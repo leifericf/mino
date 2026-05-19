@@ -96,10 +96,10 @@ mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "eval requires one argument");
     }
-    saved_ambient = S->fn_ambient_ns;
-    S->fn_ambient_ns = NULL;
+    saved_ambient = S->ns_vars.fn_ambient_ns;
+    S->ns_vars.fn_ambient_ns = NULL;
     result = eval_value(S, args->as.cons.car, env);
-    S->fn_ambient_ns = saved_ambient;
+    S->ns_vars.fn_ambient_ns = saved_ambient;
     return result;
 }
 
@@ -120,10 +120,10 @@ mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "load-string: argument must be a string");
     }
-    saved_ambient = S->fn_ambient_ns;
-    S->fn_ambient_ns = NULL;
+    saved_ambient = S->ns_vars.fn_ambient_ns;
+    S->ns_vars.fn_ambient_ns = NULL;
     result = mino_eval_string(S, src->as.s.data, env);
-    S->fn_ambient_ns = saved_ambient;
+    S->ns_vars.fn_ambient_ns = saved_ambient;
     return result;
 }
 
@@ -151,10 +151,10 @@ mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     memcpy(cpath, path->as.s.data, path->as.s.len);
     cpath[path->as.s.len] = '\0';
-    saved_ambient = S->fn_ambient_ns;
-    S->fn_ambient_ns = NULL;
+    saved_ambient = S->ns_vars.fn_ambient_ns;
+    S->ns_vars.fn_ambient_ns = NULL;
     result = mino_load_file(S, cpath, env);
-    S->fn_ambient_ns = saved_ambient;
+    S->ns_vars.fn_ambient_ns = saved_ambient;
     return result;
 }
 
@@ -1055,9 +1055,9 @@ mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ns_buf[ns_len] = '\0';
 
         /* Check alias table. */
-        for (i = 0; i < S->ns_alias_len; i++) {
-            if (strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
-                resolved_ns = S->ns_aliases[i].full_name;
+        for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (strcmp(S->ns_vars.ns_aliases[i].alias, ns_buf) == 0) {
+                resolved_ns = S->ns_vars.ns_aliases[i].full_name;
                 goto found_ns;
             }
         }
@@ -1072,7 +1072,7 @@ found_ns:
      * "scan every ns for any var with this name" fallback is gone --
      * it picked up unrelated names from sibling namespaces. */
     {
-        const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+        const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
         mino_val_t *var = var_find(S, cur, buf);
         mino_env_t *e;
         if (var != NULL) return var;
@@ -1081,9 +1081,9 @@ found_ns:
             env_binding_t *b = env_find_here(e, buf);
             if (b != NULL) {
                 size_t k;
-                for (k = 0; k < S->ns_env_len; k++) {
-                    if (S->ns_env_table[k].env == e) {
-                        const char *src_ns = S->ns_env_table[k].name;
+                for (k = 0; k < S->ns_vars.ns_env_len; k++) {
+                    if (S->ns_vars.ns_env_table[k].env == e) {
+                        const char *src_ns = S->ns_vars.ns_env_table[k].name;
                         mino_val_t *v = var_find(S, src_ns, buf);
                         if (v != NULL) return v;
                         v = var_intern(S, src_ns, buf);

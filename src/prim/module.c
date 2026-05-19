@@ -40,9 +40,9 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
     }
     name = name_val->as.s.data;
     /* Check cache. */
-    for (i = 0; i < S->module_cache_len; i++) {
-        if (strcmp(S->module_cache[i].name, name) == 0) {
-            return S->module_cache[i].value;
+    for (i = 0; i < S->module.module_cache_len; i++) {
+        if (strcmp(S->module.module_cache[i].name, name) == 0) {
+            return S->module.module_cache[i].value;
         }
     }
     /* If the dotted form of name corresponds to a runtime-only ns
@@ -65,9 +65,9 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
         if (nl < sizeof(dotted)) {
             mino_env_t *e;
             int has_file = 0;
-            if (S->module_resolver != NULL) {
-                const char *resolved = S->module_resolver(name,
-                                          S->module_resolver_ctx);
+            if (S->module.module_resolver != NULL) {
+                const char *resolved = S->module.module_resolver(name,
+                                          S->module.module_resolver_ctx);
                 if (resolved != NULL) has_file = 1;
             }
             /* A bundled lib is "loadable" too -- treat the same as
@@ -94,16 +94,16 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
     }
     /* Cycle check: name on the load stack means a transitive require
      * looped back. Report the chain. */
-    for (i = 0; i < S->load_stack_len; i++) {
-        if (strcmp(S->load_stack[i], name) == 0) {
+    for (i = 0; i < S->module.load_stack_len; i++) {
+        if (strcmp(S->module.load_stack[i], name) == 0) {
             char msg[512];
             size_t off = 0;
             size_t j;
             off += (size_t)snprintf(msg, sizeof(msg),
                 "require: cyclic load dependency: ");
-            for (j = i; j < S->load_stack_len && off < sizeof(msg); j++) {
+            for (j = i; j < S->module.load_stack_len && off < sizeof(msg); j++) {
                 off += (size_t)snprintf(msg + off, sizeof(msg) - off,
-                    "%s -> ", S->load_stack[j]);
+                    "%s -> ", S->module.load_stack[j]);
             }
             if (off < sizeof(msg)) {
                 snprintf(msg + off, sizeof(msg) - off, "%s", name);
@@ -119,12 +119,12 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
      * paths). The bundled registry is the brew/scoop fallback for the
      * common case where no lib/ directory exists on cwd; a name
      * stays bundled only when the disk resolver also misses. */
-    path = (S->module_resolver != NULL)
-        ? S->module_resolver(name, S->module_resolver_ctx)
+    path = (S->module.module_resolver != NULL)
+        ? S->module.module_resolver(name, S->module.module_resolver_ctx)
         : NULL;
     bundled_source = (path == NULL) ? bundled_lib_lookup(S, name) : NULL;
     if (path == NULL && bundled_source == NULL) {
-        if (S->module_resolver == NULL) {
+        if (S->module.module_resolver == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", "require: no module resolver configured");
             return NULL;
         }
@@ -136,16 +136,16 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
         }
     }
     /* Push name onto load stack before loading; pop after. */
-    if (S->load_stack_len == S->load_stack_cap) {
-        size_t new_cap = S->load_stack_cap == 0 ? 8 : S->load_stack_cap * 2;
-        char **nb = (char **)realloc(S->load_stack, new_cap * sizeof(*nb));
+    if (S->module.load_stack_len == S->module.load_stack_cap) {
+        size_t new_cap = S->module.load_stack_cap == 0 ? 8 : S->module.load_stack_cap * 2;
+        char **nb = (char **)realloc(S->module.load_stack, new_cap * sizeof(*nb));
         if (nb == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001",
                 "require: out of memory");
             return NULL;
         }
-        S->load_stack     = nb;
-        S->load_stack_cap = new_cap;
+        S->module.load_stack     = nb;
+        S->module.load_stack_cap = new_cap;
     }
     {
         size_t nlen = strlen(name);
@@ -156,7 +156,7 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
             return NULL;
         }
         memcpy(dup, name, nlen + 1);
-        S->load_stack[S->load_stack_len++] = dup;
+        S->module.load_stack[S->module.load_stack_len++] = dup;
     }
     /* Load — save/restore current namespace so ns forms inside the
      * loaded file don't leak into the caller's namespace. Also clear
@@ -165,35 +165,35 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
      * defining_ns, not whatever macro-expansion ambient happened to
      * be active when require was called from inside a closure. */
     {
-        const char *saved_ns      = S->current_ns;
-        const char *saved_ambient = S->fn_ambient_ns;
+        const char *saved_ns      = S->ns_vars.current_ns;
+        const char *saved_ambient = S->ns_vars.fn_ambient_ns;
         const char *post_ns;
-        S->fn_ambient_ns = NULL;
+        S->ns_vars.fn_ambient_ns = NULL;
         if (bundled_source != NULL) {
             /* Bundled load: eval the in-memory source directly. Set
              * reader_file to a synthetic <bundled name> path so any
              * diagnostics produced during eval point at something
              * meaningful instead of inheriting the caller's file. */
-            const char *saved_file = S->reader_file;
+            const char *saved_file = S->reader.reader_file;
             char        synth[256];
             snprintf(synth, sizeof(synth), "<bundled %s>", name);
-            S->reader_file = intern_filename(S, synth);
+            S->reader.reader_file = intern_filename(S, synth);
             result         = mino_eval_string(S, bundled_source, env);
-            S->reader_file = saved_file;
+            S->reader.reader_file = saved_file;
         } else {
             result = mino_load_file(S, path, env);
         }
-        post_ns = S->current_ns;
-        S->current_ns    = saved_ns;
-        S->fn_ambient_ns = saved_ambient;
+        post_ns = S->ns_vars.current_ns;
+        S->ns_vars.current_ns    = saved_ns;
+        S->ns_vars.fn_ambient_ns = saved_ambient;
         /* Re-publish *ns* to track the restored ns. Inside the loaded
          * file, an (ns ...) form will have set the var to the file's
          * declared namespace; the require boundary is not a
          * user-visible switch, so the var follows current_ns back. */
         mino_publish_current_ns(S);
         /* Pop load stack regardless of success. */
-        if (S->load_stack_len > 0) {
-            free(S->load_stack[--S->load_stack_len]);
+        if (S->module.load_stack_len > 0) {
+            free(S->module.load_stack[--S->module.load_stack_len]);
         }
         if (result == NULL) {
             return NULL;
@@ -255,16 +255,16 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
         }
     }
     /* Cache. */
-    if (S->module_cache_len == S->module_cache_cap) {
-        size_t         new_cap = S->module_cache_cap == 0 ? 8 : S->module_cache_cap * 2;
+    if (S->module.module_cache_len == S->module.module_cache_cap) {
+        size_t         new_cap = S->module.module_cache_cap == 0 ? 8 : S->module.module_cache_cap * 2;
         module_entry_t *nb     = (module_entry_t *)realloc(
-            S->module_cache, new_cap * sizeof(*nb));
+            S->module.module_cache, new_cap * sizeof(*nb));
         if (nb == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "require: out of memory");
             return NULL;
         }
-        S->module_cache     = nb;
-        S->module_cache_cap = new_cap;
+        S->module.module_cache     = nb;
+        S->module.module_cache_cap = new_cap;
     }
     {
         size_t nlen = strlen(name);
@@ -274,9 +274,9 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
             return NULL;
         }
         memcpy(dup, name, nlen + 1);
-        S->module_cache[S->module_cache_len].name  = dup;
-        S->module_cache[S->module_cache_len].value = result;
-        S->module_cache_len++;
+        S->module.module_cache[S->module.module_cache_len].name  = dup;
+        S->module.module_cache[S->module.module_cache_len].value = result;
+        S->module.module_cache_len++;
     }
     return result;
 }
@@ -605,8 +605,8 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (e != NULL && e->len > 0) {
                 if (path_ok) {
                     size_t ci;
-                    for (ci = 0; ci < S->module_cache_len; ci++) {
-                        if (strcmp(S->module_cache[ci].name,
+                    for (ci = 0; ci < S->module.module_cache_len; ci++) {
+                        if (strcmp(S->module.module_cache[ci].name,
                                    shortcut_path) == 0) {
                             return mino_nil(S);
                         }
@@ -693,8 +693,8 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 if (e != NULL && e->len > 0) {
                     if (path_ok) {
                         size_t ci;
-                        for (ci = 0; ci < S->module_cache_len; ci++) {
-                            if (strcmp(S->module_cache[ci].name,
+                        for (ci = 0; ci < S->module.module_cache_len; ci++) {
+                            if (strcmp(S->module.module_cache[ci].name,
                                        shortcut_path) == 0) {
                                 skip_load = 1;
                                 result    = mino_nil(S);
@@ -1041,8 +1041,8 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 {
-    S->module_resolver     = fn;
-    S->module_resolver_ctx = ctx;
+    S->module.module_resolver     = fn;
+    S->module.module_resolver_ctx = ctx;
 }
 
 void mino_register_bundled_lib(mino_state_t *S, const char *name,
@@ -1053,28 +1053,28 @@ void mino_register_bundled_lib(mino_state_t *S, const char *name,
     char  *dup;
     if (S == NULL || name == NULL || source == NULL) return;
     /* Replace if already present. */
-    for (i = 0; i < S->bundled_libs_len; i++) {
-        if (strcmp(S->bundled_libs[i].name, name) == 0) {
-            S->bundled_libs[i].source = source;
+    for (i = 0; i < S->module.bundled_libs_len; i++) {
+        if (strcmp(S->module.bundled_libs[i].name, name) == 0) {
+            S->module.bundled_libs[i].source = source;
             return;
         }
     }
-    if (S->bundled_libs_len == S->bundled_libs_cap) {
-        size_t new_cap = S->bundled_libs_cap == 0 ? 8
-                       : S->bundled_libs_cap * 2;
+    if (S->module.bundled_libs_len == S->module.bundled_libs_cap) {
+        size_t new_cap = S->module.bundled_libs_cap == 0 ? 8
+                       : S->module.bundled_libs_cap * 2;
         bundled_lib_entry_t *nb = (bundled_lib_entry_t *)realloc(
-            S->bundled_libs, new_cap * sizeof(*nb));
+            S->module.bundled_libs, new_cap * sizeof(*nb));
         if (nb == NULL) return; /* silent: best-effort, caller can re-try */
-        S->bundled_libs     = nb;
-        S->bundled_libs_cap = new_cap;
+        S->module.bundled_libs     = nb;
+        S->module.bundled_libs_cap = new_cap;
     }
     nlen = strlen(name);
     dup  = (char *)malloc(nlen + 1);
     if (dup == NULL) return;
     memcpy(dup, name, nlen + 1);
-    S->bundled_libs[S->bundled_libs_len].name   = dup;
-    S->bundled_libs[S->bundled_libs_len].source = source;
-    S->bundled_libs_len++;
+    S->module.bundled_libs[S->module.bundled_libs_len].name   = dup;
+    S->module.bundled_libs[S->module.bundled_libs_len].source = source;
+    S->module.bundled_libs_len++;
 }
 
 /* Compare two namespace names for equality, treating '.' and '/' as
@@ -1098,9 +1098,9 @@ static int ns_name_eq(const char *a, const char *b)
 static const char *bundled_lib_lookup(mino_state_t *S, const char *name)
 {
     size_t i;
-    for (i = 0; i < S->bundled_libs_len; i++) {
-        if (ns_name_eq(S->bundled_libs[i].name, name)) {
-            return S->bundled_libs[i].source;
+    for (i = 0; i < S->module.bundled_libs_len; i++) {
+        if (ns_name_eq(S->module.bundled_libs[i].name, name)) {
+            return S->module.bundled_libs[i].source;
         }
     }
     return NULL;
@@ -1130,20 +1130,20 @@ mino_val_t *prim_add_load_path(mino_state_t *S, mino_val_t *args,
             "add-load-path!: argument must be a string");
     }
     path = path_val->as.s.data;
-    for (i = 0; i < S->extra_load_paths_len; i++) {
-        if (strcmp(S->extra_load_paths[i], path) == 0) return mino_nil(S);
+    for (i = 0; i < S->module.extra_load_paths_len; i++) {
+        if (strcmp(S->module.extra_load_paths[i], path) == 0) return mino_nil(S);
     }
-    if (S->extra_load_paths_len == S->extra_load_paths_cap) {
-        size_t new_cap = S->extra_load_paths_cap == 0 ? 4
-                       : S->extra_load_paths_cap * 2;
-        char **np = (char **)realloc(S->extra_load_paths,
+    if (S->module.extra_load_paths_len == S->module.extra_load_paths_cap) {
+        size_t new_cap = S->module.extra_load_paths_cap == 0 ? 4
+                       : S->module.extra_load_paths_cap * 2;
+        char **np = (char **)realloc(S->module.extra_load_paths,
                                      new_cap * sizeof(*np));
         if (np == NULL) {
             return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
                 "out of memory in add-load-path!");
         }
-        S->extra_load_paths     = np;
-        S->extra_load_paths_cap = new_cap;
+        S->module.extra_load_paths     = np;
+        S->module.extra_load_paths_cap = new_cap;
     }
     {
         size_t path_len = strlen(path);
@@ -1154,7 +1154,7 @@ mino_val_t *prim_add_load_path(mino_state_t *S, mino_val_t *args,
         }
         memcpy(dup, path, path_len + 1);
     }
-    S->extra_load_paths[S->extra_load_paths_len++] = dup;
+    S->module.extra_load_paths[S->module.extra_load_paths_len++] = dup;
     return mino_nil(S);
 }
 

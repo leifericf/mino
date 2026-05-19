@@ -53,38 +53,38 @@ int runtime_module_add_alias(mino_state_t *S,
     size_t i;
     size_t alen = strlen(alias);
     size_t flen = strlen(full);
-    const char *owner = S->current_ns != NULL ? S->current_ns : "user";
+    const char *owner = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
     size_t olen = strlen(owner);
     char  *o;
     char  *a;
     char  *f;
 
-    for (i = 0; i < S->ns_alias_len; i++) {
-        if (S->ns_aliases[i].owning_ns != NULL
-            && strcmp(S->ns_aliases[i].owning_ns, owner) == 0
-            && strcmp(S->ns_aliases[i].alias, alias) == 0) {
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_vars.ns_aliases[i].owning_ns, owner) == 0
+            && strcmp(S->ns_vars.ns_aliases[i].alias, alias) == 0) {
             char *replaced = dup_str(full, flen);
             if (replaced == NULL) return -1;
-            free(S->ns_aliases[i].full_name);
-            S->ns_aliases[i].full_name = replaced;
+            free(S->ns_vars.ns_aliases[i].full_name);
+            S->ns_vars.ns_aliases[i].full_name = replaced;
             return 0;
         }
     }
 
-    if (S->ns_alias_len == S->ns_alias_cap) {
+    if (S->ns_vars.ns_alias_len == S->ns_vars.ns_alias_cap) {
         size_t new_cap;
         size_t alloc_sz;
         ns_alias_t *nb;
-        if (S->ns_alias_cap == 0) {
+        if (S->ns_vars.ns_alias_cap == 0) {
             new_cap = 8;
-        } else if (!checked_double_sz(S->ns_alias_cap, &new_cap)) {
+        } else if (!checked_double_sz(S->ns_vars.ns_alias_cap, &new_cap)) {
             return -1;
         }
         if (!checked_mul_sz(new_cap, sizeof(*nb), &alloc_sz)) return -1;
-        nb = (ns_alias_t *)realloc(S->ns_aliases, alloc_sz);
+        nb = (ns_alias_t *)realloc(S->ns_vars.ns_aliases, alloc_sz);
         if (nb == NULL) return -1;
-        S->ns_aliases   = nb;
-        S->ns_alias_cap = new_cap;
+        S->ns_vars.ns_aliases   = nb;
+        S->ns_vars.ns_alias_cap = new_cap;
     }
 
     o = dup_str(owner, olen);
@@ -96,9 +96,9 @@ int runtime_module_add_alias(mino_state_t *S,
         free(f);
         return -1;
     }
-    S->ns_aliases[S->ns_alias_len].owning_ns = o;
-    S->ns_aliases[S->ns_alias_len].alias     = a;
-    S->ns_aliases[S->ns_alias_len].full_name = f;
-    S->ns_alias_len++;
+    S->ns_vars.ns_aliases[S->ns_vars.ns_alias_len].owning_ns = o;
+    S->ns_vars.ns_aliases[S->ns_vars.ns_alias_len].alias     = a;
+    S->ns_vars.ns_aliases[S->ns_vars.ns_alias_len].full_name = f;
+    S->ns_vars.ns_alias_len++;
     return 0;
 }

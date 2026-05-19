@@ -145,7 +145,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
                            size_t len);                           /* GC-owned */
 
 /* Owned-edit conj / assoc / pop variants. The `owner` argument is the
- * editing transient's monotonic ID (from S->transient_owner_next);
+ * editing transient's monotonic ID (from S->ns_vars.transient_owner_next);
  * nodes whose owner field matches are mutated in place, others are
  * cloned once with `owner` stamped and then mutated in place by
  * subsequent calls. Used by `conj!` / `assoc!` / `pop!` on transient

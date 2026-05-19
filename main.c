@@ -158,7 +158,7 @@ static int try_resolve_in(const char *dir, const char *name, size_t nlen,
 /* Resolver that checks project paths first, then runtime-registered
  * extra paths (from `(add-load-path! ...)`), then falls through to
  * cwd. The state pointer is passed in via ctx so we can read
- * S->extra_load_paths without a global. */
+ * S->module.extra_load_paths without a global. */
 static const char *project_resolve(const char *name, void *ctx)
 {
     static char pbuf[PATH_BUF_CAP];
@@ -174,8 +174,8 @@ static const char *project_resolve(const char *name, void *ctx)
             return pbuf;
     }
     if (S != NULL) {
-        for (i = 0; i < S->extra_load_paths_len; i++) {
-            if (try_resolve_in(S->extra_load_paths[i], name, nlen,
+        for (i = 0; i < S->module.extra_load_paths_len; i++) {
+            if (try_resolve_in(S->module.extra_load_paths[i], name, nlen,
                                pbuf, sizeof(pbuf)))
                 return pbuf;
         }
@@ -196,8 +196,8 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
     nlen = strlen(name);
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
     if (S != NULL) {
-        for (i = 0; i < S->extra_load_paths_len; i++) {
-            if (try_resolve_in(S->extra_load_paths[i], name, nlen,
+        for (i = 0; i < S->module.extra_load_paths_len; i++) {
+            if (try_resolve_in(S->module.extra_load_paths[i], name, nlen,
                                pbuf, sizeof(pbuf)))
                 return pbuf;
         }
@@ -1220,7 +1220,7 @@ int main(int argc, char **argv)
              * the full session history, not just the parse buffer: the
              * parse buffer is truncated whenever a form is consumed,
              * but reader_line keeps accumulating across forms. */
-            source_cache_store(S, S->reader_file, hist_buf, hist_len);
+            source_cache_store(S, S->reader.reader_file, hist_buf, hist_len);
 
             form = mino_read(S, cursor, &end);
             if (form != NULL && form->type == MINO_KEYWORD) {

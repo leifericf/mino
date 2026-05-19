@@ -95,7 +95,7 @@ static int cv_timedwait_ms(pthread_cond_t *c, pthread_mutex_t *m, long ms)
 
 void mino_host_threads_state_init(mino_state_t *S)
 {
-    S->future_list_head = NULL;
+    S->threading.future_list_head = NULL;
 }
 
 void mino_host_threads_state_destroy(mino_state_t *S)
@@ -138,8 +138,8 @@ static mino_val_t *future_alloc(mino_state_t *S)
      * and from the spawn path that already holds state_lock. To keep
      * it simple, take the state_lock here. */
     mino_lock(S);
-    impl->next_in_state = S->future_list_head;
-    S->future_list_head = impl;
+    impl->next_in_state = S->threading.future_list_head;
+    S->threading.future_list_head = impl;
     mino_unlock(S);
 
     return v;
@@ -248,8 +248,8 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
 
 /* Lock invariant: enters with no locks held — this thread did not pass
  * through mino_call. Acquires worker_list_lock explicitly twice: once
- * briefly to attach ctx to S->worker_ctxs_head before running the
- * body, and once at exit to detach ctx and decrement S->thread_count
+ * briefly to attach ctx to S->threading.worker_ctxs_head before running the
+ * body, and once at exit to detach ctx and decrement S->threading.thread_count
  * atomically. The mino_call inside the body acquires state_lock
  * recursively for the duration of the user thunk. impl->mu is taken
  * only to publish the result and broadcast the cv.
@@ -289,20 +289,20 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
     mino_tls_cancel_ptr      = &impl->cancel_flag;
     mino_tls_safepoint_count = 0;
 
-    /* Link onto S->worker_ctxs_head so gc_mark_roots can walk the
+    /* Link onto S->threading.worker_ctxs_head so gc_mark_roots can walk the
      * worker's gc_save and dyn_stack while it's blocked. Take the
      * brief worker_list_lock for the list mutation. */
     mino_worker_list_lock_acquire(S);
-    ctx->next_worker = S->worker_ctxs_head;
-    S->worker_ctxs_head = ctx;
+    ctx->next_worker = S->threading.worker_ctxs_head;
+    S->threading.worker_ctxs_head = ctx;
     mino_worker_list_lock_release(S);
 
     /* Embed-distinctive lifecycle hook. Spawn-per-future path only.
      * Pool-managed workers run under the pool's own lifecycle hooks.
      * Hook fires on the worker thread so it can do pthread_setname_np,
      * CPU pinning, or priority class. */
-    if (S->thread_pool == NULL && S->thread_start_fn != NULL) {
-        S->thread_start_fn(S, S->thread_factory_ctx);
+    if (S->threading.thread_pool == NULL && S->threading.thread_start_fn != NULL) {
+        S->threading.thread_start_fn(S, S->threading.thread_factory_ctx);
     }
 
     /* Install conveyed dynamic bindings before running the thunk. The
@@ -382,11 +382,11 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
         mu_unlock(&impl->mu);
     }
 
-    if (S->thread_pool == NULL && S->thread_end_fn != NULL) {
-        S->thread_end_fn(S, S->thread_factory_ctx);
+    if (S->threading.thread_pool == NULL && S->threading.thread_end_fn != NULL) {
+        S->threading.thread_end_fn(S, S->threading.thread_factory_ctx);
     }
 
-    /* Detach this worker's ctx from S->worker_ctxs_head before
+    /* Detach this worker's ctx from S->threading.worker_ctxs_head before
      * freeing so GC root scanning never visits a freed ctx, and
      * release the slot so spawn() bookkeeping reflects only
      * concurrently-live workers. For the spawn-per-future path the
@@ -403,12 +403,12 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
      * still claims a live worker. */
     mino_worker_list_lock_acquire(S);
     {
-        mino_thread_ctx_t **pp = &S->worker_ctxs_head;
+        mino_thread_ctx_t **pp = &S->threading.worker_ctxs_head;
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
-    if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->thread_count, 1, __ATOMIC_RELAXED);
+    if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
+        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     }
     mino_worker_list_lock_release(S);
 
@@ -475,26 +475,26 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
      * critical section under worker_list_lock so a parallel spawn
      * can't both read thread_count < limit and then both increment. */
     mino_worker_list_lock_acquire(S);
-    if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) >= S->thread_limit) {
+    if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) >= S->threading.thread_limit) {
         mino_worker_list_lock_release(S);
         return prim_throw_classified(S,
             "mino/thread-limit-exceeded", "MTH001",
             "thread limit exceeded; raise via mino_set_thread_limit");
     }
-    __atomic_fetch_add(&S->thread_count, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     mino_worker_list_lock_release(S);
     (void)env; /* env borrowing reserved for richer body forms */
 
     /* First spawn flips multi_threaded; from this point gc/atom paths
      * take their multi-threaded branches. Reached only via the apply
      * path from mino_call, which holds state_lock for the entire call. */
-    S->multi_threaded = 1;
+    S->threading.multi_threaded = 1;
 
     fut = future_alloc(S);
     if (fut == NULL) {
         mino_worker_list_lock_acquire(S);
-        if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->thread_count, 1, __ATOMIC_RELAXED);
+        if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
+        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     }
         mino_worker_list_lock_release(S);
         return NULL;
@@ -512,13 +512,13 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     /* Pool path: the embedder hands us a host pool and we just submit
      * the work item. impl->thread_started stays 0 so the sweep + quiesce
      * paths skip pthread_join (mino doesn't own the pthread). */
-    if (S->thread_pool != NULL && S->thread_pool->submit_fn != NULL) {
-        int rc = S->thread_pool->submit_fn(S->thread_pool,
+    if (S->threading.thread_pool != NULL && S->threading.thread_pool->submit_fn != NULL) {
+        int rc = S->threading.thread_pool->submit_fn(S->threading.thread_pool,
                                            worker_pool_entry, impl);
         if (rc != 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->thread_count, 1, __ATOMIC_RELAXED);
+            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
+        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     }
             mino_worker_list_lock_release(S);
             return prim_throw_classified(S,
@@ -530,13 +530,13 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
 
 #if defined(_WIN32) && defined(_MSC_VER)
     {
-        unsigned stack = (unsigned)S->thread_stack_size;  /* 0 = default */
+        unsigned stack = (unsigned)S->threading.thread_stack_size;  /* 0 = default */
         uintptr_t h = _beginthreadex(NULL, stack, worker_entry, impl,
                                      0, NULL);
         if (h == 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->thread_count, 1, __ATOMIC_RELAXED);
+            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
+        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     }
             mino_worker_list_lock_release(S);
             return NULL;
@@ -549,9 +549,9 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
         pthread_attr_t attr;
         pthread_attr_t *attrp = NULL;
         int rc;
-        if (S->thread_stack_size > 0) {
+        if (S->threading.thread_stack_size > 0) {
             if (pthread_attr_init(&attr) == 0) {
-                pthread_attr_setstacksize(&attr, S->thread_stack_size);
+                pthread_attr_setstacksize(&attr, S->threading.thread_stack_size);
                 attrp = &attr;
             }
         }
@@ -559,8 +559,8 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->thread_count, 1, __ATOMIC_RELAXED);
+            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
+        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
     }
             mino_worker_list_lock_release(S);
             return NULL;
@@ -778,7 +778,7 @@ void mino_host_threads_quiesce(mino_state_t *S)
      * Cells with no thread (bare promises) and no waiter cost
      * nothing here; they simply move to CANCELLED before the GC
      * sweep collects them. */
-    impl = S->future_list_head;
+    impl = S->threading.future_list_head;
     while (impl != NULL) {
         mu_lock(&impl->mu);
         if (impl->state_tag == MINO_FUTURE_PENDING) {
@@ -801,7 +801,7 @@ void mino_host_threads_quiesce(mino_state_t *S)
      *     hadn't completed, but the cv_wait is the safe shape and
      *     handles the in-flight-just-finishing race too.
      * Bare promises with no thunk and no thread skip both cases. */
-    impl = S->future_list_head;
+    impl = S->threading.future_list_head;
     while (impl != NULL) {
         if (impl->thread_started && !impl->thread_joined) {
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -904,10 +904,10 @@ void mino_future_gc_sweep(mino_val_t *fut)
         if (S != NULL) mino_resume_lock(S, depth);
     }
 
-    /* Detach from S->future_list_head before freeing so quiesce
+    /* Detach from S->threading.future_list_head before freeing so quiesce
      * never walks into a dangling impl. */
     if (S != NULL) {
-        mino_future_t **pp = &S->future_list_head;
+        mino_future_t **pp = &S->threading.future_list_head;
         while (*pp != NULL && *pp != impl) { pp = &(*pp)->next_in_state; }
         if (*pp == impl) { *pp = impl->next_in_state; }
     }

@@ -259,7 +259,7 @@ struct mino_val {
             mino_val_t *current;
             int         valid;
             /* Owner ID minted at creation by
-             * S->transient_owner_next++; written into the owner field
+             * S->ns_vars.transient_owner_next++; written into the owner field
              * of every owner-tagged vec/HAMT node so the transient's
              * *_bang mutators can recognise their own nodes and mutate
              * them in place. 0 means "no in-place editing tier", which

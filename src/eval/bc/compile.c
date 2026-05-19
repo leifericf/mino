@@ -44,7 +44,7 @@
  *
  * Var-indirection discipline: every reference to a global name compiles
  * to OP_GETGLOBAL with the symbol in the const pool, never a baked
- * value. OP_SETGLOBAL bumps S->ic_gen so cached call sites invalidate.
+ * value. OP_SETGLOBAL bumps S->ns_vars.ic_gen so cached call sites invalidate.
  */
 
 #include <stddef.h>
@@ -3115,7 +3115,7 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst, int tail)
 /* Walk the runtime's resolution cascade in probe mode: lexical env, then
  * the fn's defining-ns env, returning the bound value or NULL. Mirrors
  * eval_symbol's unqualified path but uses the fn's defining_ns rather
- * than S->current_ns -- compile happens lazily and S->current_ns at
+ * than S->ns_vars.current_ns -- compile happens lazily and S->ns_vars.current_ns at
  * that time is the caller's, not the fn's.
  *
  * For qualified ns/name symbols, walks alias_resolve -> var_find ->
@@ -3144,14 +3144,14 @@ static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
         const char *sym_name = slash + 1;
 
         /* Resolve alias against the fn's defining_ns (the runtime does
-         * the equivalent against S->current_ns, which during dispatch
+         * the equivalent against S->ns_vars.current_ns, which during dispatch
          * is the defining_ns). */
         const char *resolved_ns = ns_buf;
-        for (size_t i = 0; i < S->ns_alias_len; i++) {
-            if (S->ns_aliases[i].owning_ns != NULL
-                && strcmp(S->ns_aliases[i].owning_ns, owning) == 0
-                && strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
-                resolved_ns = S->ns_aliases[i].full_name;
+        for (size_t i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+                && strcmp(S->ns_vars.ns_aliases[i].owning_ns, owning) == 0
+                && strcmp(S->ns_vars.ns_aliases[i].alias, ns_buf) == 0) {
+                resolved_ns = S->ns_vars.ns_aliases[i].full_name;
                 break;
             }
         }
@@ -3593,7 +3593,7 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
      * a self-evaluating literal, run the prim now and emit OP_LOAD_K
      * with the result. The fold records its dependency on the var-
      * resolution state via bc->compile_ic_gen (set at end of compile);
-     * any subsequent def / ns-unmap bumps S->ic_gen and forces a
+     * any subsequent def / ns-unmap bumps S->ns_vars.ic_gen and forces a
      * recompile at the next call so a redefined `+` doesn't keep
      * yielding the stale constant. */
     {
@@ -4789,14 +4789,14 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     bc->n_regs   = c.n_regs;
     /* Soundness tracker for any literal-arg fold that fired during this
      * compile (see find_pure_prim / compile_call_impl). apply_callable
-     * compares compile_ic_gen against S->ic_gen on each call entry; a
+     * compares compile_ic_gen against S->ns_vars.ic_gen on each call entry; a
      * mismatch means a var was redefined since the fold was computed,
      * so the cached fold-result might no longer be Clojure-correct. The
      * mismatch path drops fn->bc back to NULL and the next call
      * recompiles from source. */
     bc->has_folds      = c.has_folds;
     bc->has_try        = c.has_try;
-    bc->compile_ic_gen = S->ic_gen;
+    bc->compile_ic_gen = S->ns_vars.ic_gen;
     /* Tighten the source-map length: keep only the slots that match
      * actual emitted instructions. Over-allocated tail entries are
      * harmless but the len field is the only signal a lookup uses to

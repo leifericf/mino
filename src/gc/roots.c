@@ -390,19 +390,19 @@ static void gc_mark_module_and_meta(mino_state_t *S)
     /* The pending raw-payload stash from an inner-eval catch is only
      * referenced from this slot until the outer pcall consumes it. */
     gc_mark_interior(S, mino_current_ctx(S)->pending_user_ex);
-    for (idx = 0; idx < S->module_cache_len; idx++) {
-        gc_mark_interior(S, S->module_cache[idx].value);
+    for (idx = 0; idx < S->module.module_cache_len; idx++) {
+        gc_mark_interior(S, S->module.module_cache[idx].value);
     }
-    for (idx = 0; idx < S->ns_env_len; idx++) {
-        if (S->ns_env_table[idx].meta != NULL) {
-            gc_mark_interior(S, S->ns_env_table[idx].meta);
+    for (idx = 0; idx < S->ns_vars.ns_env_len; idx++) {
+        if (S->ns_vars.ns_env_table[idx].meta != NULL) {
+            gc_mark_interior(S, S->ns_vars.ns_env_table[idx].meta);
         }
     }
-    for (idx = 0; idx < S->meta_table_len; idx++) {
-        gc_mark_interior(S, S->meta_table[idx].source);
+    for (idx = 0; idx < S->module.meta_table_len; idx++) {
+        gc_mark_interior(S, S->module.meta_table[idx].source);
     }
-    for (idx = 0; idx < S->var_registry_len; idx++) {
-        gc_mark_interior(S, S->var_registry[idx].var);
+    for (idx = 0; idx < S->ns_vars.var_registry_len; idx++) {
+        gc_mark_interior(S, S->ns_vars.var_registry[idx].var);
     }
     for (ref = S->ref_roots; ref != NULL; ref = ref->next) {
         gc_mark_interior(S, ref->val);
@@ -426,7 +426,7 @@ static void gc_mark_thread_state(mino_state_t *S)
     mino_thread_ctx_t *w;
     gc_mark_ctx_dyn_stack(S, &S->main_ctx);
     mino_worker_list_lock_acquire(S);
-    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_dyn_stack(S, w);
     }
     mino_worker_list_lock_release(S);
@@ -445,7 +445,7 @@ static void gc_mark_thread_state(mino_state_t *S)
         gc_mark_interior(S, (void *)S->main_ctx.bc_current_bc);
     }
     mino_worker_list_lock_acquire(S);
-    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         if (w->bc_current_bc != NULL) {
             gc_mark_interior(S, (void *)w->bc_current_bc);
         }
@@ -453,13 +453,13 @@ static void gc_mark_thread_state(mino_state_t *S)
     mino_worker_list_lock_release(S);
     gc_mark_ctx_gc_save(S, &S->main_ctx);
     mino_worker_list_lock_acquire(S);
-    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_gc_save(S, w);
     }
     mino_worker_list_lock_release(S);
     gc_mark_ctx_tx(S, &S->main_ctx);
     mino_worker_list_lock_acquire(S);
-    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_tx(S, w);
     }
     mino_worker_list_lock_release(S);
@@ -493,12 +493,12 @@ static void gc_mark_runtime_globals(mino_state_t *S)
      * (low three bits non-zero) at the top, so a tagged scalar that
      * landed in the cache slot is harmless even though forms and
      * callables in practice are always heap pointers. */
-    if (S->ic_table != NULL) {
+    if (S->ns_vars.ic_table != NULL) {
         size_t ic_i;
-        for (ic_i = 0; ic_i < S->ic_cap; ic_i++) {
-            if (S->ic_table[ic_i].form != NULL) {
-                gc_mark_interior(S, S->ic_table[ic_i].form);
-                gc_mark_interior(S, S->ic_table[ic_i].callable);
+        for (ic_i = 0; ic_i < S->ns_vars.ic_cap; ic_i++) {
+            if (S->ns_vars.ic_table[ic_i].form != NULL) {
+                gc_mark_interior(S, S->ns_vars.ic_table[ic_i].form);
+                gc_mark_interior(S, S->ns_vars.ic_table[ic_i].callable);
             }
         }
     }
@@ -517,13 +517,13 @@ static void gc_mark_runtime_globals(mino_state_t *S)
      * skips the write barrier for speed, we walk the live slot range
      * explicitly here so a minor cycle finds every YOUNG value held
      * in a register. */
-    if (S->bc_regs != NULL) {
-        gc_mark_interior(S, S->bc_regs);
-        if (S->bc_top <= S->bc_regs_cap) {
+    if (S->bc.bc_regs != NULL) {
+        gc_mark_interior(S, S->bc.bc_regs);
+        if (S->bc.bc_top <= S->bc.bc_regs_cap) {
             size_t bi;
-            for (bi = 0; bi < S->bc_top; bi++) {
-                if (S->bc_regs[bi] != NULL) {
-                    gc_mark_interior(S, S->bc_regs[bi]);
+            for (bi = 0; bi < S->bc.bc_top; bi++) {
+                if (S->bc.bc_regs[bi] != NULL) {
+                    gc_mark_interior(S, S->bc.bc_regs[bi]);
                 }
             }
         }
@@ -544,7 +544,7 @@ static void gc_mark_runtime_globals(mino_state_t *S)
     {
         mino_thread_ctx_t *w;
         mino_worker_list_lock_acquire(S);
-        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
             if (w->bc_snapshot_valid && w->bc_regs_storage != NULL) {
                 size_t bi;
                 gc_mark_interior(S, w->bc_regs_storage);
@@ -596,7 +596,7 @@ static void gc_mark_agent_runq(mino_state_t *S)
     int pi;
     for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
         agent_action_node_t *n;
-        for (n = S->agent_pool[pi].run_head; n != NULL; n = n->next) {
+        for (n = S->agent.pool[pi].run_head; n != NULL; n = n->next) {
             gc_mark_interior(S, n->agent);
             gc_mark_interior(S, n->fn);
             gc_mark_interior(S, n->extra);

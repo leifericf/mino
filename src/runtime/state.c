@@ -80,20 +80,20 @@ static void state_init(mino_state_t *S)
      * change it with mino_state_set_jit_hot_threshold. The fields live
      * here unconditionally even in mino-lean (MINO_CPJIT off) so the
      * struct offset and public-API ABI stay identical across builds. */
-    S->jit_mode          = (int)MINO_JIT_MODE_AUTO;
-    S->jit_hot_threshold = MINO_JIT_THRESHOLD;
+    S->jit.jit_mode          = (int)MINO_JIT_MODE_AUTO;
+    S->jit.jit_hot_threshold = MINO_JIT_THRESHOLD;
     {
         const char *m = getenv("MINO_JIT");
         if (m != NULL && m[0] != '\0') {
             if ((m[0]|0x20) == 'o' && (m[1]|0x20) == 'n' && m[2] == '\0') {
-                S->jit_mode = (int)MINO_JIT_MODE_ON;
+                S->jit.jit_mode = (int)MINO_JIT_MODE_ON;
             } else if ((m[0]|0x20) == 'o' && (m[1]|0x20) == 'f'
                        && (m[2]|0x20) == 'f' && m[3] == '\0') {
-                S->jit_mode = (int)MINO_JIT_MODE_OFF;
+                S->jit.jit_mode = (int)MINO_JIT_MODE_OFF;
             } else if ((m[0]|0x20) == 'a' && (m[1]|0x20) == 'u'
                        && (m[2]|0x20) == 't' && (m[3]|0x20) == 'o'
                        && m[4] == '\0') {
-                S->jit_mode = (int)MINO_JIT_MODE_AUTO;
+                S->jit.jit_mode = (int)MINO_JIT_MODE_AUTO;
             }
             /* Unknown values silently fall through to AUTO; the env
              * var is a soft override, not a hard contract. */
@@ -105,7 +105,7 @@ static void state_init(mino_state_t *S)
             char *endp = NULL;
             unsigned long v = strtoul(t, &endp, 10);
             if (endp != NULL && *endp == '\0' && v >= 1u && v <= 0xfffffffful) {
-                S->jit_hot_threshold = (unsigned)v;
+                S->jit.jit_hot_threshold = (unsigned)v;
             }
         }
     }
@@ -188,31 +188,31 @@ static void state_init(mino_state_t *S)
             S->small_ints[si].as.i = (long long)(si + MINO_SMALL_INT_LO);
         }
     }
-    S->reader_line             = 1;
-    S->reader_col              = 1;
-    S->reader_dialect          = "mino";
-    S->reader_last_cond_empty  = 0;
-    S->current_ns          = "user";
+    S->reader.reader_line             = 1;
+    S->reader.reader_col              = 1;
+    S->reader.reader_dialect          = "mino";
+    S->reader.reader_last_cond_empty  = 0;
+    S->ns_vars.current_ns          = "user";
     /* Host-thread grant defaults to single-threaded. Standalone `./mino`
      * raises this to cpu_count after mino_install_all; embedders opt
      * in per state via mino_set_thread_limit. */
-    S->thread_limit        = 1;
-    S->thread_count        = 0;
-    S->multi_threaded      = 0;
+    S->threading.thread_limit        = 1;
+    S->threading.thread_count        = 0;
+    S->threading.multi_threaded      = 0;
     S->stm.lock_inited     = 0;
     S->stm.next_ref_id     = 0;
-    S->agent_next_id       = 0;
-    S->agents_shutdown     = 0;
+    S->agent.next_id       = 0;
+    S->agent.shutdown     = 0;
     {
         int pi;
         for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
-            S->agent_pool[pi].run_head            = NULL;
-            S->agent_pool[pi].run_tail            = NULL;
-            S->agent_pool[pi].worker_alive        = 0;
-            S->agent_pool[pi].worker_pending_join = 0;
+            S->agent.pool[pi].run_head            = NULL;
+            S->agent.pool[pi].run_tail            = NULL;
+            S->agent.pool[pi].worker_alive        = 0;
+            S->agent.pool[pi].worker_pending_join = 0;
         }
     }
-    S->agent_mu_inited = 0;
+    S->agent.mu_inited = 0;
     mino_state_lock_init(S);
     mino_worker_list_lock_init(S);
     gc_evt_init(S);
@@ -264,12 +264,12 @@ static void state_free_refs(mino_state_t *S)
 static void state_free_ns_aliases(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->ns_alias_len; i++) {
-        free(S->ns_aliases[i].owning_ns);
-        free(S->ns_aliases[i].alias);
-        free(S->ns_aliases[i].full_name);
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        free(S->ns_vars.ns_aliases[i].owning_ns);
+        free(S->ns_vars.ns_aliases[i].alias);
+        free(S->ns_vars.ns_aliases[i].full_name);
     }
-    free(S->ns_aliases);
+    free(S->ns_vars.ns_aliases);
 }
 
 /* Free the per-ns env table. Names are interned via intern_filename
@@ -277,21 +277,21 @@ static void state_free_ns_aliases(mino_state_t *S)
  * (freed by state_free_heap). Only the array storage is malloc-owned. */
 static void state_free_ns_env_table(mino_state_t *S)
 {
-    free(S->ns_env_table);
+    free(S->ns_vars.ns_env_table);
 }
 
 /* Free the module cache: per-entry names, then the array itself. */
 static void state_free_module_cache(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->module_cache_len; i++) {
-        free(S->module_cache[i].name);
+    for (i = 0; i < S->module.module_cache_len; i++) {
+        free(S->module.module_cache[i].name);
     }
-    free(S->module_cache);
-    for (i = 0; i < S->load_stack_len; i++) {
-        free(S->load_stack[i]);
+    free(S->module.module_cache);
+    for (i = 0; i < S->module.load_stack_len; i++) {
+        free(S->module.load_stack[i]);
     }
-    free(S->load_stack);
+    free(S->module.load_stack);
 }
 
 /* Free the bundled-stdlib registry: per-entry names, then the array.
@@ -299,20 +299,20 @@ static void state_free_module_cache(mino_state_t *S)
 static void state_free_bundled_libs(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->bundled_libs_len; i++) {
-        free(S->bundled_libs[i].name);
+    for (i = 0; i < S->module.bundled_libs_len; i++) {
+        free(S->module.bundled_libs[i].name);
     }
-    free(S->bundled_libs);
+    free(S->module.bundled_libs);
 }
 
 /* Free extra load paths registered via (add-load-path! ...). */
 static void state_free_extra_load_paths(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->extra_load_paths_len; i++) {
-        free(S->extra_load_paths[i]);
+    for (i = 0; i < S->module.extra_load_paths_len; i++) {
+        free(S->module.extra_load_paths[i]);
     }
-    free(S->extra_load_paths);
+    free(S->module.extra_load_paths);
 }
 
 /* Truncate the load stack back to LEN, freeing any entries pushed past
@@ -320,8 +320,8 @@ static void state_free_extra_load_paths(mino_state_t *S)
  * normal cleanup runs. */
 void load_stack_truncate(mino_state_t *S, size_t len)
 {
-    while (S->load_stack_len > len) {
-        free(S->load_stack[--S->load_stack_len]);
+    while (S->module.load_stack_len > len) {
+        free(S->module.load_stack[--S->module.load_stack_len]);
     }
 }
 
@@ -341,12 +341,12 @@ static void state_free_host_types(mino_state_t *S)
 static void state_free_meta_table(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->meta_table_len; i++) {
-        free(S->meta_table[i].name);
-        free(S->meta_table[i].docstring);
-        free(S->meta_table[i].capability);
+    for (i = 0; i < S->module.meta_table_len; i++) {
+        free(S->module.meta_table[i].name);
+        free(S->module.meta_table[i].docstring);
+        free(S->module.meta_table[i].capability);
     }
-    free(S->meta_table);
+    free(S->module.meta_table);
 }
 
 /* Free both intern tables (symbols + keywords). The interned values
@@ -378,15 +378,15 @@ static void state_free_record_types(mino_state_t *S)
 static void state_free_string_interns(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->interned_files_len; i++) {
-        free((void *)S->interned_files[i]);
+    for (i = 0; i < S->reader.interned_files_len; i++) {
+        free((void *)S->reader.interned_files[i]);
     }
-    free(S->interned_files);
-    for (i = 0; i < S->interned_var_strs_len; i++) {
-        free((void *)S->interned_var_strs[i]);
+    free(S->reader.interned_files);
+    for (i = 0; i < S->reader.interned_var_strs_len; i++) {
+        free((void *)S->reader.interned_var_strs[i]);
     }
-    free(S->interned_var_strs);
-    free(S->interned_var_strs_hash);
+    free(S->reader.interned_var_strs);
+    free(S->reader.interned_var_strs_hash);
 }
 
 /* Free GC bookkeeping arrays + freelists. The actual heap (gc_all_young
@@ -418,7 +418,7 @@ static void state_free_diag_state(mino_state_t *S)
     diag_free(mino_current_ctx(S)->last_diag);
     mino_current_ctx(S)->last_diag = NULL;
     for (sci = 0; sci < MINO_SOURCE_CACHE_SIZE; sci++) {
-        free(S->source_cache[sci].text);
+        free(S->reader.source_cache[sci].text);
     }
 }
 
@@ -486,7 +486,7 @@ void mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode)
     case MINO_JIT_MODE_AUTO:
     case MINO_JIT_MODE_OFF:
     case MINO_JIT_MODE_ON:
-        S->jit_mode = (int)mode;
+        S->jit.jit_mode = (int)mode;
         return;
     }
     /* Unknown enum value: leave the current mode untouched. */
@@ -495,7 +495,7 @@ void mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode)
 mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S)
 {
     if (S == NULL) return MINO_JIT_MODE_AUTO;
-    return (mino_jit_mode_t)S->jit_mode;
+    return (mino_jit_mode_t)S->jit.jit_mode;
 }
 
 void mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold)
@@ -505,22 +505,22 @@ void mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold)
      * "hot_counter >= thresh" check fire before the first
      * increment, which is hostile. The intent of zero is "ASAP",
      * which is the same as 1 in this gating scheme. */
-    S->jit_hot_threshold = threshold < 1u ? 1u : threshold;
+    S->jit.jit_hot_threshold = threshold < 1u ? 1u : threshold;
 }
 
 unsigned mino_state_jit_hot_threshold(const mino_state_t *S)
 {
     if (S == NULL) return MINO_JIT_THRESHOLD;
-    return S->jit_hot_threshold;
+    return S->jit.jit_hot_threshold;
 }
 
 mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S)
 {
     mino_jit_capability_t cap;
     cap.mode      = (S == NULL) ? MINO_JIT_MODE_AUTO
-                                : (mino_jit_mode_t)S->jit_mode;
+                                : (mino_jit_mode_t)S->jit.jit_mode;
     cap.threshold = (S == NULL) ? MINO_JIT_THRESHOLD
-                                : S->jit_hot_threshold;
+                                : S->jit.jit_hot_threshold;
 #if defined(__aarch64__)
     cap.host_arch = "arm64";
 #elif defined(__x86_64__)
@@ -580,9 +580,9 @@ void mino_state_free(mino_state_t *S)
     }
     free(S->sampler_ring);
     free(S->alloc_sampler_ring);
-    free(S->var_registry);
-    free(S->var_hash);
-    free(S->ic_table);
+    free(S->ns_vars.var_registry);
+    free(S->ns_vars.var_hash);
+    free(S->ns_vars.ic_table);
     /* Drain any leftover agent run-queue nodes. shutdown-agents
      * (or a successful host_threads quiesce above) normally empties
      * this; if the embedder tore down without calling shutdown-agents,
@@ -593,26 +593,26 @@ void mino_state_free(mino_state_t *S)
     {
         int pi;
         for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
-            agent_action_node_t *n = S->agent_pool[pi].run_head;
+            agent_action_node_t *n = S->agent.pool[pi].run_head;
             while (n != NULL) {
                 agent_action_node_t *next = n->next;
                 free(n);
                 n = next;
             }
-            S->agent_pool[pi].run_head = NULL;
-            S->agent_pool[pi].run_tail = NULL;
+            S->agent.pool[pi].run_head = NULL;
+            S->agent.pool[pi].run_tail = NULL;
         }
     }
 #if defined(_WIN32) && defined(_MSC_VER)
-    if (S->agent_mu_inited) {
-        DeleteCriticalSection(&S->agent_mu);
-        S->agent_mu_inited = 0;
+    if (S->agent.mu_inited) {
+        DeleteCriticalSection(&S->agent.mu);
+        S->agent.mu_inited = 0;
     }
 #else
-    if (S->agent_mu_inited) {
-        pthread_cond_destroy(&S->agent_cv);
-        pthread_mutex_destroy(&S->agent_mu);
-        S->agent_mu_inited = 0;
+    if (S->agent.mu_inited) {
+        pthread_cond_destroy(&S->agent.cv);
+        pthread_mutex_destroy(&S->agent.mu);
+        S->agent.mu_inited = 0;
     }
 #endif
     state_free_host_types(S);
@@ -725,9 +725,9 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
      * surface as a NULL return instead of aborting the process. */
     if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
@@ -738,8 +738,8 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
             if (ex != NULL && mino_current_ctx(S)->pending_user_ex == NULL) {
                 mino_current_ctx(S)->pending_user_ex = ex;
             }
-            S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-            S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+            S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+            S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
             mino_current_ctx(S)->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
@@ -825,32 +825,32 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
     volatile char   probe = 0;
     const char * volatile src = src_in;
     mino_val_t     *last  = mino_nil(S);
-    const char     *saved_file = S->reader_file;
-    int             saved_line = S->reader_line;
-    int             saved_col  = S->reader_col;
+    const char     *saved_file = S->reader.reader_file;
+    int             saved_line = S->reader.reader_line;
+    int             saved_col  = S->reader.reader_col;
     int             saved_try  = mino_current_ctx(S)->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     mino_current_ctx(S)->eval_steps     = 0;
     mino_current_ctx(S)->limit_exceeded = 0;
     mino_current_ctx(S)->interrupted    = 0;
-    if (S->reader_file == NULL) {
-        S->reader_file = intern_filename(S, "<string>");
+    if (S->reader.reader_file == NULL) {
+        S->reader.reader_file = intern_filename(S, "<string>");
     }
-    S->reader_line = 1;
+    S->reader.reader_line = 1;
     /* reset reader_col so line-1 of this source sees fresh column
      * tracking. Without this, the terminal column of the previous
      * load (e.g. the bundled core.mino) leaks into the next load and
      * the very first error reports a wildly off column. */
-    S->reader_col  = 1;
+    S->reader.reader_col  = 1;
 
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
     if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
             /* Same payload-stash as in mino_eval_inner: outer pcall-style
@@ -858,13 +858,13 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
             if (ex != NULL && mino_current_ctx(S)->pending_user_ex == NULL) {
                 mino_current_ctx(S)->pending_user_ex = ex;
             }
-            S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-            S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+            S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+            S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
             mino_current_ctx(S)->try_depth   = saved_try;
-            S->reader_file = saved_file;
-            S->reader_line = saved_line;
-            S->reader_col  = saved_col;
+            S->reader.reader_file = saved_file;
+            S->reader.reader_line = saved_line;
+            S->reader.reader_col  = saved_col;
             if (mino_last_error(S) == NULL) {
                 /* Preserve the original exception's kind/code/message.
                  * Mirrors mino_eval_inner so file-mode (script) errors
@@ -873,7 +873,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                  * :message / :data keys) and prim_throw_classified maps
                  * would take different paths and degrade to a generic
                  * MCT001 wrapper. */
-                const char *file = S->reader_file;
+                const char *file = S->reader.reader_file;
                 mino_val_t *nex = (ex != NULL)
                     ? normalize_exception(S, ex) : NULL;
                 if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
@@ -918,9 +918,9 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
         if (form == NULL) {
             if (mino_last_error(S) != NULL) {
                 mino_current_ctx(S)->try_depth   = saved_try;
-                S->reader_file = saved_file;
-                S->reader_line = saved_line;
-                S->reader_col  = saved_col;
+                S->reader.reader_file = saved_file;
+                S->reader.reader_line = saved_line;
+                S->reader.reader_col  = saved_col;
                 return NULL;
             }
             if (end != NULL && end > src) {
@@ -932,17 +932,17 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
         last = mino_eval(S, form, env);
         if (last == NULL) {
             mino_current_ctx(S)->try_depth   = saved_try;
-            S->reader_file = saved_file;
-            S->reader_line = saved_line;
-            S->reader_col  = saved_col;
+            S->reader.reader_file = saved_file;
+            S->reader.reader_line = saved_line;
+            S->reader.reader_col  = saved_col;
             return NULL;
         }
         src = end;
     }
     mino_current_ctx(S)->try_depth   = saved_try;
-    S->reader_file = saved_file;
-    S->reader_line = saved_line;
-    S->reader_col  = saved_col;
+    S->reader.reader_file = saved_file;
+    S->reader.reader_line = saved_line;
+    S->reader.reader_col  = saved_col;
     return last;
 }
 
@@ -1011,11 +1011,11 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
         return NULL;
     }
     buf[rd] = '\0';
-    saved_file  = S->reader_file;
-    S->reader_file = intern_filename(S, path);
-    source_cache_store(S, S->reader_file, buf, rd);
+    saved_file  = S->reader.reader_file;
+    S->reader.reader_file = intern_filename(S, path);
+    source_cache_store(S, S->reader.reader_file, buf, rd);
     result = mino_eval_string(S, buf, env);
-    S->reader_file = saved_file;
+    S->reader.reader_file = saved_file;
     free(buf);
     return result;
 }
@@ -1073,9 +1073,9 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
     }
 
     mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->current_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         /* Inner-eval try frames may have caught the original throw and
@@ -1085,8 +1085,8 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
             ex = mino_current_ctx(S)->pending_user_ex;
         }
         mino_current_ctx(S)->pending_user_ex = NULL;
-        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+        S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+        S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S,
             mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
@@ -1169,9 +1169,9 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     }
 
     mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->current_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. Restore the
          * eval bookkeeping that was active at pcall entry, then
@@ -1204,8 +1204,8 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
             ex = mino_current_ctx(S)->pending_user_ex;
         }
         mino_current_ctx(S)->pending_user_ex = NULL;
-        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+        S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+        S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
@@ -1237,8 +1237,8 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
 void mino_set_limit(mino_state_t *S, int kind, size_t value)
 {
     switch (kind) {
-    case MINO_LIMIT_STEPS: S->limit_steps = value; break;
-    case MINO_LIMIT_HEAP:  S->limit_heap  = value; break;
+    case MINO_LIMIT_STEPS: S->module.limit_steps = value; break;
+    case MINO_LIMIT_HEAP:  S->module.limit_heap  = value; break;
     default: break;
     }
 }
@@ -1277,21 +1277,21 @@ void mino_set_thread_limit(mino_state_t *S, int n)
 {
     if (S == NULL) { return; }
     if (n < 0) { n = 0; }
-    S->thread_limit = n;
+    S->threading.thread_limit = n;
 }
 
 int mino_get_thread_limit(mino_state_t *S)
 {
     if (S == NULL) { return 1; }
-    return S->thread_limit;
+    return S->threading.thread_limit;
 }
 
-/* Relaxed observability read of S->thread_count -- intentionally without
+/* Relaxed observability read of S->threading.thread_count -- intentionally without
  * state_lock. The only consumer is the "suppress major GC while host
  * workers are alive" approximation; a transient stale value either
  * delays a major slice by one tick (harmless) or runs a slice during
  * the gap between increment and visibility (also harmless, because
- * workers tag their own roots through S->worker_ctxs_head rather than
+ * workers tag their own roots through S->threading.worker_ctxs_head rather than
  * through thread_count). Writer sites in host_threads.c hold the lock:
  * mino_future_spawn increments under the caller-held state_lock from
  * mino_call (apply path); worker exit decrements after taking the lock
@@ -1299,12 +1299,12 @@ int mino_get_thread_limit(mino_state_t *S)
 int mino_thread_count(mino_state_t *S)
 {
     if (S == NULL) { return 0; }
-    return __atomic_load_n(&S->thread_count, __ATOMIC_RELAXED);
+    return __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED);
 }
 
 void mino_quiesce_threads(mino_state_t *S)
 {
-    /* Walk S->future_list_head and join every worker that hasn't been
+    /* Walk S->threading.future_list_head and join every worker that hasn't been
      * joined yet. The implementation lives in runtime/host_threads.c;
      * mino_state_free calls this before tearing down the heap so
      * workers don't run after free. Embedders also call this directly
@@ -1317,7 +1317,7 @@ void mino_quiesce_threads(mino_state_t *S)
 void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool)
 {
     if (S == NULL) { return; }
-    S->thread_pool = pool;
+    S->threading.thread_pool = pool;
 }
 
 void mino_set_thread_factory(mino_state_t *S,
@@ -1326,15 +1326,15 @@ void mino_set_thread_factory(mino_state_t *S,
                              void *ctx)
 {
     if (S == NULL) { return; }
-    S->thread_start_fn     = start_fn;
-    S->thread_end_fn       = end_fn;
-    S->thread_factory_ctx  = ctx;
+    S->threading.thread_start_fn     = start_fn;
+    S->threading.thread_end_fn       = end_fn;
+    S->threading.thread_factory_ctx  = ctx;
 }
 
 void mino_set_thread_stack_size(mino_state_t *S, size_t n)
 {
     if (S == NULL) { return; }
-    S->thread_stack_size = n;
+    S->threading.thread_stack_size = n;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1357,7 +1357,7 @@ void mino_safepoint_park(mino_state_t *S)
      * or a host driver flipped the flag between sweeps. Clear the
      * local flag and return — no other thread to coordinate with.
      * A multi-worker variant would replace this body with a
-     * condition-variable wait keyed to S->stw_request. */
+     * condition-variable wait keyed to S->threading.stw_request. */
     if (S == NULL) { return; }
     mino_current_ctx(S)->should_yield = 0;
 }
@@ -1365,7 +1365,7 @@ void mino_safepoint_park(mino_state_t *S)
 void gc_request_stw(mino_state_t *S)
 {
     if (S == NULL) { return; }
-    S->stw_request = 1;
+    S->threading.stw_request = 1;
     /* Single-threaded today: only S->main_ctx exists. A multi-worker
      * variant would walk the worker set and set should_yield on each.
      * The calling thread is the mutator-and-collector both, so it's
@@ -1485,7 +1485,7 @@ int mino_bc_safepoint(mino_state_t *S)
                                     "future was cancelled");
         return 0;
     }
-    if (S->multi_threaded
+    if (S->threading.multi_threaded
         && (++mino_tls_safepoint_count & 0xFFFFu) == 0) {
         int depth = mino_yield_lock(S);
 #if defined(_WIN32) && defined(_MSC_VER)
@@ -1508,7 +1508,7 @@ int mino_bc_safepoint(mino_state_t *S)
 void gc_release_stw(mino_state_t *S)
 {
     if (S == NULL) { return; }
-    S->stw_request = 0;
+    S->threading.stw_request = 0;
     mino_current_ctx(S)->should_yield = 0;
 }
 
@@ -1517,7 +1517,7 @@ void gc_release_stw(mino_state_t *S)
 /*                                                                            */
 /* Initialized at state_init unconditionally so any caller can take it       */
 /* whether or not the host has granted threads. The mino_lock / mino_unlock  */
-/* macros gate on S->multi_threaded so single-threaded states pay no         */
+/* macros gate on S->threading.multi_threaded so single-threaded states pay no         */
 /* lock/unlock cost; only states with active worker threads serialize.       */
 /* ------------------------------------------------------------------------- */
 
@@ -1529,24 +1529,24 @@ void mino_state_lock_init(mino_state_t *S)
     /* unrecoverable: init-time OOM allocating state_lock */
     if (cs == NULL) { abort(); }
     InitializeCriticalSection(cs);
-    S->state_lock = cs;
+    S->threading.state_lock = cs;
 }
 void mino_state_lock_destroy(mino_state_t *S)
 {
-    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->state_lock;
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->threading.state_lock;
     if (cs != NULL) {
         DeleteCriticalSection(cs);
         free(cs);
-        S->state_lock = NULL;
+        S->threading.state_lock = NULL;
     }
 }
 void mino_state_lock_acquire(mino_state_t *S)
 {
-    EnterCriticalSection((CRITICAL_SECTION *)S->state_lock);
+    EnterCriticalSection((CRITICAL_SECTION *)S->threading.state_lock);
 }
 void mino_state_lock_release(mino_state_t *S)
 {
-    LeaveCriticalSection((CRITICAL_SECTION *)S->state_lock);
+    LeaveCriticalSection((CRITICAL_SECTION *)S->threading.state_lock);
 }
 void mino_worker_list_lock_init(mino_state_t *S)
 {
@@ -1554,24 +1554,24 @@ void mino_worker_list_lock_init(mino_state_t *S)
     /* unrecoverable: init-time OOM allocating worker_list_lock */
     if (cs == NULL) { abort(); }
     InitializeCriticalSection(cs);
-    S->worker_list_lock = cs;
+    S->threading.worker_list_lock = cs;
 }
 void mino_worker_list_lock_destroy(mino_state_t *S)
 {
-    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->worker_list_lock;
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->threading.worker_list_lock;
     if (cs != NULL) {
         DeleteCriticalSection(cs);
         free(cs);
-        S->worker_list_lock = NULL;
+        S->threading.worker_list_lock = NULL;
     }
 }
 void mino_worker_list_lock_acquire(mino_state_t *S)
 {
-    EnterCriticalSection((CRITICAL_SECTION *)S->worker_list_lock);
+    EnterCriticalSection((CRITICAL_SECTION *)S->threading.worker_list_lock);
 }
 void mino_worker_list_lock_release(mino_state_t *S)
 {
-    LeaveCriticalSection((CRITICAL_SECTION *)S->worker_list_lock);
+    LeaveCriticalSection((CRITICAL_SECTION *)S->threading.worker_list_lock);
 }
 #else
 void mino_state_lock_init(mino_state_t *S)
@@ -1583,36 +1583,36 @@ void mino_state_lock_init(mino_state_t *S)
      * itself can allocate. The same thread re-acquiring is correct;
      * non-recursive would deadlock against the same thread. */
     pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&S->state_lock, &attr);
+    pthread_mutex_init(&S->threading.state_lock, &attr);
     pthread_mutexattr_destroy(&attr);
 }
 void mino_state_lock_destroy(mino_state_t *S)
 {
-    pthread_mutex_destroy(&S->state_lock);
+    pthread_mutex_destroy(&S->threading.state_lock);
 }
 void mino_state_lock_acquire(mino_state_t *S)
 {
-    pthread_mutex_lock(&S->state_lock);
+    pthread_mutex_lock(&S->threading.state_lock);
 }
 void mino_state_lock_release(mino_state_t *S)
 {
-    pthread_mutex_unlock(&S->state_lock);
+    pthread_mutex_unlock(&S->threading.state_lock);
 }
 void mino_worker_list_lock_init(mino_state_t *S)
 {
-    pthread_mutex_init(&S->worker_list_lock, NULL);
+    pthread_mutex_init(&S->threading.worker_list_lock, NULL);
 }
 void mino_worker_list_lock_destroy(mino_state_t *S)
 {
-    pthread_mutex_destroy(&S->worker_list_lock);
+    pthread_mutex_destroy(&S->threading.worker_list_lock);
 }
 void mino_worker_list_lock_acquire(mino_state_t *S)
 {
-    pthread_mutex_lock(&S->worker_list_lock);
+    pthread_mutex_lock(&S->threading.worker_list_lock);
 }
 void mino_worker_list_lock_release(mino_state_t *S)
 {
-    pthread_mutex_unlock(&S->worker_list_lock);
+    pthread_mutex_unlock(&S->threading.worker_list_lock);
 }
 #endif
 
@@ -1633,9 +1633,9 @@ int mino_yield_lock(mino_state_t *S)
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     int depth = ctx->lock_depth;
     /* Snapshot the BC stack into this ctx before releasing the lock. */
-    ctx->bc_regs_storage      = S->bc_regs;
-    ctx->bc_regs_storage_cap  = S->bc_regs_cap;
-    ctx->bc_top_snapshot      = S->bc_top;
+    ctx->bc_regs_storage      = S->bc.bc_regs;
+    ctx->bc_regs_storage_cap  = S->bc.bc_regs_cap;
+    ctx->bc_top_snapshot      = S->bc.bc_top;
     ctx->bc_snapshot_valid    = 1;
     while (ctx->lock_depth > 0) {
         ctx->lock_depth--;
@@ -1657,9 +1657,9 @@ void mino_resume_lock(mino_state_t *S, int saved_depth)
      * snapshotted their own state into THEIR ctxs and restored on
      * their resume). */
     if (ctx->bc_snapshot_valid) {
-        S->bc_regs     = ctx->bc_regs_storage;
-        S->bc_regs_cap = ctx->bc_regs_storage_cap;
-        S->bc_top      = ctx->bc_top_snapshot;
+        S->bc.bc_regs     = ctx->bc_regs_storage;
+        S->bc.bc_regs_cap = ctx->bc_regs_storage_cap;
+        S->bc.bc_top      = ctx->bc_top_snapshot;
     }
 }
 

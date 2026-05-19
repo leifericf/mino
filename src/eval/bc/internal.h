@@ -308,7 +308,7 @@ typedef struct mino_bc_source_map {
  * array indexed by the Bx field of the cached opcode. For the GLOBAL
  * kind: `sym` is the unqualified or qualified MINO_SYMBOL whose
  * resolution this slot stands for, `cached` is the last resolved value
- * (NULL = uninitialized / invalidated), and `gen` is the S->ic_gen
+ * (NULL = uninitialized / invalidated), and `gen` is the S->ns_vars.ic_gen
  * snapshot at fill -- when ic_gen advances (def / ns-unmap /
  * var_set_root / var_unintern) the cache misses on its next read. For
  * the PROTOCOL kind: `atom` is the dispatch atom captured at compile
@@ -461,7 +461,7 @@ typedef struct mino_bc_fn {
                                    * + the matching cleanup at bc_done.
                                    * Bodies without try / catch / throw
                                    * skip the snapshot entirely. */
-    unsigned         compile_ic_gen; /* S->ic_gen at end of compile.
+    unsigned         compile_ic_gen; /* S->ns_vars.ic_gen at end of compile.
                                       * apply_callable invalidates the
                                       * bc and reruns the compile if a
                                       * mismatch is observed at call
@@ -480,7 +480,7 @@ typedef struct mino_bc_fn {
      * site reads them through the tier-selection branch in
      * apply_callable. native is the head of an mmap'd page carrying
      * the patched stencil sequence; native_size is the page length
-     * (for unmap on deopt); native_gen is the S->ic_gen snapshot at
+     * (for unmap on deopt); native_gen is the S->ns_vars.ic_gen snapshot at
      * the time the page was compiled (mismatches force a deopt back
      * to the interpreter on the next call). hot_counter accumulates
      * invocations under the interpreter; reaching JIT_THRESHOLD
@@ -603,7 +603,7 @@ mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
  * minimum window + cursor + dyn / try snapshot work that
  * mino_bc_run's prologue does for every call. Preconditions:
  *   - fn->as.fn.bc != NULL
- *   - bc->native != NULL && bc->native_gen == S->ic_gen
+ *   - bc->native != NULL && bc->native_gen == S->ns_vars.ic_gen
  *   - bc->n_clauses == 1 && clauses[0].entry_pc == 0
  *   - clauses[0].has_rest == 0
  *   - argc == clauses[0].n_params
@@ -684,7 +684,7 @@ int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
  * indexes it. The runtime side guarantees:
  *
  *   - A single slot per syntactic var reference in the fn body.
- *   - The slot's gen field tracks the S->ic_gen snapshot at fill;
+ *   - The slot's gen field tracks the S->ns_vars.ic_gen snapshot at fill;
  *     def / ns-unmap / var_set_root / var_unintern bump ic_gen and
  *     force the next read to re-resolve.
  *   - The cached value is observed-consistent with the var's root at

@@ -19,7 +19,7 @@ mino_val_t *mino_promise_new(mino_state_t *S);
 
 /* Spawn a worker thread that evaluates (thunk) under env. Returns a
  * MINO_FUTURE in PENDING. Throws :mino/thread-limit-exceeded if
- * S->thread_count >= S->thread_limit. */
+ * S->threading.thread_count >= S->threading.thread_limit. */
 mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
                               mino_env_t *env);
 

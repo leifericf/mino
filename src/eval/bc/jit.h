@@ -7,7 +7,7 @@
  * the relocations with the per-instruction operands, mprotects to RX,
  * and stores the resulting pointer in bc->native. apply_callable's
  * tier-selection branch picks the native arm when bc->native != NULL
- * and bc->native_gen matches S->ic_gen.
+ * and bc->native_gen matches S->ns_vars.ic_gen.
  *
  * The whole module is compiled in only when MINO_CPJIT is defined; the
  * default build is unaffected. The `jit_regions` slot in mino_state_t
@@ -50,7 +50,7 @@
 
 /* Deopt model.
  *
- * A JIT'd region's `native_gen` is the `S->ic_gen` snapshot at the
+ * A JIT'd region's `native_gen` is the `S->ns_vars.ic_gen` snapshot at the
  * time the region was emitted. Anything that bumps `ic_gen`
  * (def / ns-unmap / var_set_root / var_unintern) renders the
  * region's globally-cached resolutions stale; the dispatch path

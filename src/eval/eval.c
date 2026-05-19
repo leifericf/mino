@@ -47,11 +47,11 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
         mino_env_t *ns_env = current_ns_env(S);
         if (ns_env != NULL) mac = mino_env_get(ns_env, buf);
     }
-    if (mac == NULL && S->fn_ambient_ns != NULL
-        && S->fn_ambient_ns != S->current_ns
-        && (S->current_ns == NULL
-            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-        mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+    if (mac == NULL && S->ns_vars.fn_ambient_ns != NULL
+        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
+        && (S->ns_vars.current_ns == NULL
+            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         if (amb != NULL) mac = mino_env_get(amb, buf);
     }
     if (mac == NULL || mino_type_of(mac) != MINO_MACRO) {
@@ -87,8 +87,8 @@ static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
     mino_env_t *e;
     for (e = env; e != NULL; e = e->parent) {
         size_t i;
-        for (i = 0; i < S->ns_env_len; i++) {
-            if (S->ns_env_table[i].env == e) return 0; /* hit ns boundary */
+        for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+            if (S->ns_vars.ns_env_table[i].env == e) return 0; /* hit ns boundary */
         }
         if (env_find_here(e, name) != NULL) return 1;
     }
@@ -109,15 +109,15 @@ static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
 static void qq_qualifying_ns(mino_state_t *S, const char **ns_name_out,
                              mino_env_t **ns_env_out)
 {
-    if (S->fn_ambient_ns != NULL
-        && S->fn_ambient_ns != S->current_ns
-        && (S->current_ns == NULL
-            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-        *ns_name_out = S->fn_ambient_ns;
-        *ns_env_out  = ns_env_lookup(S, S->fn_ambient_ns);
+    if (S->ns_vars.fn_ambient_ns != NULL
+        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
+        && (S->ns_vars.current_ns == NULL
+            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+        *ns_name_out = S->ns_vars.fn_ambient_ns;
+        *ns_env_out  = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         return;
     }
-    *ns_name_out = S->current_ns;
+    *ns_name_out = S->ns_vars.current_ns;
     *ns_env_out  = current_ns_env(S);
 }
 
@@ -151,11 +151,11 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
         if (prefix_len == 0 || prefix_len >= sizeof(prefix_buf)) return sym;
         memcpy(prefix_buf, name, prefix_len);
         prefix_buf[prefix_len] = '\0';
-        for (i = 0; i < S->ns_alias_len; i++) {
-            if (S->ns_aliases[i].owning_ns == NULL
-                || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
-            if (strcmp(S->ns_aliases[i].alias, prefix_buf) == 0) {
-                const char *full   = S->ns_aliases[i].full_name;
+        for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (S->ns_vars.ns_aliases[i].owning_ns == NULL
+                || strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) != 0) continue;
+            if (strcmp(S->ns_vars.ns_aliases[i].alias, prefix_buf) == 0) {
+                const char *full   = S->ns_vars.ns_aliases[i].full_name;
                 size_t      flen   = strlen(full);
                 char        buf[512];
                 if (flen + 1 + suffix_len + 1 > sizeof(buf)) return sym;
@@ -187,9 +187,9 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
                 bnlen = bname != NULL ? strlen(bname) : 0;
             }
             if (nsn == NULL) {
-                for (i = 0; i < S->ns_env_len; i++) {
-                    if (S->ns_env_table[i].env == e) {
-                        nsn = S->ns_env_table[i].name;
+                for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+                    if (S->ns_vars.ns_env_table[i].env == e) {
+                        nsn = S->ns_vars.ns_env_table[i].name;
                         break;
                     }
                 }

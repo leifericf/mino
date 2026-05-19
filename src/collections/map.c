@@ -1703,13 +1703,13 @@ mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
      * a macro body emits bare `sym` instead of `defining-ns/sym` once
      * the closure runs, since invoking the closure overwrites
      * fn_ambient_ns with its (caller-derived) defining_ns. */
-    if (S->fn_ambient_ns != NULL
-        && S->fn_ambient_ns != S->current_ns
-        && (S->current_ns == NULL
-            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-        v->as.fn.defining_ns = S->fn_ambient_ns;
+    if (S->ns_vars.fn_ambient_ns != NULL
+        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
+        && (S->ns_vars.current_ns == NULL
+            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+        v->as.fn.defining_ns = S->ns_vars.fn_ambient_ns;
     } else {
-        v->as.fn.defining_ns = S->current_ns;
+        v->as.fn.defining_ns = S->ns_vars.current_ns;
     }
     return v;
 }

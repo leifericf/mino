@@ -8,7 +8,7 @@
  *
  * The stencil inlines the cached-hit path: read the slot, verify the
  * cached value is present, verify the slot's gen matches the current
- * `S->ic_gen` (so a defn / ns-unmap / var_set_root / var_unintern
+ * `S->ns_vars.ic_gen` (so a defn / ns-unmap / var_set_root / var_unintern
  * since fill misses), and verify no `(binding [...] ...)` is active
  * (the dyn-shadowing branch otherwise has precedence). On hit the
  * cached value is written straight into regs[A] -- no `bl`. On miss

@@ -147,7 +147,7 @@ typedef struct mino_thread_ctx {
      * across re-entry. */
     struct mino_env *jit_invoke_env;
 
-    /* This thread's recursive depth on S->state_lock.
+    /* This thread's recursive depth on S->threading.state_lock.
      * mino_lock increments, mino_unlock decrements; mino_yield_lock
      * saves the depth and unlocks down to zero, mino_resume_lock
      * re-locks up to the saved depth. Used by mino_future_deref so
@@ -171,7 +171,7 @@ typedef struct mino_thread_ctx {
 
     /* Per-ctx BC register stack snapshot.
      *
-     * The state-level S->bc_regs / S->bc_top / S->bc_regs_cap fields
+     * The state-level S->bc.bc_regs / S->bc.bc_top / S->bc.bc_regs_cap fields
      * track the BC stack of whichever worker currently holds
      * state_lock. When that worker yields (mino_yield_lock), the
      * full snapshot is copied here so the bc_top cursor + the array

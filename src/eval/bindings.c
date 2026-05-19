@@ -956,16 +956,16 @@ static int push_dyn_binding(mino_state_t *S, mino_val_t *form,
                 memcpy(ns_buf, nbuf, ns_len);
                 ns_buf[ns_len] = '\0';
                 resolved_ns = ns_buf;
-                for (i = 0; i < S->ns_alias_len; i++) {
-                    if (strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
-                        resolved_ns = S->ns_aliases[i].full_name;
+                for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+                    if (strcmp(S->ns_vars.ns_aliases[i].alias, ns_buf) == 0) {
+                        resolved_ns = S->ns_vars.ns_aliases[i].full_name;
                         break;
                     }
                 }
                 var = var_find(S, resolved_ns, name);
             }
         } else {
-            const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+            const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
             var = var_find(S, cur, nbuf);
         }
         if (var != NULL && mino_type_of(var) == MINO_VAR

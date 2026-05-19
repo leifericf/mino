@@ -93,10 +93,10 @@ mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
      * transient falls back to a path-copy wrapper instead of
      * spuriously claiming nodes whose IDs collided with a long-dead
      * transient. */
-    if (S->transient_owner_next == 0xFFFFFFFFu) {
+    if (S->ns_vars.transient_owner_next == 0xFFFFFFFFu) {
         t->as.transient.owner_id = 0;
     } else {
-        t->as.transient.owner_id = (uintptr_t)(++S->transient_owner_next);
+        t->as.transient.owner_id = (uintptr_t)(++S->ns_vars.transient_owner_next);
     }
     return t;
 }

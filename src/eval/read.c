@@ -17,9 +17,9 @@ const char *intern_filename(mino_state_t *S, const char *name)
     if (name == NULL) {
         return NULL;
     }
-    for (i = 0; i < S->interned_files_len; i++) {
-        if (strcmp(S->interned_files[i], name) == 0) {
-            return S->interned_files[i];
+    for (i = 0; i < S->reader.interned_files_len; i++) {
+        if (strcmp(S->reader.interned_files[i], name) == 0) {
+            return S->reader.interned_files[i];
         }
     }
     len = strlen(name);
@@ -28,19 +28,19 @@ const char *intern_filename(mino_state_t *S, const char *name)
         return name;
     }
     memcpy(dup, name, len + 1);
-    if (S->interned_files_len == S->interned_files_cap) {
-        size_t new_cap = S->interned_files_cap == 0 ? 64
-                                                    : S->interned_files_cap * 2;
+    if (S->reader.interned_files_len == S->reader.interned_files_cap) {
+        size_t new_cap = S->reader.interned_files_cap == 0 ? 64
+                                                    : S->reader.interned_files_cap * 2;
         const char **nb = (const char **)realloc(
-            S->interned_files, new_cap * sizeof(*nb));
+            S->reader.interned_files, new_cap * sizeof(*nb));
         if (nb == NULL) {
             free(dup);
             return name;
         }
-        S->interned_files     = nb;
-        S->interned_files_cap = new_cap;
+        S->reader.interned_files     = nb;
+        S->reader.interned_files_cap = new_cap;
     }
-    S->interned_files[S->interned_files_len++] = dup;
+    S->reader.interned_files[S->reader.interned_files_len++] = dup;
     return dup;
 }
 
@@ -73,7 +73,7 @@ static void set_reader_diag(mino_state_t *S, const char *code,
     if (d != NULL) {
         mino_span_t span;
         memset(&span, 0, sizeof(span));
-        span.file   = S->reader_file;
+        span.file   = S->reader.reader_file;
         span.line   = line;
         span.column = col;
         diag_set_span(d, span);
@@ -85,14 +85,14 @@ static void set_reader_diag(mino_state_t *S, const char *code,
 static inline void ADVANCE(mino_state_t *S, const char **p)
 {
     (*p)++;
-    S->reader_col++;
+    S->reader.reader_col++;
 }
 
 /* Advance by n characters (no embedded newlines expected). */
 static inline void ADVANCE_N(mino_state_t *S, const char **p, size_t n)
 {
     *p += n;
-    S->reader_col += (int)n;
+    S->reader.reader_col += (int)n;
 }
 
 static int is_ws(char c)
@@ -113,8 +113,8 @@ static void skip_ws(mino_state_t *S, const char **p)
     while (**p) {
         char c = **p;
         if (c == '\n') {
-            S->reader_line++;
-            S->reader_col = 1;
+            S->reader.reader_line++;
+            S->reader.reader_col = 1;
             (*p)++;
         } else if (is_ws(c)) {
             ADVANCE(S, p);
@@ -137,8 +137,8 @@ static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
      * engine without string-escape processing, and `\"` is preserved
      * as the two-character sequence backslash-quote (it does not
      * terminate the literal). */
-    int    str_line = S->reader_line;
-    int    str_col  = S->reader_col;
+    int    str_line = S->reader.reader_line;
+    int    str_col  = S->reader.reader_col;
     char  *buf;
     size_t cap = 16;
     size_t len = 0;
@@ -152,8 +152,8 @@ static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
     while (**p && **p != '"') {
         char c = **p;
         if (c == '\n') {
-            S->reader_line++;
-            S->reader_col = 1;
+            S->reader.reader_line++;
+            S->reader.reader_col = 1;
         }
         if (c == '\\') {
             /* Pass backslash and the next char through verbatim. */
@@ -217,8 +217,8 @@ static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
 static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
-    int str_line = S->reader_line;
-    int str_col  = S->reader_col;
+    int str_line = S->reader.reader_line;
+    int str_col  = S->reader.reader_col;
     char *buf;
     size_t cap = 16;
     size_t len = 0;
@@ -232,8 +232,8 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     while (**p && **p != '"') {
         char c = **p;
         if (c == '\n') {
-            S->reader_line++;
-            S->reader_col = 1;
+            S->reader.reader_line++;
+            S->reader.reader_col = 1;
         }
         if (c == '\\') {
             ADVANCE(S, p);
@@ -311,7 +311,7 @@ static mino_val_t *make_reader_conditional_record(
 }
 
 /* Read a reader-conditional body: (keyword form keyword form ...).
- * Matches S->reader_dialect first, then "default". `:clj` is *not* a
+ * Matches S->reader.reader_dialect first, then "default". `:clj` is *not* a
  * fallback: mino is not a JVM dialect, so JVM-only forms inside `:clj`
  * branches must not fire on mino. Cross-dialect tests in the wild
  * (e.g. jank-lang/clojure-test-suite) put JVM-only assertions in
@@ -335,7 +335,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE005, "unterminated reader conditional",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         if (**p == ')') {
@@ -347,14 +347,14 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
         if (key == NULL) {
             if (mino_last_error(S) == NULL) {
                 set_reader_diag(S, MRE005, "unterminated reader conditional",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             }
             return NULL;
         }
         if (mino_type_of(key) != MINO_KEYWORD) {
             set_reader_diag(S, MRE006,
                             "reader conditional key must be a keyword",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         skip_ws(S, p);
@@ -363,7 +363,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
             if (mino_last_error(S) == NULL) {
                 set_reader_diag(S, MRE006,
                             "reader conditional: missing value for key",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             }
             return NULL;
         }
@@ -371,7 +371,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
             const char *kname = key->as.s.data;
             size_t      klen  = key->as.s.len;
             int is_default = (klen == 7 && memcmp(kname, "default", 7) == 0);
-            if (reader_cond_active(S->reader_dialect, kname, klen)
+            if (reader_cond_active(S->reader.reader_dialect, kname, klen)
                 || is_default) {
                 result  = val;
                 matched = !is_default;
@@ -402,7 +402,7 @@ static void list_append_cell(mino_state_t *S, mino_val_t **head,
                              int elem_line, int elem_col)
 {
     mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
-    cell->as.cons.file   = S->reader_file;
+    cell->as.cons.file   = S->reader.reader_file;
     cell->as.cons.line   = (*tail == NULL) ? list_line : elem_line;
     cell->as.cons.column = (*tail == NULL) ? list_col  : elem_col;
     if (*tail == NULL) {
@@ -416,8 +416,8 @@ static void list_append_cell(mino_state_t *S, mino_val_t **head,
 static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
-    int         list_line = S->reader_line;
-    int         list_col  = S->reader_col;
+    int         list_line = S->reader.reader_line;
+    int         list_col  = S->reader.reader_col;
     mino_val_t *head = mino_nil(S);
     mino_val_t *tail = NULL;
     ADVANCE(S, p); /* skip '(' */
@@ -435,21 +435,21 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice: read conditional body, splice matching list */
             mino_val_t *found = NULL;
-            int         splice_line = S->reader_line;
+            int         splice_line = S->reader.reader_line;
             skip_ws(S, p);
             if (**p != '(') {
                 set_reader_diag(S, MRE007,
                                 "#?@ must be followed by a list",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 2) {
+            if (S->reader.reader_cond_mode == 2) {
                 set_reader_diag(S, MRE007,
                     "reader conditional not allowed when :read-cond is :disallow",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 1) {
+            if (S->reader.reader_cond_mode == 1) {
                 /* preserve: append a reader-conditional record (no splice). */
                 mino_val_t *body = read_list_form(S, p);
                 mino_val_t *record;
@@ -487,8 +487,8 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             continue;
         }
         {
-            int         elem_line = S->reader_line;
-            int         elem_col  = S->reader_col;
+            int         elem_line = S->reader.reader_line;
+            int         elem_col  = S->reader.reader_col;
             mino_val_t *elem = read_form(S, p);
             if (elem == NULL && mino_last_error(S) != NULL) {
                 return NULL;
@@ -573,7 +573,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE003, "unterminated vector",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         if (**p == ']') {
@@ -587,16 +587,16 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
             if (**p != '(') {
                 set_reader_diag(S, MRE007,
                                 "#?@ must be followed by a list",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 2) {
+            if (S->reader.reader_cond_mode == 2) {
                 set_reader_diag(S, MRE007,
                     "reader conditional not allowed when :read-cond is :disallow",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 1) {
+            if (S->reader.reader_cond_mode == 1) {
                 mino_val_t *body = read_list_form(S, p);
                 mino_val_t *record;
                 if (body == NULL && mino_last_error(S) != NULL) return NULL;
@@ -636,7 +636,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 if (**p == ']') { ADVANCE(S, p); break; }
                 if (**p == '\0') {
                     set_reader_diag(S, MRE003, "unterminated vector",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
                     return NULL;
                 }
                 continue;
@@ -664,7 +664,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE003, "unterminated map",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         if (**p == '}') {
@@ -677,19 +677,19 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             if (**p != '(') {
                 set_reader_diag(S, MRE007,
                                 "#?@ must be followed by a list",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 2) {
+            if (S->reader.reader_cond_mode == 2) {
                 set_reader_diag(S, MRE007,
                     "reader conditional not allowed when :read-cond is :disallow",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            if (S->reader_cond_mode == 1) {
+            if (S->reader.reader_cond_mode == 1) {
                 set_reader_diag(S, MRE007,
                     "#?@ inside map literal not supported with :read-cond :preserve",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             ADVANCE(S, p);
@@ -702,7 +702,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
                     if (found->as.vec.len % 2 != 0) {
                         set_reader_diag(S, MRE008,
                             "#?@ splice into map requires even number of forms",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
                         gc_unpin(1);
                         return NULL;
                     }
@@ -722,7 +722,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
                     if (mino_is_cons(cur)) {
                         set_reader_diag(S, MRE008,
                             "#?@ splice into map requires even number of forms",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
                         gc_unpin(1);
                         return NULL;
                     }
@@ -751,7 +751,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         if (**p == '}' || **p == '\0') {
             set_reader_diag(S, MRE008,
                             "map literal has odd number of forms",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         val = read_form(S, p);
@@ -779,7 +779,7 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE003, "unterminated set",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         if (**p == '}') {
@@ -912,7 +912,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                 if (num_bi == NULL) {
                     set_reader_diag(S, MRE008,
                                     "invalid ratio literal",
-                                    S->reader_line, S->reader_col);
+                                    S->reader.reader_line, S->reader.reader_col);
                     *err = 1;
                     goto try_parse_done;
                 }
@@ -921,7 +921,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                 if (den_bi == NULL) {
                     set_reader_diag(S, MRE008,
                                     "invalid ratio literal",
-                                    S->reader_line, S->reader_col);
+                                    S->reader.reader_line, S->reader.reader_col);
                     *err = 1;
                     goto try_parse_done;
                 }
@@ -1031,26 +1031,26 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             if (body_len == 0) {
                 set_reader_diag(S, MRE008,
                                 "auto-resolved keyword missing name",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             if (slash != NULL) {
                 size_t alias_len = (size_t)(slash - body);
                 size_t i;
-                const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+                const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
                 if (alias_len == 0 || alias_len + 1 == body_len) {
                     set_reader_diag(S, MRE008,
                                     "malformed auto-resolved keyword",
-                                    S->reader_line, S->reader_col);
+                                    S->reader.reader_line, S->reader.reader_col);
                     return NULL;
                 }
-                for (i = 0; i < S->ns_alias_len; i++) {
-                    const char *a = S->ns_aliases[i].alias;
-                    if (S->ns_aliases[i].owning_ns == NULL
-                        || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
+                for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+                    const char *a = S->ns_vars.ns_aliases[i].alias;
+                    if (S->ns_vars.ns_aliases[i].owning_ns == NULL
+                        || strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) != 0) continue;
                     if (strlen(a) == alias_len
                         && memcmp(a, body, alias_len) == 0) {
-                        resolved_ns     = S->ns_aliases[i].full_name;
+                        resolved_ns     = S->ns_vars.ns_aliases[i].full_name;
                         resolved_ns_len = strlen(resolved_ns);
                         break;
                     }
@@ -1061,14 +1061,14 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                              "no such alias: %.*s",
                              (int)alias_len, body);
                     set_reader_diag(S, MRE008, msg,
-                                    S->reader_line, S->reader_col);
+                                    S->reader.reader_line, S->reader.reader_col);
                     return NULL;
                 }
                 kw_name     = slash + 1;
                 kw_name_len = body_len - alias_len - 1;
             } else {
-                resolved_ns     = (S->current_ns != NULL)
-                                  ? S->current_ns : "user";
+                resolved_ns     = (S->ns_vars.current_ns != NULL)
+                                  ? S->ns_vars.current_ns : "user";
                 resolved_ns_len = strlen(resolved_ns);
                 kw_name         = body;
                 kw_name_len     = body_len;
@@ -1076,7 +1076,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             if (resolved_ns_len + 1 + kw_name_len >= sizeof(full)) {
                 set_reader_diag(S, MRE008,
                                 "auto-resolved keyword too long",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             memcpy(full, resolved_ns, resolved_ns_len);
@@ -1095,7 +1095,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                 && slash == start + len - 1
                 && slash > start + 1) {
                 set_reader_diag(S, MRE008, "malformed keyword",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
         }
@@ -1103,7 +1103,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     }
     if (len == 1 && start[0] == ':') {
         set_reader_diag(S, MRE008, "keyword missing name",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
 
@@ -1129,7 +1129,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
      * readers; ::-prefix and :name keywords are handled earlier). */
     if (len > 0 && start[len - 1] == ':') {
         set_reader_diag(S, MRE008, "invalid symbol",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     return mino_symbol_n(S, start, len);
@@ -1229,14 +1229,14 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
             if (!checked_mul_sz(len, sizeof(*items), &alloc_sz)) {
                 set_reader_diag(S, MRE004,
                                 "out of memory in anonymous fn expansion",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             items = (mino_val_t **)malloc(alloc_sz);
             if (items == NULL) {
                 set_reader_diag(S, MRE004,
                                 "out of memory in anonymous fn expansion",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
         }
@@ -1259,8 +1259,8 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
  */
 static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
 {
-    int fn_line = S->reader_line;
-    int fn_col  = S->reader_col;
+    int fn_line = S->reader.reader_line;
+    int fn_col  = S->reader.reader_col;
     int used[9] = {0};
     int max_arg = 0, has_rest = 0;
     mino_val_t *body;
@@ -1291,7 +1291,7 @@ static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
     fn_form = mino_cons(S, mino_symbol(S, "fn"),
                   mino_cons(S, params_vec,
                       mino_cons(S, body, mino_nil(S))));
-    fn_form->as.cons.file   = S->reader_file;
+    fn_form->as.cons.file   = S->reader.reader_file;
     fn_form->as.cons.line   = fn_line;
     fn_form->as.cons.column = fn_col;
     return fn_form;
@@ -1309,7 +1309,7 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     if (meta_val == NULL) {
         if (mino_last_error(S) == NULL) {
             set_reader_diag(S, MRE010, "expected metadata after ^",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
         }
         return NULL;
     }
@@ -1337,14 +1337,14 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     if (mino_type_of(meta_val) != MINO_MAP) {
         set_reader_diag(S, MRE010,
                         "metadata must be a map, keyword, symbol, or string",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     target = read_form(S, p);
     if (target == NULL) {
         if (mino_last_error(S) == NULL) {
             set_reader_diag(S, MRE009, "expected form after metadata",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
         }
         return NULL;
     }
@@ -1405,7 +1405,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
     if (**p == '\0') {
         set_reader_diag(S, MRE001,
                         "unexpected end of input after \\",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     while (!is_terminator(start[tlen])) tlen++;
@@ -1438,13 +1438,13 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
         else {
             set_reader_diag(S, MRE008,
                             "invalid UTF-8 character literal",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         if (tlen != expect) {
             set_reader_diag(S, MRE008,
                             "malformed UTF-8 character literal",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         for (j = 1; j < expect; j++) {
@@ -1452,7 +1452,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
             if ((c & 0xC0) != 0x80) {
                 set_reader_diag(S, MRE008,
                                 "invalid UTF-8 continuation byte",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             u = (u << 6) | (c & 0x3Fu);
@@ -1470,7 +1470,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
             if (start[j] < '0' || start[j] > '7') {
                 set_reader_diag(S, MRE008,
                                 "invalid octal character literal",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             oval = (oval << 3) | (unsigned)(start[j] - '0');
@@ -1478,7 +1478,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
         if (oval > 0377) {
             set_reader_diag(S, MRE008,
                             "octal character literal out of range",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         cp = (int)oval;
@@ -1488,7 +1488,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
         size_t   j;
         if (tlen != 5) {
             set_reader_diag(S, MRE008, "invalid unicode character literal",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         for (j = 1; j < 5; j++) {
@@ -1500,7 +1500,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
             else {
                 set_reader_diag(S, MRE008,
                                 "invalid unicode character literal",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             u = (u << 4) | d;
@@ -1508,7 +1508,7 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
         cp = (int)u;
     } else {
         set_reader_diag(S, MRE008, "unknown character literal",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     return mino_char(S, cp);
@@ -1526,11 +1526,11 @@ static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
 {
     mino_val_t *inner;
     mino_val_t *outer;
-    S->reader_last_cond_empty = 0;
+    S->reader.reader_last_cond_empty = 0;
     inner = read_form(S, p);
     if (inner == NULL) {
         if (mino_last_error(S) == NULL) {
-            if (S->reader_last_cond_empty) {
+            if (S->reader.reader_last_cond_empty) {
                 char buf[256];
                 /* Reader conditional with no matching arm landed in a
                  * position where a form is required. The user-visible
@@ -1540,19 +1540,19 @@ static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
                 snprintf(buf, sizeof(buf),
                     "%s: form was a reader conditional with no matching"
                     " arm for dialect :%s (add a :default arm)",
-                    after_msg, S->reader_dialect);
+                    after_msg, S->reader.reader_dialect);
                 set_reader_diag(S, MRE009, buf, q_line, q_col);
             } else {
                 set_reader_diag(S, MRE009, after_msg,
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
             }
         }
         return NULL;
     }
-    S->reader_last_cond_empty = 0;
+    S->reader.reader_last_cond_empty = 0;
     outer = mino_cons(S, mino_symbol(S, sym_name),
                       mino_cons(S, inner, mino_nil(S)));
-    outer->as.cons.file   = S->reader_file;
+    outer->as.cons.file   = S->reader.reader_file;
     outer->as.cons.line   = q_line;
     outer->as.cons.column = q_col;
     return outer;
@@ -1617,8 +1617,8 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
     size_t      prefix_len = 0;
     int         saw_double_colon = 0;
     mino_val_t *out;
-    int         line = S->reader_line;
-    int         col  = S->reader_col;
+    int         line = S->reader.reader_line;
+    int         col  = S->reader.reader_col;
     ADVANCE_N(S, p, 2); /* skip "#:" */
     if (**p == ':') {
         /* "#::" -- auto-resolve form */
@@ -1656,13 +1656,13 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
                 /* #::alias -- look up alias to a real namespace. */
                 size_t i;
                 const char *resolved = NULL;
-                const char *cur = S->current_ns != NULL ? S->current_ns : "user";
-                for (i = 0; i < S->ns_alias_len; i++) {
-                    const char *a = S->ns_aliases[i].alias;
-                    if (S->ns_aliases[i].owning_ns == NULL
-                        || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
+                const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
+                for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+                    const char *a = S->ns_vars.ns_aliases[i].alias;
+                    if (S->ns_vars.ns_aliases[i].owning_ns == NULL
+                        || strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) != 0) continue;
                     if (strlen(a) == tlen && memcmp(a, start, tlen) == 0) {
-                        resolved = S->ns_aliases[i].full_name;
+                        resolved = S->ns_vars.ns_aliases[i].full_name;
                         break;
                     }
                 }
@@ -1690,7 +1690,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             ADVANCE_N(S, p, tlen);
         } else if (saw_double_colon) {
             /* #::{...} -- current namespace */
-            const char *cur = (S->current_ns != NULL) ? S->current_ns : "user";
+            const char *cur = (S->ns_vars.current_ns != NULL) ? S->ns_vars.current_ns : "user";
             prefix_len = strlen(cur);
             if (prefix_len >= sizeof(prefix)) {
                 set_reader_diag(S, MRE008,
@@ -1710,7 +1710,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
     if (**p != '{') {
         set_reader_diag(S, MRE008,
             "namespaced map prefix must be followed by {",
-            S->reader_line, S->reader_col);
+            S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     {
@@ -1731,7 +1731,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             skip_ws(S, p);
             if (**p == '\0') {
                 set_reader_diag(S, MRE003, "unterminated map",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             if (**p == '}') { ADVANCE(S, p); break; }
@@ -1758,7 +1758,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             if (**p == '}' || **p == '\0') {
                 set_reader_diag(S, MRE008,
                                 "map literal has odd number of forms",
-                                S->reader_line, S->reader_col);
+                                S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             v = read_form(S, p);
@@ -1799,7 +1799,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
                 if (mino_eq(ks[j], qk)) {
                     set_reader_diag(S, MRE008,
                         "namespaced map literal contains duplicate key",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
                     return NULL;
                 }
             }
@@ -1838,8 +1838,8 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         return read_anon_fn_form(S, p);
     }
     if (next == '\'') {
-        int vq_line = S->reader_line;
-        int vq_col  = S->reader_col;
+        int vq_line = S->reader.reader_line;
+        int vq_col  = S->reader.reader_col;
         ADVANCE_N(S, p, 2);
         return read_wrap_one(S, p, "var", "expected form after #'",
                              vq_line, vq_col);
@@ -1860,7 +1860,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
             return mino_float(S, NAN);
         set_reader_diag(S, MRE008, "unknown tagged literal",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     if (next == '"') {
@@ -1878,7 +1878,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         rx = mino_regex_from_source(S, str);
         if (rx == NULL) {
             set_reader_diag(S, MRE008, "regex literal: out of memory",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         return rx;
@@ -1886,13 +1886,13 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
     if (next == '?') {
         int         splicing = (*(*p + 2) == '@');
         mino_val_t *found    = NULL;
-        if (S->reader_cond_mode == 2 /* disallow */) {
+        if (S->reader.reader_cond_mode == 2 /* disallow */) {
             set_reader_diag(S, MRE007,
                 "reader conditional not allowed when :read-cond is :disallow",
-                S->reader_line, S->reader_col);
+                S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
-        if (S->reader_cond_mode == 1 /* preserve */) {
+        if (S->reader.reader_cond_mode == 1 /* preserve */) {
             mino_val_t *body;
             ADVANCE_N(S, p, splicing ? 3 : 2);
             skip_ws(S, p);
@@ -1900,7 +1900,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
                 set_reader_diag(S, MRE007,
                     splicing ? "#?@ must be followed by a list"
                              : "#? must be followed by a list",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             body = read_list_form(S, p);
@@ -1909,14 +1909,14 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         }
         if (splicing) {
             set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         ADVANCE_N(S, p, 2);
         skip_ws(S, p);
         if (**p != '(') {
             set_reader_diag(S, MRE007, "#? must be followed by a list",
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         ADVANCE(S, p);
@@ -1935,7 +1935,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
          * `#'`) that immediately follow can recognise the cause
          * and emit a clearer diagnostic instead of "expected form
          * after @". */
-        S->reader_last_cond_empty = 1;
+        S->reader.reader_last_cond_empty = 1;
         return NULL;
     }
     if (isalpha((unsigned char)next)) {
@@ -1977,7 +1977,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
                 "tagged literal #%.*s: missing form",
                 (int)tag_len, tag_start);
             set_reader_diag(S, MRE008, buf,
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         body = read_form(S, p);
@@ -1988,18 +1988,18 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
              * `tagged-literal` fn and surface as "unbound symbol:
              * form". Name the offender at the read site. */
             char buf[256];
-            if (S->reader_last_cond_empty) {
+            if (S->reader.reader_last_cond_empty) {
                 snprintf(buf, sizeof(buf),
                     "tagged literal #%.*s: form was a reader conditional"
                     " with no matching arm for dialect :%s",
-                    (int)tag_len, tag_start, S->reader_dialect);
+                    (int)tag_len, tag_start, S->reader.reader_dialect);
             } else {
                 snprintf(buf, sizeof(buf),
                     "tagged literal #%.*s: missing form",
                     (int)tag_len, tag_start);
             }
             set_reader_diag(S, MRE008, buf,
-                            S->reader_line, S->reader_col);
+                            S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
         tag_sym  = mino_symbol_n(S, tag_start, tag_len);
@@ -2016,7 +2016,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
             if (!mino_uuid_parse(body->as.s.data, body->as.s.len, bytes)) {
                 set_reader_diag(S, MRE008,
                     "#uuid: malformed UUID string",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
             return mino_uuid_from_bytes(S, bytes);
@@ -2071,7 +2071,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
                                    mino_cons(S, body, mino_nil(S))));
     }
     set_reader_diag(S, MRE008, "unknown reader dispatch macro",
-                    S->reader_line, S->reader_col);
+                    S->reader.reader_line, S->reader.reader_col);
     return NULL;
 }
 
@@ -2086,7 +2086,7 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
     }
     if (**p == ')') {
         set_reader_diag(S, MRE002, "unexpected ')'",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     if (**p == '[') {
@@ -2094,7 +2094,7 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
     }
     if (**p == ']') {
         set_reader_diag(S, MRE002, "unexpected ']'",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     if (**p == '{') {
@@ -2102,7 +2102,7 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
     }
     if (**p == '}') {
         set_reader_diag(S, MRE002, "unexpected '}'",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     if (**p == '#') {
@@ -2112,22 +2112,22 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
         return read_string_form(S, p);
     }
     if (**p == '\'') {
-        int q_line = S->reader_line;
-        int q_col  = S->reader_col;
+        int q_line = S->reader.reader_line;
+        int q_col  = S->reader.reader_col;
         ADVANCE(S, p);
         return read_wrap_one(S, p, "quote", "expected form after quote",
                              q_line, q_col);
     }
     if (**p == '`') {
-        int q_line = S->reader_line;
-        int q_col  = S->reader_col;
+        int q_line = S->reader.reader_line;
+        int q_col  = S->reader.reader_col;
         ADVANCE(S, p);
         return read_wrap_one(S, p, "quasiquote", "expected form after `",
                              q_line, q_col);
     }
     if (**p == '@') {
-        int q_line = S->reader_line;
-        int q_col  = S->reader_col;
+        int q_line = S->reader.reader_line;
+        int q_col  = S->reader.reader_col;
         ADVANCE(S, p);
         return read_wrap_one(S, p, "deref", "expected form after @",
                              q_line, q_col);
@@ -2136,8 +2136,8 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
         return read_metadata_form(S, p);
     }
     if (**p == '~') {
-        int         q_line = S->reader_line;
-        int         q_col  = S->reader_col;
+        int         q_line = S->reader.reader_line;
+        int         q_col  = S->reader.reader_col;
         const char *name   = "unquote";
         ADVANCE(S, p);
         if (**p == '@') {
@@ -2163,7 +2163,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     mino_val_t *v;
     if (S->reader_depth >= MINO_READER_MAX_DEPTH) {
         set_reader_diag(S, MRE011, "nesting too deep",
-                        S->reader_line, S->reader_col);
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
     S->reader_depth++;
@@ -2194,8 +2194,8 @@ mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
      * conservative scan covers the reader's call chain in full. */
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    if (S->reader_file == NULL) {
-        S->reader_file = intern_filename(S, "<input>");
+    if (S->reader.reader_file == NULL) {
+        S->reader.reader_file = intern_filename(S, "<input>");
     }
     clear_error(S);
     /* Reader is non-reentrant per state, so resetting depth on

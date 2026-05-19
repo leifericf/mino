@@ -3,7 +3,7 @@
  *
  * Switch-based interpreter. Each compiled fn carries its own
  * instruction stream and constant pool; mino_bc_run pushes a register
- * window onto S->bc_regs for the call and pops it on return. The
+ * window onto S->bc.bc_regs for the call and pops it on return. The
  * window is a slice into a single per-state stack so the GC can walk
  * every live register slot in one pass.
  *
@@ -310,26 +310,26 @@ const char *mino_bc_op_name(unsigned op)
     }
 }
 
-/* Grow S->bc_regs to hold an additional `n` slots and return the base
+/* Grow S->bc.bc_regs to hold an additional `n` slots and return the base
  * index of the new window. Returns (size_t)-1 on allocation failure. */
 static size_t bc_push_window(mino_state_t *S, int n)
 {
     if (n < 0) return (size_t)-1;
-    size_t need = S->bc_top + (size_t)n;
-    if (need > S->bc_regs_cap) {
-        size_t new_cap = S->bc_regs_cap == 0 ? 256 : S->bc_regs_cap * 2;
+    size_t need = S->bc.bc_top + (size_t)n;
+    if (need > S->bc.bc_regs_cap) {
+        size_t new_cap = S->bc.bc_regs_cap == 0 ? 256 : S->bc.bc_regs_cap * 2;
         while (new_cap < need) new_cap *= 2;
         mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
             S, GC_T_VALARR, new_cap * sizeof(*grown));
         if (grown == NULL) return (size_t)-1;
-        if (S->bc_regs != NULL && S->bc_top > 0) {
-            memcpy(grown, S->bc_regs, S->bc_top * sizeof(*grown));
+        if (S->bc.bc_regs != NULL && S->bc.bc_top > 0) {
+            memcpy(grown, S->bc.bc_regs, S->bc.bc_top * sizeof(*grown));
         }
-        for (size_t i = S->bc_top; i < new_cap; i++) grown[i] = NULL;
-        S->bc_regs     = grown;
-        S->bc_regs_cap = new_cap;
+        for (size_t i = S->bc.bc_top; i < new_cap; i++) grown[i] = NULL;
+        S->bc.bc_regs     = grown;
+        S->bc.bc_regs_cap = new_cap;
     }
-    size_t base = S->bc_top;
+    size_t base = S->bc.bc_top;
     /* The window is left uninitialized: bc_pop_window zeroes every
      * slot before the next push lands on it, and fresh bc_regs growth
      * paths zero the new tail explicitly above. Skipping the per-slot
@@ -340,15 +340,15 @@ static size_t bc_push_window(mino_state_t *S, int n)
      * to its own registers, because all dispatch ops that may collect
      * (OP_CALL, OP_GETGLOBAL_CACHED, OP_CLOSURE, ...) come after the
      * regs[a] := producer step. */
-    S->bc_top = need;
+    S->bc.bc_top = need;
     return base;
 }
 
 static void bc_pop_window(mino_state_t *S, size_t base)
 {
-    while (S->bc_top > base) {
-        S->bc_top--;
-        S->bc_regs[S->bc_top] = NULL;
+    while (S->bc.bc_top > base) {
+        S->bc.bc_top--;
+        S->bc.bc_regs[S->bc.bc_top] = NULL;
     }
 }
 
@@ -454,11 +454,11 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
 mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
 {
 #ifdef MINO_BC_PROFILE_COUNTS
-    S->bc_int_make_count++;
+    S->bc.bc_int_make_count++;
 #endif
     if (r >= MINO_INT_MIN && r <= MINO_INT_MAX) {
 #ifdef MINO_BC_PROFILE_COUNTS
-        S->bc_int_alloc_avoided++;
+        S->bc.bc_int_alloc_avoided++;
 #endif
         return MINO_MAKE_INT(r);
     }
@@ -745,7 +745,7 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
     }
     if (!dyn_active
         && slot->cached != NULL
-        && slot->gen == S->ic_gen) {
+        && slot->gen == S->ns_vars.ic_gen) {
         mino_bc_ic_stat_t *st = ic_stat_for(S, bc, slot_idx);
         if (st != NULL) st->hits++;
         return slot->cached;
@@ -769,7 +769,7 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
                                                          &n_params);
         gc_write_barrier(S, bc->ic_slots, slot->cached, v);
         slot->cached               = v;
-        slot->gen                  = S->ic_gen;
+        slot->gen                  = S->ns_vars.ic_gen;
         slot->cached_callable_kind = kind;
         slot->cached_fn_has_rest   = has_rest;
         slot->cached_fn_n_params   = n_params;
@@ -912,7 +912,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
                       mino_env_t **env_p, int *ok)
 {
     mino_env_t  *env  = *env_p;
-    mino_val_t **regs = S->bc_regs + base;
+    mino_val_t **regs = S->bc.bc_regs + base;
 
     switch (op) {
     case OP_NOP:
@@ -925,7 +925,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         mino_val_t *sym = bc->consts[bx];
         mino_val_t *v   = resolve_global(S, sym, env);
         if (v == NULL) { *ok = 0; return 0; }
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = v;
         return 1;
     }
@@ -939,11 +939,11 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
             *ok = 0; return 0;
         }
         mino_val_t *v   = regs[a];
-        mino_val_t *var = var_intern(S, S->current_ns, sym->as.s.data);
+        mino_val_t *var = var_intern(S, S->ns_vars.current_ns, sym->as.s.data);
         if (var == NULL) { *ok = 0; return 0; }
         var_set_root(S, var, v);
-        S->ic_gen++;
-        regs = S->bc_regs + base;
+        S->ns_vars.ic_gen++;
+        regs = S->bc.bc_regs + base;
         regs[a] = v;
         return 1;
     }
@@ -956,7 +956,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         mino_val_t *r = apply_callable_argv(S, callee, regs + a + 1,
                                             (int)argn, env);
         if (r == NULL) { *ok = 0; return 0; }
-        S->bc_regs[base + ret] = r;
+        S->bc.bc_regs[base + ret] = r;
         return 1;
     }
 
@@ -975,7 +975,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
         closure->as.fn.shape = child->as.fn.shape;
         closure->as.fn.template_fn = child;
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = closure;
         return 1;
     }
@@ -991,7 +991,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         lz->as.lazy.env      = env;
         lz->as.lazy.cached   = NULL;
         lz->as.lazy.realized = 0;
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = lz;
         return 1;
     }
@@ -1184,7 +1184,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (list == NULL) { *ok = 0; return 0; }
         mino_val_t *r = prim_nth(S, list, env);
         if (r == NULL) { *ok = 0; return 0; }
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = r;
         return 1;
     }
@@ -1203,7 +1203,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (list == NULL) { *ok = 0; return 0; }
         mino_val_t *r = prim_empty_p(S, list, env);
         if (r == NULL) { *ok = 0; return 0; }
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = r;
         return 1;
     }
@@ -1217,7 +1217,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
             mino_val_t *r = vec_conj1(S, coll, item);
             if (r == NULL) { *ok = 0; return 0; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             return 1;
         }
@@ -1227,7 +1227,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (list == NULL) { *ok = 0; return 0; }
         mino_val_t *r = prim_conj(S, list, env);
         if (r == NULL) { *ok = 0; return 0; }
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = r;
         return 1;
     }
@@ -1241,7 +1241,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
             mino_val_t *r = mino_map_dissoc1(S, coll, key);
             if (r == NULL) { *ok = 0; return 0; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             return 1;
         }
@@ -1251,7 +1251,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         if (list == NULL) { *ok = 0; return 0; }
         mino_val_t *r = prim_dissoc(S, list, env);
         if (r == NULL) { *ok = 0; return 0; }
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         regs[a] = r;
         return 1;
     }
@@ -1278,7 +1278,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                                 int saved_bc_catch_depth,
                                 dyn_frame_t *saved_dyn_stack)
 {
-    mino_val_t **regs = S->bc_regs + base;
+    mino_val_t **regs = S->bc.bc_regs + base;
     const mino_bc_insn_t *code = bc->code;
     mino_env_t *env = *env_p;
     size_t pc = start_pc;
@@ -1295,10 +1295,10 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
          * trigger user code (OP_CALL/TAILCALL via apply_callable,
          * OP_GETGLOBAL via eval_impl, OP_CLOSURE via make_fn that
          * may collect, OP_SETGLOBAL via var_intern) can cascade into
-         * a recursive mino_bc_run that grows S->bc_regs and frees
+         * a recursive mino_bc_run that grows S->bc.bc_regs and frees
          * the prior buffer. Recomputing from base on each iteration
          * keeps the window pointer correct without per-op clutter. */
-        regs = S->bc_regs + base;
+        regs = S->bc.bc_regs + base;
         /* Publish the about-to-execute pc to the bc cursor. Error
          * paths that fire from primitives invoked by this op resolve
          * a precise source span via mino_bc_source_lookup against
@@ -1336,7 +1336,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
 
         case OP_GETGLOBAL_CACHED: {
             /* Inline cache for global symbol resolution. The slot is
-             * filled on first miss with (cached, gen=S->ic_gen) and
+             * filled on first miss with (cached, gen=S->ns_vars.ic_gen) and
              * re-read while the gen still matches; bumps to ic_gen
              * (def / ns-unmap / var_set_root / var_unintern)
              * invalidate naturally. The shared ic_resolve_global
@@ -1411,7 +1411,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             mino_val_t *r = apply_callable_argv(S, callee, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            S->bc_regs[base + ret] = r;
+            S->bc.bc_regs[base + ret] = r;
             break;
         }
 
@@ -1455,7 +1455,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 retval = r;
                 goto dispatch_done;
             }
-            S->bc_regs[base + ret] = r;
+            S->bc.bc_regs[base + ret] = r;
             break;
         }
 
@@ -1541,7 +1541,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 r = fallback(S, list, env);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
             }
             regs[a] = r;
             break;
@@ -1577,7 +1577,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 r = fallback(S, list, env);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
             }
             regs[a] = r;
             break;
@@ -1616,7 +1616,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *zp = prim_zero_p(S, list, env);
                 if (zp == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (mino_is_truthy(zp)) {
                     /* Fall through to the exit branch (no recur). */
                     break;
@@ -1626,7 +1626,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *decv = prim_dec(S, list2, env);
                 if (decv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = decv;
                 pc -= 1;
                 if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
@@ -1664,20 +1664,20 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *zp = prim_zero_p(S, list, env);
                 if (zp == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (mino_is_truthy(zp)) break;
                 mino_val_t *list2 = mino_nil(S);
                 list2 = mino_cons(S, regs[a], list2);
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *decv = prim_dec(S, list2, env);
                 if (decv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 mino_val_t *list3 = mino_nil(S);
                 list3 = mino_cons(S, regs[b], list3);
                 if (list3 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *incv = prim_inc(S, list3, env);
                 if (incv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = decv;
                 regs[b] = incv;
                 pc -= 1;
@@ -1718,14 +1718,14 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *ltv = prim_lt(S, list, env);
                 if (ltv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (!mino_is_truthy(ltv)) break;
                 mino_val_t *list2 = mino_nil(S);
                 list2 = mino_cons(S, regs[a], list2);
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *incv = prim_inc(S, list2, env);
                 if (incv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = incv;
                 pc -= 1;
                 if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
@@ -1764,20 +1764,20 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *ltv = prim_lt(S, list, env);
                 if (ltv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (!mino_is_truthy(ltv)) break;
                 mino_val_t *list2 = mino_nil(S);
                 list2 = mino_cons(S, regs[a], list2);
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *incv = prim_inc(S, list2, env);
                 if (incv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 mino_val_t *list3 = mino_nil(S);
                 list3 = mino_cons(S, regs[c], list3);
                 if (list3 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *incv2 = prim_inc(S, list3, env);
                 if (incv2 == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = incv;
                 regs[c] = incv2;
                 pc -= 1;
@@ -1826,21 +1826,21 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *ltv = prim_lt(S, list, env);
                 if (ltv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (!mino_is_truthy(ltv)) break;
                 mino_val_t *list2 = mino_nil(S);
                 list2 = mino_cons(S, regs[a], list2);
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *incv = prim_inc(S, list2, env);
                 if (incv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 mino_val_t *list3 = mino_nil(S);
                 list3 = mino_cons(S, regs[d], list3);
                 list3 = mino_cons(S, regs[c], list3);
                 if (list3 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *addv = prim_add(S, list3, env);
                 if (addv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = incv;
                 regs[c] = addv;
                 pc -= 2;
@@ -1885,21 +1885,21 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *zp = prim_zero_p(S, list, env);
                 if (zp == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 if (mino_is_truthy(zp)) break;
                 mino_val_t *list2 = mino_nil(S);
                 list2 = mino_cons(S, regs[a], list2);
                 if (list2 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *decv = prim_dec(S, list2, env);
                 if (decv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 mino_val_t *list3 = mino_nil(S);
                 list3 = mino_cons(S, regs[d], list3);
                 list3 = mino_cons(S, regs[c], list3);
                 if (list3 == NULL) { ok = 0; goto dispatch_done; }
                 mino_val_t *addv = prim_add(S, list3, env);
                 if (addv == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = decv;
                 regs[c] = addv;
                 pc -= 2;
@@ -1979,7 +1979,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_get(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2006,7 +2006,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_first(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2031,7 +2031,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_count(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2061,7 +2061,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                     if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
                         mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
                         if (r == NULL) { ok = 0; goto dispatch_done; }
-                        regs = S->bc_regs + base;
+                        regs = S->bc.bc_regs + base;
                         regs[a] = r;
                         break;
                     }
@@ -2069,7 +2069,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (t == MINO_MAP) {
                     mino_val_t *r = mino_map_assoc1(S, coll, k, v);
                     if (r == NULL) { ok = 0; goto dispatch_done; }
-                    regs = S->bc_regs + base;
+                    regs = S->bc.bc_regs + base;
                     regs[a] = r;
                     break;
                 }
@@ -2082,7 +2082,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_assoc(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2106,7 +2106,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 && coll->as.transient.valid) {
                 mino_val_t *r = mino_assoc_bang(S, coll, k, v);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = r;
                 break;
             }
@@ -2117,7 +2117,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_assoc_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2136,7 +2136,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 && coll->as.transient.valid) {
                 mino_val_t *r = mino_conj_bang(S, coll, item);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = r;
                 break;
             }
@@ -2146,7 +2146,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_conj_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2163,7 +2163,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 && coll->as.transient.valid) {
                 mino_val_t *r = mino_dissoc_bang(S, coll, key);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = r;
                 break;
             }
@@ -2173,7 +2173,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_dissoc_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2190,7 +2190,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 && coll->as.transient.valid) {
                 mino_val_t *r = mino_disj_bang(S, coll, item);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
                 regs[a] = r;
                 break;
             }
@@ -2200,7 +2200,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_disj_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
-            regs = S->bc_regs + base;
+            regs = S->bc.bc_regs + base;
             regs[a] = r;
             break;
         }
@@ -2267,7 +2267,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 if (list == NULL) { ok = 0; goto dispatch_done; }
                 r = fallback(S, list, env);
                 if (r == NULL) { ok = 0; goto dispatch_done; }
-                regs = S->bc_regs + base;
+                regs = S->bc.bc_regs + base;
             }
             regs[a] = r;
             break;
@@ -2306,9 +2306,9 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             ctx->bc_catch_depth++;
 
             ctx->try_stack[td].exception      = NULL;
-            ctx->try_stack[td].saved_ns       = S->current_ns;
-            ctx->try_stack[td].saved_ambient  = S->fn_ambient_ns;
-            ctx->try_stack[td].saved_load_len = S->load_stack_len;
+            ctx->try_stack[td].saved_ns       = S->ns_vars.current_ns;
+            ctx->try_stack[td].saved_ambient  = S->ns_vars.fn_ambient_ns;
+            ctx->try_stack[td].saved_load_len = S->module.load_stack_len;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
@@ -2336,8 +2336,8 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 int d         = --ctx->bc_catch_depth;
                 int my_td     = ctx->bc_catch_stack[d].try_depth_at_push;
                 mino_val_t *ex = ctx->try_stack[my_td].exception;
-                S->current_ns    = ctx->try_stack[my_td].saved_ns;
-                S->fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
+                S->ns_vars.current_ns    = ctx->try_stack[my_td].saved_ns;
+                S->ns_vars.fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
                 load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
                 ctx->try_depth = my_td;
                 /* Pop any dyn frames that the body PUSHDYN'd but never
@@ -2358,7 +2358,7 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 }
                 pc      = ctx->bc_catch_stack[d].handler_pc;
                 env     = ctx->bc_catch_stack[d].env_at_push;
-                regs    = S->bc_regs + base;
+                regs    = S->bc.bc_regs + base;
                 regs[ctx->bc_catch_stack[d].ex_reg] =
                     normalize_exception(S, ex);
                 retval  = NULL;
@@ -2453,7 +2453,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     if (base == (size_t)-1) return NULL;
 
     for (int i = 0; i < match->n_params; i++) {
-        S->bc_regs[base + (size_t)i] = argv[i];
+        S->bc.bc_regs[base + (size_t)i] = argv[i];
     }
     /* Collect overflow args into a list and place it in the slot
      * right after the fixed params. mino_cons walks back-to-front so
@@ -2465,7 +2465,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             rest = mino_cons(S, argv[i], rest);
             if (rest == NULL) { bc_pop_window(S, base); return NULL; }
         }
-        S->bc_regs[base + (size_t)match->n_params] = rest;
+        S->bc.bc_regs[base + (size_t)match->n_params] = rest;
     }
 
     /* When the body contains an inner fn literal or a (lazy-seq ...),
@@ -2487,12 +2487,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 match->params_vec->as.vec.len - 1);
             if (rest_sym != NULL && mino_type_of(rest_sym) == MINO_SYMBOL) {
                 env_bind_sym(S, env, rest_sym,
-                    S->bc_regs[base + (size_t)match->n_params]);
+                    S->bc.bc_regs[base + (size_t)match->n_params]);
             }
         }
     }
 
-    mino_val_t **regs = S->bc_regs + base;
+    mino_val_t **regs = S->bc.bc_regs + base;
     size_t pc = (size_t)match->entry_pc;
     mino_val_t *retval = NULL;
     int ok = 1;
@@ -2546,7 +2546,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * ARM64 function prologue, so a mid-region entry would skip
      * the callee-saved register saves and corrupt the caller's
      * frame on epilogue. */
-    if (bc->native != NULL && bc->native_gen == S->ic_gen
+    if (bc->native != NULL && bc->native_gen == S->ns_vars.ic_gen
         && match->entry_pc == 0) {
         /* Publish the per-fn snapshots so mino_jit_invoke can pass
          * them to mino_bc_run_resume on a side-exit deopt. The locals
@@ -2642,7 +2642,7 @@ mino_val_t *mino_bc_run_known_native(mino_state_t *S, mino_val_t *fn_val,
 #ifdef MINO_CPJIT
     const mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) goto fallback;
-    if (bc->native == NULL || bc->native_gen != S->ic_gen) goto fallback;
+    if (bc->native == NULL || bc->native_gen != S->ns_vars.ic_gen) goto fallback;
     if (bc->n_clauses != 1 || bc->clauses == NULL) goto fallback;
     const mino_bc_clause_t *cl = &bc->clauses[0];
     if (cl->has_rest) goto fallback;
@@ -2653,7 +2653,7 @@ mino_val_t *mino_bc_run_known_native(mino_state_t *S, mino_val_t *fn_val,
     size_t base = bc_push_window(S, bc->n_regs);
     if (base == (size_t)-1) return NULL;
     for (int i = 0; i < argc; i++) {
-        S->bc_regs[base + (size_t)i] = argv[i];
+        S->bc.bc_regs[base + (size_t)i] = argv[i];
     }
 
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
@@ -2678,7 +2678,7 @@ mino_val_t *mino_bc_run_known_native(mino_state_t *S, mino_val_t *fn_val,
     S->jit_resume_saved_bc_catch_depth = saved_bc_catch_depth;
     S->jit_resume_saved_dyn_stack      = saved_dyn_stack;
     mino_val_t *retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc,
-                                          S->bc_regs + base,
+                                          S->bc.bc_regs + base,
                                           (mino_val_t **)bc->consts, env);
 
     if (bc->has_try) {

@@ -64,16 +64,16 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
 {
     mino_env_t    *ns_env;
     env_binding_t *b;
-    if (S->current_ns == NULL) return 0;
+    if (S->ns_vars.current_ns == NULL) return 0;
     /* clojure.core itself "owns" its primitives via env_bind at install
      * time without interning vars; skip the check there so core.clj can
      * def names whose primitive bindings live in the same env. */
-    if (strcmp(S->current_ns, "clojure.core") == 0) return 0;
+    if (strcmp(S->ns_vars.current_ns, "clojure.core") == 0) return 0;
     ns_env = current_ns_env(S);
     if (ns_env == NULL) return 0;
     b = env_find_here(ns_env, name);
     if (b == NULL) return 0;
-    if (var_find(S, S->current_ns, name) != NULL) return 0;
+    if (var_find(S, S->ns_vars.current_ns, name) != NULL) return 0;
     /* Phase 2 interns every primitive into its install-time
      * namespace, so the var_find check above already exempts
      * legitimate shadowing within the home ns (e.g. clojure.string
@@ -385,8 +385,8 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
         }
         memcpy(buf, name_form->as.s.data, n);
         buf[n] = '\0';
-        S->current_ns = intern_filename(S, buf);
-        (void)ns_env_ensure(S, S->current_ns);
+        S->ns_vars.current_ns = intern_filename(S, buf);
+        (void)ns_env_ensure(S, S->ns_vars.current_ns);
         /* Pull together metadata from ^meta on the name, an optional
          * docstring as the second arg, and an optional attr-map as the
          * third (or second when no docstring). */
@@ -417,7 +417,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
             /* Each (ns ...) invocation replaces the namespace's metadata
              * outright; merging only happens between the ^meta, the
              * docstring, and the attribute map within a single call. */
-            ns_env_set_meta(S, S->current_ns, meta);
+            ns_env_set_meta(S, S->ns_vars.current_ns, meta);
             mino_publish_current_ns(S);
             args = mino_cons(S, name_form, cur);
         }
@@ -476,7 +476,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 }
                 {
                     mino_env_t *target = current_ns_env(S);
-                    mino_env_t *core   = S->mino_core_env;
+                    mino_env_t *core   = S->ns_vars.mino_core_env;
                     size_t      i;
                     if (target == NULL || core == NULL) {
                         set_eval_diag(S, form, "internal", "MIN001",
@@ -608,7 +608,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     mac->as.fn.params      = params;
     mac->as.fn.body        = body;
     mac->as.fn.env         = env;
-    mac->as.fn.defining_ns = S->current_ns;
+    mac->as.fn.defining_ns = S->ns_vars.current_ns;
     mac->as.fn.shape       = 0;
     n = name_form->as.s.len;
     if (n >= sizeof(buf)) {
@@ -628,7 +628,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         }
         gc_pin(mac);
         {
-            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 var_set_root(S, var, mac);
                 if (is_priv) var->as.var.is_private = 1;
@@ -671,7 +671,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
          * root. Binding nil here would silently resolve to nil and
          * mask the reference-before-def bug. */
         {
-            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
             env_bind(S, current_ns_env(S), buf,
                      var != NULL ? var : mino_nil(S));
         }
@@ -724,7 +724,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         /* (def name) -- declaration only. Var stays unbound unless previously
          * defined; returns the var. */
         if (!mino_is_cons(args->as.cons.cdr)) {
-            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
@@ -751,7 +751,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         }
         gc_pin(value);
         {
-            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;

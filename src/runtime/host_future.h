@@ -66,7 +66,7 @@ struct mino_future {
      * same binding context as the caller. */
     mino_val_t         *dyn_snapshot;
 
-    mino_future_t      *next_in_state;   /* S->future_list_head chain */
+    mino_future_t      *next_in_state;   /* S->threading.future_list_head chain */
 };
 
 #endif /* RUNTIME_HOST_FUTURE_H */

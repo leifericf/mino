@@ -11,7 +11,7 @@
  *
  * Threading contract:
  *
- *  - Each pool's worker counts against S->thread_limit (the embedder
+ *  - Each pool's worker counts against S->threading.thread_limit (the embedder
  *    thread does NOT). Default thread_limit is 1, so a host that
  *    hasn't called mino_set_thread_limit can have one agent worker
  *    OR one future OR one host thread alive at a time. send /
@@ -24,11 +24,11 @@
  *
  *  - Each worker is lazy-spawned on the first send/send-off into its
  *    pool. It exits when its queue is drained so a long-idle worker
- *    doesn't keep S->thread_count > 0 and suppress GC for the rest
+ *    doesn't keep S->threading.thread_count > 0 and suppress GC for the rest
  *    of the state's lifetime; the next send into that pool re-spawns.
  *    shutdown-agents and mino_state_free quiesce both pools.
  *
- *  - Lock order: state_lock outer, S->agent_mu inner. The send caller
+ *  - Lock order: state_lock outer, S->agent.mu inner. The send caller
  *    holds state_lock while it enqueues under agent_mu. The worker
  *    takes agent_mu to pop, releases agent_mu, then acquires
  *    state_lock to run the action; no nested hold across the action
@@ -95,10 +95,10 @@ static void agent_cv_broadcast(pthread_cond_t *c) { pthread_cond_broadcast(c); }
  * read is race-free against concurrent sends from other threads). */
 static void agent_mu_ensure_inited(mino_state_t *S)
 {
-    if (!S->agent_mu_inited) {
-        agent_mu_init(&S->agent_mu);
-        agent_cv_init(&S->agent_cv);
-        S->agent_mu_inited = 1;
+    if (!S->agent.mu_inited) {
+        agent_mu_init(&S->agent.mu);
+        agent_cv_init(&S->agent.cv);
+        S->agent.mu_inited = 1;
     }
 }
 
@@ -129,7 +129,7 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
     v->as.agent.err_handler  = NULL;
     v->as.agent.err_mode     = 0;  /* :fail */
     v->as.agent.in_flight    = 0;
-    v->as.agent.agent_id     = ++S->agent_next_id;
+    v->as.agent.agent_id     = ++S->agent.next_id;
     v->as.agent.owning_state = S;
     return v;
 }
@@ -318,32 +318,32 @@ out:
 
 /* --- worker thread + queue dispatch --------------------------------------- */
 
-/* Pop the head node of S->agent_pool[kind].run_head. Caller must hold agent_mu. */
+/* Pop the head node of S->agent.pool[kind].run_head. Caller must hold agent_mu. */
 static agent_action_node_t *agent_runq_pop(mino_state_t *S,
                                             agent_pool_kind_t kind)
 {
-    agent_action_node_t *n = S->agent_pool[kind].run_head;
+    agent_action_node_t *n = S->agent.pool[kind].run_head;
     if (n == NULL) return NULL;
-    S->agent_pool[kind].run_head = n->next;
-    if (S->agent_pool[kind].run_head == NULL) {
-        S->agent_pool[kind].run_tail = NULL;
+    S->agent.pool[kind].run_head = n->next;
+    if (S->agent.pool[kind].run_head == NULL) {
+        S->agent.pool[kind].run_tail = NULL;
     }
     n->next = NULL;
     return n;
 }
 
-/* Append node to the tail of S->agent_pool[kind].run_head. Caller must
+/* Append node to the tail of S->agent.pool[kind].run_head. Caller must
  * hold agent_mu. */
 static void agent_runq_push_tail(mino_state_t *S, agent_pool_kind_t kind,
                                   agent_action_node_t *n)
 {
     n->next = NULL;
-    if (S->agent_pool[kind].run_tail != NULL) {
-        S->agent_pool[kind].run_tail->next = n;
+    if (S->agent.pool[kind].run_tail != NULL) {
+        S->agent.pool[kind].run_tail->next = n;
     } else {
-        S->agent_pool[kind].run_head = n;
+        S->agent.pool[kind].run_head = n;
     }
-    S->agent_pool[kind].run_tail = n;
+    S->agent.pool[kind].run_tail = n;
 }
 
 /* Run one queued action on the worker thread. Holds state_lock for
@@ -434,39 +434,39 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
          * the worker as gone so the next send re-spawns; pending
          * nodes leak (memory is reclaimed by mino_state_free's
          * drain). */
-        agent_mu_lock(&S->agent_mu);
-        S->agent_pool[kind].worker_alive = 0;
-        agent_cv_broadcast(&S->agent_cv);
-        agent_mu_unlock(&S->agent_mu);
+        agent_mu_lock(&S->agent.mu);
+        S->agent.pool[kind].worker_alive = 0;
+        agent_cv_broadcast(&S->agent.cv);
+        agent_mu_unlock(&S->agent.mu);
         return;
     }
     ctx->gc_stack_bottom = (void *)stack_anchor;
     mino_tls_ctx = ctx;
 
-    /* Link onto S->worker_ctxs_head so gc_mark_roots reaches the
+    /* Link onto S->threading.worker_ctxs_head so gc_mark_roots reaches the
      * worker's pinned values while it's blocked. The brief
      * worker_list_lock keeps this off the heavy state_lock so a
      * tight embedder loop can't stall agent worker entry. */
     mino_worker_list_lock_acquire(S);
-    ctx->next_worker = S->worker_ctxs_head;
-    S->worker_ctxs_head = ctx;
+    ctx->next_worker = S->threading.worker_ctxs_head;
+    S->threading.worker_ctxs_head = ctx;
     mino_worker_list_lock_release(S);
 
     for (;;) {
         agent_action_node_t *n;
 
-        agent_mu_lock(&S->agent_mu);
-        if (S->agent_pool[kind].run_head == NULL) {
+        agent_mu_lock(&S->agent.mu);
+        if (S->agent.pool[kind].run_head == NULL) {
             /* Queue drained or shutdown: exit the worker so it
              * stops counting against thread_count. The next send
              * into this pool re-spawns. */
-            S->agent_pool[kind].worker_alive = 0;
-            agent_cv_broadcast(&S->agent_cv);
-            agent_mu_unlock(&S->agent_mu);
+            S->agent.pool[kind].worker_alive = 0;
+            agent_cv_broadcast(&S->agent.cv);
+            agent_mu_unlock(&S->agent.mu);
             break;
         }
         n = agent_runq_pop(S, kind);
-        agent_mu_unlock(&S->agent_mu);
+        agent_mu_unlock(&S->agent.mu);
 
         /* Run the action under state_lock so eval invariants hold. */
         mino_state_lock_acquire(S);
@@ -474,17 +474,17 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
         mino_state_lock_release(S);
 
         /* Decrement the agent's in_flight and signal await waiters. */
-        agent_mu_lock(&S->agent_mu);
+        agent_mu_lock(&S->agent.mu);
         if (n->agent->as.agent.in_flight > 0) {
             n->agent->as.agent.in_flight--;
         }
-        agent_cv_broadcast(&S->agent_cv);
-        agent_mu_unlock(&S->agent_mu);
+        agent_cv_broadcast(&S->agent.cv);
+        agent_mu_unlock(&S->agent.mu);
 
         free(n);
     }
 
-    /* Detach worker ctx from S->worker_ctxs_head and decrement the
+    /* Detach worker ctx from S->threading.worker_ctxs_head and decrement the
      * thread count under the brief worker_list_lock. The pthread_t
      * is left intact for a follow-up pthread_join from
      * agent_worker_ensure or mino_agent_quiesce_workers (signaled by
@@ -493,11 +493,11 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
      * immediately. */
     mino_worker_list_lock_acquire(S);
     {
-        mino_thread_ctx_t **pp = &S->worker_ctxs_head;
+        mino_thread_ctx_t **pp = &S->threading.worker_ctxs_head;
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
-    if (S->thread_count > 0) { S->thread_count--; }
+    if (S->threading.thread_count > 0) { S->threading.thread_count--; }
     mino_worker_list_lock_release(S);
 
     mino_tls_ctx = NULL;
@@ -542,14 +542,14 @@ static void *agent_worker_entry_solo(void *arg)
 static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
 {
     int saved_depth;
-    if (!S->agent_pool[kind].worker_pending_join) return;
-    S->agent_pool[kind].worker_pending_join = 0;
+    if (!S->agent.pool[kind].worker_pending_join) return;
+    S->agent.pool[kind].worker_pending_join = 0;
     saved_depth = mino_yield_lock(S);
 #if defined(_WIN32) && defined(_MSC_VER)
-    WaitForSingleObject(S->agent_pool[kind].worker, INFINITE);
-    CloseHandle(S->agent_pool[kind].worker);
+    WaitForSingleObject(S->agent.pool[kind].worker, INFINITE);
+    CloseHandle(S->agent.pool[kind].worker);
 #else
-    pthread_join(S->agent_pool[kind].worker, NULL);
+    pthread_join(S->agent.pool[kind].worker, NULL);
 #endif
     mino_resume_lock(S, saved_depth);
 }
@@ -563,12 +563,12 @@ static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
 static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
 {
     int alive;
-    if (!S->agent_mu_inited) {
+    if (!S->agent.mu_inited) {
         agent_mu_ensure_inited(S);
     }
-    agent_mu_lock(&S->agent_mu);
-    alive = S->agent_pool[kind].worker_alive;
-    agent_mu_unlock(&S->agent_mu);
+    agent_mu_lock(&S->agent.mu);
+    alive = S->agent.pool[kind].worker_alive;
+    agent_mu_unlock(&S->agent.mu);
     if (alive) return 0;
 
     /* Reap any pthread handle left by a previously-drained worker
@@ -579,7 +579,7 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
      * concurrent spawn (e.g. another pool's agent_worker_ensure or
      * mino_future_spawn) cannot both pass the limit check. */
     mino_worker_list_lock_acquire(S);
-    if (S->thread_count >= S->thread_limit) {
+    if (S->threading.thread_count >= S->threading.thread_limit) {
         mino_worker_list_lock_release(S);
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
@@ -589,57 +589,57 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             "against the limit -- only spawned workers do.");
         return 1;
     }
-    S->thread_count++;
+    S->threading.thread_count++;
     mino_worker_list_lock_release(S);
-    S->multi_threaded = 1;
+    S->threading.multi_threaded = 1;
     /* Mark alive BEFORE pthread_create returns so a concurrent send
      * on the embedder thread (impossible in single-thread mode but
      * defensive) doesn't race. */
-    agent_mu_lock(&S->agent_mu);
-    S->agent_pool[kind].worker_alive = 1;
-    agent_mu_unlock(&S->agent_mu);
+    agent_mu_lock(&S->agent.mu);
+    S->agent.pool[kind].worker_alive = 1;
+    agent_mu_unlock(&S->agent.mu);
 #if defined(_WIN32) && defined(_MSC_VER)
     {
-        unsigned stack = (unsigned)S->thread_stack_size;
+        unsigned stack = (unsigned)S->threading.thread_stack_size;
         uintptr_t h = _beginthreadex(NULL, stack,
             kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
                                        : agent_worker_entry_solo,
             S, 0, NULL);
         if (h == 0) {
-            agent_mu_lock(&S->agent_mu);
-            S->agent_pool[kind].worker_alive = 0;
-            agent_mu_unlock(&S->agent_mu);
+            agent_mu_lock(&S->agent.mu);
+            S->agent.pool[kind].worker_alive = 0;
+            agent_mu_unlock(&S->agent.mu);
             mino_worker_list_lock_acquire(S);
-            if (S->thread_count > 0) { S->thread_count--; }
+            if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
-        S->agent_pool[kind].worker = (HANDLE)h;
+        S->agent.pool[kind].worker = (HANDLE)h;
     }
 #else
     {
         pthread_attr_t attr;
         pthread_attr_t *attrp = NULL;
         int rc;
-        if (S->thread_stack_size > 0) {
+        if (S->threading.thread_stack_size > 0) {
             if (pthread_attr_init(&attr) == 0) {
-                pthread_attr_setstacksize(&attr, S->thread_stack_size);
+                pthread_attr_setstacksize(&attr, S->threading.thread_stack_size);
                 attrp = &attr;
             }
         }
-        rc = pthread_create(&S->agent_pool[kind].worker, attrp,
+        rc = pthread_create(&S->agent.pool[kind].worker, attrp,
             kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
                                        : agent_worker_entry_solo,
             S);
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
-            agent_mu_lock(&S->agent_mu);
-            S->agent_pool[kind].worker_alive = 0;
-            agent_mu_unlock(&S->agent_mu);
+            agent_mu_lock(&S->agent.mu);
+            S->agent.pool[kind].worker_alive = 0;
+            agent_mu_unlock(&S->agent.mu);
             mino_worker_list_lock_acquire(S);
-            if (S->thread_count > 0) { S->thread_count--; }
+            if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
@@ -647,7 +647,7 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
         }
     }
 #endif
-    S->agent_pool[kind].worker_pending_join = 1;
+    S->agent.pool[kind].worker_pending_join = 1;
     return 0;
 }
 
@@ -667,13 +667,13 @@ static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
     n->env      = env;
     n->dyn_snap = mino_snapshot_thread_bindings(S);
     n->next     = NULL;
-    agent_mu_lock(&S->agent_mu);
+    agent_mu_lock(&S->agent.mu);
     agent_runq_push_tail(S, kind, n);
     if (agent->as.agent.in_flight < INT_MAX) {
         agent->as.agent.in_flight++;
     }
-    agent_cv_broadcast(&S->agent_cv);
-    agent_mu_unlock(&S->agent_mu);
+    agent_cv_broadcast(&S->agent.cv);
+    agent_mu_unlock(&S->agent.mu);
     return 0;
 }
 
@@ -691,13 +691,13 @@ void mino_agent_quiesce_workers(mino_state_t *S)
 {
     int pi;
     /* Flag shutdown + wake workers so they can drain + exit. */
-    if (S->agent_mu_inited) {
-        agent_mu_lock(&S->agent_mu);
-        S->agents_shutdown = 1;
-        agent_cv_broadcast(&S->agent_cv);
-        agent_mu_unlock(&S->agent_mu);
+    if (S->agent.mu_inited) {
+        agent_mu_lock(&S->agent.mu);
+        S->agent.shutdown = 1;
+        agent_cv_broadcast(&S->agent.cv);
+        agent_mu_unlock(&S->agent.mu);
     } else {
-        S->agents_shutdown = 1;
+        S->agent.shutdown = 1;
     }
 
     for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
@@ -847,7 +847,7 @@ static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
         return NULL;
     }
     if (agent_check_state(S, agent)) return NULL;
-    if (S->agents_shutdown) {
+    if (S->agent.shutdown) {
         prim_throw_classified(S, "eval/state", "MST008",
             "Agents have been shut down; new sends are not accepted");
         return NULL;
@@ -923,7 +923,7 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
             && agent_v->as.agent.err_mode == 0) {
             continue;
         }
-        if (S->agents_shutdown) continue;
+        if (S->agent.shutdown) continue;
         /* In-tx send is the JVM-canon shape -- post-commit pending
          * drains route through the POOLED pool. */
         if (agent_worker_ensure(S, AGENT_POOL_POOLED)) {
@@ -1092,7 +1092,7 @@ mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (agent_check_state(S, a)) return NULL;
     }
-    if (!S->agent_mu_inited) {
+    if (!S->agent.mu_inited) {
         /* No worker has spawned: every agent's in_flight is 0,
          * await is trivially complete. */
         return mino_nil(S);
@@ -1105,7 +1105,7 @@ mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "await called from agent action body would deadlock");
     }
     saved_depth = mino_yield_lock(S);
-    agent_mu_lock(&S->agent_mu);
+    agent_mu_lock(&S->agent.mu);
     for (;;) {
         int still_busy = 0;
         for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
@@ -1113,9 +1113,9 @@ mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
         }
         if (!still_busy) break;
-        agent_cv_wait(&S->agent_cv, &S->agent_mu);
+        agent_cv_wait(&S->agent.cv, &S->agent.mu);
     }
-    agent_mu_unlock(&S->agent_mu);
+    agent_mu_unlock(&S->agent.mu);
     mino_resume_lock(S, saved_depth);
     return mino_nil(S);
 }
@@ -1165,13 +1165,13 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
         }
         if (agent_check_state(S, a)) return NULL;
     }
-    if (!S->agent_mu_inited) return mino_true(S);
+    if (!S->agent.mu_inited) return mino_true(S);
     if (mino_tls_ctx != NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "await-for called from agent action body would deadlock");
     }
     saved_depth = mino_yield_lock(S);
-    agent_mu_lock(&S->agent_mu);
+    agent_mu_lock(&S->agent.mu);
 #if defined(_WIN32) && defined(_MSC_VER)
     {
         DWORD deadline_ms = GetTickCount() + (DWORD)timeout_ms;
@@ -1185,7 +1185,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
             if (!still_busy) break;
             now = GetTickCount();
             if (now >= deadline_ms) { timed_out = 1; break; }
-            if (!SleepConditionVariableCS(&S->agent_cv, &S->agent_mu,
+            if (!SleepConditionVariableCS(&S->agent.cv, &S->agent.mu,
                                           deadline_ms - now)) {
                 timed_out = 1;
                 break;
@@ -1205,7 +1205,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
                 if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
             }
             if (!still_busy) break;
-            rc = pthread_cond_timedwait(&S->agent_cv, &S->agent_mu,
+            rc = pthread_cond_timedwait(&S->agent.cv, &S->agent.mu,
                                         &deadline);
             if (rc != 0) { timed_out = 1; break; }
         }
@@ -1221,7 +1221,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
         }
         if (!still_busy) timed_out = 0;
     }
-    agent_mu_unlock(&S->agent_mu);
+    agent_mu_unlock(&S->agent.mu);
     mino_resume_lock(S, saved_depth);
     return timed_out ? mino_false(S) : mino_true(S);
 }
@@ -1311,11 +1311,11 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
      * failure latch anyway). Walk both pools' runqs under agent_mu,
      * splice out entries targeting this agent, decrement in_flight
      * per removal, broadcast in case an await waiter is sleeping. */
-    if (clear_actions && S->agent_mu_inited) {
+    if (clear_actions && S->agent.mu_inited) {
         int pi;
-        agent_mu_lock(&S->agent_mu);
+        agent_mu_lock(&S->agent.mu);
         for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
-            agent_action_node_t **pp = &S->agent_pool[pi].run_head;
+            agent_action_node_t **pp = &S->agent.pool[pi].run_head;
             while (*pp != NULL) {
                 agent_action_node_t *cur = *pp;
                 if (cur->agent == agent) {
@@ -1329,16 +1329,16 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
                 }
             }
             /* Re-establish run_tail by walking once. */
-            if (S->agent_pool[pi].run_head == NULL) {
-                S->agent_pool[pi].run_tail = NULL;
+            if (S->agent.pool[pi].run_head == NULL) {
+                S->agent.pool[pi].run_tail = NULL;
             } else {
-                agent_action_node_t *t = S->agent_pool[pi].run_head;
+                agent_action_node_t *t = S->agent.pool[pi].run_head;
                 while (t->next != NULL) t = t->next;
-                S->agent_pool[pi].run_tail = t;
+                S->agent.pool[pi].run_tail = t;
             }
         }
-        agent_cv_broadcast(&S->agent_cv);
-        agent_mu_unlock(&S->agent_mu);
+        agent_cv_broadcast(&S->agent.cv);
+        agent_mu_unlock(&S->agent.mu);
     }
     gc_write_barrier(S, agent, agent->as.agent.err, NULL);
     agent->as.agent.err = NULL;

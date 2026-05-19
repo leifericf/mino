@@ -113,8 +113,8 @@ static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
     node->ptr     = ptr;
     node->size    = size;
     node->aux_ptr = aux_ptr;
-    node->next    = S->jit_regions;
-    S->jit_regions = node;
+    node->next    = S->jit.jit_regions;
+    S->jit.jit_regions = node;
     return 0;
 }
 
@@ -243,7 +243,7 @@ void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
 
 void mino_jit_free_all(mino_state_t *S)
 {
-    struct mino_jit_region *node = S->jit_regions;
+    struct mino_jit_region *node = S->jit.jit_regions;
     while (node != NULL) {
         struct mino_jit_region *next = node->next;
         if (node->aux_ptr != NULL) free(node->aux_ptr);
@@ -251,7 +251,7 @@ void mino_jit_free_all(mino_state_t *S)
         free(node);
         node = next;
     }
-    S->jit_regions = NULL;
+    S->jit.jit_regions = NULL;
     {
         struct mino_jit_slab *slab = S->jit_slabs;
         while (slab != NULL) {
@@ -1007,7 +1007,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
     }
     bc->native            = region;
     bc->native_size       = (slab != NULL) ? slot_size : total_size;
-    bc->native_gen        = S->ic_gen;
+    bc->native_gen        = S->ns_vars.ic_gen;
     bc->native_slab       = slab;
     /* The offsets table is owned by the jit_regions node (legacy) or
      * the bc record itself (slab path; freed by mino_jit_invalidate).

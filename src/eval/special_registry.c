@@ -109,13 +109,13 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
         }
     }
     /* Unqualified: try current ns, then "user", then scan all. */
-    var = var_find(S, S->current_ns, vbuf);
+    var = var_find(S, S->ns_vars.current_ns, vbuf);
     if (var == NULL) var = var_find(S, "user", vbuf);
     if (var == NULL) {
         size_t vi;
-        for (vi = 0; vi < S->var_registry_len; vi++) {
-            if (strcmp(S->var_registry[vi].name, vbuf) == 0) {
-                var = S->var_registry[vi].var;
+        for (vi = 0; vi < S->ns_vars.var_registry_len; vi++) {
+            if (strcmp(S->ns_vars.var_registry[vi].name, vbuf) == 0) {
+                var = S->ns_vars.var_registry[vi].var;
                 break;
             }
         }

@@ -31,38 +31,38 @@ void source_cache_store(mino_state_t *S, const char *file,
     int i;
     /* Find existing slot for this file or pick the first empty one. */
     for (i = 0; i < MINO_SOURCE_CACHE_SIZE; i++) {
-        if (S->source_cache[i].file == file) {
+        if (S->reader.source_cache[i].file == file) {
             slot = i;
             break;
         }
-        if (S->source_cache[i].file == NULL && slot < 0) {
+        if (S->reader.source_cache[i].file == NULL && slot < 0) {
             slot = i;
         }
     }
     /* Evict slot 0 if full. */
     if (slot < 0) {
-        free(S->source_cache[0].text);
+        free(S->reader.source_cache[0].text);
         slot = 0;
     } else {
-        free(S->source_cache[slot].text);
+        free(S->reader.source_cache[slot].text);
     }
-    S->source_cache[slot].file = file;
+    S->reader.source_cache[slot].file = file;
     /* len + 1 must not wrap — pathological file size would otherwise
      * malloc(0) and then memcpy SIZE_MAX bytes. */
     if (len >= SIZE_MAX) {
-        S->source_cache[slot].text = NULL;
-        S->source_cache[slot].file = NULL;
-        S->source_cache[slot].len  = 0;
+        S->reader.source_cache[slot].text = NULL;
+        S->reader.source_cache[slot].file = NULL;
+        S->reader.source_cache[slot].len  = 0;
         return;
     }
-    S->source_cache[slot].text = (char *)malloc(len + 1);
-    if (S->source_cache[slot].text != NULL) {
-        memcpy(S->source_cache[slot].text, text, len);
-        S->source_cache[slot].text[len] = '\0';
-        S->source_cache[slot].len = len;
+    S->reader.source_cache[slot].text = (char *)malloc(len + 1);
+    if (S->reader.source_cache[slot].text != NULL) {
+        memcpy(S->reader.source_cache[slot].text, text, len);
+        S->reader.source_cache[slot].text[len] = '\0';
+        S->reader.source_cache[slot].len = len;
     } else {
-        S->source_cache[slot].file = NULL;
-        S->source_cache[slot].len = 0;
+        S->reader.source_cache[slot].file = NULL;
+        S->reader.source_cache[slot].len = 0;
     }
 }
 
@@ -73,9 +73,9 @@ const char *source_cache_get_line(mino_state_t *S, const char *file,
     const char *p, *end, *line_start;
     int cur;
     for (i = 0; i < MINO_SOURCE_CACHE_SIZE; i++) {
-        if (S->source_cache[i].file == file && S->source_cache[i].text != NULL) {
-            p = S->source_cache[i].text;
-            end = p + S->source_cache[i].len;
+        if (S->reader.source_cache[i].file == file && S->reader.source_cache[i].text != NULL) {
+            p = S->reader.source_cache[i].text;
+            end = p + S->reader.source_cache[i].len;
             cur = 1;
             while (p < end && cur < line) {
                 if (*p == '\n') cur++;

@@ -71,12 +71,12 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
 }
 
 /* Atomic load of an atom's current value.  In single-threaded mode this
- * is a plain pointer read; once S->multi_threaded flips the read goes
+ * is a plain pointer read; once S->threading.multi_threaded flips the read goes
  * through __atomic_load_n with acquire ordering so swap! sees a
  * coherent snapshot of writes from other workers. */
 static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
 {
-    if (S->multi_threaded) {
+    if (S->threading.multi_threaded) {
         return __atomic_load_n(&atom->as.atom.val, __ATOMIC_ACQUIRE);
     }
     return atom->as.atom.val;
@@ -93,7 +93,7 @@ static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
 static int atom_cas_ptr(mino_state_t *S, mino_val_t *atom,
                         mino_val_t *expected, mino_val_t *new_val)
 {
-    if (S->multi_threaded) {
+    if (S->threading.multi_threaded) {
         return __atomic_compare_exchange_n(&atom->as.atom.val,
                                            &expected, new_val,
                                            0,  /* not weak */
@@ -307,7 +307,7 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  *
  * Single-threaded path is a straight read-compute-publish.  Multi-threaded
  * path runs the canonical retry loop: load, compute, CAS, retry on loss.
- * The retry path lights up once S->multi_threaded flips after host
+ * The retry path lights up once S->threading.multi_threaded flips after host
  * threads enter the picture. */
 mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -321,7 +321,7 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
     }
     extra = args->as.cons.cdr->as.cons.cdr;
-    if (!S->multi_threaded) {
+    if (!S->threading.multi_threaded) {
         cur = a->as.atom.val;
         call_args = swap_build_args(S, cur, extra);
         result = mino_call(S, fn, call_args, env);

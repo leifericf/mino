@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.379.0 — Architecture Cycle 4c: Complete mino_state Decomposition
+
+Closes the cycle 4 deferred work. Every field cluster in
+`struct mino_state` that the original plan named is now extracted
+into its own sub-struct, embedded at the byte position the inline
+fields used to occupy. The stencil-ABI-pinned offsets (sf_*,
+ic_gen at 47856, bc_regs at 47888, jit_invoke_ctx at 47936,
+dyn_stack at 25712) survive — verified by the existing
+`_Static_assert` guards in `src/eval/bc/jit/entry.c`, updated to
+the nested `offsetof` paths `ns_vars.ic_gen` / `bc.bc_regs` /
+`jit.jit_invoke_ctx`.
+
+| Sub-struct                | Header                                  | Fields | JIT-pinned offset |
+|---------------------------|------------------------------------------|-------:|-------------------|
+| `gc_state_t`              | `src/gc/state.h`                         | ~40    | —                 |
+| `stm_subsystem_t`         | `src/prim/stm_state.h`                   | 3      | —                 |
+| `agent_subsystem_t`       | `src/prim/agent_state.h`                 | 7      | —                 |
+| `async_state_t`           | `src/async/state.h`                      | 3      | —                 |
+| `reader_printer_state_t`  | `src/runtime/reader_printer_state.h`    | 15     | —                 |
+| `threading_state_t`       | `src/runtime/threading_state.h`         | 13     | —                 |
+| `ns_vars_state_t`         | `src/runtime/ns_vars_state.h`           | 17     | `ic_gen` (47856)  |
+| `bc_vm_state_t`           | `src/eval/bc/state.h`                    | 5      | `bc_regs` (47888) |
+| `jit_state_t`             | `src/eval/bc/jit/state.h`                | 4      | `jit_invoke_ctx` (47936) |
+| `module_state_t`          | `src/runtime/module_state.h`            | ~17    | —                 |
+
+The `print_depth` printer counter stays inline in `mino_state`
+ahead of `reader_printer_state_t` so it packs with the preceding
+`caps_installed` (both 4-byte ints) and the sub-struct starts at
+an 8-aligned offset with no outer padding.
+
+Field accesses migrate to nested-struct paths (`S->gc_x` →
+`S->gc.x`, `S->ic_gen` → `S->ns_vars.ic_gen`, and so on across
+~600 site renames). The bc and jit sub-struct field names retain
+their `bc_` / `jit_` prefixes so the access paths read
+`S->bc.bc_regs` / `S->jit.jit_invoke_ctx` — verbose but
+unambiguous in matching the JIT-pinned offset names.
+
+`.local/cycle-4-followups.md` is closed; the remaining
+documented work is empty.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean. JIT-pinned offset asserts pass.
+
 ## v0.378.0 — Architecture Cycle 6b: Real Mega-prim Splits
 
 Lands the per-sub-domain mega-file splits that cycle 6 (v0.375.0)

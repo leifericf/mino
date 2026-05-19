@@ -210,14 +210,14 @@ void gc_write_barrier(mino_state_t *S, void *container,
 static void gc_remset_pin_bc_regs(mino_state_t *S)
 {
     mino_thread_ctx_t *w;
-    if (S->bc_regs != NULL) {
-        gc_hdr_t *h = ((gc_hdr_t *)S->bc_regs) - 1;
+    if (S->bc.bc_regs != NULL) {
+        gc_hdr_t *h = ((gc_hdr_t *)S->bc.bc_regs) - 1;
         if (h->gen == GC_GEN_OLD && !h->dirty) {
             gc_remset_add(S, h);
         }
     }
     mino_worker_list_lock_acquire(S);
-    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         if (w->bc_regs_storage != NULL) {
             gc_hdr_t *h = ((gc_hdr_t *)w->bc_regs_storage) - 1;
             if (h->gen == GC_GEN_OLD && !h->dirty) {

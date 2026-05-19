@@ -72,7 +72,14 @@
  * .local/cycle-4-followups.md. */
 #include "gc/state.h"
 #include "prim/stm_state.h"
+#include "prim/agent_state.h"
 #include "async/state.h"
+#include "runtime/reader_printer_state.h"
+#include "runtime/threading_state.h"
+#include "runtime/ns_vars_state.h"
+#include "eval/bc/state.h"
+#include "eval/bc/jit/state.h"
+#include "runtime/module_state.h"
 
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
@@ -159,44 +166,11 @@ struct mino_state {
     mino_val_t     *sf_or;
 
     /* === Module system, execution limits, metadata ===================== */
-
-    /* Execution limits (config knobs; set once by host, read by ctx). */
-    size_t          limit_steps;
-    size_t          limit_heap;
-
-    /* Module system */
-    mino_resolve_fn module_resolver;
-    void           *module_resolver_ctx;
-    module_entry_t *module_cache;
-    size_t          module_cache_len;
-    size_t          module_cache_cap;
-    /* Load stack: names of modules currently being loaded (for cycle
-     * detection). A module is on this stack between require entry and
-     * the point where it's added to module_cache. */
-    char          **load_stack;
-    size_t          load_stack_len;
-    size_t          load_stack_cap;
-    /* Bundled-stdlib registry: name -> static C-string source pointer.
-     * Populated by mino_install_clojure_<name> hooks. Consulted by
-     * (require ...) before the disk resolver, so brew/scoop installs
-     * with no lib/ on disk still load the bundled namespaces. The
-     * source pointers are static literals in generated headers and
-     * are never freed; only the array storage is malloc-owned. */
-    bundled_lib_entry_t *bundled_libs;
-    size_t               bundled_libs_len;
-    size_t               bundled_libs_cap;
-    /* Extra load paths registered at runtime via (add-load-path! ...).
-     * Consulted by the main.c resolver after the project_paths and
-     * before the cwd fallback. Each entry is a malloc-owned dup;
-     * freed at state teardown. */
-    char               **extra_load_paths;
-    size_t               extra_load_paths_len;
-    size_t               extra_load_paths_cap;
-
-    /* Metadata */
-    meta_entry_t   *meta_table;
-    size_t          meta_table_len;
-    size_t          meta_table_cap;
+    /* Lives in src/runtime/module_state.h. The block is embedded at
+     * the byte position the inline limit_* / module_* / load_stack /
+     * bundled_libs / extra_load_paths / meta_table fields used to
+     * occupy. */
+    module_state_t  module;
 
     /* Capability bitmask. Bit set per MINO_CAP_* constant in mino.h
      * when the corresponding `mino_install_<cap>` runs. Consulted by
@@ -208,179 +182,38 @@ struct mino_state {
     unsigned int    caps_installed;
 
     /* === Printer, reader, source diagnostics =========================== */
-
-    /* Printer */
+    /* print_depth stays inline so it packs with caps_installed (both
+     * 4-byte ints) before the sub-struct, leaving the sub-struct at
+     * an 8-aligned offset with no outer padding. */
     int             print_depth;
+    /* Reader / source-cache state lives in
+     * src/runtime/reader_printer_state.h. The block is embedded at
+     * the byte position the inline reader_* / interned_* /
+     * source_cache fields used to occupy. */
+    reader_printer_state_t reader;
 
     /* Error reporting state moved to mino_thread_ctx_t (error_buf,
      * call_stack, call_depth, trace_added, last_diag). */
 
-    /* Reader */
-    const char     *reader_file;
-    int             reader_line;
-    int             reader_col;
-    const char     *reader_dialect;   /* "mino" */
-    /* :read-cond mode for reader conditionals.
-     *   0 = allow (default; match S->reader_dialect / default)
-     *   1 = preserve (return a reader-conditional record)
-     *   2 = disallow (error on any #? or #?@) */
-    int             reader_cond_mode;
-    /* Transient flag: set by `#?(...)` when no branch matched so the
-     * read returned NULL silently (the "no form produced" signal that
-     * lists/vectors/maps handle by skipping). Wrap-one reader macros
-     * (`@`, `'`, `` ` ``, `~`, `~@`, `#'`) check this when they get a
-     * silent NULL inner so the diagnostic names the actual cause
-     * instead of the misleading "expected form after @". Reset at the
-     * entry of every `read_form` call. */
-    int             reader_last_cond_empty;
-
-    /* Filename intern table. Strings are malloc-owned, freed at state
-     * teardown. Held here (not process-global) so two runtimes on two
-     * threads don't race on a shared table. */
-    const char    **interned_files;
-    size_t          interned_files_len;
-    size_t          interned_files_cap;
-
-    /* Var-name intern table (ns + name for MINO_VAR). Same rationale
-     * as interned_files: strings outlive the state's vars but not the
-     * state itself. */
-    const char    **interned_var_strs;
-    size_t          interned_var_strs_len;
-    size_t          interned_var_strs_cap;
-    /* Open-addressing hash mirror over interned_var_strs, keyed on the
-     * string contents. Each slot stores the canonical pointer; NULL
-     * marks an empty slot. cap is always a power of two; resize when
-     * load factor exceeds 0.7. Linear scans dominated cold-start
-     * install before this index existed (~640 vars => 400k strcmps). */
-    const char    **interned_var_strs_hash;
-    size_t          interned_var_strs_hash_cap;
-
-    /* Source cache for diagnostic rendering. */
-    #define MINO_SOURCE_CACHE_SIZE 4
-    struct {
-        const char *file;   /* interned filename */
-        char       *text;   /* malloc-owned full source text */
-        size_t      len;    /* length of text */
-    } source_cache[4];
-
     /* === Namespaces, vars, host interop ================================ */
+    /* Lives in src/runtime/ns_vars_state.h. The block is embedded at
+     * the byte position the inline current_ns / ns_* / var_* /
+     * ic_table / ic_gen / transient_owner_next / var_hash fields
+     * used to occupy. ic_gen sits at the stencil-ABI-pinned offset
+     * 47856; the embedded layout preserves it (verified by the
+     * static_assert in eval/bc/jit/entry.c). */
+    ns_vars_state_t ns_vars;
 
-    /* Namespace */
-    const char     *current_ns;       /* from (ns ...), default "user" */
-    ns_alias_t     *ns_aliases;
-    size_t          ns_alias_len;
-    size_t          ns_alias_cap;
+    /* Bytecode-VM state lives in src/eval/bc/state.h. The block is
+     * embedded at the byte position the inline bc_* fields used to
+     * occupy. bc_regs sits at the stencil-ABI-pinned offset 47888. */
+    bc_vm_state_t   bc;
 
-    /* Per-namespace root env table. Each entry's env owns the ns's
-     * value bindings (def, refer). Every ns env except clojure.core has
-     * parent → clojure.core, so unqualified lookup walks ns → clojure.core. */
-    ns_env_entry_t *ns_env_table;
-    size_t          ns_env_len;
-    size_t          ns_env_cap;
-    mino_env_t     *mino_core_env;    /* root env for clojure.core; parent NULL */
-    /* Ambient namespace for free-var resolution inside the active fn body.
-     * apply_callable sets this to the fn's defining ns; eval_symbol's
-     * fall-through consults it after current_ns_env, so `(ns ...)`
-     * mutations inside a body don't lose access to the macros and helpers
-     * the body was written against. */
-    const char     *fn_ambient_ns;
-
-    /* Var registry */
-    var_entry_t    *var_registry;
-    size_t          var_registry_len;
-    size_t          var_registry_cap;
-    /* Monomorphic inline call cache. Keyed on the call form pointer
-     * plus the head symbol's interned data pointer. The form and the
-     * callable in each filled slot are walked by gc_mark_runtime_globals,
-     * so the GC keeps both alive for the cache lifetime; this prevents
-     * the freed-and-recycled-form aliasing problem. Var redefinition
-     * bumps `ic_gen`, invalidating every slot in one shot. Allocated
-     * lazily on first hit-prone call. */
-    struct ic_slot {
-        mino_val_t *form;          /* call form pointer, NULL = empty */
-        const char *head_data;     /* sym->as.s.data, interned */
-        mino_val_t *callable;
-        unsigned    gen_at_fill;
-    } *ic_table;
-    size_t          ic_cap;
-    unsigned        ic_gen;
-    /* Monotonic owner-ID generator for transient batch mutators
-     * (src/collections/transient.c). Each new (transient ...) call
-     * pre-increments and reads this counter; vec nodes whose owner
-     * field equals the resulting ID are mutated in place by the
-     * matching transient. Using an ID rather than the transient
-     * mino_val_t pointer avoids the address-reuse hazard after a
-     * transient is GC'd. The vec node `owner` field is 32 bits, so
-     * the runtime caps mintable IDs at 2^32 - 1; transients past
-     * that cap (astronomically unlikely in a real process) fall
-     * back to the wrapper path. */
-    uint32_t        transient_owner_next;
-    /* Open-addressing hash mirror keyed on the (interned-ns*, interned-name*)
-     * pointer pair. var_intern / var_find / var_unintern hit this first;
-     * the linear var_registry remains the source of truth (and the GC
-     * root-walk target). cap is always a power of two; len counts
-     * occupied slots. ns == NULL marks an empty slot. */
-    var_hash_slot_t *var_hash;
-    size_t          var_hash_cap;
-    size_t          var_hash_len;
-
-    /* Bytecode VM register stack. The bytecode VM (src/eval/bc/vm.c)
-     * runs each compiled fn in a slot window inside this single stack;
-     * a fn entry pushes n_regs slots, a fn exit pops them. Every slot
-     * in [0, bc_top) is a live GC root walked by gc_mark_roots so the
-     * GC keeps the values reachable across collections triggered from
-     * inside the VM. Allocated lazily on first compile + run; NULL
-     * until then. */
-    mino_val_t    **bc_regs;
-    size_t          bc_regs_cap;
-    size_t          bc_top;
-
-    /* Pointer-tagged int counters: bc_int_make_count counts every call
-     * to mino_int(S, n); bc_int_alloc_avoided counts those that
-     * returned a tagged value instead of allocating a boxed MINO_INT
-     * cell. Only maintained when MINO_BC_PROFILE_COUNTS is defined --
-     * the increments live on the hottest path in the VM, and steady-
-     * state runs leave them off so the arith fast lane doesn't pay
-     * for two unconditional writes per tagged-int production. */
-    size_t          bc_int_make_count;
-    size_t          bc_int_alloc_avoided;
-
-    /* JIT executable-region list (CPJIT). Each entry is one mmap'd
-     * page-aligned region that the runtime materialised through the
-     * copy-and-patch pipeline. mino_state_free walks the list and
-     * munmaps every region so the OS reclaims the executable pages
-     * at state teardown. Empty until the first JIT compile. Field
-     * stays present even with MINO_CPJIT disabled (always NULL); the
-     * cleanup path checks for non-NULL before crossing the JIT-only
-     * code so embedders linking against a non-JIT build pay only the
-     * pointer slot. */
-    struct mino_jit_region *jit_regions;
-
-    /* Active JIT-invoke ctx. Published by mino_jit_invoke before it
-     * jumps into the native region and restored on return. Lets
-     * stencil-emitted code reach the calling thread's ctx (for
-     * `dyn_stack`, `jit_invoke_env`, etc.) via a single fixed-offset
-     * load from S, with no Darwin TLVP relocation in the stencil
-     * bytes -- the stencil_extract tool does not handle TLV-class
-     * relocations today, so the inline TLS sequence
-     * `mino_current_ctx(S)` would emit can't survive the
-     * copy-and-patch round-trip. Save / restore around the call
-     * supports re-entry from a nested JIT'd callee. NULL outside an
-     * active JIT region. */
-    struct mino_thread_ctx *jit_invoke_ctx;
-
-    /* Per-state JIT mode: AUTO (default) / OFF / ON. Threaded
-     * through the fn.c JIT trigger so a single embedded runtime can
-     * disable JIT for one VM and leave it enabled for another in
-     * the same process. See mino.h::mino_jit_mode_t. Placed after
-     * jit_invoke_ctx so the runtime_layout.h offset constants the
-     * stencil bytes depend on do not shift. */
-    int             jit_mode;
-    /* Per-state hot threshold (call count before AUTO triggers a
-     * compile). Defaults to MINO_JIT_THRESHOLD; overridable via
-     * mino_state_set_jit_hot_threshold so embedders can soften /
-     * tighten the warm-up window per workload. */
-    unsigned        jit_hot_threshold;
+    /* JIT state lives in src/eval/bc/jit/state.h. The block is
+     * embedded at the byte position the inline jit_* fields used to
+     * occupy. jit_invoke_ctx sits at the stencil-ABI-pinned offset
+     * 47936. */
+    jit_state_t     jit;
 
     /* === Instrumentation: per-phase GC timers ============================
      *
@@ -569,115 +402,13 @@ struct mino_state {
     long            fi_raw_countdown;
 
     /* === Host-thread runtime: grant, knobs, lock, futures, STW ========= */
+    /* Lives in src/runtime/threading_state.h. The block is embedded
+     * at the byte position the inline host-thread fields used to
+     * occupy. The threading cluster sits past every stencil-ABI- and
+     * JIT-pinned offset, so the extraction has no effect on the
+     * runtime_layout.h constants. */
+    threading_state_t threading;
 
-    /* Host-thread grant.
-     *
-     * thread_limit is the host-granted ceiling on concurrent host
-     * threads. Default 1 (single-threaded; future/promise/etc. throw
-     * :mino/unsupported with a message naming the grant API). Set via
-     * mino_set_thread_limit. Standalone `./mino` grants cpu_count right
-     * after mino_install_all so REPL users get the canonical surface
-     * by default; embedders opt in per state.
-     *
-     * thread_count is the live worker count, incremented at spawn,
-     * decremented at join. Mutated under worker_list_lock (NOT
-     * state_lock), so a tight embedder loop holding state_lock cannot
-     * stall a worker's exit-decrement. multi_threaded flips to 1 the
-     * first time a spawn actually runs; single-threaded states pay
-     * none of the inter-thread coordination cost. The full
-     * implementation
-     * (per-thread context refactor, GC STW machinery, atom CAS upgrade)
-     * lands across upcoming versions; v0.84.x is the API surface plus
-     * thrown stubs that distinguish "host has not granted threads"
-     * from "host granted but runtime impl is in flight." */
-    int             thread_limit;
-    /* thread_count is mutated by host_threads under worker_list_lock
-     * but read without a lock from gc_tick_should_suppress and
-     * mino_thread_count (relaxed observability counter -- see
-     * runtime/state.c). Plain int was UB under the C standard and
-     * TSan flagged the race. All accesses go through __atomic_*
-     * with RELAXED ordering: the counter approximation tolerates
-     * stale reads, and the lock-side writes pair with the
-     * lock-side reads for the cases that need a tight value. */
-    int             thread_count;
-    int             multi_threaded;
-
-    /* Embed-distinctive thread knobs. NULL/0 leaves the
-     * spawn-per-future default behaviour intact. See mino.h for the
-     * surface. thread_pool, when non-NULL, redirects spawn from
-     * pthread_create to pool->submit_fn. thread_start_fn / thread_end_fn
-     * fire on the worker thread for the spawn-per-future path only;
-     * pool-managed work items run under the pool's own lifecycle.
-     * thread_stack_size is applied via pthread_attr when set. */
-    struct mino_thread_pool *thread_pool;
-    void          (*thread_start_fn)(mino_state_t *S, void *ctx);
-    void          (*thread_end_fn)(mino_state_t *S, void *ctx);
-    void           *thread_factory_ctx;
-    size_t          thread_stack_size;
-
-    /* Per-state mutex held across worker-thread eval.
-     *
-     * Worker threads acquire `state_lock` before running eval and
-     * release after, serializing all evals (workers + embedder
-     * thread) within a single state. This is a coarse model that
-     * gives correct semantics for futures/promises/threads without
-     * a per-subsystem lock matrix. Cross-state work runs fully
-     * concurrent (each state has its own lock); a host pool sharing
-     * N workers across M states gets per-state mutual exclusion but
-     * pool-wide parallelism.
-     *
-     * Initialized in state_init unconditionally (mutex_init is
-     * cheap). `mino_lock(S)` / `mino_unlock(S)` no-op when
-     * !multi_threaded so single-threaded states pay nothing. */
-#if defined(_WIN32) && defined(_MSC_VER)
-    void           *state_lock;        /* CRITICAL_SECTION; see state.c */
-#else
-    pthread_mutex_t state_lock;
-#endif
-
-    /* Outstanding futures. Singly-linked; quiesce walks this to join
-     * worker threads before state teardown. The struct mino_future
-     * definition is below (after struct mino_state). */
-    mino_future_t *future_list_head;
-
-    /* Linked list of live worker ctxs. Walked during GC root
-     * scanning so blocked workers' pinned values stay live.
-     * Mutated under worker_list_lock (see below) -- NOT state_lock.
-     * The split keeps worker bookkeeping off the heavy eval lock so a
-     * tight embedder loop that holds state_lock can't starve workers
-     * at their entry-link / exit-detach steps.
-     *
-     * Lock order (when both are needed): state_lock outer,
-     * worker_list_lock inner. Workers at entry/exit acquire
-     * worker_list_lock alone. The spawn path and GC root scan reach
-     * worker_list_lock from inside state_lock. */
-    mino_thread_ctx_t *worker_ctxs_head;
-
-    /* Brief mutex guarding worker_ctxs_head and thread_count.
-     * Non-recursive; held only across the linked-list mutation +
-     * counter step. See comment above worker_ctxs_head for the lock
-     * order. Initialized in state_init unconditionally; cheap to
-     * carry in single-threaded mode (one mutex_init at state-create
-     * time, never contended). */
-#if defined(_WIN32) && defined(_MSC_VER)
-    void           *worker_list_lock;  /* CRITICAL_SECTION; see state.c */
-#else
-    pthread_mutex_t worker_list_lock;
-#endif
-
-    /* Stop-the-world request for major GC.
-     *
-     * Set by `gc_request_stw` before running a major collection;
-     * mino_safepoint_propagate_stw walks the live thread set and
-     * sets `should_yield` on each ctx. Cleared after GC by
-     * `gc_release_stw`. In single-threaded mode there is exactly
-     * one ctx (S->main_ctx) and the GC is itself the mutator, so
-     * the propagation is a single-store no-op. The flag is declared
-     * volatile so future multi-threaded code can safely read it
-     * from worker threads without explicit fences (the ordering
-     * invariants are enforced via the same __atomic_* primitives
-     * used by atom CAS). */
-    volatile int    stw_request;
 
     /* === STM (refs / dosync) ============================================ */
     /* STM subsystem state lives in src/prim/stm_state.h. The block
@@ -685,83 +416,10 @@ struct mino_state {
      * to occupy. */
     stm_subsystem_t stm;
 
-    /* Monotonic counter for agent IDs. Mirrors stm_next_ref_id so
-     * the agent print form (#agent[ID VAL]) can distinguish two
-     * agents that happen to hold the same value. Without it,
-     * (= (pr-str a1) (pr-str a2)) was true for distinct agents
-     * with equal state -- a debugging foot-gun and a divergence
-     * from the ref print form. */
-    uint64_t        agent_next_id;
-
-    /* Flipped to 1 by (shutdown-agents). After shutdown, every send
-     * / send-off throws MST008 instead of running its action; the
-     * worker drains the remaining queued actions and then exits.
-     * Idempotent: calling twice is a no-op. */
-    int             agents_shutdown;
-
-    /* Per-state agent workers + run queues (split into POOLED and
-     * SOLO; see agent_pool_kind_t above).
-     *
-     * One worker thread per pool serves all agents in this state.
-     * Each worker counts against thread_limit, so a host that never
-     * grants threads (default thread_limit == 1) cannot use agents
-     * -- send/send-off throw MTH001 in that case, the same shape
-     * future/promise/thread
-     * already use. Standalone `./mino` raises thread_limit to cpu_count
-     * after install_all so the standalone REPL works out of the box.
-     *
-     * The worker holds state_lock for the duration of each action's
-     * eval. Per-state eval-lock serialization means parallelism across
-     * agents within one state isn't a goal here; the worker exists to
-     * decouple send (returns immediately) from action execution and to
-     * give await meaningful blocking semantics. mino's eval lock means
-     * single-action-per-state regardless of pool size; Phase 2 may add
-     * a send vs send-off split for IO-bound actions that release the
-     * lock during blocking calls.
-     *
-     * Each pool's run_head / run_tail form a singly-linked FIFO of
-     * (agent, fn, extra, dyn_snap) tuples. agent_mu serializes access
-     * to all pool queues and to per-agent in_flight counters. agent_cv
-     * is shared by the workers (waiting for their pool's work) and by
-     * await callers (waiting for an agent's in_flight to reach zero);
-     * broadcasts happen on enqueue and after each action completes.
-     *
-     * Each pool's worker is lazy-spawned on first send/send-off into
-     * that pool, and joined by shutdown-agents. Queues live entirely
-     * outside the GC heap (malloc-owned nodes); GC tracing reaches
-     * the held mino_val_t pointers via gc_mark_agent_runq. */
-#if defined(_WIN32) && defined(_MSC_VER)
-    CRITICAL_SECTION     agent_mu;
-    CONDITION_VARIABLE   agent_cv;
-#else
-    pthread_mutex_t      agent_mu;
-    pthread_cond_t       agent_cv;
-#endif
-    /* Per-pool state. worker_alive: worker thread is currently in its
-     * loop (mutated under agent_mu); cleared before the worker exits
-     * so the next send observes "no live worker" and re-spawns.
-     * worker_pending_join: worker holds a joinable handle for a thread
-     * that has exited (or is exiting) but has not been joined yet
-     * (mutated under state_lock). Cleared after the join. The worker
-     * exits lazily when its run-queue drains so a long-idle agent
-     * worker doesn't keep S->thread_count > 0 and suppress GC for the
-     * rest of the state's lifetime; the spawn cost on a subsequent
-     * burst is the price. */
-    struct {
-        agent_action_node_t *run_head;
-        agent_action_node_t *run_tail;
-#if defined(_WIN32) && defined(_MSC_VER)
-        HANDLE               worker;
-#else
-        pthread_t            worker;
-#endif
-        int                  worker_alive;
-        int                  worker_pending_join;
-    } agent_pool[AGENT_POOL_COUNT];
-
-    /* agent_mu_inited: has agent_mu/agent_cv been pthread_*_init'd
-     * yet (lazy on first send into either pool). */
-    int                  agent_mu_inited;
+    /* === Agent subsystem (send / send-off / await) ====================== */
+    /* Lives in src/prim/agent_state.h. The block is embedded at the
+     * byte position the inline agent_* fields used to occupy. */
+    agent_subsystem_t   agent;
 
     /* === Async scheduler and timers ==================================== */
     /* Async subsystem state lives in src/async/state.h. The block is
@@ -887,7 +545,7 @@ static inline void mino_safepoint_poll(mino_state_t *S)
  * sequencing can be proven.
  *
  * The outermost acquire / release also swap the BC register stack:
- * on outermost acquire, install this ctx's snapshot into S->bc_regs/
+ * on outermost acquire, install this ctx's snapshot into S->bc.bc_regs/
  * cap/top so the worker resumes with its own frame slots, isolated
  * from any other worker that ran during the yield window. On
  * outermost release, snapshot back so the next acquirer can install
@@ -900,13 +558,13 @@ static inline void mino_lock(mino_state_t *S)
     ctx = mino_current_ctx(S);
     if (ctx->lock_depth == 0) {
         if (ctx->bc_snapshot_valid) {
-            S->bc_regs     = ctx->bc_regs_storage;
-            S->bc_regs_cap = ctx->bc_regs_storage_cap;
-            S->bc_top      = ctx->bc_top_snapshot;
+            S->bc.bc_regs     = ctx->bc_regs_storage;
+            S->bc.bc_regs_cap = ctx->bc_regs_storage_cap;
+            S->bc.bc_top      = ctx->bc_top_snapshot;
         } else {
-            S->bc_regs     = NULL;
-            S->bc_regs_cap = 0;
-            S->bc_top      = 0;
+            S->bc.bc_regs     = NULL;
+            S->bc.bc_regs_cap = 0;
+            S->bc.bc_top      = 0;
         }
     }
     ctx->lock_depth++;
@@ -917,9 +575,9 @@ static inline void mino_unlock(mino_state_t *S)
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     ctx->lock_depth--;
     if (ctx->lock_depth == 0) {
-        ctx->bc_regs_storage     = S->bc_regs;
-        ctx->bc_regs_storage_cap = S->bc_regs_cap;
-        ctx->bc_top_snapshot     = S->bc_top;
+        ctx->bc_regs_storage     = S->bc.bc_regs;
+        ctx->bc_regs_storage_cap = S->bc.bc_regs_cap;
+        ctx->bc_top_snapshot     = S->bc.bc_top;
         ctx->bc_snapshot_valid   = 1;
     }
     mino_state_lock_release(S);

@@ -326,9 +326,9 @@ void append_trace(mino_state_t *S)
 meta_entry_t *meta_find(mino_state_t *S, const char *name)
 {
     size_t i;
-    for (i = 0; i < S->meta_table_len; i++) {
-        if (strcmp(S->meta_table[i].name, name) == 0) {
-            return &S->meta_table[i];
+    for (i = 0; i < S->module.meta_table_len; i++) {
+        if (strcmp(S->module.meta_table[i].name, name) == 0) {
+            return &S->module.meta_table[i];
         }
     }
     return NULL;
@@ -351,31 +351,31 @@ void meta_set(mino_state_t *S, const char *name, const char *doc,
         e->source = source;
         return;
     }
-    if (S->meta_table_len == S->meta_table_cap) {
-        size_t new_cap = S->meta_table_cap == 0 ? 32 : S->meta_table_cap * 2;
+    if (S->module.meta_table_len == S->module.meta_table_cap) {
+        size_t new_cap = S->module.meta_table_cap == 0 ? 32 : S->module.meta_table_cap * 2;
         meta_entry_t *ne = (meta_entry_t *)realloc(
-            S->meta_table, new_cap * sizeof(*ne));
+            S->module.meta_table, new_cap * sizeof(*ne));
         if (ne == NULL) { return; }
-        S->meta_table = ne;
-        S->meta_table_cap = new_cap;
+        S->module.meta_table = ne;
+        S->module.meta_table_cap = new_cap;
     }
     {
         size_t nlen = strlen(name);
-        S->meta_table[S->meta_table_len].name = (char *)malloc(nlen + 1);
-        if (S->meta_table[S->meta_table_len].name == NULL) { return; }
-        memcpy(S->meta_table[S->meta_table_len].name, name, nlen + 1);
+        S->module.meta_table[S->module.meta_table_len].name = (char *)malloc(nlen + 1);
+        if (S->module.meta_table[S->module.meta_table_len].name == NULL) { return; }
+        memcpy(S->module.meta_table[S->module.meta_table_len].name, name, nlen + 1);
     }
-    S->meta_table[S->meta_table_len].docstring = NULL;
+    S->module.meta_table[S->module.meta_table_len].docstring = NULL;
     if (doc != NULL) {
-        S->meta_table[S->meta_table_len].docstring = (char *)malloc(doc_len + 1);
-        if (S->meta_table[S->meta_table_len].docstring != NULL) {
-            memcpy(S->meta_table[S->meta_table_len].docstring, doc, doc_len);
-            S->meta_table[S->meta_table_len].docstring[doc_len] = '\0';
+        S->module.meta_table[S->module.meta_table_len].docstring = (char *)malloc(doc_len + 1);
+        if (S->module.meta_table[S->module.meta_table_len].docstring != NULL) {
+            memcpy(S->module.meta_table[S->module.meta_table_len].docstring, doc, doc_len);
+            S->module.meta_table[S->module.meta_table_len].docstring[doc_len] = '\0';
         }
     }
-    S->meta_table[S->meta_table_len].capability = NULL;
-    S->meta_table[S->meta_table_len].source = source;
-    S->meta_table_len++;
+    S->module.meta_table[S->module.meta_table_len].capability = NULL;
+    S->module.meta_table[S->module.meta_table_len].source = source;
+    S->module.meta_table_len++;
 }
 
 void meta_set_capability(mino_state_t *S, const char *name,

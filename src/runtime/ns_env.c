@@ -28,26 +28,26 @@ static void ns_env_register_root(mino_state_t *S, mino_env_t *env)
 
 static void ns_env_table_grow(mino_state_t *S)
 {
-    size_t new_cap = S->ns_env_cap == 0 ? 8 : S->ns_env_cap * 2;
+    size_t new_cap = S->ns_vars.ns_env_cap == 0 ? 8 : S->ns_vars.ns_env_cap * 2;
     ns_env_entry_t *nb = (ns_env_entry_t *)realloc(
-        S->ns_env_table, new_cap * sizeof(*nb));
+        S->ns_vars.ns_env_table, new_cap * sizeof(*nb));
     if (nb == NULL) {
         fprintf(stderr, "ns_env: out of memory growing table\n");
         /* unrecoverable: init-time OOM, no try-frame to recover through */
         abort();
     }
-    S->ns_env_table = nb;
-    S->ns_env_cap   = new_cap;
+    S->ns_vars.ns_env_table = nb;
+    S->ns_vars.ns_env_cap   = new_cap;
 }
 
 mino_env_t *ns_env_lookup(mino_state_t *S, const char *name)
 {
     size_t i;
     if (name == NULL) return NULL;
-    for (i = 0; i < S->ns_env_len; i++) {
-        const char *n = S->ns_env_table[i].name;
+    for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+        const char *n = S->ns_vars.ns_env_table[i].name;
         if (n == name || strcmp(n, name) == 0) {
-            return S->ns_env_table[i].env;
+            return S->ns_vars.ns_env_table[i].env;
         }
     }
     return NULL;
@@ -64,26 +64,26 @@ mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
 
     /* clojure.core must exist before any other ns env so we can wire the
      * parent pointer. Create it lazily on first request. */
-    if (S->mino_core_env == NULL) {
-        S->mino_core_env = env_alloc(S, NULL);
-        ns_env_register_root(S, S->mino_core_env);
-        if (S->ns_env_len == S->ns_env_cap) ns_env_table_grow(S);
-        S->ns_env_table[S->ns_env_len].name = intern_filename(S, "clojure.core");
-        S->ns_env_table[S->ns_env_len].env  = S->mino_core_env;
-        S->ns_env_table[S->ns_env_len].meta = NULL;
-        S->ns_env_len++;
-        if (strcmp(name, "clojure.core") == 0) return S->mino_core_env;
+    if (S->ns_vars.mino_core_env == NULL) {
+        S->ns_vars.mino_core_env = env_alloc(S, NULL);
+        ns_env_register_root(S, S->ns_vars.mino_core_env);
+        if (S->ns_vars.ns_env_len == S->ns_vars.ns_env_cap) ns_env_table_grow(S);
+        S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].name = intern_filename(S, "clojure.core");
+        S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].env  = S->ns_vars.mino_core_env;
+        S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].meta = NULL;
+        S->ns_vars.ns_env_len++;
+        if (strcmp(name, "clojure.core") == 0) return S->ns_vars.mino_core_env;
     }
 
     /* Create the requested ns env with parent → clojure.core. */
-    e = env_alloc(S, S->mino_core_env);
+    e = env_alloc(S, S->ns_vars.mino_core_env);
     ns_env_register_root(S, e);
     iname = intern_filename(S, name);
-    if (S->ns_env_len == S->ns_env_cap) ns_env_table_grow(S);
-    S->ns_env_table[S->ns_env_len].name = iname;
-    S->ns_env_table[S->ns_env_len].env  = e;
-    S->ns_env_table[S->ns_env_len].meta = NULL;
-    S->ns_env_len++;
+    if (S->ns_vars.ns_env_len == S->ns_vars.ns_env_cap) ns_env_table_grow(S);
+    S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].name = iname;
+    S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].env  = e;
+    S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].meta = NULL;
+    S->ns_vars.ns_env_len++;
     return e;
 }
 
@@ -91,9 +91,9 @@ mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name)
 {
     size_t i;
     if (name == NULL) return NULL;
-    for (i = 0; i < S->ns_env_len; i++) {
-        if (strcmp(S->ns_env_table[i].name, name) == 0)
-            return S->ns_env_table[i].meta;
+    for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+        if (strcmp(S->ns_vars.ns_env_table[i].name, name) == 0)
+            return S->ns_vars.ns_env_table[i].meta;
     }
     return NULL;
 }
@@ -102,9 +102,9 @@ void ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta)
 {
     size_t i;
     if (name == NULL) return;
-    for (i = 0; i < S->ns_env_len; i++) {
-        if (strcmp(S->ns_env_table[i].name, name) == 0) {
-            S->ns_env_table[i].meta = meta;
+    for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+        if (strcmp(S->ns_vars.ns_env_table[i].name, name) == 0) {
+            S->ns_vars.ns_env_table[i].meta = meta;
             return;
         }
     }
@@ -112,7 +112,7 @@ void ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta)
 
 mino_env_t *current_ns_env(mino_state_t *S)
 {
-    return ns_env_ensure(S, S->current_ns);
+    return ns_env_ensure(S, S->ns_vars.current_ns);
 }
 
 /* Return a symbol naming NAME, carrying the namespace's metadata
@@ -138,8 +138,8 @@ mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
 void mino_publish_current_ns(mino_state_t *S)
 {
     mino_val_t *var;
-    if (S->current_ns == NULL) return;
+    if (S->ns_vars.current_ns == NULL) return;
     var = var_find(S, "clojure.core", "*ns*");
     if (var == NULL) return;
-    var_set_root(S, var, ns_symbol_with_meta(S, S->current_ns));
+    var_set_root(S, var, ns_symbol_with_meta(S, S->ns_vars.current_ns));
 }

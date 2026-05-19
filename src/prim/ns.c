@@ -61,7 +61,7 @@ mino_val_t *prim_star_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *name;
     (void)args;
     (void)env;
-    name = S->current_ns != NULL ? S->current_ns : "user";
+    name = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
     return ns_symbol_with_meta(S, name);
 }
 
@@ -74,7 +74,7 @@ mino_val_t *prim_in_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!ns_one_arg(S, args, "in-ns", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "in-ns")) return NULL;
     (void)ns_env_ensure(S, buf);
-    S->current_ns = intern_filename(S, buf);
+    S->ns_vars.current_ns = intern_filename(S, buf);
     mino_publish_current_ns(S);
     return mino_symbol(S, buf);
 }
@@ -130,26 +130,26 @@ mino_val_t *prim_remove_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Drop any aliases owned by this ns so they don't outlive it. */
     {
         size_t w = 0;
-        for (i = 0; i < S->ns_alias_len; i++) {
-            if (S->ns_aliases[i].owning_ns != NULL
-                && strcmp(S->ns_aliases[i].owning_ns, buf) == 0) {
-                free(S->ns_aliases[i].owning_ns);
-                free(S->ns_aliases[i].alias);
-                free(S->ns_aliases[i].full_name);
+        for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+                && strcmp(S->ns_vars.ns_aliases[i].owning_ns, buf) == 0) {
+                free(S->ns_vars.ns_aliases[i].owning_ns);
+                free(S->ns_vars.ns_aliases[i].alias);
+                free(S->ns_vars.ns_aliases[i].full_name);
                 continue;
             }
-            if (w != i) S->ns_aliases[w] = S->ns_aliases[i];
+            if (w != i) S->ns_vars.ns_aliases[w] = S->ns_vars.ns_aliases[i];
             w++;
         }
-        S->ns_alias_len = w;
+        S->ns_vars.ns_alias_len = w;
     }
-    for (i = 0; i < S->ns_env_len; i++) {
-        if (strcmp(S->ns_env_table[i].name, buf) == 0) {
+    for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+        if (strcmp(S->ns_vars.ns_env_table[i].name, buf) == 0) {
             size_t j;
-            for (j = i + 1; j < S->ns_env_len; j++) {
-                S->ns_env_table[j - 1] = S->ns_env_table[j];
+            for (j = i + 1; j < S->ns_vars.ns_env_len; j++) {
+                S->ns_vars.ns_env_table[j - 1] = S->ns_vars.ns_env_table[j];
             }
-            S->ns_env_len--;
+            S->ns_vars.ns_env_len--;
             return mino_nil(S);
         }
     }
@@ -356,13 +356,13 @@ mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* Finally aliases as symbol → ns-symbol entries (ns-aliases shape).
      * Only show aliases declared by the namespace under inspection. */
-    for (i = 0; i < S->ns_alias_len; i++) {
-        if (S->ns_aliases[i].owning_ns == NULL
-            || strcmp(S->ns_aliases[i].owning_ns, buf) != 0) continue;
-        if (names_contains(ks, len, S->ns_aliases[i].alias)) continue;
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns == NULL
+            || strcmp(S->ns_vars.ns_aliases[i].owning_ns, buf) != 0) continue;
+        if (names_contains(ks, len, S->ns_vars.ns_aliases[i].alias)) continue;
         if (!append_kv(S, &ks, &vs, &len, &cap,
-                       mino_symbol(S, S->ns_aliases[i].alias),
-                       mino_symbol(S, S->ns_aliases[i].full_name))) return NULL;
+                       mino_symbol(S, S->ns_vars.ns_aliases[i].alias),
+                       mino_symbol(S, S->ns_vars.ns_aliases[i].full_name))) return NULL;
     }
     return mino_map(S, ks, vs, len);
 }
@@ -381,20 +381,20 @@ mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-aliases")) return NULL;
     /* Count entries owned by the requested namespace. */
     n = 0;
-    for (i = 0; i < S->ns_alias_len; i++) {
-        if (S->ns_aliases[i].owning_ns != NULL
-            && strcmp(S->ns_aliases[i].owning_ns, buf) == 0) n++;
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_vars.ns_aliases[i].owning_ns, buf) == 0) n++;
     }
     if (n == 0) return mino_map(S, NULL, NULL, 0);
     ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
     vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
     {
         size_t out = 0;
-        for (i = 0; i < S->ns_alias_len; i++) {
-            if (S->ns_aliases[i].owning_ns == NULL
-                || strcmp(S->ns_aliases[i].owning_ns, buf) != 0) continue;
-            gc_valarr_set(S, ks, out, mino_symbol(S, S->ns_aliases[i].alias));
-            gc_valarr_set(S, vs, out, mino_symbol(S, S->ns_aliases[i].full_name));
+        for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (S->ns_vars.ns_aliases[i].owning_ns == NULL
+                || strcmp(S->ns_vars.ns_aliases[i].owning_ns, buf) != 0) continue;
+            gc_valarr_set(S, ks, out, mino_symbol(S, S->ns_vars.ns_aliases[i].alias));
+            gc_valarr_set(S, vs, out, mino_symbol(S, S->ns_vars.ns_aliases[i].full_name));
             out++;
         }
     }
@@ -670,18 +670,18 @@ mino_val_t *prim_ns_unalias(mino_state_t *S, mino_val_t *args,
         return NULL;
     if (!ns_to_name(S, alias_arg, a_buf, sizeof(a_buf), "ns-unalias"))
         return NULL;
-    for (i = 0; i < S->ns_alias_len; i++) {
-        if (S->ns_aliases[i].owning_ns != NULL
-            && strcmp(S->ns_aliases[i].owning_ns, ns_buf) == 0
-            && strcmp(S->ns_aliases[i].alias, a_buf) == 0) {
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_vars.ns_aliases[i].owning_ns, ns_buf) == 0
+            && strcmp(S->ns_vars.ns_aliases[i].alias, a_buf) == 0) {
             size_t j;
-            free(S->ns_aliases[i].owning_ns);
-            free(S->ns_aliases[i].alias);
-            free(S->ns_aliases[i].full_name);
-            for (j = i + 1; j < S->ns_alias_len; j++) {
-                S->ns_aliases[j - 1] = S->ns_aliases[j];
+            free(S->ns_vars.ns_aliases[i].owning_ns);
+            free(S->ns_vars.ns_aliases[i].alias);
+            free(S->ns_vars.ns_aliases[i].full_name);
+            for (j = i + 1; j < S->ns_vars.ns_alias_len; j++) {
+                S->ns_vars.ns_aliases[j - 1] = S->ns_vars.ns_aliases[j];
             }
-            S->ns_alias_len--;
+            S->ns_vars.ns_alias_len--;
             break;
         }
     }
@@ -726,14 +726,14 @@ mino_val_t *prim_all_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t       i;
     (void)args;
     (void)env;
-    if (S->ns_env_len == 0) return mino_vector(S, NULL, 0);
+    if (S->ns_vars.ns_env_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-                                          S->ns_env_len * sizeof(*tmp));
-    for (i = 0; i < S->ns_env_len; i++) {
+                                          S->ns_vars.ns_env_len * sizeof(*tmp));
+    for (i = 0; i < S->ns_vars.ns_env_len; i++) {
         gc_valarr_set(S, tmp, i,
-                      mino_symbol(S, S->ns_env_table[i].name));
+                      mino_symbol(S, S->ns_vars.ns_env_table[i].name));
     }
-    return mino_vector(S, tmp, S->ns_env_len);
+    return mino_vector(S, tmp, S->ns_vars.ns_env_len);
 }
 
 mino_val_t *prim_loaded_libs(mino_state_t *S, mino_val_t *args,
@@ -743,14 +743,14 @@ mino_val_t *prim_loaded_libs(mino_state_t *S, mino_val_t *args,
     size_t       i;
     (void)args;
     (void)env;
-    if (S->module_cache_len == 0) return mino_vector(S, NULL, 0);
+    if (S->module.module_cache_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-                                          S->module_cache_len * sizeof(*tmp));
-    for (i = 0; i < S->module_cache_len; i++) {
+                                          S->module.module_cache_len * sizeof(*tmp));
+    for (i = 0; i < S->module.module_cache_len; i++) {
         gc_valarr_set(S, tmp, i,
-                      mino_symbol(S, S->module_cache[i].name));
+                      mino_symbol(S, S->module.module_cache[i].name));
     }
-    return mino_vector(S, tmp, S->module_cache_len);
+    return mino_vector(S, tmp, S->module.module_cache_len);
 }
 
 /* --- find-var / ns-resolve / requiring-resolve --------------------------- */

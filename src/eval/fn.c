@@ -389,7 +389,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             && fn->as.fn.bc != NULL
             && fn->as.fn.bc != &mino_bc_declined
             && fn->as.fn.bc->has_folds
-            && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
+            && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
             fn->as.fn.bc = NULL;
             (void)mino_bc_compile_fn(S, fn);
         }
@@ -403,7 +403,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
              * after that, the runtime's invocation path (below) hands
              * off to mino_jit_invoke instead of mino_bc_run. */
             mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-            if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
+            if (bc_rec->native != NULL && bc_rec->native_gen != S->ns_vars.ic_gen) {
                 /* Stale native code: ic_gen advanced (def / ns-unmap /
                  * var_set_root / var_unintern), so the JIT'd inline-
                  * cache state and global resolutions are no longer
@@ -416,14 +416,14 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             }
             if (bc_rec->native == NULL
                 && bc_rec->hot_counter < (unsigned)-1
-                && S->jit_mode != (int)MINO_JIT_MODE_OFF) {
+                && S->jit.jit_mode != (int)MINO_JIT_MODE_OFF) {
                 bc_rec->hot_counter++;
                 /* MODE_ON -> compile on first call (threshold = 1).
                  * MODE_AUTO -> per-state hot threshold (defaults to
                  * MINO_JIT_THRESHOLD; tunable via the public
                  * mino_state_set_jit_hot_threshold API). */
-                unsigned thresh = (S->jit_mode == (int)MINO_JIT_MODE_ON)
-                    ? 1u : S->jit_hot_threshold;
+                unsigned thresh = (S->jit.jit_mode == (int)MINO_JIT_MODE_ON)
+                    ? 1u : S->jit.jit_hot_threshold;
                 if (bc_rec->hot_counter >= thresh) {
                     /* One compile attempt per crossing. On success
                      * native becomes non-NULL and subsequent calls
@@ -450,8 +450,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             const char  *file = NULL;
             int          line = 0;
             int          col  = 0;
-            const char  *saved_ns      = S->current_ns;
-            const char  *saved_ambient = S->fn_ambient_ns;
+            const char  *saved_ns      = S->ns_vars.current_ns;
+            const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
             mino_val_t  *result;
             while (mino_is_cons(cur)) {
                 if (argc == cap) {
@@ -472,8 +472,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 cur = cur->as.cons.cdr;
             }
             if (fn->as.fn.defining_ns != NULL) {
-                S->current_ns    = fn->as.fn.defining_ns;
-                S->fn_ambient_ns = fn->as.fn.defining_ns;
+                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
             }
             if (mino_current_ctx(S)->eval_current_form != NULL
                 && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
@@ -492,8 +492,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             for (;;) {
                 result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
                 if (result == NULL) {
-                    S->current_ns    = saved_ns;
-                    S->fn_ambient_ns = saved_ambient;
+                    S->ns_vars.current_ns    = saved_ns;
+                    S->ns_vars.fn_ambient_ns = saved_ambient;
                     return NULL;
                 }
                 if (mino_type_of(result) != MINO_TAIL_CALL) break;
@@ -533,8 +533,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                                 S, GC_T_VALARR,
                                 (size_t)new_cap * sizeof(*grown));
                             if (grown == NULL) {
-                                S->current_ns    = saved_ns;
-                                S->fn_ambient_ns = saved_ambient;
+                                S->ns_vars.current_ns    = saved_ns;
+                                S->ns_vars.fn_ambient_ns = saved_ambient;
                                 return NULL;
                             }
                             memcpy(grown, argv,
@@ -553,20 +553,20 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     }
                     fn = next_fn;
                     if (fn->as.fn.defining_ns != NULL) {
-                        S->current_ns    = fn->as.fn.defining_ns;
-                        S->fn_ambient_ns = fn->as.fn.defining_ns;
+                        S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                        S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
                     }
                     continue;
                 }
                 /* Non-bc target: pop our frame and hand off. */
                 pop_frame(S);
-                S->current_ns    = saved_ns;
-                S->fn_ambient_ns = saved_ambient;
+                S->ns_vars.current_ns    = saved_ns;
+                S->ns_vars.fn_ambient_ns = saved_ambient;
                 return apply_callable(S, next_fn, next_args, env);
             }
             pop_frame(S);
-            S->current_ns    = saved_ns;
-            S->fn_ambient_ns = saved_ambient;
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
             return result;
         }
         mino_val_t *cur_params = fn->as.fn.params;
@@ -576,8 +576,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *file      = NULL;
         int         line      = 0;
         int         col       = 0;
-        const char *saved_ns      = S->current_ns;
-        const char *saved_ambient = S->fn_ambient_ns;
+        const char *saved_ns      = S->ns_vars.current_ns;
+        const char *saved_ambient = S->ns_vars.fn_ambient_ns;
         mino_val_t *result;
         if (mino_type_of(fn) == MINO_MACRO) {
             /* &env is a map of {sym <opaque-info>} for every local
@@ -649,10 +649,10 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
          * shifting current_ns. */
         if (fn->as.fn.defining_ns != NULL) {
             if (mino_type_of(fn) == MINO_MACRO) {
-                S->fn_ambient_ns = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
             } else {
-                S->current_ns    = fn->as.fn.defining_ns;
-                S->fn_ambient_ns = fn->as.fn.defining_ns;
+                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
             }
         }
         if (mino_current_ctx(S)->eval_current_form != NULL
@@ -666,8 +666,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         if (cur_params == NULL
             && dispatch_multi_arity(S, cur_body, call_args, "",
                                     &cur_params, &cur_body) != 0) {
-            S->current_ns    = saved_ns;
-            S->fn_ambient_ns = saved_ambient;
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
             return NULL;
         }
         for (;;) {
@@ -684,19 +684,19 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             }
             if (simple_path) {
                 if (!bind_simple_params(S, local, cur_params, call_args, tag)) {
-                    S->current_ns    = saved_ns;
-                    S->fn_ambient_ns = saved_ambient;
+                    S->ns_vars.current_ns    = saved_ns;
+                    S->ns_vars.fn_ambient_ns = saved_ambient;
                     return NULL;
                 }
             } else if (!bind_params(S, local, cur_params, call_args, tag)) {
-                S->current_ns    = saved_ns;
-                S->fn_ambient_ns = saved_ambient;
+                S->ns_vars.current_ns    = saved_ns;
+                S->ns_vars.fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
             }
             result = eval_implicit_do_impl(S, cur_body, local, 1);
             if (result == NULL) {
-                S->current_ns    = saved_ns;
-                S->fn_ambient_ns = saved_ambient;
+                S->ns_vars.current_ns    = saved_ns;
+                S->ns_vars.fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
             }
             if (mino_type_of(result) == MINO_RECUR) {
@@ -708,7 +708,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
                                              " in recur",
                                              &cur_params, &cur_body) != 0) {
-                        S->current_ns = saved_ns;
+                        S->ns_vars.current_ns = saved_ns;
                         return NULL;
                     }
                     /* Reuse `local` only when the recur lands on the
@@ -762,20 +762,20 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 /* Tail-call to a different fn: switch to its defining ns
                  * so its body's free vars resolve correctly. */
                 if (mino_type_of(fn) == MINO_FN && fn->as.fn.defining_ns != NULL) {
-                    S->current_ns    = fn->as.fn.defining_ns;
-                    S->fn_ambient_ns = fn->as.fn.defining_ns;
+                    S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                    S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
                 }
                 if (cur_params == NULL
                     && dispatch_multi_arity(S, cur_body, call_args, "",
                                             &cur_params, &cur_body) != 0) {
-                    S->current_ns = saved_ns;
+                    S->ns_vars.current_ns = saved_ns;
                     return NULL;
                 }
                 continue;
             }
             pop_frame(S);
-            S->current_ns    = saved_ns;
-            S->fn_ambient_ns = saved_ambient;
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
             return result;
         }
     }
@@ -816,7 +816,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
 {
     /* The two staleness checks (NULL bc + fold-staleness recompile)
      * still run because the JIT path's IC slot can predate a fold
-     * promotion (compile_ic_gen advances independently of S->ic_gen,
+     * promotion (compile_ic_gen advances independently of S->ns_vars.ic_gen,
      * via mino_jit_compile). Skipping them risks running stale bc. */
     if (fn->as.fn.bc == NULL) {
         (void)mino_bc_compile_fn(S, fn);
@@ -824,7 +824,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
     if (fn->as.fn.bc != NULL
         && fn->as.fn.bc != &mino_bc_declined
         && fn->as.fn.bc->has_folds
-        && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
+        && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
         /* Template-aware recompile: closures share their template's
          * bc, so the recompile fires once on the template and every
          * sibling closure inherits the fresh bc through the back-
@@ -849,12 +849,12 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
         return apply_callable(S, fn, args, env);
     }
     mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-    if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
+    if (bc_rec->native != NULL && bc_rec->native_gen != S->ns_vars.ic_gen) {
         mino_jit_invalidate(S, fn);
     }
     if (bc_rec->native == NULL
         && bc_rec->hot_counter < (unsigned)-1
-        && S->jit_mode != (int)MINO_JIT_MODE_OFF) {
+        && S->jit.jit_mode != (int)MINO_JIT_MODE_OFF) {
         bc_rec->hot_counter++;
         /* Adaptive tiering: a callee invoked from inside a JIT'd
          * region (jit_invoke_depth > 0) is on the hot path of
@@ -863,12 +863,12 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
          * state's hot-threshold setting; ON mode threshold stays at
          * 1 unconditionally. */
         unsigned thresh;
-        if (S->jit_mode == (int)MINO_JIT_MODE_ON) {
+        if (S->jit.jit_mode == (int)MINO_JIT_MODE_ON) {
             thresh = 1u;
         } else if (mino_current_ctx(S)->jit_invoke_depth > 0) {
             thresh = 1u;
         } else {
-            thresh = S->jit_hot_threshold;
+            thresh = S->jit.jit_hot_threshold;
         }
         if (bc_rec->hot_counter >= thresh) {
             if (mino_jit_compile(S, fn) < 0) {
@@ -883,12 +883,12 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
     const char  *file      = NULL;
     int          line      = 0;
     int          col       = 0;
-    const char  *saved_ns      = S->current_ns;
-    const char  *saved_ambient = S->fn_ambient_ns;
+    const char  *saved_ns      = S->ns_vars.current_ns;
+    const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
     mino_val_t  *result;
     if (fn->as.fn.defining_ns != NULL) {
-        S->current_ns    = fn->as.fn.defining_ns;
-        S->fn_ambient_ns = fn->as.fn.defining_ns;
+        S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+        S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
     }
     if (mino_current_ctx(S)->eval_current_form != NULL
         && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
@@ -901,8 +901,8 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
         result = mino_bc_run(S, fn, call_argv, call_argc,
                              fn->as.fn.env);
         if (result == NULL) {
-            S->current_ns    = saved_ns;
-            S->fn_ambient_ns = saved_ambient;
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
             return NULL;
         }
         if (mino_type_of(result) != MINO_TAIL_CALL) break;
@@ -925,8 +925,8 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
                         S, GC_T_VALARR,
                         (size_t)new_cap * sizeof(*grown));
                     if (grown == NULL) {
-                        S->current_ns    = saved_ns;
-                        S->fn_ambient_ns = saved_ambient;
+                        S->ns_vars.current_ns    = saved_ns;
+                        S->ns_vars.fn_ambient_ns = saved_ambient;
                         return NULL;
                     }
                     memcpy(grown, call_argv,
@@ -947,19 +947,19 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
             call_argc = new_argc;
             fn        = next_fn;
             if (fn->as.fn.defining_ns != NULL) {
-                S->current_ns    = fn->as.fn.defining_ns;
-                S->fn_ambient_ns = fn->as.fn.defining_ns;
+                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
             }
             continue;
         }
         pop_frame(S);
-        S->current_ns    = saved_ns;
-        S->fn_ambient_ns = saved_ambient;
+        S->ns_vars.current_ns    = saved_ns;
+        S->ns_vars.fn_ambient_ns = saved_ambient;
         return apply_callable(S, next_fn, next_args, env);
     }
     pop_frame(S);
-    S->current_ns    = saved_ns;
-    S->fn_ambient_ns = saved_ambient;
+    S->ns_vars.current_ns    = saved_ns;
+    S->ns_vars.fn_ambient_ns = saved_ambient;
     return result;
 }
 

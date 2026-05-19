@@ -56,16 +56,16 @@ static void intern_str_hash_resize(mino_state_t *S, size_t new_cap)
     new_tbl = (const char **)calloc(new_cap, sizeof(*new_tbl));
     if (new_tbl == NULL) return;  /* lookups silently fall back to linear */
     /* Replay every interned string into the new table. */
-    for (i = 0; i < S->interned_var_strs_len; i++) {
-        const char *s     = S->interned_var_strs[i];
+    for (i = 0; i < S->reader.interned_var_strs_len; i++) {
+        const char *s     = S->reader.interned_var_strs[i];
         unsigned    h     = str_hash_fnv1a(s);
         size_t      probe = (size_t)h & (new_cap - 1u);
         while (new_tbl[probe] != NULL) probe = (probe + 1u) & (new_cap - 1u);
         new_tbl[probe] = s;
     }
-    free(S->interned_var_strs_hash);
-    S->interned_var_strs_hash     = new_tbl;
-    S->interned_var_strs_hash_cap = new_cap;
+    free(S->reader.interned_var_strs_hash);
+    S->reader.interned_var_strs_hash     = new_tbl;
+    S->reader.interned_var_strs_hash_cap = new_cap;
 }
 
 /* Look up s in the hash. Returns the canonical interned pointer or
@@ -75,13 +75,13 @@ static const char *intern_str_hash_lookup(mino_state_t *S, const char *s)
 {
     unsigned h;
     size_t   probe;
-    if (S->interned_var_strs_hash == NULL) return NULL;
+    if (S->reader.interned_var_strs_hash == NULL) return NULL;
     h     = str_hash_fnv1a(s);
-    probe = (size_t)h & (S->interned_var_strs_hash_cap - 1u);
-    while (S->interned_var_strs_hash[probe] != NULL) {
-        const char *cand = S->interned_var_strs_hash[probe];
+    probe = (size_t)h & (S->reader.interned_var_strs_hash_cap - 1u);
+    while (S->reader.interned_var_strs_hash[probe] != NULL) {
+        const char *cand = S->reader.interned_var_strs_hash[probe];
         if (cand == s || strcmp(cand, s) == 0) return cand;
-        probe = (probe + 1u) & (S->interned_var_strs_hash_cap - 1u);
+        probe = (probe + 1u) & (S->reader.interned_var_strs_hash_cap - 1u);
     }
     return NULL;
 }
@@ -91,19 +91,19 @@ static void intern_str_hash_insert(mino_state_t *S, const char *s)
     unsigned h;
     size_t   probe;
     /* Resize trigger: keep load factor under ~0.7. */
-    if (S->interned_var_strs_hash == NULL
-        || S->interned_var_strs_len * 10u >= S->interned_var_strs_hash_cap * 7u) {
-        size_t new_cap = (S->interned_var_strs_hash_cap == 0)
-                         ? 128u : (S->interned_var_strs_hash_cap * 2u);
+    if (S->reader.interned_var_strs_hash == NULL
+        || S->reader.interned_var_strs_len * 10u >= S->reader.interned_var_strs_hash_cap * 7u) {
+        size_t new_cap = (S->reader.interned_var_strs_hash_cap == 0)
+                         ? 128u : (S->reader.interned_var_strs_hash_cap * 2u);
         intern_str_hash_resize(S, new_cap);
-        if (S->interned_var_strs_hash == NULL) return;  /* OOM, give up */
+        if (S->reader.interned_var_strs_hash == NULL) return;  /* OOM, give up */
     }
     h     = str_hash_fnv1a(s);
-    probe = (size_t)h & (S->interned_var_strs_hash_cap - 1u);
-    while (S->interned_var_strs_hash[probe] != NULL) {
-        probe = (probe + 1u) & (S->interned_var_strs_hash_cap - 1u);
+    probe = (size_t)h & (S->reader.interned_var_strs_hash_cap - 1u);
+    while (S->reader.interned_var_strs_hash[probe] != NULL) {
+        probe = (probe + 1u) & (S->reader.interned_var_strs_hash_cap - 1u);
     }
-    S->interned_var_strs_hash[probe] = s;
+    S->reader.interned_var_strs_hash[probe] = s;
 }
 
 /* Intern a string into the state's var-string table. Returns a pointer
@@ -119,19 +119,19 @@ static const char *intern_var_str(mino_state_t *S, const char *s)
     d = (char *)malloc(n + 1);
     if (d == NULL) return s;
     memcpy(d, s, n + 1);
-    if (S->interned_var_strs_len == S->interned_var_strs_cap) {
-        size_t       new_cap = (S->interned_var_strs_cap == 0)
-                               ? 64u : (S->interned_var_strs_cap * 2u);
+    if (S->reader.interned_var_strs_len == S->reader.interned_var_strs_cap) {
+        size_t       new_cap = (S->reader.interned_var_strs_cap == 0)
+                               ? 64u : (S->reader.interned_var_strs_cap * 2u);
         const char **nb      = (const char **)realloc(
-            S->interned_var_strs, new_cap * sizeof(*nb));
+            S->reader.interned_var_strs, new_cap * sizeof(*nb));
         if (nb == NULL) {
             free(d);
             return s;
         }
-        S->interned_var_strs     = nb;
-        S->interned_var_strs_cap = new_cap;
+        S->reader.interned_var_strs     = nb;
+        S->reader.interned_var_strs_cap = new_cap;
     }
-    S->interned_var_strs[S->interned_var_strs_len++] = d;
+    S->reader.interned_var_strs[S->reader.interned_var_strs_len++] = d;
     intern_str_hash_insert(S, d);
     return d;
 }
@@ -144,9 +144,9 @@ static void var_hash_resize(mino_state_t *S, size_t new_cap)
     var_hash_slot_t *new_tbl;
     new_tbl = (var_hash_slot_t *)calloc(new_cap, sizeof(*new_tbl));
     if (new_tbl == NULL) return;
-    for (i = 0; i < S->var_registry_len; i++) {
-        const char *ns    = S->var_registry[i].ns;
-        const char *name  = S->var_registry[i].name;
+    for (i = 0; i < S->ns_vars.var_registry_len; i++) {
+        const char *ns    = S->ns_vars.var_registry[i].ns;
+        const char *name  = S->ns_vars.var_registry[i].name;
         unsigned    h     = ptr_pair_hash(ns, name);
         size_t      probe = (size_t)h & (new_cap - 1u);
         while (new_tbl[probe].ns != NULL) {
@@ -154,12 +154,12 @@ static void var_hash_resize(mino_state_t *S, size_t new_cap)
         }
         new_tbl[probe].ns   = ns;
         new_tbl[probe].name = name;
-        new_tbl[probe].var  = S->var_registry[i].var;
+        new_tbl[probe].var  = S->ns_vars.var_registry[i].var;
     }
-    free(S->var_hash);
-    S->var_hash     = new_tbl;
-    S->var_hash_cap = new_cap;
-    S->var_hash_len = S->var_registry_len;
+    free(S->ns_vars.var_hash);
+    S->ns_vars.var_hash     = new_tbl;
+    S->ns_vars.var_hash_cap = new_cap;
+    S->ns_vars.var_hash_len = S->ns_vars.var_registry_len;
 }
 
 /* Hot path: lookup by (ns*, name*). Both must be interned for pointer
@@ -170,15 +170,15 @@ static mino_val_t *var_hash_lookup(mino_state_t *S, const char *i_ns,
 {
     unsigned h;
     size_t   probe;
-    if (S->var_hash == NULL) return NULL;
+    if (S->ns_vars.var_hash == NULL) return NULL;
     h     = ptr_pair_hash(i_ns, i_name);
-    probe = (size_t)h & (S->var_hash_cap - 1u);
-    while (S->var_hash[probe].ns != NULL) {
-        if (S->var_hash[probe].ns == i_ns
-            && S->var_hash[probe].name == i_name) {
-            return S->var_hash[probe].var;
+    probe = (size_t)h & (S->ns_vars.var_hash_cap - 1u);
+    while (S->ns_vars.var_hash[probe].ns != NULL) {
+        if (S->ns_vars.var_hash[probe].ns == i_ns
+            && S->ns_vars.var_hash[probe].name == i_name) {
+            return S->ns_vars.var_hash[probe].var;
         }
-        probe = (probe + 1u) & (S->var_hash_cap - 1u);
+        probe = (probe + 1u) & (S->ns_vars.var_hash_cap - 1u);
     }
     return NULL;
 }
@@ -188,21 +188,21 @@ static void var_hash_insert(mino_state_t *S, const char *i_ns,
 {
     unsigned h;
     size_t   probe;
-    if (S->var_hash == NULL
-        || (S->var_hash_len + 1u) * 10u >= S->var_hash_cap * 7u) {
-        size_t new_cap = (S->var_hash_cap == 0) ? 128u : (S->var_hash_cap * 2u);
+    if (S->ns_vars.var_hash == NULL
+        || (S->ns_vars.var_hash_len + 1u) * 10u >= S->ns_vars.var_hash_cap * 7u) {
+        size_t new_cap = (S->ns_vars.var_hash_cap == 0) ? 128u : (S->ns_vars.var_hash_cap * 2u);
         var_hash_resize(S, new_cap);
-        if (S->var_hash == NULL) return;
+        if (S->ns_vars.var_hash == NULL) return;
     }
     h     = ptr_pair_hash(i_ns, i_name);
-    probe = (size_t)h & (S->var_hash_cap - 1u);
-    while (S->var_hash[probe].ns != NULL) {
-        probe = (probe + 1u) & (S->var_hash_cap - 1u);
+    probe = (size_t)h & (S->ns_vars.var_hash_cap - 1u);
+    while (S->ns_vars.var_hash[probe].ns != NULL) {
+        probe = (probe + 1u) & (S->ns_vars.var_hash_cap - 1u);
     }
-    S->var_hash[probe].ns   = i_ns;
-    S->var_hash[probe].name = i_name;
-    S->var_hash[probe].var  = var;
-    S->var_hash_len++;
+    S->ns_vars.var_hash[probe].ns   = i_ns;
+    S->ns_vars.var_hash[probe].name = i_name;
+    S->ns_vars.var_hash[probe].var  = var;
+    S->ns_vars.var_hash_len++;
 }
 
 /* var_unintern is rare. Drop the matching entry from the linear
@@ -210,7 +210,7 @@ static void var_hash_insert(mino_state_t *S, const char *i_ns,
  * bookkeeping. */
 static void var_hash_rebuild(mino_state_t *S)
 {
-    size_t cap = S->var_hash_cap > 0 ? S->var_hash_cap : 128u;
+    size_t cap = S->ns_vars.var_hash_cap > 0 ? S->ns_vars.var_hash_cap : 128u;
     var_hash_resize(S, cap);
 }
 
@@ -234,25 +234,25 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
     gc_pin(v);
 
     /* Grow registry if needed. */
-    if (S->var_registry_len == S->var_registry_cap) {
-        size_t       new_cap = (S->var_registry_cap == 0)
-                               ? 64u : (S->var_registry_cap * 2u);
+    if (S->ns_vars.var_registry_len == S->ns_vars.var_registry_cap) {
+        size_t       new_cap = (S->ns_vars.var_registry_cap == 0)
+                               ? 64u : (S->ns_vars.var_registry_cap * 2u);
         var_entry_t *nb      = (var_entry_t *)realloc(
-            S->var_registry, new_cap * sizeof(*nb));
+            S->ns_vars.var_registry, new_cap * sizeof(*nb));
         if (nb == NULL) {
             gc_unpin(1);
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                           "internal", "MIN001", "out of memory");
             return NULL;
         }
-        S->var_registry     = nb;
-        S->var_registry_cap = new_cap;
+        S->ns_vars.var_registry     = nb;
+        S->ns_vars.var_registry_cap = new_cap;
     }
 
-    S->var_registry[S->var_registry_len].ns   = i_ns;
-    S->var_registry[S->var_registry_len].name = i_name;
-    S->var_registry[S->var_registry_len].var  = v;
-    S->var_registry_len++;
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].ns   = i_ns;
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].name = i_name;
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].var  = v;
+    S->ns_vars.var_registry_len++;
 
     var_hash_insert(S, i_ns, i_name, v);
 
@@ -277,7 +277,7 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
         var->as.var.root  = val;
         var->as.var.bound = 1;
         var->as.var.version++;
-        S->ic_gen++;
+        S->ns_vars.ic_gen++;
         return;
     }
 
@@ -341,18 +341,18 @@ void var_unintern(mino_state_t *S, const char *ns, const char *name)
     const char *i_ns   = intern_var_str(S, ns);
     const char *i_name = intern_var_str(S, name);
     size_t      i, j;
-    for (i = 0; i < S->var_registry_len; i++) {
-        if (S->var_registry[i].ns == i_ns
-            && S->var_registry[i].name == i_name) {
-            for (j = i + 1; j < S->var_registry_len; j++) {
-                S->var_registry[j - 1] = S->var_registry[j];
+    for (i = 0; i < S->ns_vars.var_registry_len; i++) {
+        if (S->ns_vars.var_registry[i].ns == i_ns
+            && S->ns_vars.var_registry[i].name == i_name) {
+            for (j = i + 1; j < S->ns_vars.var_registry_len; j++) {
+                S->ns_vars.var_registry[j - 1] = S->ns_vars.var_registry[j];
             }
-            S->var_registry_len--;
+            S->ns_vars.var_registry_len--;
             var_hash_rebuild(S);
             /* Same rationale as env_unbind: removing a var changes how
              * its symbol resolves, and the inline call cache must
              * notice. Bumping ic_gen invalidates every slot. */
-            S->ic_gen++;
+            S->ns_vars.ic_gen++;
             return;
         }
     }

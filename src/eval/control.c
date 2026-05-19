@@ -207,9 +207,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
 
     /* Body: evaluate inside a setjmp landing pad so a throw lands here. */
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val_t *r;
         mino_current_ctx(S)->try_depth++;
@@ -226,8 +226,8 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         /* longjmp'd from throw in body. Restore current_ns and ambient
          * since the throw bypassed any per-fn restore on its way up. */
         vol_ex      = mino_current_ctx(S)->try_stack[saved_try].exception;
-        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+        S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+        S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth   = saved_try;
         mino_current_ctx(S)->call_depth  = saved_call;
@@ -262,9 +262,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             int         is = mino_current_ctx(S)->try_depth; /* save before setjmp */
             dyn_frame_t *id = mino_current_ctx(S)->dyn_stack;
             mino_current_ctx(S)->try_stack[is].exception      = NULL;
-            mino_current_ctx(S)->try_stack[is].saved_ns       = S->current_ns;
-            mino_current_ctx(S)->try_stack[is].saved_ambient  = S->fn_ambient_ns;
-            mino_current_ctx(S)->try_stack[is].saved_load_len = S->load_stack_len;
+            mino_current_ctx(S)->try_stack[is].saved_ns       = S->ns_vars.current_ns;
+            mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
+            mino_current_ctx(S)->try_stack[is].saved_load_len = S->module.load_stack_len;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val_t *r;
                 mino_current_ctx(S)->try_depth++;
@@ -279,8 +279,8 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             } else {
                 /* Catch handler re-threw. */
                 vol_ex      = mino_current_ctx(S)->try_stack[is].exception;
-                S->current_ns    = mino_current_ctx(S)->try_stack[is].saved_ns;
-                S->fn_ambient_ns = mino_current_ctx(S)->try_stack[is].saved_ambient;
+                S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[is].saved_ns;
+                S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[is].saved_ambient;
                 load_stack_truncate(S, mino_current_ctx(S)->try_stack[is].saved_load_len);
                 mino_current_ctx(S)->try_depth   = is;
                 mino_current_ctx(S)->call_depth  = ic;

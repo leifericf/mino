@@ -49,7 +49,7 @@ void gc_release_stw(mino_state_t *S);
 /* ------------------------------------------------------------------------- */
 /* Per-state lock helpers                                                    */
 /*                                                                           */
-/* mino_lock(S) / mino_unlock(S) acquire/release S->state_lock when         */
+/* mino_lock(S) / mino_unlock(S) acquire/release S->threading.state_lock when         */
 /* multi_threaded is set; otherwise they're a no-op. Held by worker threads */
 /* across the entire eval call so single-state futures execute serialized.  */
 /* Cross-state work runs fully concurrent (each state has its own lock).    */

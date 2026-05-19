@@ -39,7 +39,7 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
 {
     mino_val_t *v;
 #ifdef MINO_BC_PROFILE_COUNTS
-    S->bc_int_make_count++;
+    S->bc.bc_int_make_count++;
 #endif
     /* Inline-tag every int that fits in the 61-bit signed range. The
      * fallback below handles the narrow band between MINO_INT_MAX and
@@ -49,7 +49,7 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
      * boxed as a MINO_INT carrying the full 64-bit signed integer. */
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
 #ifdef MINO_BC_PROFILE_COUNTS
-        S->bc_int_alloc_avoided++;
+        S->bc.bc_int_alloc_avoided++;
 #endif
         return MINO_MAKE_INT(n);
     }
@@ -64,11 +64,11 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
 mino_val_t *mino_int_wrap(mino_state_t *S, long long n)
 {
 #ifdef MINO_BC_PROFILE_COUNTS
-    S->bc_int_make_count++;
+    S->bc.bc_int_make_count++;
 #endif
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
 #ifdef MINO_BC_PROFILE_COUNTS
-        S->bc_int_alloc_avoided++;
+        S->bc.bc_int_alloc_avoided++;
 #endif
         return MINO_MAKE_INT(n);
     }

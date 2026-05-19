@@ -79,7 +79,7 @@
 static void stm_lock(mino_state_t *S)
 {
     if (!S->stm.lock_inited) return;
-    if (S->thread_limit <= 1) return;
+    if (S->threading.thread_limit <= 1) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
     pthread_mutex_lock(&S->stm.commit_lock);
 #endif
@@ -88,7 +88,7 @@ static void stm_lock(mino_state_t *S)
 static void stm_unlock(mino_state_t *S)
 {
     if (!S->stm.lock_inited) return;
-    if (S->thread_limit <= 1) return;
+    if (S->threading.thread_limit <= 1) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
     pthread_mutex_unlock(&S->stm.commit_lock);
 #endif
@@ -1136,9 +1136,9 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
     }
     frame                 = &ctx_v->try_stack[ctx_v->try_depth];
     frame->exception      = NULL;
-    frame->saved_ns       = S->current_ns;
-    frame->saved_ambient  = S->fn_ambient_ns;
-    frame->saved_load_len = S->load_stack_len;
+    frame->saved_ns       = S->ns_vars.current_ns;
+    frame->saved_ambient  = S->ns_vars.fn_ambient_ns;
+    frame->saved_load_len = S->module.load_stack_len;
     if (setjmp(frame->buf) != 0) {
         /* Body threw. Use the volatile ctx_v captured before setjmp so
          * we don't re-enter the inlined mino_current_ctx (whose locals
@@ -1148,8 +1148,8 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
         tx_clear_ref_states(&tx);
         c->current_tx    = NULL;
         c->try_depth     = saved_try;
-        S->current_ns    = c->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = c->try_stack[saved_try].saved_ambient;
+        S->ns_vars.current_ns    = c->try_stack[saved_try].saved_ns;
+        S->ns_vars.fn_ambient_ns = c->try_stack[saved_try].saved_ambient;
         if (c->try_depth > 0) {
             c->try_stack[c->try_depth - 1].exception = ex;
             longjmp(c->try_stack[c->try_depth - 1].buf, 1);

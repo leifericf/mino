@@ -85,8 +85,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
 
     if (S->core_forms == NULL) {
         const char  *src        = core_mino_src;
-        const char  *saved_file = S->reader_file;
-        int          saved_line = S->reader_line;
+        const char  *saved_file = S->reader.reader_file;
+        int          saved_line = S->reader.reader_line;
         size_t       cap        = 256;
 
         S->core_forms     = malloc(cap * sizeof(mino_val_t *));
@@ -96,8 +96,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             fprintf(stderr, "core.clj: out of memory\n"); abort();
         }
 
-        S->reader_file = intern_filename(S, "<core>");
-        S->reader_line = 1;
+        S->reader.reader_file = intern_filename(S, "<core>");
+        S->reader.reader_line = 1;
         while (*src != '\0') {
             const char *end  = NULL;
             mino_val_t *form = mino_read(S, src, &end);
@@ -133,8 +133,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             }
             src = end;
         }
-        S->reader_file = saved_file;
-        S->reader_line = saved_line;
+        S->reader.reader_file = saved_file;
+        S->reader.reader_line = saved_line;
         return;
     }
 
@@ -435,8 +435,8 @@ static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
         mino_val_t *var = var_intern(S, "clojure.core", "*ns*");
         if (var != NULL) {
             var->as.var.dynamic = 1;
-            if (S->current_ns == NULL) {
-                S->current_ns = intern_filename(S, "user");
+            if (S->ns_vars.current_ns == NULL) {
+                S->ns_vars.current_ns = intern_filename(S, "user");
                 (void)ns_env_ensure(S, "user");
             }
             mino_publish_current_ns(S);
@@ -580,10 +580,10 @@ void mino_install_clojure_core(mino_state_t *S, mino_env_t *env)
     }
     core_env = ns_env_ensure(S, "clojure.core");
 
-    saved_ns      = S->current_ns;
-    S->current_ns = "clojure.core";
+    saved_ns      = S->ns_vars.current_ns;
+    S->ns_vars.current_ns = "clojure.core";
     install_core_mino(S, core_env);
-    S->current_ns = saved_ns;
+    S->ns_vars.current_ns = saved_ns;
     (void)env;
 }
 

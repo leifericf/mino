@@ -59,13 +59,13 @@
         mino_jit_layout_assert_##tag##_, __LINE__)[(cond) ? 1 : -1]
 
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN ==
-                           offsetof(struct mino_state, ic_gen),
+                           offsetof(struct mino_state, ns_vars.ic_gen),
                        state_ic_gen);
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS ==
-                           offsetof(struct mino_state, bc_regs),
+                           offsetof(struct mino_state, bc.bc_regs),
                        state_bc_regs);
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ==
-                           offsetof(struct mino_state, jit_invoke_ctx),
+                           offsetof(struct mino_state, jit.jit_invoke_ctx),
                        state_jit_invoke_ctx);
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK ==
                            offsetof(struct mino_thread_ctx, dyn_stack),
@@ -869,12 +869,12 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * later release. */
     mino_thread_ctx_t *ctx        = mino_current_ctx(S);
     mino_env_t        *saved_env  = ctx->jit_invoke_env;
-    mino_thread_ctx_t *saved_ctx  = S->jit_invoke_ctx;
+    mino_thread_ctx_t *saved_ctx  = S->jit.jit_invoke_ctx;
     ctx->jit_invoke_env = env;
     /* Publish ctx on S so stencil-emitted code can reach
      * `ctx->dyn_stack` via a fixed offset from S without touching
      * the Darwin __thread machinery the extractor doesn't model. */
-    S->jit_invoke_ctx = ctx;
+    S->jit.jit_invoke_ctx = ctx;
     /* Capture the side-exit snapshot inputs into locals before f() so
      * a nested mino_bc_run (triggered by an OP_CALL stencil that
      * recurses into a JIT'd callee) can overwrite S->jit_resume_saved_*
@@ -920,13 +920,13 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
                 size_t resume_pc = S->jit_deopt_pc;
                 S->jit_deopt_pending = 0;
                 bc->jit_deopt_exits++;
-                size_t base = (size_t)(regs - S->bc_regs);
+                size_t base = (size_t)(regs - S->bc.bc_regs);
                 r = mino_bc_run_resume(S, bc, base, env, resume_pc,
                                        saved_try_depth,
                                        saved_bc_catch_depth,
                                        saved_dyn_stack);
             }
-            S->jit_invoke_ctx = saved_ctx;
+            S->jit.jit_invoke_ctx = saved_ctx;
             ctx->jit_invoke_env = saved_env;
             return r;
         }
@@ -944,12 +944,12 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
         size_t resume_pc = S->jit_deopt_pc;
         S->jit_deopt_pending = 0;
         bc->jit_deopt_exits++;
-        size_t base = (size_t)(regs - S->bc_regs);
+        size_t base = (size_t)(regs - S->bc.bc_regs);
         r = mino_bc_run_resume(S, bc, base, env, resume_pc,
                                saved_try_depth, saved_bc_catch_depth,
                                saved_dyn_stack);
     }
-    S->jit_invoke_ctx = saved_ctx;
+    S->jit.jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
     return r;
 }

@@ -9,7 +9,7 @@
  * directory, so they cannot reach the canonical runtime headers
  * (`mino.h`, `mino_internal.h`, `runtime/internal.h`,
  * `eval/bc/internal.h`). When a stencil's hot path needs to read
- * `S->ic_gen` or `bc->ic_slots[idx]` inline -- skipping the bl into a
+ * `S->ns_vars.ic_gen` or `bc->ic_slots[idx]` inline -- skipping the bl into a
  * slow helper that the coverage cycle's stencils route through -- it
  * needs visibility into those layouts without dragging the runtime
  * header tree into the stencil compilation unit.
@@ -196,7 +196,7 @@ typedef struct mino_bc_ic_slot {
                                   + MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS))
 
 /* Resolve the active per-thread ctx. `mino_jit_invoke` publishes the
- * calling thread's ctx into `S->jit_invoke_ctx` before jumping into
+ * calling thread's ctx into `S->jit.jit_invoke_ctx` before jumping into
  * the JIT region and restores it on return, so stencils reach the
  * ctx through a single fixed-offset load from S -- no Darwin TLVP
  * relocation in the stencil bytes (the stencil_extract tool does not

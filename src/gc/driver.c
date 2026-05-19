@@ -205,7 +205,7 @@ static int gc_tick_should_suppress(mino_state_t *S)
      * locking. See internal.h thread_count comment. */
     return mino_current_ctx(S)->gc_depth > 0
         || mino_current_ctx(S)->gc_stack_bottom == NULL
-        || __atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0;
+        || __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0;
 }
 
 /* Stress mode: every alloc forces a full STW major, preserving the

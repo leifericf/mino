@@ -22,12 +22,12 @@
 static const char *alias_resolve(mino_state_t *S, const char *alias)
 {
     size_t i;
-    const char *cur = S->current_ns != NULL ? S->current_ns : "user";
-    for (i = 0; i < S->ns_alias_len; i++) {
-        if (S->ns_aliases[i].owning_ns != NULL
-            && strcmp(S->ns_aliases[i].owning_ns, cur) == 0
-            && strcmp(S->ns_aliases[i].alias, alias) == 0) {
-            return S->ns_aliases[i].full_name;
+    const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) == 0
+            && strcmp(S->ns_vars.ns_aliases[i].alias, alias) == 0) {
+            return S->ns_vars.ns_aliases[i].full_name;
         }
     }
     return NULL;
@@ -89,8 +89,8 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
         /* Cross-ns access of a private var is rejected. Same-ns access
          * is fine since callers within a namespace are not outsiders. */
         if (var->as.var.is_private
-            && (S->current_ns == NULL
-                || strcmp(S->current_ns, resolved_ns) != 0)) {
+            && (S->ns_vars.current_ns == NULL
+                || strcmp(S->ns_vars.current_ns, resolved_ns) != 0)) {
             snprintf(msg, sizeof(msg),
                 "var %s/%s is private", resolved_ns, sym_name);
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -121,7 +121,7 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
         /* Neither an alias nor a loaded namespace -- most likely the
          * user meant an alias that isn't set up. */
         const char *cur =
-            (S->current_ns != NULL) ? S->current_ns : "user";
+            (S->ns_vars.current_ns != NULL) ? S->ns_vars.current_ns : "user";
         snprintf(msg, sizeof(msg),
             "no such alias: %s in namespace %s", ns_buf, cur);
     }
@@ -152,7 +152,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
      * The symbol carries the namespace's metadata so (meta *ns*) works. */
     if (n == 4 && memcmp(data, "*ns*", 4) == 0) {
         if (mino_env_get(env, data) == NULL) {
-            const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+            const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
             mino_val_t *sym = mino_symbol(S, cur);
             mino_val_t *meta = ns_env_get_meta(S, cur);
             if (meta != NULL && sym != NULL) {
@@ -183,11 +183,11 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
             if (v != NULL) from_ns_env = 1;
         }
     }
-    if (v == NULL && S->fn_ambient_ns != NULL
-        && S->fn_ambient_ns != S->current_ns
-        && (S->current_ns == NULL
-            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-        mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+    if (v == NULL && S->ns_vars.fn_ambient_ns != NULL
+        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
+        && (S->ns_vars.current_ns == NULL
+            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         if (amb != NULL) {
             v = mino_env_get_sym(amb, form);
             if (v != NULL) from_ns_env = 1;
@@ -609,10 +609,10 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 ns_env = current_ns_env(S);
                 if (ns_env != NULL) type_val = mino_env_get(ns_env, stem_buf);
             }
-            if (type_val == NULL && S->fn_ambient_ns != NULL
-                && (S->current_ns == NULL
-                    || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-                mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+            if (type_val == NULL && S->ns_vars.fn_ambient_ns != NULL
+                && (S->ns_vars.current_ns == NULL
+                    || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+                mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
                 if (amb != NULL) type_val = mino_env_get(amb, stem_buf);
             }
             if (type_val != NULL && mino_type_of(type_val) == MINO_TYPE) {
@@ -628,10 +628,10 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                         ns_env = current_ns_env(S);
                         if (ns_env != NULL) ctor = mino_env_get(ns_env, ctor_buf);
                     }
-                    if (ctor == NULL && S->fn_ambient_ns != NULL
-                        && (S->current_ns == NULL
-                            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
-                        mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+                    if (ctor == NULL && S->ns_vars.fn_ambient_ns != NULL
+                        && (S->ns_vars.current_ns == NULL
+                            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+                        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
                         if (amb != NULL) ctor = mino_env_get(amb, ctor_buf);
                     }
                     if (ctor != NULL) {
@@ -718,8 +718,8 @@ static int local_lexical_shadow(mino_state_t *S, mino_env_t *env,
     mino_env_t *cur = env;
     size_t      i;
     while (cur != NULL) {
-        for (i = 0; i < S->ns_env_len; i++) {
-            if (S->ns_env_table[i].env == cur) return 0;
+        for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+            if (S->ns_vars.ns_env_table[i].env == cur) return 0;
         }
         if (env_find_here_n(cur, name, nlen) != NULL) return 1;
         cur = cur->parent;
@@ -738,13 +738,13 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
      * Slots are GC-pinned in gc_mark_runtime_globals so a freed form
      * cannot alias a fresh allocation. */
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL
-        && S->ic_table != NULL
+        && S->ns_vars.ic_table != NULL
         && mino_current_ctx(S)->dyn_stack == NULL) {
-        size_t bucket = ((uintptr_t)form >> 4) & (S->ic_cap - 1);
-        struct ic_slot *slot = &S->ic_table[bucket];
+        size_t bucket = ((uintptr_t)form >> 4) & (S->ns_vars.ic_cap - 1);
+        struct ic_slot *slot = &S->ns_vars.ic_table[bucket];
         if (slot->form == form
             && slot->head_data == head->as.s.data
-            && slot->gen_at_fill == S->ic_gen) {
+            && slot->gen_at_fill == S->ns_vars.ic_gen) {
             fn = slot->callable;
         }
     }
@@ -762,19 +762,19 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
             && !local_lexical_shadow(S, env, head->as.s.data, head->as.s.len)) {
             size_t bucket;
             struct ic_slot *slot;
-            if (S->ic_table == NULL) {
-                S->ic_cap   = 1024;
-                S->ic_table = (struct ic_slot *)calloc(
-                    S->ic_cap, sizeof(*S->ic_table));
-                if (S->ic_table == NULL) S->ic_cap = 0;
+            if (S->ns_vars.ic_table == NULL) {
+                S->ns_vars.ic_cap   = 1024;
+                S->ns_vars.ic_table = (struct ic_slot *)calloc(
+                    S->ns_vars.ic_cap, sizeof(*S->ns_vars.ic_table));
+                if (S->ns_vars.ic_table == NULL) S->ns_vars.ic_cap = 0;
             }
-            if (S->ic_table != NULL) {
-                bucket = ((uintptr_t)form >> 4) & (S->ic_cap - 1);
-                slot   = &S->ic_table[bucket];
+            if (S->ns_vars.ic_table != NULL) {
+                bucket = ((uintptr_t)form >> 4) & (S->ns_vars.ic_cap - 1);
+                slot   = &S->ns_vars.ic_table[bucket];
                 slot->form        = form;
                 slot->head_data   = head->as.s.data;
                 slot->callable    = fn;
-                slot->gen_at_fill = S->ic_gen;
+                slot->gen_at_fill = S->ns_vars.ic_gen;
             }
         }
     }
@@ -1002,13 +1002,13 @@ static int eval_check_limits(mino_state_t *S)
         return 0;
     }
     mino_safepoint_poll(S);
-    if (S->limit_steps > 0 && ++mino_current_ctx(S)->eval_steps > S->limit_steps) {
+    if (S->module.limit_steps > 0 && ++mino_current_ctx(S)->eval_steps > S->module.limit_steps) {
         mino_current_ctx(S)->limit_exceeded = 1;
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
                       "step limit exceeded");
         return 0;
     }
-    if (S->limit_heap > 0 && S->gc.bytes_alloc > S->limit_heap) {
+    if (S->module.limit_heap > 0 && S->gc.bytes_alloc > S->module.limit_heap) {
         mino_current_ctx(S)->limit_exceeded = 1;
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
                       "heap limit exceeded");

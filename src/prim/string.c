@@ -217,7 +217,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *s;
     mino_val_t *opts = NULL;
     mino_val_t *result;
-    int         saved_mode = S->reader_cond_mode;
+    int         saved_mode = S->reader.reader_cond_mode;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "read-string requires one string argument");
@@ -249,9 +249,9 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "read-string: :read-cond must be a keyword");
             }
-            if (strcmp(rc->as.s.data, "allow") == 0)         S->reader_cond_mode = 0;
-            else if (strcmp(rc->as.s.data, "preserve") == 0) S->reader_cond_mode = 1;
-            else if (strcmp(rc->as.s.data, "disallow") == 0) S->reader_cond_mode = 2;
+            if (strcmp(rc->as.s.data, "allow") == 0)         S->reader.reader_cond_mode = 0;
+            else if (strcmp(rc->as.s.data, "preserve") == 0) S->reader.reader_cond_mode = 1;
+            else if (strcmp(rc->as.s.data, "disallow") == 0) S->reader.reader_cond_mode = 2;
             else {
                 return prim_throw_classified(S, "eval/contract", "MCT001",
                     "read-string: :read-cond must be :allow, :preserve, or :disallow");
@@ -260,7 +260,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     clear_error(S);
     result = mino_read(S, s->as.s.data, NULL);
-    S->reader_cond_mode = saved_mode;
+    S->reader.reader_cond_mode = saved_mode;
     if (result == NULL && mino_last_error(S) != NULL) {
         /* Throw parse errors as catchable exceptions so user code can
          * handle them via try/catch. */
