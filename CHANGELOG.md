@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.370.0 — Runtime Umbrella Header Split
+
+First step of a multi-tag architectural refactor. `src/runtime/internal.h`
+was a 1796-line umbrella that pulled in every other component's
+`internal.h` and inlined the runtime's per-thread context, STM,
+agent queue, future, lock primitives, and forward declarations
+alongside `struct mino_state`. Every `.c` file under `src/` reached
+for it because the path of least resistance was a single include
+that surfaced everything. The result was a 117-edge cross-component
+import graph in which most of the coupling was phantom: a collections
+file appeared to depend on async because the umbrella pulled async
+in transitively.
+
+This release carves the umbrella into nine focused per-concern
+headers and switches a first batch of consumers to the narrower
+includes. `struct mino_state` itself stays in `runtime/internal.h`
+for now — its decomposition is a later cycle, and several inline
+fast paths (`mino_safepoint_poll`, `mino_lock`, `mino_unlock`) still
+reach into its fields. The umbrella now forwards the new headers
+in place; existing consumers compile unchanged.
+
+| New header                  | What moved in                          |
+|-----------------------------|----------------------------------------|
+| `runtime/value_assert.h`    | tag-debug invariants, `mino_type_of`, accessors, checked size arithmetic |
+| `runtime/runtime_types.h`   | env / dyn-binding frames, module / meta / var registry entries, `struct mino_env` |
+| `runtime/stm_state.h`       | `tx_ref_state_t`, `tx_state_t`         |
+| `runtime/thread_ctx.h`      | `mino_thread_ctx_t`, TLS externs, `try_frame_t`+`MAX_TRY_DEPTH` (moved from eval) |
+| `runtime/agent_queue.h`     | `agent_action_node_t`, pool-kind enum  |
+| `runtime/host_future.h`     | `mino_future_state_t`, `struct mino_future` |
+| `runtime/coordination.h`    | safepoint + STW driver + state-lock declarations |
+| `runtime/error_diag.h`      | error / diag / meta forward decls      |
+| `runtime/env_api.h`         | env-allocation, env-bind, dyn-binding forward decls |
+| `runtime/var_module.h`      | ns_env, var, state PRNG, module decls  |
+
+First-batch consumer switches drop four umbrella edges:
+`gc/profile.c` (mino.h + gc/internal.h), `collections/builders.c`
+(mino.h), `collections/chunk.c` (mino.h + gc/internal.h +
+value_assert.h), and `collections/iter.c` (collections/internal.h
++ eval/internal.h + value_assert.h).
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean.
+
 ## v0.369.0 — Perf cycle G close
 
 Closes the seven-tag v0.363.0 -> v0.369.0 cycle. Plan called
