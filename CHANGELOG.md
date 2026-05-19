@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.364.0 — SATB drop, end-of-mark re-rooting
+
+The hybrid Yuasa-plus-Dijkstra write barrier drops its
+deletion (SATB) half. The major remark phase grows a full
+`gc_mark_roots` pass that re-walks every precise root before
+the final stack scan and mark-stack drain, replacing the
+snapshot-at-begin invariant with an incremental-update
+invariant the existing Dijkstra (insertion) push already
+captures.
+
+**What changes in the barrier.** The `MAJOR_MARK` branch of
+`gc_write_barrier` previously pushed two values for every
+slot store: `old_value` (SATB, preserves snapshot reach) and
+`new_value` (Dijkstra, captures inserted edges). The
+`old_value` push is removed. The `new_value` push is
+unchanged. The `gc_barrier_satb_pushes` field stays on
+`mino_state_t` for `(gc-stats)` ABI continuity; new builds
+always read 0.
+
+**What changes in major remark.** `gc_major_remark` used to
+do only `gc_scan_stack` + `gc_drain_mark_stack`. It now
+also calls `gc_mark_roots` first, which is what makes the
+SATB drop sound. Anything reachable through any root at end
+of mark gets traced; anything that lost every root path is
+correctly swept. State-owned containers whose slot writes
+bypass the per-op barrier for hot-path speed (`bc_regs`,
+per-worker `bc_regs_storage`) get their YOUNG / OLD frontier
+covered by the new remark walk.
+
+**Soundness argument**:
+
+- New OLD-to-OLD edges installed during MAJOR_MARK are
+  captured by Dijkstra. Unchanged.
+- Old OLD-to-OLD edges dropped during MAJOR_MARK: if the
+  dropped value is still reachable through any other root,
+  end-of-mark `gc_mark_roots` re-walk catches it; if not,
+  it is correctly swept.
+- YOUNG promotions during MAJOR_MARK already enqueue the
+  promoted header onto major's mark stack
+  (`gc_major_enqueue_promoted` in minor sweep). Unchanged.
+
+**Cost trade**:
+
+- Per-op barrier work in MAJOR_MARK roughly halves (one push
+  per store instead of two; the dedup on `h->mark` was
+  already free when the value was in the snapshot).
+- One additional `gc_mark_roots` walk per major cycle. Cost
+  is O(roots), bounded by the precise-root enumeration.
+
+`MINO_GC_VERIFY=1 task release-gate` clean; the v0.362-era
+verify trap stays closed. JIT parity byte-identical.
+
 ## v0.363.0 — OLD-VALARR write-barrier retrofit + bc-regs remset pin
 
 Closes the OLD-VALARR remset-miss bug surfaced under

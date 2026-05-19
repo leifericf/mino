@@ -91,6 +91,14 @@ void gc_major_remark(mino_state_t *S)
         gc_build_range_index(S);
     }
     t0 = mino_monotonic_ns();
+    /* Re-walk every precise root before the final stack scan. The
+     * Dijkstra-only barrier captures inserted edges but does not push
+     * the values that fall off slots; anything still reachable through
+     * a root must be marked from the root walk at end-of-mark, not
+     * from the begin-of-mark snapshot. State-owned containers whose
+     * slot writes bypass the barrier (bc_regs and per-worker
+     * bc_regs_storage) get their YOUNG / OLD frontier covered here. */
+    gc_mark_roots(S);
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
     S->gc_major_mark_ns += (size_t)(mino_monotonic_ns() - t0);

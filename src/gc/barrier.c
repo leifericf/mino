@@ -133,41 +133,25 @@ void gc_write_barrier(mino_state_t *S, void *container,
            || ((((gc_hdr_t *)container) - 1)->gen == GC_GEN_YOUNG
                || (((gc_hdr_t *)container) - 1)->gen == GC_GEN_OLD));
     gc_evt_record(S, GC_EVT_WB, container, old_value, new_value, 0, 0);
-    /* During active major marking, the slot store needs both halves of
-     * a hybrid Yuasa-plus-Dijkstra barrier:
+    /* During active major marking, the slot store needs only the
+     * Dijkstra (insertion) half of the barrier: enqueue the just-
+     * installed value so any OLD it transitively reaches gets marked
+     * even if the snapshot path that used to reach those OLDs has been
+     * overwritten in the same write.
      *
-     *   old_value -- pure SATB. Enqueue the previous slot contents so
-     *     anything reachable at snapshot time survives the cycle even
-     *     if the mutator unlinks it before the mark frontier reaches
-     *     container.
+     * The Yuasa (SATB) half that used to push old_value was removed
+     * once gc_major_remark grew a full gc_mark_roots pass. Anything
+     * the mutator drops from a slot during the cycle either:
      *
-     *   new_value -- insertion barrier. Enqueue the just-installed
-     *     value so any OLD it transitively points at gets marked even
-     *     if the snapshot path that used to reach those OLDs has been
-     *     overwritten in the same write. Pure SATB does not cover
-     *     this: the snapshot value going onto the mark stack is the
-     *     OLD that is being dropped, not the OLD that is being kept
-     *     reachable through new_value.
+     *   - is still reachable through some other root; end-of-mark
+     *     re-walks every root and captures it.
+     *   - has lost every root path; correct collection on next sweep.
      *
-     * Both halves skip singletons (not GC-managed) and NULL (empty
-     * slot). gc_mark_push deduplicates against h->mark, so the second
-     * push is free when the value was already in the snapshot. */
-    /* One gc_phase load gates both pushes. Each push is guarded by an
-     * inline h->mark dedup so the function-call path only runs when
-     * there is actually work to enqueue; the previous code paid the
-     * call cost on every barrier in MAJOR_MARK, including the common
-     * case where the value was already marked by an earlier barrier
-     * or by the snapshot root scan. */
+     * Dijkstra still skips singletons (not GC-managed), NULL (empty
+     * slot), and tagged inline values. gc_mark_push deduplicates
+     * against h->mark, so the push is free when the value was already
+     * in the snapshot or rooted. */
     if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
-        if (old_value != NULL
-            && ((uintptr_t)old_value & MINO_TAG_MASK) == 0
-            && !gc_ptr_is_state_embedded(S, old_value)) {
-            gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
-            if (!h_old->mark) {
-                gc_mark_push(S, h_old);
-                S->gc_barrier_satb_pushes++;
-            }
-        }
         if (new_value != NULL
             && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
             && !gc_ptr_is_state_embedded(S, new_value)) {
