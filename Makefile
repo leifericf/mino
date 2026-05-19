@@ -21,8 +21,8 @@ CC      ?= cc
 # either.
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -DMINO_CPJIT=1
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
-           -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
-           -Isrc/diag -Isrc/vendor/imath
+           -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
+           -Isrc/interop -Isrc/diag -Isrc/vendor/imath
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
@@ -43,8 +43,9 @@ BIN = mino$(EXE)
 SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                   src/diag/*.c \
                   src/runtime/*.c src/gc/*.c src/public/*.c \
-                  src/collections/*.c src/prim/*.c src/interop/*.c \
-                  src/regex/*.c src/async/*.c src/vendor/imath/*.c) main.c
+                  src/values/*.c src/collections/*.c src/prim/*.c \
+                  src/interop/*.c src/regex/*.c src/async/*.c \
+                  src/vendor/imath/*.c) main.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/<symbol>.h with a single static const char *<symbol>_src

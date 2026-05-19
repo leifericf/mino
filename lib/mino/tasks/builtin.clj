@@ -8,8 +8,8 @@
 (def ^:private cc      (or (getenv "CC") "cc"))
 (def ^:private include-flags
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
-       " -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop"
-       " -Isrc/diag -Isrc/vendor/imath"))
+       " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
+       " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"))
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        "-DMINO_CPJIT=1 "
@@ -41,7 +41,7 @@
    "src/gc/barrier.c" "src/gc/minor.c"
    "src/gc/trace.c" "src/gc/profile.c" "src/runtime/module.c"
    "src/public/gc.c" "src/public/embed.c"
-   "src/collections/val.c" "src/collections/vec.c" "src/collections/map.c"
+   "src/values/val.c" "src/collections/vec.c" "src/collections/map.c"
    "src/collections/chunk.c"
    "src/collections/rbtree.c"
    "src/collections/builders.c"
@@ -1095,7 +1095,7 @@
    "src/prim/sequences.c"       "sequence primitives -- map / filter / take / etc share lazy-seq glue"
    "src/prim/stm.c"             "STM commit + retry + ref/alter/commute/dosync kept together"
    "src/prim/string.c"          "string primitives -- per-byte / per-char ops share parsing helpers"
-   "src/collections/val.c"      "value layer -- alloc / copy / hash / equality kept with type defs"
+   "src/values/val.c"           "value layer -- alloc / copy / hash / equality kept with type defs"
    "src/runtime/state.c"        "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
    "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"})
 
@@ -1103,7 +1103,7 @@
 (def ^:private fn-allowlist
   #{"src/eval/special.c:eval_impl"     ;; main evaluator dispatch -- inherently large
     "src/eval/read.c:read_form"
-    "src/collections/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
+    "src/values/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
     "src/eval/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
     "src/prim/module.c:mino_env_t *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
     "src/prim/module.c:mino_val_t *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
