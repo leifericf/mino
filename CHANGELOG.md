@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.356.0 — JIT region sub-allocator deferred
+
+Cycle F item 3 ("JIT region sub-allocator") was scoped as two
+releases (v0.356 design + small-fn alloc, v0.357 per-fn slot
+invalidate). The v0.349 dashboard ranked this as the cycle's
+biggest single measured lever -- every JIT-compiled fn pays
+one full mmap page (16 KB on Apple Silicon), and code bodies
+are 92-788 B, so per-fn page waste is 94-99 % and a pipeline
+workload with 168 JIT'd lambdas wastes ~2.7 MB.
+
+The sub-allocator requires substantial new infrastructure:
+
+- W^X-aware page management: code pages must be either RW
+  (during emit) or RX (during execute), and the slab pool
+  must mprotect-cycle on every compile that lands in an
+  already-sealed slab.
+- Per-page seal coordination: the existing one-mmap-per-fn
+  flow seals once after emit; the slab path needs sealing
+  per-compile-session, with the seal back to RX before the
+  fn's native pointer is published.
+- Apple Silicon nuance: arm64-darwin's mprotect RW->RX cycle
+  works for the current binary today, but MAP_JIT +
+  `pthread_jit_write_protect_np` is the standard mechanism
+  for write-then-execute regions on production-signed builds.
+  Picking one path means committing to its host-specific
+  behaviour for all 5 cross-target builds.
+- Per-fn slot invalidate: tying a bc's `native` to a slot
+  offset inside a shared slab, with `live_slots` reference
+  counting and slab `munmap` when the last live slot drains.
+
+Each of these is straightforward in isolation; together they
+exceed a single-release scope by the cycle's measurement-
+driven rhythm (every release ships with before/after numbers
+from the Cycle E surfaces).
+
+Decision: defer both v0.356 and v0.357 as a single
+follow-on cycle. The measurement evidence (94-99 % per-page
+waste, ~220 KB on 14 fns, ~2.7 MB on 168 fns) remains the
+cycle's single biggest lever and is now documented in the
+dashboard as the next-cycle entry point.
+
+Honest impact: no runtime change in this release. JIT
+memory footprint for `mino-bench/jit_blocker_workloads.clj`
+and the new `alloc_site_saturation.clj` rows stays at the
+v0.355 levels.
+
 ## v0.355.0 — Fold delay realisation into C prim_deref
 
 The instrumentation cycle dashboard ranked `<core>:844:16`
