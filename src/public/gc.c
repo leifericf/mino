@@ -325,3 +325,64 @@ unsigned mino_sampler_dump(mino_state_t *S, FILE *out)
     }
     return n_agg;
 }
+
+/* Allocation-site sampler dump. Aggregates the ring's samples by
+ * (site, tag, size_bucket) triple and writes top entries to `out`
+ * sorted by count descending. Returns the number of distinct triples
+ * written. */
+typedef struct alloc_agg {
+    const void *site;
+    uint8_t     tag;
+    uint8_t     size_bucket;
+    uint32_t    count;
+} alloc_agg_t;
+
+static int alloc_agg_cmp(const void *a, const void *b)
+{
+    const alloc_agg_t *aa = (const alloc_agg_t *)a;
+    const alloc_agg_t *bb = (const alloc_agg_t *)b;
+    if (aa->count > bb->count) return -1;
+    if (aa->count < bb->count) return  1;
+    return 0;
+}
+
+unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out)
+{
+    static alloc_agg_t agg[1024];
+    unsigned           n_agg = 0;
+    unsigned           i;
+    unsigned           ring_n;
+    if (S == NULL || out == NULL) return 0;
+    if (S->alloc_sampler_ring == NULL || S->alloc_sampler_ring_count == 0)
+        return 0;
+    ring_n = S->alloc_sampler_ring_count;
+    for (i = 0; i < ring_n; i++) {
+        const mino_alloc_sample_t *s = &S->alloc_sampler_ring[i];
+        unsigned j, found = 0;
+        for (j = 0; j < n_agg; j++) {
+            if (agg[j].site == s->site && agg[j].tag == s->tag
+                && agg[j].size_bucket == s->size_bucket) {
+                agg[j].count++;
+                found = 1;
+                break;
+            }
+        }
+        if (!found && n_agg < 1024u) {
+            agg[n_agg].site        = s->site;
+            agg[n_agg].tag         = s->tag;
+            agg[n_agg].size_bucket = s->size_bucket;
+            agg[n_agg].count       = 1u;
+            n_agg++;
+        }
+    }
+    qsort(agg, n_agg, sizeof(agg[0]), alloc_agg_cmp);
+    fprintf(out, "[alloc-sampler] %u samples over %u distinct sites\n",
+            ring_n, n_agg);
+    for (i = 0; i < n_agg; i++) {
+        fprintf(out,
+                "  samples=%u  site=%p  tag=%u  size-bucket=%u\n",
+                agg[i].count, agg[i].site,
+                (unsigned)agg[i].tag, (unsigned)agg[i].size_bucket);
+    }
+    return n_agg;
+}

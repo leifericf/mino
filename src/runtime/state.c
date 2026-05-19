@@ -549,7 +549,11 @@ void mino_state_free(mino_state_t *S)
     if (S->sampler_ring != NULL && S->sampler_ring_count > 0u) {
         (void)mino_sampler_dump(S, stderr);
     }
+    if (S->alloc_sampler_ring != NULL && S->alloc_sampler_ring_count > 0u) {
+        (void)mino_alloc_sampler_dump(S, stderr);
+    }
     free(S->sampler_ring);
+    free(S->alloc_sampler_ring);
     free(S->var_registry);
     free(S->var_hash);
     free(S->ic_table);

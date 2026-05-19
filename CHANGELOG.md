@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.348.2 — Allocation-site sampler (env-gated light)
+
+Complements the compile-gated `MINO_ALLOC_PROFILE` with an
+always-runnable variant. `MINO_ALLOC_SAMPLE=1` activates the
+sampler; `MINO_ALLOC_SAMPLE_RATE=N` tunes the rate (default
+4096 -- one out of every 4096 allocations). At each
+`gc_alloc_typed_inner` call the counter ticks and, when the
+period trips, a 16-byte `mino_alloc_sample_t` triple
+(immediate return address, tag, log2 size bucket) lands in a
+fixed-size 4096-entry ring (~64 KB).
+
+New public API:
+- `mino_alloc_sampler_dump(state, FILE *)` aggregates the ring
+  by `(site, tag, size_bucket)` and writes a top-N table
+  sorted by count descending. Returns the number of distinct
+  sites written.
+- `mino_state_free` auto-dumps to stderr alongside the v0.348.0
+  CPU sampler dump.
+
+The site value is the immediate caller of `gc_alloc_typed_
+inner`, captured via `__builtin_return_address(0)` -- maps
+back to a source file/line via `addr2line` on the mino binary.
+
+Probe (50 cycles of `(vec (range 0 5000))` +
+`(apply hash-map (range 0 1000))` with rate 512):
+- Top site: `samples=5  site=0x1027da3a0  tag=5  size-bucket=5`
+  (tag 5 = hamt-node; size bucket 5 = 32..63 bytes). The
+  next-densest sites mix tag 4 (vec-node), 7 (ptrarr), 8
+  (valarr). 14 distinct sites covered the run.
+
+Default cost: one branch + counter increment on the alloc
+path when the env flag is unset.
+
+`task release-gate` is OK.
+
 ## v0.348.1 — Native-side sample tag
 
 `mino_sampler_fire` now consults `ctx->jit_invoke_depth` at

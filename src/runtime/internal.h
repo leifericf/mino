@@ -1070,6 +1070,20 @@ struct mino_state {
     uint64_t        sampler_counter;
     struct mino_sample *sampler_ring;  /* malloc'd lazily */
 
+    /* Allocation-site sampler (light). MINO_ALLOC_SAMPLE=1 +
+     * MINO_ALLOC_SAMPLE_RATE=N (default 4096) records one alloc out
+     * of every N into a tiny ring keyed by the immediate alloc-site
+     * return address + tag + size bucket. Fixed-size ring (4096
+     * entries × 16 B = 64 KB) makes this safe to flip on in dev
+     * without recompile. */
+    int             alloc_sampler_enabled;  /* sniffed tri-state */
+    unsigned        alloc_sampler_rate;
+    unsigned        alloc_sampler_ring_cap;
+    unsigned        alloc_sampler_ring_idx;
+    unsigned        alloc_sampler_ring_count;
+    uint64_t        alloc_sampler_counter;
+    struct mino_alloc_sample *alloc_sampler_ring;
+
     /* Pause-time distribution. gc_pause_ring is a circular buffer of
      * the last 256 pause durations (one entry per minor collect, per
      * major-slice, per force-finish, per fully-STW major); each value

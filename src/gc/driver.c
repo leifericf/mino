@@ -317,9 +317,62 @@ void gc_oom_throw(mino_state_t *S, const char *msg)
     abort(); /* Class I: no error frame to recover through */
 }
 
+/* Allocation-site sampler: with probability 1/alloc_sampler_rate
+ * (default 4096), record (return address, tag, size_bucket) for this
+ * alloc into the small ring. Env-gated. The return address is the
+ * immediate caller -- one frame up from gc_alloc_typed_inner. */
+static void mino_alloc_sampler_fire(mino_state_t *S, unsigned char tag,
+                                    size_t size, void *site_ra)
+{
+    unsigned     idx;
+    unsigned     bucket;
+    size_t       sb;
+    if (S->alloc_sampler_enabled == 0) {
+        const char *e = getenv("MINO_ALLOC_SAMPLE");
+        if (e == NULL || e[0] == '\0' || e[0] == '0') {
+            S->alloc_sampler_enabled = -1;
+            return;
+        }
+        const char *r = getenv("MINO_ALLOC_SAMPLE_RATE");
+        S->alloc_sampler_rate = (r != NULL && r[0] != '\0')
+                                ? (unsigned)atoi(r) : 4096u;
+        if (S->alloc_sampler_rate == 0u) S->alloc_sampler_rate = 4096u;
+        S->alloc_sampler_enabled = 1;
+    }
+    if (S->alloc_sampler_enabled != 1) return;
+    S->alloc_sampler_counter++;
+    if ((S->alloc_sampler_counter % S->alloc_sampler_rate) != 0u) return;
+    if (S->alloc_sampler_ring == NULL) {
+        S->alloc_sampler_ring_cap = 4096u;
+        S->alloc_sampler_ring = (mino_alloc_sample_t *)calloc(
+            S->alloc_sampler_ring_cap, sizeof(mino_alloc_sample_t));
+        if (S->alloc_sampler_ring == NULL) {
+            S->alloc_sampler_enabled = -1;
+            return;
+        }
+    }
+    bucket = 0u;
+    sb     = size + 1u;
+    while ((sb >> 1) > 0u && bucket < 31u) { sb >>= 1; bucket++; }
+    idx = S->alloc_sampler_ring_idx;
+    S->alloc_sampler_ring[idx].site        = site_ra;
+    S->alloc_sampler_ring[idx].tag         = tag;
+    S->alloc_sampler_ring[idx].size_bucket = (uint8_t)bucket;
+    S->alloc_sampler_ring[idx].count       = 0;
+    S->alloc_sampler_ring_idx = (idx + 1u) % S->alloc_sampler_ring_cap;
+    if (S->alloc_sampler_ring_count < S->alloc_sampler_ring_cap) {
+        S->alloc_sampler_ring_count++;
+    }
+}
+
 void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
+    /* Capture the immediate caller's return address for the alloc-site
+     * sampler. The fire helper bails fast when disabled, so the
+     * builtin call cost is only paid when sampling is on. */
+    mino_alloc_sampler_fire(S, tag, size,
+                            __builtin_return_address(0));
     if (S->gc_stress == -1) {
         const char *e = getenv("MINO_GC_STRESS");
         S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;

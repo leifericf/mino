@@ -324,6 +324,19 @@ typedef struct mino_sample {
     uint16_t                 flags;
 } mino_sample_t;
 
+/* Allocation-site sampler entry. site is the immediate return address
+ * captured at gc_alloc_typed_inner (the C-side alloc site, which lets
+ * the dashboard map a hot allocator back to a specific source file
+ * and line via addr2line). tag is the GC tag the caller asked for;
+ * size_bucket is clamp(floor(log2(size+1)), 0..31). 16 bytes. */
+typedef struct mino_alloc_sample {
+    const void *site;
+    uint8_t     tag;
+    uint8_t     size_bucket;
+    uint16_t    _pad;
+    uint32_t    count;  /* aggregated at fold; unused for ring slot */
+} mino_alloc_sample_t;
+
 /* BC compile-decline categories (instrumentation). The compiler ticks
  * S->bc_declines[<reason>] at each structural bail-out so the
  * dashboard can rank "which family of input declined most often" --

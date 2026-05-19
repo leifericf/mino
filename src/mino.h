@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 348
-#define MINO_VERSION_PATCH 1
+#define MINO_VERSION_PATCH 2
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1652,6 +1652,16 @@ void mino_gc_pause_hist(mino_state_t *S,
  * empty.
  */
 unsigned mino_sampler_dump(mino_state_t *S, FILE *out);
+
+/*
+ * Allocation-site sampler dump. When MINO_ALLOC_SAMPLE=1 was set in
+ * the environment, the runtime records one (return-address, tag,
+ * size-bucket) tuple for every MINO_ALLOC_SAMPLE_RATE-th allocation
+ * (default 4096) into a tiny ring (4096 entries × 16 B = 64 KB).
+ * Writes a top-N table aggregated by site to `out` and returns the
+ * number of distinct sites written. No-op when sampling is off.
+ */
+unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out);
 
 /* ------------------------------------------------------------------------- */
 /* Allocation profiler [MINO_UNSTABLE_ALLOC_PROFILE]                         */
