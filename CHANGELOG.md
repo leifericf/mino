@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.352.0 — JIT loop matcher: constant-step accumulator
+
+Extends the counted-loop matcher to accept literal-int
+accumulator steps like
+
+    (loop [i 0 acc 0]
+      (if (< i N) (recur (inc i) (+ acc 2)) acc))
+
+and the commuted `(+ 2 acc)` form. Implementation is a pure
+matcher addition: the matcher recognises `(+ acc N)` for any
+non-1 int constant N, allocates a fresh register, emits
+`OP_LOAD_K` to materialise N into that register, then emits the
+`OP_LOOP_INT_LT_ACC` / `OP_LOOP_INT_DEC_ACC` stencil from
+v0.351 with the temp register as the step source.
+
+No new opcodes, no new stencils. The pre-load runs once per
+loop entry; the per-iteration cost is identical to the
+register-step path.
+
+| workload | jit-off | jit-on | speedup |
+|---|---:|---:|---:|
+| `(loop [i 0 acc 0] (if (< i 100k) (recur (inc i) (+ acc 2)) acc))` × 200 | 71 ms | 40 ms | 1.78x |
+
+The matcher exclude N == 1 since that shape is already covered
+by the existing `(+ acc 1) -> OP_LOOP_INT_LT_INC` fast path.
+Negative constants like `(+ acc -3)` work via the same lane.
+
+`task test-jit-parity` byte-identical across all 4 binaries.
+`task release-gate` clean. `task perf-gate` carries the
+pre-existing `small-map` allocation regression from v0.344.0;
+no new regressions.
+
 ## v0.351.0 — JIT loop matcher: arithmetic-step accumulator
 
 Extends the counted-loop matcher to the canonical Clojure-shape

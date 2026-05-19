@@ -1213,6 +1213,54 @@ static int is_inc_step_of_local(compiler_t *c, mino_val_t *step,
         || is_plus_one_of_local(c, step, bname);
 }
 
+/* True when `form` is `(+ bind N)` or `(+ N bind)` resolving the head
+ * to the canonical `+` prim, with the named binding on one side and a
+ * tagged-int literal on the other. Distinct from `is_plus_one_of_local`
+ * because the matched step can be any tagged-int constant -- the
+ * caller materialises N via LOAD_K and feeds the register as the
+ * ACC stencil's step source. Excludes N == 1 since the existing
+ * `(+ acc 1)` path is already handled by `is_inc_step_of_local`. */
+static int is_plus_int_const_of_local(compiler_t *c, mino_val_t *form,
+                                       const char *expected_name,
+                                       long long *out_n)
+{
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *h = form->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
+    if (strcmp(h->as.s.data, "+") != 0) return 0;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return 0;
+    mino_val_t *a1 = args->as.cons.car;
+    mino_val_t *rest = args->as.cons.cdr;
+    if (!mino_is_cons(rest)) return 0;
+    mino_val_t *a2 = rest->as.cons.car;
+    if (rest->as.cons.cdr != NULL
+        && mino_type_of(rest->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(rest->as.cons.cdr)) return 0;
+    }
+    if (a1 == NULL || a2 == NULL) return 0;
+    int a1_sym = (mino_type_of(a1) == MINO_SYMBOL
+                  && strcmp(a1->as.s.data, expected_name) == 0);
+    int a2_sym = (mino_type_of(a2) == MINO_SYMBOL
+                  && strcmp(a2->as.s.data, expected_name) == 0);
+    int a1_int = mino_val_int_p(a1);
+    int a2_int = mino_val_int_p(a2);
+    long long n;
+    if (a1_sym && a2_int) {
+        n = mino_val_int_get(a2);
+    } else if (a2_sym && a1_int) {
+        n = mino_val_int_get(a1);
+    } else {
+        return 0;
+    }
+    /* N == 1 is handled by is_inc_step_of_local; skip so the const
+     * lane stays distinct. */
+    if (n == 1) return 0;
+    if (!head_is_canonical_pure_prim(c, h)) return 0;
+    if (out_n != NULL) *out_n = n;
+    return 1;
+}
+
 /* True when `form` is `(+ this_name other_name)` or `(+ other_name
  * this_name)` resolving the head to the canonical `+` prim. Used to
  * recognise an accumulator step `(+ acc i)` where `acc` is the
@@ -1287,9 +1335,16 @@ static int try_match_dec_shape(compiler_t *c,
      *   test (counter) binding: (dec bname)
      *   acc binding:            (inc bname) / (+ bname 1) / (+ 1 bname)
      *                           OR (+ bname OTHER) / (+ OTHER bname)
-     *                           where OTHER is another loop binding (the
-     *                           ACC shape that emits OP_LOOP_INT_DEC_ACC). */
-    int acc_step_src_idx = -1;
+     *                           where OTHER is another loop binding
+     *                           (register-step ACC; emits
+     *                           OP_LOOP_INT_DEC_ACC) OR
+     *                           (+ bname N) / (+ N bname) where N is
+     *                           a non-1 int constant (const-step ACC;
+     *                           N is materialised via LOAD_K into a
+     *                           temp register that feeds the same op). */
+    int       acc_step_src_idx     = -1;
+    int       acc_step_const_valid = 0;
+    long long acc_step_const       = 0;
     if (!mino_is_cons(else_form)) return 0;
     mino_val_t *eh = else_form->as.cons.car;
     if (eh == NULL || mino_type_of(eh) != MINO_SYMBOL) return 0;
@@ -1310,7 +1365,8 @@ static int try_match_dec_shape(compiler_t *c,
             steps = steps->as.cons.cdr;
             continue;
         }
-        if (n_bindings == 2 && acc_step_src_idx < 0) {
+        if (n_bindings == 2
+            && acc_step_src_idx < 0 && !acc_step_const_valid) {
             const char *other = NULL;
             if (is_plus_two_locals_of(c, step, bname, &other)) {
                 int other_idx = find_binding_idx(bindings, n_bindings,
@@ -1321,11 +1377,30 @@ static int try_match_dec_shape(compiler_t *c,
                     continue;
                 }
             }
+            long long n;
+            if (is_plus_int_const_of_local(c, step, bname, &n)) {
+                acc_step_const_valid = 1;
+                acc_step_const = n;
+                steps = steps->as.cons.cdr;
+                continue;
+            }
         }
         return 0;
     }
     if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
         if (mino_is_cons(steps)) return 0;
+    }
+
+    /* For const-step ACC: pre-load the literal N into a fresh
+     * register before the loop entry so the fused opcode reads it as
+     * a register-shaped step source. */
+    int const_step_reg = -1;
+    if (acc_step_const_valid) {
+        const_step_reg = alloc_reg(c);
+        if (const_step_reg < 0) return -1;
+        int k = add_const(c, mino_int(c->S, acc_step_const));
+        if (k < 0) return -1;
+        emit_abx(c, OP_LOAD_K, (unsigned)const_step_reg, (unsigned)k);
     }
 
     /* All matched. Emit the fused step op at the recur target, then
@@ -1334,10 +1409,12 @@ static int try_match_dec_shape(compiler_t *c,
     int test_reg = this_loop->bind_regs[test_idx];
     if (n_bindings == 1) {
         emit_abc(c, OP_LOOP_INT_DEC, (unsigned)test_reg, 0, 0);
-    } else if (acc_step_src_idx >= 0) {
+    } else if (acc_step_src_idx >= 0 || acc_step_const_valid) {
         int acc_idx = 1 - test_idx;
         int acc_reg = this_loop->bind_regs[acc_idx];
-        int src_reg = this_loop->bind_regs[acc_step_src_idx];
+        int src_reg = acc_step_const_valid
+            ? const_step_reg
+            : this_loop->bind_regs[acc_step_src_idx];
         emit_abc(c, OP_LOOP_INT_DEC_ACC,
                  (unsigned)test_reg, 0, (unsigned)acc_reg);
         emit_abx(c, OP_NOP, 0, (unsigned)src_reg);
@@ -1466,11 +1543,19 @@ static int try_match_lt_shape(compiler_t *c,
      *   counter binding:  (inc bname) / (+ bname 1) / (+ 1 bname)
      *   acc binding:      same as counter (carry-by-1 fast path) OR
      *                     (+ bname OTHER) / (+ OTHER bname) where OTHER
-     *                     is another loop binding (the ACC shape that
-     *                     emits OP_LOOP_INT_LT_ACC).
-     * `acc_step_src_idx` stays -1 in the inc-only path; on ACC match it
-     * holds the binding index whose register feeds the accumulator. */
-    int acc_step_src_idx = -1;
+     *                     is another loop binding (register-step ACC
+     *                     shape, emits OP_LOOP_INT_LT_ACC) OR
+     *                     (+ bname N) / (+ N bname) where N is a
+     *                     non-1 tagged-int constant (const-step ACC
+     *                     shape; materialised via LOAD_K into a temp
+     *                     register that feeds the same opcode).
+     * `acc_step_src_idx` stays -1 in the inc-only path; on register-
+     * step ACC match it holds the binding index whose register feeds
+     * the accumulator. `acc_step_const_valid` / `acc_step_const` hold
+     * the literal for the const-step ACC lane. */
+    int       acc_step_src_idx     = -1;
+    int       acc_step_const_valid = 0;
+    long long acc_step_const       = 0;
     if (!mino_is_cons(recur_form)) return 0;
     mino_val_t *rh = recur_form->as.cons.car;
     if (rh == NULL || mino_type_of(rh) != MINO_SYMBOL) return 0;
@@ -1486,7 +1571,8 @@ static int try_match_lt_shape(compiler_t *c,
             steps = steps->as.cons.cdr;
             continue;
         }
-        if (n_bindings == 2 && i != counter_idx && acc_step_src_idx < 0) {
+        if (n_bindings == 2 && i != counter_idx
+            && acc_step_src_idx < 0 && !acc_step_const_valid) {
             const char *other = NULL;
             if (is_plus_two_locals_of(c, step, bname, &other)) {
                 int other_idx = find_binding_idx(bindings, n_bindings,
@@ -1496,6 +1582,13 @@ static int try_match_lt_shape(compiler_t *c,
                     steps = steps->as.cons.cdr;
                     continue;
                 }
+            }
+            long long n;
+            if (is_plus_int_const_of_local(c, step, bname, &n)) {
+                acc_step_const_valid = 1;
+                acc_step_const = n;
+                steps = steps->as.cons.cdr;
+                continue;
             }
         }
         return 0;
@@ -1512,15 +1605,31 @@ static int try_match_lt_shape(compiler_t *c,
     if (limit_reg < 0) return -1;
     if (compile_expr(c, limit_form, limit_reg, 0) < 0) return -1;
 
+    /* For const-step ACC: pre-load the literal N into a fresh
+     * register before entering the loop body so the fused opcode
+     * has a register-shaped step source. The temp register lives for
+     * the loop's lifetime; no instruction inside the matched body
+     * writes to it. */
+    int const_step_reg = -1;
+    if (acc_step_const_valid) {
+        const_step_reg = alloc_reg(c);
+        if (const_step_reg < 0) return -1;
+        int k = add_const(c, mino_int(c->S, acc_step_const));
+        if (k < 0) return -1;
+        emit_abx(c, OP_LOAD_K, (unsigned)const_step_reg, (unsigned)k);
+    }
+
     this_loop->entry_pc = (int)c->bc->code_len;
     int counter_reg = this_loop->bind_regs[counter_idx];
     if (n_bindings == 1) {
         emit_abc(c, OP_LOOP_INT_LT,
                  (unsigned)counter_reg, (unsigned)limit_reg, 0);
-    } else if (acc_step_src_idx >= 0) {
+    } else if (acc_step_src_idx >= 0 || acc_step_const_valid) {
         int acc_idx = 1 - counter_idx;
         int acc_reg = this_loop->bind_regs[acc_idx];
-        int src_reg = this_loop->bind_regs[acc_step_src_idx];
+        int src_reg = acc_step_const_valid
+            ? const_step_reg
+            : this_loop->bind_regs[acc_step_src_idx];
         emit_abc(c, OP_LOOP_INT_LT_ACC,
                  (unsigned)counter_reg, (unsigned)limit_reg,
                  (unsigned)acc_reg);
