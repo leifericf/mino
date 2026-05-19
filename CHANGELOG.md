@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.346.3 — JIT compile-time + code region usage
+
+Three new always-on fields on `mino_bc_fn_t`:
+
+- `jit_compile_ns` (uint64_t) — cumulative wall-time inside
+  `mino_jit_compile_inner` for this bc, summed across all
+  compile attempts (recompiles after IC-gen invalidation
+  accumulate).
+- `jit_code_bytes` (uint32_t saturating) — the code-stream size
+  emitted by the patcher (exclusive of trampoline + literal pool
+  + page-alignment slack).
+- `jit_code_region_dead` (uint32_t saturating) — slack bytes at
+  the end of the region: `total_size - code - tramp - pool`.
+
+Pair with the existing `bc->native_size` to derive total region
+usage: `region_used = code + tramp + pool`, where `tramp` and
+`pool` are not separately surfaced (they are small and bounded).
+
+`MINO_CPJIT_STATS=tracing` per-fn dump now prints a `compile:
+ns=N  code=K B  region=M B  dead=D B` follow-up line for each
+compiled fn.
+
+Probe (caller -> helper, JIT-compiled):
+- compile: ns=12000  code=260 B  region=16384 B  dead=16084 B.
+
+The 98% dead-byte ratio on tiny fns is a real finding: every
+JIT'd fn pays for a full mmap'd page, so a workload with many
+small JIT'd fns has high region waste. This is a candidate
+lever for the dashboard.
+
+`task release-gate` is OK. All v0.346.3 fields are always-on
+(no env gate); the per-compile cost is one extra
+`mino_monotonic_ns()` pair plus three stores at the very end
+of `mino_jit_compile_inner`, negligible.
+
 ## v0.346.2 — Per-site IC stats (env-gated)
 
 `MINO_JIT_IC_STATS=1` lazily allocates a parallel POD buffer of

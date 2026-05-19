@@ -268,6 +268,17 @@ static void cpjit_stats_dump(void)
                         "    wall: total=%llu ns  avg=%llu ns  max=%llu ns\n",
                         tns, avg, mns);
             }
+            /* Compile cost + region utilisation. Printed for every
+             * compiled fn so the dashboard can rank compile-ns per
+             * bytecode-op and identify pathological compiles. */
+            if (e->compiled) {
+                unsigned long long cns = (unsigned long long)e->bc->jit_compile_ns;
+                unsigned long long cb  = (unsigned long long)e->bc->jit_code_bytes;
+                unsigned long long rd  = (unsigned long long)e->bc->jit_code_region_dead;
+                fprintf(stderr,
+                        "    compile: ns=%llu  code=%llu B  region=%zu B  dead=%llu B\n",
+                        cns, cb, e->native_bytes, rd);
+            }
             /* Per-site IC stats addendum: printed only when ic_stats is
              * populated (MINO_JIT_IC_STATS=1 was set early enough to
              * cover any resolve on this bc). Per-site, ordered by

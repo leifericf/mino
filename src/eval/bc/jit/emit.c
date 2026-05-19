@@ -824,6 +824,19 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
      * compile's table is still reachable through the list. Pointing
      * bc here to the fresh table is the visible-to-runtime atomic. */
     bc->native_pc_offsets = pc_offsets;
+    /* Instrumentation: record the code-stream size (no tramp / pool /
+     * slack) and the dead-byte slack at the end of the region.
+     * (region_bytes - code - tramp - pool) is the slack the region
+     * allocator left because it rounds up to page boundaries. */
+    {
+        size_t used = pos + tramp_pos + pool_pos;
+        bc->jit_code_bytes        = (pos > UINT32_MAX) ? UINT32_MAX
+                                                       : (uint32_t)pos;
+        bc->jit_code_region_dead  = (total_size > used)
+            ? ((total_size - used > UINT32_MAX) ? UINT32_MAX
+                                                : (uint32_t)(total_size - used))
+            : 0u;
+    }
     /* Optional diagnostic: emit a stderr line on each compile when
      * `MINO_CPJIT_TRACE` is set in the environment. The check fires
      * once per compile, off the hot path. */

@@ -478,6 +478,17 @@ typedef struct mino_bc_fn {
      * Each tick adds one increment on the hot path; per-site rather
      * than per-op so the dashboard can rank specific call sites. */
     struct mino_bc_ic_stat *ic_stats;
+    /* JIT compile cost + region utilisation (instrumentation).
+     * jit_compile_ns is the wall-time elapsed inside mino_jit_compile_
+     * inner for this bc (cumulative across recompiles after IC-gen
+     * invalidation). jit_code_bytes is the code-stream size (excluding
+     * trampoline + literal pool + alignment slack); pair with
+     * bc->native_size to derive utilisation. jit_code_region_dead is
+     * the slack bytes at the end of the region. All three stay zero
+     * until a JIT compile lands. */
+    uint64_t         jit_compile_ns;
+    uint32_t         jit_code_bytes;
+    uint32_t         jit_code_region_dead;
 } mino_bc_fn_t;
 
 typedef struct mino_bc_ic_stat {

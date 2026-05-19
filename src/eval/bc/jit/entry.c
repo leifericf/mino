@@ -809,7 +809,9 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
                                                           &first_unknown_pc);
     /* Plain OK -- compile the whole body, no deopt stencil. */
     if (reason == CPJIT_REASON_OK) {
+        long long t0 = mino_monotonic_ns();
         int rc = mino_jit_compile_inner(S, fn_val, (size_t)-1);
+        bc->jit_compile_ns += (uint64_t)(mino_monotonic_ns() - t0);
         mino_jit_stats_record(bc, CPJIT_REASON_OK, 0, 0,
                               rc == 0, rc == 0 ? bc->native_size : 0);
         return rc;
@@ -823,7 +825,9 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     if (reason == CPJIT_REASON_OK_WITH_DEOPT
         && first_unknown_pc <= 0xFFFFu
         && !prefix_has_escaping_branch(bc, first_unknown_pc)) {
+        long long t0 = mino_monotonic_ns();
         int rc = mino_jit_compile_inner(S, fn_val, first_unknown_pc);
+        bc->jit_compile_ns += (uint64_t)(mino_monotonic_ns() - t0);
         mino_jit_stats_record(bc, CPJIT_REASON_OK_WITH_DEOPT,
                               first_unknown_op, first_unknown_pc,
                               rc == 0, rc == 0 ? bc->native_size : 0);
