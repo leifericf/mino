@@ -1811,264 +1811,314 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
     return out;
 }
 
-static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
+/* Per-#-suffix reader. Each handler is called with *p pointing at '#'
+ * (caller does no skipping). Each returns the read value, or NULL on
+ * error (in which case mino_last_error or the reader diag has been
+ * populated). The tagged-literal branch is handled separately because
+ * its trigger is a character class (alpha) rather than a single
+ * literal char. */
+typedef mino_val_t *(*read_dispatch_fn)(mino_state_t *S, const char **p);
+
+static mino_val_t *read_dispatch_namespaced_map(mino_state_t *S, const char **p)
 {
-    char next = *(*p + 1);
-    if (next == ':') {
-        return read_namespaced_map(S, p);
-    }
-    if (next == '{') {
-        ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
-        return read_set_form(S, p);
-    }
-    if (next == '_') {
-        /* Discard reader macro: #_ discards the next form. */
-        mino_val_t *discarded;
-        ADVANCE_N(S, p, 2);
-        discarded = read_form(S, p);
-        (void)discarded;
-        if (mino_last_error(S) != NULL)
-            return NULL;
-        skip_ws(S, p);
-        if (**p == ')' || **p == ']' || **p == '}' || **p == '\0')
-            return NULL; /* let parent handle closing delimiter */
-        return read_form(S, p);
-    }
-    if (next == '(') {
-        return read_anon_fn_form(S, p);
-    }
-    if (next == '\'') {
-        int vq_line = S->reader.reader_line;
-        int vq_col  = S->reader.reader_col;
-        ADVANCE_N(S, p, 2);
-        return read_wrap_one(S, p, "var", "expected form after #'",
-                             vq_line, vq_col);
-    }
-    if (next == '#') {
-        /* Special float tokens: ##Inf, ##-Inf, ##NaN */
-        const char *start;
-        size_t      tlen;
-        ADVANCE_N(S, p, 2);
-        start = *p;
-        tlen = 0;
-        while (!is_terminator((*p)[tlen])) tlen++;
-        ADVANCE_N(S, p, tlen);
-        if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
-            return mino_float(S, INFINITY);
-        if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
-            return mino_float(S, -INFINITY);
-        if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
-            return mino_float(S, NAN);
-        set_reader_diag(S, MRE008, "unknown tagged literal",
+    return read_namespaced_map(S, p);
+}
+
+static mino_val_t *read_dispatch_set(mino_state_t *S, const char **p)
+{
+    ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
+    return read_set_form(S, p);
+}
+
+static mino_val_t *read_dispatch_discard(mino_state_t *S, const char **p)
+{
+    /* Discard reader macro: #_ discards the next form. */
+    mino_val_t *discarded;
+    ADVANCE_N(S, p, 2);
+    discarded = read_form(S, p);
+    (void)discarded;
+    if (mino_last_error(S) != NULL) return NULL;
+    skip_ws(S, p);
+    if (**p == ')' || **p == ']' || **p == '}' || **p == '\0')
+        return NULL; /* let parent handle closing delimiter */
+    return read_form(S, p);
+}
+
+static mino_val_t *read_dispatch_anon_fn(mino_state_t *S, const char **p)
+{
+    return read_anon_fn_form(S, p);
+}
+
+static mino_val_t *read_dispatch_var(mino_state_t *S, const char **p)
+{
+    int vq_line = S->reader.reader_line;
+    int vq_col  = S->reader.reader_col;
+    ADVANCE_N(S, p, 2);
+    return read_wrap_one(S, p, "var", "expected form after #'",
+                         vq_line, vq_col);
+}
+
+static mino_val_t *read_dispatch_special_float(mino_state_t *S, const char **p)
+{
+    /* Special float tokens: ##Inf, ##-Inf, ##NaN */
+    const char *start;
+    size_t      tlen;
+    ADVANCE_N(S, p, 2);
+    start = *p;
+    tlen = 0;
+    while (!is_terminator((*p)[tlen])) tlen++;
+    ADVANCE_N(S, p, tlen);
+    if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
+        return mino_float(S, INFINITY);
+    if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
+        return mino_float(S, -INFINITY);
+    if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
+        return mino_float(S, NAN);
+    set_reader_diag(S, MRE008, "unknown tagged literal",
+                    S->reader.reader_line, S->reader.reader_col);
+    return NULL;
+}
+
+static mino_val_t *read_dispatch_regex(mino_state_t *S, const char **p)
+{
+    /* Regex literal: #"pattern" -- construct a MINO_REGEX directly.
+     * Body bytes pass through to the regex engine verbatim -- no
+     * string-escape processing -- so `\d` reaches the engine as the
+     * two characters backslash and d. Each literal is a distinct
+     * value (MINO_REGEX equality is identity), matching Clojure JVM
+     * where two `#"x"` literals are not `=`. */
+    mino_val_t *str;
+    mino_val_t *rx;
+    ADVANCE(S, p); /* skip '#', now *p points at '"' */
+    str = read_regex_string(S, p);
+    if (str == NULL) return NULL;
+    rx = mino_regex_from_source(S, str);
+    if (rx == NULL) {
+        set_reader_diag(S, MRE008, "regex literal: out of memory",
                         S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
-    if (next == '"') {
-        /* Regex literal: #"pattern" -- construct a MINO_REGEX directly.
-         * Body bytes pass through to the regex engine verbatim -- no
-         * string-escape processing -- so `\d` reaches the engine as
-         * the two characters backslash and d. Each literal is a
-         * distinct value (MINO_REGEX equality is identity), matching
-         * Clojure JVM where two `#"x"` literals are not `=`. */
-        mino_val_t *str;
-        mino_val_t *rx;
-        ADVANCE(S, p); /* skip '#', now *p points at '"' */
-        str = read_regex_string(S, p);
-        if (str == NULL) return NULL;
-        rx = mino_regex_from_source(S, str);
-        if (rx == NULL) {
-            set_reader_diag(S, MRE008, "regex literal: out of memory",
-                            S->reader.reader_line, S->reader.reader_col);
-            return NULL;
-        }
-        return rx;
+    return rx;
+}
+
+static mino_val_t *read_dispatch_cond(mino_state_t *S, const char **p)
+{
+    int         splicing = (*(*p + 2) == '@');
+    mino_val_t *found    = NULL;
+    if (S->reader.reader_cond_mode == 2 /* disallow */) {
+        set_reader_diag(S, MRE007,
+            "reader conditional not allowed when :read-cond is :disallow",
+            S->reader.reader_line, S->reader.reader_col);
+        return NULL;
     }
-    if (next == '?') {
-        int         splicing = (*(*p + 2) == '@');
-        mino_val_t *found    = NULL;
-        if (S->reader.reader_cond_mode == 2 /* disallow */) {
+    if (S->reader.reader_cond_mode == 1 /* preserve */) {
+        mino_val_t *body;
+        ADVANCE_N(S, p, splicing ? 3 : 2);
+        skip_ws(S, p);
+        if (**p != '(') {
             set_reader_diag(S, MRE007,
-                "reader conditional not allowed when :read-cond is :disallow",
+                splicing ? "#?@ must be followed by a list"
+                         : "#? must be followed by a list",
                 S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
-        if (S->reader.reader_cond_mode == 1 /* preserve */) {
-            mino_val_t *body;
-            ADVANCE_N(S, p, splicing ? 3 : 2);
-            skip_ws(S, p);
-            if (**p != '(') {
-                set_reader_diag(S, MRE007,
-                    splicing ? "#?@ must be followed by a list"
-                             : "#? must be followed by a list",
-                    S->reader.reader_line, S->reader.reader_col);
-                return NULL;
-            }
-            body = read_list_form(S, p);
-            if (body == NULL && mino_last_error(S) != NULL) return NULL;
-            return make_reader_conditional_record(S, body, splicing);
-        }
-        if (splicing) {
-            set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
-                            S->reader.reader_line, S->reader.reader_col);
-            return NULL;
-        }
-        ADVANCE_N(S, p, 2);
-        skip_ws(S, p);
-        if (**p != '(') {
-            set_reader_diag(S, MRE007, "#? must be followed by a list",
-                            S->reader.reader_line, S->reader.reader_col);
-            return NULL;
-        }
-        ADVANCE(S, p);
-        read_cond_body(S, p, &found);
-        if (mino_last_error(S) != NULL) return NULL;
-        if (found != NULL) {
-            gc_unpin(1);
-            return found;
-        }
-        /* No branch matched: return NULL without error to signal
-         * "no form produced" to the enclosing reader (list, vector,
-         * or map). The enclosing reader will continue to the next
-         * form. For maps this is critical -- the map reader must
-         * consume and discard the paired value. Set the transient
-         * flag so wrap-one macros (`@`, `'`, `` ` ``, `~`, `~@`,
-         * `#'`) that immediately follow can recognise the cause
-         * and emit a clearer diagnostic instead of "expected form
-         * after @". */
-        S->reader.reader_last_cond_empty = 1;
+        body = read_list_form(S, p);
+        if (body == NULL && mino_last_error(S) != NULL) return NULL;
+        return make_reader_conditional_record(S, body, splicing);
+    }
+    if (splicing) {
+        set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
+                        S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
-    if (isalpha((unsigned char)next)) {
-        /* Tagged literals: #tag form. Resolution order at read time:
-         *
-         *   1. (get *data-readers* 'tag)        -- per-tag reader fn,
-         *                                          called as (fn body)
-         *   2. *default-data-reader-fn*          -- catch-all reader,
-         *                                          called as (fn 'tag body)
-         *   3. tagged-literal record fallback    -- (tagged-literal 'tag body)
-         *
-         * Resolution happens in the reader so the binding visible at
-         * read time decides the reader fn (preserves read/eval
-         * separation: the eval-time binding doesn't affect a value
-         * already produced by read-string). */
-        const char *tag_start;
-        size_t      tag_len;
-        mino_val_t *tag_sym;
-        mino_val_t *body;
-        mino_val_t *readers;
-        mino_val_t *fn;
-        mino_env_t *call_env;
-        ADVANCE(S, p);
-        tag_start = *p;
-        tag_len = 0;
-        while (!is_terminator((*p)[tag_len])) tag_len++;
-        ADVANCE_N(S, p, tag_len);
-        skip_ws(S, p);
-        /* Detect a missing body up front -- EOF or an immediate closing
-         * delimiter -- so we can name the tag in the diagnostic. Without
-         * this, EOF would surface from inside core/tagged-literal as the
-         * misleading "unbound symbol: form" (its `form` parameter bound
-         * to NULL), and a `)` closer would surface as the generic
-         * "unexpected ')'" with no mention that the bare `#tag` was
-         * what consumed everything up to it. */
-        if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
-            char buf[256];
+    ADVANCE_N(S, p, 2);
+    skip_ws(S, p);
+    if (**p != '(') {
+        set_reader_diag(S, MRE007, "#? must be followed by a list",
+                        S->reader.reader_line, S->reader.reader_col);
+        return NULL;
+    }
+    ADVANCE(S, p);
+    read_cond_body(S, p, &found);
+    if (mino_last_error(S) != NULL) return NULL;
+    if (found != NULL) {
+        gc_unpin(1);
+        return found;
+    }
+    /* No branch matched: return NULL without error to signal
+     * "no form produced" to the enclosing reader (list, vector, or
+     * map). The enclosing reader will continue to the next form. For
+     * maps this is critical -- the map reader must consume and
+     * discard the paired value. Set the transient flag so wrap-one
+     * macros (`@`, `'`, `` ` ``, `~`, `~@`, `#'`) that immediately
+     * follow can recognise the cause and emit a clearer diagnostic
+     * instead of "expected form after @". */
+    S->reader.reader_last_cond_empty = 1;
+    return NULL;
+}
+
+/* Tagged literals: #tag form. Resolution order at read time:
+ *
+ *   1. (get *data-readers* 'tag)        -- per-tag reader fn,
+ *                                          called as (fn body)
+ *   2. *default-data-reader-fn*          -- catch-all reader,
+ *                                          called as (fn 'tag body)
+ *   3. tagged-literal record fallback    -- (tagged-literal 'tag body)
+ *
+ * Resolution happens in the reader so the binding visible at read
+ * time decides the reader fn (preserves read/eval separation: the
+ * eval-time binding doesn't affect a value already produced by
+ * read-string). */
+static mino_val_t *read_dispatch_tagged(mino_state_t *S, const char **p)
+{
+    const char *tag_start;
+    size_t      tag_len;
+    mino_val_t *tag_sym;
+    mino_val_t *body;
+    mino_val_t *readers;
+    mino_val_t *fn;
+    mino_env_t *call_env;
+    ADVANCE(S, p);
+    tag_start = *p;
+    tag_len = 0;
+    while (!is_terminator((*p)[tag_len])) tag_len++;
+    ADVANCE_N(S, p, tag_len);
+    skip_ws(S, p);
+    /* Detect a missing body up front -- EOF or an immediate closing
+     * delimiter -- so we can name the tag in the diagnostic. Without
+     * this, EOF would surface from inside core/tagged-literal as the
+     * misleading "unbound symbol: form" (its `form` parameter bound
+     * to NULL), and a `)` closer would surface as the generic
+     * "unexpected ')'" with no mention that the bare `#tag` was
+     * what consumed everything up to it. */
+    if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+            "tagged literal #%.*s: missing form",
+            (int)tag_len, tag_start);
+        set_reader_diag(S, MRE008, buf,
+                        S->reader.reader_line, S->reader.reader_col);
+        return NULL;
+    }
+    body = read_form(S, p);
+    if (body == NULL && mino_last_error(S) != NULL) return NULL;
+    if (body == NULL) {
+        /* Body resolved to nothing via a reader conditional -- the
+         * fallback path would pass NULL through to core's
+         * `tagged-literal` fn and surface as "unbound symbol: form".
+         * Name the offender at the read site. */
+        char buf[256];
+        if (S->reader.reader_last_cond_empty) {
+            snprintf(buf, sizeof(buf),
+                "tagged literal #%.*s: form was a reader conditional"
+                " with no matching arm for dialect :%s",
+                (int)tag_len, tag_start, S->reader.reader_dialect);
+        } else {
             snprintf(buf, sizeof(buf),
                 "tagged literal #%.*s: missing form",
                 (int)tag_len, tag_start);
-            set_reader_diag(S, MRE008, buf,
-                            S->reader.reader_line, S->reader.reader_col);
+        }
+        set_reader_diag(S, MRE008, buf,
+                        S->reader.reader_line, S->reader.reader_col);
+        return NULL;
+    }
+    tag_sym  = mino_symbol_n(S, tag_start, tag_len);
+    call_env = current_ns_env(S);
+
+    /* (0) Built-in #uuid "..." literal. Match exactly tag "uuid"
+     * with a string body; produce a MINO_UUID directly (so the
+     * reader literal is a value, not a tagged-literal record).
+     * Mirrors Clojure's reader where #uuid "..." constructs a
+     * java.util.UUID at read time. */
+    if (tag_len == 4 && memcmp(tag_start, "uuid", 4) == 0
+        && body != NULL && mino_type_of(body) == MINO_STRING) {
+        unsigned char bytes[16];
+        if (!mino_uuid_parse(body->as.s.data, body->as.s.len, bytes)) {
+            set_reader_diag(S, MRE008,
+                "#uuid: malformed UUID string",
+                S->reader.reader_line, S->reader.reader_col);
             return NULL;
         }
-        body = read_form(S, p);
-        if (body == NULL && mino_last_error(S) != NULL) return NULL;
-        if (body == NULL) {
-            /* Body resolved to nothing via a reader conditional -- the
-             * fallback path would pass NULL through to core's
-             * `tagged-literal` fn and surface as "unbound symbol:
-             * form". Name the offender at the read site. */
-            char buf[256];
-            if (S->reader.reader_last_cond_empty) {
-                snprintf(buf, sizeof(buf),
-                    "tagged literal #%.*s: form was a reader conditional"
-                    " with no matching arm for dialect :%s",
-                    (int)tag_len, tag_start, S->reader.reader_dialect);
-            } else {
-                snprintf(buf, sizeof(buf),
-                    "tagged literal #%.*s: missing form",
-                    (int)tag_len, tag_start);
-            }
-            set_reader_diag(S, MRE008, buf,
-                            S->reader.reader_line, S->reader.reader_col);
-            return NULL;
-        }
-        tag_sym  = mino_symbol_n(S, tag_start, tag_len);
-        call_env = current_ns_env(S);
+        return mino_uuid_from_bytes(S, bytes);
+    }
 
-        /* (0) Built-in #uuid "..." literal. Match exactly tag "uuid"
-         * with a string body; produce a MINO_UUID directly (so the
-         * reader literal is a value, not a tagged-literal record).
-         * Mirrors Clojure's reader where #uuid "..." constructs a
-         * java.util.UUID at read time. */
-        if (tag_len == 4 && memcmp(tag_start, "uuid", 4) == 0
-            && body != NULL && mino_type_of(body) == MINO_STRING) {
-            unsigned char bytes[16];
-            if (!mino_uuid_parse(body->as.s.data, body->as.s.len, bytes)) {
-                set_reader_diag(S, MRE008,
-                    "#uuid: malformed UUID string",
-                    S->reader.reader_line, S->reader.reader_col);
-                return NULL;
-            }
-            return mino_uuid_from_bytes(S, bytes);
-        }
-
-        /* (1) per-tag reader from *data-readers*. */
-        readers = (mino_current_ctx(S)->dyn_stack != NULL)
-                    ? dyn_lookup(S, "*data-readers*") : NULL;
-        if (readers == NULL) {
-            mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
-            if (var != NULL && var->as.var.bound) readers = var->as.var.root;
-        }
-        if (readers != NULL && mino_type_of(readers) == MINO_MAP) {
-            fn = map_get_val(readers, tag_sym);
-            if (fn != NULL && call_env != NULL) {
-                mino_val_t *args = mino_cons(S, body, mino_nil(S));
-                return mino_call(S, fn, args, call_env);
-            }
-        }
-
-        /* (2) *default-data-reader-fn*. */
-        fn = (mino_current_ctx(S)->dyn_stack != NULL)
-                ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
-        if (fn == NULL) {
-            mino_val_t *var = var_find(S, "clojure.core",
-                                       "*default-data-reader-fn*");
-            if (var != NULL && var->as.var.bound) fn = var->as.var.root;
-        }
-        if (fn != NULL && mino_type_of(fn) != MINO_NIL && call_env != NULL) {
-            mino_val_t *args = mino_cons(S, tag_sym,
-                                         mino_cons(S, body, mino_nil(S)));
+    /* (1) per-tag reader from *data-readers*. */
+    readers = (mino_current_ctx(S)->dyn_stack != NULL)
+                ? dyn_lookup(S, "*data-readers*") : NULL;
+    if (readers == NULL) {
+        mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
+        if (var != NULL && var->as.var.bound) readers = var->as.var.root;
+    }
+    if (readers != NULL && mino_type_of(readers) == MINO_MAP) {
+        fn = map_get_val(readers, tag_sym);
+        if (fn != NULL && call_env != NULL) {
+            mino_val_t *args = mino_cons(S, body, mino_nil(S));
             return mino_call(S, fn, args, call_env);
         }
+    }
 
-        /* (3) tagged-literal record fallback: build at read time so a
-         * read result is a value (matching canonical Clojure), not a
-         * deferred (tagged-literal ...) call form. */
-        {
-            mino_val_t *tl_var = var_find(S, "clojure.core",
-                                          "tagged-literal");
-            if (tl_var != NULL && tl_var->as.var.bound && call_env != NULL) {
-                mino_val_t *args = mino_cons(S, tag_sym,
-                                             mino_cons(S, body, mino_nil(S)));
-                return mino_call(S, tl_var->as.var.root, args, call_env);
-            }
+    /* (2) *default-data-reader-fn*. */
+    fn = (mino_current_ctx(S)->dyn_stack != NULL)
+            ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
+    if (fn == NULL) {
+        mino_val_t *var = var_find(S, "clojure.core",
+                                   "*default-data-reader-fn*");
+        if (var != NULL && var->as.var.bound) fn = var->as.var.root;
+    }
+    if (fn != NULL && mino_type_of(fn) != MINO_NIL && call_env != NULL) {
+        mino_val_t *args = mino_cons(S, tag_sym,
+                                     mino_cons(S, body, mino_nil(S)));
+        return mino_call(S, fn, args, call_env);
+    }
+
+    /* (3) tagged-literal record fallback: build at read time so a
+     * read result is a value (matching canonical Clojure), not a
+     * deferred (tagged-literal ...) call form. */
+    {
+        mino_val_t *tl_var = var_find(S, "clojure.core", "tagged-literal");
+        if (tl_var != NULL && tl_var->as.var.bound && call_env != NULL) {
+            mino_val_t *args = mino_cons(S, tag_sym,
+                                         mino_cons(S, body, mino_nil(S)));
+            return mino_call(S, tl_var->as.var.root, args, call_env);
         }
+    }
 
-        /* Last-resort: emit the form. Reachable only during very early
-         * bootstrap before clojure.core/tagged-literal exists. */
-        return mino_cons(S, mino_symbol(S, "tagged-literal"),
-                         mino_cons(S, tag_sym,
-                                   mino_cons(S, body, mino_nil(S))));
+    /* Last-resort: emit the form. Reachable only during very early
+     * bootstrap before clojure.core/tagged-literal exists. */
+    return mino_cons(S, mino_symbol(S, "tagged-literal"),
+                     mino_cons(S, tag_sym,
+                               mino_cons(S, body, mino_nil(S))));
+}
+
+/* Single-char dispatch table for the seven specific `#X` shapes the
+ * reader recognises. Tagged literals (`#tag ...`) are matched by
+ * character class (alpha) and fall through the table; ##float-tokens
+ * sit in the table under `#` because the second char IS `#`. */
+static const struct {
+    char             next;
+    read_dispatch_fn fn;
+} k_read_dispatch[] = {
+    {':',  read_dispatch_namespaced_map},
+    {'{',  read_dispatch_set},
+    {'_',  read_dispatch_discard},
+    {'(',  read_dispatch_anon_fn},
+    {'\'', read_dispatch_var},
+    {'#',  read_dispatch_special_float},
+    {'"',  read_dispatch_regex},
+    {'?',  read_dispatch_cond},
+};
+
+static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
+{
+    char   next = *(*p + 1);
+    size_t i;
+    for (i = 0; i < sizeof(k_read_dispatch) / sizeof(k_read_dispatch[0]); i++) {
+        if (k_read_dispatch[i].next == next) {
+            return k_read_dispatch[i].fn(S, p);
+        }
+    }
+    if (isalpha((unsigned char)next)) {
+        return read_dispatch_tagged(S, p);
     }
     set_reader_diag(S, MRE008, "unknown reader dispatch macro",
                     S->reader.reader_line, S->reader.reader_col);
