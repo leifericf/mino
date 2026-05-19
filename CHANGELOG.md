@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.359.0 — Major-mark root pruning deferred (soundness gate)
+
+Cycle F item 6 ("Major-mark root pruning") proposed gating the
+intern-table walks (`sym_intern` + `kw_intern`) on the GC phase
+so MAJOR_MARK skips them. The cycle E dashboard's root-scan
+fraction (25 % of major-mark cost on the alloc-pressure
+workload) was the motivating evidence.
+
+Local measurement confirms the cost is real:
+
+| workload | `root-scan-ns` | `major-mark-ns` | scan share |
+|---|---:|---:|---:|
+| `(dotimes [_ 100] (vec (map inc (range 10000))))` | 1.30 ms | 0.49 ms | 73 % |
+
+Soundness assessment, however, says the plan's
+"conservative-scan-catches-young-interns" claim doesn't hold
+in mino's design: the intern table itself **is** the canonical
+root for interned symbols / keywords. Names interned by code
+that's no longer reachable through any other root path (no var,
+no ns_env entry, no compile-time const) survive only because
+`gc_mark_intern_table` pushes them every cycle. Skipping the
+walk would cause a use-after-free on the next
+`mino_intern_symbol` call that looks up the same name and
+finds a stale pointer in the table.
+
+Fixing this properly requires changing the intern table's
+storage to be weak-ref-shaped: live entries get reaped during
+sweep when the underlying symbol has no other references, and
+the table's lookup path tombstones reaped slots. That's a
+non-trivial change to mino's runtime symbol identity.
+
+Decision: defer. The lever's measured upside (~25 % of
+major-mark cost) is real but its enabling refactor (weak
+intern table) is too large for a single-release scope and
+needs its own design pass. Captured in the next-cycle
+backlog alongside the JIT slab pool and bc-template
+dedup levers.
+
 ## v0.358.0 — Anonymous-fn bc dedup deferred (diagnostic logged)
 
 Cycle F item 4 ("Anonymous-fn bc dedup cache") was scoped to
