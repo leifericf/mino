@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.380.0 — Architecture Cycle 6c: Splits in numeric / collections / sequences
+
+Closes the cycle 6 deferred work on the three plan-named mega-files.
+Each file now hosts at least one extracted sub-domain in a separate
+translation unit:
+
+| Origin file               | Lines before | Lines after | Extractions                                              |
+|---------------------------|-------------:|------------:|----------------------------------------------------------|
+| `src/prim/numeric.c`      | 2806         | 2191        | `numeric_math.c` (203), `numeric_bit.c` (150), `numeric_coerce.c` (310) |
+| `src/prim/collections.c`  | 2312         | 2152        | `collections_transient.c` (174)                          |
+| `src/prim/sequences.c`    | 3499         | 3257        | `sequences_seq.c` (255)                                  |
+
+The extractions follow the cycle-6b pattern: each new file picks up
+the shared helpers via the existing `prim/internal.h` forward decls.
+Where a prim function was previously declared inline next to its
+definition (`prim_math_asin` and the rest of the trig+hyperbolic
+family, log10/log1p/expm1/cbrt, hypot, copy-sign, next-up/down,
+ieee-remainder, to-radians/to-degrees, signum), the declaration moves
+to `prim/internal.h` so the registry table at the bottom of
+`numeric.c` keeps compiling against the extracted definitions.
+
+The `k_prims_numeric[]` / `k_prims_collections[]` / `k_prims_sequences[]`
+registries stay in their original files; the extracted definitions
+satisfy them through external linkage. `prim/install.c` is
+untouched.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean.
+
 ## v0.379.0 — Architecture Cycle 4c: Complete mino_state Decomposition
 
 Closes the cycle 4 deferred work. Every field cluster in
