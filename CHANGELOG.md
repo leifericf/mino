@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.348.0 — Safepoint-based CPU sampler
+
+Adds the first CPU sampling profiler to mino. `MINO_SAMPLE=1`
+activates the sampler; `MINO_SAMPLE_PERIOD=N` tunes the sample
+rate (default 1000 -- one sample every 1000 safepoint hits).
+At each `mino_bc_safepoint` call the counter ticks and, on a
+matching period, the current ctx's `bc_current_bc` /
+`bc_current_pc` are recorded as a `mino_sample_t { bc, pc, op,
+flags }` into a per-state ring buffer (capacity 65536 entries
+= 1 MB, allocated lazily on the first sample).
+
+Two new public API entries in `mino.h`:
+
+- `mino_sampler_dump(state, FILE *)` — aggregates the ring's
+  samples by `(bc, pc)` tuple, sorts by count descending, and
+  writes one line per tuple to the supplied stream. Returns the
+  number of distinct PCs written.
+- `mino_state_free` now invokes `mino_sampler_dump(S, stderr)`
+  automatically before tearing down the ring buffer, so any
+  embedder that ran with `MINO_SAMPLE=1` gets a dump without
+  an explicit hook.
+
+`mino_sample_t` is 16 bytes (one pointer + uint32_t + two
+uint16_t); the `flags` low bit is reserved for the v0.348.1
+native-side tag.
+
+Probe (50000-iter outer loop over fib(20), period 100):
+- `[sampler] 19 samples over 1 distinct PCs`
+- `samples=19  fn=0x1505e98e0  pc=11  op=5` — every sample
+  landed on the inner-loop back-edge (the only frequent
+  safepoint hit). With period 1, the sample distribution would
+  spread across more PCs.
+
+Default cost: one branch + counter increment per safepoint.
+The env probe runs once per state via a sniffed tri-state.
+
+`task release-gate` is OK.
+
 ## v0.347.2 — Collection-size histogram (env-gated)
 
 `MINO_COLL_SIZE_STATS=1` activates a `coll_size_hist[3][32]`

@@ -543,6 +543,13 @@ void mino_state_free(mino_state_t *S)
      * those regions through `native`, but nothing in the heap-free
      * path touches the executable bytes. */
     mino_jit_free_all(S);
+    /* Auto-dump CPU sampler if MINO_SAMPLE was set and the ring has
+     * any samples. Lets the embedder see the dump without an explicit
+     * teardown hook. Free the ring afterwards. */
+    if (S->sampler_ring != NULL && S->sampler_ring_count > 0u) {
+        (void)mino_sampler_dump(S, stderr);
+    }
+    free(S->sampler_ring);
     free(S->var_registry);
     free(S->var_hash);
     free(S->ic_table);
@@ -1380,9 +1387,63 @@ unsigned int mino_tls_safepoint_count = 0;
  * increment. State is in TLS rather than mino_thread_ctx_t so
  * adding the cancel/counter doesn't shift JIT-pinned offsets in
  * main_ctx. */
+/* CPU sampler hook. Called from mino_bc_safepoint and gc_alloc's
+ * safepoint path. Sniffs MINO_SAMPLE on first hit; with the env flag
+ * on, every sampler_period-th call records the current ctx's bc/pc
+ * into the ring buffer. The ring buffer is malloc'd lazily on the
+ * first sample. */
+static void mino_sampler_fire(mino_state_t *S)
+{
+    mino_thread_ctx_t *ctx;
+    mino_sample_t     *slot;
+    const mino_bc_fn_t *bc;
+    size_t              pc;
+    unsigned            idx;
+    if (S->sampler_enabled == 0) {
+        const char *e = getenv("MINO_SAMPLE");
+        if (e == NULL || e[0] == '\0' || e[0] == '0') {
+            S->sampler_enabled = -1;
+        } else {
+            const char *p = getenv("MINO_SAMPLE_PERIOD");
+            S->sampler_period = (p != NULL && p[0] != '\0')
+                                ? (unsigned)atoi(p) : 1000u;
+            if (S->sampler_period == 0u) S->sampler_period = 1000u;
+            S->sampler_enabled = 1;
+        }
+    }
+    if (S->sampler_enabled != 1) return;
+    S->sampler_counter++;
+    if ((S->sampler_counter % S->sampler_period) != 0u) return;
+    if (S->sampler_ring == NULL) {
+        S->sampler_ring_cap = 65536u;
+        S->sampler_ring = (mino_sample_t *)calloc(S->sampler_ring_cap,
+                                                  sizeof(mino_sample_t));
+        if (S->sampler_ring == NULL) {
+            S->sampler_enabled = -1; /* OOM: disable */
+            return;
+        }
+    }
+    ctx = mino_current_ctx(S);
+    bc  = ctx->bc_current_bc;
+    pc  = ctx->bc_current_pc;
+    if (bc == NULL) return;
+    idx = S->sampler_ring_idx;
+    slot = &S->sampler_ring[idx];
+    slot->bc    = bc;
+    slot->pc    = (uint32_t)pc;
+    slot->op    = (bc->code != NULL && pc < bc->code_len)
+                  ? (uint16_t)(bc->code[pc] & 0xffu) : (uint16_t)0xffffu;
+    slot->flags = 0; /* native-side tag added in v0.348.1 */
+    S->sampler_ring_idx = (idx + 1u) % S->sampler_ring_cap;
+    if (S->sampler_ring_count < S->sampler_ring_cap) {
+        S->sampler_ring_count++;
+    }
+}
+
 int mino_bc_safepoint(mino_state_t *S)
 {
     if (S == NULL) return 1;
+    mino_sampler_fire(S);
     if (mino_tls_cancel_ptr != NULL && *mino_tls_cancel_ptr) {
         (void)prim_throw_classified(S, "mino/cancelled", "MTH002",
                                     "future was cancelled");

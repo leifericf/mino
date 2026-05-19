@@ -314,6 +314,16 @@ typedef enum {
     MINO_BC_IC_PROTOCOL = 1
 } mino_bc_ic_kind_t;
 
+/* Single CPU-sampler entry. flags low bit = 1 when the sample fired
+ * inside JIT'd native code (set by the native-side tag in v0.348.1).
+ * Compact (16 bytes) to keep the ring footprint modest. */
+typedef struct mino_sample {
+    const struct mino_bc_fn *bc;
+    uint32_t                 pc;
+    uint16_t                 op;
+    uint16_t                 flags;
+} mino_sample_t;
+
 /* BC compile-decline categories (instrumentation). The compiler ticks
  * S->bc_declines[<reason>] at each structural bail-out so the
  * dashboard can rank "which family of input declined most often" --

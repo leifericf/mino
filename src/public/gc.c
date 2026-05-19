@@ -7,10 +7,12 @@
  * one struct-out getter. All three calls are safe at any GC phase.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include "mino.h"
 #include "public/internal_bridge.h"
-#include "gc/internal.h"  /* for GC_T__COUNT in stats copy */
+#include "gc/internal.h"        /* for GC_T__COUNT in stats copy */
+#include "eval/bc/internal.h"  /* for mino_bc_fn_t + mino_sample_t */
 
 void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
 {
@@ -250,4 +252,72 @@ void mino_gc_pause_hist(mino_state_t *S,
     if (out_count != NULL) {
         *out_count = S->gc_pause_ring_count;
     }
+}
+
+/* CPU sampler dump. Aggregates the current ring's samples by
+ * (fn, pc, op) tuple and writes one line per tuple to `out`, sorted
+ * by sample count descending. Lines look like:
+ *   samples=N fn=<file:line> pc=<P> op=<op-name> [native]
+ *
+ * Returns the number of distinct (fn, pc) pairs written. No-op when
+ * the ring is empty.
+ *
+ * Aggregation uses a fixed-size open-addressed scratch table on the
+ * stack so the dump avoids any heap allocation; entries beyond
+ * SAMPLER_DUMP_TABLE_MAX (the cap) are folded into a single residual
+ * bucket. */
+typedef struct sampler_agg {
+    const mino_bc_fn_t *bc;
+    uint32_t            pc;
+    uint16_t            op;
+    uint32_t            count;
+} sampler_agg_t;
+
+#define SAMPLER_DUMP_TABLE_MAX 4096
+
+static int sampler_agg_cmp(const void *a, const void *b)
+{
+    const sampler_agg_t *aa = (const sampler_agg_t *)a;
+    const sampler_agg_t *bb = (const sampler_agg_t *)b;
+    /* Descending count. */
+    if (aa->count > bb->count) return -1;
+    if (aa->count < bb->count) return  1;
+    return 0;
+}
+
+unsigned mino_sampler_dump(mino_state_t *S, FILE *out)
+{
+    static sampler_agg_t agg[SAMPLER_DUMP_TABLE_MAX];
+    unsigned             n_agg = 0;
+    unsigned             i;
+    unsigned             ring_n;
+    if (S == NULL || out == NULL) return 0;
+    if (S->sampler_ring == NULL || S->sampler_ring_count == 0) return 0;
+    ring_n = S->sampler_ring_count;
+    for (i = 0; i < ring_n; i++) {
+        const mino_sample_t *s = &S->sampler_ring[i];
+        unsigned j, found = 0;
+        for (j = 0; j < n_agg; j++) {
+            if (agg[j].bc == s->bc && agg[j].pc == s->pc) {
+                agg[j].count++;
+                found = 1;
+                break;
+            }
+        }
+        if (!found && n_agg < SAMPLER_DUMP_TABLE_MAX) {
+            agg[n_agg].bc    = s->bc;
+            agg[n_agg].pc    = s->pc;
+            agg[n_agg].op    = s->op;
+            agg[n_agg].count = 1u;
+            n_agg++;
+        }
+    }
+    qsort(agg, n_agg, sizeof(agg[0]), sampler_agg_cmp);
+    fprintf(out, "[sampler] %u samples over %u distinct PCs\n",
+            ring_n, n_agg);
+    for (i = 0; i < n_agg; i++) {
+        fprintf(out, "  samples=%u  fn=%p  pc=%u  op=%u\n",
+                agg[i].count, (void *)agg[i].bc, agg[i].pc, agg[i].op);
+    }
+    return n_agg;
 }

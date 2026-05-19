@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 347
-#define MINO_VERSION_PATCH 2
+#define MINO_VERSION_MINOR 348
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1641,6 +1641,17 @@ void mino_gc_stats_pauses(mino_state_t *S,
 void mino_gc_pause_hist(mino_state_t *S,
                         uint32_t out_buckets[24],
                         unsigned *out_count);
+
+/*
+ * CPU sampler dump. When MINO_SAMPLE=1 was set in the environment,
+ * the runtime records (fn, pc, op) tuples into a ring at each
+ * safepoint hit (default every 1000 safepoints; MINO_SAMPLE_PERIOD
+ * tunes the rate). mino_sampler_dump writes a per-PC histogram of
+ * the current ring contents to `out`. Returns the number of distinct
+ * (fn, pc) pairs written. No-op when sampling is off or the ring is
+ * empty.
+ */
+unsigned mino_sampler_dump(mino_state_t *S, FILE *out);
 
 /* ------------------------------------------------------------------------- */
 /* Allocation profiler [MINO_UNSTABLE_ALLOC_PROFILE]                         */

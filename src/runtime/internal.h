@@ -1055,6 +1055,21 @@ struct mino_state {
     int             coll_size_stats_enabled;  /* sniffed tri-state */
     uint64_t        coll_size_hist[3][32];
 
+    /* Safepoint-based CPU sampler. MINO_SAMPLE=1 turns the sampler on;
+     * MINO_SAMPLE_PERIOD sets the sampling rate (default 1000). Every
+     * mino_bc_safepoint call bumps sampler_counter and, when the
+     * counter modulo period hits zero, records the current bytecode
+     * frame into sampler_ring. sampler_ring is allocated lazily on
+     * the first sample (~1 MB at default cap 65536). The ring wraps,
+     * preserving the most-recent SAMPLER_CAP samples for the dump. */
+    int             sampler_enabled;  /* sniffed tri-state */
+    unsigned        sampler_period;
+    unsigned        sampler_ring_cap;
+    unsigned        sampler_ring_idx;
+    unsigned        sampler_ring_count;
+    uint64_t        sampler_counter;
+    struct mino_sample *sampler_ring;  /* malloc'd lazily */
+
     /* Pause-time distribution. gc_pause_ring is a circular buffer of
      * the last 256 pause durations (one entry per minor collect, per
      * major-slice, per force-finish, per fully-STW major); each value
