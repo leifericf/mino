@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.357.0 — JIT per-fn slot invalidate (folded into v0.356 deferral)
+
+Part 2 of the JIT slab pool work. The per-fn invalidate path
+depends on the v0.356 slab allocator landing first;
+deferring as the second half of the same combined follow-on
+cycle. See v0.356 above for the full rationale.
+
 ## v0.356.0 — JIT region sub-allocator deferred
 
 Cycle F item 3 ("JIT region sub-allocator") was scoped as two
