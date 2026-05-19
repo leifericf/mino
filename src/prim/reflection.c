@@ -1227,7 +1227,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     ks[6]  = mino_keyword(S, "bytes-freed");
     vs[6]  = mino_int(S, (long long)st.bytes_freed);
     ks[7]  = mino_keyword(S, "threshold");
-    vs[7]  = mino_int(S, (long long)S->gc_threshold);
+    vs[7]  = mino_int(S, (long long)S->gc.threshold);
     ks[8]  = mino_keyword(S, "total-gc-ns");
     vs[8]  = mino_int(S, (long long)st.total_gc_ns);
     ks[9]  = mino_keyword(S, "max-gc-ns");
@@ -1237,7 +1237,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     ks[11] = mino_keyword(S, "phase");
     vs[11] = mino_keyword(S, phase_name);
     ks[12] = mino_keyword(S, "nursery-bytes");
-    vs[12] = mino_int(S, (long long)S->gc_nursery_bytes);
+    vs[12] = mino_int(S, (long long)S->gc.nursery_bytes);
     ks[13] = mino_keyword(S, "remset-cap");
     vs[13] = mino_int(S, (long long)st.remset_cap);
     ks[14] = mino_keyword(S, "remset-high-water");

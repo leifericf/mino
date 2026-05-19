@@ -298,7 +298,7 @@ void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
  * enabled, we pay a real call through gc_evt_record_impl. */
 #define gc_evt_record(S, kind, a, b, c, aux, extra) \
     do { \
-        if ((S)->gc_evt_ring != NULL) { \
+        if ((S)->gc.evt_ring != NULL) { \
             gc_evt_record_impl((S), (kind), (a), (b), (c), (aux), (extra)); \
         } \
     } while (0)

@@ -91,26 +91,26 @@ static int gc_ptr_is_state_embedded(const mino_state_t *S, const void *p)
  * (allocated with realloc, freed from state teardown). */
 void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
 {
-    if (S->gc_remset_len == S->gc_remset_cap) {
+    if (S->gc.remset_len == S->gc.remset_cap) {
         size_t      new_cap;
         gc_hdr_t  **nr;
-        if (S->gc_remset_cap == 0) {
+        if (S->gc.remset_cap == 0) {
             new_cap = 256;
-        } else if (S->gc_remset_cap > SIZE_MAX / 2 / sizeof(*nr)) {
+        } else if (S->gc.remset_cap > SIZE_MAX / 2 / sizeof(*nr)) {
             abort(); /* Class I: capacity overflow inside write barrier */
         } else {
-            new_cap = S->gc_remset_cap * 2;
+            new_cap = S->gc.remset_cap * 2;
         }
-        nr = (gc_hdr_t **)realloc(S->gc_remset, new_cap * sizeof(*nr));
+        nr = (gc_hdr_t **)realloc(S->gc.remset, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside write barrier, no recovery path */
         }
-        S->gc_remset     = nr;
-        S->gc_remset_cap = new_cap;
+        S->gc.remset     = nr;
+        S->gc.remset_cap = new_cap;
     }
-    S->gc_remset[S->gc_remset_len++] = container;
-    if (S->gc_remset_len > S->gc_remset_high_water) {
-        S->gc_remset_high_water = S->gc_remset_len;
+    S->gc.remset[S->gc.remset_len++] = container;
+    if (S->gc.remset_len > S->gc.remset_high_water) {
+        S->gc.remset_high_water = S->gc.remset_len;
     }
     container->dirty = 1;
     gc_evt_record(S, GC_EVT_REMSET_ADD, container, NULL, NULL,
@@ -151,7 +151,7 @@ void gc_write_barrier(mino_state_t *S, void *container,
      * slot), and tagged inline values. gc_mark_push deduplicates
      * against h->mark, so the push is free when the value was already
      * in the snapshot or rooted. */
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+    if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
         if (new_value != NULL
             && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
             && !gc_ptr_is_state_embedded(S, new_value)) {
@@ -232,11 +232,11 @@ void gc_remset_reset(mino_state_t *S)
 {
     size_t i;
     gc_evt_record(S, GC_EVT_REMSET_RESET, NULL, NULL, NULL,
-                  (uintptr_t)S->gc_remset_len, 0);
-    for (i = 0; i < S->gc_remset_len; i++) {
-        S->gc_remset[i]->dirty = 0;
+                  (uintptr_t)S->gc.remset_len, 0);
+    for (i = 0; i < S->gc.remset_len; i++) {
+        S->gc.remset[i]->dirty = 0;
     }
-    S->gc_remset_len = 0;
+    S->gc.remset_len = 0;
     gc_remset_pin_bc_regs(S);
 }
 
@@ -249,14 +249,14 @@ void gc_remset_reset(mino_state_t *S)
 void gc_remset_purge_dead(mino_state_t *S)
 {
     size_t i, dst = 0;
-    size_t before = S->gc_remset_len;
-    for (i = 0; i < S->gc_remset_len; i++) {
-        gc_hdr_t *h = S->gc_remset[i];
+    size_t before = S->gc.remset_len;
+    for (i = 0; i < S->gc.remset_len; i++) {
+        gc_hdr_t *h = S->gc.remset[i];
         if (h->mark) {
-            S->gc_remset[dst++] = h;
+            S->gc.remset[dst++] = h;
         }
     }
-    S->gc_remset_len = dst;
+    S->gc.remset_len = dst;
     gc_evt_record(S, GC_EVT_REMSET_PURGE, NULL, NULL, NULL,
                   (uintptr_t)before, (uint16_t)dst);
 }

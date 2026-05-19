@@ -20,12 +20,12 @@ void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
     e->val_ref  = value ? mino_ref(S, value) : NULL;
     e->next     = NULL;
 
-    if (S->async_run_tail) {
-        S->async_run_tail->next = e;
+    if (S->async.run_tail) {
+        S->async.run_tail->next = e;
     } else {
-        S->async_run_head = e;
+        S->async.run_head = e;
     }
-    S->async_run_tail = e;
+    S->async.run_tail = e;
 }
 
 int async_sched_drain(mino_state_t *S, mino_env_t *env)
@@ -35,14 +35,14 @@ int async_sched_drain(mino_state_t *S, mino_env_t *env)
     /* Check expired timers before draining. */
     async_timers_check(S);
 
-    while (S->async_run_head != NULL) {
-        sched_entry_t *e = S->async_run_head;
+    while (S->async.run_head != NULL) {
+        sched_entry_t *e = S->async.run_head;
         mino_val_t *cb  = e->callback;
         mino_val_t *val = e->value;
 
-        S->async_run_head = e->next;
-        if (S->async_run_head == NULL)
-            S->async_run_tail = NULL;
+        S->async.run_head = e->next;
+        if (S->async.run_head == NULL)
+            S->async.run_tail = NULL;
 
         if (cb != NULL) {
             mino_val_t *args;
@@ -67,7 +67,7 @@ int async_sched_drain(mino_state_t *S, mino_env_t *env)
 
 void async_sched_free(mino_state_t *S)
 {
-    sched_entry_t *e = S->async_run_head;
+    sched_entry_t *e = S->async.run_head;
     while (e != NULL) {
         sched_entry_t *next = e->next;
         if (e->cb_ref)  mino_unref(S, e->cb_ref);
@@ -75,14 +75,14 @@ void async_sched_free(mino_state_t *S)
         free(e);
         e = next;
     }
-    S->async_run_head = NULL;
-    S->async_run_tail = NULL;
+    S->async.run_head = NULL;
+    S->async.run_tail = NULL;
 }
 
 void async_sched_mark(mino_state_t *S)
 {
     sched_entry_t *e;
-    for (e = S->async_run_head; e != NULL; e = e->next) {
+    for (e = S->async.run_head; e != NULL; e = e->next) {
         if (e->callback) gc_mark_interior(S, e->callback);
         if (e->value)    gc_mark_interior(S, e->value);
     }

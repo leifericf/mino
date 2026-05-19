@@ -22,8 +22,8 @@ static void ns_env_register_root(mino_state_t *S, mino_env_t *env)
         abort();
     }
     r->env  = env;
-    r->next = S->gc_root_envs;
-    S->gc_root_envs = r;
+    r->next = S->gc.root_envs;
+    S->gc.root_envs = r;
 }
 
 static void ns_env_table_grow(mino_state_t *S)

@@ -86,7 +86,7 @@ static void gc_adapt_major_budget(mino_state_t *S)
     size_t   target;
     size_t   median;
     size_t   budget;
-    if (S->gc_stress == 1) return;
+    if (S->gc.stress == 1) return;
     if (S->gc_pause_ring_count == 0) return;
     S->gc_budget_slices_since_adjust++;
     if (S->gc_budget_slices_since_adjust < 10u) return;
@@ -114,17 +114,17 @@ static void gc_adapt_major_budget(mino_state_t *S)
     median = (size_t)samples[take / 2u];
     target = S->gc_pause_target_ns;
     if (target == 0u) return;
-    budget = S->gc_major_work_budget;
+    budget = S->gc.major_work_budget;
     if (median > target + (target / 5u)) {        /* > 120 % of target */
         if (budget > 256u) {
             size_t halved = budget / 2u;
-            S->gc_major_work_budget = halved < 256u ? 256u : halved;
+            S->gc.major_work_budget = halved < 256u ? 256u : halved;
             S->gc_budget_slices_since_adjust = 0;
         }
     } else if (median < (target * 4u) / 5u) {     /* < 80 % of target */
         if (budget < 65536u) {
             size_t scaled = budget + (budget / 2u);  /* * 1.5 */
-            S->gc_major_work_budget = scaled > 65536u ? 65536u : scaled;
+            S->gc.major_work_budget = scaled > 65536u ? 65536u : scaled;
             S->gc_budget_slices_since_adjust = 0;
         }
     }
@@ -137,11 +137,11 @@ static void gc_adapt_major_budget(mino_state_t *S)
  * instant the first byte is promoted. */
 static int gc_should_start_major(const mino_state_t *S)
 {
-    size_t trigger = S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
-    if (trigger < S->gc_threshold) {
-        trigger = S->gc_threshold;
+    size_t trigger = S->gc.old_baseline * S->gc.major_growth_tenths / 10u;
+    if (trigger < S->gc.threshold) {
+        trigger = S->gc.threshold;
     }
-    return S->gc_bytes_old > trigger;
+    return S->gc.bytes_old > trigger;
 }
 
 /* Drive one incremental slice of an in-flight major: drain up to
@@ -152,20 +152,20 @@ static void gc_major_slice(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->gc_phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
+    if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
     start_ns = mino_monotonic_ns();
-    gc_major_step(S, S->gc_major_work_budget);
-    S->gc_major_step_alloc = 0;
-    if (S->gc_mark_stack_len == 0) {
+    gc_major_step(S, S->gc.major_work_budget);
+    S->gc.major_step_alloc = 0;
+    if (S->gc.mark_stack_len == 0) {
         gc_major_remark(S);
         gc_major_sweep_phase(S);
     }
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
-    S->gc_total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc_max_ns) {
-        S->gc_max_ns = elapsed_ns;
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
     }
     gc_record_pause(S, elapsed_ns);
     gc_adapt_major_budget(S);
@@ -179,7 +179,7 @@ void gc_force_finish_major(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->gc_phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
+    if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
     start_ns = mino_monotonic_ns();
@@ -187,9 +187,9 @@ void gc_force_finish_major(mino_state_t *S)
     gc_major_remark(S);
     gc_major_sweep_phase(S);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
-    S->gc_total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc_max_ns) {
-        S->gc_max_ns = elapsed_ns;
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
     }
     gc_record_pause(S, elapsed_ns);
 }
@@ -213,10 +213,10 @@ static int gc_tick_should_suppress(mino_state_t *S)
  * driven to completion first so the stress major starts from IDLE. */
 static void gc_tick_stress(mino_state_t *S)
 {
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+    if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
         gc_force_finish_major(S);
     }
-    if (S->gc_phase == GC_PHASE_IDLE) {
+    if (S->gc.phase == GC_PHASE_IDLE) {
         gc_major_collect(S);
     }
 }
@@ -234,13 +234,13 @@ static void gc_tick_stress(mino_state_t *S)
  * minor, which is strictly more work in the common case. */
 static void gc_tick_during_major(mino_state_t *S, size_t alloc_size)
 {
-    S->gc_major_step_alloc += alloc_size;
-    if (S->gc_bytes_young > S->gc_nursery_bytes) {
+    S->gc.major_step_alloc += alloc_size;
+    if (S->gc.bytes_young > S->gc.nursery_bytes) {
         gc_force_finish_major(S);
         gc_minor_collect(S);
         return;
     }
-    if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
+    if (S->gc.major_step_alloc >= S->gc.major_alloc_quantum) {
         gc_major_slice(S);
     }
 }
@@ -249,10 +249,10 @@ static void gc_tick_during_major(mino_state_t *S, size_t alloc_size)
  * past the post-major baseline, kick off a fresh incremental major. */
 static void gc_tick_idle(mino_state_t *S)
 {
-    if (S->gc_bytes_young > S->gc_nursery_bytes) {
+    if (S->gc.bytes_young > S->gc.nursery_bytes) {
         gc_minor_collect(S);
     }
-    if (S->gc_phase == GC_PHASE_IDLE && gc_should_start_major(S)) {
+    if (S->gc.phase == GC_PHASE_IDLE && gc_should_start_major(S)) {
         gc_major_begin(S);
         gc_major_slice(S);
     }
@@ -263,11 +263,11 @@ static void gc_tick_idle(mino_state_t *S)
 static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
 {
     if (gc_tick_should_suppress(S)) return;
-    if (S->gc_stress) {
+    if (S->gc.stress) {
         gc_tick_stress(S);
         return;
     }
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+    if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
         gc_tick_during_major(S, alloc_size);
         return;
     }
@@ -307,10 +307,10 @@ static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
     int       fc;
     /* Try free list first for fixed-size allocations. */
     fc = gc_freelist_class(size);
-    if (fc >= 0 && S->gc_freelists[fc] != NULL) {
+    if (fc >= 0 && S->gc.freelists[fc] != NULL) {
         unsigned char was_bump;
-        h = S->gc_freelists[fc];
-        S->gc_freelists[fc] = h->next;
+        h = S->gc.freelists[fc];
+        S->gc.freelists[fc] = h->next;
         was_bump = h->bump;
         memset(h, 0, sizeof(*h) + size);
         h->bump = was_bump;
@@ -351,10 +351,10 @@ static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
     h->gen             = GC_GEN_YOUNG;
     h->age             = 0;
     h->size            = size;
-    h->next            = S->gc_all_young;
-    S->gc_all_young    = h;
-    S->gc_bytes_alloc += size;
-    S->gc_bytes_young += size;
+    h->next            = S->gc.all_young;
+    S->gc.all_young    = h;
+    S->gc.bytes_alloc += size;
+    S->gc.bytes_young += size;
     gc_range_insert(S, h);
     gc_evt_record(S, GC_EVT_ALLOC, h, NULL, NULL,
                   (uintptr_t)tag, (uint16_t)(size & 0xffffu));
@@ -432,9 +432,9 @@ void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
      * builtin call cost is only paid when sampling is on. */
     mino_alloc_sampler_fire(S, tag, size,
                             __builtin_return_address(0));
-    if (S->gc_stress == -1) {
+    if (S->gc.stress == -1) {
         const char *e = getenv("MINO_GC_STRESS");
-        S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
+        S->gc.stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
     }
     /* Safepoint: every alloc is an opportunity for the collector to ask
      * the mutator to park. Gated on gc_depth == 0 so a recursive alloc
@@ -463,7 +463,7 @@ void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
          * by old-gen references the minor skipped and releases the
          * snapshot overhead of the interrupted cycle. */
         gc_force_finish_major(S);
-        if (S->gc_phase == GC_PHASE_IDLE) {
+        if (S->gc.phase == GC_PHASE_IDLE) {
             gc_major_collect(S);
         }
         h = gc_alloc_raw(S, tag, size);
@@ -517,29 +517,29 @@ char *dup_n_inner(mino_state_t *S, const char *s, size_t len)
  * scan as a backstop. */
 static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
 {
-    if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
+    if (S->gc.mark_stack_len == S->gc.mark_stack_cap) {
         size_t     new_cap;
         gc_hdr_t **ns;
-        if (S->gc_mark_stack_cap == 0) {
+        if (S->gc.mark_stack_cap == 0) {
             new_cap = GC_MARK_STACK_INIT;
-        } else if (S->gc_mark_stack_cap > SIZE_MAX / 2 / sizeof(*ns)) {
+        } else if (S->gc.mark_stack_cap > SIZE_MAX / 2 / sizeof(*ns)) {
             S->gc_mark_stack_overflows++;
             return; /* Cap overflow: drop the push (collector falls back
                      * on conservative scan as a backstop). */
         } else {
-            new_cap = S->gc_mark_stack_cap * 2;
+            new_cap = S->gc.mark_stack_cap * 2;
         }
-        ns = (gc_hdr_t **)realloc(S->gc_mark_stack, new_cap * sizeof(*ns));
+        ns = (gc_hdr_t **)realloc(S->gc.mark_stack, new_cap * sizeof(*ns));
         if (ns == NULL) {
             S->gc_mark_stack_overflows++;
             return;
         }
-        S->gc_mark_stack = ns;
-        S->gc_mark_stack_cap = new_cap;
+        S->gc.mark_stack = ns;
+        S->gc.mark_stack_cap = new_cap;
     }
-    S->gc_mark_stack[S->gc_mark_stack_len++] = h;
-    if (S->gc_mark_stack_len > S->gc_mark_stack_high_water) {
-        S->gc_mark_stack_high_water = S->gc_mark_stack_len;
+    S->gc.mark_stack[S->gc.mark_stack_len++] = h;
+    if (S->gc.mark_stack_len > S->gc.mark_stack_high_water) {
+        S->gc.mark_stack_high_water = S->gc.mark_stack_len;
     }
 }
 
@@ -550,7 +550,7 @@ void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
      * mark OLD headers. The write barrier guarantees every OLD-to-YOUNG
      * reference is reachable through the remembered set; other OLD
      * objects live by definition across minor cycles. */
-    if (S->gc_phase == GC_PHASE_MINOR && h->gen == GC_GEN_OLD) return;
+    if (S->gc.phase == GC_PHASE_MINOR && h->gen == GC_GEN_OLD) return;
     h->mark = 1;
     gc_mark_stack_push_raw(S, h);
 }
@@ -728,8 +728,8 @@ void gc_register_default_tracers(mino_state_t *S)
  * untouched beneath. Callers that want a full drain pass 0. */
 void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len)
 {
-    while (S->gc_mark_stack_len > floor_len) {
-        gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
+    while (S->gc.mark_stack_len > floor_len) {
+        gc_hdr_t *h = S->gc.mark_stack[--S->gc.mark_stack_len];
         gc_trace_children(S, h);
     }
 }
@@ -756,7 +756,7 @@ void gc_major_collect(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_IDLE) {
         return;
     }
     start_ns = mino_monotonic_ns();
@@ -772,9 +772,9 @@ void gc_major_collect(mino_state_t *S)
     gc_major_sweep_phase(S);
     gc_release_stw(S);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
-    S->gc_total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc_max_ns) {
-        S->gc_max_ns = elapsed_ns;
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
     }
     gc_record_pause(S, elapsed_ns);
 }

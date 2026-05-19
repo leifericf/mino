@@ -71,6 +71,8 @@
  * the deferred byte-level decomposition lands. See
  * .local/cycle-4-followups.md. */
 #include "gc/state.h"
+#include "prim/stm_state.h"
+#include "async/state.h"
 
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
@@ -88,98 +90,15 @@ struct mino_state {
     mino_thread_ctx_t  main_ctx;
 
     /* === Garbage collection ============================================ */
-    /*
-     * gc_all_young and gc_all_old are singly-linked lists partitioning
-     * every live header by generation. Alloc prepends to the young
-     * list; minor sweep walks only young (promotion moves a header
-     * between lists); major sweep walks old to free dead, and young
-     * only to clear mark bits major set during cross-gen tracing.
-     * Keeping the two separated caps minor-sweep cost at O(young-live)
-     * instead of O(total-heap). */
-    gc_hdr_t       *gc_all_young;
-    gc_hdr_t       *gc_all_old;
-    size_t          gc_bytes_alloc;
-    size_t          gc_bytes_live;
-    size_t          gc_threshold;
-    int             gc_stress;
-    /* gc_depth and gc_stack_bottom moved to mino_thread_ctx_t. */
-    root_env_t     *gc_root_envs;
-    gc_range_t     *gc_ranges;
-    size_t          gc_ranges_len;
-    size_t          gc_ranges_cap;
-    size_t          gc_ranges_valid;
-    /* Allocations between collections land here instead of memmove-ing
-     * into the sorted main array on every alloc. Merged at the next
-     * collection via sort-then-merge (cheaper than re-qsorting n+K
-     * entries from scratch). Grows dynamically; sized by
-     * gc_ranges_pending_cap. */
-    gc_range_t     *gc_ranges_pending;
-    size_t          gc_ranges_pending_len;
-    size_t          gc_ranges_pending_cap;
-    size_t          gc_collections_minor;
-    size_t          gc_collections_major;
-    size_t          gc_total_freed;
-    size_t          gc_total_ns;       /* cumulative ns spent in gc_major_collect */
-    size_t          gc_max_ns;         /* largest single-collection ns */
-    /* Generational bookkeeping. Maintained continuously on every
-     * allocation, sweep, and promotion: gc_bytes_young + gc_bytes_old
-     * equals gc_bytes_alloc. gc_old_baseline captures gc_bytes_old
-     * right after the last major sweep; future major cycles trigger
-     * when gc_bytes_old exceeds baseline by the growth tenths factor. */
-    size_t          gc_bytes_young;
-    size_t          gc_bytes_old;
-    size_t          gc_old_baseline;
-    /* Remembered set: every old-gen header that observed a store of a
-     * young-gen pointer since the last minor or major cycle. The array
-     * doubles as needed. Each member has gc_hdr_t::dirty = 1 while
-     * present, so repeated stores to the same container are deduped. */
-    gc_hdr_t      **gc_remset;
-    size_t          gc_remset_len;
-    size_t          gc_remset_cap;
-    /* High-water mark of gc_remset_len across this state's lifetime.
-     * Exposed via mino_gc_stats so embedders can size remset-sensitive
-     * workloads without instrumenting the runtime. */
-    size_t          gc_remset_high_water;
-    /* Collector tuning parameters. gc_nursery_bytes triggers a minor
-     * collection when exceeded. gc_promotion_age is the number of
-     * minor survivals before a young object flips to old. Both have
-     * defaults from state_init; a future mino_gc_set_param lets a
-     * host override them. */
-    size_t          gc_nursery_bytes;
-    unsigned        gc_promotion_age;
-    /* Major trigger threshold: gc_bytes_old must exceed
-     * gc_old_baseline * gc_major_growth_tenths / 10 (floored at
-     * gc_threshold) before a major cycle is started. Tenths precision
-     * keeps the setter integer-only while covering 1.1x through 4.0x. */
-    unsigned        gc_major_growth_tenths;
-    /* Incremental major parameters. gc_major_work_budget bounds the
-     * headers popped per gc_major_step slice; gc_major_alloc_quantum is
-     * the allocation volume that has to accumulate between steps before
-     * the alloc path fires another slice. gc_major_step_alloc holds
-     * the running count since the previous step. All three are shared
-     * between the driver (gc/driver.c) and gc_major_step itself. */
-    size_t          gc_major_work_budget;
-    size_t          gc_major_alloc_quantum;
-    size_t          gc_major_step_alloc;
-    int             gc_phase;
-    gc_hdr_t      **gc_mark_stack;
-    size_t          gc_mark_stack_len;
-    size_t          gc_mark_stack_cap;
-    /* High-water mark of gc_mark_stack_len across this state's
-     * lifetime. Exposed via mino_gc_stats. */
-    size_t          gc_mark_stack_high_water;
-    gc_hdr_t       *gc_freelists[4];   /* per-size-class recycling */
-    /* Cached [min, max) bounds of all managed allocations. Lets the
-     * conservative stack scan reject non-pointer words before doing a
-     * binary search through the range index. */
-    uintptr_t       gc_heap_min;
-    uintptr_t       gc_heap_max;
-
-    /* GC event ring buffer (diagnostic only). Allocated lazily when
-     * MINO_GC_EVT=1 is set at state init; NULL otherwise and every
-     * recording site is a no-op. See gc_evt_t. */
-    gc_evt_t       *gc_evt_ring;
-    uint64_t        gc_evt_seq;
+    /* GC subsystem state lives in its own block defined in
+     * src/gc/state.h. The block is embedded at the byte position
+     * the inline gc_* fields used to occupy, so the
+     * runtime_layout.h offsets for sf_*, ic_gen, bc_regs,
+     * jit_invoke_ctx are unaffected. The secondary instrumentation
+     * cluster (per-phase timers, pause ring, sampler rings) stays
+     * inline past jit_hot_threshold, where adding new fields is
+     * safe. */
+    gc_state_t      gc;
 
     /* === Value caches: singletons, sentinels, interns, special forms === */
 
@@ -761,27 +680,10 @@ struct mino_state {
     volatile int    stw_request;
 
     /* === STM (refs / dosync) ============================================ */
-
-    /* Global STM commit lock. Held only across the commit phase of a
-     * transaction (read-set validation + writes + version bumps); watch
-     * dispatch runs outside it. Lazy-initialized on the first call to
-     * mino_install_stm so embedders that never opt into STM pay only
-     * the bool tracking cost. Coarse-grained on purpose: mino's typical
-     * embedded workload is single-digit refs and a handful of worker
-     * threads, where contention from a single mutex is far cheaper than
-     * the per-ref pthread_mutex_t alternative. */
-#if defined(_WIN32) && defined(_MSC_VER)
-    void           *stm_commit_lock;   /* CRITICAL_SECTION; lazy */
-#else
-    pthread_mutex_t stm_commit_lock;
-#endif
-    int             stm_lock_inited;
-
-    /* Monotonic counter for tx-ref IDs. Refs get a stable identity
-     * value at construction; not currently used for lock ordering
-     * (single global commit lock) but kept reserved for a future
-     * fine-grained lock matrix. */
-    uint64_t        stm_next_ref_id;
+    /* STM subsystem state lives in src/prim/stm_state.h. The block
+     * is embedded at the byte position the inline stm_* fields used
+     * to occupy. */
+    stm_subsystem_t stm;
 
     /* Monotonic counter for agent IDs. Mirrors stm_next_ref_id so
      * the agent print form (#agent[ID VAL]) can distinguish two
@@ -862,13 +764,10 @@ struct mino_state {
     int                  agent_mu_inited;
 
     /* === Async scheduler and timers ==================================== */
-
-    /* Async scheduler run queue. */
-    sched_entry_t  *async_run_head;
-    sched_entry_t  *async_run_tail;
-
-    /* Async timer queue. */
-    timer_entry_t  *async_timers;
+    /* Async subsystem state lives in src/async/state.h. The block is
+     * embedded at the byte position the inline async_* fields used
+     * to occupy. */
+    async_state_t   async;
 
     /* Reader recursion depth. Bumped on every read_form entry,
      * checked against MINO_READER_MAX_DEPTH so pathological

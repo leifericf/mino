@@ -109,7 +109,7 @@ static void state_init(mino_state_t *S)
             }
         }
     }
-    S->gc_threshold            = 1u << 20;
+    S->gc.threshold            = 1u << 20;
     /* 4 MiB nursery. Allocation-heavy realistic workloads spend
      * 35-43% of wall time in minor-GC at 1 MiB; bumping to 4 MiB cuts
      * total GC time by ~35-40% on `bump-int-map` and `nested-vectors`
@@ -128,16 +128,16 @@ static void state_init(mino_state_t *S)
      * but small regressions on build int-map and nested vec (longer
      * trace per cycle outweighs the cycle count reduction). 8 MiB is
      * the median-best of {1, 4, 8, 16} MiB. */
-    S->gc_nursery_bytes        = 8u * (1u << 20);  /* 8 MiB default */
+    S->gc.nursery_bytes        = 8u * (1u << 20);  /* 8 MiB default */
     {
         const char *nb = getenv("MINO_GC_NURSERY_BYTES");
         if (nb != NULL && nb[0] != '\0') {
             unsigned long v = strtoul(nb, NULL, 10);
-            if (v >= 64u * 1024u) S->gc_nursery_bytes = (size_t)v;
+            if (v >= 64u * 1024u) S->gc.nursery_bytes = (size_t)v;
         }
     }
-    S->gc_promotion_age        = 1;
-    S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
+    S->gc.promotion_age        = 1;
+    S->gc.major_growth_tenths  = 15;        /* 1.5x old-gen growth */
     /* Bump allocator on by default; MINO_BUMP_ALLOC=0 disables it for
      * A/B comparison or to fall back to the calloc-only path. The
      * bump path bypasses libmalloc's per-call bookkeeping by carving
@@ -153,9 +153,9 @@ static void state_init(mino_state_t *S)
     /* Headers popped per slice. 4096 amortizes the per-slice overhead
      * on small-heap allocation-heavy workloads; max pause rises but
      * stays under 20 ms on the GC stress shards. */
-    S->gc_major_work_budget    = 4096;
-    S->gc_major_alloc_quantum  = 16u * 1024u;  /* bytes between auto steps */
-    S->gc_major_step_alloc     = 0;
+    S->gc.major_work_budget    = 4096;
+    S->gc.major_alloc_quantum  = 16u * 1024u;  /* bytes between auto steps */
+    S->gc.major_step_alloc     = 0;
     /* Adaptive slice-budget target: 1 ms default, overridable via
      * MINO_GC_PAUSE_TARGET_NS. The adaptive helper in driver.c reads
      * the recent N=8 pauses and adjusts gc_major_work_budget toward
@@ -173,7 +173,7 @@ static void state_init(mino_state_t *S)
         S->gc_pause_target_ns          = v;
         S->gc_budget_slices_since_adjust = 0;
     }
-    S->gc_stress               = -1;
+    S->gc.stress               = -1;
     S->nil_singleton.type  = MINO_NIL;
     S->true_singleton.type = MINO_BOOL;
     S->true_singleton.as.b = 1;
@@ -199,8 +199,8 @@ static void state_init(mino_state_t *S)
     S->thread_limit        = 1;
     S->thread_count        = 0;
     S->multi_threaded      = 0;
-    S->stm_lock_inited     = 0;
-    S->stm_next_ref_id     = 0;
+    S->stm.lock_inited     = 0;
+    S->stm.next_ref_id     = 0;
     S->agent_next_id       = 0;
     S->agents_shutdown     = 0;
     {
@@ -242,7 +242,7 @@ mino_state_t *mino_state_new(void)
 static void state_free_root_envs(mino_state_t *S)
 {
     root_env_t *r, *rnext;
-    for (r = S->gc_root_envs; r != NULL; r = rnext) {
+    for (r = S->gc.root_envs; r != NULL; r = rnext) {
         rnext = r->next;
         free(r);
     }
@@ -394,13 +394,13 @@ static void state_free_string_interns(mino_state_t *S)
 static void state_free_gc_aux(mino_state_t *S)
 {
     int i;
-    free(S->gc_ranges);
-    free(S->gc_ranges_pending);
-    free(S->gc_mark_stack);
-    free(S->gc_remset);
+    free(S->gc.ranges);
+    free(S->gc.ranges_pending);
+    free(S->gc.mark_stack);
+    free(S->gc.remset);
     gc_evt_free(S);
     for (i = 0; i < 4; i++) {
-        gc_hdr_t *h = S->gc_freelists[i];
+        gc_hdr_t *h = S->gc.freelists[i];
         while (h != NULL) {
             gc_hdr_t *next = h->next;
             if (!h->bump) free(h);
@@ -425,7 +425,7 @@ static void state_free_diag_state(mino_state_t *S)
 /* Free the async-scheduler run queue and timer priority queue. */
 static void state_free_async(mino_state_t *S)
 {
-    struct sched_entry *e = S->async_run_head;
+    struct sched_entry *e = S->async.run_head;
     struct sched_entry *enext;
     while (e != NULL) {
         enext = e->next;
@@ -443,7 +443,7 @@ static void state_free_heap(mino_state_t *S)
 {
     gc_hdr_t *h, *hnext;
     gc_bump_slab_t *slab, *snext;
-    for (h = S->gc_all_young; h != NULL; h = hnext) {
+    for (h = S->gc.all_young; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
@@ -453,7 +453,7 @@ static void state_free_heap(mino_state_t *S)
         }
         if (!h->bump) free(h);
     }
-    for (h = S->gc_all_old; h != NULL; h = hnext) {
+    for (h = S->gc.all_old; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
@@ -629,11 +629,11 @@ void mino_state_free(mino_state_t *S)
     state_free_heap(S);
     mino_state_lock_destroy(S);
     mino_worker_list_lock_destroy(S);
-    if (S->stm_lock_inited) {
+    if (S->stm.lock_inited) {
 #if !(defined(_WIN32) && defined(_MSC_VER))
-        pthread_mutex_destroy(&S->stm_commit_lock);
+        pthread_mutex_destroy(&S->stm.commit_lock);
 #endif
-        S->stm_lock_inited = 0;
+        S->stm.lock_inited = 0;
     }
     free(S);
 }

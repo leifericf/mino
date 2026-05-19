@@ -32,8 +32,8 @@
 static void gc_mark_remset(mino_state_t *S)
 {
     size_t i;
-    for (i = 0; i < S->gc_remset_len; i++) {
-        gc_trace_children(S, S->gc_remset[i]);
+    for (i = 0; i < S->gc.remset_len; i++) {
+        gc_trace_children(S, S->gc.remset[i]);
     }
 }
 
@@ -46,7 +46,7 @@ static void gc_mark_remset(mino_state_t *S)
  * stack so major traces it before sweep. */
 static void gc_minor_sweep(mino_state_t *S, int saved_phase)
 {
-    gc_hdr_t **pp          = &S->gc_all_young;
+    gc_hdr_t **pp          = &S->gc.all_young;
     size_t     freed_bytes = 0;
     size_t     promoted_bytes = 0;
     while (*pp != NULL) {
@@ -73,13 +73,13 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                 }
             }
             S->gc_young_age_bucket[bucket]++;
-            if (h->age >= S->gc_promotion_age) {
+            if (h->age >= S->gc.promotion_age) {
                 /* Promote: unlink from young list, prepend to old list,
                  * flip the gen tag, and keep accounting consistent. */
                 *pp             = h->next;
                 h->gen          = GC_GEN_OLD;
-                h->next         = S->gc_all_old;
-                S->gc_all_old   = h;
+                h->next         = S->gc.all_old;
+                S->gc.all_old   = h;
                 promoted_bytes += h->size;
                 S->gc_bytes_promoted_minor += h->size;
                 gc_evt_record(S, GC_EVT_PROMOTE, h, NULL, NULL,
@@ -123,8 +123,8 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                 /* Bump and calloc-origin headers both round-trip through
                  * the freelist; gc_alloc_raw preserves h->bump across
                  * the memset that resets pulled headers. */
-                h->next            = S->gc_freelists[fc];
-                S->gc_freelists[fc] = h;
+                h->next            = S->gc.freelists[fc];
+                S->gc.freelists[fc] = h;
             } else if (h->bump) {
                 /* No size class: bump-origin leaks in its slab until
                  * state destruction frees the whole slab. */
@@ -135,12 +135,12 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
     }
     /* Accounting: promoted bytes move between generations; freed bytes
      * drop out of both the young tally and the global alloc tally. */
-    S->gc_bytes_young -= freed_bytes;
-    S->gc_bytes_young -= promoted_bytes;
-    S->gc_bytes_old   += promoted_bytes;
-    S->gc_bytes_alloc -= freed_bytes;
-    S->gc_bytes_live   = S->gc_bytes_young + S->gc_bytes_old;
-    S->gc_total_freed += freed_bytes;
+    S->gc.bytes_young -= freed_bytes;
+    S->gc.bytes_young -= promoted_bytes;
+    S->gc.bytes_old   += promoted_bytes;
+    S->gc.bytes_alloc -= freed_bytes;
+    S->gc.bytes_live   = S->gc.bytes_young + S->gc.bytes_old;
+    S->gc.total_freed += freed_bytes;
 }
 
 /* Helper for gc_verify_remset_complete below. If `p` references a
@@ -204,8 +204,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
 
     /* Count + save + zero every mark bit before our classifying pass. */
     n_hdrs = 0;
-    for (h = S->gc_all_young; h != NULL; h = h->next) n_hdrs++;
-    for (h = S->gc_all_old;   h != NULL; h = h->next) n_hdrs++;
+    for (h = S->gc.all_young; h != NULL; h = h->next) n_hdrs++;
+    for (h = S->gc.all_old;   h != NULL; h = h->next) n_hdrs++;
     saved_hdrs  = (gc_hdr_t **)calloc(n_hdrs, sizeof(*saved_hdrs));
     saved_marks = (unsigned char *)calloc(n_hdrs, sizeof(*saved_marks));
     if (saved_hdrs == NULL || saved_marks == NULL) {
@@ -214,13 +214,13 @@ static void gc_verify_remset_complete(mino_state_t *S)
         return;
     }
     idx = 0;
-    for (h = S->gc_all_young; h != NULL; h = h->next) {
+    for (h = S->gc.all_young; h != NULL; h = h->next) {
         saved_hdrs[idx]  = h;
         saved_marks[idx] = h->mark;
         h->mark          = 0;
         idx++;
     }
-    for (h = S->gc_all_old; h != NULL; h = h->next) {
+    for (h = S->gc.all_old; h != NULL; h = h->next) {
         saved_hdrs[idx]  = h;
         saved_marks[idx] = h->mark;
         h->mark          = 0;
@@ -229,16 +229,16 @@ static void gc_verify_remset_complete(mino_state_t *S)
 
     /* Precise + conservative mark pass under MAJOR_MARK so OLD is not
      * filtered from the frontier. */
-    saved_phase = S->gc_phase;
-    saved_floor = S->gc_mark_stack_len;
-    S->gc_phase = GC_PHASE_MAJOR_MARK;
+    saved_phase = S->gc.phase;
+    saved_floor = S->gc.mark_stack_len;
+    S->gc.phase = GC_PHASE_MAJOR_MARK;
     gc_mark_roots(S);
     gc_drain_mark_stack_to(S, saved_floor);
     gc_scan_stack(S);
     gc_drain_mark_stack_to(S, saved_floor);
-    S->gc_phase = saved_phase;
+    S->gc.phase = saved_phase;
 
-    for (h = S->gc_all_old; h != NULL; h = h->next) {
+    for (h = S->gc.all_old; h != NULL; h = h->next) {
         if (h->dirty) continue;
         if (!h->mark) continue; /* dead OLD zombie; skip (see comment above) */
         switch (h->type_tag) {
@@ -443,12 +443,12 @@ void gc_minor_collect(mino_state_t *S)
      * drains only above the floor so major's work is preserved. The
      * saved phase is restored on exit so the outer major cycle
      * continues uninterrupted. */
-    saved_phase = S->gc_phase;
-    mark_floor  = S->gc_mark_stack_len;
-    S->gc_phase = GC_PHASE_MINOR;
+    saved_phase = S->gc.phase;
+    mark_floor  = S->gc.mark_stack_len;
+    S->gc.phase = GC_PHASE_MINOR;
     gc_evt_record(S, GC_EVT_MINOR_BEGIN, NULL, NULL, NULL,
                   (uintptr_t)saved_phase, 0);
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         gc_build_range_index(S);
     } else {
         /* Incremental path: main array stayed sorted across the last
@@ -465,7 +465,7 @@ void gc_minor_collect(mino_state_t *S)
         abort(); /* Class I: nonzero return only under corruption */
     }
     (void)jb;
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         gc_build_range_index(S);
     }
     /* Mark phase: precise roots + remset + conservative stack scan,
@@ -498,13 +498,13 @@ void gc_minor_collect(mino_state_t *S)
     gc_remset_reset(S);
     gc_minor_sweep(S, saved_phase);
     S->gc_minor_sweep_ns += (size_t)(mino_monotonic_ns() - sweep_start_ns);
-    S->gc_collections_minor++;
-    S->gc_phase = saved_phase;
+    S->gc.collections_minor++;
+    S->gc.phase = saved_phase;
     gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
-    S->gc_total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc_max_ns) {
-        S->gc_max_ns = elapsed_ns;
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
     }
     gc_record_pause(S, elapsed_ns);
     mino_current_ctx(S)->gc_depth--;

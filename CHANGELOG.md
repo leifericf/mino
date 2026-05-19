@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.377.0 — Architecture Cycle 4b: Real mino_state Decomposition
+
+Lands the per-subsystem decomposition that cycle 4 (v0.373.0) had
+scope-reduced. Three sub-structs replace inline field clusters in
+`struct mino_state`, each embedded at the byte position the inline
+fields used to occupy so the stencil-ABI-pinned offsets (sf_*,
+ic_gen at 47856, bc_regs at 47888, jit_invoke_ctx at 47936,
+dyn_stack at 25712) are byte-stable:
+
+| Sub-struct        | Header                  | Fields | Field renames |
+|-------------------|-------------------------|-------:|--------------:|
+| `gc_state_t`      | `src/gc/state.h`        | ~40    | ~316 sites    |
+| `stm_subsystem_t` | `src/prim/stm_state.h`  | 3      | ~10 sites     |
+| `async_state_t`   | `src/async/state.h`     | 3      | ~15 sites     |
+
+Field accesses migrate `S->gc_<x>` → `S->gc.<x>`, `S->stm_<x>` →
+`S->stm.<x>`, `S->async_<x>` → `S->async.<x>`. The
+runtime_layout.h `_Static_assert` guards in
+`src/eval/bc/jit/entry.c` continue to verify the JIT-pinned
+offsets at compile time; both clusters preserve the byte layout
+because each sub-struct contains the same fields in the same order
+as the inline block it replaces.
+
+The secondary GC instrumentation cluster (per-phase timers, pause
+ring, sampler rings, alloc-by-tag histogram) stays inline in
+`mino_state` past `jit_hot_threshold`, where adding fields is safe.
+Subsequent decomposition (eval/jit/bc state, threading state,
+vars/modules state, reader/printer state) follows the same pattern;
+the deferred breakdown remains in `.local/cycle-4-followups.md`.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean. No JIT regression (runtime_layout asserts
+pass).
+
 ## v0.376.0 — Architecture Cycle 7: Cleanup + Graph Audit
 
 Closes the seven-tag v0.370.0 → v0.376.0 architecture refactor cycle.

@@ -33,40 +33,40 @@ void gc_build_range_index(mino_state_t *S)
 {
     gc_hdr_t *h;
     size_t    n = 0;
-    for (h = S->gc_all_young; h != NULL; h = h->next) n++;
-    for (h = S->gc_all_old;   h != NULL; h = h->next) n++;
-    if (n > S->gc_ranges_cap) {
+    for (h = S->gc.all_young; h != NULL; h = h->next) n++;
+    for (h = S->gc.all_old;   h != NULL; h = h->next) n++;
+    if (n > S->gc.ranges_cap) {
         size_t      new_cap = n * 2 + 16;
         gc_range_t *nr      = (gc_range_t *)realloc(
-            S->gc_ranges, new_cap * sizeof(*nr));
+            S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside GC; no safe recovery path */
         }
-        S->gc_ranges     = nr;
-        S->gc_ranges_cap = new_cap;
+        S->gc.ranges     = nr;
+        S->gc.ranges_cap = new_cap;
     }
-    S->gc_ranges_len = 0;
-    for (h = S->gc_all_young; h != NULL; h = h->next) {
-        S->gc_ranges[S->gc_ranges_len].start = (uintptr_t)(h + 1);
-        S->gc_ranges[S->gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
-        S->gc_ranges[S->gc_ranges_len].h     = h;
-        S->gc_ranges_len++;
+    S->gc.ranges_len = 0;
+    for (h = S->gc.all_young; h != NULL; h = h->next) {
+        S->gc.ranges[S->gc.ranges_len].start = (uintptr_t)(h + 1);
+        S->gc.ranges[S->gc.ranges_len].end   = (uintptr_t)(h + 1) + h->size;
+        S->gc.ranges[S->gc.ranges_len].h     = h;
+        S->gc.ranges_len++;
     }
-    for (h = S->gc_all_old; h != NULL; h = h->next) {
-        S->gc_ranges[S->gc_ranges_len].start = (uintptr_t)(h + 1);
-        S->gc_ranges[S->gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
-        S->gc_ranges[S->gc_ranges_len].h     = h;
-        S->gc_ranges_len++;
+    for (h = S->gc.all_old; h != NULL; h = h->next) {
+        S->gc.ranges[S->gc.ranges_len].start = (uintptr_t)(h + 1);
+        S->gc.ranges[S->gc.ranges_len].end   = (uintptr_t)(h + 1) + h->size;
+        S->gc.ranges[S->gc.ranges_len].h     = h;
+        S->gc.ranges_len++;
     }
-    qsort(S->gc_ranges, S->gc_ranges_len, sizeof(*S->gc_ranges), gc_range_cmp);
-    S->gc_ranges_valid = 1;
-    S->gc_ranges_pending_len = 0;
-    if (S->gc_ranges_len > 0) {
-        S->gc_heap_min = S->gc_ranges[0].start;
-        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    qsort(S->gc.ranges, S->gc.ranges_len, sizeof(*S->gc.ranges), gc_range_cmp);
+    S->gc.ranges_valid = 1;
+    S->gc.ranges_pending_len = 0;
+    if (S->gc.ranges_len > 0) {
+        S->gc.heap_min = S->gc.ranges[0].start;
+        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
     } else {
-        S->gc_heap_min = 0;
-        S->gc_heap_max = 0;
+        S->gc.heap_min = 0;
+        S->gc.heap_max = 0;
     }
 }
 
@@ -83,31 +83,31 @@ void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
 {
     gc_range_t entry;
 
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         return;
     }
 
-    if (S->gc_ranges_pending_len == S->gc_ranges_pending_cap) {
-        size_t      new_cap = S->gc_ranges_pending_cap == 0
-            ? 64 : S->gc_ranges_pending_cap * 2;
+    if (S->gc.ranges_pending_len == S->gc.ranges_pending_cap) {
+        size_t      new_cap = S->gc.ranges_pending_cap == 0
+            ? 64 : S->gc.ranges_pending_cap * 2;
         gc_range_t *nr      = (gc_range_t *)realloc(
-            S->gc_ranges_pending, new_cap * sizeof(*nr));
+            S->gc.ranges_pending, new_cap * sizeof(*nr));
         if (nr == NULL) {
             /* Fallback to the invalidate path so mutation can continue
              * even under memory pressure. Next collection rebuilds from
              * gc_all. */
-            S->gc_ranges_valid = 0;
+            S->gc.ranges_valid = 0;
             return;
         }
-        S->gc_ranges_pending     = nr;
-        S->gc_ranges_pending_cap = new_cap;
+        S->gc.ranges_pending     = nr;
+        S->gc.ranges_pending_cap = new_cap;
     }
 
     entry.start = (uintptr_t)(h + 1);
     entry.end   = (uintptr_t)(h + 1) + h->size;
     entry.h     = h;
-    S->gc_ranges_pending[S->gc_ranges_pending_len] = entry;
-    S->gc_ranges_pending_len++;
+    S->gc.ranges_pending[S->gc.ranges_pending_len] = entry;
+    S->gc.ranges_pending_len++;
 }
 
 /*
@@ -126,49 +126,49 @@ void gc_range_merge_pending(mino_state_t *S)
     size_t K, N, need, i, j, k;
     gc_range_t *merged;
 
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         return;
     }
-    K = S->gc_ranges_pending_len;
+    K = S->gc.ranges_pending_len;
     if (K == 0) {
         return;
     }
-    qsort(S->gc_ranges_pending, K, sizeof(*S->gc_ranges_pending), gc_range_cmp);
+    qsort(S->gc.ranges_pending, K, sizeof(*S->gc.ranges_pending), gc_range_cmp);
 
-    N = S->gc_ranges_len;
+    N = S->gc.ranges_len;
     need = N + K;
-    if (need > S->gc_ranges_cap) {
+    if (need > S->gc.ranges_cap) {
         size_t      new_cap = need * 2 + 16;
         gc_range_t *nr      = (gc_range_t *)realloc(
-            S->gc_ranges, new_cap * sizeof(*nr));
+            S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside GC; no safe recovery path */
         }
-        S->gc_ranges     = nr;
-        S->gc_ranges_cap = new_cap;
+        S->gc.ranges     = nr;
+        S->gc.ranges_cap = new_cap;
     }
     /* In-place merge from the back to avoid a scratch buffer. Walk both
      * inputs from high to low and fill gc_ranges from index need-1
      * downward; N and K cursors track remaining unmerged entries. */
-    merged = S->gc_ranges;
+    merged = S->gc.ranges;
     i = N;
     j = K;
     k = need;
     while (j > 0) {
-        if (i > 0 && merged[i - 1].start > S->gc_ranges_pending[j - 1].start) {
+        if (i > 0 && merged[i - 1].start > S->gc.ranges_pending[j - 1].start) {
             merged[k - 1] = merged[i - 1];
             i--;
         } else {
-            merged[k - 1] = S->gc_ranges_pending[j - 1];
+            merged[k - 1] = S->gc.ranges_pending[j - 1];
             j--;
         }
         k--;
     }
-    S->gc_ranges_len = need;
-    S->gc_ranges_pending_len = 0;
-    if (S->gc_ranges_len > 0) {
-        S->gc_heap_min = S->gc_ranges[0].start;
-        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    S->gc.ranges_len = need;
+    S->gc.ranges_pending_len = 0;
+    if (S->gc.ranges_len > 0) {
+        S->gc.heap_min = S->gc.ranges[0].start;
+        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
     }
 }
 
@@ -185,22 +185,22 @@ void gc_range_merge_pending(mino_state_t *S)
 void gc_range_compact_after_minor_mark(mino_state_t *S)
 {
     size_t dst = 0, src;
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         return;
     }
-    for (src = 0; src < S->gc_ranges_len; src++) {
-        gc_hdr_t *h = S->gc_ranges[src].h;
+    for (src = 0; src < S->gc.ranges_len; src++) {
+        gc_hdr_t *h = S->gc.ranges[src].h;
         if (h->gen == GC_GEN_OLD || h->mark) {
-            S->gc_ranges[dst++] = S->gc_ranges[src];
+            S->gc.ranges[dst++] = S->gc.ranges[src];
         }
     }
-    S->gc_ranges_len = dst;
-    if (S->gc_ranges_len > 0) {
-        S->gc_heap_min = S->gc_ranges[0].start;
-        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    S->gc.ranges_len = dst;
+    if (S->gc.ranges_len > 0) {
+        S->gc.heap_min = S->gc.ranges[0].start;
+        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
     } else {
-        S->gc_heap_min = 0;
-        S->gc_heap_max = 0;
+        S->gc.heap_min = 0;
+        S->gc.heap_max = 0;
     }
 }
 
@@ -214,28 +214,28 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
 {
     uintptr_t u  = (uintptr_t)p;
     size_t    lo = 0;
-    size_t    hi = S->gc_ranges_len;
+    size_t    hi = S->gc.ranges_len;
     size_t    i;
     /* Fast reject for stack words outside the heap — the conservative
      * scan examines every aligned machine word, and most of them are
      * not pointers into the managed heap. */
-    if ((u < S->gc_heap_min || u >= S->gc_heap_max)
-        && S->gc_ranges_pending_len == 0) {
+    if ((u < S->gc.heap_min || u >= S->gc.heap_max)
+        && S->gc.ranges_pending_len == 0) {
         return NULL;
     }
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
-        if (u < S->gc_ranges[mid].start) {
+        if (u < S->gc.ranges[mid].start) {
             hi = mid;
-        } else if (u >= S->gc_ranges[mid].end) {
+        } else if (u >= S->gc.ranges[mid].end) {
             lo = mid + 1;
         } else {
-            return S->gc_ranges[mid].h;
+            return S->gc.ranges[mid].h;
         }
     }
-    for (i = 0; i < S->gc_ranges_pending_len; i++) {
-        if (u >= S->gc_ranges_pending[i].start && u < S->gc_ranges_pending[i].end) {
-            return S->gc_ranges_pending[i].h;
+    for (i = 0; i < S->gc.ranges_pending_len; i++) {
+        if (u >= S->gc.ranges_pending[i].start && u < S->gc.ranges_pending[i].end) {
+            return S->gc.ranges_pending[i].h;
         }
     }
     return NULL;
@@ -267,7 +267,7 @@ static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
      * major cycle prunes it or another root captures it; gc_mark_push's
      * per-phase filter short-circuits OLD entries during MINOR so the
      * loop is bounded by intern.len. */
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK) return;
+    if (S->gc.phase == GC_PHASE_MAJOR_MARK) return;
     for (i = 0; i < tbl->len; i++) {
         mino_val_t *v = tbl->entries[i];
         gc_hdr_t   *h;
@@ -340,7 +340,7 @@ static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
 static void gc_mark_envs_and_interns(mino_state_t *S)
 {
     root_env_t *r;
-    for (r = S->gc_root_envs; r != NULL; r = r->next) {
+    for (r = S->gc.root_envs; r != NULL; r = r->next) {
         gc_mark_interior(S, r->env);
     }
     gc_mark_intern_table(S, &S->sym_intern);
@@ -566,7 +566,7 @@ static void gc_mark_runtime_globals(mino_state_t *S)
 static void gc_mark_async_roots(mino_state_t *S)
 {
     struct sched_entry *e;
-    for (e = S->async_run_head; e != NULL; e = e->next) {
+    for (e = S->async.run_head; e != NULL; e = e->next) {
         gc_mark_interior(S, e->callback);
         gc_mark_interior(S, e->value);
     }

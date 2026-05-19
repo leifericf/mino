@@ -41,20 +41,20 @@ void gc_evt_init(mino_state_t *S)
 {
     const char *env = getenv("MINO_GC_EVT");
     if (env == NULL || env[0] == '\0' || env[0] == '0') {
-        S->gc_evt_ring = NULL;
+        S->gc.evt_ring = NULL;
         return;
     }
-    S->gc_evt_ring = (gc_evt_t *)calloc(GC_EVT_CAP, sizeof(gc_evt_t));
-    if (S->gc_evt_ring == NULL) {
+    S->gc.evt_ring = (gc_evt_t *)calloc(GC_EVT_CAP, sizeof(gc_evt_t));
+    if (S->gc.evt_ring == NULL) {
         abort(); /* Class I: diagnostic init; no recovery path */
     }
-    S->gc_evt_seq = 1; /* 0 reserved for "empty" */
+    S->gc.evt_seq = 1; /* 0 reserved for "empty" */
 }
 
 void gc_evt_free(mino_state_t *S)
 {
-    free(S->gc_evt_ring);
-    S->gc_evt_ring = NULL;
+    free(S->gc.evt_ring);
+    S->gc.evt_ring = NULL;
 }
 
 /* Callers reach this via the gc_evt_record macro, which already
@@ -65,14 +65,14 @@ void gc_evt_record_impl(mino_state_t *S, uint8_t kind, const void *a,
 {
     gc_evt_t *e;
     uint64_t  seq;
-    seq = S->gc_evt_seq++;
-    e   = &S->gc_evt_ring[seq & GC_EVT_CAP_MASK];
+    seq = S->gc.evt_seq++;
+    e   = &S->gc.evt_ring[seq & GC_EVT_CAP_MASK];
     /* Payload first; seq last as commit marker. Single-threaded so no
      * barriers needed; the ordering just keeps the dump consistent if
      * we ever read from a signal handler. */
-    e->cycle = (uint32_t)S->gc_collections_minor;
+    e->cycle = (uint32_t)S->gc.collections_minor;
     e->kind  = kind;
-    e->phase = (uint8_t)S->gc_phase;
+    e->phase = (uint8_t)S->gc.phase;
     e->extra = extra;
     e->a     = (void *)a;
     e->b     = (void *)b;
@@ -121,18 +121,18 @@ void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
 {
     uint64_t end, start, i;
     size_t   dumped = 0;
-    if (S->gc_evt_ring == NULL) {
+    if (S->gc.evt_ring == NULL) {
         fprintf(stderr, "[gc-evt] ring not enabled (set MINO_GC_EVT=1)\n");
         return;
     }
-    end   = S->gc_evt_seq;
+    end   = S->gc.evt_seq;
     start = (end > GC_EVT_CAP) ? (end - GC_EVT_CAP) : 1;
     fprintf(stderr,
             "[gc-evt] dumping events seq=[%llu..%llu) filter=%p/%p/%p\n",
             (unsigned long long)start, (unsigned long long)end,
             p1, p2, p3);
     for (i = start; i < end; i++) {
-        const gc_evt_t *e = &S->gc_evt_ring[i & GC_EVT_CAP_MASK];
+        const gc_evt_t *e = &S->gc.evt_ring[i & GC_EVT_CAP_MASK];
         if (e->seq != i) continue; /* overwritten or never committed */
         if (!gc_evt_mentions(e, p1, p2, p3)) continue;
         fprintf(stderr,
@@ -158,8 +158,8 @@ static void gc_for_each_hdr(mino_state_t *S,
                             void *user)
 {
     gc_hdr_t *h;
-    for (h = S->gc_all_young; h != NULL; h = h->next) fn(h, user);
-    for (h = S->gc_all_old;   h != NULL; h = h->next) fn(h, user);
+    for (h = S->gc.all_young; h != NULL; h = h->next) fn(h, user);
+    for (h = S->gc.all_old;   h != NULL; h = h->next) fn(h, user);
 }
 
 /* Count headers live on both lists, used to size the save buffer. */
@@ -167,8 +167,8 @@ static size_t gc_count_hdrs(mino_state_t *S)
 {
     size_t    n = 0;
     gc_hdr_t *h;
-    for (h = S->gc_all_young; h != NULL; h = h->next) n++;
-    for (h = S->gc_all_old;   h != NULL; h = h->next) n++;
+    for (h = S->gc.all_young; h != NULL; h = h->next) n++;
+    for (h = S->gc.all_old;   h != NULL; h = h->next) n++;
     return n;
 }
 
@@ -193,14 +193,14 @@ int gc_classify_offender(mino_state_t *S, gc_hdr_t *offender)
 {
     struct mark_save_ctx ctx;
     size_t   i, n;
-    int      saved_phase = S->gc_phase;
-    size_t   saved_floor = S->gc_mark_stack_len;
+    int      saved_phase = S->gc.phase;
+    size_t   saved_floor = S->gc.mark_stack_len;
     int      pass1, pass2;
-    size_t   saved_ranges_valid = S->gc_ranges_valid;
+    size_t   saved_ranges_valid = S->gc.ranges_valid;
 
     /* Build a fresh range index so gc_find_header_for_ptr works, then
      * freeze it for the duration of classification. */
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         gc_build_range_index(S);
     }
 
@@ -223,7 +223,7 @@ int gc_classify_offender(mino_state_t *S, gc_hdr_t *offender)
     /* Flip phase to MAJOR_MARK so gc_mark_push won't filter OLD out of
      * the frontier (otherwise pass 1 would be minor-scope and never
      * mark the OLD offender even if it is genuinely reachable). */
-    S->gc_phase = GC_PHASE_MAJOR_MARK;
+    S->gc.phase = GC_PHASE_MAJOR_MARK;
 
     /* Pass 1: precise-only. */
     gc_mark_roots(S);
@@ -244,8 +244,8 @@ int gc_classify_offender(mino_state_t *S, gc_hdr_t *offender)
     for (i = 0; i < ctx.idx; i++) {
         ctx.hdrs[i]->mark = ctx.marks[i];
     }
-    S->gc_phase        = saved_phase;
-    S->gc_ranges_valid = saved_ranges_valid;
+    S->gc.phase        = saved_phase;
+    S->gc.ranges_valid = saved_ranges_valid;
 
     free(ctx.hdrs);
     free(ctx.marks);

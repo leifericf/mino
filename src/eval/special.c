@@ -1008,7 +1008,7 @@ static int eval_check_limits(mino_state_t *S)
                       "step limit exceeded");
         return 0;
     }
-    if (S->limit_heap > 0 && S->gc_bytes_alloc > S->limit_heap) {
+    if (S->limit_heap > 0 && S->gc.bytes_alloc > S->limit_heap) {
         mino_current_ctx(S)->limit_exceeded = 1;
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
                       "heap limit exceeded");

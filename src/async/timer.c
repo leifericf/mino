@@ -58,12 +58,12 @@ int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
     entry->next        = NULL;
 
     /* Insert sorted by deadline (earliest first). */
-    if (S->async_timers == NULL ||
-        entry->deadline_ms <= S->async_timers->deadline_ms) {
-        entry->next     = S->async_timers;
-        S->async_timers = entry;
+    if (S->async.timers == NULL ||
+        entry->deadline_ms <= S->async.timers->deadline_ms) {
+        entry->next     = S->async.timers;
+        S->async.timers = entry;
     } else {
-        timer_entry_t *cur = S->async_timers;
+        timer_entry_t *cur = S->async.timers;
         while (cur->next != NULL &&
                cur->next->deadline_ms < entry->deadline_ms) {
             cur = cur->next;
@@ -80,11 +80,11 @@ void async_timers_check(mino_state_t *S)
     double t = now_ms();
     timer_entry_t *entry;
 
-    while (S->async_timers != NULL) {
-        entry = S->async_timers;
+    while (S->async.timers != NULL) {
+        entry = S->async.timers;
         if (entry->deadline_ms > t) break;
 
-        S->async_timers = entry->next;
+        S->async.timers = entry->next;
 
         /* Hand the callback to the scheduler; it runs on the next drain
          * pass and receives nil as its argument. */
@@ -97,20 +97,20 @@ void async_timers_check(mino_state_t *S)
 
 void async_timers_free(mino_state_t *S)
 {
-    timer_entry_t *entry = S->async_timers;
+    timer_entry_t *entry = S->async.timers;
     while (entry != NULL) {
         timer_entry_t *next = entry->next;
         if (entry->cb_ref) mino_unref(S, entry->cb_ref);
         free(entry);
         entry = next;
     }
-    S->async_timers = NULL;
+    S->async.timers = NULL;
 }
 
 void async_timers_mark(mino_state_t *S)
 {
     timer_entry_t *entry;
-    for (entry = S->async_timers; entry != NULL; entry = entry->next) {
+    for (entry = S->async.timers; entry != NULL; entry = entry->next) {
         if (entry->callback) gc_mark_interior(S, entry->callback);
     }
 }

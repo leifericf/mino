@@ -30,9 +30,9 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
         if (mino_current_ctx(S)->gc_stack_bottom == NULL) {
             return;
         }
-        if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+        if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
             gc_force_finish_major(S);
-        } else if (S->gc_phase == GC_PHASE_IDLE) {
+        } else if (S->gc.phase == GC_PHASE_IDLE) {
             gc_major_collect(S);
         }
         return;
@@ -46,13 +46,13 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
          * pending on major's stack; major's next gc_trace_children
          * would then chase the freed pointer. Same invariant the
          * auto-tick path (gc_tick_during_major) honours. */
-        if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+        if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
             gc_force_finish_major(S);
         }
-        if (S->gc_bytes_young > 0) {
+        if (S->gc.bytes_young > 0) {
             gc_minor_collect(S);
         }
-        if (S->gc_phase == GC_PHASE_IDLE) {
+        if (S->gc.phase == GC_PHASE_IDLE) {
             gc_major_collect(S);
         }
         return;
@@ -67,7 +67,7 @@ static int set_nursery_bytes(mino_state_t *S, size_t v)
     if (v < 64u * 1024u || v > 256u * 1024u * 1024u) {
         return 0;
     }
-    S->gc_nursery_bytes = v;
+    S->gc.nursery_bytes = v;
     return 1;
 }
 
@@ -76,7 +76,7 @@ static int set_major_growth_tenths(mino_state_t *S, size_t v)
     if (v < 11u || v > 40u) {
         return 0;
     }
-    S->gc_major_growth_tenths = (unsigned)v;
+    S->gc.major_growth_tenths = (unsigned)v;
     return 1;
 }
 
@@ -85,7 +85,7 @@ static int set_promotion_age(mino_state_t *S, size_t v)
     if (v < 1u || v > 8u) {
         return 0;
     }
-    S->gc_promotion_age = (unsigned)v;
+    S->gc.promotion_age = (unsigned)v;
     return 1;
 }
 
@@ -94,7 +94,7 @@ static int set_incremental_budget(mino_state_t *S, size_t v)
     if (v < 64u || v > 65536u) {
         return 0;
     }
-    S->gc_major_work_budget = v;
+    S->gc.major_work_budget = v;
     return 1;
 }
 
@@ -103,7 +103,7 @@ static int set_step_alloc_bytes(mino_state_t *S, size_t v)
     if (v < 1024u || v > 16u * 1024u * 1024u) {
         return 0;
     }
-    S->gc_major_alloc_quantum = v;
+    S->gc.major_alloc_quantum = v;
     return 1;
 }
 
@@ -143,15 +143,15 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
     if (S == NULL || out == NULL) {
         return;
     }
-    out->collections_minor = S->gc_collections_minor;
-    out->collections_major = S->gc_collections_major;
-    out->bytes_live        = S->gc_bytes_live;
-    out->bytes_young       = S->gc_bytes_young;
-    out->bytes_old         = S->gc_bytes_old;
-    out->bytes_alloc       = S->gc_bytes_alloc;
-    out->bytes_freed       = S->gc_total_freed;
-    out->total_gc_ns       = S->gc_total_ns;
-    out->max_gc_ns         = S->gc_max_ns;
+    out->collections_minor = S->gc.collections_minor;
+    out->collections_major = S->gc.collections_major;
+    out->bytes_live        = S->gc.bytes_live;
+    out->bytes_young       = S->gc.bytes_young;
+    out->bytes_old         = S->gc.bytes_old;
+    out->bytes_alloc       = S->gc.bytes_alloc;
+    out->bytes_freed       = S->gc.total_freed;
+    out->total_gc_ns       = S->gc.total_ns;
+    out->max_gc_ns         = S->gc.max_ns;
     out->minor_mark_ns     = S->gc_minor_mark_ns;
     out->minor_sweep_ns    = S->gc_minor_sweep_ns;
     out->major_mark_ns     = S->gc_major_mark_ns;
@@ -171,12 +171,12 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
                                    ? S->gc_alloc_by_tag[i] : 0;
         }
     }
-    out->remset_entries    = S->gc_remset_len;
-    out->remset_cap        = S->gc_remset_cap;
-    out->remset_high_water = S->gc_remset_high_water;
-    out->mark_stack_cap        = S->gc_mark_stack_cap;
-    out->mark_stack_high_water = S->gc_mark_stack_high_water;
-    out->phase             = phase_to_public(S->gc_phase);
+    out->remset_entries    = S->gc.remset_len;
+    out->remset_cap        = S->gc.remset_cap;
+    out->remset_high_water = S->gc.remset_high_water;
+    out->mark_stack_cap        = S->gc.mark_stack_cap;
+    out->mark_stack_high_water = S->gc.mark_stack_high_water;
+    out->phase             = phase_to_public(S->gc.phase);
 }
 
 /* qsort comparator on uint32_t in ascending order. */

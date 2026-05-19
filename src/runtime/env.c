@@ -42,8 +42,8 @@ mino_env_t *mino_env_new(mino_state_t *S)
         return NULL;
     }
     r->env       = env;
-    r->next      = S->gc_root_envs;
-    S->gc_root_envs = r;
+    r->next      = S->gc.root_envs;
+    S->gc.root_envs = r;
     return env;
 }
 
@@ -56,7 +56,7 @@ void mino_env_free(mino_state_t *S, mino_env_t *env)
 {
     /* Unroot the env. Its memory, along with any closures and bindings
      * reachable only through it, is reclaimed at the next collection. */
-    root_env_t **pp = &S->gc_root_envs;
+    root_env_t **pp = &S->gc.root_envs;
     if (env == NULL) {
         return;
     }

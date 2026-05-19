@@ -28,13 +28,13 @@
 void gc_major_begin(mino_state_t *S)
 {
     long long t0, troots;
-    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_IDLE) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
-    S->gc_phase = GC_PHASE_MAJOR_MARK;
+    S->gc.phase = GC_PHASE_MAJOR_MARK;
     gc_evt_record(S, GC_EVT_MAJOR_BEGIN, NULL, NULL, NULL, 0, 0);
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         gc_build_range_index(S);
     }
     t0     = mino_monotonic_ns();
@@ -42,7 +42,7 @@ void gc_major_begin(mino_state_t *S)
     gc_mark_roots(S);
     S->gc_root_scan_ns += (size_t)(mino_monotonic_ns() - troots);
     S->gc_major_mark_ns += (size_t)(mino_monotonic_ns() - t0);
-    S->gc_major_step_alloc = 0;
+    S->gc.major_step_alloc = 0;
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -55,13 +55,13 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
 {
     long long t0;
     size_t    popped = 0;
-    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
     t0 = mino_monotonic_ns();
-    while (S->gc_mark_stack_len > 0 && popped < budget_words) {
-        gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
+    while (S->gc.mark_stack_len > 0 && popped < budget_words) {
+        gc_hdr_t *h = S->gc.mark_stack[--S->gc.mark_stack_len];
         gc_trace_children(S, h);
         popped++;
     }
@@ -79,7 +79,7 @@ void gc_major_remark(mino_state_t *S)
 {
     jmp_buf   jb;
     long long t0;
-    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
@@ -87,7 +87,7 @@ void gc_major_remark(mino_state_t *S)
         abort(); /* Class I: nonzero return only under corruption */
     }
     (void)jb;
-    if (!S->gc_ranges_valid) {
+    if (!S->gc.ranges_valid) {
         gc_build_range_index(S);
     }
     t0 = mino_monotonic_ns();
@@ -160,11 +160,11 @@ static void gc_intern_sweep_tombstones(mino_state_t *S)
 void gc_major_sweep_phase(mino_state_t *S)
 {
     long long t0;
-    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
-    S->gc_phase = GC_PHASE_MAJOR_SWEEP;
+    S->gc.phase = GC_PHASE_MAJOR_SWEEP;
     gc_evt_record(S, GC_EVT_MAJOR_SWEEP, NULL, NULL, NULL, 0, 0);
     /* Sweep phase: tombstone weak intern entries whose header was not
      * reached through any root, purge the remset of dead containers,
@@ -181,9 +181,9 @@ void gc_major_sweep_phase(mino_state_t *S)
      * so compact would wrongly drop unmarked YOUNG survivors from the
      * index and the next collector could not resolve their headers.
      * The next collector touchpoint rebuilds from gc_all. */
-    S->gc_ranges_valid = 0;
-    S->gc_collections_major++;
-    S->gc_phase = GC_PHASE_IDLE;
+    S->gc.ranges_valid = 0;
+    S->gc.collections_major++;
+    S->gc.phase = GC_PHASE_IDLE;
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -197,14 +197,14 @@ void gc_major_sweep_phase(mino_state_t *S)
  * starts from a clean slate. */
 void gc_sweep(mino_state_t *S)
 {
-    gc_hdr_t **pp         = &S->gc_all_old;
+    gc_hdr_t **pp         = &S->gc.all_old;
     size_t     live_young = 0;
     size_t     live_old   = 0;
     size_t     freed_old  = 0;
     /* Clear mark bits on YOUNG survivors and tally live young bytes. */
     {
         gc_hdr_t *yh;
-        for (yh = S->gc_all_young; yh != NULL; yh = yh->next) {
+        for (yh = S->gc.all_young; yh != NULL; yh = yh->next) {
             yh->mark = 0;
             live_young += yh->size;
         }
@@ -234,8 +234,8 @@ void gc_sweep(mino_state_t *S)
                 /* See minor.c -- bump-origin and calloc-origin both
                  * round-trip through the freelist; gc_alloc_raw
                  * preserves h->bump across the pull-side memset. */
-                h->next = S->gc_freelists[fc];
-                S->gc_freelists[fc] = h;
+                h->next = S->gc.freelists[fc];
+                S->gc.freelists[fc] = h;
             } else if (h->bump) {
                 /* No size class: bump-origin leaks in its slab. */
             } else {
@@ -243,15 +243,15 @@ void gc_sweep(mino_state_t *S)
             }
         }
     }
-    S->gc_total_freed   += freed_old;
-    S->gc_bytes_young    = live_young;
-    S->gc_bytes_old      = live_old;
-    S->gc_bytes_live     = live_young + live_old;
-    S->gc_bytes_alloc    = S->gc_bytes_live;
-    S->gc_old_baseline   = live_old;
+    S->gc.total_freed   += freed_old;
+    S->gc.bytes_young    = live_young;
+    S->gc.bytes_old      = live_old;
+    S->gc.bytes_live     = live_young + live_old;
+    S->gc.bytes_alloc    = S->gc.bytes_live;
+    S->gc.old_baseline   = live_old;
     /* Next major triggers after another threshold's worth of growth
      * above the live set so collection cost stays amortised. */
-    if (S->gc_bytes_live * 2 > S->gc_threshold) {
-        S->gc_threshold = S->gc_bytes_live * 2;
+    if (S->gc.bytes_live * 2 > S->gc.threshold) {
+        S->gc.threshold = S->gc.bytes_live * 2;
     }
 }

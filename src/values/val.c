@@ -428,7 +428,7 @@ mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val)
     v->as.tx_ref.watches      = NULL;
     v->as.tx_ref.validator    = NULL;
     v->as.tx_ref.version      = 0;
-    v->as.tx_ref.ref_id       = ++S->stm_next_ref_id;
+    v->as.tx_ref.ref_id       = ++S->stm.next_ref_id;
     v->as.tx_ref.owning_state = S;
     return v;
 }

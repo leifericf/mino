@@ -16,7 +16,7 @@
  *
  *  2. Global commit lock. JVM uses per-ref read/write locks plus
  *     write-skew detection; mino serializes all commits behind one
- *     mutex (S->stm_commit_lock) lazy-initialized in
+ *     mutex (S->stm.commit_lock) lazy-initialized in
  *     mino_install_stm. Coarser, simpler, and on a single thread
  *     completely free (the lock is skipped when thread_limit <= 1).
  *
@@ -78,19 +78,19 @@
  * no other thread can interfere with the commit phase. */
 static void stm_lock(mino_state_t *S)
 {
-    if (!S->stm_lock_inited) return;
+    if (!S->stm.lock_inited) return;
     if (S->thread_limit <= 1) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
-    pthread_mutex_lock(&S->stm_commit_lock);
+    pthread_mutex_lock(&S->stm.commit_lock);
 #endif
 }
 
 static void stm_unlock(mino_state_t *S)
 {
-    if (!S->stm_lock_inited) return;
+    if (!S->stm.lock_inited) return;
     if (S->thread_limit <= 1) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
-    pthread_mutex_unlock(&S->stm_commit_lock);
+    pthread_mutex_unlock(&S->stm.commit_lock);
 #endif
 }
 
@@ -1306,13 +1306,13 @@ const size_t k_prims_stm_count = sizeof(k_prims_stm) / sizeof(k_prims_stm[0]);
  * opt into STM keep the bool flag and nothing else. */
 static void stm_lazy_init_commit_lock(mino_state_t *S)
 {
-    if (S->stm_lock_inited) return;
+    if (S->stm.lock_inited) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
-    if (pthread_mutex_init(&S->stm_commit_lock, NULL) != 0) {
+    if (pthread_mutex_init(&S->stm.commit_lock, NULL) != 0) {
         abort(); /* Class I: pthread_mutex_init failure means dosync cannot run safely */
     }
 #endif
-    S->stm_lock_inited = 1;
+    S->stm.lock_inited = 1;
 }
 
 void mino_install_stm(mino_state_t *S, mino_env_t *env)
