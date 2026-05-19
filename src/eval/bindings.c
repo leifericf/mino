@@ -34,31 +34,37 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
  * Destructure a vector pattern against a sequential value (list or vector).
  * Supports positional binding, `&` rest, and `:as` whole-binding.
  */
-static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
-                                mino_val_t *pattern, mino_val_t *val,
-                                const char *ctx)
+/* Reify a sequential value into a cons-list head suitable for
+ * positional walking by bind_vec_destructure. Vector / map-entry
+ * values flatten unconditionally; lazy / chunked / chunk values walk
+ * only as many elements as the pattern needs (one past the fixed
+ * arity when no `&` is present so the surplus check has something to
+ * see) and preserve the unforced tail on the rest-arg slot. */
+static mino_val_t *vec_destructure_args(mino_state_t *S,
+                                        mino_val_t *pattern,
+                                        mino_val_t *val)
 {
     size_t plen = pattern->as.vec.len;
-    size_t i;
-    /* Walk the sequential value into a cons list for uniform access. */
-    mino_val_t *args = val;
-    if (val != NULL && mino_type_of(val) == MINO_VECTOR) {
-        /* Convert vector value to a cons list for positional walk. */
+    if (val == NULL) return val;
+    if (mino_type_of(val) == MINO_VECTOR) {
         mino_val_t *lst = mino_nil(S);
         size_t j = val->as.vec.len;
         while (j > 0) {
             j--;
             lst = mino_cons(S, vec_nth(val, j), lst);
         }
-        args = lst;
-    } else if (val != NULL && mino_type_of(val) == MINO_MAP_ENTRY) {
-        /* Map entry behaves like a 2-vector for destructuring. */
-        args = mino_cons(S, val->as.map_entry.k,
+        return lst;
+    }
+    if (mino_type_of(val) == MINO_MAP_ENTRY) {
+        return mino_cons(S, val->as.map_entry.k,
                             mino_cons(S, val->as.map_entry.v, mino_nil(S)));
-    } else if (val != NULL
-               && (mino_type_of(val) == MINO_LAZY
-                   || mino_type_of(val) == MINO_CHUNKED_CONS
-                   || mino_type_of(val) == MINO_CHUNK)) {
+    }
+    if (mino_type_of(val) != MINO_LAZY
+        && mino_type_of(val) != MINO_CHUNKED_CONS
+        && mino_type_of(val) != MINO_CHUNK) {
+        return val;
+    }
+    {
         /* Lazy / chunked sequential value: the downstream positional
          * walk's mino_is_cons check fails on these types, so every
          * pattern slot would bind to nil. Walk only up to the `&`
@@ -136,16 +142,23 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
          * elements we materialized, which is correct because the
          * non-LAZY tail has no infinite-future risk. */
         if (head == NULL) {
-            args = cur != NULL && mino_type_of(cur) == MINO_LAZY
-                ? cur
-                : mino_nil(S);
-        } else {
-            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-                tail_pin->as.cons.cdr = cur;
-            }
-            args = head;
+            return (cur != NULL && mino_type_of(cur) == MINO_LAZY)
+                ? cur : mino_nil(S);
         }
+        if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
+            tail_pin->as.cons.cdr = cur;
+        }
+        return head;
     }
+}
+
+static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
+                                mino_val_t *pattern, mino_val_t *val,
+                                const char *ctx)
+{
+    size_t plen = pattern->as.vec.len;
+    size_t i;
+    mino_val_t *args = vec_destructure_args(S, pattern, val);
     for (i = 0; i < plen; i++) {
         mino_val_t *p = vec_nth(pattern, i);
         /* Force any lazy cell at the cursor before deciding what to bind.
