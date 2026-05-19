@@ -271,6 +271,7 @@ typedef struct sampler_agg {
     uint32_t            pc;
     uint16_t            op;
     uint32_t            count;
+    uint32_t            native_count;  /* subset of count where flags & 1 */
 } sampler_agg_t;
 
 #define SAMPLER_DUMP_TABLE_MAX 4096
@@ -300,15 +301,17 @@ unsigned mino_sampler_dump(mino_state_t *S, FILE *out)
         for (j = 0; j < n_agg; j++) {
             if (agg[j].bc == s->bc && agg[j].pc == s->pc) {
                 agg[j].count++;
+                if (s->flags & 1u) agg[j].native_count++;
                 found = 1;
                 break;
             }
         }
         if (!found && n_agg < SAMPLER_DUMP_TABLE_MAX) {
-            agg[n_agg].bc    = s->bc;
-            agg[n_agg].pc    = s->pc;
-            agg[n_agg].op    = s->op;
-            agg[n_agg].count = 1u;
+            agg[n_agg].bc           = s->bc;
+            agg[n_agg].pc           = s->pc;
+            agg[n_agg].op           = s->op;
+            agg[n_agg].count        = 1u;
+            agg[n_agg].native_count = (s->flags & 1u) ? 1u : 0u;
             n_agg++;
         }
     }
@@ -316,8 +319,9 @@ unsigned mino_sampler_dump(mino_state_t *S, FILE *out)
     fprintf(out, "[sampler] %u samples over %u distinct PCs\n",
             ring_n, n_agg);
     for (i = 0; i < n_agg; i++) {
-        fprintf(out, "  samples=%u  fn=%p  pc=%u  op=%u\n",
-                agg[i].count, (void *)agg[i].bc, agg[i].pc, agg[i].op);
+        fprintf(out, "  samples=%u  native=%u  fn=%p  pc=%u  op=%u\n",
+                agg[i].count, agg[i].native_count,
+                (void *)agg[i].bc, agg[i].pc, agg[i].op);
     }
     return n_agg;
 }

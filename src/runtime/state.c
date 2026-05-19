@@ -1433,7 +1433,13 @@ static void mino_sampler_fire(mino_state_t *S)
     slot->pc    = (uint32_t)pc;
     slot->op    = (bc->code != NULL && pc < bc->code_len)
                   ? (uint16_t)(bc->code[pc] & 0xffu) : (uint16_t)0xffffu;
-    slot->flags = 0; /* native-side tag added in v0.348.1 */
+    /* Native-side tag: low bit of flags set iff the safepoint hit
+     * fired from inside JIT'd native code. The JIT loop stencils call
+     * mino_bc_safepoint with ctx->jit_invoke_depth > 0 (bumped by
+     * mino_jit_invoke around the f() call). Pairing the sample's
+     * native bit with v0.346.0's per-fn invocation count lets the
+     * dashboard compute "samples per invocation" for native fns. */
+    slot->flags = (ctx->jit_invoke_depth > 0) ? 1u : 0u;
     S->sampler_ring_idx = (idx + 1u) % S->sampler_ring_cap;
     if (S->sampler_ring_count < S->sampler_ring_cap) {
         S->sampler_ring_count++;

@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.348.1 — Native-side sample tag
+
+`mino_sampler_fire` now consults `ctx->jit_invoke_depth` at
+each sample capture and sets the low bit of
+`mino_sample_t.flags` when the safepoint hit fired from inside
+JIT'd native code (the loop stencil's downcounter calls
+`mino_bc_safepoint` while `jit_invoke_depth > 0`).
+
+`mino_sampler_dump` aggregates a parallel `native_count` per
+`(bc, pc)` bucket so the dump line now reads
+`samples=N  native=M  fn=...  pc=...  op=...`.
+
+Pair the per-fn `samples_native` total with v0.346.0's
+`jit_invocations` to compute samples-per-native-invocation,
+the proxy for per-call CPU cost inside JIT'd code.
+
+Probe (200-iter warmup + 100x loopy(500000) with the matcher-
+compatible counter-only loop shape, period 100):
+- `[sampler] 2052 samples over 2 distinct PCs`
+- `samples=1953  native=1953  fn=...  pc=0  op=2` — JIT'd
+  loop's anchor stencil
+- `samples=99  native=0  fn=...  pc=2  op=66` — BC-interpreted
+  back-edges during the warmup phase.
+
+Multi-binding loops with non-trivial recur steps (e.g.
+`(loop [i 0 acc 0] ... (recur (inc i) (+ acc i)))`) don't yet
+fuse to OP_LOOP_INT_LT so they don't fire the stencil's
+safepoint downcounter and stay invisible to the native tag.
+The matcher-extension cycles already on backlog (Cycle D's
+loop-matcher-rejects notes) will widen this once they ship.
+
+`task release-gate` is OK.
+
 ## v0.348.0 — Safepoint-based CPU sampler
 
 Adds the first CPU sampling profiler to mino. `MINO_SAMPLE=1`
