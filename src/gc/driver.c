@@ -627,28 +627,6 @@ static void gc_mark_child_push(mino_state_t *S, const void *p)
  * the mark stack. Used from gc_drain_mark_stack on any header popped
  * for tracing, and directly from the minor collector when seeding the
  * mark stack from remembered-set entries. */
-/* Walk a bc fn's IC slot array: push the buffer itself plus every
- * embedded value pointer. The slot array is a GC_T_RAW POD buffer
- * whose sym / cached / atom / cached_map / cached_type fields the
- * GC can't see without an explicit walk; this helper centralises
- * the slot-kind -> field mapping so the MINO_FN walker and the
- * GC_T_BC_FN walker (called when a write barrier hits the bc
- * record itself) can't drift. */
-static void gc_mark_bc_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc)
-{
-    int i;
-    if (bc == NULL || bc->ic_slots == NULL || bc->ic_slots_len <= 0) return;
-    gc_mark_child_push(S, bc->ic_slots);
-    for (i = 0; i < bc->ic_slots_len; i++) {
-        gc_mark_child_push(S, bc->ic_slots[i].sym);
-        gc_mark_child_push(S, bc->ic_slots[i].cached);
-        if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
-            gc_mark_child_push(S, bc->ic_slots[i].atom);
-            gc_mark_child_push(S, bc->ic_slots[i].cached_map);
-            gc_mark_child_push(S, bc->ic_slots[i].cached_type);
-        }
-    }
-}
 
 /* ------------------------------------------------------------------------- */
 /* Per-tag tracer functions                                                  */
@@ -729,9 +707,9 @@ static void trace_val(mino_state_t *S, gc_hdr_t *h)
                 }
                 /* IC slots: a GC_T_RAW POD buffer whose embedded value
                  * pointers the GC can't see without an explicit walk.
-                 * gc_mark_bc_ic_slots is the single authority on the
+                 * mino_bc_trace_ic_slots is the single authority on the
                  * slot-kind -> field mapping. */
-                gc_mark_bc_ic_slots(S, bc);
+                mino_bc_trace_ic_slots(S, bc);
                 /* Optional ic_stats POD buffer (MINO_JIT_IC_STATS=1). */
                 gc_mark_child_push(S, bc->ic_stats);
             }
@@ -878,25 +856,8 @@ static void trace_pointer_array(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-/* The bc record carries pointers to its code, consts, clauses, and
- * ic_slots buffers. These are normally reached via MINO_FN's trace,
- * but a write barrier on the bc record (e.g. ensure_code growing the
- * code buffer) adds the bc directly to the remset, and minor mark
- * then needs to push its YOUNG children itself. Without this case
- * the bc lives but its buffers are silently swept. */
-static void trace_bc(mino_state_t *S, gc_hdr_t *h)
-{
-    struct mino_bc_fn *bc = (struct mino_bc_fn *)(h + 1);
-    gc_mark_child_push(S, bc->code);
-    gc_mark_child_push(S, bc->consts);
-    gc_mark_child_push(S, bc->clauses);
-    gc_mark_child_push(S, bc->source_map.positions);
-    gc_mark_bc_ic_slots(S, bc);
-    /* Optional ic_stats POD buffer (allocated only under
-     * MINO_JIT_IC_STATS=1). Plain GC_T_RAW counters; no embedded
-     * pointers, so the buffer itself is the only thing to mark. */
-    gc_mark_child_push(S, bc->ic_stats);
-}
+/* trace_bc lives in src/eval/bc/gc_handlers.c and registers itself
+ * via mino_bc_register_gc_handlers(S). */
 
 void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
 {
@@ -940,7 +901,6 @@ void gc_register_default_tracers(mino_state_t *S)
     gc_register_tracer(S, GC_T_ENV,    trace_env);
     gc_register_tracer(S, GC_T_PTRARR, trace_pointer_array);
     gc_register_tracer(S, GC_T_VALARR, trace_pointer_array);
-    gc_register_tracer(S, GC_T_BC,     trace_bc);
 }
 
 /* Drain the mark stack until its length drops to floor_len. The floor

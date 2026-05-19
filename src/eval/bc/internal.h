@@ -726,4 +726,12 @@ void mino_bc_check_require(struct mino_state *S, mino_val_t *fn);
 #define MINO_BC_RUNNABLE(v) \
     ((v)->as.fn.bc != NULL && (v)->as.fn.bc != &mino_bc_declined)
 
+/* GC tracer registration for the GC_T_BC bc-fn layout. Called from
+ * runtime/state.c::state_init before the first allocation. The
+ * mino_bc_trace_ic_slots helper is exported so the values-side
+ * MINO_FN tracer can walk a bc record's IC slots without
+ * re-implementing the slot-kind dispatch. */
+void mino_bc_register_gc_handlers(mino_state_t *S);
+void mino_bc_trace_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc);
+
 #endif /* MINO_EVAL_BC_INTERNAL_H */

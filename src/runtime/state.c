@@ -20,6 +20,7 @@
 #include "async/scheduler.h"
 #include "async/timer.h"
 #include "eval/bc/jit.h"
+#include "eval/bc/internal.h"        /* mino_bc_register_gc_handlers */
 #include "eval/special_internal.h"  /* normalize_exception */
 
 #ifdef _WIN32
@@ -221,6 +222,7 @@ static void state_init(mino_state_t *S)
      * component register hook populates its own. */
     gc_register_default_tracers(S);
     mino_collections_register_gc_handlers(S);
+    mino_bc_register_gc_handlers(S);
 }
 
 mino_state_t *mino_state_new(void)
