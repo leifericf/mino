@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.361.0 — SATB-drop audit + verification
+
+Cycle F item 8 part 1. Pure verification pass -- no behaviour
+change to the hybrid write barrier.
+
+Adds a temporary `gc_barrier_clear_only` counter (ticks during
+MAJOR_MARK when `gc_write_barrier` fires with `new_value ==
+NULL` AND `old_value != NULL` -- i.e., the SATB push is doing
+the only work for that call).
+
+Audit doc landed at `.local/satb-audit.md` covering every
+clear-only call site:
+
+- 6 sites total: 1 in `agent.c` (err clear), 1 in `stateful.c`
+  (set-validator! nil-removes), 4 in `eval.c` (lazy
+  realization clears of cached.body / cached.env).
+- All 6 are clear-on-replace where the cleared field's value
+  had a single-path-to-root through the container itself.
+- Cross-cutting soundness argument: mino's `gc_major_remark`
+  re-marks every root + scans the main-thread C stack at
+  end-of-mark; only the main thread is allowed to alloc during
+  collection (via the `thread_count` guard in
+  `gc_tick_should_suppress`); Dijkstra captures every new
+  OLD->OLD edge between slices. Together these give
+  incremental-update soundness without SATB.
+
+**Verdict**: safe to drop SATB. v0.362 ships the removal.
+
+`task test-jit-parity` byte-identical across all 4 binaries
+with the instrumented build. `task release-gate` clean.
+
 ## v0.360.0 — Adaptive major-slice budget
 
 Replaces the static `gc_major_work_budget` default (4096
