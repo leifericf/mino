@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.350.0 — Perf cycle E close
+
+Doc-only marker closing the v0.345.0 → v0.349.0 pure-
+instrumentation cycle. 16 tags shipped across 6 phases; nothing
+deferred. Every planned surface landed honestly mapped to mino's
+actual collector / barrier / JIT design (a few plan fields
+intentionally omitted with rationale captured in the originating
+release notes -- `gc_minor_flip_ns`, `gc_minor_promote_ns`,
+`gc_remset_overflows`, `gc_card_dirties`).
+
+Acceptance gates met:
+- GC phase-timer sum tracks `total-gc-ns` within 5% (measured
+  ratio 1.01-1.03).
+- `task release-gate` clean across every release.
+- `task perf-gate` carries the one pre-existing `small-map`
+  allocation regression from v0.344.0 (logged in
+  `.local/BUGS.md`); no new regressions introduced.
+
+Dashboard at `mino/.local/instrumentation-dashboard.md`
+re-ranks the standing perf backlog by measured evidence:
+
+- **Skip** (zero corpus headroom): promotion-age tuning,
+  SATB-only barrier work.
+- **Defer further** (insufficient measured pressure):
+  predicate+branch fusion, forward stencil hooks,
+  superinstruction fusion beyond LOAD_K_RETURN.
+- **Top three for the next cycle**: (1) JIT region sub-
+  allocator (94-99% per-page waste is the single biggest
+  measured lever), (2) JIT loop matcher extension to multi-
+  binding shapes (unblocks native sampler coverage on real
+  workloads), (3) pipeline `:raw` / `:hamt-node` audit
+  (investigation pass).
+
+Out-of-band carry-over the user flagged: a small mino-bench
+expansion cycle (1-2 days) to add bench rows the dashboard
+found dark -- counter-only loops, deopt-triggering shapes,
+per-tag alloc-stress.
+
+The next-cycle entry point is the JIT region sub-allocator
+work, with the now-instrumented runtime providing the
+before/after measurement substrate.
+
 ## v0.349.0 — Synthesis dashboard
 
 Doc-only release. Ran the v0.345..v0.348 instrumentation
