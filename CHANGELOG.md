@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.347.1 — BC compile-decline histogram
+
+Adds `S->bc_declines[BC_DECLINE__COUNT]` (size 16) and a small
+enum of decline categories. The compiler ticks the matching
+bucket at structural decline sites:
+
+- `BC_DECLINE_MACRO` — head resolves to a macro at compile time.
+- `BC_DECLINE_SPECIAL_FORM` — special form name is in the
+  recognised set but has no compile-time handler.
+- `BC_DECLINE_BAD_FORM` — call form is not a cons.
+- `BC_DECLINE_OTHER` — catch-all for declines that didn't tick a
+  specific bucket; counted at the top-level `decline:` label by
+  snapshotting the specific buckets at compile entry and
+  comparing at exit.
+
+Reserved buckets (`QUALIFIED_HEAD`, `DESTRUCTURE`,
+`RECUR_OUTSIDE`, `NESTING_LIMIT`, `OOM`) are wired into the
+enum but not yet ticked at their leaf sites; they will be
+filled in as the dashboard surfaces concrete blockers for each
+family. The catch-all `OTHER` ensures every decline is counted
+regardless of attribution depth.
+
+Surfaced via `(gc-stats)` as `:bc-declines`, a keyword -> count
+map (zero buckets elided). Probe (one try-fn + one binding-fn +
+30-iter loop): `{:macro 13}` — both `try` and `binding` are
+compile-handled, so the only declines come from stdlib macro
+expansions hitting the macro head-resolve path.
+
+`task release-gate` is OK.
+
 ## v0.347.0 — Per-tag allocation histogram
 
 Adds an always-on `gc_alloc_by_tag[GC_T__COUNT]` (size 16)

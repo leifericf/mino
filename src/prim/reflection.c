@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[37];
-    mino_val_t *vs[37];
+    mino_val_t *ks[38];
+    mino_val_t *vs[38];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1336,7 +1336,29 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ks[36] = mino_keyword(S, "alloc-by-tag");
         vs[36] = mino_map(S, tk, tv, n);
     }
-    return mino_map(S, ks, vs, 37);
+    /* BC compile-decline histogram, surfaced as a keyword -> count
+     * map. Zero-count buckets elided. */
+    {
+        static const char *reason_names[16] = {
+            NULL, "macro", "special-form", "bad-form",
+            "qualified-head", "destructure", "recur-outside",
+            "nesting-limit", "oom", "other",
+            NULL, NULL, NULL, NULL, NULL, NULL
+        };
+        mino_val_t *dk[16];
+        mino_val_t *dv[16];
+        size_t i, n = 0;
+        for (i = 0; i < 16; i++) {
+            if (reason_names[i] == NULL) continue;
+            if (S->bc_declines[i] == 0) continue;
+            dk[n] = mino_keyword(S, reason_names[i]);
+            dv[n] = mino_int(S, (long long)S->bc_declines[i]);
+            n++;
+        }
+        ks[37] = mino_keyword(S, "bc-declines");
+        vs[37] = mino_map(S, dk, dv, n);
+    }
+    return mino_map(S, ks, vs, 38);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

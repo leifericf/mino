@@ -314,6 +314,24 @@ typedef enum {
     MINO_BC_IC_PROTOCOL = 1
 } mino_bc_ic_kind_t;
 
+/* BC compile-decline categories (instrumentation). The compiler ticks
+ * S->bc_declines[<reason>] at each structural bail-out so the
+ * dashboard can rank "which family of input declined most often" --
+ * the data-driven complement to manually tagging every ok=0 site. */
+enum {
+    BC_DECLINE_OK              = 0,
+    BC_DECLINE_MACRO           = 1,
+    BC_DECLINE_SPECIAL_FORM    = 2,
+    BC_DECLINE_BAD_FORM        = 3,
+    BC_DECLINE_QUALIFIED_HEAD  = 4,
+    BC_DECLINE_DESTRUCTURE     = 5,
+    BC_DECLINE_RECUR_OUTSIDE   = 6,
+    BC_DECLINE_NESTING_LIMIT   = 7,
+    BC_DECLINE_OOM             = 8,
+    BC_DECLINE_OTHER           = 9,
+    BC_DECLINE__COUNT          = 16
+};
+
 typedef struct mino_bc_ic_slot {
     mino_val_t   *sym;
     mino_val_t   *cached;

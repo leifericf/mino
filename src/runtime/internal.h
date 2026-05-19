@@ -1037,6 +1037,16 @@ struct mino_state {
      * which is already paying for the header init / list-link cost. */
     uint64_t        gc_alloc_by_tag[GC_T__COUNT];
 
+    /* BC compile-decline reason histogram. Each ok=0 path in compile.c
+     * that the compiler attributes to a structural reason ticks one of
+     * these buckets; the leaf overflow sites (consts table full, IC
+     * slots cap reached, &c.) all fold into BC_DECLINE_OTHER so the
+     * dashboard sees them as a single "internal limit" bucket without
+     * needing to instrument every micro-site. Always-on; one indexed
+     * store per decline. Exposed via (gc-stats) for now (cheaper than
+     * a separate stats API) and via the mino.h surface below. */
+    uint64_t        bc_declines[16];
+
     /* Pause-time distribution. gc_pause_ring is a circular buffer of
      * the last 256 pause durations (one entry per minor collect, per
      * major-slice, per force-finish, per fully-STW major); each value

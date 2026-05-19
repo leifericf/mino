@@ -4150,6 +4150,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
         }
     }
     if (!mino_is_cons(form)) {
+        c->S->bc_declines[BC_DECLINE_BAD_FORM]++;
         c->ok = 0;
         return -1;
     }
@@ -4159,6 +4160,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
      * for qualified heads) is required; a lexical-only check misses
      * macros that live in the ns env, which is where most macros sit. */
     if (head_resolves_to_macro(c, form->as.cons.car)) {
+        c->S->bc_declines[BC_DECLINE_MACRO]++;
         c->ok = 0;
         return -1;
     }
@@ -4191,6 +4193,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
          * so the tree-walker picks them up rather than emitting a
          * regular call that would fail at runtime. */
         if (is_special_form_name(name)) {
+            c->S->bc_declines[BC_DECLINE_SPECIAL_FORM]++;
             c->ok = 0;
             return -1;
         }
@@ -4548,6 +4551,18 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     c.ok          = 1;
     c.n_regs      = 0;
 
+    /* Decline-bucket snapshot: if no specific reason ticks during this
+     * fn's compile but it still declines, the residual gets attributed
+     * to BC_DECLINE_OTHER at the decline label below. Sums every
+     * specific reason in the [1..OTHER) range. */
+    uint64_t decline_snapshot = 0;
+    {
+        int i;
+        for (i = 1; i < BC_DECLINE_OTHER; i++) {
+            decline_snapshot += S->bc_declines[i];
+        }
+    }
+
     for (int i = 0; i < n_clauses; i++) {
         if (compile_clause(&c, clause_params_arr[i], clause_body_arr[i],
                            &clauses[i]) < 0) {
@@ -4582,6 +4597,18 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     return MINO_BC_OK;
 
 decline:
+    /* If no specific decline bucket ticked during this compile, route
+     * the bail to OTHER so the histogram still records the event. */
+    {
+        uint64_t now = 0;
+        int      i;
+        for (i = 1; i < BC_DECLINE_OTHER; i++) {
+            now += S->bc_declines[i];
+        }
+        if (now == decline_snapshot) {
+            S->bc_declines[BC_DECLINE_OTHER]++;
+        }
+    }
     fn->as.fn.bc = &mino_bc_declined;
     return MINO_BC_UNSUPPORTED;
 }
