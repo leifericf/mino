@@ -60,7 +60,8 @@
    "src/prim/host.c" "src/interop/syntax.c"
    "src/collections/clone.c" "src/regex/re.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/prim/async.c"
-   "src/prim/bignum.c" "src/vendor/imath/imath.c"])
+   "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
+   "src/vendor/imath/imath.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 

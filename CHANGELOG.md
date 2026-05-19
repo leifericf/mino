@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.378.0 — Architecture Cycle 6b: Real Mega-prim Splits
+
+Lands the per-sub-domain mega-file splits that cycle 6 (v0.375.0)
+had scope-reduced. `src/prim/bignum.c` shrinks from 1797 lines to
+702 lines by extracting two sub-domains into their own files:
+
+| File                       | Before | After  | Notes                          |
+|----------------------------|-------:|-------:|--------------------------------|
+| `src/prim/bignum.c`        |   1797 |    702 | Bigint payload + install only  |
+| `src/prim/ratio.c` (new)   |        |    510 | MINO_RATIO arithmetic + printing |
+| `src/prim/bigdec.c` (new)  |        |    625 | MINO_BIGDEC arithmetic + printing |
+
+Shared bigint helpers (`to_bigint`, `bigint_alloc_zeroed`,
+`bigint_wrap`, `mino_double_shortest`) move into a new
+`src/prim/bignum_shared.h` so the extracted files reach them via a
+narrow public surface instead of through the umbrella. The
+`k_prims_bignum[]` registry stays in `bignum.c` and references
+externally-defined `prim_bigdec` / `prim_decimal_p` via the existing
+`prim/internal.h` forward declarations — no install-time changes.
+
+`numeric.c` (2806 lines), `sequences.c` (3499 lines), and
+`collections.c` (2312 lines) are still under one roof; their splits
+follow the same pattern but each carries 40-60 primitives plus its
+own `k_prims_*[]` table and is reserved for a dedicated future
+cycle. Breakdown in `.local/cycle-6-followups.md` remains current.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean.
+
 ## v0.377.0 — Architecture Cycle 4b: Real mino_state Decomposition
 
 Lands the per-subsystem decomposition that cycle 4 (v0.373.0) had
