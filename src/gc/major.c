@@ -188,13 +188,15 @@ void gc_major_sweep_phase(mino_state_t *S)
 }
 
 /* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD
- * headers by walking gc_all_old; leaves the young list alone -- minor
- * owns YOUNG lifecycle, and new YOUNG allocations that land after
- * gc_major_begin seeded the mark stack will not be marked in this
- * cycle but still need to survive until the next minor evaluates them
- * against its own roots. A separate pass clears any mark bit the
- * major frontier set on YOUNG via cross-gen tracing so the next minor
- * starts from a clean slate. */
+ * headers by walking gc_all_old; does not free any YOUNG headers --
+ * minor owns YOUNG lifecycle, and new YOUNG allocations that land
+ * after gc_major_begin seeded the mark stack will not be marked in
+ * this cycle but still need to survive until the next minor
+ * evaluates them against its own roots. Before walking OLD, the
+ * sweep iterates all_young once to clear any mark bit the major
+ * frontier set on YOUNG via cross-gen tracing (so the next minor
+ * starts from a clean slate) and to tally live_young for the
+ * post-sweep byte counters. */
 void gc_sweep(mino_state_t *S)
 {
     gc_hdr_t **pp         = &S->gc.all_old;
