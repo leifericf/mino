@@ -74,11 +74,18 @@ src/
 | `src/prim/host.c` | Host interop primitives (`host/new`, `host/call`, `host/static-call`, `host/get`), capability registry |
 | `src/interop/syntax.c` | Interop syntax desugaring (dot-method, field access, constructor, static calls) |
 
+## Values
+
+| File | Responsibility |
+|------|----------------|
+| `src/values/layout.h` | Pointer-tagged scheme + `struct mino_val` body + opaque node typedefs |
+| `src/values/internal.h` | `intern_lookup_or_create`, `make_fn`, `hash_val`, `mino_eq_force`, `mino_mk_var` forward decls |
+| `src/values/val.c` | Value constructors, interning, hashing, equality |
+
 ## Data Structures
 
 | File | Responsibility |
 |------|----------------|
-| `src/collections/val.c` | Value constructors, interning, hashing, equality |
 | `src/collections/vec.c` | Persistent vector (32-way trie) |
 | `src/collections/map.c` | HAMT for maps and sets |
 | `src/collections/rbtree.c` | Persistent left-leaning red-black tree for sorted maps and sets |

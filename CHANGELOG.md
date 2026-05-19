@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.371.0 — Values Component
+
+The pointer-tagged value system becomes a first-class component
+upstream of collections and everything else. `struct mino_val`,
+the tag-encoding macros, and `val.c` (constructors, predicates,
+equality, interning, hashing) are no longer a subdirectory of
+collections; they live in `src/values/`.
+
+| New file                  | Source of content                            |
+|---------------------------|----------------------------------------------|
+| `src/values/layout.h`     | Tag scheme + `struct mino_val` (from mino_internal.h) |
+| `src/values/internal.h`   | val.c forward decls (from collections/internal.h) |
+| `src/values/val.c`        | Identical content of the former `src/collections/val.c` |
+
+The collection-owned `intern_table` keeps its body in
+`collections/internal.h` (the entries vector is structurally
+collection storage). It picked up a `struct` tag so
+`values/internal.h` can forward-declare it.
+
+Both umbrella headers re-include the new files, so every existing
+consumer compiles unchanged. The bootstrap Makefile and the task
+runner pick up `src/values/` via `-Isrc/values` and the source-glob
+update.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean.
+
 ## v0.370.0 — Runtime Umbrella Header Split
 
 First step of a multi-tag architectural refactor. `src/runtime/internal.h`
