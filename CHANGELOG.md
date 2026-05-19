@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.347.2 — Collection-size histogram (env-gated)
+
+`MINO_COLL_SIZE_STATS=1` activates a `coll_size_hist[3][32]`
+on `mino_state_t`. Ticked at `mino_persistent`, which is the
+canonical finalize entry for every transient-based collection
+build. Kind 0 = vector, 1 = map, 2 = set; bucket =
+`clamp(floor(log2(size + 1)), 0..31)`. Default builds carry one
+sniff + one branch on the persistent path.
+
+Surfaced via `(gc-stats)` as `:coll-size-hist`, a map of
+kind-keyword -> length-32 bucket vector. Zero-kind entries
+elided.
+
+Probe (100 `[1..5]` transients + 50 `{:a :b}` transients with
+`MINO_COLL_SIZE_STATS=1`):
+- `{:vector [1 16 104 ... 0], :map [0 54 0 ... 0]}`
+- Vector bucket 2 catches 104 of size-5 finalizes; bucket 1
+  catches the 16 size-3 partials produced while transients
+  ramp up via conj!; bucket 0 captures the initial empty seed.
+
+Direct `mino_vector` / `mino_map` / `mino_set` calls from C
+that don't transit `mino_persistent` are not ticked; this is
+the documented scope (the transient finalize covers the
+dominant script-level construction pattern, and adding ticks
+to the direct constructors would be a separate pass once a
+dashboard surfaces a measurable C-only construction workload).
+
+`task release-gate` is OK.
+
 ## v0.347.1 — BC compile-decline histogram
 
 Adds `S->bc_declines[BC_DECLINE__COUNT]` (size 16) and a small

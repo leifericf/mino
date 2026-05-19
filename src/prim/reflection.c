@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[38];
-    mino_val_t *vs[38];
+    mino_val_t *ks[39];
+    mino_val_t *vs[39];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1358,7 +1358,30 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ks[37] = mino_keyword(S, "bc-declines");
         vs[37] = mino_map(S, dk, dv, n);
     }
-    return mino_map(S, ks, vs, 38);
+    /* Collection-size histogram (env-gated). Map kind -> 32-vec of
+     * log2-bucket counts. Empty when MINO_COLL_SIZE_STATS is unset. */
+    {
+        static const char *kind_names[3] = {"vector", "map", "set"};
+        mino_val_t *ck[3];
+        mino_val_t *cv[3];
+        size_t kind, n = 0;
+        for (kind = 0; kind < 3; kind++) {
+            int any = 0;
+            mino_val_t *bv[32];
+            size_t b;
+            for (b = 0; b < 32; b++) {
+                if (S->coll_size_hist[kind][b] != 0) any = 1;
+                bv[b] = mino_int(S, (long long)S->coll_size_hist[kind][b]);
+            }
+            if (!any) continue;
+            ck[n] = mino_keyword(S, kind_names[kind]);
+            cv[n] = mino_vector(S, bv, 32);
+            n++;
+        }
+        ks[38] = mino_keyword(S, "coll-size-hist");
+        vs[38] = mino_map(S, ck, cv, n);
+    }
+    return mino_map(S, ks, vs, 39);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

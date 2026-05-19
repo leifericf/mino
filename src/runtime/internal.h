@@ -1047,6 +1047,14 @@ struct mino_state {
      * a separate stats API) and via the mino.h surface below. */
     uint64_t        bc_declines[16];
 
+    /* Collection-size histogram (env-gated by MINO_COLL_SIZE_STATS=1).
+     * coll_size_hist[kind][bucket] -- kind is 0=vector, 1=map, 2=set;
+     * bucket is clamp(floor(log2(size+1)), 0..31). Ticked at the
+     * persistent / finalize entry points. Zero by default; only
+     * populated when the env flag is on. Surfaced via (gc-stats). */
+    int             coll_size_stats_enabled;  /* sniffed tri-state */
+    uint64_t        coll_size_hist[3][32];
+
     /* Pause-time distribution. gc_pause_ring is a circular buffer of
      * the last 256 pause durations (one entry per minor collect, per
      * major-slice, per force-finish, per fully-STW major); each value

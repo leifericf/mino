@@ -22,6 +22,7 @@
 #include "collections/internal.h"  /* vec_conj1_owned / assoc1_owned / pop_owned */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 /* ------------------------------------------------------------------------- */
 /* Small helpers                                                             */
@@ -100,6 +101,34 @@ mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
     return t;
 }
 
+/* MINO_COLL_SIZE_STATS=1 tri-state sniff. Returns 1 when enabled. */
+static int coll_size_stats_enabled(mino_state_t *S)
+{
+    if (S->coll_size_stats_enabled == 0) {
+        const char *e = getenv("MINO_COLL_SIZE_STATS");
+        S->coll_size_stats_enabled = (e != NULL && e[0] != '\0' && e[0] != '0')
+                                     ? 1 : -1;
+    }
+    return S->coll_size_stats_enabled == 1;
+}
+
+/* Tick the size histogram for one finalized collection. kind: 0=vec,
+ * 1=map, 2=set. bucket = clamp(floor(log2(size+1)), 0..31). */
+static void coll_size_tick(mino_state_t *S, int kind, size_t size)
+{
+    unsigned bucket;
+    size_t n;
+    if (!coll_size_stats_enabled(S)) return;
+    if (kind < 0 || kind > 2) return;
+    bucket = 0u;
+    n = size + 1u;
+    while ((n >> 1) > 0u && bucket < 31u) {
+        n >>= 1;
+        bucket++;
+    }
+    S->coll_size_hist[kind][bucket]++;
+}
+
 mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t)
 {
     mino_val_t *out;
@@ -117,6 +146,17 @@ mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t)
      * value for everything after. */
     t->as.transient.valid = 0;
     transient_set_current(S, t, NULL);
+    /* Instrumentation: tick the collection-size histogram for the
+     * finalized inner. The kind / size lookups are env-gated so the
+     * default path is one branch + return. */
+    if (out != NULL) {
+        switch (mino_type_of(out)) {
+        case MINO_VECTOR: coll_size_tick(S, 0, out->as.vec.len); break;
+        case MINO_MAP:    coll_size_tick(S, 1, out->as.map.len); break;
+        case MINO_SET:    coll_size_tick(S, 2, out->as.set.len); break;
+        default: break;
+        }
+    }
     return out;
 }
 
