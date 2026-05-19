@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.360.0 — Adaptive major-slice budget
+
+Replaces the static `gc_major_work_budget` default (4096
+headers per slice) with an adaptive controller targeting a
+configurable STW pause length.
+
+- New per-state field `gc_pause_target_ns` (default 1 ms;
+  overridable via `MINO_GC_PAUSE_TARGET_NS` env var, range
+  `100 us .. 100 ms`).
+- New helper `gc_adapt_major_budget` runs after each
+  `gc_record_pause` in `gc_major_slice`. Reads the median
+  of the recent 8 pauses off `gc_pause_ring`; halves the
+  budget when the median exceeds 120 % of target, multiplies
+  by 1.5x when below 80 %. Damping: at least 10 slices
+  between adjustments. Bounds: `[256, 65536]` headers.
+- Stress mode (`MINO_GC_STRESS=1`) bypasses the adaptive
+  helper entirely -- a full STW major per allocation makes
+  the slice budget meaningless.
+
+Tail-placed past the existing pause-distribution fields in
+`mino_state_t` so the JIT-pinned offsets (`ic_gen`,
+`bc_regs`, `jit_invoke_ctx`) stay stable.
+
+`task test-jit-parity` byte-identical across all 4 binaries.
+`task release-gate` clean. `task perf-gate` carries the
+pre-existing `small-map` regression; no new regressions.
+
+Honest measurement note: the alloc-heavy local probe doesn't
+sustain enough mark-stack pressure for adaptive to kick in
+(median pause stays well under target), so the default
+budget remains 4096 in steady state. The lever activates
+on workloads that DO push median pause past target, where
+it dampens tail max without changing total GC ns
+(measurement-driven; controlled experiment in a future
+cycle). The plan's "max pause <= 1.5x target" gate cannot be
+exercised on the current corpus -- pause ring's p99 is
+already under target.
+
 ## v0.359.0 — Major-mark root pruning deferred (soundness gate)
 
 Cycle F item 6 ("Major-mark root pruning") proposed gating the

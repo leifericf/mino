@@ -72,6 +72,64 @@ void gc_record_pause(mino_state_t *S, size_t ns)
     S->gc_pause_hist[bucket]++;
 }
 
+/* Adapt gc_major_work_budget toward gc_pause_target_ns. Reads the
+ * recent N=8 pauses from gc_pause_ring, computes the median, and
+ * scales the budget up (multiply by 1.5) when pauses are under 80 %
+ * of target, or halves when over 120 %. Damping: at least 10 slices
+ * must pass between adjustments. Bounds: [256, 65536] headers.
+ * Stress mode bypasses adaptive entirely (full STW per alloc means
+ * the budget is irrelevant). */
+static void gc_adapt_major_budget(mino_state_t *S)
+{
+    unsigned count, take, i;
+    uint32_t samples[8];
+    size_t   target;
+    size_t   median;
+    size_t   budget;
+    if (S->gc_stress == 1) return;
+    if (S->gc_pause_ring_count == 0) return;
+    S->gc_budget_slices_since_adjust++;
+    if (S->gc_budget_slices_since_adjust < 10u) return;
+    count = S->gc_pause_ring_count;
+    take  = count < 8u ? count : 8u;
+    /* Pull the most recent `take` samples (newest first). The ring's
+     * write index points at the NEXT slot, so the most recent valid
+     * sample is at (idx - 1). */
+    for (i = 0; i < take; i++) {
+        unsigned slot = (S->gc_pause_ring_idx + 256u - 1u - i) & 0xffu;
+        samples[i] = S->gc_pause_ring[slot];
+    }
+    /* Simple selection sort over up to 8 elements: cheap, no allocs. */
+    for (i = 0; i + 1u < take; i++) {
+        unsigned j, min_j = i;
+        for (j = i + 1u; j < take; j++) {
+            if (samples[j] < samples[min_j]) min_j = j;
+        }
+        if (min_j != i) {
+            uint32_t tmp = samples[i];
+            samples[i]   = samples[min_j];
+            samples[min_j] = tmp;
+        }
+    }
+    median = (size_t)samples[take / 2u];
+    target = S->gc_pause_target_ns;
+    if (target == 0u) return;
+    budget = S->gc_major_work_budget;
+    if (median > target + (target / 5u)) {        /* > 120 % of target */
+        if (budget > 256u) {
+            size_t halved = budget / 2u;
+            S->gc_major_work_budget = halved < 256u ? 256u : halved;
+            S->gc_budget_slices_since_adjust = 0;
+        }
+    } else if (median < (target * 4u) / 5u) {     /* < 80 % of target */
+        if (budget < 65536u) {
+            size_t scaled = budget + (budget / 2u);  /* * 1.5 */
+            S->gc_major_work_budget = scaled > 65536u ? 65536u : scaled;
+            S->gc_budget_slices_since_adjust = 0;
+        }
+    }
+}
+
 /* True when bytes_old has grown enough past the post-last-major
  * baseline to warrant starting a new major cycle. The tenths math
  * lets the default 1.5x multiplier be expressed without float. The
@@ -110,6 +168,7 @@ static void gc_major_slice(mino_state_t *S)
         S->gc_max_ns = elapsed_ns;
     }
     gc_record_pause(S, elapsed_ns);
+    gc_adapt_major_budget(S);
 }
 
 /* Force any in-flight major to completion, with the mutator paused.

@@ -155,6 +155,23 @@ static void state_init(mino_state_t *S)
     S->gc_major_work_budget    = 4096;
     S->gc_major_alloc_quantum  = 16u * 1024u;  /* bytes between auto steps */
     S->gc_major_step_alloc     = 0;
+    /* Adaptive slice-budget target: 1 ms default, overridable via
+     * MINO_GC_PAUSE_TARGET_NS. The adaptive helper in driver.c reads
+     * the recent N=8 pauses and adjusts gc_major_work_budget toward
+     * the target within bounds [256, 65536] headers per slice. */
+    {
+        const char *e = getenv("MINO_GC_PAUSE_TARGET_NS");
+        size_t v = 1000000u;  /* 1 ms */
+        if (e != NULL && e[0] != '\0') {
+            char *end = NULL;
+            unsigned long long parsed = strtoull(e, &end, 10);
+            if (end != e && parsed >= 100000ull && parsed <= 100000000ull) {
+                v = (size_t)parsed;
+            }
+        }
+        S->gc_pause_target_ns          = v;
+        S->gc_budget_slices_since_adjust = 0;
+    }
     S->gc_stress               = -1;
     S->nil_singleton.type  = MINO_NIL;
     S->true_singleton.type = MINO_BOOL;

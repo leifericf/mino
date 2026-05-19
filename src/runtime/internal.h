@@ -1099,6 +1099,17 @@ struct mino_state {
     unsigned        gc_pause_ring_count;
     uint32_t        gc_pause_hist[24];
 
+    /* Adaptive major-slice budget. gc_pause_target_ns is the desired
+     * STW pause length (default 1 ms); MINO_GC_PAUSE_TARGET_NS overrides.
+     * gc_budget_slices_since_adjust counts slices since the last damped
+     * adjustment so successive adjustments can't snowball. The adaptive
+     * helper in driver.c reads the recent 8-slice median pause off
+     * gc_pause_ring and bumps gc_major_work_budget toward
+     * gc_pause_target_ns within bounds [256, 65536] headers. Stress
+     * mode (MINO_GC_STRESS=1) bypasses adaptive entirely. */
+    size_t          gc_pause_target_ns;
+    unsigned        gc_budget_slices_since_adjust;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;
