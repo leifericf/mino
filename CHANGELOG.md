@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.376.0 — Architecture Cycle 7: Cleanup + Graph Audit
+
+Closes the seven-tag v0.370.0 → v0.376.0 architecture refactor cycle.
+This release runs the cleanup pass and validates the noumenon graph
+against the new shape.
+
+**Cleanup.** Stale `.d` dependency files for sources that no longer
+exist were deleted (`src/public/public_embed.d`,
+`src/public/public_gc.d`). No stale meta-comments
+("Extracted from X", "Phase N", "Moved from Y") landed in the new
+header carve-outs from cycles 1-3 — the comments in each new file
+describe the file's current responsibility, not its move history.
+
+**Noumenon graph.** After `noumenon_update`, the
+`cross-component-imports` query reports 49 distinct cross-component
+edges (down from the 117-edge baseline at v0.369.0). The
+`components` query shows 43 components total, with the per-cycle
+shape changes visible:
+
+| Cycle | Tag      | Shape change                                              |
+|------:|----------|-----------------------------------------------------------|
+| 1     | v0.370.0 | `src/runtime/` umbrella carved into 9 per-concern headers |
+| 2     | v0.371.0 | `src/values/` first-class component upstream of collections |
+| 3     | v0.372.0 | `gc <-> collections` cycle broken via per-tag tracer table |
+| 4     | v0.373.0 | `gc_state_t` type alias (full struct decomposition deferred) |
+| 5     | v0.374.0 | `mino.h` audited; sampler-dump pair demoted to mino_internal.h |
+| 6     | v0.375.0 | Mega-prim files audited; splits deferred                  |
+| 7     | v0.376.0 | This release: cleanup + graph audit                       |
+
+The values component is structurally present (`src/values/layout.h`,
+`src/values/internal.h`, `src/values/val.c`,
+`src/values/gc_handlers.c`) but the noumenon LLM-analyzed
+`components` view still folds it into `collections` until the next
+analyze pass refreshes the semantic grouping.
+
+**Deferred items.** Cycles 4 and 6 shipped scope-reduced. The
+follow-up work is captured in `.local/cycle-4-followups.md` (mino_state
+sub-struct extraction) and `.local/cycle-6-followups.md` (mega-prim
+splits) with constraints, recommended order, and verification
+checklists so the work resumes cleanly in a future cycle.
+
+**Verification.** Full test suite green across every cycle (1371
+tests, 4828 assertions). Build clean. No JIT regression observed.
+
 ## v0.375.0 — Architecture Cycle 6 (Audit, Splits Deferred)
 
 Cycle 6 set out to split the four mega `prim/` files into per-domain
