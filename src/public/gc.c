@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "mino.h"
+#include "mino_internal.h"      /* mino_sampler_dump, mino_alloc_sampler_dump */
 #include "public/internal_bridge.h"
 #include "gc/internal.h"        /* for GC_T__COUNT in stats copy */
 #include "eval/bc/internal.h"  /* for mino_bc_fn_t + mino_sample_t */

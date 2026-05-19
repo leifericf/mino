@@ -124,6 +124,33 @@ void mino_install_mino_tooling      (mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_core(mino_state_t *S, mino_env_t *env);
 
 /* ------------------------------------------------------------------------- */
+/* Safepoint-sampler dumps (diagnostic, runtime-internal)                    */
+/* ------------------------------------------------------------------------- */
+
+#include <stdio.h>
+
+/*
+ * CPU sampler dump. When MINO_SAMPLE=1 was set in the environment,
+ * the runtime records (fn, pc, op) tuples into a ring at each
+ * safepoint hit (default every 1000 safepoints; MINO_SAMPLE_PERIOD
+ * tunes the rate). mino_sampler_dump writes a per-PC histogram of
+ * the current ring contents to `out`. Returns the number of distinct
+ * (fn, pc) pairs written. No-op when sampling is off or the ring is
+ * empty.
+ */
+unsigned mino_sampler_dump(mino_state_t *S, FILE *out);
+
+/*
+ * Allocation-site sampler dump. When MINO_ALLOC_SAMPLE=1 was set in
+ * the environment, the runtime records one (return-address, tag,
+ * size-bucket) tuple for every MINO_ALLOC_SAMPLE_RATE-th allocation
+ * (default 4096) into a tiny ring (4096 entries × 16 B = 64 KB).
+ * Writes a top-N table aggregated by site to `out` and returns the
+ * number of distinct sites written. No-op when sampling is off.
+ */
+unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out);
+
+/* ------------------------------------------------------------------------- */
 /* Fault injection (test-only)                                               */
 /* ------------------------------------------------------------------------- */
 

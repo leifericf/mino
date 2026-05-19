@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 373
+#define MINO_VERSION_MINOR 374
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -1642,26 +1642,11 @@ void mino_gc_pause_hist(mino_state_t *S,
                         uint32_t out_buckets[24],
                         unsigned *out_count);
 
-/*
- * CPU sampler dump. When MINO_SAMPLE=1 was set in the environment,
- * the runtime records (fn, pc, op) tuples into a ring at each
- * safepoint hit (default every 1000 safepoints; MINO_SAMPLE_PERIOD
- * tunes the rate). mino_sampler_dump writes a per-PC histogram of
- * the current ring contents to `out`. Returns the number of distinct
- * (fn, pc) pairs written. No-op when sampling is off or the ring is
- * empty.
- */
-unsigned mino_sampler_dump(mino_state_t *S, FILE *out);
-
-/*
- * Allocation-site sampler dump. When MINO_ALLOC_SAMPLE=1 was set in
- * the environment, the runtime records one (return-address, tag,
- * size-bucket) tuple for every MINO_ALLOC_SAMPLE_RATE-th allocation
- * (default 4096) into a tiny ring (4096 entries × 16 B = 64 KB).
- * Writes a top-N table aggregated by site to `out` and returns the
- * number of distinct sites written. No-op when sampling is off.
- */
-unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out);
+/* CPU and allocation safepoint-sampler dumps (mino_sampler_dump,
+ * mino_alloc_sampler_dump) are runtime diagnostic helpers, not part
+ * of the embedder surface. They're declared in mino_internal.h and
+ * called from runtime/state.c::quiesce and from the mino-side
+ * (alloc-site-summary) primitive in prim/reflection.c. */
 
 /* ------------------------------------------------------------------------- */
 /* Allocation profiler [MINO_UNSTABLE_ALLOC_PROFILE]                         */

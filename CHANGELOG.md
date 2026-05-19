@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.374.0 — mino.h Audited for Embedder Fit
+
+mino is an embeddable Lisp. A single `#include <mino.h>` is the
+contract — every example, JNI/C++ binding, brew/scoop install, and
+mino-site C API reference depends on the single-header shape.
+Cycle 5 reaffirms that contract: **`mino.h` stays one header.**
+
+This release tightens what `mino.h` exposes by demoting two
+runtime-internal safepoint-sampler dumps to `mino_internal.h`:
+
+- `unsigned mino_sampler_dump(mino_state_t *S, FILE *out);`
+- `unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out);`
+
+These were only called from `runtime/state.c`'s quiesce path and from
+mino-side primitives in `prim/reflection.c`. No embedder example or
+mino-examples cookbook referenced them. They belong with the rest of
+the diagnostic surface in `mino_internal.h`.
+
+Everything else stays public: GC stats and tuning, JIT mode and
+capability, host thread pool surface, capability install, and the
+allocation profiler (already gated `UNSTABLE`).
+
+`mino.h` section banners are unchanged — the existing titles
+(Version, Value types, Constructors, Collection builders, ...)
+already make the audience obvious.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean. Examples build.
+
 ## v0.373.0 — Architecture Cycle 4 (Scope-Reduced)
 
 Cycle 4's original ambition was to decompose `struct mino_state`
