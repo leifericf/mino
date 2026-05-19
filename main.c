@@ -834,8 +834,9 @@ static void install_crash_handler(mino_state_t *S)
 
 /* Interactive REPL loop. Runs until stdin reaches EOF, the user types
  * :quit, or an unrecoverable allocation failure aborts. `specials`
- * carries the *1/*2/*3/*e bookkeeping inherited from main; the env is
- * mino's default user-environment seeded with the standard library. */
+ * carries the `*1 *2 *3 *e` bookkeeping inherited from main; the env
+ * is mino's default user-environment seeded with the standard
+ * library. */
 static int run_repl(mino_state_t *S, mino_env_t *env,
                     repl_specials_t *specials)
 {
