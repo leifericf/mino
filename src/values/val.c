@@ -1088,6 +1088,50 @@ static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
  * same. New tier additions or new equality bridges must extend the
  * matching branch in hash_val in the same commit.
  */
+/* Cross-type equality: a and b have different tags but may still be
+ * = under Clojure's promotion rules (int/bigint share a value class;
+ * cons/vector/etc compare as seqs; map/sorted-map compare by entry
+ * pairs; set/sorted-set compare by element membership). Everything
+ * else with mismatched tags is unequal. */
+static int eq_cross_type(const mino_val_t *a, const mino_val_t *b)
+{
+    /* Cross-tier integer equality: int and bigint represent the same
+     * arbitrary-precision integer kind, and Clojure treats them as
+     * `=` when they hold the same value (`(= 1 1N)` is true). Other
+     * tier combinations -- int/float, ratio/float, bigdec/anything --
+     * are NOT equal under `=`; use `==` for cross-tier numeric
+     * equality. */
+    if (mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) {
+        return mino_bigint_equals_ll(b, mino_val_int_get(a));
+    }
+    if (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b)) {
+        return mino_bigint_equals_ll(a, mino_val_int_get(b));
+    }
+    /* Cross-type sequential equality: cons, vector, lazy, chunked-cons,
+     * map-entry, nil all compare element-wise. Matches Clojure where
+     * (= '(1 2) [1 2]) is true. */
+    if (is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
+        return eq_seq_like(a, b);
+    }
+    /* Cross-type map equality: sorted-map and map compare by entries. */
+    {
+        int a_map = (mino_type_of(a) == MINO_MAP
+                     || mino_type_of(a) == MINO_SORTED_MAP);
+        int b_map = (mino_type_of(b) == MINO_MAP
+                     || mino_type_of(b) == MINO_SORTED_MAP);
+        if (a_map && b_map) return eq_map_like_cross(a, b);
+    }
+    /* Cross-type set equality: sorted-set and set compare by elements. */
+    {
+        int a_set = (mino_type_of(a) == MINO_SET
+                     || mino_type_of(a) == MINO_SORTED_SET);
+        int b_set = (mino_type_of(b) == MINO_SET
+                     || mino_type_of(b) == MINO_SORTED_SET);
+        if (a_set && b_set) return eq_set_like_cross(a, b);
+    }
+    return 0;
+}
+
 int mino_eq(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) {
@@ -1149,52 +1193,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         }
     }
     if (mino_type_of(a) != mino_type_of(b)) {
-        /*
-         * Cross-tier integer equality: int and bigint represent the
-         * same arbitrary-precision integer kind, and Clojure treats
-         * them as `=` when they hold the same value (`(= 1 1N)` is
-         * true). Other tier combinations — int/float, ratio/float,
-         * bigdec/anything-else — are NOT equal under `=`; use `==`
-         * for cross-tier numeric equality.
-         */
-        if (mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) {
-            return mino_bigint_equals_ll(b, mino_val_int_get(a));
-        }
-        if (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b)) {
-            return mino_bigint_equals_ll(a, mino_val_int_get(b));
-        }
-        /*
-         * Cross-type sequential equality: cons, vector, and nil compare
-         * element-wise.  Matches Clojure where (= '(1 2) [1 2]) is true.
-         */
-        {
-            int a_seq = is_sequential(mino_type_of(a));
-            int b_seq = is_sequential(mino_type_of(b));
-            if (a_seq && b_seq) {
-                return eq_seq_like(a, b);
-            }
-        }
-        /*
-         * Cross-type map equality: sorted-map and map compare by entries.
-         */
-        {
-            int a_map = (mino_type_of(a) == MINO_MAP || mino_type_of(a) == MINO_SORTED_MAP);
-            int b_map = (mino_type_of(b) == MINO_MAP || mino_type_of(b) == MINO_SORTED_MAP);
-            if (a_map && b_map) {
-                return eq_map_like_cross(a, b);
-            }
-        }
-        /*
-         * Cross-type set equality: sorted-set and set compare by elements.
-         */
-        {
-            int a_set = (mino_type_of(a) == MINO_SET || mino_type_of(a) == MINO_SORTED_SET);
-            int b_set = (mino_type_of(b) == MINO_SET || mino_type_of(b) == MINO_SORTED_SET);
-            if (a_set && b_set) {
-                return eq_set_like_cross(a, b);
-            }
-        }
-        return 0;
+        return eq_cross_type(a, b);
     }
     switch (mino_type_of(a)) {
     case MINO_NIL:
@@ -1271,22 +1270,37 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         }
         return 1;
     }
+    /* Identity-equality kinds: callables, mutable cells, opaque values,
+     * and internal sentinels. For these, two distinct allocations are
+     * never `=`. Each primitive is allocated once per state by
+     * prim_install_table; macros/fns close over their own env;
+     * atoms/volatiles/refs/agents are identity cells; the JVM-aligned
+     * types (regex, host-array, future) match Object.equals
+     * defaults; transients are short-lived mutable handles;
+     * record-types intern by (ns, name) so they compare pointer-
+     * equal already; recur/tail-call/reduced are runtime sentinels
+     * that shouldn't escape user code. */
     case MINO_PRIM:
-        /* Each primitive is allocated once per state by prim_install_table,
-         * so two MINO_PRIM values denote the same prim iff they are the
-         * same allocation. Pointer equality avoids comparing through
-         * either ABI's function-pointer field. */
-        return a == b;
     case MINO_FN:
     case MINO_MACRO:
-        /* Callables compare by identity. Structural equality on bodies and
-         * captured environments is neither cheap nor especially meaningful. */
-        return a == b;
-    case MINO_HANDLE:
-        return a->as.handle.ptr == b->as.handle.ptr;
     case MINO_ATOM:
     case MINO_VOLATILE:
+    case MINO_RECUR:
+    case MINO_TAIL_CALL:
+    case MINO_REDUCED:
+    case MINO_VAR:
+    case MINO_TRANSIENT:
+    case MINO_TYPE:
+    case MINO_FUTURE:
+    case MINO_REGEX:
+    case MINO_HOST_ARRAY:
+    case MINO_TX_REF:
+    case MINO_AGENT:
         return a == b;
+    case MINO_HANDLE:
+        /* Two MINO_HANDLE values are equal iff they wrap the same host
+         * pointer; tag matching is left to the host. */
+        return a->as.handle.ptr == b->as.handle.ptr;
     case MINO_LAZY:
         /* Both sides are MINO_LAZY of the same realized state. Two
          * realized-to-empty lazy seqs both keep the LAZY tag (the
@@ -1321,26 +1335,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return rb_trees_content_equal(a->as.sorted.root,
                                       b->as.sorted.root,
                                       mino_type_of(a) == MINO_SORTED_MAP);
-    case MINO_RECUR:
-        return a == b;
-    case MINO_TAIL_CALL:
-        return a == b;
-    case MINO_REDUCED:
-        return a == b;
-    case MINO_VAR:
-        return a == b; /* identity equality */
-    case MINO_TRANSIENT:
-        return a == b; /* identity equality; transients are mutable */
     case MINO_BIGINT:
         return mino_bigint_equals(a, b);
     case MINO_RATIO:
         return mino_ratio_equals(a, b);
     case MINO_BIGDEC:
         return mino_bigdec_equals(a, b);
-    case MINO_TYPE:
-        /* Record-type identity is pointer equality: defrecord interns
-         * by (ns, name), so two equal types are the same allocation. */
-        return a == b;
     case MINO_RECORD: {
         /* Records are equal iff their types are pointer-identical AND
          * each declared field value is mino_eq AND the ext maps are
@@ -1357,32 +1357,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         if (a->as.record.ext == NULL || b->as.record.ext == NULL) return 0;
         return mino_eq(a->as.record.ext, b->as.record.ext);
     }
-    case MINO_FUTURE:
-        /* Futures use identity equality — two distinct future cells
-         * are never equal even if they hold the same result. */
-        return a == b;
     case MINO_UUID:
         return memcmp(a->as.uuid.bytes, b->as.uuid.bytes, 16) == 0;
-    case MINO_REGEX:
-        /* Identity equality, matching Java's Pattern.equals. Two
-         * distinct #"x" #"x" literals are NOT `=` -- Clojure's
-         * convention since clojure.core/= delegates Pattern equality
-         * straight to Object.equals for this type. */
-        return a == b;
-    case MINO_HOST_ARRAY:
-        /* Identity equality, matching JVM Java arrays. Two distinct
-         * (object-array 3) calls are NOT `=` even if their elements
-         * match. */
-        return a == b;
     case MINO_MAP_ENTRY:
         return mino_eq(a->as.map_entry.k, b->as.map_entry.k)
             && mino_eq(a->as.map_entry.v, b->as.map_entry.v);
-    case MINO_TX_REF:
-        /* Identity equality matches atoms and Clojure's JVM Ref. */
-        return a == b;
-    case MINO_AGENT:
-        /* Identity equality matches atoms and JVM Agent. */
-        return a == b;
     }
     return 0;
 }
