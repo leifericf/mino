@@ -23,23 +23,9 @@
 #define EVAL_INTERNAL_H
 
 #include "mino_internal.h"
+#include "runtime/thread_ctx.h"  /* MAX_TRY_DEPTH + try_frame_t (the per-ctx try-stack types) */
 
-#include <setjmp.h>
 #include <stdio.h>
-
-/* ------------------------------------------------------------------------- */
-/* Exception handling                                                        */
-/* ------------------------------------------------------------------------- */
-
-#define MAX_TRY_DEPTH 64
-
-typedef struct {
-    jmp_buf     buf;
-    mino_val_t *exception;
-    const char *saved_ns;       /* current_ns at try-frame entry; restored on catch */
-    const char *saved_ambient;  /* fn_ambient_ns at try-frame entry */
-    size_t      saved_load_len; /* require load-stack depth at frame entry */
-} try_frame_t;
 
 /* ------------------------------------------------------------------------- */
 /* mino.c: evaluator core helpers                                            */
