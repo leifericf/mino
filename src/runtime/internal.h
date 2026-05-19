@@ -933,6 +933,15 @@ struct mino_state {
      * cycle. Tail-placed so the runtime_layout.h JIT-pinned offsets
      * stay stable. */
     struct mino_jit_slab    *jit_slabs;
+
+    /* Per-tag GC dispatch tables. Tracer at gc_tracers[tag] handles
+     * gc_trace_children for a header with that type_tag; finalizer at
+     * gc_finalizers[tag] (NULL = no external resource) is called from
+     * sweep paths before the header is freed. Component-owned tracers
+     * register themselves via gc_register_tracer / gc_register_finalizer
+     * during state init, before the first allocation. */
+    gc_tracer_fn             gc_tracers[GC_T__COUNT];
+    gc_finalizer_fn          gc_finalizers[GC_T__COUNT];
 };
 
 /* Resolve the active per-thread ctx for state S.

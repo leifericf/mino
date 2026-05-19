@@ -215,6 +215,10 @@ static void state_init(mino_state_t *S)
     mino_state_lock_init(S);
     mino_worker_list_lock_init(S);
     gc_evt_init(S);
+    /* GC tracer table must be wired before any allocation. The state
+     * struct is calloc'd, so gc_tracers and gc_finalizers start as
+     * all-NULL; the defaults populate every built-in tag. */
+    gc_register_default_tracers(S);
 }
 
 mino_state_t *mino_state_new(void)

@@ -639,11 +639,18 @@ static void gc_mark_bc_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc)
     }
 }
 
-void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
+/* ------------------------------------------------------------------------- */
+/* Per-tag tracer functions                                                  */
+/*                                                                           */
+/* One function per GC_T_* tag, registered into S->gc_tracers at boot.       */
+/* gc_trace_children dispatches through that table. Future cycles move the   */
+/* component-specific tracers (vec/hamt/rb -> collections, bc -> eval/bc,    */
+/* val -> values) out into their owning components.                          */
+/* ------------------------------------------------------------------------- */
+
+static void trace_val(mino_state_t *S, gc_hdr_t *h)
 {
-    switch (h->type_tag) {
-    case GC_T_VAL: {
-        mino_val_t *v = (mino_val_t *)(h + 1);
+    mino_val_t *v = (mino_val_t *)(h + 1);
         gc_mark_child_push(S, v->meta);
         switch (mino_type_of(v)) {
         case MINO_STRING:
@@ -826,92 +833,137 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             break;
         default:
             break;
-        }
-        break;
     }
-    case GC_T_ENV: {
-        mino_env_t *env = (mino_env_t *)(h + 1);
-        size_t i;
-        gc_mark_child_push(S, env->parent);
-        if (env->bindings != NULL) {
-            gc_mark_child_push(S, env->bindings);
-            for (i = 0; i < env->len; i++) {
-                gc_mark_child_push(S, env->bindings[i].name);
-                gc_mark_child_push(S, env->bindings[i].val);
-            }
+}
+
+static void trace_env(mino_state_t *S, gc_hdr_t *h)
+{
+    mino_env_t *env = (mino_env_t *)(h + 1);
+    size_t i;
+    gc_mark_child_push(S, env->parent);
+    if (env->bindings != NULL) {
+        gc_mark_child_push(S, env->bindings);
+        for (i = 0; i < env->len; i++) {
+            gc_mark_child_push(S, env->bindings[i].name);
+            gc_mark_child_push(S, env->bindings[i].val);
         }
-        gc_mark_child_push(S, env->ht_buckets);
-        break;
     }
-    case GC_T_VEC_NODE: {
-        mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
-        unsigned i;
-        for (i = 0; i < n->count; i++) {
+    gc_mark_child_push(S, env->ht_buckets);
+}
+
+static void trace_vec_node(mino_state_t *S, gc_hdr_t *h)
+{
+    mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
+    unsigned i;
+    for (i = 0; i < n->count; i++) {
+        gc_mark_child_push(S, n->slots[i]);
+    }
+}
+
+static void trace_hamt_node(mino_state_t *S, gc_hdr_t *h)
+{
+    mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
+    unsigned count, i;
+    gc_mark_child_push(S, n->slots);
+    count = (n->collision_count > 0) ? n->collision_count
+                                     : popcount32(n->bitmap);
+    if (n->slots != NULL) {
+        for (i = 0; i < count; i++) {
             gc_mark_child_push(S, n->slots[i]);
         }
-        break;
     }
-    case GC_T_HAMT_NODE: {
-        mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
-        unsigned count, i;
-        gc_mark_child_push(S, n->slots);
-        count = (n->collision_count > 0) ? n->collision_count
-                                         : popcount32(n->bitmap);
-        if (n->slots != NULL) {
-            for (i = 0; i < count; i++) {
-                gc_mark_child_push(S, n->slots[i]);
-            }
-        }
-        break;
+}
+
+static void trace_hamt_entry(mino_state_t *S, gc_hdr_t *h)
+{
+    hamt_entry_t *e = (hamt_entry_t *)(h + 1);
+    gc_mark_child_push(S, e->key);
+    gc_mark_child_push(S, e->val);
+}
+
+/* Walks GC_T_VALARR and GC_T_PTRARR alike: both layouts are a flat
+ * array of void *. */
+static void trace_pointer_array(mino_state_t *S, gc_hdr_t *h)
+{
+    void **arr = (void **)(h + 1);
+    size_t n = h->size / sizeof(*arr);
+    size_t i;
+    for (i = 0; i < n; i++) {
+        gc_mark_child_push(S, arr[i]);
     }
-    case GC_T_HAMT_ENTRY: {
-        hamt_entry_t *e = (hamt_entry_t *)(h + 1);
-        gc_mark_child_push(S, e->key);
-        gc_mark_child_push(S, e->val);
-        break;
-    }
-    case GC_T_VALARR:
-    case GC_T_PTRARR: {
-        void **arr = (void **)(h + 1);
-        size_t n = h->size / sizeof(*arr);
-        size_t i;
-        for (i = 0; i < n; i++) {
-            gc_mark_child_push(S, arr[i]);
-        }
-        break;
-    }
-    case GC_T_RB_NODE: {
-        mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
-        gc_mark_child_push(S, rb->key);
-        gc_mark_child_push(S, rb->val);
-        gc_mark_child_push(S, rb->left);
-        gc_mark_child_push(S, rb->right);
-        break;
-    }
-    case GC_T_BC: {
-        /* The bc record carries pointers to its code, consts, clauses,
-         * and ic_slots buffers. These are normally reached via
-         * MINO_FN's trace, but a write barrier on the bc record
-         * (e.g. ensure_code growing the code buffer) adds the bc
-         * directly to the remset, and minor mark then needs to push
-         * its YOUNG children itself. Without this case the bc lives
-         * but its buffers are silently swept. */
-        struct mino_bc_fn *bc = (struct mino_bc_fn *)(h + 1);
-        gc_mark_child_push(S, bc->code);
-        gc_mark_child_push(S, bc->consts);
-        gc_mark_child_push(S, bc->clauses);
-        gc_mark_child_push(S, bc->source_map.positions);
-        gc_mark_bc_ic_slots(S, bc);
-        /* Optional ic_stats POD buffer (allocated only under
-         * MINO_JIT_IC_STATS=1). Plain GC_T_RAW counters; no embedded
-         * pointers, so the buffer itself is the only thing to mark. */
-        gc_mark_child_push(S, bc->ic_stats);
-        break;
-    }
-    case GC_T_RAW:
-    default:
-        break;
-    }
+}
+
+static void trace_rb_node(mino_state_t *S, gc_hdr_t *h)
+{
+    mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
+    gc_mark_child_push(S, rb->key);
+    gc_mark_child_push(S, rb->val);
+    gc_mark_child_push(S, rb->left);
+    gc_mark_child_push(S, rb->right);
+}
+
+/* The bc record carries pointers to its code, consts, clauses, and
+ * ic_slots buffers. These are normally reached via MINO_FN's trace,
+ * but a write barrier on the bc record (e.g. ensure_code growing the
+ * code buffer) adds the bc directly to the remset, and minor mark
+ * then needs to push its YOUNG children itself. Without this case
+ * the bc lives but its buffers are silently swept. */
+static void trace_bc(mino_state_t *S, gc_hdr_t *h)
+{
+    struct mino_bc_fn *bc = (struct mino_bc_fn *)(h + 1);
+    gc_mark_child_push(S, bc->code);
+    gc_mark_child_push(S, bc->consts);
+    gc_mark_child_push(S, bc->clauses);
+    gc_mark_child_push(S, bc->source_map.positions);
+    gc_mark_bc_ic_slots(S, bc);
+    /* Optional ic_stats POD buffer (allocated only under
+     * MINO_JIT_IC_STATS=1). Plain GC_T_RAW counters; no embedded
+     * pointers, so the buffer itself is the only thing to mark. */
+    gc_mark_child_push(S, bc->ic_stats);
+}
+
+void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
+{
+    gc_tracer_fn fn;
+    unsigned tag = h->type_tag;
+    if (tag >= GC_T__COUNT) return;
+    fn = S->gc_tracers[tag];
+    if (fn != NULL) fn(S, h);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tracer + finalizer registration                                           */
+/* ------------------------------------------------------------------------- */
+
+void gc_register_tracer(mino_state_t *S, unsigned char tag, gc_tracer_fn fn)
+{
+    if (tag < GC_T__COUNT) S->gc_tracers[tag] = fn;
+}
+
+void gc_register_finalizer(mino_state_t *S, unsigned char tag,
+                           gc_finalizer_fn fn)
+{
+    if (tag < GC_T__COUNT) S->gc_finalizers[tag] = fn;
+}
+
+/* Wire up every built-in tag. Component-owned tracers (collections,
+ * eval/bc, values) currently live in driver.c; later cycles move
+ * them out to their owning components and the component-side hook
+ * (mino_collections_register_gc_handlers etc.) calls
+ * gc_register_tracer. */
+void gc_register_default_tracers(mino_state_t *S)
+{
+    /* GC_T_RAW intentionally stays NULL: a POD buffer has nothing to
+     * trace; gc_trace_children no-ops on NULL slots. */
+    gc_register_tracer(S, GC_T_VAL,        trace_val);
+    gc_register_tracer(S, GC_T_ENV,        trace_env);
+    gc_register_tracer(S, GC_T_VEC_NODE,   trace_vec_node);
+    gc_register_tracer(S, GC_T_HAMT_NODE,  trace_hamt_node);
+    gc_register_tracer(S, GC_T_HAMT_ENTRY, trace_hamt_entry);
+    gc_register_tracer(S, GC_T_PTRARR,     trace_pointer_array);
+    gc_register_tracer(S, GC_T_VALARR,     trace_pointer_array);
+    gc_register_tracer(S, GC_T_RB_NODE,    trace_rb_node);
+    gc_register_tracer(S, GC_T_BC,         trace_bc);
 }
 
 /* Drain the mark stack until its length drops to floor_len. The floor

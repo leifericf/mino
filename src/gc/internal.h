@@ -210,6 +210,21 @@ void gc_drain_mark_stack(mino_state_t *S);
  * beneath the floor are preserved for the next gc_major_step. */
 void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len);
 void gc_trace_children(mino_state_t *S, gc_hdr_t *h);
+
+/* Per-tag tracer + finalizer registration. Called from each
+ * component's mino_<component>_register_gc_handlers(S) hook during
+ * state init, before any allocation. Registering NULL is the same
+ * as leaving the slot untouched; gc_trace_children skips empty
+ * slots, so unhandled tags are no-ops. */
+void gc_register_tracer(mino_state_t *S, unsigned char tag,
+                        gc_tracer_fn fn);
+void gc_register_finalizer(mino_state_t *S, unsigned char tag,
+                           gc_finalizer_fn fn);
+
+/* Wire every built-in tracer. Called from runtime/state.c::state_init
+ * before the first allocation; component-owned tracers register
+ * themselves alongside. */
+void gc_register_default_tracers(mino_state_t *S);
 /* Enqueue a header onto the mark stack with mark=1, bypassing the
  * minor-phase OLD filter. Used by minor's promotion hook to hand
  * newly-promoted OLD objects to major's mark frontier when a minor
