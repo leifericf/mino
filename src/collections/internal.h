@@ -37,13 +37,14 @@
 #define INTERN_HT_EMPTY     SIZE_MAX
 #define INTERN_HT_TOMBSTONE (SIZE_MAX - 1)
 
-typedef struct {
+struct intern_table {
     mino_val_t **entries;
     size_t       len;
     size_t       cap;
     size_t      *ht_buckets;  /* open-addressing hash table: index into entries[] */
     size_t       ht_cap;      /* power of 2 */
-} intern_table_t;
+};
+typedef struct intern_table intern_table_t;
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector                                                         */
@@ -116,28 +117,9 @@ struct mino_rb_node {
     unsigned char   red;    /* 1 = red, 0 = black */
 };
 
-/* ------------------------------------------------------------------------- */
-/* val.c: constructors, interning, hashing, equality                         */
-/* ------------------------------------------------------------------------- */
-
-/* Interned values are GC-owned singletons (deduplicated by content). */
-mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
-                                    mino_type_t type,
-                                    const char *s, size_t len);  /* GC-owned */
-mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
-                    mino_env_t *env);                            /* GC-owned */
-
-/* Hashing (pure, no allocation). */
-uint32_t hash_val(const mino_val_t *v);
-uint32_t fnv_mix(uint32_t h, unsigned char b);
-uint32_t fnv_bytes(uint32_t h, const unsigned char *p, size_t n);
-
-/* Equality (may force lazy seqs, triggering allocation). */
-int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
-
-/* val.c: var constructor. */
-mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
-                        mino_val_t *root);
+/* val.c API (constructors, interning, hashing, equality, mino_mk_var)
+ * lives in values/internal.h. */
+#include "values/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* vec.c: persistent vector operations                                       */
