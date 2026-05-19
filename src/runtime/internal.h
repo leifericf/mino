@@ -1012,74 +1012,8 @@ static inline void mino_unlock(mino_state_t *S)
     mino_state_lock_release(S);
 }
 
-/* ------------------------------------------------------------------------- */
-/* error.c                                                                   */
-/* ------------------------------------------------------------------------- */
-
-/* set_error/set_error_at copy msg into the current ctx's error_buf; msg is borrowed. */
-void        set_error(mino_state_t *S, const char *msg);          /* msg: borrowed */
-void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borrowed */
-                         const char *msg);                         /* msg: borrowed */
-void        clear_error(mino_state_t *S);
-void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
-void        source_cache_store(mino_state_t *S, const char *file,
-                               const char *text, size_t len);
-const char *source_cache_get_line(mino_state_t *S, const char *file,
-                                  int line, size_t *out_len);
-void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
-                          const char *kind, const char *code,
-                          const char *msg);
-/* Extended variant of set_eval_diag that also attaches a `:mino/data`
- * payload (GC-owned; the runtime keeps it alive while the diag is
- * live) and an optional note. Pass NULL for either to skip. */
-void        set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
-                                    const char *kind, const char *code,
-                                    const char *msg, mino_val_t *data,
-                                    const char *note);
-const char *type_tag_str(const mino_val_t *v);                    /* static string */
-void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
-                       const char *file, int line,            /* file: borrowed */
-                       int column);
-void        pop_frame(mino_state_t *S);
-void        append_trace(mino_state_t *S);
-meta_entry_t *meta_find(mino_state_t *S, const char *name);   /* borrowed into meta_table */
-void meta_set(mino_state_t *S, const char *name,              /* name: borrowed (copied) */
-              const char *doc, size_t doc_len,                 /* doc: borrowed (copied) */
-              mino_val_t *source);                             /* source: GC-owned, retained */
-/* meta_set_capability tags a registered binding with its install-group
- * label. Borrows; copies. NULL clears. */
-void meta_set_capability(mino_state_t *S, const char *name,
-                         const char *capability);
-
-/* ------------------------------------------------------------------------- */
-/* env.c: environment and dynamic bindings                                   */
-/*                                                                           */
-/* Environments are GC-owned. Bindings within are borrowed views.            */
-/* ------------------------------------------------------------------------- */
-
-mino_env_t    *env_alloc(mino_state_t *S, mino_env_t *parent); /* GC-owned */
-env_binding_t *env_find_here(mino_env_t *env, const char *name); /* borrowed */
-env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen);
-/* Symbol-aware lookup. Caller already has sym->as.s.{data,len}; we
- * skip strlen and walk the parent chain with the cached length. */
-mino_val_t    *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym);
-void           env_bind(mino_state_t *S, mino_env_t *env,
-                        const char *name,                      /* borrowed (copied) */
-                        mino_val_t *val);                      /* GC-owned, retained */
-void           env_bind_sym(mino_state_t *S, mino_env_t *env,
-                        mino_val_t *sym,                       /* interned symbol */
-                        mino_val_t *val);                      /* GC-owned, retained */
-int            env_unbind(mino_state_t *S, mino_env_t *env,
-                        const char *name);                     /* 1 if removed */
-mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
-mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
-mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
-void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
-
-/* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
- * Returns mino_nil(S) when the stack is empty. Used by future spawn to
- * convey caller bindings to the worker, and by get-thread-bindings. */
-mino_val_t    *mino_snapshot_thread_bindings(mino_state_t *S);
+#include "runtime/error_diag.h"
+#include "runtime/env_api.h"
 
 /* ------------------------------------------------------------------------- */
 /* ns_env.c: per-namespace root env table.                                   */
