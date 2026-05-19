@@ -868,6 +868,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * so nested JIT-from-JIT calls (currently unreachable, but the
      * counter is reentrant-safe) accumulate depth correctly. */
     ctx->jit_invoke_depth++;
+    bc->jit_invocations++;
     mino_val_t *r = f(regs, consts, S);
     ctx->jit_invoke_depth--;
     /* Side-exit detection: when the deopt stencil fires, it sets
@@ -880,6 +881,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
     if (r == NULL && S->jit_deopt_pending) {
         size_t resume_pc = S->jit_deopt_pc;
         S->jit_deopt_pending = 0;
+        bc->jit_deopt_exits++;
         size_t base = (size_t)(regs - S->bc_regs);
         r = mino_bc_run_resume(S, bc, base, env, resume_pc,
                                saved_try_depth, saved_bc_catch_depth,

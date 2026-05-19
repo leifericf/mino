@@ -451,6 +451,17 @@ typedef struct mino_bc_fn {
      * (freed at deopt or at state teardown via the jit_regions
      * walk). */
     unsigned        *native_pc_offsets;
+    /* Per-fn JIT counters (instrumentation). invocations is incremented
+     * each time mino_jit_invoke enters this bc record's native code;
+     * deopt_exits is incremented each time the body returns via the
+     * OP_DEOPT_TO_INTERP stencil (or the deopt-pending pseudo-op).
+     * native_returns is the implied delta (invocations - deopt_exits)
+     * and is not stored separately. The counters are tagged onto the
+     * struct rather than to a side table because the JIT compile path
+     * is the only writer per fn, and (gc-stats) does not need to walk
+     * a global registry to dump them. */
+    uint64_t         jit_invocations;
+    uint64_t         jit_deopt_exits;
 } mino_bc_fn_t;
 
 /* Stencil ABI boundary invariant.

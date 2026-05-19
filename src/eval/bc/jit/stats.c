@@ -229,22 +229,29 @@ static void cpjit_stats_dump(void)
             const char *file = e->file ? e->file : "?";
             const char *base = strrchr(file, '/');
             base = base ? base + 1 : file;
-            char loc[200];
+            char loc[260];
+            /* Per-fn runtime counters live on the bc record itself.
+             * Pull them at dump time so the figure reflects every
+             * invocation the JIT'd region accumulated through the
+             * end of the run. Skipped for non-compiled fns (they
+             * never enter the native path, so the counters are 0). */
+            unsigned long long inv = (unsigned long long)e->bc->jit_invocations;
+            unsigned long long dx  = (unsigned long long)e->bc->jit_deopt_exits;
             if (e->reason == CPJIT_REASON_UNKNOWN_OP
                 || e->reason == CPJIT_REASON_OK_WITH_DEOPT) {
                 snprintf(loc, sizeof loc,
-                         "%s:%d:%d  code_len=%zu  reason=%s(op=%u@pc=%zu)  native=%zu",
+                         "%s:%d:%d  code_len=%zu  reason=%s(op=%u@pc=%zu)  native=%zu  inv=%llu  deopts=%llu",
                          base, e->line, e->column, e->code_len,
                          mino_jit_reason_name(e->reason),
                          e->first_unknown_op, e->first_unknown_pc,
-                         e->native_bytes);
+                         e->native_bytes, inv, dx);
             } else {
                 snprintf(loc, sizeof loc,
-                         "%s:%d:%d  code_len=%zu  reason=%-16s  %s native=%zu",
+                         "%s:%d:%d  code_len=%zu  reason=%-16s  %s native=%zu  inv=%llu  deopts=%llu",
                          base, e->line, e->column, e->code_len,
                          mino_jit_reason_name(e->reason),
                          e->compiled ? "compiled" : "        ",
-                         e->native_bytes);
+                         e->native_bytes, inv, dx);
             }
             fprintf(stderr, "  %s\n", loc);
             n++;

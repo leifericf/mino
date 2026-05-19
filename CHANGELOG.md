@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.346.0 — Per-fn JIT invocation + deopt counters
+
+Two `uint64_t` counters per compiled bc record:
+
+- `jit_invocations` — ticks each time `mino_jit_invoke` enters
+  the bc's native code (incremented just before the call into
+  the stencil region).
+- `jit_deopt_exits` — ticks each time the body returns via the
+  side-exit deopt path (NULL return with `jit_deopt_pending`).
+  The implied `native_returns` is the difference of the two; not
+  stored separately.
+
+Counters land directly on `mino_bc_fn_t` rather than a global
+side table because the JIT compile path already owns the
+record's lifetime, and the existing `MINO_CPJIT_STATS=tracing`
+per-fn dump path can read them at exit without walking a
+separate registry. The tracing dump now reports per-fn `inv=N
+deopts=M` alongside the existing `reason=` / `code_len=` /
+`native=` columns.
+
+Probe (single fn, dotimes 200 over inner loop): tracing dump
+shows `inv=N deopts=0` for the JIT'd body. (Exact `N` depends
+on warm-up: top-level invocations made before the threshold is
+crossed run through the interpreter and don't count.)
+
+`task release-gate` is OK.
+
 ## v0.345.3 — Pause-time distribution
 
 Adds the GC pause-time distribution surface. Every collection /
