@@ -271,6 +271,82 @@ static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
     return 0;
 }
 
+/* Look up the current source location for the call frame. Returns
+ * NULL file pointer and zero line/col when the eval-current-form is
+ * not a CONS with location info. */
+static void current_call_location(mino_state_t *S, const char **file_out,
+                                  int *line_out, int *col_out)
+{
+    const mino_val_t *f = mino_current_ctx(S)->eval_current_form;
+    if (f != NULL && mino_type_of(f) == MINO_CONS) {
+        *file_out = f->as.cons.file;
+        *line_out = f->as.cons.line;
+        *col_out  = f->as.cons.column;
+    } else {
+        *file_out = NULL;
+        *line_out = 0;
+        *col_out  = 0;
+    }
+}
+
+/* PRIM dispatch from a cons-spine `args` list. Walks args into a stack
+ * scratch (16-slot, spilling to a heap VALARR on overflow) so the
+ * argv-ABI primitive sees a contiguous argv array. cons-spine ABI
+ * prims see the cons list directly. The push_frame happens before the
+ * call so any throw inside has a stack frame attributable to the
+ * prim; pop_frame fires only on success so an error leaves the frame
+ * for the trace formatter. */
+static mino_val_t *apply_prim_cons(mino_state_t *S, mino_val_t *fn,
+                                   mino_val_t *args, mino_env_t *env)
+{
+    const char *file;
+    int         line, col;
+    mino_val_t *result;
+    current_call_location(S, &file, &line, &col);
+    push_frame(S, fn->as.prim.name, file, line, col);
+    if (fn->as.prim.fn2 != NULL) {
+        /* argv ABI: walk the cons spine into a stack scratch array.
+         * Conservative stack scan keeps the slots rooted across any
+         * GC the prim itself triggers. Spillover beyond the scratch
+         * capacity falls through to a heap VALARR so variadic
+         * argv-prims still work; the common 1-3 arg case never
+         * touches the heap. */
+        mino_val_t  *scratch[16];
+        mino_val_t **argv = scratch;
+        int          argc = 0;
+        int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
+        mino_val_t  *cur  = args;
+        mino_val_t **heap = NULL;
+        while (mino_is_cons(cur)) {
+            if (argc == cap) {
+                int new_cap = cap * 2;
+                mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
+                memcpy(grown, argv, (size_t)argc * sizeof(*argv));
+                argv = grown;
+                cap  = new_cap;
+                heap = grown;
+            }
+            if (heap != NULL) {
+                gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
+                argc++;
+            } else {
+                argv[argc++] = cur->as.cons.car;
+            }
+            cur = cur->as.cons.cdr;
+        }
+        result = fn->as.prim.fn2(S, argv, argc, env);
+        (void)heap;
+    } else {
+        result = fn->as.prim.fn(S, args, env);
+    }
+    if (result == NULL) {
+        return NULL; /* leave frame for trace */
+    }
+    pop_frame(S);
+    return result;
+}
+
 mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                            mino_env_t *env)
 {
@@ -295,58 +371,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
     }
     if (mino_type_of(fn) == MINO_PRIM) {
-        const char *file = NULL;
-        int         line = 0;
-        int         col  = 0;
-        mino_val_t *result;
-        if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-        }
-        push_frame(S, fn->as.prim.name, file, line, col);
-        if (fn->as.prim.fn2 != NULL) {
-            /* argv ABI: walk the cons spine into a stack scratch array.
-             * Conservative stack scan keeps the slots rooted across
-             * any GC the prim itself triggers. Spillover beyond the
-             * scratch capacity falls through to a heap VALARR so
-             * variadic argv-prims still work; the common 1-3 arg case
-             * never touches the heap. */
-            mino_val_t  *scratch[16];
-            mino_val_t **argv = scratch;
-            int          argc = 0;
-            int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
-            mino_val_t  *cur  = args;
-            mino_val_t **heap = NULL;
-            while (mino_is_cons(cur)) {
-                if (argc == cap) {
-                    int new_cap = cap * 2;
-                    mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
-                        S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
-                    memcpy(grown, argv, (size_t)argc * sizeof(*argv));
-                    argv = grown;
-                    cap  = new_cap;
-                    heap = grown;
-                }
-                if (heap != NULL) {
-                    gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
-                    argc++;
-                } else {
-                    argv[argc++] = cur->as.cons.car;
-                }
-                cur = cur->as.cons.cdr;
-            }
-            result = fn->as.prim.fn2(S, argv, argc, env);
-            (void)heap;
-        } else {
-            result = fn->as.prim.fn(S, args, env);
-        }
-        if (result == NULL) {
-            return NULL; /* leave frame for trace */
-        }
-        pop_frame(S);
-        return result;
+        return apply_prim_cons(S, fn, args, env);
     }
     if (mino_type_of(fn) == MINO_FN || mino_type_of(fn) == MINO_MACRO) {
         const char *tag       = mino_type_of(fn) == MINO_MACRO ? "macro" : "fn";
