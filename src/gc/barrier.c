@@ -166,7 +166,6 @@ void gc_write_barrier(mino_state_t *S, void *container,
             if (!h_old->mark) {
                 gc_mark_push(S, h_old);
                 S->gc_barrier_satb_pushes++;
-                if (new_value == NULL) S->gc_barrier_clear_only++;
             }
         }
         if (new_value != NULL

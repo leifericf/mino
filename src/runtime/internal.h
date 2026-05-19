@@ -1110,15 +1110,9 @@ struct mino_state {
     size_t          gc_pause_target_ns;
     unsigned        gc_budget_slices_since_adjust;
 
-    /* Temporary diagnostic for the SATB-drop verification pass.
-     * Ticks whenever a write barrier fires during MAJOR_MARK with
-     * new_value == NULL and old_value != NULL (i.e., the SATB push
-     * is the only push the call makes -- there's no companion
-     * Dijkstra push). A zero count across the workload corpus
-     * confirms the SATB push is doing redundant work the Dijkstra
-     * insertion barrier + the end-of-mark conservative scan
-     * already cover. Removed once the drop ships. */
-    unsigned        gc_barrier_clear_only;
+    /* (Removed in v0.362.0: gc_barrier_clear_only was a one-cycle
+     * verification counter for the SATB-drop audit. Field kept
+     * out of the struct now that the drop has shipped.) */
 
     /* Host interop */
     int             interop_enabled;

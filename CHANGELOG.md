@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.362.0 — Perf cycle F close (SATB drop deferred)
+
+Closes the 12-tag v0.351.0 -> v0.362.0 cycle. The plan called
+for 10 perf items grouped into 3 phases; 4 items shipped with
+measurable wins and 6 deferred with documented rationale.
+
+The SATB drop (the cycle's final scheduled item) is deferred
+per the pre-approved decision rule: the v0.361 verification
+pass surfaced a pre-existing OLD-VALARR -> YOUNG-VAL remset
+miss under `MINO_GC_VERIFY=1` that SATB had been masking.
+Dropping SATB would make the existing remset-miss bug
+user-visible. The bug is logged in `.local/BUGS.md` as a P1
+for a focused follow-on fix. SATB push restored to its
+pre-prototype shape; `gc_barrier_clear_only` counter removed.
+
+The temporary instrumentation field added in v0.361.0 is
+removed; `gc_barrier_satb_pushes` keeps its slot in
+`(gc-stats)` for ABI continuity (always non-zero under the
+restored hybrid barrier).
+
+**Cycle scoreboard**:
+
+- Shipped: items 2, 5 (both A+B), 7, 10.
+- Deferred (rationale documented): items 1+9, 3, 4, 6, 8.
+
+**Measurable wins**:
+- `(+ acc i)` and `(+ acc N)` loops: 1.77-1.78x JIT speedup
+  on real-shape accumulators.
+- Hot `deref` path: 6.3 % shave from removing the
+  shadow / folding delay into the C prim.
+- Native sampler coverage: lit up at the matched op for
+  multi-binding loops (previously dark across the corpus).
+- Adaptive pause-budget controller available (default 1 ms,
+  env-overridable).
+
+**Carry-over** (ordered by expected leverage):
+
+1. JIT slab pool + template-aware bc recompile (items 3 + 4
+   combined).
+2. OLD-VALARR remset-miss fix (precondition for the SATB
+   drop).
+3. Weak intern table (unblocks item 6).
+4. SATB drop (ships once #2 is fixed).
+
+Full cycle synopsis lives at `mino/.local/perf-cycle-f-close.md`.
+
+`task test-jit-parity` byte-identical across all 4 binaries.
+`task release-gate` clean (default `MINO_GC_VERIFY` unset).
+`task perf-gate` carries the pre-existing `small-map`
+allocation regression from v0.344.0; no new regressions.
+
 ## v0.361.0 — SATB-drop audit + verification
 
 Cycle F item 8 part 1. Pure verification pass -- no behaviour
