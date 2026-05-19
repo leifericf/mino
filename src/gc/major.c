@@ -112,41 +112,47 @@ void gc_major_remark(mino_state_t *S)
  * Major has traced everything reachable, so the remset is redundant
  * this cycle; the barrier will repopulate it as mutator stores
  * reintroduce old->young edges. */
-/* Pre-sweep diagnostic (opt-in via MINO_GC_VERIFY=1): every OLD intern
- * entry must have its mark bit set, otherwise sweep would free a
- * root-reachable header. Surfaces root-enumeration bugs at the exact
- * point they matter. YOUNG entries are not swept by major, so they
- * are exempt from this check. */
-static void gc_verify_roots_marked(mino_state_t *S)
+/* Pre-sweep tombstone pass for the weak intern tables. Walks every
+ * sym / keyword entry and tombstones the slot whose underlying header
+ * is unmarked at end-of-mark. Without this, gc_sweep would free the
+ * header and leave entries[i] / ht_buckets[bucket] pointing at recycled
+ * memory; subsequent intern_lookup_or_create probes would dereference
+ * the dangling pointer. YOUNG entries are not swept by major (minor
+ * owns YOUNG lifecycle), so they are skipped. */
+static void gc_intern_sweep_tombstones(mino_state_t *S)
 {
-    const char *env;
-    size_t      i;
-    env = getenv("MINO_GC_VERIFY");
-    if (env == NULL || env[0] == '\0' || env[0] == '0') {
-        return;
-    }
-    for (i = 0; i < S->sym_intern.len; i++) {
-        mino_val_t *e = S->sym_intern.entries[i];
-        gc_hdr_t   *h;
-        if (e == NULL) continue;
-        h = ((gc_hdr_t *)e) - 1;
-        if (h->gen == GC_GEN_OLD && !h->mark) {
-            fprintf(stderr, "[gc-verify] sym_intern[%zu] OLD unmarked at sweep "
-                "(e=%p h=%p)\n", i, (void *)e, (void *)h);
-            /* unrecoverable: heap invariant violated, would corrupt sweep */
-            abort();
-        }
-    }
-    for (i = 0; i < S->kw_intern.len; i++) {
-        mino_val_t *e = S->kw_intern.entries[i];
-        gc_hdr_t   *h;
-        if (e == NULL) continue;
-        h = ((gc_hdr_t *)e) - 1;
-        if (h->gen == GC_GEN_OLD && !h->mark) {
-            fprintf(stderr, "[gc-verify] kw_intern[%zu] OLD unmarked at sweep "
-                "(e=%p h=%p)\n", i, (void *)e, (void *)h);
-            /* unrecoverable: heap invariant violated, would corrupt sweep */
-            abort();
+    intern_table_t *tables[2];
+    int             ti;
+    tables[0] = &S->sym_intern;
+    tables[1] = &S->kw_intern;
+    for (ti = 0; ti < 2; ti++) {
+        intern_table_t *tbl = tables[ti];
+        size_t          i;
+        size_t          mask;
+        for (i = 0; i < tbl->len; i++) {
+            mino_val_t *e = tbl->entries[i];
+            gc_hdr_t   *h;
+            uint32_t    hash;
+            size_t      idx;
+            if (e == NULL) continue;
+            h = ((gc_hdr_t *)e) - 1;
+            if (h->gen != GC_GEN_OLD) continue;
+            if (h->mark) continue;
+            /* Tombstone: clear entries[] slot and mark every probe-
+             * chain bucket pointing at this slot as TOMBSTONE so a
+             * future intern with the same content lands here. */
+            hash = e->as.s.hash;
+            tbl->entries[i] = NULL;
+            if (tbl->ht_buckets == NULL) continue;
+            mask = tbl->ht_cap - 1;
+            idx  = hash & mask;
+            while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
+                if (tbl->ht_buckets[idx] == i) {
+                    tbl->ht_buckets[idx] = INTERN_HT_TOMBSTONE;
+                    break;
+                }
+                idx = (idx + 1) & mask;
+            }
         }
     }
 }
@@ -160,12 +166,13 @@ void gc_major_sweep_phase(mino_state_t *S)
     mino_current_ctx(S)->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_SWEEP;
     gc_evt_record(S, GC_EVT_MAJOR_SWEEP, NULL, NULL, NULL, 0, 0);
-    /* Sweep phase: optional root-mark verify (env-gated), remset purge
-     * over dead containers, and the OLD sweep itself. All three are
-     * sweep-side housekeeping; lumped together so the phase sum tracks
+    /* Sweep phase: tombstone weak intern entries whose header was not
+     * reached through any root, purge the remset of dead containers,
+     * then run the OLD sweep itself. All three are sweep-side
+     * housekeeping; lumped together so the phase sum tracks
      * gc_total_ns closely. */
     t0 = mino_monotonic_ns();
-    gc_verify_roots_marked(S);
+    gc_intern_sweep_tombstones(S);
     gc_remset_purge_dead(S);
     gc_sweep(S);
     S->gc_major_sweep_ns += (size_t)(mino_monotonic_ns() - t0);

@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.368.0 — Weak intern table, skip MAJOR_MARK walk
+
+The symbol and keyword intern tables stop pinning every
+interned name across major cycles. Entries survive only when
+reached through some other root (var registry, namespace env,
+compiled bc consts, runtime values, the explicit special-form
+symbol cache). Anything that loses every reachable path gets
+tombstoned at end-of-mark and the underlying header is freed
+in the regular OLD sweep.
+
+**What changes.**
+
+- `gc_mark_intern_table` now gates the walk on phase. MINOR
+  keeps the walk so freshly interned YOUNG entries survive
+  until either a major prunes them or another root captures
+  them; the per-push `h->gen == GC_GEN_OLD` filter
+  short-circuits OLD entries so the loop is bounded by
+  intern.len. MAJOR_MARK skips the walk entirely.
+- `gc_intern_sweep_tombstones` runs in
+  `gc_major_sweep_phase` before `gc_sweep`. For every OLD
+  unmarked entry, it clears `entries[i] = NULL` and marks
+  every probe-chain bucket pointing at the slot as
+  `INTERN_HT_TOMBSTONE`. `gc_sweep` then frees the header
+  through the normal path.
+- The intern probe loop in `intern_lookup_or_create_ns` skips
+  tombstones during lookup and remembers the first tombstone
+  it saw so the insert can reuse the slot. The rebuild path
+  compacts NULL entries away.
+- Cached special-form symbol pointers in `mino_state_t`
+  (`sf_quote`, `sf_declare`, ...) are now traced precisely
+  from `gc_mark_envs_and_interns` so the
+  `eval_try_special_form` pointer-identity dispatch stays
+  valid across major cycles.
+
+**Identity semantics.** Interned symbols are stable across
+their natural lifetime (var-held, env-held, bc-consts-held,
+or held in any live data structure). One-shot transient
+interns (`(symbol "foo")` whose result is discarded) get
+fresh identities across cycles, mirroring JVM Clojure's
+permgen / metaspace unload pattern.
+
+**Verification.**
+
+- `task release-gate` clean.
+- `MINO_GC_VERIFY=1 task release-gate` clean.
+- `task test-jit-parity` byte-identical across all 4 binaries.
+
 ## v0.367.0 — Template-aware bc recompile
 
 Closures share their template's `bc` record by reference

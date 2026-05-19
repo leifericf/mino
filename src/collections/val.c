@@ -126,9 +126,8 @@ mino_val_t *mino_string(mino_state_t *S, const char *s)
  * Entries live for the life of the process.
  */
 
-#define INTERN_HT_EMPTY SIZE_MAX
-#define INTERN_HT_INIT  64
-#define INTERN_HT_LOAD  75  /* percent */
+#define INTERN_HT_INIT      64
+#define INTERN_HT_LOAD      75  /* percent */
 
 static uint32_t intern_hash(const char *s, size_t len)
 {
@@ -142,10 +141,16 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
     size_t *buckets = (size_t *)malloc(new_ht_cap * sizeof(*buckets));
     if (buckets == NULL) return;  /* caller handles gracefully */
     for (i = 0; i < new_ht_cap; i++) buckets[i] = INTERN_HT_EMPTY;
+    /* Rebuild skips NULL entries (tombstoned slots whose underlying
+     * sym/keyword header was swept). The rebuild compacts away the
+     * tombstones; subsequent inserts append at tbl->len. */
     for (i = 0; i < tbl->len; i++) {
         mino_val_t *e = tbl->entries[i];
-        uint32_t h = intern_hash(e->as.s.data, e->as.s.len);
-        size_t idx = h & mask;
+        uint32_t h;
+        size_t idx;
+        if (e == NULL) continue;
+        h = intern_hash(e->as.s.data, e->as.s.len);
+        idx = h & mask;
         while (buckets[idx] != INTERN_HT_EMPTY) idx = (idx + 1) & mask;
         buckets[idx] = i;
     }
@@ -209,10 +214,20 @@ mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
 
     /* Probe for existing entry. Match (data, len, ns_len) so that
      * `(keyword "a/b" "c")` and `(keyword "a" "b/c")` produce
-     * distinct vals even though their flat string is identical. */
+     * distinct vals even though their flat string is identical.
+     * Tombstone slots (entries[bucket] == NULL after a sweep cleared
+     * the underlying header) are skipped during lookup but remembered
+     * so the new insert below can reuse them instead of appending. */
+    size_t first_tombstone = INTERN_HT_EMPTY;
     while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
+        if (tbl->ht_buckets[idx] == INTERN_HT_TOMBSTONE) {
+            if (first_tombstone == INTERN_HT_EMPTY) first_tombstone = idx;
+            idx = (idx + 1) & mask;
+            continue;
+        }
         mino_val_t *e = tbl->entries[tbl->ht_buckets[idx]];
-        if (e->as.s.len == len
+        if (e != NULL
+            && e->as.s.len == len
             && e->as.s.ns_len == ns_len
             && memcmp(e->as.s.data, s, len) == 0) {
             return e;
@@ -257,8 +272,14 @@ mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
     mino_current_ctx(S)->gc_depth--;
     tbl->entries[tbl->len] = v;
 
-    /* Insert index into hash table. */
-    tbl->ht_buckets[idx] = tbl->len;
+    /* Insert index into hash table. Prefer the first tombstone slot
+     * along the probe chain if one was seen; otherwise land on the
+     * empty slot the lookup probe stopped at. */
+    {
+        size_t target_bucket = (first_tombstone != INTERN_HT_EMPTY)
+            ? first_tombstone : idx;
+        tbl->ht_buckets[target_bucket] = tbl->len;
+    }
     tbl->len++;
 
     /* Rehash if load exceeds threshold. */

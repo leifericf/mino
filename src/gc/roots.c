@@ -258,9 +258,21 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
 static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
 {
     size_t i;
+    /* MAJOR_MARK skips the walk: intern entries survive only when
+     * reached through other roots (vars, ns env, code consts, live
+     * runtime values). Slots whose underlying header is unmarked at
+     * end-of-mark are tombstoned in gc_intern_sweep_tombstones before
+     * gc_sweep frees the header memory. MINOR keeps the walk so a
+     * freshly interned YOUNG sym/keyword stays alive until either a
+     * major cycle prunes it or another root captures it; gc_mark_push's
+     * per-phase filter short-circuits OLD entries during MINOR so the
+     * loop is bounded by intern.len. */
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK) return;
     for (i = 0; i < tbl->len; i++) {
         mino_val_t *v = tbl->entries[i];
-        gc_hdr_t   *h = ((gc_hdr_t *)v) - 1;
+        gc_hdr_t   *h;
+        if (v == NULL) continue;
+        h = ((gc_hdr_t *)v) - 1;
         gc_mark_push(S, h);
     }
 }
@@ -319,8 +331,12 @@ static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
     gc_mark_interior(S, tx->pending_sends);
 }
 
-/* Pin lexical environments published as GC roots and the symbol/keyword
- * intern tables that anchor every interned name in the runtime. */
+/* Pin lexical environments published as GC roots, the symbol/keyword
+ * intern tables, and the cached special-form symbol pointers used by
+ * the O(1) eval_try_special_form dispatch. The sf_* fields hold
+ * intern_table entries by pointer identity; without a precise root
+ * here the weak intern sweep would tombstone them once nothing else
+ * mentioned the symbol, leaving the cached pointer dangling. */
 static void gc_mark_envs_and_interns(mino_state_t *S)
 {
     root_env_t *r;
@@ -329,6 +345,34 @@ static void gc_mark_envs_and_interns(mino_state_t *S)
     }
     gc_mark_intern_table(S, &S->sym_intern);
     gc_mark_intern_table(S, &S->kw_intern);
+    /* Cached special-form symbols: keep alive so eval_try_special_form's
+     * pointer-identity dispatch never sees a tombstoned entry. */
+    gc_mark_interior(S, S->sf_quote);
+    gc_mark_interior(S, S->sf_quasiquote);
+    gc_mark_interior(S, S->sf_unquote);
+    gc_mark_interior(S, S->sf_unquote_splicing);
+    gc_mark_interior(S, S->sf_defmacro);
+    gc_mark_interior(S, S->sf_declare);
+    gc_mark_interior(S, S->sf_ns);
+    gc_mark_interior(S, S->sf_var);
+    gc_mark_interior(S, S->sf_def);
+    gc_mark_interior(S, S->sf_if);
+    gc_mark_interior(S, S->sf_do);
+    gc_mark_interior(S, S->sf_let);
+    gc_mark_interior(S, S->sf_let_star);
+    gc_mark_interior(S, S->sf_letfn_star);
+    gc_mark_interior(S, S->sf_fn);
+    gc_mark_interior(S, S->sf_fn_star);
+    gc_mark_interior(S, S->sf_recur);
+    gc_mark_interior(S, S->sf_loop);
+    gc_mark_interior(S, S->sf_loop_star);
+    gc_mark_interior(S, S->sf_try);
+    gc_mark_interior(S, S->sf_binding);
+    gc_mark_interior(S, S->sf_lazy_seq);
+    gc_mark_interior(S, S->sf_new);
+    gc_mark_interior(S, S->sf_when);
+    gc_mark_interior(S, S->sf_and);
+    gc_mark_interior(S, S->sf_or);
 }
 
 /* Pin in-flight try/catch exception values, cached module require

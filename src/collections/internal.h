@@ -29,13 +29,20 @@
 /* Intern table                                                              */
 /* ------------------------------------------------------------------------- */
 
-/* Intern table with hash index for O(1) lookup. */
+/* Intern table with hash index for O(1) lookup. Bucket sentinels:
+ * INTERN_HT_EMPTY = SIZE_MAX terminates probe chains; INTERN_HT_
+ * TOMBSTONE = SIZE_MAX - 1 is left behind when major sweep prunes
+ * an unreached entry so future inserts can reuse the slot without
+ * extending the probe chain. */
+#define INTERN_HT_EMPTY     SIZE_MAX
+#define INTERN_HT_TOMBSTONE (SIZE_MAX - 1)
+
 typedef struct {
     mino_val_t **entries;
     size_t       len;
     size_t       cap;
     size_t      *ht_buckets;  /* open-addressing hash table: index into entries[] */
-    size_t       ht_cap;      /* power of 2; SIZE_MAX marks empty slots */
+    size_t       ht_cap;      /* power of 2 */
 } intern_table_t;
 
 /* ------------------------------------------------------------------------- */
