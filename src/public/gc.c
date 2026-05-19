@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "mino.h"
 #include "public/internal_bridge.h"
+#include "gc/internal.h"  /* for GC_T__COUNT in stats copy */
 
 void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
 {
@@ -161,6 +162,10 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
         size_t i;
         for (i = 0; i < 8; i++) {
             out->young_age_bucket[i] = S->gc_young_age_bucket[i];
+        }
+        for (i = 0; i < 16; i++) {
+            out->alloc_by_tag[i] = (i < (size_t)GC_T__COUNT)
+                                   ? S->gc_alloc_by_tag[i] : 0;
         }
     }
     out->remset_entries    = S->gc_remset_len;

@@ -1031,6 +1031,12 @@ struct mino_state {
     size_t          gc_bytes_promoted_minor;
     uint64_t        gc_young_age_bucket[8];
 
+    /* Per-tag allocation counter. Indexed by GC_T_* tag (1..GC_T_BC,
+     * with 0 and the slack tail reserved). Ticked once per gc_alloc_
+     * typed call. Always-on: a single indexed store on the alloc path,
+     * which is already paying for the header init / list-link cost. */
+    uint64_t        gc_alloc_by_tag[GC_T__COUNT];
+
     /* Pause-time distribution. gc_pause_ring is a circular buffer of
      * the last 256 pause durations (one entry per minor collect, per
      * major-slice, per force-finish, per fully-STW major); each value

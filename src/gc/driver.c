@@ -340,6 +340,9 @@ void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
         }
     }
     h = gc_alloc_raw(S, tag, size);
+    if (h != NULL && tag < GC_T__COUNT) {
+        S->gc_alloc_by_tag[tag]++;
+    }
     if (h == NULL
         && mino_current_ctx(S)->gc_depth == 0
         && mino_current_ctx(S)->gc_stack_bottom != NULL) {

@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 346
-#define MINO_VERSION_PATCH 3
+#define MINO_VERSION_MINOR 347
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1603,6 +1603,11 @@ typedef struct {
      * counts identify candidates for promotion-age / nursery tuning. */
     size_t   bytes_promoted_minor;
     uint64_t young_age_bucket[8];
+    /* Per-GC-tag allocation counter. Indexed 1..10 (GC_T_RAW..
+     * GC_T_BC); 0 and the slack tail are reserved. Always-on; ticked
+     * once per gc_alloc_typed call. The named indices are exposed via
+     * `(gc-stats)`'s `:alloc-by-tag` map for the script-side view. */
+    uint64_t alloc_by_tag[16];
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */

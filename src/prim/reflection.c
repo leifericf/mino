@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[36];
-    mino_val_t *vs[36];
+    mino_val_t *ks[37];
+    mino_val_t *vs[37];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1314,7 +1314,29 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ks[35] = mino_keyword(S, "pause-hist");
         vs[35] = mino_vector(S, hist_vals, 24);
     }
-    return mino_map(S, ks, vs, 36);
+    /* Per-tag allocation histogram, surfaced as a map of
+     * tag-keyword -> count. Indices 1..10 cover the current GC tag
+     * enum; unused indices stay implicit zero. */
+    {
+        static const char *tag_names[16] = {
+            NULL, "raw", "val", "env", "vec-node", "hamt-node",
+            "hamt-entry", "ptrarr", "valarr", "rb-node", "bc",
+            NULL, NULL, NULL, NULL, NULL
+        };
+        mino_val_t *tk[16];
+        mino_val_t *tv[16];
+        size_t i, n = 0;
+        for (i = 0; i < 16; i++) {
+            if (tag_names[i] == NULL) continue;
+            if (st.alloc_by_tag[i] == 0) continue;
+            tk[n] = mino_keyword(S, tag_names[i]);
+            tv[n] = mino_int(S, (long long)st.alloc_by_tag[i]);
+            n++;
+        }
+        ks[36] = mino_keyword(S, "alloc-by-tag");
+        vs[36] = mino_map(S, tk, tv, n);
+    }
+    return mino_map(S, ks, vs, 37);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

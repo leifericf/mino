@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.347.0 — Per-tag allocation histogram
+
+Adds an always-on `gc_alloc_by_tag[GC_T__COUNT]` (size 16)
+counter array to `mino_state_t`. Each `gc_alloc_typed_inner`
+call increments the slot for the requested tag (one extra
+indexed store on the alloc path; negligible vs. the header
+init + list-link cost the path already pays).
+
+Surfaced on `mino_gc_stats_t` as `alloc_by_tag[16]` (raw
+indices preserved) and through `(gc-stats)` as `:alloc-by-tag`,
+a map of tag-keyword -> count: `:raw / :val / :env / :vec-node
+/ :hamt-node / :hamt-entry / :ptrarr / :valarr / :rb-node /
+:bc`. Zero-count entries are elided.
+
+A new `GC_T__COUNT = 16` enum entry bounds the array and
+leaves slack for one round of tag growth without resizing the
+public struct.
+
+Probe (3 cycles of vec/hash-map/hash-set construction):
+- `{:raw 5436, :val 31894, :env 4115, :vec-node 5048,
+  :hamt-node 5781, :hamt-entry 2866, :ptrarr 5834,
+  :valarr 1505, :bc 67}`.
+
+`:val` dominating by ~6x over the next tag is the expected
+fingerprint of cons-heavy + literal-heavy workloads.
+
+`task release-gate` is OK.
+
 ## v0.346.3 — JIT compile-time + code region usage
 
 Three new always-on fields on `mino_bc_fn_t`:

@@ -39,7 +39,10 @@ enum {
     GC_T_PTRARR     = 7,
     GC_T_VALARR     = 8,
     GC_T_RB_NODE    = 9,
-    GC_T_BC         = 10
+    GC_T_BC         = 10,
+    GC_T__COUNT     = 16   /* histogram array bound; covers all current
+                            * tags + slack for one round of growth before
+                            * the array needs resizing. */
 };
 
 /* Generation tags for the two-generation collector. The OLD value is
