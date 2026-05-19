@@ -104,27 +104,14 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
             pp = &h->next;
             continue;
         }
-        /* Dead YOUNG: call any finalizer, unlink, recycle. */
-        if (h->type_tag == GC_T_VAL) {
-            mino_val_t *v = (mino_val_t *)(h + 1);
-            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
-                v->as.handle.finalizer(v->as.handle.ptr,
-                                       v->as.handle.tag);
-            } else if (mino_type_of(v) == MINO_BIGINT) {
-                mino_bigint_free(v);
-            } else if (mino_type_of(v) == MINO_RECORD) {
-                free(v->as.record.vals);
-                v->as.record.vals = NULL;
-            } else if (mino_type_of(v) == MINO_CHUNK) {
-                free(v->as.chunk.vals);
-                v->as.chunk.vals = NULL;
-            } else if (mino_type_of(v) == MINO_HOST_ARRAY) {
-                free(v->as.host_array.vals);
-                v->as.host_array.vals = NULL;
-            } else if (mino_type_of(v) == MINO_FUTURE) {
-                extern void mino_future_gc_sweep(mino_val_t *fut);
-                mino_future_gc_sweep(v);
-            }
+        /* Dead YOUNG: call any per-tag finalizer, unlink, recycle.
+         * The values-side finalizer dispatches across MINO_HANDLE /
+         * MINO_BIGINT / MINO_RECORD / MINO_CHUNK / MINO_HOST_ARRAY /
+         * MINO_FUTURE; other tags either skip the table or register
+         * NULL. */
+        {
+            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            if (fin != NULL) fin(S, h);
         }
         freed_bytes += h->size;
         *pp = h->next;

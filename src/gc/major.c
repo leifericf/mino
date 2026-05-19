@@ -217,31 +217,14 @@ void gc_sweep(mino_state_t *S)
             pp = &h->next;
             continue;
         }
-        /* Dead OLD: call finalizer, unlink, recycle. */
-        if (h->type_tag == GC_T_VAL) {
-            mino_val_t *v = (mino_val_t *)(h + 1);
-            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
-                v->as.handle.finalizer(v->as.handle.ptr,
-                                       v->as.handle.tag);
-            } else if (mino_type_of(v) == MINO_BIGINT) {
-                mino_bigint_free(v);
-            } else if (mino_type_of(v) == MINO_RECORD) {
-                free(v->as.record.vals);
-                v->as.record.vals = NULL;
-            } else if (mino_type_of(v) == MINO_CHUNK) {
-                free(v->as.chunk.vals);
-                v->as.chunk.vals = NULL;
-            } else if (mino_type_of(v) == MINO_HOST_ARRAY) {
-                free(v->as.host_array.vals);
-                v->as.host_array.vals = NULL;
-            } else if (mino_type_of(v) == MINO_FUTURE) {
-                /* Hosted-thread future: tear down mu/cv and free
-                 * the impl struct. quiesce should have joined any
-                 * outstanding worker before we get here; if not, the
-                 * impl is leaked rather than freed under it. */
-                extern void mino_future_gc_sweep(mino_val_t *fut);
-                mino_future_gc_sweep(v);
-            }
+        /* Dead OLD: call any per-tag finalizer, unlink, recycle.
+         * See gc/minor.c for the dispatch shape; quiesce should have
+         * joined any outstanding MINO_FUTURE worker before we get
+         * here, otherwise the impl is leaked rather than freed under
+         * it. */
+        {
+            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            if (fin != NULL) fin(S, h);
         }
         freed_old += h->size;
         *pp = h->next;

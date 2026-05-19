@@ -19,7 +19,10 @@
 #include "gc/internal.h"
 #include "runtime/value_assert.h"   /* mino_type_of */
 #include "eval/bc/internal.h"        /* mino_bc_trace_fn_bc */
-#include "runtime/host_threads.h"    /* mino_future_trace_impl */
+#include "runtime/host_threads.h"    /* mino_future_trace_impl, mino_future_gc_sweep */
+#include "collections/internal.h"    /* mino_bigint_free (collections-adjacent bignum) */
+
+#include <stdlib.h>                  /* free() for malloc-owned slot arrays */
 
 void gc_mark_child_push_exported(mino_state_t *S, const void *p);
 
@@ -170,7 +173,49 @@ static void trace_val(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
+/* Per-type cleanup for a dying GC_T_VAL header. Called from
+ * gc_minor_collect (dead YOUNG) and gc_major_sweep_phase (dead OLD)
+ * via S->gc_finalizers[GC_T_VAL] right before the header is unlinked
+ * and recycled. MINO_HANDLE invokes the embedder-supplied finalizer;
+ * MINO_BIGINT releases the imath payload; MINO_RECORD / MINO_CHUNK /
+ * MINO_HOST_ARRAY free the malloc-owned slot arrays; MINO_FUTURE
+ * tears down the worker thread, mu/cv, and impl struct. All other
+ * types have nothing external to release. */
+static void finalize_val(mino_state_t *S, gc_hdr_t *h)
+{
+    mino_val_t *v = (mino_val_t *)(h + 1);
+    (void)S;
+    switch (mino_type_of(v)) {
+    case MINO_HANDLE:
+        if (v->as.handle.finalizer != NULL) {
+            v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
+        }
+        break;
+    case MINO_BIGINT:
+        mino_bigint_free(v);
+        break;
+    case MINO_RECORD:
+        free(v->as.record.vals);
+        v->as.record.vals = NULL;
+        break;
+    case MINO_CHUNK:
+        free(v->as.chunk.vals);
+        v->as.chunk.vals = NULL;
+        break;
+    case MINO_HOST_ARRAY:
+        free(v->as.host_array.vals);
+        v->as.host_array.vals = NULL;
+        break;
+    case MINO_FUTURE:
+        mino_future_gc_sweep(v);
+        break;
+    default:
+        break;
+    }
+}
+
 void mino_values_register_gc_handlers(mino_state_t *S)
 {
     gc_register_tracer(S, GC_T_VAL, trace_val);
+    gc_register_finalizer(S, GC_T_VAL, finalize_val);
 }
