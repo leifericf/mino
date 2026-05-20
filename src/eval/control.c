@@ -267,10 +267,14 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         mino_env *local  = env_child(S, env);
         env_bind(S, local, clauses.catch_var, ex_val);
 
-        if (clauses.has_finally
-            && mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
-            /* Inner try frame catches re-throws from handler
-             * so that finally still runs. */
+        if (clauses.has_finally) {
+            /* Inner try frame catches re-throws from the catch handler
+             * so finally still runs. The slot at try_stack[try_depth]
+             * is always available here: the entry guard at the top of
+             * eval_try rejects any call with try_depth >= MAX_TRY_DEPTH
+             * BEFORE the body runs, and the longjmp-unwind path
+             * restored try_depth to that pre-entry value, so there is
+             * room for one more push. */
             int         ic = mino_current_ctx(S)->call_depth;
             int         it = mino_current_ctx(S)->trace_added;
             int         is = mino_current_ctx(S)->try_depth; /* save before setjmp */
@@ -309,12 +313,13 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 /* got_exception stays 1, vol_ex updated. */
             }
         } else {
-            /* No finally or nesting limit -- run catch directly. */
+            /* No finally: run catch directly. A re-throw inside the
+             * handler longjmps straight to the enclosing try frame,
+             * which is exactly the contract -- there is no finally on
+             * this frame to run on the unwind. */
             mino_val *r =
                 eval_implicit_do(S, clauses.catch_body, local);
             if (r == NULL) {
-                if (clauses.has_finally)
-                    eval_implicit_do(S, clauses.finally_body, env);
                 return NULL;
             }
             vol_result    = r;

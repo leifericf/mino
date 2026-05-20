@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.389.8 — `eval_try` Catch-Rethrow Protection Hygiene
+
+The catch-with-finally branch was gated on
+`try_depth < MAX_TRY_DEPTH`. The intent was to fall back to a
+"catch-runs-unprotected" path if the inner try frame could not be
+pushed, but the entry guard at the top of `eval_try` already
+rejects any call with `try_depth >= MAX_TRY_DEPTH` before the body
+runs, and the unwind path restores `try_depth` to that pre-entry
+value -- so the gate was dead defensive code that suggested a
+codepath that cannot fire. Drop the gate so the inner setjmp
+always protects the catch handler when a finally exists, and
+explain why in the comments.
+
 ## v0.389.7 — Reject `with-meta` / `vary-meta` on a Var
 
 `with-meta` and `vary-meta` shallow-copied a Var when handed one,
