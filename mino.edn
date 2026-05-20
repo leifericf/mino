@@ -57,6 +57,9 @@
   test-embed      {:doc  "C embedding API smoke (basic surface; full battery lives in mino-tests)"
                    :deps [build]
                    :task mino.tasks.builtin/test-embed}
+  examples        {:doc  "Build and run every examples/embed_*.c against the lib srcs"
+                   :deps [build]
+                   :task mino.tasks.builtin/examples}
   qa-arch         {:doc  "Architecture quality gates"
                    :task mino.tasks.builtin/qa-arch}
   build-stencil-extract {:doc  "Build tools/stencil_extract"

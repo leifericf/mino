@@ -385,7 +385,7 @@ struct mino_state {
      * mino_thread_ctx_t (dyn_stack, interrupted, gc_save, gc_save_len). */
 
     /* Cached parsed core.clj forms (avoids re-parsing on second
-     * mino_install_core call within the same state). */
+     * mino_install_clojure_core call within the same state). */
     mino_val_t    **core_forms;
     size_t          core_forms_len;
 

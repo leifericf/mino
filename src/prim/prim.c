@@ -4,7 +4,7 @@
  * Per-domain primitives live in their own files (prim/numeric.c,
  * prim/collections.c, ...).  Each domain file exports a static
  * mino_prim_def table at TU bottom; prim/install.c composes the tables
- * into mino_install_core.
+ * into mino_install / mino_install_clojure_core.
  */
 
 #include "prim/internal.h"

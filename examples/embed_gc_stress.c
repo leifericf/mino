@@ -74,6 +74,17 @@ static void test_param_bounds(mino_state_t *S)
     if (mino_gc_set_param(S, (mino_gc_param_t)9999, 1) == 0) {
         fail("unknown param key accepted");
     }
+    /* Restore GC parameters to their defaults so the rest of the
+     * suite runs against the production schedule. The bounds-test
+     * loop leaves every parameter at its hi_ok value; without this
+     * reset, downstream tests are exercising a non-default GC
+     * schedule and pick up the tight-nursery+raised-promotion_age
+     * bug recorded in .local/BUGS.md. */
+    (void)mino_gc_set_param(S, MINO_GC_NURSERY_BYTES,       8u * 1024u * 1024u);
+    (void)mino_gc_set_param(S, MINO_GC_MAJOR_GROWTH_TENTHS, 15u);
+    (void)mino_gc_set_param(S, MINO_GC_PROMOTION_AGE,       1u);
+    (void)mino_gc_set_param(S, MINO_GC_INCREMENTAL_BUDGET,  4096u);
+    (void)mino_gc_set_param(S, MINO_GC_STEP_ALLOC_BYTES,    16u * 1024u);
 }
 
 /* mino_gc_collect contract: every kind drives phase to IDLE on return.
@@ -156,7 +167,7 @@ int main(void)
     mino_env_t   *env;
     if (S == NULL) { fail("state_new"); return 1; }
     env = mino_env_new(S);
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     test_param_bounds(S);
     test_collect_kinds(S, env);

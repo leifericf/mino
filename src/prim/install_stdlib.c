@@ -7,8 +7,8 @@
  *
  * The C primitives that some of these namespaces layer over (e.g.
  * the clojure.string ns env's `lower-case` etc.) are installed
- * separately by `mino_install_core` -- this file is concerned only
- * with making the wrapper sources available.
+ * separately by `mino_install_clojure_core` -- this file is
+ * concerned only with making the wrapper sources available.
  *
  * Embedders pick exactly the namespaces they want; the standalone
  * binary calls `mino_install_all` to register the full set.

@@ -8,10 +8,12 @@
  * symmetrical with how script-side defrecord/->Vec3/(:x v) work.
  *
  * Build (from repo root):
- *   cc -std=c99 -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
- *      -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
- *      -Isrc/diag -Isrc/vendor/imath \
- *      -o embed_record examples/embed_record.c <objects from `mino task build`> -lm
+ *   ./mino task examples
+ * Or use the amalgamation:
+ *   ./mino task amalgamate
+ *   cc -std=c99 -Idist -c dist/mino.c -o dist/mino.o
+ *   cc -std=c99 -Idist examples/embed_record.c dist/mino.o -lm -lpthread \
+ *      -o build/embed_record
  */
 
 #include "mino.h"
@@ -40,7 +42,7 @@ int main(void)
         return 1;
     }
     env = mino_env_new(S);
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     /* Define the record type from C. The constructor is idempotent
      * by (ns, name); a re-call returns the existing type. */

@@ -38,7 +38,7 @@ int main(void)
         return 1;
     }
     env = mino_env_new(S);
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     report(S, "initial");
 

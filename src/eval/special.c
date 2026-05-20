@@ -144,8 +144,9 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         return eval_qualified_symbol(S, env, data, n, slash);
     }
 
-    /* *ns* derefs to the current namespace symbol. Once mino_install_core
-     * runs, *ns* is interned as a dynamic var in clojure.core (see
+    /* *ns* derefs to the current namespace symbol. Once
+     * mino_install_clojure_core runs, *ns* is interned as a dynamic
+     * var in clojure.core (see
      * runtime/ns_env.c:mino_publish_current_ns); this fast path stays
      * for embedders that read *ns* before installation completes and
      * for reading the running ns without going through the var registry.

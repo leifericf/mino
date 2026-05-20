@@ -1,8 +1,8 @@
 /*
  * install.c -- composes per-domain primitive tables into the core
  * environment.  Each prim/<domain>.c exports k_prims_<domain> + count;
- * mino_install_core walks k_core_domains[] and binds each entry through
- * prim_install_table.
+ * mino_install_clojure_core walks k_core_domains[] and binds each entry
+ * through prim_install_table.
  *
  * mino_install_io lives in prim/io.c next to its table; mino_install_fs,
  * mino_install_proc, mino_install_host, and mino_install_async likewise
@@ -75,7 +75,8 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
 
 /* Bootstraps lib/core by reading and evaluating embedded source on the
  * first call for a state, then caching the parsed AST so subsequent
- * mino_install_core calls into other envs can replay without re-parsing.
+ * mino_install_clojure_core calls into other envs can replay without
+ * re-parsing.
  *
  * Runs with current_ns set to "clojure.core" by the caller, so every def
  * in core.clj lands in the clojure.core ns env. */
@@ -425,8 +426,8 @@ static const size_t k_prims_capability_count =
 /* Internal: floor setup and finalize                                        */
 /* ------------------------------------------------------------------------- */
 
-/* Wire up the dynamic vars and ns scaffolding that mino_install_core
- * historically installed. Used by both mino_install_minimal (where
+/* Wire up the dynamic vars and ns scaffolding that the canonical
+ * Clojure-core install needs. Used by both mino_install_minimal (where
  * core.clj is NOT evaluated) and the higher-tier installers so vars
  * like *ns* / *out* / *in* / *data-readers* are always available. */
 static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
@@ -543,8 +544,8 @@ void mino_install_multimethods(mino_state_t *S, mino_env_t *env)
     (void)env;
     /* No C-prim surface; capability is implemented in core.clj sections
      * gated on `(mino-installed? :multimethods)`. The bit must be set
-     * before mino_install_clojure_core / mino_install_core evaluates
-     * core.clj so the section runs. */
+     * before mino_install_clojure_core evaluates core.clj so the
+     * section runs. */
     S->caps_installed |= MINO_CAP_MULTIMETHODS;
 }
 
@@ -571,10 +572,9 @@ void mino_install_clojure_core(mino_state_t *S, mino_env_t *env)
 
     /* Install the floor scaffold first (idempotent); the embedder is
      * responsible for having flipped the per-capability bits and
-     * installed the related C prims via mino_install_<cap> before
-     * this call. The standalone CLI's mino_install_core wrapper sets
-     * the canonical Clojure-core surface up front so existing
-     * embedders see no behaviour change. */
+     * installed the related C prims via mino_install(S, env, caps)
+     * before this call. The standalone CLI uses mino_install_all so
+     * the canonical Clojure-core surface is up front. */
     if ((S->caps_installed & MINO_CAP_FLOOR) == 0) {
         mino_install_minimal(S, env);
     }

@@ -10,7 +10,7 @@
  * Run: ./embed_api_test
  */
 
-#include "mino_internal.h"
+#include "mino.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -80,7 +80,8 @@ static void test_args_parse_ok(mino_state_t *S, mino_env_t *env)
 
     r = mino_eval_string(S, "(demo 42 \"hello\")", env);
     REQUIRE(r != NULL, "demo eval returned NULL");
-    REQUIRE(r != NULL && r->type == MINO_VECTOR, "demo result not a vector");
+    REQUIRE(r != NULL && mino_typeof(r) == MINO_VECTOR,
+            "demo result not a vector");
 
     r = mino_eval_string(S, "(nth (demo 42 \"hello\") 0)", env);
     if (mino_to_int(r, &first)) {
@@ -125,11 +126,14 @@ static void test_throw_caught(mino_state_t *S, mino_env_t *env)
         "(try (boom) (catch e (pr-str e)))",
         env);
     REQUIRE(r != NULL, "throw-caught: try-catch returned NULL");
-    if (r != NULL && r->type == MINO_STRING) {
+    if (r != NULL && mino_typeof(r) == MINO_STRING) {
+        const char *data = NULL;
+        size_t      len  = 0;
         /* The runtime wraps caught exceptions in a diagnostic map that
          * carries the thrown payload under :mino/data. Assert the map
          * printed form includes the keyword we threw. */
-        REQUIRE(strstr(r->as.s.data, ":boom") != NULL,
+        REQUIRE(mino_to_string(r, &data, &len)
+                && data != NULL && strstr(data, ":boom") != NULL,
                 "throw-caught: payload does not contain :boom");
     } else {
         REQUIRE(0, "throw-caught: catch result is not a string");

@@ -31,7 +31,7 @@ void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
  * qualified names (syntax-quote in user macros tends to expand the
  * bare symbol to the qualified form), then falls back to the var's
  * root value. Returns NULL only when the var has never been interned
- * (the boot-time path before mino_install_core finishes). */
+ * (the boot-time path before mino_install_clojure_core finishes). */
 static mino_val_t *resolve_io_sink(mino_state_t *S, const char *name)
 {
     mino_val_t *v;
@@ -581,8 +581,9 @@ mino_val_t *prim_flush(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
-/* (slurp path) — read a file's entire contents as a string. I/O capability;
- * only installed by mino_install_io, not mino_install_core. */
+/* (slurp path) — read a file's entire contents as a string. I/O
+ * capability; only installed by mino_install(S, env, MINO_CAP_IO),
+ * not the floor install. */
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *path_val;
@@ -837,11 +838,11 @@ mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* k_prims_io_core -- print primitives and the printer hooks installed
- * during mino_install_core so the print-method multimethod and the
- * with-out-str / *out* surface in core.clj are available before any
- * code calls pr. Filesystem and process I/O (slurp, spit, exit, file-
- * seq, getenv, getcwd, chdir) stay in k_prims_io for capability-gated
- * installation by mino_install_io. */
+ * by the floor (FLOOR-domain) install so the print-method multimethod
+ * and the with-out-str / *out* surface in core.clj are available
+ * before any code calls pr. Filesystem and process I/O (slurp, spit,
+ * exit, file-seq, getenv, getcwd, chdir) stay in k_prims_io for
+ * capability-gated installation by mino_install(S, env, MINO_CAP_IO). */
 const mino_prim_def k_prims_io_core[] = {
     {"pr-builtin",        prim_pr_builtin,
      "Prints a value readably via the built-in C formatter, bypassing print-method."},

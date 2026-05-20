@@ -728,7 +728,9 @@
      3. test-suite             -- bytecode + JIT path
      4. test-suite-asan        -- same suite, sanitiser-built
      5. test-jit-parity        -- byte-identical stdout vs no-JIT
-     6. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
+     6. examples               -- every examples/embed_*.c builds and
+                                   runs against the lib srcs
+     7. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
                                    skipped with a warn otherwise.
 
    `check-stencils-fresh` is intentionally NOT part of the composite:
@@ -752,6 +754,7 @@
   (build-asan)
   (println (sh! "./mino_asan" "tests/run.clj"))
   (test-jit-parity)
+  (examples)
   (if-let [mt (mino-tests-adjacent)]
     (do
       (println "  release-gate: chaining to mino-tests at" mt)
@@ -1083,6 +1086,44 @@
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
                               "embed_api_test"))
+
+;; ---- Examples ----
+
+(def ^:private embed-examples
+  ;; Each example builds against the lib srcs as a tiny smoke; a stale
+  ;; reference to the public surface fails the build, which catches the
+  ;; v0.151-era cascade-rot class of bug for future renames.
+  ["examples/embed_gc.c"
+   "examples/embed_gc_stress.c"
+   "examples/embed_record.c"
+   "examples/embed_multi_tenant_threads.c"])
+
+(defn- compile-and-run-example
+  "Compile one examples/embed_*.c against the lib srcs and run it.
+   Output binary lives next to the source so cleanup matches the
+   harness pattern used by test-embed."
+  [src]
+  (let [slash   (str/last-index-of src "/")
+        base    (if slash (subs src (+ 1 slash)) src)
+        bin     (str "examples/" (subs base 0 (- (count base) 2)))
+        objs    (mapv src->obj lib-srcs)
+        pthread (if windows? [] ["-pthread"])
+        args    (into [cc] (concat cflags pthread ldflags
+                                   ["-o" bin src]
+                                   objs libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
+
+(defn examples
+  "Build and run every examples/embed_*.c against the lib srcs.
+   Acts as a smoke that the public mino.h surface stays sufficient
+   and that every published example tracks the current API."
+  []
+  (build)
+  (doseq [src embed-examples]
+    (println (str "--- " src " ---"))
+    (compile-and-run-example src)))
 
 ;; ---- Architecture quality gates ----
 

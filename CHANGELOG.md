@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.382.0 — Embedder UX: Cascade-Completion
+
+Phase 1 of the pre-1.0 Embedder UX cycle. Closes the cascade
+through `examples/`, `tests/embed_api_test.c`, and the bundled-
+stdlib generator that rotted after the v0.151 capability-bitmask
+revamp. None of those paths had a CI gate, so the rot was
+invisible until somebody actually opened the directory.
+
+### Added
+
+- `./mino task examples` builds every `examples/embed_*.c`
+  against the lib srcs and runs each binary; a stale reference
+  to the public surface now fails the build.
+- The `examples` task is wired into `./mino task release-gate`
+  so every pre-tag check exercises the example surface.
+
+### Changed
+
+- `tests/embed_api_test.c` no longer includes `mino_internal.h`.
+  Field-level reach-ins (`r->type == MINO_VECTOR`, `r->as.s.data`)
+  have been replaced with the public predicates and extractors
+  (`mino_typeof`, `mino_to_string`). The smoke test verifies that
+  the public surface is sufficient — including the private header
+  would defeat that contract.
+- The "Build" comment block at the top of `examples/embed_record.c`
+  is now a two-line `./mino task examples` recipe instead of a
+  nine-flag include-path wall. (The other example blocks will
+  collapse to the amalgamation form in Phase 3.)
+
+### Removed (dead references)
+
+- `examples/embed_gc.c`, `examples/embed_gc_stress.c`,
+  `examples/embed_record.c` were calling `mino_install_core(S, env)`,
+  a symbol removed in v0.151. Replaced with the canonical
+  `mino_install(S, env, MINO_CAP_DEFAULT)`.
+- Comments in `src/eval/special.c`, `src/prim/io.c`,
+  `src/prim/install.c`, `src/prim/install_stdlib.c`,
+  `src/prim/prim.c`, `src/runtime/internal.h`, and the bundled
+  `lib/clojure/string.clj` source still named `mino_install_core`.
+  Each has been updated to name the actual current symbol
+  (`mino_install`, `mino_install_clojure_core`, or
+  `MINO_CAP_IO`-shaped phrasing).
+
+### Migration
+
+- Embedders calling `mino_install_core(S, env)`: replace with
+  `mino_install(S, env, MINO_CAP_DEFAULT)`. The two have been
+  semantically equivalent since v0.151 (when `mino_install_core`
+  was kept only as a deprecated alias); the alias has now been
+  gone for a long time, but documented references survived.
+
 ## v0.381.1 — Fix: agent dosync-send / await race on Linux
 
 Fixes a long-standing CI hang documented in `.local/BUGS.md` as

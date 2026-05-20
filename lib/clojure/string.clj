@@ -3,7 +3,7 @@
 ;; The C primitives `clojure.string/lower-case`, `upper-case`,
 ;; `starts-with?`, `ends-with?`, `includes?`, `replace`, `split`,
 ;; `join`, and `trim` are installed into this namespace by
-;; mino_install_core. The defs below add nil-handling and
+;; mino_install_clojure_core. The defs below add nil-handling and
 ;; arity-coercion wrappers around them and define the rest of the
 ;; clojure.string surface (capitalize, blank?, escape, triml,
 ;; trimr, split-lines, trim-newline) on top.
