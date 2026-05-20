@@ -1156,7 +1156,7 @@ mino_val **mino_jit_make_lazy_slow(mino_state *S, mino_val **regs,
     lz->as.lazy.body     = body;
     lz->as.lazy.env      = ctx->jit_invoke_env;
     lz->as.lazy.cached   = NULL;
-    lz->as.lazy.realized = 0;
+    lz->as.lazy.realized = LAZY_UNREALIZED;
     regs    = S->bc.bc_regs + base;
     regs[a] = lz;
     return regs;

@@ -316,7 +316,7 @@ int lazy_is_int_range(const mino_val *coll, long long *start_out,
     const mino_val *ctx;
     if (coll == NULL || mino_type_of(coll) != MINO_LAZY) return 0;
     if (coll->as.lazy.c_thunk != range_thunk) return 0;
-    if (coll->as.lazy.realized) return 0;  /* would be a chunked cons by now */
+    if (coll->as.lazy.realized != LAZY_UNREALIZED) return 0;
     ctx = coll->as.lazy.body;
     if (ctx == NULL || !mino_is_cons(ctx)) return 0;
     *start_out    = mino_val_int_get(ctx->as.cons.car);
@@ -340,7 +340,7 @@ int lazy_thunk_is_map1(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
-        && !coll->as.lazy.realized
+        && coll->as.lazy.realized == LAZY_UNREALIZED
         && coll->as.lazy.c_thunk == lazy_map1_thunk;
 }
 
@@ -348,7 +348,7 @@ int lazy_thunk_is_filter(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
-        && !coll->as.lazy.realized
+        && coll->as.lazy.realized == LAZY_UNREALIZED
         && coll->as.lazy.c_thunk == lazy_filter_thunk;
 }
 
@@ -356,7 +356,7 @@ int lazy_thunk_is_take(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
-        && !coll->as.lazy.realized
+        && coll->as.lazy.realized == LAZY_UNREALIZED
         && coll->as.lazy.c_thunk == lazy_take_thunk;
 }
 

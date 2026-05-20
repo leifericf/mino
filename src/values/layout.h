@@ -102,6 +102,21 @@ struct mino_bc_fn;            /* compiled-fn record */
     ((int)((uintptr_t)(v) >> MINO_TAG_BITS))
 
 /* ------------------------------------------------------------------------- */
+/* Lazy-sequence realization state machine                                   */
+/* ------------------------------------------------------------------------- */
+
+/* Pre-tri-state code stored 0 or 1 in lazy.realized and tested it as a
+ * boolean. Concurrent forcers can both observe 0 before either writes
+ * 1, so both run the thunk and tear-publish cached. The realizing
+ * sentinel narrows this to a CAS-claimed window: state moves 0 -> 2 ->
+ * 1 (winner) while losers see 2 and wait. Readers that don't go
+ * through lazy_force still test `realized == LAZY_REALIZED`, never
+ * truthy, so a mid-realization slot is never misread as "done". */
+#define LAZY_UNREALIZED 0
+#define LAZY_REALIZED   1
+#define LAZY_REALIZING  2
+
+/* ------------------------------------------------------------------------- */
 /* Value struct body                                                         */
 /* ------------------------------------------------------------------------- */
 
@@ -221,6 +236,14 @@ struct mino_val {
             mino_env *env;
             mino_val *cached;
             mino_val *(*c_thunk)(struct mino_state *, mino_val *);
+            /* Tri-state machine: 0=untouched, 2=a thread is computing
+             * the thunk now, 1=cached holds the published value. CAS
+             * 0 -> 2 claims the realization; only the claiming thread
+             * later writes 1. Concurrent forcers spin (yield_lock +
+             * sched_yield) while state==2, then read cached after
+             * state observes 1. If the thunk throws, the realizer
+             * resets state to 0 so a retry can re-run the thunk,
+             * matching JVM Clojure's LazySeq semantics. */
             int         realized;
         } lazy;
         struct {          /* MINO_CHUNK: fixed-cap value buffer */

@@ -855,7 +855,7 @@ static int try_unwind_pipeline(mino_val *coll,
     int n = 0;
     while (n < max_stages && coll != NULL
            && mino_type_of(coll) == MINO_LAZY
-           && !coll->as.lazy.realized) {
+           && coll->as.lazy.realized == LAZY_UNREALIZED) {
         mino_val *body = coll->as.lazy.body;
         if (body == NULL || !mino_is_cons(body)
             || !mino_is_cons(body->as.cons.cdr)) {

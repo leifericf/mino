@@ -142,7 +142,7 @@ static uint32_t hash_sequential(const mino_val *original)
     v = original;
     for (;;) {
         while (v != NULL && mino_type_of(v) == MINO_LAZY
-               && v->as.lazy.realized) {
+               && v->as.lazy.realized == LAZY_REALIZED) {
             v = v->as.lazy.cached;
         }
         if (v == NULL) break;

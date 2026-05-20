@@ -1002,7 +1002,8 @@ static int is_sequential(mino_type t)
  */
 static const mino_val *resolve_lazy(const mino_val *v)
 {
-    while (v != NULL && mino_type_of(v) == MINO_LAZY && v->as.lazy.realized) {
+    while (v != NULL && mino_type_of(v) == MINO_LAZY
+           && v->as.lazy.realized == LAZY_REALIZED) {
         v = v->as.lazy.cached;
     }
     return v;
@@ -1211,14 +1212,16 @@ int mino_eq(const mino_val *a, const mino_val *b)
      * A realized lazy whose cache is nil/empty-list is still semantically
      * an empty seq; preserve the LAZY tag so cross-type seq equality
      * routes through eq_seq_like instead of degenerating to nil. */
-    if (mino_type_of(a) == MINO_LAZY && a->as.lazy.realized) {
+    if (mino_type_of(a) == MINO_LAZY
+        && a->as.lazy.realized == LAZY_REALIZED) {
         mino_val *cached = a->as.lazy.cached;
         if (cached != NULL && mino_type_of(cached) != MINO_NIL
             && mino_type_of(cached) != MINO_EMPTY_LIST) {
             a = cached;
         }
     }
-    if (mino_type_of(b) == MINO_LAZY && b->as.lazy.realized) {
+    if (mino_type_of(b) == MINO_LAZY
+        && b->as.lazy.realized == LAZY_REALIZED) {
         mino_val *cached = b->as.lazy.cached;
         if (cached != NULL && mino_type_of(cached) != MINO_NIL
             && mino_type_of(cached) != MINO_EMPTY_LIST) {

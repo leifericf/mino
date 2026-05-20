@@ -317,8 +317,9 @@ static void gc_verify_remset_complete(mino_state *S)
                 gc_verify_check(S, h, v->as.chunked_cons.chunk);
                 gc_verify_check(S, h, v->as.chunked_cons.more); break;
             case MINO_LAZY:
-                if (v->as.lazy.realized) gc_verify_check(S, h, v->as.lazy.cached);
-                else {
+                if (v->as.lazy.realized == LAZY_REALIZED) {
+                    gc_verify_check(S, h, v->as.lazy.cached);
+                } else {
                     gc_verify_check(S, h, v->as.lazy.body);
                     gc_verify_check(S, h, v->as.lazy.env);
                 }

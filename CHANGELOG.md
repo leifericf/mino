@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.389.2 — Lazy-Force Exactly-Once Realization
+
+`lazy_force` previously read-checked-then-set `realized` without
+synchronization. Two threads observing the unrealized state both
+ran the thunk and tear-published `cached`/`body`/`env`, breaking
+the exactly-once realization guarantee that `clojure.lang.LazySeq`
+provides. The lazy storage `realized` field is now a tri-state
+machine (`LAZY_UNREALIZED` / `LAZY_REALIZING` / `LAZY_REALIZED`):
+the first forcer wins a CAS into the realizing slot, evaluates the
+thunk, publishes `cached`, then flips to realized; concurrent
+forcers spin under `mino_yield_lock` until the winner publishes,
+then return the same value. If the thunk throws, the realizer
+resets the slot to unrealized so a retry re-runs the thunk,
+matching JVM behaviour.
+
+Every reader of `lazy.realized` -- the GC tracer, the
+seq/equality/walker helpers, the pipeline-fusion thunk
+identification, the `realized?` predicate -- now compares against
+`LAZY_REALIZED` explicitly, so a mid-realization lazy is never
+misread as "done".
+
 ## v0.389.1 — Atomic Transient Owner Mint
 
 `mino_transient` now mints the per-batch owner ID through an atomic

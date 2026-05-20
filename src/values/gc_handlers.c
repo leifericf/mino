@@ -103,7 +103,13 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
         PUSH(v->as.chunked_cons.more);
         break;
     case MINO_LAZY:
-        if (v->as.lazy.realized) {
+        /* LAZY_REALIZING is treated like LAZY_UNREALIZED: the realizer
+         * has not yet published cached, so body+env still hold the
+         * live closure and must keep being traced. The barrier-paired
+         * stores in lazy_realize publish cached before flipping the
+         * flag to LAZY_REALIZED, so a tracer that observes REALIZED
+         * also observes the populated cached slot. */
+        if (v->as.lazy.realized == LAZY_REALIZED) {
             PUSH(v->as.lazy.cached);
         } else {
             PUSH(v->as.lazy.body);

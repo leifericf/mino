@@ -5,6 +5,12 @@
 
 #include "runtime/internal.h"
 
+#if defined(_WIN32) && defined(_MSC_VER)
+#  include <windows.h>  /* Sleep() for the lazy-realize spin yield */
+#else
+#  include <time.h>     /* nanosleep() for the lazy-realize spin yield */
+#endif
+
 int sym_eq(const mino_val *v, const char *s)
 {
     size_t n;
@@ -528,56 +534,113 @@ mino_val *eval_implicit_do(mino_state *S, mino_val *body, mino_env *env)
 }
 
 /*
+ * Realize one lazy. Concurrent forcers race on a CAS of `realized`
+ * from LAZY_UNREALIZED to LAZY_REALIZING; the CAS winner runs the
+ * thunk, publishes `cached`, then flips `realized` to LAZY_REALIZED.
+ * Losers spin (yielding state_lock so the realizer can make progress
+ * if its thunk itself blocks) until they observe LAZY_REALIZED. If
+ * the thunk throws (result == NULL) the realizer reverts `realized`
+ * back to LAZY_UNREALIZED so a retry can re-run the thunk -- this
+ * matches JVM clojure.lang.LazySeq#sval(), which throws out the
+ * cached state on exception and retries on next force.
+ */
+static mino_val *lazy_realize(mino_state *S, mino_val *v)
+{
+    for (;;) {
+        int state = __atomic_load_n(&v->as.lazy.realized, __ATOMIC_ACQUIRE);
+        if (state == LAZY_REALIZED) {
+            return v->as.lazy.cached;
+        }
+        if (state == LAZY_UNREALIZED) {
+            int expected = LAZY_UNREALIZED;
+            if (__atomic_compare_exchange_n(&v->as.lazy.realized,
+                                            &expected, LAZY_REALIZING,
+                                            0,
+                                            __ATOMIC_ACQ_REL,
+                                            __ATOMIC_ACQUIRE)) {
+                mino_val *result = v->as.lazy.c_thunk != NULL
+                    ? v->as.lazy.c_thunk(S, v->as.lazy.body)
+                    : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
+                if (result == NULL) {
+                    /* Thunk threw. Roll back the claim so a retrying
+                     * caller can re-run the thunk; if other threads
+                     * are spinning, they'll see UNREALIZED and one of
+                     * them will try the CAS. */
+                    __atomic_store_n(&v->as.lazy.realized,
+                                     LAZY_UNREALIZED, __ATOMIC_RELEASE);
+                    return NULL;
+                }
+                /* Pre-realized lazy: cached is NULL, body/env hold
+                 * the thunk. Realisation overwrites three slots. The
+                 * body and env stores need SATB because the thunk
+                 * they pointed to may otherwise be reachable only
+                 * through this lazy and must survive the in-flight
+                 * major cycle. The realized flip uses release
+                 * ordering so a reader that observes LAZY_REALIZED
+                 * also observes the cached/body/env writes. */
+                gc_write_barrier(S, v, v->as.lazy.cached, result);
+                v->as.lazy.cached = result;
+                gc_write_barrier(S, v, v->as.lazy.body, NULL);
+                v->as.lazy.body = NULL;
+                gc_write_barrier(S, v, v->as.lazy.env, NULL);
+                v->as.lazy.env = NULL;
+                __atomic_store_n(&v->as.lazy.realized,
+                                 LAZY_REALIZED, __ATOMIC_RELEASE);
+                return result;
+            }
+            /* CAS lost; expected now holds the observed state. Loop
+             * back to re-check (state may be REALIZING, REALIZED, or
+             * UNREALIZED again if a previous realizer threw). */
+            continue;
+        }
+        /* state == LAZY_REALIZING: another thread is computing. Drop
+         * state_lock so that thread (or its sub-evaluations) can make
+         * progress; sleep a short slice so the OS scheduler actually
+         * runs the realizer on a non-fair mutex impl before we
+         * re-acquire and re-check. Matches the BC safepoint
+         * auto-yield idiom in src/runtime/state.c. */
+        {
+            int depth = mino_yield_lock(S);
+#if defined(_WIN32) && defined(_MSC_VER)
+            Sleep(0);
+#else
+            {
+                struct timespec ts;
+                ts.tv_sec  = 0;
+                ts.tv_nsec = 100000L; /* 100us */
+                nanosleep(&ts, NULL);
+            }
+#endif
+            mino_resume_lock(S, depth);
+        }
+    }
+}
+
+/*
  * Force a lazy sequence: evaluate the body in the captured environment,
  * cache the result, and release the thunk for GC. Iteratively unwraps
  * nested lazy seqs to avoid stack overflow.
  */
 mino_val *lazy_force(mino_state *S, mino_val *v)
 {
-    if (v->as.lazy.realized) {
-        return v->as.lazy.cached;
+    mino_val *result = lazy_realize(S, v);
+    mino_val *first  = result;
+    while (result != NULL && mino_type_of(result) == MINO_LAZY) {
+        result = lazy_realize(S, result);
     }
-    {
-        mino_val *result = v->as.lazy.c_thunk != NULL
-            ? v->as.lazy.c_thunk(S, v->as.lazy.body)
-            : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
-        if (result == NULL) return NULL;
-        /* Iteratively unwrap nested lazy seqs. */
-        while (result != NULL && mino_type_of(result) == MINO_LAZY) {
-            if (result->as.lazy.realized) {
-                result = result->as.lazy.cached;
-            } else {
-                mino_val *inner = result->as.lazy.c_thunk != NULL
-                    ? result->as.lazy.c_thunk(S, result->as.lazy.body)
-                    : eval_implicit_do(S,
-                        result->as.lazy.body, result->as.lazy.env);
-                /* Pre-realized lazy: cached is NULL, body/env hold the
-                 * thunk. Realisation overwrites three slots. The
-                 * cached-store needs no SATB (cached was NULL); the
-                 * body and env stores do, because the thunk they
-                 * pointed to may otherwise be reachable only through
-                 * this lazy and must survive the in-flight major
-                 * cycle. */
-                gc_write_barrier(S, result, result->as.lazy.cached, inner);
-                result->as.lazy.cached  = inner;
-                result->as.lazy.realized = 1;
-                gc_write_barrier(S, result, result->as.lazy.body, NULL);
-                result->as.lazy.body    = NULL;
-                gc_write_barrier(S, result, result->as.lazy.env, NULL);
-                result->as.lazy.env     = NULL;
-                result = inner;
-                if (result == NULL) return NULL;
-            }
-        }
+    /* Path-compress v.cached to the final non-lazy. Both v.cached
+     * (== first) and `result` walk to the same value; readers that
+     * observe either form get an equivalent traversal, so this is
+     * race-free even though the store happens after the LAZY_REALIZED
+     * flip. The barrier is required because v may be OLD and result
+     * may be YOUNG; cached == first is already covered by the
+     * realizer's SATB push, so we only need a fresh barrier when the
+     * pointer actually changes. */
+    if (result != first && result != NULL) {
         gc_write_barrier(S, v, v->as.lazy.cached, result);
-        v->as.lazy.cached   = result;
-        v->as.lazy.realized = 1;
-        gc_write_barrier(S, v, v->as.lazy.body, NULL);
-        v->as.lazy.body     = NULL;
-        gc_write_barrier(S, v, v->as.lazy.env, NULL);
-        v->as.lazy.env      = NULL;
-        return result;
+        v->as.lazy.cached = result;
     }
+    return result;
 }
 
 mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env)

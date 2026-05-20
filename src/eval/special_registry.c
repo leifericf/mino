@@ -200,7 +200,7 @@ static mino_val *eval_lazy_seq(mino_state *S, mino_val *form,
     lz->as.lazy.body     = args;
     lz->as.lazy.env      = env;
     lz->as.lazy.cached   = NULL;
-    lz->as.lazy.realized = 0;
+    lz->as.lazy.realized = LAZY_UNREALIZED;
     return lz;
 }
 

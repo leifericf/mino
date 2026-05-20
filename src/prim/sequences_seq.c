@@ -282,7 +282,8 @@ mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
     }
     v = args->as.cons.car;
     if (v != NULL && mino_type_of(v) == MINO_LAZY) {
-        return v->as.lazy.realized ? mino_true(S) : mino_false(S);
+        return v->as.lazy.realized == LAZY_REALIZED
+               ? mino_true(S) : mino_false(S);
     }
     if (v != NULL && mino_type_of(v) == MINO_FUTURE) {
         return mino_future_realized_p(v) ? mino_true(S) : mino_false(S);
