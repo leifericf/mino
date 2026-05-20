@@ -115,6 +115,12 @@ mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
     if (mino_type_of(text_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
+    /* The regex engine uses file-static globals (re_flags +
+     * re_g_state) for match state, so every caller must serialize
+     * through state_lock. The debug-build assert surfaces a missing
+     * lock at the offending call site instead of silently corrupting
+     * the next match's capture spans. */
+    MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
         return prim_throw_classified(S, "eval/contract", "MCT001",
@@ -160,6 +166,7 @@ mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
     if (mino_type_of(text_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
+    MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
         return prim_throw_classified(S, "eval/contract", "MCT001",

@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.389.13 — Lock-Invariant Assert on Regex Prim Entries
+
+The regex engine in `src/regex/re.c` uses file-static globals
+(`re_flags`, `re_g_state`) for match state. All current callers
+go through `re-find`, `re-matches`, `split`, or `str-replace` --
+each runs inside `mino_call`, which holds `state_lock`, so the
+globals are effectively serialized in practice. The contract was
+not enforced anywhere, so a future refactor that elides
+`state_lock` around one of those prims would silently corrupt the
+next match's capture spans. Add `MINO_ASSERT_STATE_SAFE` at each
+prim's regex call site to surface a missing lock at the offending
+site under a debug build.
+
 ## v0.389.12 — Agent Spawn-Rollback Hands Off Concurrent Producer's Queue
 
 When `pthread_create` (or `_beginthreadex`) refuses the agent

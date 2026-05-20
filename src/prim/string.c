@@ -491,7 +491,12 @@ mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
          * conflated 0 and negative for the literal-string path, so the
          * regex path matches that). */
         const char *pat_src = sep_val->as.regex.source->as.s.data;
-        re_t        compiled = re_compile(pat_src);
+        re_t        compiled;
+        /* See prim_re_find for the rationale: the regex engine's
+         * static-global match state requires every caller to be in
+         * a state-safe window (state_lock held). */
+        MINO_ASSERT_STATE_SAFE(S);
+        compiled = re_compile(pat_src);
         size_t      pos = 0;
         if (compiled == NULL) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
@@ -908,6 +913,7 @@ mino_val *prim_str_replace(mino_state *S, mino_val *args,
                 "str-replace: regex has no source pattern");
         }
         pat_src  = match_val->as.regex.source->as.s.data;
+        MINO_ASSERT_STATE_SAFE(S);
         compiled = re_compile(pat_src);
         if (compiled == NULL) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
