@@ -226,18 +226,6 @@ void mino_chan_finalize(mino_state *S, mino_val *v)
 /* Operations                                                          */
 /* ------------------------------------------------------------------ */
 
-static int has_room(mino_chan_impl *impl)
-{
-    switch (impl->buf_kind) {
-    case CHAN_BUF_NONE:     return 0;
-    case CHAN_BUF_FIXED:    return impl->buf_len < impl->buf_capacity;
-    case CHAN_BUF_DROPPING: return 1; /* drops on full; always "accepts" */
-    case CHAN_BUF_SLIDING:  return 1; /* evicts on full; always "accepts" */
-    case CHAN_BUF_PROMISE:  return !impl->promise_set;
-    }
-    return 0;
-}
-
 /* Schedule a callback on the async run queue. Both arities (cb val)
  * and (cb [val ch]) are handled at the call site -- the alts callback
  * receives a 2-vector. We just enqueue cb + the materialized arg. */
