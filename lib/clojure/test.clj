@@ -55,10 +55,20 @@
   (and (symbol? sym) (= "thrown?" (name sym))))
 
 (defmacro is-thrown [expr msg]
-  `(try
-     (do ~@(rest expr)
-         (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
-     (catch __e (assert-pass!))))
+  ;; expr matches either of two shapes:
+  ;;   (thrown? <type> <body>...)  -- JVM-clojure compatible
+  ;;   (thrown? <body>)            -- mino single-arg shorthand
+  ;; mino has no exception class hierarchy; the type symbol is
+  ;; documentation-only, so any throw from the body counts as a
+  ;; pass. We detect the JVM shape by arity: 2+ elements after
+  ;; `thrown?` means the first is the type (skip it); 1 element
+  ;; is the body itself.
+  (let [args        (rest expr)
+        body-forms  (if (= 1 (count args)) args (rest args))]
+    `(try
+       (do ~@body-forms
+           (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
+       (catch __e (assert-pass!)))))
 
 (defmacro is-eq [expr msg]
   (let [gs-exp (gensym) gs-act (gensym)

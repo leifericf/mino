@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.389.14 — `is-thrown` Correctly Checks the Body, Not the Type Symbol
+
+`(is (thrown? Exception body))` used to silently pass whenever
+the type symbol was unbound: the macro spliced `(rest expr)` --
+which includes both the type symbol and the body -- into a
+`do` block, so evaluating `Exception` itself threw and the
+catch arm registered a pass before the body ever ran. Tests that
+expected the body to throw were therefore green regardless of
+what the body actually did.
+
+The macro now detects the JVM-Clojure shape `(thrown? <type>
+<body>...)` vs the mino single-arg shorthand `(thrown? <body>)`
+by arity and skips the type symbol when present. mino has no
+exception class hierarchy, so the type symbol is treated as
+documentation; any throw from the body counts as a pass.
+
 ## v0.389.13 — Lock-Invariant Assert on Regex Prim Entries
 
 The regex engine in `src/regex/re.c` uses file-static globals
