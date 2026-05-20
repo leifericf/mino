@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.381.1 — Fix: agent dosync-send / await race on Linux
+
+Fixes a long-standing CI hang documented in `.local/BUGS.md` as
+"CI hang #2: tests/run_migrated.clj on ubuntu-24.04". The hang was
+deterministic on GHA ubuntu-24.04 runners (both x86 and arm) and
+masked on macos-14 plus Apple Silicon Docker. Reproducer: a single
+`(dosync (send a fn))` followed by `(await a)` would block forever
+on the very first iteration.
+
+### Root cause
+
+`agent_worker_ensure` released `agent_mu` between spawning the
+worker pthread and the caller's subsequent `agent_enqueue` call.
+A freshly-spawned worker could win the race to `agent_mu`, see an
+empty runq, set `worker_alive = 0`, and exit before the producer
+ever published its action. The producer's later `agent_enqueue`
+then pushed the node + bumped `in_flight` into a runq with no
+consumer; `(await a)` waited on a condition that nothing would
+ever signal.
+
+### Fix
+
+Merge the worker spawn and the enqueue into a single
+`agent_enqueue` critical section. The producer:
+
+1. Takes `agent_mu`.
+2. Decides whether a worker is needed (`worker_alive == 0`), and
+   if so reserves a thread-budget slot atomically.
+3. Pushes the action node and bumps `in_flight` (still under
+   `agent_mu`).
+4. Releases `agent_mu`.
+5. Calls `pthread_create` only after the node is published.
+
+The new worker's first `agent_mu_lock` therefore always observes
+a non-empty runq for the producer that spawned it. Thread-budget
+refusals revert the enqueue and free the node before throwing so
+`(await a)` is never stranded on an action that no worker will
+process.
+
+The dead `agent_worker_ensure` and its inline spawn body are
+removed. `agent_worker_reap_pending` stays — `mino_agent_quiesce_workers`
+still uses it on state teardown, and the new `agent_enqueue` calls
+it under `agent_mu` (with a state-lock yield around the
+`pthread_join`) when the previous worker has exited.
+
+### Regression test
+
+Added `tests/migrated/dosync_send_repro.clj` to `mino-tests` —
+five iterations of the dosync-send-await pattern with explicit
+progress logging. Pre-fix, this hangs after the first
+`[repro] iter 0 before await` on Linux CI. Post-fix, all five
+iterations complete in ~50ms locally and the full Migrated suite
+passes on every CI runner.
+
+### Verification
+
+- Full mino test suite green (1371 tests, 4828 assertions).
+- Local linux/amd64 + linux/arm64 Docker run the migrated suite
+  in ~24s end-to-end; isolated repro completes in 50ms.
+
 ## v0.381.0 — C Micro-refactor: Hygiene, Identity-by-name, Dispatch Tables, God-function Splits
 
 Closes the file/function-level cleanup the architecture cycles

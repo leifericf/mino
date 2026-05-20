@@ -486,8 +486,8 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
 
     /* Detach worker ctx from S->threading.worker_ctxs_head and decrement the
      * thread count under the brief worker_list_lock. The pthread_t
-     * is left intact for a follow-up pthread_join from
-     * agent_worker_ensure or mino_agent_quiesce_workers (signaled by
+     * is left intact for a follow-up pthread_join from a later
+     * agent_enqueue or mino_agent_quiesce_workers (signaled by
      * worker_pending_join, which the spawn path set when it created
      * us). Joining an already-exited joinable pthread returns
      * immediately. */
@@ -554,33 +554,97 @@ static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
     mino_resume_lock(S, saved_depth);
 }
 
-/* Lazy-spawn the agent worker for the given pool. Caller must hold
- * state_lock. Throws MTH001 if thread budget is exhausted. Returns 0
- * on success, 1 on throw (caller should propagate NULL). Idempotent:
- * returns 0 fast when a worker is already running. If a previous
- * worker exited (queue drained), reap its pthread handle before
- * spawning a fresh one so thread_count is accurate. */
-static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
+/* Enqueue (agent fn extra env dyn_snap) onto the named pool's queue.
+ * Caller holds state_lock. Spawns the pool's worker if needed and
+ * enqueues the action under a single agent_mu critical section so a
+ * newly-spawned worker cannot observe an empty runq before this
+ * producer publishes its node.
+ *
+ * Race that this closes: if ensure released agent_mu before
+ * agent_enqueue re-acquired it, a freshly-spawned worker could
+ * sneak in between the two acquisitions, see an empty runq, set
+ * worker_alive=0, and exit. The subsequent enqueue would then push
+ * the node + bump in_flight into a runq with no consumer, and
+ * `(await a)` blocks forever waiting on in_flight=0. Reproduces on
+ * GHA ubuntu-24.04 (both arches), masked on macos-14 + Apple Silicon
+ * Docker by stricter effective memory ordering.
+ *
+ * Returns 0 on success, 1 on OOM or thread-budget refusal (caller
+ * propagates NULL). On 1, the diag has been published via
+ * prim_throw_classified and no observable state change happened
+ * (no enqueue, no in_flight bump, no pthread spawned). */
+static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
+                          mino_val_t *agent, mino_val_t *fn,
+                          mino_val_t *extra, mino_env_t *env)
 {
-    int alive;
+    agent_action_node_t *n;
+    int                  need_spawn = 0;
+    int                  budget_ok  = 1;
+
     if (!S->agent.mu_inited) {
         agent_mu_ensure_inited(S);
     }
+
+    n = (agent_action_node_t *)calloc(1, sizeof(*n));
+    if (n == NULL) return 1;
+    n->agent    = agent;
+    n->fn       = fn;
+    n->extra    = extra;
+    n->env      = env;
+    n->dyn_snap = mino_snapshot_thread_bindings(S);
+    n->next     = NULL;
+
+    /* Decide whether a new worker is needed, take the thread-budget
+     * slot, and publish the node + in_flight bump as one atomic
+     * critical section. The worker we are about to spawn (if any)
+     * cannot acquire agent_mu until we release, so its first runq
+     * check is guaranteed to see this node. */
     agent_mu_lock(&S->agent.mu);
-    alive = S->agent.pool[kind].worker_alive;
-    agent_mu_unlock(&S->agent.mu);
-    if (alive) return 0;
-
-    /* Reap any pthread handle left by a previously-drained worker
-     * for this pool. */
-    agent_worker_reap_pending(S, kind);
-
-    /* Gate-and-increment thread_count under worker_list_lock so a
-     * concurrent spawn (e.g. another pool's agent_worker_ensure or
-     * mino_future_spawn) cannot both pass the limit check. */
-    mino_worker_list_lock_acquire(S);
-    if (S->threading.thread_count >= S->threading.thread_limit) {
-        mino_worker_list_lock_release(S);
+    if (!S->agent.pool[kind].worker_alive) {
+        need_spawn = 1;
+        /* Reap a prior worker's pthread handle synchronously here
+         * rather than at the spawn step below, so the budget check
+         * sees the up-to-date thread_count. The previous worker
+         * exited via the for-loop break and decremented thread_count
+         * during its detach; its pthread_t still lives in the slot
+         * until we join it. */
+        if (S->agent.pool[kind].worker_pending_join) {
+            S->agent.pool[kind].worker_pending_join = 0;
+            agent_mu_unlock(&S->agent.mu);
+            {
+                int saved_depth = mino_yield_lock(S);
+#if defined(_WIN32) && defined(_MSC_VER)
+                WaitForSingleObject(S->agent.pool[kind].worker, INFINITE);
+                CloseHandle(S->agent.pool[kind].worker);
+#else
+                pthread_join(S->agent.pool[kind].worker, NULL);
+#endif
+                mino_resume_lock(S, saved_depth);
+            }
+            agent_mu_lock(&S->agent.mu);
+            /* While the lock was yielded a concurrent producer could
+             * have re-spawned the worker. Re-check; if alive again,
+             * we no longer need to spawn. */
+            if (S->agent.pool[kind].worker_alive) {
+                need_spawn = 0;
+            }
+        }
+        if (need_spawn) {
+            mino_worker_list_lock_acquire(S);
+            if (S->threading.thread_count >= S->threading.thread_limit) {
+                mino_worker_list_lock_release(S);
+                budget_ok = 0;
+            } else {
+                S->threading.thread_count++;
+                mino_worker_list_lock_release(S);
+                S->threading.multi_threaded = 1;
+                S->agent.pool[kind].worker_alive = 1;
+            }
+        }
+    }
+    if (!budget_ok) {
+        agent_mu_unlock(&S->agent.mu);
+        free(n);
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
             "raise via mino_set_thread_limit (>= 1 for one agent "
@@ -589,37 +653,50 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             "against the limit -- only spawned workers do.");
         return 1;
     }
-    S->threading.thread_count++;
-    mino_worker_list_lock_release(S);
-    S->threading.multi_threaded = 1;
-    /* Mark alive BEFORE pthread_create returns so a concurrent send
-     * on the embedder thread (impossible in single-thread mode but
-     * defensive) doesn't race. */
-    agent_mu_lock(&S->agent.mu);
-    S->agent.pool[kind].worker_alive = 1;
+    agent_runq_push_tail(S, kind, n);
+    if (agent->as.agent.in_flight < INT_MAX) {
+        agent->as.agent.in_flight++;
+    }
+    agent_cv_broadcast(&S->agent.cv);
     agent_mu_unlock(&S->agent.mu);
+
+    /* Spawn the worker AFTER the node is published. The new pthread
+     * will block on agent_mu_lock at its first iteration if we are
+     * still holding (we aren't anymore) and immediately observe the
+     * node we just pushed. */
+    if (need_spawn) {
 #if defined(_WIN32) && defined(_MSC_VER)
-    {
         unsigned stack = (unsigned)S->threading.thread_stack_size;
         uintptr_t h = _beginthreadex(NULL, stack,
             kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
                                        : agent_worker_entry_solo,
             S, 0, NULL);
         if (h == 0) {
+            /* pthread create refused. Roll back the in_flight bump
+             * and pop the node we just pushed so await is not
+             * stranded on a permanently-pending action. The runq
+             * head is what we pushed; pop it back. */
             agent_mu_lock(&S->agent.mu);
+            if (S->agent.pool[kind].run_tail == n) {
+                S->agent.pool[kind].run_tail = NULL;
+            }
+            S->agent.pool[kind].run_head = n->next;
+            if (agent->as.agent.in_flight > 0) {
+                agent->as.agent.in_flight--;
+            }
             S->agent.pool[kind].worker_alive = 0;
+            agent_cv_broadcast(&S->agent.cv);
             agent_mu_unlock(&S->agent.mu);
             mino_worker_list_lock_acquire(S);
             if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
+            free(n);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
         S->agent.pool[kind].worker = (HANDLE)h;
-    }
 #else
-    {
         pthread_attr_t attr;
         pthread_attr_t *attrp = NULL;
         int rc;
@@ -635,45 +712,29 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             S);
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
+            /* Same rollback as the Windows arm above. */
             agent_mu_lock(&S->agent.mu);
+            if (S->agent.pool[kind].run_tail == n) {
+                S->agent.pool[kind].run_tail = NULL;
+            }
+            S->agent.pool[kind].run_head = n->next;
+            if (agent->as.agent.in_flight > 0) {
+                agent->as.agent.in_flight--;
+            }
             S->agent.pool[kind].worker_alive = 0;
+            agent_cv_broadcast(&S->agent.cv);
             agent_mu_unlock(&S->agent.mu);
             mino_worker_list_lock_acquire(S);
             if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
+            free(n);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
-    }
 #endif
-    S->agent.pool[kind].worker_pending_join = 1;
-    return 0;
-}
-
-/* Enqueue (agent fn extra env dyn_snap) onto the named pool's queue.
- * Caller holds state_lock. agent_worker_ensure has spawned the
- * pool's worker if needed. Returns 0 on success, 1 on OOM (caller
- * propagates NULL). */
-static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
-                          mino_val_t *agent, mino_val_t *fn,
-                          mino_val_t *extra, mino_env_t *env)
-{
-    agent_action_node_t *n = (agent_action_node_t *)calloc(1, sizeof(*n));
-    if (n == NULL) return 1;
-    n->agent    = agent;
-    n->fn       = fn;
-    n->extra    = extra;
-    n->env      = env;
-    n->dyn_snap = mino_snapshot_thread_bindings(S);
-    n->next     = NULL;
-    agent_mu_lock(&S->agent.mu);
-    agent_runq_push_tail(S, kind, n);
-    if (agent->as.agent.in_flight < INT_MAX) {
-        agent->as.agent.in_flight++;
+        S->agent.pool[kind].worker_pending_join = 1;
     }
-    agent_cv_broadcast(&S->agent.cv);
-    agent_mu_unlock(&S->agent.mu);
     return 0;
 }
 
@@ -868,10 +929,13 @@ static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
                     : mino_empty_list(S));
         return agent;
     }
-    if (agent_worker_ensure(S, kind)) return NULL;
+    /* agent_enqueue handles lazy worker spawn under the same
+     * agent_mu critical section as the push + in_flight bump, so a
+     * freshly-spawned worker is guaranteed to observe the node on
+     * its first runq check (see the race note in the function
+     * comment). */
     if (agent_enqueue(S, kind, agent, fn, extra, env)) {
-        prim_throw_classified(S, "eval/state", "MST002",
-            "send: out of memory enqueueing action");
+        /* Diag already published by agent_enqueue. */
         return NULL;
     }
     return agent;
@@ -925,19 +989,15 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
         }
         if (S->agent.shutdown) continue;
         /* In-tx send is the JVM-canon shape -- post-commit pending
-         * drains route through the POOLED pool. */
-        if (agent_worker_ensure(S, AGENT_POOL_POOLED)) {
-            /* Worker spawn refused (no thread budget). Pending
-             * sends are silently dropped; the commit has already
-             * gone through. Clear the error that
-             * agent_worker_ensure -> prim_throw_classified set so
-             * the post-commit drain doesn't surface as a failed
-             * dosync. */
-            clear_error(S);
-            return;
-        }
+         * drains route through the POOLED pool. agent_enqueue lazy-
+         * spawns the worker atomically with the push so the worker
+         * is guaranteed to drain. If the spawn refuses (no thread
+         * budget) the action is silently dropped: the commit has
+         * already gone through and throwing here would surprise a
+         * caller that wasn't holding state_lock. Clear the diag
+         * that agent_enqueue published. */
         if (agent_enqueue(S, AGENT_POOL_POOLED, agent_v, fn, extra, env)) {
-            /* OOM enqueueing: same logic as above. */
+            clear_error(S);
             return;
         }
     }
