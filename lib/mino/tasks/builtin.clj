@@ -45,6 +45,7 @@
    "src/values/val.c" "src/values/gc_handlers.c"
    "src/collections/vec.c" "src/collections/map.c"
    "src/collections/chunk.c"
+   "src/collections/queue.c"
    "src/collections/rbtree.c"
    "src/collections/builders.c"
    "src/collections/gc_handlers.c"

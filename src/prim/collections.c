@@ -404,6 +404,8 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
         return mino_int(S, (long long)coll->as.host_array.len);
     case MINO_MAP_ENTRY:
         return mino_int(S, 2);
+    case MINO_QUEUE:
+        return mino_int(S, (long long)mino_queue_count(coll));
     case MINO_CHUNKED_CONS: {
         long long          n = 0;
         const mino_val  *cur = coll;
@@ -449,6 +451,26 @@ mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
             "count requires one argument");
     }
     return prim_count_step(S, argv[0], env);
+}
+
+mino_val *prim_empty_queue(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "-empty-queue takes no arguments");
+    }
+    return mino_queue_empty(S);
+}
+
+mino_val *prim_queue_p(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "queue? requires one argument");
+    }
+    return mino_is_queue(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
 mino_val *prim_vector(mino_state *S, mino_val *args, mino_env *env)
@@ -731,6 +753,10 @@ static mino_val *prim_first_step(mino_state *S, mino_val *coll,
         }
         return n->key;
     }
+    if (mino_type_of(coll) == MINO_QUEUE) {
+        mino_val *first = mino_queue_peek(coll);
+        return (first != NULL) ? first : mino_nil(S);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -951,6 +977,14 @@ static mino_val *prim_rest_step(mino_state *S, mino_val *coll,
         if (r == NULL) return NULL;
         if (mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
         return r;
+    }
+    if (mino_type_of(coll) == MINO_QUEUE) {
+        if (mino_queue_count(coll) <= 1) return mino_empty_list(S);
+        {
+            mino_val *seqv = mino_queue_seq(S, coll);
+            if (seqv == NULL || !mino_is_cons(seqv)) return mino_empty_list(S);
+            return seqv->as.cons.cdr;
+        }
     }
     {
         char msg[96];
@@ -1412,6 +1446,14 @@ mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env)
         return conj_sorted_map(S, coll, items);
     case MINO_SORTED_SET:
         return conj_sorted_set(S, coll, items);
+    case MINO_QUEUE: {
+        mino_val *q = coll;
+        while (mino_is_cons(items)) {
+            q = mino_queue_conj(S, q, items->as.cons.car);
+            items = items->as.cons.cdr;
+        }
+        return q;
+    }
     default: {
         char msg[96];
         snprintf(msg, sizeof(msg),
@@ -2112,6 +2154,11 @@ const mino_prim_def k_prims_collections[] = {
      "Returns the value mapped to key in a collection, or not-found."},
     {"conj",     prim_conj,
      "Returns a new collection with items added."},
+    {"-empty-queue", prim_empty_queue,
+     "Internal: return an empty PersistentQueue. Public surface is "
+     "clojure.lang.PersistentQueue/EMPTY (a bound var) plus conj."},
+    {"queue?",   prim_queue_p,
+     "Returns true if x is a PersistentQueue."},
     {"keys",     prim_keys,
      "Returns a sequence of the keys in a map."},
     {"vals",     prim_vals,

@@ -53,6 +53,11 @@ int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b);
 mino_val *mino_mk_var(mino_state *S, const char *ns, const char *name,
                         mino_val *root);
 
+/* PersistentQueue internal helpers — implemented in collections/queue.c.
+ * Public ctor / accessors live on the embedder surface (mino_queue_*). */
+int       mino_queue_eq  (const mino_val *a, const mino_val *b);
+uint32_t  mino_queue_hash(const mino_val *q);
+
 /* Register the GC tracer for GC_T_VAL. Called from
  * runtime/state.c::state_init before the first allocation. */
 void mino_values_register_gc_handlers(mino_state *S);

@@ -68,6 +68,7 @@ BUNDLED = \
     lib_clojure_stacktrace:lib/clojure/stacktrace.clj \
     lib_clojure_datafy:lib/clojure/datafy.clj \
     lib_clojure_core_protocols:lib/clojure/core/protocols.clj \
+    lib_clojure_core_reducers:lib/clojure/core/reducers.clj \
     lib_clojure_instant:lib/clojure/instant.clj \
     lib_clojure_spec_alpha:lib/clojure/spec/alpha.clj \
     lib_clojure_core_specs_alpha:lib/clojure/core/specs/alpha.clj \

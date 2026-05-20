@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.399.0 — PersistentQueue (Two-List Persistent FIFO)
+
+A new MINO_QUEUE value type lands as the mino-native equivalent of
+`clojure.lang.PersistentQueue`. Backed by two cons-spine lists (front
+in deque order, back in reverse-deque order) so `conj` and `pop` are
+both amortised O(1) and the queue is fully persistent.
+
+The canonical empty value is bound to
+`clojure.lang.PersistentQueue/EMPTY` so the JVM-style idiom
+`(conj clojure.lang.PersistentQueue/EMPTY ...)` works. The
+predicate `queue?` ships alongside, and `type` returns `:queue`.
+
+`conj`, `peek`, `pop`, `count`, `seq`, `first`, `rest`, `empty`,
+`empty?`, `=`, and `hash` dispatch on `MINO_QUEUE` element-wise (or
+via the deque-order seq). `seq_iter_init` flattens a queue into a
+cons-spine for uniform iteration through `reduce` / `into` / `map`.
+The print form is `#queue [a b c]`.
+
+The ClojureDocs probe drops `empty:1`, `:2`, `:4`, `:5`. The `:0` and
+`:3` entries stay because their JVM-side expected output embeds
+`Object.hashCode` (`#<PersistentQueue clojure.lang.PersistentQueue@20>`)
+which a non-JVM runtime cannot reproduce.
+
 ## v0.398.0 — Reader-Conditional `:preserve` Round-Trips Through `pr-str`
 
 `pr-str` on a value carrying `:mino/reader-conditional` or

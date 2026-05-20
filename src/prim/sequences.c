@@ -100,6 +100,15 @@ void seq_iter_init(mino_state *S, seq_iter_t *it, const mino_val *coll)
             coll = lazy_force(S, (mino_val *)coll);
         }
     }
+    /* Queues: flatten to a cons list in deque order. The seq_iter
+     * switches don't handle MINO_QUEUE directly. */
+    if (coll != NULL && mino_type_of(coll) == MINO_QUEUE) {
+        if (mino_queue_count(coll) == 0) {
+            coll = NULL;
+        } else {
+            coll = mino_queue_seq(S, coll);
+        }
+    }
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && mino_type_of(coll) == MINO_CONS) ? coll : NULL;
@@ -2218,9 +2227,13 @@ mino_val *prim_peek(mino_state *S, mino_val *args, mino_env *env)
      * matching JVM Clojure where Cons is not a stack. */
     if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list)
         return coll->as.cons.car;
+    if (mino_type_of(coll) == MINO_QUEUE) {
+        mino_val *first = mino_queue_peek(coll);
+        return (first != NULL) ? first : mino_nil(S);
+    }
     {
         char msg[96];
-        snprintf(msg, sizeof(msg), "peek: expected a vector or list, got %s",
+        snprintf(msg, sizeof(msg), "peek: expected a vector, list, or queue, got %s",
                  type_tag_str(coll));
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
@@ -2245,9 +2258,16 @@ mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env)
     }
     if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list)
         return coll->as.cons.cdr;
+    if (mino_type_of(coll) == MINO_QUEUE) {
+        if (mino_queue_count(coll) == 0) {
+            return prim_throw_classified(S, "eval/bounds", "MBD001",
+                "pop: cannot pop an empty queue");
+        }
+        return mino_queue_pop(S, coll);
+    }
     {
         char msg[96];
-        snprintf(msg, sizeof(msg), "pop: expected a vector or list, got %s",
+        snprintf(msg, sizeof(msg), "pop: expected a vector, list, or queue, got %s",
                  type_tag_str(coll));
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
@@ -2347,6 +2367,10 @@ mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
         case MINO_EMPTY_LIST:
             /* Per Clojure, (empty seq) is the empty list (). */
             return mino_empty_list(S);
+        case MINO_QUEUE:
+            r = mino_queue_empty(S);
+            r->meta = coll->meta;
+            return r;
         default:
             return mino_nil(S);
         }

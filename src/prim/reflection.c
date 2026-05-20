@@ -373,6 +373,7 @@ mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
     case MINO_TX_REF:    return mino_keyword(S, "ref");
     case MINO_AGENT:     return mino_keyword(S, "agent");
     case MINO_CHAN:      return mino_keyword(S, "chan");
+    case MINO_QUEUE:     return mino_keyword(S, "queue");
     }
     return mino_keyword(S, "unknown");
 }
@@ -483,6 +484,7 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     case MINO_CHUNK:        return v->as.chunk.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_HOST_ARRAY:   return v->as.host_array.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_MAP_ENTRY:    return mino_false(S);
+    case MINO_QUEUE:        return mino_queue_count(v) == 0 ? mino_true(S) : mino_false(S);
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");

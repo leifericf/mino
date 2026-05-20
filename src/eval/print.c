@@ -649,6 +649,28 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         /* `#chan[0xPTR]` -- identity-based, like agents / refs. */
         fprintf(out, "#chan[%p]", (const void *)v);
         return;
+    case MINO_QUEUE: {
+        /* `#queue [a b c]` — Clojure JVM's print-method emits this
+         * shape (modulo the JVM's `<-(...)-<` legacy form which is
+         * not portable). The body is the queue's elements in deque
+         * order. */
+        mino_val *seqv = mino_queue_seq(S, v);
+        fputs("#queue [", out);
+        S->print_depth++;
+        {
+            mino_val *cur = seqv;
+            int first = 1;
+            while (cur != NULL && mino_is_cons(cur)) {
+                if (!first) fputc(' ', out);
+                mino_print_to(S, out, cur->as.cons.car);
+                cur = cur->as.cons.cdr;
+                first = 0;
+            }
+        }
+        S->print_depth--;
+        fputc(']', out);
+        return;
+    }
     }
 }
 

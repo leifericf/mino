@@ -261,6 +261,10 @@ mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
         }
         return head;
     }
+    if (mino_type_of(coll) == MINO_QUEUE) {
+        if (mino_queue_count(coll) == 0) return mino_nil(S);
+        return mino_queue_seq(S, coll);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",

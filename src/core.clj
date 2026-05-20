@@ -3264,6 +3264,15 @@
   (with-meta {:form form :splicing? (boolean splicing?)}
              {:mino/reader-conditional true}))
 
+;; clojure.lang.PersistentQueue/EMPTY — the canonical empty persistent
+;; queue. Clojure programs use this with (conj ...) to build queues.
+;; mino has no Java-class machinery; we expose the canonical name as a
+;; var in the clojure.lang.PersistentQueue namespace so the slash-form
+;; lookup works without special-casing.
+(in-ns 'clojure.lang.PersistentQueue)
+(def EMPTY (-empty-queue))
+(in-ns 'clojure.core)
+
 ;; --- Platform-specific forms (not supported on mino) ---
 ;;
 ;; Mino is neither a JVM nor a JavaScript runtime, so forms that

@@ -31,9 +31,10 @@ src/lib_mino_*.h
 *.gcov
 coverage/
 
-# Core dumps
-core
-core.*
+# Core dumps (anchor to repo root so we don't accidentally swallow
+# `lib/clojure/core/` and friends)
+/core
+/core.*
 !tools/stencil_extract/
 
 # OS noise

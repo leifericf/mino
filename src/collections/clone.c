@@ -217,6 +217,10 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
     case MINO_TX_REF:
     case MINO_AGENT:
     case MINO_CHAN:
+    case MINO_QUEUE:
+        /* Cross-state queue clone deferred until a real use case
+         * appears; non-transferable for now alongside identity-bearing
+         * types. */
         return NULL;
     case MINO_UUID:
         return mino_uuid_from_bytes(dst, v->as.uuid.bytes);
@@ -304,6 +308,7 @@ static const char *non_transferable_name(mino_type t)
     case MINO_TX_REF:       return "ref";
     case MINO_AGENT:        return "agent";
     case MINO_CHAN:         return "chan";
+    case MINO_QUEUE:        return "queue";
     case MINO_SORTED_MAP:   return "sorted-map";
     case MINO_SORTED_SET:   return "sorted-set";
     case MINO_REGEX:        return "regex";

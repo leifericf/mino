@@ -351,6 +351,11 @@ struct mino_val {
         struct {          /* MINO_CHAN: clojure.core.async channel */
             struct mino_chan_impl *impl;
         } chan;
+        struct {          /* MINO_QUEUE: PersistentQueue (two-list FIFO) */
+            mino_val *front;  /* cons-list in deque order, possibly nil */
+            mino_val *back;   /* cons-list in REVERSE-deque order, possibly nil */
+            size_t      len;    /* total element count (cached) */
+        } queue;
     } as;
 };
 

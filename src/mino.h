@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 398
+#define MINO_VERSION_MINOR 399
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -195,7 +195,7 @@ typedef enum {
                      * thread_limit, so send / send-off throw MTH001
                      * if the host hasn't granted a thread budget
                      * (default thread_limit == 1 means no agents). */
-    MINO_CHAN       /* clojure.core.async channel. Owns its buffer
+    MINO_CHAN,      /* clojure.core.async channel. Owns its buffer
                      * (for :fixed / :dropping / :sliding kinds),
                      * pending-putters and pending-takers queues, a
                      * closed flag, and optional transducer + ex-
@@ -206,6 +206,19 @@ typedef enum {
                      * allocation. Equality is identity. Constructed
                      * via `(chan)` / `(chan n)` / `(chan n xform)` /
                      * `(promise-chan)`. */
+    MINO_QUEUE      /* clojure.lang.PersistentQueue equivalent: a
+                     * persistent FIFO with amortised O(1) enqueue
+                     * (conj) and dequeue (pop). Backed by two cons
+                     * lists: a front list (the next-to-pop side, in
+                     * order) and a back list (the most-recently-conj
+                     * side, in REVERSE order). When the front empties
+                     * the back is reversed and becomes the new front.
+                     * count is cached. Predicates / seq / conj /
+                     * peek / pop dispatch element-wise; equality is
+                     * sequence equality with other queues only.
+                     * Constructed via clojure.lang.PersistentQueue/
+                     * EMPTY plus conj, or the mino-native EMPTY-QUEUE
+                     * binding. */
 } mino_type;
 
 typedef struct mino_val    mino_val;   /* opaque */
@@ -481,6 +494,24 @@ void        mino_atom_reset(mino_val *a, mino_val *val);
  * to publish entries with the right type identity (so key / val can
  * type-check), and by `clojure.lang.MapEntry/create`. */
 mino_val *mino_map_entry(mino_state *S, mino_val *k, mino_val *v);
+
+/* Build an empty PersistentQueue. The mino-native canonical empty value
+ * is bound to `clojure.lang.PersistentQueue/EMPTY` after a normal
+ * mino_install; conj / peek / pop / count / seq behave canonically. */
+mino_val *mino_queue_empty(mino_state *S);
+
+/* Return 1 if v is a MINO_QUEUE, 0 otherwise. NULL-safe. */
+int         mino_is_queue(const mino_val *v);
+
+/* count / conj / peek / pop / seq on a PersistentQueue. NULL on type
+ * mismatch except count which returns 0. conj appends to the back;
+ * peek returns the next-to-pop element; pop returns the queue without
+ * its head. The seq returns the elements in deque order. */
+size_t      mino_queue_count(const mino_val *q);
+mino_val *mino_queue_conj (mino_state *S, mino_val *q, mino_val *v);
+mino_val *mino_queue_peek (const mino_val *q);
+mino_val *mino_queue_pop  (mino_state *S, mino_val *q);
+mino_val *mino_queue_seq  (mino_state *S, const mino_val *q);
 
 /* Construct an STM ref holding the given committed value. The watches
  * map and validator slots start NULL; install them via add-watch /
@@ -785,6 +816,7 @@ int mino_is_sorted_set(const mino_val *v);
 int mino_is_map_entry (const mino_val *v);
 int mino_is_host_array(const mino_val *v);
 int mino_is_record    (const mino_val *v);  /* also at mino_defrecord */
+int mino_is_queue     (const mino_val *v);  /* also at mino_queue_empty */
 int mino_is_record_type(const mino_val *v); /* also at mino_defrecord */
 int mino_is_handle    (const mino_val *v);  /* also near mino_handle */
 int mino_is_atom      (const mino_val *v);  /* also near mino_atom */

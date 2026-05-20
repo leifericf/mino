@@ -401,6 +401,9 @@ uint32_t hash_val(const mino_val *v)
         /* Identity equality means identity hash too. */
         h = fnv_mix(h, 0x16);
         return hash_pointer_bytes(h, (uintptr_t)v);
+    case MINO_QUEUE:
+        h = fnv_mix(h, 0x17);
+        return hash_uint32_bytes(h, mino_queue_hash(v));
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);
