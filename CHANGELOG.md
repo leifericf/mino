@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.393.0 — Regex Nested Alternation and Group Quantifiers
+
+`(foo|bar)`, `(foo|bar)+`, and `(foo)+` now work end-to-end. The
+top-level `|` alternation landed earlier in v0.281.0, but nested
+alternation inside groups was a known follow-up. `matchpattern` now
+detects compound-atom groups (groups whose body has internal `|` OR
+whose matching close is followed by `*`/`+`/`?`/`{n,m}`) and delegates
+to a recursive `matchgroup_loop` that tries each branch with proper
+backtracking and repeats the body with greedy-then-backoff semantics.
+
+Simple groups with no internal alternation and no trailing quantifier
+keep flowing through the original skip-and-record path so internal
+`matchplus`/`matchstar` keep seeing the post-group atoms for natural
+backtracking; `(.+)/(.+)` and similar canonical idioms stay
+green.
+
 ## v0.392.0 — Binding / Thread-Binding Sweep
 
 The variadic Clojure-canon binding-family functions land on top of the

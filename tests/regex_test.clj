@@ -164,3 +164,35 @@
     ;; scoped flags, which prim_regex translates into a classified
     ;; MCT001. Verify the throw rather than the storage.
     (is (thrown? (re-find #"(?i:foo)" "FOO")))))
+
+(deftest re-nested-alternation-in-groups
+  ;; Groups with internal | alternation: each branch is tried in
+  ;; left-to-right order. Without a trailing quantifier the group is
+  ;; matched once.
+  (testing "(foo|bar) picks the matching branch"
+    (is (= ["foo" "foo"] (re-find #"(foo|bar)" "foo")))
+    (is (= ["bar" "bar"] (re-find #"(foo|bar)" "bar")))
+    (is (nil?            (re-find #"(foo|bar)" "garbage"))))
+  (testing "Alternation with surrounding literals"
+    (is (= ["abd" "b"] (re-find #"a(b|c)d" "abd")))
+    (is (= ["acd" "c"] (re-find #"a(b|c)d" "acd"))))
+  (testing "Three-way alternation"
+    (is (= ["a" "a"] (re-find #"(a|b|c)" "abc")))
+    (is (= ["b" "b"] (re-find #"(a|b|c)" "b"))))
+  ;; Groups with internal alternation AND a trailing + quantifier:
+  ;; repeat the group, trying each branch each iteration. The capture
+  ;; for the group's last successful iteration wins.
+  (testing "(foo|bar)+ repeats with mixed branches"
+    (is (= ["foobarfoo" "foo"] (re-find #"(foo|bar)+" "foobarfoo")))
+    (is (= ["foofoofoo" "foo"] (re-find #"(foo|bar)+" "foofoofoo")))
+    (is (= ["barbar"    "bar"] (re-find #"(foo|bar)+" "barbar")))
+    (is (nil? (re-find #"(foo|bar)+" "zzz"))))
+  (testing "(a|b|c)* matches empty AND a non-empty run"
+    (is (= ["abcacb" "b"] (re-matches #"^(a|b|c)*$" "abcacb")))
+    (is (= ["" nil]       (re-matches #"^(a|b|c)*$" ""))))
+  ;; Simple group with trailing quantifier (no internal alternation):
+  ;; same dispatch path; the body is matched repeatedly.
+  (testing "(foo)+ repeats a single-branch group"
+    (is (= ["foofoofoo" "foo"] (re-find #"(foo)+" "foofoofoo")))
+    (is (= ["foo"       "foo"] (re-find #"(foo)+" "foox")))
+    (is (nil? (re-find #"(foo)+" "fofo")))))

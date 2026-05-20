@@ -39,6 +39,7 @@
 
 
 #include "re.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -906,6 +907,123 @@ static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* mat
 }
 
 
+/* Find the matching GROUP_CLOSE for the GROUP_OPEN at gopen[0].
+ * Returns the index relative to gopen, or -1 on malformed input
+ * (no matching close before end-of-pattern). */
+static int find_group_close(regex_t* gopen)
+{
+  int depth = 1;
+  int i = 1;
+  while (gopen[i].type != UNUSED)
+  {
+    if (gopen[i].type == GROUP_OPEN) depth++;
+    else if (gopen[i].type == GROUP_CLOSE)
+    {
+      depth--;
+      if (depth == 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/* Find the next ALT at depth-0 within span [start..end) of `gopen`.
+ * Returns the index relative to gopen, or -1 when no such ALT exists.
+ * Used to enumerate the branches of a (foo|bar) group. */
+static int find_alt_in_span(regex_t* gopen, int start, int end)
+{
+  int depth = 0;
+  int i;
+  for (i = start; i < end; i++)
+  {
+    if (gopen[i].type == GROUP_OPEN) depth++;
+    else if (gopen[i].type == GROUP_CLOSE) depth--;
+    else if (gopen[i].type == ALT && depth == 0) return i;
+  }
+  return -1;
+}
+
+/* Recursive group-loop driver. Greedy: try one more iteration of the
+ * group body first, fall back to matching the suffix on failure.
+ * `gopen` points at the GROUP_OPEN slot; gc_idx is the relative index
+ * of the matching GROUP_CLOSE; `suffix` is the pattern slot to match
+ * after the group plus any quantifier; count_so_far is the number of
+ * successful iterations already consumed; min/max are the quantifier
+ * bounds (no quantifier => min=1, max=1). */
+static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
+                            const char* text, int* matchlength,
+                            int count_so_far, int min_reps, int max_reps)
+{
+  int ml_before = *matchlength;
+  int gid       = (int)gopen[0].u.gid;
+
+  if (count_so_far < max_reps)
+  {
+    int branch_start = 1;
+    for (;;)
+    {
+      int           alt_idx     = find_alt_in_span(gopen, branch_start, gc_idx);
+      int           branch_end  = (alt_idx < 0) ? gc_idx : alt_idx;
+      unsigned char saved_type;
+      int           branch_ml   = 0;
+      int           saved_start = -1;
+      int           saved_end   = -1;
+      int           branch_ok;
+
+      if (gid >= 1 && gid <= RE_MAX_GROUPS)
+      {
+        saved_start = re_g_state.starts[gid - 1];
+        saved_end   = re_g_state.ends[gid - 1];
+        re_g_state.starts[gid - 1] = (int)(text - re_g_state.base);
+      }
+
+      saved_type = gopen[branch_end].type;
+      gopen[branch_end].type = UNUSED;
+      branch_ok = matchpattern(&gopen[branch_start], text, &branch_ml);
+      gopen[branch_end].type = saved_type;
+
+      if (branch_ok && branch_ml > 0)
+      {
+        const char *after = text + branch_ml;
+        int         rec_ml;
+        if (gid >= 1 && gid <= RE_MAX_GROUPS)
+        {
+          re_g_state.ends[gid - 1] = (int)(after - re_g_state.base);
+        }
+        rec_ml = 0;
+        if (matchgroup_loop(gopen, gc_idx, suffix, after, &rec_ml,
+                            count_so_far + 1, min_reps, max_reps))
+        {
+          *matchlength = ml_before + branch_ml + rec_ml;
+          return 1;
+        }
+      }
+
+      if (gid >= 1 && gid <= RE_MAX_GROUPS && saved_start >= 0)
+      {
+        re_g_state.starts[gid - 1] = saved_start;
+        re_g_state.ends[gid - 1]   = saved_end;
+      }
+
+      if (alt_idx < 0) break;
+      branch_start = alt_idx + 1;
+    }
+  }
+
+  if (count_so_far >= min_reps)
+  {
+    int suffix_ml = 0;
+    if (matchpattern(suffix, text, &suffix_ml))
+    {
+      *matchlength = ml_before + suffix_ml;
+      return 1;
+    }
+  }
+
+  *matchlength = ml_before;
+  return 0;
+}
+
 #if 0
 
 /* Recursive matching */
@@ -948,14 +1066,13 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
   int pre = *matchlength;
   do
   {
-    /* Capture-group markers are no-op for the matcher; they just
-     * record the current text offset for the corresponding group.
-     * Multiple writes during backtracking inside matchstar / matchplus
-     * settle to the final successful path's offsets.
-     *
-     * SET_FLAGS slots are also matcher-side no-ops; they only
-     * update the active flag word so later atoms see the correct
-     * case-fold / dotall / multiline behavior. */
+    /* Capture-group markers and SET_FLAGS slots: skip and record. A
+     * GROUP_OPEN whose body has internal `|` alternation OR whose
+     * matching close is followed by a quantifier (STAR/PLUS/?/{n,m})
+     * is a compound atom — dispatch to matchgroup_loop. Other groups
+     * are no-ops at the matcher level; matchplus / matchstar / etc.
+     * inside them backtrack naturally because the suffix slots are
+     * visible through the skip-loop's `pattern++`. */
     while (pattern[0].type == GROUP_OPEN
         || pattern[0].type == GROUP_CLOSE
         || pattern[0].type == SET_FLAGS)
@@ -966,6 +1083,54 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
         else                      re_flags &= ~pattern[0].u.flg.mask;
         pattern++;
         continue;
+      }
+      if (pattern[0].type == GROUP_OPEN)
+      {
+        int gc_rel    = find_group_close(pattern);
+        int has_alt   = (gc_rel >= 0)
+                        && (find_alt_in_span(pattern, 1, gc_rel) >= 0);
+        int has_quant = 0;
+        if (gc_rel >= 0)
+        {
+          switch (pattern[gc_rel + 1].type)
+          {
+            case STAR: case PLUS: case QUESTIONMARK: case BOUNDED:
+              has_quant = 1;
+              break;
+            default:
+              break;
+          }
+        }
+        if (gc_rel >= 0 && (has_alt || has_quant))
+        {
+          int      min_r  = 1;
+          int      max_r  = 1;
+          regex_t *suffix = &pattern[gc_rel + 1];
+          int      gml;
+          int      r;
+          switch (suffix[0].type)
+          {
+            case STAR:         min_r = 0; max_r = INT_MAX; suffix++; break;
+            case PLUS:         min_r = 1; max_r = INT_MAX; suffix++; break;
+            case QUESTIONMARK: min_r = 0; max_r = 1;       suffix++; break;
+            case BOUNDED:
+              min_r = (int)suffix[0].u.bnd.min;
+              max_r = (suffix[0].u.bnd.max == 0xFF)
+                      ? INT_MAX
+                      : (int)suffix[0].u.bnd.max;
+              suffix++;
+              break;
+            default:
+              break;
+          }
+          gml = *matchlength;
+          r = matchgroup_loop(pattern, gc_rel, suffix, text, &gml,
+                              0, min_r, max_r);
+          *matchlength = r ? gml : pre;
+          return r;
+        }
+        /* Simple group: fall through to the skip-and-record path so
+         * matchplus/matchstar inside can see the post-group atoms. */
       }
       {
         int gid = (int)pattern[0].u.gid;
