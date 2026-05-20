@@ -772,6 +772,25 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
                              (int)ex->as.s.len, ex->as.s.data);
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                                   "user", "MUS001", msg);
+                } else if (ex != NULL) {
+                    /* Non-string non-map payload: route through
+                     * mino_print_to_buf so the original value appears
+                     * in the diagnostic. Without this, `throw :payload`
+                     * loses :payload at the top level (Phase 6 of the
+                     * embedder UX cycle called this out). */
+                    char buf[384];
+                    char msg[512];
+                    int  w = mino_print_to_buf(S, ex, buf, sizeof(buf));
+                    if (w > 0) {
+                        snprintf(msg, sizeof(msg),
+                                 "uncaught exception: %s", buf);
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                      "user", "MUS001", msg);
+                    } else {
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                      "user", "MUS001",
+                                      "uncaught exception");
+                    }
                 } else {
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                                   "internal", "MIN001",
@@ -1030,6 +1049,18 @@ mino_env *mino_env_new_default(mino_state *S)
 void mino_register_fn(mino_state *S, mino_env *env, const char *name, mino_prim_fn fn)
 {
     mino_env_set(S, env, name, mino_prim(S, name, fn));
+}
+
+void mino_register_fns(mino_state *S, mino_env *env, const mino_reg *regs)
+{
+    if (S == NULL || env == NULL || regs == NULL) return;
+    while (regs->name != NULL) {
+        mino_val *pv = (regs->argv != 0 || regs->fn2 != NULL)
+                       ? mino_prim_argv(S, regs->name, regs->fn2)
+                       : mino_prim(S, regs->name, regs->fn);
+        mino_env_set(S, env, regs->name, pv);
+        regs++;
+    }
 }
 
 mino_val *mino_call(mino_state *S, mino_val *fn, mino_val *args, mino_env *env)

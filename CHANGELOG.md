@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.387.0 — Embedder UX: API Ergonomics
+
+Phase 6 of the pre-1.0 Embedder UX cycle. Closes the half-dozen
+UX papercuts that don't warrant their own phase but do warrant
+fixing before the v1.0 freeze.
+
+### Added
+
+- `mino_register_fns(S, env, regs)` for bulk primitive registration.
+  Takes a `const mino_reg[]` terminated by a sentinel
+  `{NULL, NULL, NULL, 0}` row. Each row picks the ABI via `argv`:
+  0 for cons-list (`mino_prim_fn`), 1 for argv (`mino_prim_fn2`).
+  Matches the peer convention used by other embedded scripting C
+  APIs for bulk registration.
+
+- Six new `mino_args_parse` specifiers: `'B'` (bigint), `'r'`
+  (ratio), `'d'` (bigdec), `'R'` (record), `'X'` (set or
+  sorted-set), `'F'` (callable: fn / prim / macro). Each writes a
+  `mino_val *` through the corresponding `va_arg`. The `'F'`
+  specifier is distinct from `'v'` (any): the error message says
+  "expected callable" not "expected any" when a non-callable
+  shows up at a fn position.
+
+### Changed
+
+- `mino_throw` and the top-level eval handler no longer drop
+  non-string non-map throw payloads. A `(throw :foo)` (or any
+  non-string non-map value) now produces a diagnostic that reads
+  `uncaught exception: :foo`, routing the payload through the
+  same `mino_print_to_buf` formatter used by the REPL handler.
+  The structured payload itself was already preserved by v0.151.1
+  via `mino_error_map`'s `:mino/data`; this finishes the
+  human-readable half.
+
+- `mino_clone`'s failure diagnostic now names the specific
+  non-transferable type (`"atom"`, `"agent"`, `"handle"`,
+  `"future"`, ...) instead of the generic
+  `"fn, macro, prim, handle, atom, or lazy-seq"` list. Reuses
+  Phase 5's `mino_can_clone` walk to find the first
+  non-transferable type in the value tree.
+
+- `'M'` specifier in `mino_args_parse` now matches both
+  `MINO_MAP` and `MINO_SORTED_MAP` (consistent with `mino_is_map`
+  / `mino_is_set` matching both variants).
+
+- `mino_int` doc-comment expanded with a "Capability-conditional
+  behaviour" callout explaining how the bignum auto-promote
+  maps to JVM Clojure's `+'` / `inc'` opt-in arithmetic. No code
+  change; pure documentation.
+
+### Verification
+
+`embed_api_test` carries a new Phase 6 block exercising
+`mino_register_fns`, the `throw :payload` round-trip, and
+`mino_clone`'s named-type failure diagnostic.
+
 ## v0.386.0 — Embedder UX: Clojure-Canon C Surface
 
 Phase 5 of the pre-1.0 Embedder UX cycle. Adds the C-side

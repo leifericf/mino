@@ -24,13 +24,26 @@ mino_val *mino_throw(mino_state *S, mino_val *ex)
     if (S == NULL) return NULL;
 
     if (mino_current_ctx(S)->try_depth <= 0) {
-        /* No enclosing try: surface as a classified error. */
+        /* No enclosing try: surface as a classified error. Route the
+         * payload through pr-str-shaped formatting so non-string
+         * payloads (keywords, maps, ex-info data) appear in the
+         * diagnostic message instead of dropping. The structured
+         * payload itself is also preserved via the same route as the
+         * caught path so error_map's :mino/data carries it. */
         char msg[512];
-        if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
+        if (ex == NULL) {
+            snprintf(msg, sizeof(msg), "uncaught exception");
+        } else if (mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "uncaught exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
         } else {
-            snprintf(msg, sizeof(msg), "uncaught exception");
+            char buf[384];
+            int  written = mino_print_to_buf(S, ex, buf, sizeof(buf));
+            if (written <= 0) {
+                snprintf(msg, sizeof(msg), "uncaught exception");
+            } else {
+                snprintf(msg, sizeof(msg), "uncaught exception: %s", buf);
+            }
         }
         return prim_throw_classified(S, "user", "MUS001", msg);
     }
@@ -60,6 +73,12 @@ static const char *args_type_label(char spec)
     case 'L': return "list";
     case 'H': return "handle";
     case 'A': return "atom";
+    case 'B': return "bigint";
+    case 'r': return "ratio";
+    case 'd': return "bigdec";
+    case 'R': return "record";
+    case 'X': return "set";
+    case 'F': return "callable";
     default:  return "?";
     }
 }
@@ -77,10 +96,19 @@ static int args_type_match(char spec, const mino_val *v)
     case 'c': return mino_type_of(v) == MINO_CHAR;
     case 'v': return 1;
     case 'V': return mino_type_of(v) == MINO_VECTOR;
-    case 'M': return mino_type_of(v) == MINO_MAP;
+    case 'M': return mino_type_of(v) == MINO_MAP || mino_type_of(v) == MINO_SORTED_MAP;
     case 'L': return mino_type_of(v) == MINO_CONS || mino_type_of(v) == MINO_NIL;
     case 'H': return mino_type_of(v) == MINO_HANDLE;
     case 'A': return mino_type_of(v) == MINO_ATOM;
+    case 'B': return mino_type_of(v) == MINO_BIGINT;
+    case 'r': return mino_type_of(v) == MINO_RATIO;
+    case 'd': return mino_type_of(v) == MINO_BIGDEC;
+    case 'R': return mino_type_of(v) == MINO_RECORD;
+    case 'X': return mino_type_of(v) == MINO_SET || mino_type_of(v) == MINO_SORTED_SET;
+    case 'F': {
+        mino_type t = mino_type_of(v);
+        return t == MINO_FN || t == MINO_PRIM || t == MINO_MACRO;
+    }
     default:  return 0;
     }
 }
@@ -162,7 +190,8 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
             break;
         }
         case 'v': case 'V': case 'M': case 'L':
-        case 'H': case 'A': {
+        case 'H': case 'A':
+        case 'B': case 'r': case 'd': case 'R': case 'X': case 'F': {
             mino_val **out = va_arg(ap, mino_val **);
             *out = v;
             break;

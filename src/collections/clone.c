@@ -258,9 +258,24 @@ mino_val *mino_clone(mino_state *dst, mino_state *src, mino_val *val)
     (void)src;
     result = clone_val(dst, val);
     if (result == NULL && val != NULL) {
-        set_eval_diag(dst, mino_current_ctx(dst)->eval_current_form, "internal", "MIN001",
-                  "clone: value contains non-transferable types "
-                  "(fn, macro, prim, handle, atom, or lazy-seq)");
+        /* Use mino_can_clone's walk to name the first non-transferable
+         * type encountered, so the diagnostic carries enough detail
+         * for the embedder to fix the offending value without walking
+         * the source tree themselves. */
+        const char *reason = NULL;
+        char msg[256];
+        (void)mino_can_clone(val, &reason);
+        if (reason != NULL) {
+            snprintf(msg, sizeof(msg),
+                     "clone: value contains non-transferable type: %s",
+                     reason);
+        } else {
+            snprintf(msg, sizeof(msg),
+                     "clone: value contains non-transferable types "
+                     "(fn, macro, prim, handle, atom, or lazy-seq)");
+        }
+        set_eval_diag(dst, mino_current_ctx(dst)->eval_current_form,
+                      "internal", "MIN001", msg);
     }
     return result;
 }

@@ -126,6 +126,20 @@ mino_val *normalize_exception(mino_state *S, mino_val *ex_val)
             mino_keyword(S, "message"));
         vals[3] = (msg_val != NULL && mino_type_of(msg_val) == MINO_STRING)
             ? msg_val : mino_string(S, "uncaught exception");
+    } else if (ex_val != NULL) {
+        /* Non-string, non-map payload (keyword, symbol, vector,
+         * record, ...): print the value into the diagnostic message
+         * so embedders can see what was thrown. Phase 6 of the
+         * embedder UX cycle called this out. */
+        char buf[384];
+        char msg[512];
+        int  w = mino_print_to_buf(S, ex_val, buf, sizeof(buf));
+        if (w > 0) {
+            snprintf(msg, sizeof(msg), "uncaught exception: %s", buf);
+            vals[3] = mino_string(S, msg);
+        } else {
+            vals[3] = mino_string(S, "uncaught exception");
+        }
     } else {
         vals[3] = mino_string(S, "uncaught exception");
     }

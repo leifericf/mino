@@ -1156,6 +1156,22 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)exc->as.s.len, exc->as.s.data);
             prim_throw_classified(S, "user", "MUS001", msg);
+        } else if (exc != NULL) {
+            /* Non-string non-map payload (keyword, symbol, vector, ...):
+             * route through mino_print_to_buf so the original value
+             * appears in the diagnostic. Without this, "throw :payload"
+             * loses :payload, and Phase 6 of the embedder UX cycle
+             * called this out. */
+            char buf[384];
+            char msg[512];
+            int  w = mino_print_to_buf(S, exc, buf, sizeof(buf));
+            if (w > 0) {
+                snprintf(msg, sizeof(msg), "unhandled exception: %s", buf);
+                prim_throw_classified(S, "user", "MUS001", msg);
+            } else {
+                prim_throw_classified(S, "user", "MUS001",
+                    "unhandled exception");
+            }
         } else {
             prim_throw_classified(S, "user", "MUS001",
                 "unhandled exception");

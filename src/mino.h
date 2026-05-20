@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 386
+#define MINO_VERSION_MINOR 387
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -256,7 +256,18 @@ mino_val *mino_empty_list(mino_state *S);
  * Inside mino's runtime, deterministic operations such as the reader,
  * bitwise primitives, and the unchecked-* family never auto-promote;
  * they keep producing MINO_INT (boxed when outside the tag range) so
- * Clojure-style "long stays long" semantics are preserved. */
+ * Clojure-style "long stays long" semantics are preserved.
+ *
+ * Capability-conditional behaviour
+ * --------------------------------
+ * The auto-promote of a tag-overflowing `mino_int` argument to a
+ * MINO_BIGINT when MINO_CAP_BIGNUM is installed is the C-side peer
+ * to JVM Clojure's `+'` / `inc'` / `*'` / `dec'` opt-in arithmetic.
+ * An embedder that wants "long stays long" (regardless of magnitude)
+ * uses `mino_install_minimal` plus the explicit `unchecked-*`
+ * surface; an embedder that wants the JVM `BigInteger`-shaped
+ * "promote silently" semantics installs the BIGNUM capability and
+ * gets the auto-promote through this constructor. */
 mino_val *mino_int(mino_state *S, long long n);
 
 /* Create a floating-point value. */
@@ -1176,6 +1187,34 @@ int mino_load_file_ex  (mino_state *S, const char *path, mino_env *env,
  */
 void mino_register_fn(mino_state *S, mino_env *env, const char *name,
                       mino_prim_fn fn);
+
+/*
+ * Bulk-register an array of C primitives. The array is terminated by
+ * a sentinel row `{NULL, NULL, NULL, 0}`. Each row's `argv` field
+ * picks the ABI: 0 = cons-list (`fn` is mino_prim_fn), 1 = argv
+ * (`fn2` is mino_prim_fn2). Either `fn` or `fn2` must be set
+ * (matching the chosen ABI), the other can be NULL. Matches the peer
+ * convention used by other embedded scripting C APIs for bulk
+ * registration.
+ *
+ * Example:
+ *   static mino_val *prim_a(mino_state *S, mino_val *args, mino_env *e) {...}
+ *   static mino_val *prim_b(mino_state *S, mino_val **argv, int n, mino_env *e) {...}
+ *   static const mino_reg my_prims[] = {
+ *       {"a", prim_a, NULL,    0},
+ *       {"b", NULL,   prim_b,  1},
+ *       {NULL, NULL,  NULL,    0},
+ *   };
+ *   mino_register_fns(S, env, my_prims);
+ */
+typedef struct {
+    const char    *name;
+    mino_prim_fn   fn;
+    mino_prim_fn2  fn2;
+    int            argv;   /* 0 = cons ABI (use fn), 1 = argv ABI (use fn2) */
+} mino_reg;
+
+void mino_register_fns(mino_state *S, mino_env *env, const mino_reg *regs);
 
 /*
  * Call a callable value (fn, macro, prim) with an argument list.

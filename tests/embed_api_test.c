@@ -352,6 +352,13 @@ static void test_eval_string_null_src(mino_state *S, mino_env *env)
             "null-src: mino_eval_string_ex leaves out == NULL");
 }
 
+/* Phase 6 bulk-register helper -- file-scope because C99 doesn't
+ * allow nested function definitions. Returns 7 on any call. */
+static mino_val *p6_static_seven(mino_state *S2, mino_val *args, mino_env *e)
+{
+    (void)args; (void)e; return mino_int(S2, 7);
+}
+
 /* Smoke the grid additions (mino_is_* + mino_to_*) from v0.385.0.
  * Every predicate built in this phase has its own MINO_* tag-shaped
  * value evaluated and checked, and every new extractor is exercised
@@ -473,6 +480,46 @@ int main(void)
     test_eval_ex_out_ex_payload(S, env);
     test_to_int_bignum_round_trip();
     test_predicate_grid(S, env);
+
+    /* Phase 6 -- embed-API ergonomics. */
+    {
+        /* mino_register_fns bulk registration. */
+        const mino_reg regs[] = {
+            {"p6a", p6_static_seven, NULL, 0},
+            {NULL,  NULL,            NULL, 0},
+        };
+        mino_val *r;
+        long long n = 0;
+        mino_register_fns(S, env, regs);
+        r = mino_eval_string(S, "(p6a)", env);
+        REQUIRE(r != NULL && mino_to_int(r, &n) && n == 7,
+                "phase6: mino_register_fns bound p6a");
+    }
+    {
+        /* mino_throw payload preservation: a keyword thrown without a
+         * try frame surfaces in the diagnostic message. */
+        mino_val *r = mino_eval_string(S, "(throw :payload)", env);
+        const char *e_err;
+        REQUIRE(r == NULL, "phase6: throw :payload returns NULL");
+        e_err = mino_last_error(S);
+        REQUIRE(e_err != NULL && strstr(e_err, ":payload") != NULL,
+                "phase6: throw :payload diagnostic includes :payload");
+    }
+    {
+        /* mino_can_clone failure-reason mirrored on mino_clone path:
+         * cloning an atom-bearing value to a fresh state fails and
+         * the diagnostic carries "atom" rather than the generic
+         * fn/macro/prim list. */
+        mino_state *dst = mino_state_new();
+        mino_val   *bad = mino_eval_string(S, "(atom 1)", env);
+        mino_val   *cl  = mino_clone(dst, S, bad);
+        const char *err;
+        REQUIRE(cl == NULL, "phase6: clone(atom) returns NULL");
+        err = mino_last_error(dst);
+        REQUIRE(err != NULL && strstr(err, "atom") != NULL,
+                "phase6: clone diagnostic names 'atom'");
+        mino_state_free(dst);
+    }
 
     /* Phase 5 -- Clojure-canon surface additions. */
     {
