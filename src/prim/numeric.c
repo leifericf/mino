@@ -1095,6 +1095,39 @@ static int unchecked_grab_long(mino_val *v, long long *out)
     return 1;
 }
 
+/* Lenient long-grab used by the -int arithmetic family and narrowing
+ * casts. Accepts the full numeric tower: floats and float32 truncate
+ * toward zero; bigints exceeding long-long range route through double
+ * for deterministic clamping; ratios and bigdecs go through double.
+ * Matches JVM Clojure's `(unchecked-add-int 1.5 2)` → 3 behaviour
+ * (where the int family coerces). */
+static int unchecked_grab_long_lenient(mino_val *v, long long *out)
+{
+    if (v == NULL) return 0;
+    if (mino_val_int_p(v)) {
+        *out = mino_val_int_get(v);
+        return 1;
+    }
+    {
+        mino_type t = mino_type_of(v);
+        if (t == MINO_FLOAT || t == MINO_FLOAT32) {
+            *out = (long long)v->as.f;
+            return 1;
+        }
+        if (t == MINO_BIGINT) {
+            long long ll;
+            if (mino_as_ll(v, &ll)) { *out = ll; return 1; }
+            *out = (long long)tower_to_double(v);
+            return 1;
+        }
+        if (t == MINO_RATIO || t == MINO_BIGDEC) {
+            *out = (long long)tower_to_double(v);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static long long uwrap_add(long long a, long long b)
 {
     return (long long)((unsigned long long)a + (unsigned long long)b);
@@ -1232,9 +1265,26 @@ static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
             *out_d = v->as.f;
             return 1;
         }
+        if (t == MINO_BIGINT) {
+            long long ll;
+            if (mino_as_ll(v, &ll)) {
+                *out_l = ll;
+                return 1;
+            }
+            /* Bigint outside long-long range: route through double so
+             * unchecked_trunc_long can clamp deterministically. */
+            *is_double = 1;
+            *out_d = tower_to_double(v);
+            return 1;
+        }
+        if (t == MINO_RATIO || t == MINO_BIGDEC) {
+            *is_double = 1;
+            *out_d = tower_to_double(v);
+            return 1;
+        }
     }
     snprintf(msg, sizeof(msg),
-        "%s: numeric type not yet supported (use int/float/double)", opname);
+        "%s: numeric type not supported", opname);
     prim_throw_classified(S, "eval/type", "MTY001", msg);
     return 0;
 }
@@ -1369,11 +1419,37 @@ static long long iwrap32_mul(long long a, long long b)
     return (long long)(int32_t)((uint32_t)(int32_t)a * (uint32_t)(int32_t)b);
 }
 
+/* Lenient pair-grab for the -int family: coerces ints, floats,
+ * bigints, ratios, and bigdecs to long via truncation. */
+static int unchecked_two_int_lenient(mino_state *S, mino_val *args,
+                                     const char *opname,
+                                     long long *a, long long *b)
+{
+    char msg[80];
+    mino_val *xa;
+    mino_val *xb;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires exactly 2 arguments", opname);
+        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return 0;
+    }
+    xa = args->as.cons.car;
+    xb = args->as.cons.cdr->as.cons.car;
+    if (!unchecked_grab_long_lenient(xa, a)
+        || !unchecked_grab_long_lenient(xb, b)) {
+        snprintf(msg, sizeof(msg), "%s expects numbers", opname);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return 0;
+    }
+    return 1;
+}
+
 mino_val *prim_unchecked_add_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
-    if (!unchecked_two_int(S, args, "unchecked-add-int", &a, &b)) return NULL;
+    if (!unchecked_two_int_lenient(S, args, "unchecked-add-int", &a, &b)) return NULL;
     return mino_int_wrap(S, iwrap32_add(a, b));
 }
 
@@ -1381,7 +1457,7 @@ mino_val *prim_unchecked_subtract_int(mino_state *S, mino_val *args, mino_env *e
 {
     long long a, b;
     (void)env;
-    if (!unchecked_two_int(S, args, "unchecked-subtract-int", &a, &b)) return NULL;
+    if (!unchecked_two_int_lenient(S, args, "unchecked-subtract-int", &a, &b)) return NULL;
     return mino_int_wrap(S, iwrap32_sub(a, b));
 }
 
@@ -1389,7 +1465,7 @@ mino_val *prim_unchecked_multiply_int(mino_state *S, mino_val *args, mino_env *e
 {
     long long a, b;
     (void)env;
-    if (!unchecked_two_int(S, args, "unchecked-multiply-int", &a, &b)) return NULL;
+    if (!unchecked_two_int_lenient(S, args, "unchecked-multiply-int", &a, &b)) return NULL;
     return mino_int_wrap(S, iwrap32_mul(a, b));
 }
 
@@ -1400,9 +1476,9 @@ mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "unchecked-inc-int requires exactly 1 argument");
-    if (!unchecked_grab_long(args->as.cons.car, &x))
+    if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "unchecked-inc-int expects an int");
+            "unchecked-inc-int expects a number");
     return mino_int_wrap(S, iwrap32_add(x, 1));
 }
 
@@ -1413,9 +1489,9 @@ mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "unchecked-dec-int requires exactly 1 argument");
-    if (!unchecked_grab_long(args->as.cons.car, &x))
+    if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "unchecked-dec-int expects an int");
+            "unchecked-dec-int expects a number");
     return mino_int_wrap(S, iwrap32_sub(x, 1));
 }
 
@@ -1426,9 +1502,9 @@ mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_env *env
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "unchecked-negate-int requires exactly 1 argument");
-    if (!unchecked_grab_long(args->as.cons.car, &x))
+    if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "unchecked-negate-int expects an int");
+            "unchecked-negate-int expects a number");
     return mino_int_wrap(S, iwrap32_sub(0, x));
 }
 
@@ -1436,7 +1512,7 @@ mino_val *prim_unchecked_remainder_int(mino_state *S, mino_val *args, mino_env *
 {
     long long a, b;
     (void)env;
-    if (!unchecked_two_int(S, args, "unchecked-remainder-int", &a, &b)) return NULL;
+    if (!unchecked_two_int_lenient(S, args, "unchecked-remainder-int", &a, &b)) return NULL;
     if ((int32_t)b == 0) {
         return prim_throw_classified(S, "eval/contract", "MCT001",
             "unchecked-remainder-int: division by zero");

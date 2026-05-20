@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.400.0 — `unchecked-*` Family Coerces the Full Numeric Tower
+
+The diff probe surfaced `(unchecked-byte 1N)` and `(unchecked-int -5/3)`
+in the example preambles — JVM Clojure's narrowing casts and `-int`
+arithmetic family coerce bigints, ratios, and bigdecs via
+`intValue()` / `longValue()`. mino was throwing on those.
+
+Now `unchecked-byte / -short / -int / -long / -char / -float / -double`
+and the seven `-int` arithmetic variants accept the full numeric
+tower: floats truncate toward zero, bigints in long-long range pass
+through directly (out-of-range routes through double for
+deterministic clamping), ratios and bigdecs go through
+`tower_to_double` then truncate.
+
+The long-domain family `unchecked-add / -subtract / -multiply /
+-inc / -dec / -negate` keeps its strict integer-only contract so
+`(unchecked-add 1.0 2)` still throws as before.
+
 ## v0.399.0 — PersistentQueue (Two-List Persistent FIFO)
 
 A new MINO_QUEUE value type lands as the mino-native equivalent of
