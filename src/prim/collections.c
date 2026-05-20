@@ -257,9 +257,14 @@ mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001",
             "aset: index out of range");
     }
-    /* The host-array's vals[] is GC-traced via gc_mark_child_push, so
-     * the new pointer becomes a live reference for the next collection
-     * cycle. The old pointer drops out of the array's reachability. */
+    /* host_array.vals[] is malloc-owned storage on the GC_T_VAL
+     * container; the tracer walks it for free, but a slot store on a
+     * promoted OLD container has to record the OLD->YOUNG edge in the
+     * remset or the minor collector will reclaim new_val while the
+     * slot still references it. Route the in-place write through
+     * gc_write_barrier so the remset and the major-mark Dijkstra
+     * insertion path both see the publication. */
+    gc_write_barrier(S, arr, arr->as.host_array.vals[(size_t)idx], new_val);
     arr->as.host_array.vals[(size_t)idx] = new_val;
     return new_val;
 }

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.389.3 — `aset` Barrier on Host Arrays
+
+`aset` is the only mutator path that writes a slot of a long-lived
+GC-managed container in place. Writing a fresh YOUNG value into a
+host array that had already been promoted to OLD bypassed the GC
+write barrier: the OLD->YOUNG edge was never recorded in the
+remset, the next minor reclaimed the YOUNG, and the slot was left
+pointing at freed memory. The write now routes through
+`gc_write_barrier` so the remset captures the edge and the
+major-mark Dijkstra insertion path observes the publication during
+an in-flight cycle.
+
+The vector / map / set primitives already barrier their stores;
+this brings host arrays in line.
+
 ## v0.389.2 — Lazy-Force Exactly-Once Realization
 
 `lazy_force` previously read-checked-then-set `realized` without

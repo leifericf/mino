@@ -63,3 +63,16 @@
     (conj! t 3)
     (gc!)
     (is (= [1 2 3] (persistent! t)))))
+
+(deftest aset-keeps-young-value-alive-across-minor
+  ;; aset writes a slot of a host array in place. If the array has
+  ;; already been promoted to OLD when the slot is overwritten with a
+  ;; freshly-allocated YOUNG value, the only path that keeps the
+  ;; YOUNG value alive across a minor is the remset entry installed
+  ;; by the GC write barrier. Without the barrier, the next minor
+  ;; reclaims the YOUNG and the slot points at freed memory.
+  (let [arr (to-array [0 0 0 0])]
+    (dotimes [_ 4] (gc!))   ; age arr to OLD
+    (aset arr 0 (assoc {} :marker 12345))
+    (dotimes [_ 4] (gc!))   ; minor cycles after the OLD->YOUNG write
+    (is (= 12345 (get (nth arr 0) :marker)))))
