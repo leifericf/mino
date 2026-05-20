@@ -336,8 +336,15 @@ mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
         result = mino_call(S, fn, call_args, env);
         if (result == NULL) return NULL;
         if (atom_validate(S, a, result, env) != 0) return NULL;
-        gc_write_barrier(S, a, cur, result);
         if (atom_cas_ptr(S, a, cur, result)) {
+            /* Barrier on the success path only: a losing CAS that
+             * still fires the barrier would add a non-edge to the
+             * remset and keep `result` artificially alive across the
+             * next mark cycle. state_lock is held across cas + barrier
+             * so no other thread can advance gc.phase between them,
+             * and the major-mark Dijkstra push still observes `result`
+             * while phase is MAJOR_MARK. */
+            gc_write_barrier(S, a, cur, result);
             if (atom_notify_watches(S, a, cur, result, env) != 0) return NULL;
             return result;
         }

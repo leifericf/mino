@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.389.6 — `swap!` Barrier Only on Successful CAS
+
+`prim_swap_bang`'s multi-threaded retry loop fired the GC write
+barrier before every CAS attempt. On a lost CAS the barrier had
+already added the atom container to the remset (recording an
+OLD->YOUNG edge that the slot never actually held) and pushed the
+candidate result onto the in-flight major's mark stack. The
+spurious remset entry kept the rejected result artificially alive
+across the next mark cycle until the dirty bit cleared.
+
+The barrier now fires only after a successful publish, matching
+the shape already used by `prim_alter_meta` and the watch/validator
+installers.
+
 ## v0.389.5 — Atomic Watch and Validator Installs
 
 `add-watch`, `remove-watch`, and `set-validator!` all did a plain
