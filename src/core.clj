@@ -3148,6 +3148,47 @@
   ([s]      (read-string s))
   ([opts s] (read-string opts s)))
 
+;; bound? / thread-bound?: variadic over vars, true iff every var has a
+;; binding of the right shape. The C primitives -var-root-bound? and
+;; -thread-bound? do the per-var check.
+(defn bound?
+  "Returns true if all of the vars provided as arguments have any
+   bindings — either a root binding or a thread-local binding."
+  [& vars]
+  (every? (fn [v] (or (-var-root-bound? v) (-thread-bound? v))) vars))
+
+(defn thread-bound?
+  "Returns true if all of the vars provided as arguments have
+   thread-local bindings active on the current dyn-stack."
+  [& vars]
+  (every? -thread-bound? vars))
+
+;; with-bindings / push/pop-thread-bindings: wrap the C primitives so the
+;; Clojure-level surface matches clojure.lang.Var/pushThreadBindings.
+(defn push-thread-bindings
+  "Push a fresh dynamic-binding frame whose entries come from the map.
+   Symbols-or-strings are accepted as keys. Must be paired with
+   pop-thread-bindings in a try/finally."
+  [bindings]
+  (push-thread-bindings* bindings))
+
+(defn pop-thread-bindings
+  "Pop the topmost dynamic-binding frame. Throws when no frame is
+   active. Pair with push-thread-bindings."
+  []
+  (pop-thread-bindings*))
+
+(defmacro with-bindings
+  "Takes a map of var->value pairs. Installs the bindings, executes
+   body, and pops the bindings in a finally clause."
+  [binding-map & body]
+  `(let [vmap# ~binding-map]
+     (push-thread-bindings vmap#)
+     (try
+       ~@body
+       (finally
+         (pop-thread-bindings)))))
+
 ;; bound-fn / bound-fn*: capture the dynamic-binding context active at
 ;; capture time and replay it around every invocation of the wrapped fn.
 ;; Layered on the C primitives get-thread-bindings + with-bindings*.

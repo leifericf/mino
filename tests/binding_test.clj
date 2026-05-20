@@ -49,3 +49,55 @@
     (is (some? err))
     (is (some? (re-find #"dynamic" err)))
     (is (some? (re-find #"bt-plain-x" err)))))
+
+;; Canon parity: bound? / thread-bound? / with-bindings / push+pop-thread-bindings.
+;; The C primitives -var-root-bound? + -thread-bound? + with-bindings* +
+;; get-thread-bindings + push/pop-thread-bindings* back the Clojure-level wrappers.
+
+(def ^:dynamic *bt-dyn-y* :root)
+
+(deftest bound?-checks-root-or-thread
+  (is (bound? (var *bt-dyn-y*)))
+  (binding [*bt-dyn-y* :inner]
+    (is (bound? (var *bt-dyn-y*))))
+  (is (bound? (var *bt-dyn-y*) (var bt-plain-x))))
+
+(deftest thread-bound?-checks-only-thread
+  (is (not (thread-bound? (var *bt-dyn-y*))))
+  (binding [*bt-dyn-y* :inner]
+    (is (thread-bound? (var *bt-dyn-y*))))
+  (is (not (thread-bound? (var *bt-dyn-y*)))))
+
+(deftest with-bindings-installs-and-pops
+  (is (= :root *bt-dyn-y*))
+  (with-bindings {(var *bt-dyn-y*) :wb-inner}
+    (is (= :wb-inner *bt-dyn-y*)))
+  (is (= :root *bt-dyn-y*)))
+
+(deftest push-pop-thread-bindings-pair
+  (is (= :root *bt-dyn-y*))
+  (push-thread-bindings {(var *bt-dyn-y*) :pushed})
+  (try
+    (is (= :pushed *bt-dyn-y*))
+    (finally
+      (pop-thread-bindings)))
+  (is (= :root *bt-dyn-y*)))
+
+(deftest with-bindings-snapshot-via-get-thread-bindings
+  ;; get-thread-bindings returns a map keyed by symbols; with-bindings*
+  ;; accepts that snapshot directly. Used by bound-fn* to replay
+  ;; captured bindings.
+  (binding [*bt-dyn-y* :snap]
+    (let [snap (get-thread-bindings)]
+      (is (map? snap))
+      ;; Re-apply outside the binding: with-bindings* takes the snapshot
+      ;; and runs the thunk with those names installed.
+      (is (= :snap (with-bindings* snap (fn [] *bt-dyn-y*)))))))
+
+(deftest binding-frame-unwinds-on-throw
+  ;; A throw inside a binding body must restore the outer value.
+  (try
+    (binding [*bt-dyn-y* :will-unwind]
+      (throw :boom))
+    (catch _e nil))
+  (is (= :root *bt-dyn-y*)))

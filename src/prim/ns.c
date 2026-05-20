@@ -1000,14 +1000,14 @@ mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
 }
 
-mino_val *prim_bound_p(mino_state *S, mino_val *args, mino_env *env)
+mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     (void)env;
-    if (!ns_one_arg(S, args, "bound?", &arg)) return NULL;
+    if (!ns_one_arg(S, args, "-var-root-bound?", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "bound?: expected a var");
+            "-var-root-bound?: expected a var");
     }
     return arg->as.var.bound ? mino_true(S) : mino_false(S);
 }
@@ -1128,8 +1128,8 @@ const mino_prim_def k_prims_ns[] = {
      "Set the root value of a var."},
     {"alter-var-root", prim_alter_var_root,
      "Apply a function to a var's root and store the result."},
-    {"bound?",         prim_bound_p,
-     "Return true if the var has a root binding."},
+    {"-var-root-bound?", prim_var_root_bound_p,
+     "Return true if the var has a root binding. Internal helper backing the variadic Clojure-level bound?."},
 };
 
 const size_t k_prims_ns_count =

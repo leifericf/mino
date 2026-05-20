@@ -174,9 +174,8 @@
      aset-long aset-short ints longs floats doubles shorts bytes booleans chars
      ;; classloader / JVM compile
      add-classpath load load-file load-reader compile compile-files
-     load-string namespace-munge bound? get-thread-bindings
-     pop-thread-bindings push-thread-bindings thread-bound?
-     with-bindings with-bindings* with-loading-context
+     load-string namespace-munge
+     with-loading-context
      ;; primitives that wrap Java types
      byte short char cast
      ;; futures / threading (JVM-coupled)

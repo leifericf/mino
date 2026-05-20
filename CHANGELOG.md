@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.392.0 — Binding / Thread-Binding Sweep
+
+The variadic Clojure-canon binding-family functions land on top of the
+existing C primitives: `bound?` and `thread-bound?` are now variadic
+fns that AND over every var argument; `with-bindings` is a macro that
+pushes a binding frame and pops it in a `finally`; `push-thread-bindings`
+and `pop-thread-bindings` are direct passthroughs to the new C
+primitives `push-thread-bindings*` and `pop-thread-bindings*`. The C
+`with-bindings*` and the new `push-thread-bindings*` accept maps keyed
+by vars (the Clojure-canon shape) in addition to symbols and strings —
+the var's unqualified name is extracted automatically.
+
+The single-arg internal helper that backs `bound?`'s root-binding
+check was renamed from `bound?` to `-var-root-bound?`, with a
+companion `-thread-bound?` doing the per-var thread-stack check.
+Both leading-dash names mark these as the internal building blocks
+the public Clojure-level wrappers depend on.
+
+The coverage test no longer counts `bound?`, `thread-bound?`,
+`with-bindings`, `push-thread-bindings`, `pop-thread-bindings`, or
+`get-thread-bindings` as JVM-only — they're portable now. Core's
+coverage is 422/424 (99%); the two missing names (`apropos`, `doc`)
+ship under `clojure.repl` in mino.
+
 ## v0.391.0 — `with-redefs` Evaluates Temp-Values in Parallel
 
 Clojure's `with-redefs` evaluates every temp-value expression BEFORE any

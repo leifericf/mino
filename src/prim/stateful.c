@@ -835,15 +835,32 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
         mino_val *key = vec_nth(map_arg->as.map.key_order, i);
         mino_val *val = map_get_val(map_arg, key);
         const char *name_str;
-        if (key == NULL
-            || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
+        if (key == NULL) {
             dyn_binding_list_free(bhead);
             return prim_throw_classified(S, "eval/type", "MTY001",
-                "with-bindings*: keys must be symbols or strings");
+                "with-bindings*: keys must be vars, symbols, or strings");
         }
-        /* Intern the name string through mino_symbol so it shares
-         * storage with the binding-form path at bindings.c. */
-        name_str = mino_symbol(S, key->as.s.data)->as.s.data;
+        if (mino_type_of(key) == MINO_VAR) {
+            /* Clojure-canon: with-bindings/push-thread-bindings map is
+             * keyed by vars. Use the var's unqualified name as the
+             * dyn-frame key so lookup from `binding` / unqualified
+             * symbol reference matches. */
+            name_str = key->as.var.sym;
+            if (name_str == NULL) {
+                dyn_binding_list_free(bhead);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "with-bindings*: var key has no name");
+            }
+        } else if (mino_type_of(key) == MINO_SYMBOL
+                   || mino_type_of(key) == MINO_STRING) {
+            /* Intern the name string through mino_symbol so it shares
+             * storage with the binding-form path at bindings.c. */
+            name_str = mino_symbol(S, key->as.s.data)->as.s.data;
+        } else {
+            dyn_binding_list_free(bhead);
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "with-bindings*: keys must be vars, symbols, or strings");
+        }
         b = (dyn_binding_t *)malloc(sizeof(*b));
         if (b == NULL) {
             dyn_binding_list_free(bhead);
@@ -870,6 +887,140 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
     dyn_binding_list_free(bhead);
     free(frame);
     return result;
+}
+
+/* (push-thread-bindings* bindings-map) — push a fresh dynamic-binding
+ * frame whose entries come from the map; symbols-or-strings as keys.
+ * The frame stays live until a matching pop-thread-bindings* runs (or
+ * the state is freed). Callers must pair push/pop in a try/finally
+ * shape to keep the dyn_stack consistent across throws — the catch
+ * unwinder in control.c does free trailing frames pushed during the
+ * try body, so the worst-case path is "throw before pop" → frame is
+ * freed automatically. */
+mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
+                                            mino_env *env)
+{
+    mino_val    *map_arg;
+    dyn_frame_t   *frame;
+    dyn_binding_t *bhead = NULL;
+    dyn_binding_t *b;
+    size_t         i;
+    (void)env;
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "push-thread-bindings* requires one argument: bindings-map");
+    }
+    map_arg = args->as.cons.car;
+
+    /* Build an empty frame for nil/empty bindings so a paired pop
+     * still has something to remove. */
+    if (map_arg != NULL && mino_type_of(map_arg) != MINO_NIL
+        && mino_type_of(map_arg) != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "push-thread-bindings*: bindings argument must be a map or nil");
+    }
+    if (map_arg != NULL && mino_type_of(map_arg) == MINO_MAP) {
+        for (i = 0; i < map_arg->as.map.len; i++) {
+            mino_val *key = vec_nth(map_arg->as.map.key_order, i);
+            mino_val *val = map_get_val(map_arg, key);
+            const char *name_str;
+            if (key == NULL) {
+                dyn_binding_list_free(bhead);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "push-thread-bindings*: keys must be vars, symbols, or strings");
+            }
+            if (mino_type_of(key) == MINO_VAR) {
+                name_str = key->as.var.sym;
+                if (name_str == NULL) {
+                    dyn_binding_list_free(bhead);
+                    return prim_throw_classified(S, "eval/type", "MTY001",
+                        "push-thread-bindings*: var key has no name");
+                }
+            } else if (mino_type_of(key) == MINO_SYMBOL
+                       || mino_type_of(key) == MINO_STRING) {
+                name_str = mino_symbol(S, key->as.s.data)->as.s.data;
+            } else {
+                dyn_binding_list_free(bhead);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "push-thread-bindings*: keys must be vars, symbols, or strings");
+            }
+            b = (dyn_binding_t *)malloc(sizeof(*b));
+            if (b == NULL) {
+                dyn_binding_list_free(bhead);
+                return prim_throw_classified(S, "eval/contract", "MIN001",
+                    "push-thread-bindings*: out of memory");
+            }
+            b->name = name_str;
+            b->val  = val;
+            b->next = bhead;
+            bhead   = b;
+        }
+    }
+    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    if (frame == NULL) {
+        dyn_binding_list_free(bhead);
+        return prim_throw_classified(S, "eval/contract", "MIN001",
+            "push-thread-bindings*: out of memory");
+    }
+    frame->bindings = bhead;
+    frame->prev     = mino_current_ctx(S)->dyn_stack;
+    mino_current_ctx(S)->dyn_stack = frame;
+    return mino_nil(S);
+}
+
+/* (pop-thread-bindings*) — pop and free the top dynamic-binding frame.
+ * Throws when the dyn-stack is empty. Returns nil. */
+mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args,
+                                           mino_env *env)
+{
+    dyn_frame_t *frame;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "pop-thread-bindings* takes no arguments");
+    }
+    frame = mino_current_ctx(S)->dyn_stack;
+    if (frame == NULL) {
+        return prim_throw_classified(S, "eval/state", "MST005",
+            "pop-thread-bindings*: no active binding frame");
+    }
+    mino_current_ctx(S)->dyn_stack = frame->prev;
+    dyn_binding_list_free(frame->bindings);
+    free(frame);
+    return mino_nil(S);
+}
+
+/* (thread-bound? v) — true iff v is a var that has a thread-local
+ * binding active on the current dyn_stack. Used by Clojure's
+ * thread-bound? wrapper, which is variadic and ANDs over all args. */
+mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val    *v;
+    dyn_frame_t   *f;
+    dyn_binding_t *b;
+    const char    *name;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "thread-bound? requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || mino_type_of(v) != MINO_VAR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "thread-bound?: expected a var");
+    }
+    name = v->as.var.sym;
+    if (name == NULL) return mino_false(S);
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        for (b = f->bindings; b != NULL; b = b->next) {
+            if (b->name != NULL && strcmp(b->name, name) == 0) {
+                return mino_true(S);
+            }
+        }
+    }
+    return mino_false(S);
 }
 
 /* Fault injection: make the n-th GC allocation fail (simulated OOM).
@@ -1160,6 +1311,12 @@ const mino_prim_def k_prims_stateful[] = {
      "Returns a map of symbol->value for the active dynamic bindings, or nil if no binding frames are active."},
     {"with-bindings*", prim_with_bindings_star,
      "(with-bindings* bindings-map fn) — pushes the bindings as a dynamic frame and invokes fn with no args."},
+    {"push-thread-bindings*", prim_push_thread_bindings_star,
+     "(push-thread-bindings* bindings-map) — push a fresh dynamic-binding frame. Must be paired with pop-thread-bindings* in a try/finally."},
+    {"pop-thread-bindings*", prim_pop_thread_bindings_star,
+     "(pop-thread-bindings*) — pop and free the top dynamic-binding frame. Throws when no frame is active."},
+    {"-thread-bound?", prim_thread_bound_p,
+     "(-thread-bound? var) — true iff the var has a thread-local binding on the current dyn-stack. Clojure-level thread-bound? wraps this and is variadic."},
     {"set-dyn-binding!", prim_set_dyn_binding,
      "(set-dyn-binding! 'name value) — mutate the topmost active dynamic binding for `name`. Returns the value. Throws when no binding frame is active for `name`. Backs (set! *var* expr)."},
     {"set-fail-alloc-at!", prim_set_fail_alloc_at,
