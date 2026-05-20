@@ -162,6 +162,66 @@
     (is (= max-int (unchecked-dec min-int)))
     (is (= min-int (unchecked-multiply 2 4611686018427387904)))))
 
+(deftest unchecked-narrowing-casts
+  ;; unchecked-int/-long/-byte/-short/-char/-float/-double take a number
+  ;; and reinterpret it in the target width with two's-complement
+  ;; truncation (matching JVM semantics).
+  (testing "unchecked-long passes long values through"
+    (is (= 1 (unchecked-long 1)))
+    (is (= -1 (unchecked-long -1)))
+    (is (= 1 (unchecked-long 1.1)))
+    (is (= 1 (unchecked-long 1.9)))
+    (is (= -1 (unchecked-long -1.9))))
+  (testing "unchecked-int truncates to 32-bit signed"
+    (is (= 1 (unchecked-int 1)))
+    (is (= -1 (unchecked-int -1)))
+    (is (= -2147483648 (unchecked-int 2147483648))))
+  (testing "unchecked-byte truncates to 8-bit signed"
+    (is (= -1 (unchecked-byte 255)))
+    (is (= -128 (unchecked-byte 128)))
+    (is (= 0 (unchecked-byte 256)))
+    (is (= 1 (unchecked-byte 1))))
+  (testing "unchecked-short truncates to 16-bit signed"
+    (is (= -1 (unchecked-short 65535)))
+    (is (= -32768 (unchecked-short 32768)))
+    (is (= 1 (unchecked-short 1))))
+  (testing "unchecked-char truncates to 16-bit unsigned (char)"
+    (is (= \A (unchecked-char 65)))
+    (is (= \0 (unchecked-char 48))))
+  (testing "unchecked-float narrows to 32-bit float"
+    ;; (= 1.0 (float 1)) is false on JVM Clojure too (Float != Double);
+    ;; numeric `==` is the cross-tier comparison.
+    (is (== 1.0 (unchecked-float 1)))
+    (is (== 1.0 (unchecked-float 1.0)))
+    (is (float? (unchecked-float 1))))
+  (testing "unchecked-double widens to 64-bit double"
+    (is (= 1.0 (unchecked-double 1)))
+    (is (= 1.0 (unchecked-double 1.0)))))
+
+(deftest unchecked-int-arithmetic
+  ;; -int variants do 32-bit two's-complement wraparound; matches JVM
+  ;; semantics where the int width is 32. The non-suffixed members of
+  ;; the family (unchecked-add / -subtract / -multiply / -inc / -dec)
+  ;; use 64-bit wraparound — they are the long-domain opt-in.
+  (testing "in-range arithmetic returns the canonical answer"
+    (is (= 0 (unchecked-subtract-int 1 1)))
+    (is (= 2 (unchecked-add-int 1 1)))
+    (is (= 6 (unchecked-multiply-int 2 3)))
+    (is (= 1 (unchecked-inc-int 0)))
+    (is (= -1 (unchecked-dec-int 0)))
+    (is (= -5 (unchecked-negate-int 5)))
+    (is (= 1 (unchecked-remainder-int 10 3))))
+  (testing "32-bit wraparound at the int boundary"
+    (is (= -2147483648 (unchecked-add-int 2147483647 1)))
+    (is (= 2147483647  (unchecked-subtract-int -2147483648 1)))
+    (is (= -2147483648 (unchecked-inc-int 2147483647)))
+    (is (= 2147483647  (unchecked-dec-int -2147483648)))
+    (is (= 2147483647  (unchecked-negate-int -2147483647)))
+    ;; INT_MIN % -1 is 0 by JVM convention (vs UB in C).
+    (is (= 0 (unchecked-remainder-int -2147483648 -1))))
+  (testing "division by zero throws"
+    (is (thrown? (unchecked-remainder-int 1 0)))))
+
 (deftest tagged-int-boundary
   ;; The internal int representation tags values that fit in 61 signed
   ;; bits (about +-1.15e18) and boxes anything wider up to the long

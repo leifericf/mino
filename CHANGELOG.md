@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.394.0 — `unchecked-*` Narrowing Casts and -Int Arithmetic
+
+The seven JVM-style narrowing casts now ship: `unchecked-long`,
+`unchecked-int`, `unchecked-short`, `unchecked-byte`, `unchecked-char`,
+`unchecked-float`, `unchecked-double`. Each accepts an int or float
+operand, truncates toward zero (with clamping at long range), then
+reinterprets the result at the target width. Bigint / ratio / bigdec
+inputs throw with a clear "use int/float/double" message; widening
+those throws-into-coerces is queued for a later cycle when a real
+use case appears.
+
+The seven -int arithmetic variants are also added:
+`unchecked-add-int`, `unchecked-subtract-int`, `unchecked-multiply-int`,
+`unchecked-inc-int`, `unchecked-dec-int`, `unchecked-negate-int`, and
+`unchecked-remainder-int`. Each does 32-bit two's-complement
+wraparound (matching JVM's int width). The non-suffixed members of
+the family (`unchecked-add`, etc.) remain 64-bit long-domain
+wraparound — they are the long opt-in.
+
+The ClojureDocs probe's twenty `unchecked-*` allowlist entries are
+removed. New tests cover the cast boundary, in-range arithmetic,
+32-bit wrap, and the JVM-canonical INT_MIN % -1 = 0 case.
+
 ## v0.393.0 — Regex Nested Alternation and Group Quantifiers
 
 `(foo|bar)`, `(foo|bar)+`, and `(foo)+` now work end-to-end. The

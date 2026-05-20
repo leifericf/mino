@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <float.h>
+#include <stdint.h>
 
 /* Integer-overflow-safe arithmetic helpers. GCC >= 5 and Clang >= 3.9
  * expose __builtin_*_overflow; MSVC and older compilers fall back to
@@ -1195,6 +1196,257 @@ mino_val *prim_unchecked_negate(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_sub(0, x));
 }
 
+/* ------------------------------------------------------------------------- */
+/* unchecked-* narrowing casts and -int arithmetic.                          */
+/*                                                                           */
+/* The cast family (unchecked-int / -long / -byte / -short / -char /         */
+/* -float / -double) takes a number and reinterprets it in the target        */
+/* width with two's-complement truncation. The -int arithmetic family        */
+/* (unchecked-add-int / -subtract-int / -multiply-int / -inc-int /           */
+/* -dec-int / -negate-int / -remainder-int) performs 32-bit wraparound.      */
+/*                                                                           */
+/* Accepts MINO_INT, MINO_FLOAT, and MINO_FLOAT32. Bigint / ratio / bigdec   */
+/* inputs throw — that's a documented divergence from JVM Clojure where the  */
+/* casts coerce via intValue() / longValue(). Add bigint/ratio handling      */
+/* when a real use case appears.                                             */
+/* ------------------------------------------------------------------------- */
+
+static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
+                              long long *out_l, int *is_double, double *out_d)
+{
+    char msg[96];
+    *is_double = 0;
+    if (v == NULL) {
+        snprintf(msg, sizeof(msg), "%s requires a number", opname);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return 0;
+    }
+    if (mino_val_int_p(v)) {
+        *out_l = mino_val_int_get(v);
+        return 1;
+    }
+    {
+        mino_type t = mino_type_of(v);
+        if (t == MINO_FLOAT || t == MINO_FLOAT32) {
+            *is_double = 1;
+            *out_d = v->as.f;
+            return 1;
+        }
+    }
+    snprintf(msg, sizeof(msg),
+        "%s: numeric type not yet supported (use int/float/double)", opname);
+    prim_throw_classified(S, "eval/type", "MTY001", msg);
+    return 0;
+}
+
+/* Truncate-to-long (toward zero) for cast-family helpers. */
+static long long unchecked_trunc_long(int is_double, long long l, double d)
+{
+    if (!is_double) return l;
+    /* C99: cast from double to long long truncates toward zero. Out-of-
+     * range conversion is undefined per the standard; clamp to long-long
+     * range so we behave deterministically. JVM has its own clamp at
+     * Long.MAX_VALUE / Long.MIN_VALUE; we match that. */
+    if (d >= 9.2233720368547758e18) return 9223372036854775807LL;
+    if (d <= -9.2233720368547758e18) return (-9223372036854775807LL - 1LL);
+    return (long long)d;
+}
+
+static int unchecked_grab_one(mino_state *S, const char *opname,
+                              mino_val *args,
+                              long long *out_l, int *is_double,
+                              double *out_d)
+{
+    char msg[80];
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires exactly 1 argument", opname);
+        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return 0;
+    }
+    return unchecked_grab_num(S, opname, args->as.cons.car,
+                              out_l, is_double, out_d);
+}
+
+mino_val *prim_unchecked_long(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-long", args, &l, &isd, &d)) return NULL;
+    return mino_int_wrap(S, unchecked_trunc_long(isd, l, d));
+}
+
+mino_val *prim_unchecked_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    long long trunc;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-int", args, &l, &isd, &d)) return NULL;
+    trunc = unchecked_trunc_long(isd, l, d);
+    return mino_int_wrap(S, (long long)(int32_t)trunc);
+}
+
+mino_val *prim_unchecked_short(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    long long trunc;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-short", args, &l, &isd, &d)) return NULL;
+    trunc = unchecked_trunc_long(isd, l, d);
+    return mino_int_wrap(S, (long long)(int16_t)trunc);
+}
+
+mino_val *prim_unchecked_byte(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    long long trunc;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-byte", args, &l, &isd, &d)) return NULL;
+    trunc = unchecked_trunc_long(isd, l, d);
+    return mino_int_wrap(S, (long long)(int8_t)trunc);
+}
+
+mino_val *prim_unchecked_char(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    long long trunc;
+    int       cp;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-char", args, &l, &isd, &d)) return NULL;
+    trunc = unchecked_trunc_long(isd, l, d);
+    /* JVM: char is a 16-bit unsigned value. Truncate then construct. */
+    cp = (int)(uint16_t)trunc;
+    return mino_char(S, cp);
+}
+
+mino_val *prim_unchecked_float(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    double    base;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-float", args, &l, &isd, &d)) return NULL;
+    base = isd ? d : (double)l;
+    return mino_float32(S, base);
+}
+
+mino_val *prim_unchecked_double(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long l = 0;
+    int       isd = 0;
+    double    d = 0.0;
+    double    base;
+    (void)env;
+    if (!unchecked_grab_one(S, "unchecked-double", args, &l, &isd, &d)) return NULL;
+    base = isd ? d : (double)l;
+    return mino_float(S, base);
+}
+
+/* -int arithmetic family: 32-bit two's-complement wraparound.              */
+
+static long long iwrap32_add(long long a, long long b)
+{
+    return (long long)(int32_t)((uint32_t)(int32_t)a + (uint32_t)(int32_t)b);
+}
+
+static long long iwrap32_sub(long long a, long long b)
+{
+    return (long long)(int32_t)((uint32_t)(int32_t)a - (uint32_t)(int32_t)b);
+}
+
+static long long iwrap32_mul(long long a, long long b)
+{
+    return (long long)(int32_t)((uint32_t)(int32_t)a * (uint32_t)(int32_t)b);
+}
+
+mino_val *prim_unchecked_add_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-add-int", &a, &b)) return NULL;
+    return mino_int_wrap(S, iwrap32_add(a, b));
+}
+
+mino_val *prim_unchecked_subtract_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-subtract-int", &a, &b)) return NULL;
+    return mino_int_wrap(S, iwrap32_sub(a, b));
+}
+
+mino_val *prim_unchecked_multiply_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-multiply-int", &a, &b)) return NULL;
+    return mino_int_wrap(S, iwrap32_mul(a, b));
+}
+
+mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "unchecked-inc-int requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "unchecked-inc-int expects an int");
+    return mino_int_wrap(S, iwrap32_add(x, 1));
+}
+
+mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "unchecked-dec-int requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "unchecked-dec-int expects an int");
+    return mino_int_wrap(S, iwrap32_sub(x, 1));
+}
+
+mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "unchecked-negate-int requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "unchecked-negate-int expects an int");
+    return mino_int_wrap(S, iwrap32_sub(0, x));
+}
+
+mino_val *prim_unchecked_remainder_int(mino_state *S, mino_val *args, mino_env *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-remainder-int", &a, &b)) return NULL;
+    if ((int32_t)b == 0) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+            "unchecked-remainder-int: division by zero");
+    }
+    /* JVM int `%` operator: ((int32_t)a) % ((int32_t)b). Overflow case
+     * INT_MIN % -1 is defined as 0 on the JVM; in C it's UB, so guard. */
+    if ((int32_t)a == INT32_MIN && (int32_t)b == -1) return mino_int_wrap(S, 0);
+    return mino_int_wrap(S, (long long)((int32_t)a % (int32_t)b));
+}
+
 mino_val *prim_div(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *first;
@@ -2185,6 +2437,37 @@ const mino_prim_def k_prims_numeric[] = {
      "Aliased to quot — the truncating semantic matches canon's "
      "unchecked-divide-int (no overflow check; on the JVM this is the "
      "primitive idiv instruction)."},
+    {"unchecked-long", prim_unchecked_long,
+     "Coerce x to a 64-bit long by truncating toward zero. No overflow check; "
+     "out-of-range doubles clamp to long-long range."},
+    {"unchecked-int", prim_unchecked_int,
+     "Coerce x to a 32-bit signed int (stored in a long with sign extension). "
+     "Truncates toward zero; 32-bit wraparound."},
+    {"unchecked-short", prim_unchecked_short,
+     "Coerce x to a 16-bit signed short (stored in a long with sign extension)."},
+    {"unchecked-byte", prim_unchecked_byte,
+     "Coerce x to an 8-bit signed byte (stored in a long with sign extension)."},
+    {"unchecked-char", prim_unchecked_char,
+     "Coerce x to a Unicode char by truncating to 16 bits (matching JVM char)."},
+    {"unchecked-float", prim_unchecked_float,
+     "Coerce x to a 32-bit float."},
+    {"unchecked-double", prim_unchecked_double,
+     "Coerce x to a 64-bit double."},
+    {"unchecked-add-int", prim_unchecked_add_int,
+     "Returns x + y with 32-bit two's-complement wraparound."},
+    {"unchecked-subtract-int", prim_unchecked_subtract_int,
+     "Returns x - y with 32-bit two's-complement wraparound."},
+    {"unchecked-multiply-int", prim_unchecked_multiply_int,
+     "Returns x * y with 32-bit two's-complement wraparound."},
+    {"unchecked-inc-int", prim_unchecked_inc_int,
+     "Returns x + 1 with 32-bit two's-complement wraparound."},
+    {"unchecked-dec-int", prim_unchecked_dec_int,
+     "Returns x - 1 with 32-bit two's-complement wraparound."},
+    {"unchecked-negate-int", prim_unchecked_negate_int,
+     "Returns -x with 32-bit two's-complement wraparound."},
+    {"unchecked-remainder-int", prim_unchecked_remainder_int,
+     "Returns the 32-bit signed remainder of x divided by y. "
+     "Matches JVM int `%`; throws on division by zero; INT_MIN % -1 = 0."},
 };
 
 const size_t k_prims_numeric_count =
