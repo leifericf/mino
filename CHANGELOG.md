@@ -1,5 +1,63 @@
 # Changelog
 
+## v0.388.0 — Embedder UX: Cycle Close
+
+Final tag of the pre-1.0 Embedder UX cycle. The per-phase tags
+v0.382.0 through v0.387.1 carry the granular notes; this entry is
+the cycle's roll-up plus the cookbook + mino-site additions that
+close the documentation surface.
+
+### What this cycle delivered
+
+Across seven minor tags + one patch:
+
+- **v0.382.0** — cascade-completion: dead `mino_install_core`
+  references replaced with `mino_install(S, env, MINO_CAP_DEFAULT)`
+  in three examples, `embed_api_test` switched to public-header-
+  only, JNI binding fixed in mino-examples, a new
+  `./mino task examples` task wired into release-gate so future
+  C-API renames cannot rot the examples unobserved.
+- **v0.383.0** — type-name cleanup: 19 public typedefs dropped
+  the `_t` suffix matching the SQLite convention. Two collisions
+  resolved: `mino_ref` (function → `mino_ref_new`),
+  `mino_gc_stats` (struct → `mino_gc_stats_out`). Internal `_t`
+  typedefs untouched.
+- **v0.384.0** — amalgamation distribution: `./mino task amalgamate`
+  produces `dist/mino.c` + `dist/mino.h` as the canonical vendor-
+  drop shape. SQLite-influenced; the source tree stays for
+  development.
+- **v0.385.0** — predicate / extractor grid: 8 new `mino_is_*`
+  predicates, 6 new `mino_to_*` extractors, every public type now
+  has its grid entry.
+- **v0.386.0** — Clojure-canon C surface: `mino_meta` /
+  `mino_with_meta`, `mino_seq` / `mino_first` / `mino_rest` /
+  `mino_next`, `mino_compare`, `mino_hash`,
+  `mino_push_bindings` / `mino_pop_bindings`, `mino_can_clone`.
+- **v0.387.0** — embed-API ergonomics: `mino_register_fns` for
+  bulk primitive registration, throw-payload preservation across
+  three sites, six new `mino_args_parse` specifiers, named-type
+  clone failure diagnostics, capability-conditional `mino_int`
+  doc callout.
+- **v0.387.1** — embedded-source canon pass: every embedded
+  mino-source C-string literal in mino-examples cookbook uses
+  canonical vector-binding shape.
+- **v0.388.0** (this tag) — cycle close: cookbook adds the
+  five-minute hello-world and the handle / record / atom
+  decision tree; mino-site adds the
+  ["Zero dependencies, vendored first"](https://mino-lang.org/documentation/vendored-first/)
+  Internals page documenting the distribution philosophy.
+
+### Posture
+
+The header still carries the "UNSTABLE until v1.0.0" line. This
+cycle prepares the surface for the v1.0 commit; the v1.0 tag is
+its own dedicated cycle.
+
+The `dist/mino.c` amalgamation is bit-identical to the source
+tree at this tag; embedders that vendor from v0.388.0 are
+working against a stable surface that will not rename or remove
+public functions until v1.0.
+
 ## v0.387.1 — Embedder UX: Embedded-Source Canon Pass
 
 Phase 6.5 of the pre-1.0 Embedder UX cycle. Cosmetic / doc-
