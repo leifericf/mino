@@ -397,6 +397,44 @@ mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (add-watch atom key fn) -- register a watch callback. */
+/* Atomically publish new_val to *slot. In single-threaded mode it is
+ * a plain compare-and-write (no other writer can interpose, so the
+ * implicit expected always matches *slot). In multi-threaded mode it
+ * runs __atomic_compare_exchange_n against the caller's snapshot;
+ * returning 0 means a concurrent writer raced ahead and the caller
+ * must reload and rebuild. The barrier fires only after a successful
+ * publish so a lost CAS does not leave a stale OLD->YOUNG edge on
+ * the remset or a Dijkstra push for a value the slot never held. */
+static int watchable_slot_cas(mino_state *S, mino_val *container,
+                              mino_val **slot, mino_val *expected,
+                              mino_val *new_val)
+{
+    if (S->threading.multi_threaded) {
+        mino_val *witness = expected;
+        if (__atomic_compare_exchange_n(slot, &witness, new_val, 0,
+                                        __ATOMIC_RELEASE,
+                                        __ATOMIC_RELAXED)) {
+            gc_write_barrier(S, container, expected, new_val);
+            return 1;
+        }
+        return 0;
+    }
+    gc_write_barrier(S, container, *slot, new_val);
+    *slot = new_val;
+    return 1;
+}
+
+/* Helper: load the slot. Multi-threaded mode uses acquire-load so the
+ * caller sees a coherent snapshot of writes published from other
+ * workers; single-threaded mode skips the fence. */
+static mino_val *watchable_slot_load(mino_state *S, mino_val **slot)
+{
+    if (S->threading.multi_threaded) {
+        return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+    }
+    return *slot;
+}
+
 /* Accessor helpers so the watch / validator primitives can target
  * either MINO_ATOM or MINO_TX_REF without duplicating per-field
  * dispatch through every code path. Returns 0 for invalid input. */
@@ -475,17 +513,28 @@ mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "add-watch: watch fn must be a fn");
     }
-    watches = *watches_slot;
-    if (watches == NULL || mino_type_of(watches) != MINO_MAP) {
-        mino_val **noargs = NULL;
-        watches = mino_map(S, noargs, noargs, 0);
-        if (watches == NULL) return NULL;
+    /* CAS retry loop: load the slot, build the next map off it, and
+     * publish via watchable_slot_cas. On a lost CAS another worker
+     * installed (or removed) a watch before us; rebuild against the
+     * fresh snapshot so the new key joins their map rather than
+     * overwriting it. */
+    for (;;) {
+        mino_val *base;
+        mino_val *snap = watchable_slot_load(S, watches_slot);
+        watches = snap;
+        if (watches == NULL || mino_type_of(watches) != MINO_MAP) {
+            mino_val **noargs = NULL;
+            base = mino_map(S, noargs, noargs, 0);
+            if (base == NULL) return NULL;
+        } else {
+            base = watches;
+        }
+        new_map = mino_map_assoc1(S, base, key, fn);
+        if (new_map == NULL) return NULL;
+        if (watchable_slot_cas(S, a, watches_slot, snap, new_map)) {
+            return a;
+        }
     }
-    new_map = mino_map_assoc1(S, watches, key, fn);
-    if (new_map == NULL) return NULL;
-    gc_write_barrier(S, a, *watches_slot, new_map);
-    *watches_slot = new_map;
-    return a;
 }
 
 /* (remove-watch ref key) -- unregister a watch callback. */
@@ -506,15 +555,18 @@ mino_val *prim_remove_watch(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom or ref");
     }
     if (watchable_check_state(S, a)) return NULL;
-    watches = *watches_slot;
-    if (watches == NULL || mino_type_of(watches) != MINO_MAP) return a;
-    if (mino_map_lookup(watches, key) != NULL) {
-        mino_val *new_map = mino_map_dissoc1(S, watches, key);
+    for (;;) {
+        mino_val *snap = watchable_slot_load(S, watches_slot);
+        mino_val *new_map;
+        watches = snap;
+        if (watches == NULL || mino_type_of(watches) != MINO_MAP) return a;
+        if (mino_map_lookup(watches, key) == NULL) return a;
+        new_map = mino_map_dissoc1(S, watches, key);
         if (new_map == NULL) return NULL;
-        gc_write_barrier(S, a, *watches_slot, new_map);
-        *watches_slot = new_map;
+        if (watchable_slot_cas(S, a, watches_slot, snap, new_map)) {
+            return a;
+        }
     }
-    return a;
 }
 
 /* (set-validator! ref fn) -- set or remove a validator on an atom or ref. */
@@ -535,11 +587,17 @@ mino_val *prim_set_validator(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom or ref");
     }
     if (watchable_check_state(S, a)) return NULL;
-    /* nil removes the validator. */
+    /* nil removes the validator. The CAS retry loop handles the case
+     * where another worker installs or removes a validator
+     * concurrently; whichever store sequence the CAS finally accepts
+     * is the one whose effect outlives the contention window. */
     if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
-        gc_write_barrier(S, a, *validator_slot, NULL);
-        *validator_slot = NULL;
-        return mino_nil(S);
+        for (;;) {
+            mino_val *snap = watchable_slot_load(S, validator_slot);
+            if (watchable_slot_cas(S, a, validator_slot, snap, NULL)) {
+                return mino_nil(S);
+            }
+        }
     }
     /* The validator is invoked as (fn new-value) on every state
      * transition. Storing a non-callable just defers the failure to
@@ -554,9 +612,12 @@ mino_val *prim_set_validator(mino_state *S, mino_val *args,
     /* JVM Clojure does not validate the current value at install time; only
      * subsequent state transitions are checked. Match canon: install fn
      * unconditionally, even if the current value would fail it. */
-    gc_write_barrier(S, a, *validator_slot, fn);
-    *validator_slot = fn;
-    return mino_nil(S);
+    for (;;) {
+        mino_val *snap = watchable_slot_load(S, validator_slot);
+        if (watchable_slot_cas(S, a, validator_slot, snap, fn)) {
+            return mino_nil(S);
+        }
+    }
 }
 
 /* (get-validator ref) -- return the current validator fn or nil. */

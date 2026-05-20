@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.389.5 — Atomic Watch and Validator Installs
+
+`add-watch`, `remove-watch`, and `set-validator!` all did a plain
+load + rebuild + store on the watches map or the validator slot of
+the reference. Two concurrent installers could each observe the
+same snapshot, both build a one-entry-wider map (or each compute a
+different validator update), and the slower thread's publish would
+overwrite the first -- the user's `(add-watch a :k1 f1)` would
+silently disappear when `(add-watch a :k2 f2)` raced ahead.
+
+The three primitives now share a `watchable_slot_cas` retry helper
+that mirrors `prim_swap_bang`: load the snapshot, build the next
+value, attempt a CAS, rebuild on loss. The barrier fires only on
+the winning attempt, so lost retries do not leave stale OLD->YOUNG
+entries on the remset.
+
 ## v0.389.4 — `alter-meta!` Actually Atomic
 
 `alter-meta!` advertised atomic mutation of a reference's metadata
