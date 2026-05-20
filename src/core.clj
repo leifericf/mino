@@ -3386,16 +3386,21 @@
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring
-   them in a finally clause. Bindings is a vector of var-name/value pairs."
+   them in a finally clause. Bindings is a vector of var-name/value pairs.
+
+   The temp-value exprs are evaluated in parallel BEFORE any rebind fires, so a
+   later binding-value that names an earlier-listed var sees that var's
+   pre-redef value (matching Clojure JVM)."
   [bindings & body]
   (let [pairs    (partition 2 bindings)
         var-syms (map first pairs)
         new-vals (map second pairs)
         olds     (map (fn [_] (gensym "old")) pairs)
-        sets     (map (fn [v val]
+        news     (map (fn [_] (gensym "new")) pairs)
+        sets     (map (fn [v new-sym]
                         (list 'alter-var-root (list 'var v)
-                              (list 'fn ['_] val)))
-                      var-syms new-vals)
+                              (list 'fn ['_] new-sym)))
+                      var-syms news)
         restores (map (fn [v old]
                         (list 'alter-var-root (list 'var v)
                               (list 'fn ['_] old)))
@@ -3403,8 +3408,11 @@
         finally-form (apply list 'finally restores)
         try-form     (apply list 'try (concat sets body (list finally-form)))]
     (list 'let
-          (vec (mapcat (fn [old v] [old (list 'deref (list 'var v))])
-                       olds var-syms))
+          (vec (concat
+                 (mapcat (fn [old v] [old (list 'deref (list 'var v))])
+                         olds var-syms)
+                 (mapcat (fn [new-sym new-val] [new-sym new-val])
+                         news new-vals)))
           try-form)))
 
 (defmacro with-local-vars

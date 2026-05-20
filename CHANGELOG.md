@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.391.0 — `with-redefs` Evaluates Temp-Values in Parallel
+
+Clojure's `with-redefs` evaluates every temp-value expression BEFORE any
+var is rebound, so a later binding-value naming an earlier-listed var
+sees that var's pre-redef value. mino was generating the rebind
+sequence as nested `alter-var-root` calls with each temp-value
+expression nested inside its own `(fn [_] new-val)`, so the second and
+later temp-value exprs ran AFTER the first rebind had already taken
+effect. The macro now binds each new value to a gensym before any
+rebind fires, so the evaluation order matches the JVM. The ClojureDocs
+probe's `with-redefs:2` allowlist entry is removed; a new
+`test-with-redefs-parallel-eval` covers the case directly.
+
 ## v0.390.0 — Public-Surface Audit and Docstring Sweep
 
 Behaviour-preserving cleanup pass over the embedder-visible surface in

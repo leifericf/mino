@@ -47,6 +47,20 @@
     (is (= :temp stub-me)))
   (is (= :original stub-me)))
 
+(def with-redefs-foo :f)
+(def with-redefs-bar :b)
+
+(deftest test-with-redefs-parallel-eval
+  ;; The temp-value exprs must be evaluated before any rebind fires, so a
+  ;; later binding-value naming an earlier-listed var sees the pre-redef
+  ;; value. Matches Clojure JVM's "in parallel" contract.
+  (with-redefs [with-redefs-foo :e
+                with-redefs-bar with-redefs-foo]
+    (is (= :e with-redefs-foo))
+    (is (= :f with-redefs-bar)))
+  (is (= :f with-redefs-foo))
+  (is (= :b with-redefs-bar)))
+
 (deftest test-with-redefs-throw
   ;; Upstream variant uses Thread + Exception class; mino (is (thrown? body))
   ;; takes a body, not a class. Dropped pattern: (thrown? Exception ...).
