@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.396.0 — `spec.alpha`: `:via` Propagation, `explain-str` Format, `s/&`
+
+`explain-data` problems now carry the registered spec name in their
+`:via` path. `explain*` consults the spec's `::name` and conjes it
+onto the `via` accumulator when present, so every problem reported
+inside that spec inherits the surrounding spec's identifier. Matches
+the JVM contract: `(s/explain-data ::s 0)` produces problems with
+`:via [::s]`.
+
+`explain-str` now formats each problem as
+`"<val> - failed: <pred-abbrev> [in: ...] [at: ...] [spec: ...]"`,
+matching Clojure's canonical `explain-printer` output. The pred is
+abbreviated (namespace qualifier dropped) so `clojure.core/string?`
+renders as `string?`.
+
+`s/&` ships as a regex op that wraps a regex spec with additional
+predicates applied to the conformed sequence value. All preds must
+return truthy or the consume yields `::invalid`. `unform` delegates
+through the inner regex.
+
+The ClojureDocs probe drops `explain-data:1,2`, `explain-str:1`, `&:0`,
+and the first two `map-of` entries. The remaining `map-of:3-5`
+allowlist entries stay (the `:3` example asserts a JVM #object map
+print; the `:4,5` examples need a generator backend).
+
 ## v0.395.0 — `spec.alpha`: `unform`, `conformer`, `with-gen`
 
 `unform` (the inverse of `conform`) now ships as a multimethod

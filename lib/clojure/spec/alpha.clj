@@ -73,9 +73,14 @@
 
 (defn explain*
   "Internal dispatch for explain-data.  Public callers use
-  explain-data / explain / explain-str."
+  explain-data / explain / explain-str. When the spec is registered
+  (carries ::name), prepend that name to via so problems list the
+  surrounding spec path the way Clojure's spec.alpha does."
   [spec path via in x]
-  (explain-impl spec path via in x))
+  (let [via' (if-let [n (::name spec)]
+               (conj (vec via) n)
+               via)]
+    (explain-impl spec path via' in x)))
 
 (defn unform*
   "Internal dispatch for unform.  Public callers use unform."
@@ -118,23 +123,32 @@
        ::spec     spec
        ::value    x})))
 
-(defn- problem-str [p]
-  (str "  val: "  (pr-str (:val p))
-       " fails"
+(declare abbrev)
+
+(defn- problem-str
+  "Format a single problem the way Clojure's spec.alpha does:
+     <val> - failed: <pred> [in: <in>] [at: <path>] [spec: <name>]
+   The leading val + ' - failed: <pred>' is the only mandatory chunk;
+   the bracketed segments are emitted only when they carry data. The
+   pred form is abbreviated (namespace-qualifiers dropped) to match
+   Clojure's `explain-printer` output."
+  [p]
+  (str (pr-str (:val p))
+       " - failed: "
+       (pr-str (abbrev (:pred p)))
        (when (seq (:in p))   (str " in: " (pr-str (:in p))))
-       (when (seq (:via p))  (str " spec: " (pr-str (last (:via p)))))
        (when (seq (:path p)) (str " at: " (pr-str (:path p))))
-       " predicate: " (pr-str (:pred p))))
+       (when (seq (:via p))  (str " spec: " (pr-str (last (:via p)))))))
 
 (defn explain-str
   "Return a string describing why x fails spec, or \"Success!\\n\" if
-  it passes."
+  it passes. Format follows clojure.spec.alpha: each problem on its
+  own line terminated with \\n."
   [spec x]
   (if-let [data (explain-data spec x)]
     (apply str
-           (interpose "\n"
-                      (concat (map problem-str (::problems data))
-                              [""])))
+           (map (fn [p] (str (problem-str p) "\n"))
+                (::problems data)))
     "Success!\n"))
 
 (defn explain
@@ -627,6 +641,18 @@
    ::form (cons 'clojure.spec.alpha/alt (interleave keys forms))
    ::keys keys ::forms forms ::specs specs})
 
+(defn amp-impl
+  "Build an ::amp regex spec: re-spec is consumed normally; preds are
+  applied to the conformed sequence. All preds must return truthy or
+  the consume yields ::invalid."
+  [re-form pred-forms re-spec pred-fns]
+  {::kind ::regex ::regex true ::op ::amp
+   ::form (cons 'clojure.spec.alpha/& (cons re-form pred-forms))
+   ::re-form    re-form
+   ::pred-forms pred-forms
+   ::re         re-spec
+   ::preds      pred-fns})
+
 (declare re-conform re-consume re-explain)
 
 (defmethod conform-impl ::regex [s x]
@@ -734,7 +760,18 @@
               (let [r (conform* (as-spec sp) (first xs))]
                 (if (= ::invalid r)
                   (recur (rest keys) (rest specs))
-                  [[(first keys) r] (rest xs)])))))))))
+                  [[(first keys) r] (rest xs)])))))))
+
+    (= ::amp (::op spec))
+    (let [re-sp (as-regex-spec (::re spec))
+          [r rem] (if re-sp
+                    (re-consume re-sp xs)
+                    [::invalid xs])]
+      (if (= ::invalid r)
+        [::invalid xs]
+        (if (every? (fn [p] (p r)) (::preds spec))
+          [r rem]
+          [::invalid xs])))))
 
 (defn- re-conform [spec xs]
   (let [[r rem] (re-consume spec xs)]
@@ -796,6 +833,12 @@
             (if rsp
               (re-unform rsp v)
               (list (unform* (as-spec sp) v))))))
+
+      (= ::amp op)
+      ;; Unform through the wrapped regex; the extra preds don't
+      ;; transform the value.
+      (let [re-sp (as-regex-spec (::re spec))]
+        (if re-sp (re-unform re-sp y) y))
 
       :else y)))
 
@@ -1159,6 +1202,13 @@
         keys  (mapv first pairs)
         forms (mapv second pairs)]
     `(clojure.spec.alpha/alt-impl '~keys '~(map res forms) ~forms)))
+
+(defmacro &
+  "Wrap a regex spec with additional predicates applied to the
+  conformed sequence value. Each pred must return truthy."
+  [re & preds]
+  `(clojure.spec.alpha/amp-impl '~(res re) '~(mapv res preds)
+                                ~re ~(vec preds)))
 
 (defmacro fdef
   "Register a function spec under the qualified symbol of fn-sym.

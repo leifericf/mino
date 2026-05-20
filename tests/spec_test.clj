@@ -323,6 +323,47 @@
 ;; with-gen: attach a generator to a spec.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; s/& : regex op that wraps a regex spec with extra predicates.
+;; ---------------------------------------------------------------------------
+
+(s/def ::amp-tagged-children
+  (s/cat :tag keyword?
+         :children (s/& (s/+ integer?) (fn [%] (>= (count %) 2)))))
+
+(deftest amp-passes-when-pred-holds
+  (is (= {:tag :a :children [3 4 5]}
+         (s/conform ::amp-tagged-children [:a 3 4 5]))))
+
+(deftest amp-fails-when-pred-rejects
+  (is (= :clojure.spec.alpha/invalid
+         (s/conform ::amp-tagged-children [:a 3]))))
+
+;; ---------------------------------------------------------------------------
+;; :via path propagation in explain-data and explain-str format.
+;; ---------------------------------------------------------------------------
+
+(s/def ::via-string string?)
+
+(deftest explain-data-propagates-via-with-name
+  (let [data (s/explain-data ::via-string 0)
+        problems (:clojure.spec.alpha/problems data)
+        first-p (first problems)]
+    (is (some? data))
+    (is (= 1 (count problems)))
+    (is (contains? (set (:via first-p)) ::via-string))))
+
+(deftest explain-str-format-matches-canon
+  (is (= "Success!\n" (s/explain-str ::via-string "foo")))
+  (let [s (s/explain-str ::via-string 0)]
+    (is (some? (re-find #"0 - failed" s)))
+    (is (some? (re-find #"string\?" s)))
+    ;; spec: <qualified keyword> — the exact ns varies with the active
+    ;; namespace at load time; just assert the prefix.
+    (is (some? (re-find #"spec: :[^/]+/via-string" s)))))
+
+;; ---------------------------------------------------------------------------
+
 (deftest with-gen-attaches-generator
   (let [base   (s/and number? pos?)
         marker (fn [] :a-generator)
