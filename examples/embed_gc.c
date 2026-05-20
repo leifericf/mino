@@ -6,8 +6,12 @@
  * of collection. Used as a smoke test that mino.h stays host-friendly.
  *
  * Build (from repo root):
- *   cc -std=c99 -Isrc -o embed_gc examples/embed_gc.c src/xxx.o ... -lm
- * or link against the objects produced by `mino task build`.
+ *   ./mino task examples
+ * Or use the amalgamation:
+ *   ./mino task amalgamate
+ *   cc -std=c99 -Idist -c dist/mino.c -o dist/mino.o
+ *   cc -std=c99 -Idist examples/embed_gc.c dist/mino.o -lm -lpthread \
+ *      -o build/embed_gc
  */
 
 #include "mino.h"

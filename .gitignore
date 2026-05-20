@@ -78,10 +78,15 @@ tests/multimethod_test
 tests/multimethod_test_asan
 tests/multimethod_test_ubsan
 examples/embed_gc
+examples/embed_gc_amalgam
 examples/embed_gc_stress
+examples/embed_gc_stress_amalgam
 examples/embed_gc_stress_asan
 examples/embed_multi_tenant_threads
+examples/embed_multi_tenant_threads_amalgam
 examples/embed_record
+examples/embed_record_amalgam
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test
+dist/

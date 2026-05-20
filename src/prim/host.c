@@ -10,7 +10,7 @@
 #include <stdarg.h>
 
 /* Count args in a cons list. */
-static int count_args(mino_val *args)
+static int host_count_args(mino_val *args)
 {
     int n = 0;
     while (mino_is_cons(args)) {
@@ -62,7 +62,7 @@ static mino_val *prim_host_new(mino_state *S, mino_val *args,
         return interop_error(S, "host/new: type must be a keyword");
 
     ctor_args = args->as.cons.cdr;
-    nargs = count_args(ctor_args);
+    nargs = host_count_args(ctor_args);
 
     ht = host_type_find(S, type_key);
     if (ht == NULL)
@@ -116,7 +116,7 @@ static mino_val *prim_host_call(mino_state *S, mino_val *args,
         return interop_error(S, "host/call: method must be a keyword");
 
     call_args = args->as.cons.cdr->as.cons.cdr;
-    nargs = count_args(call_args);
+    nargs = host_count_args(call_args);
 
     ht = host_type_find(S, type_key);
     if (ht == NULL)
@@ -167,7 +167,7 @@ static mino_val *prim_host_static_call(mino_state *S, mino_val *args,
         return interop_error(S, "host/static-call: method must be a keyword");
 
     call_args = args->as.cons.cdr->as.cons.cdr;
-    nargs = count_args(call_args);
+    nargs = host_count_args(call_args);
 
     ht = host_type_find(S, type_key);
     if (ht == NULL)

@@ -782,7 +782,7 @@ static int compile_do(compiler_t *c, mino_val *form, int dst, int tail)
 }
 
 /* Count cons args starting at `args` (a cons-list). */
-static int count_args(mino_val *args)
+static int bc_count_args(mino_val *args)
 {
     int n = 0;
     while (mino_is_cons(args)) { n++; args = args->as.cons.cdr; }
@@ -834,7 +834,7 @@ static int compile_and(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
         return 0;
     }
-    int n = count_args(args);
+    int n = bc_count_args(args);
     if (n == 1) {
         return compile_expr(c, args->as.cons.car, dst, tail);
     }
@@ -866,7 +866,7 @@ static int compile_or(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
         return 0;
     }
-    int n = count_args(args);
+    int n = bc_count_args(args);
     if (n == 1) {
         return compile_expr(c, args->as.cons.car, dst, tail);
     }

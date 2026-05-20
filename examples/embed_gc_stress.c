@@ -11,9 +11,13 @@
  * Exit 0 means every adversarial case behaved as documented. Any
  * unexpected reject/accept, NULL-deref, or crash is a failure.
  *
- * Build:
- *   cc -std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc \
- *     -o examples/embed_gc_stress examples/embed_gc_stress.c $MINO_OBJS -lm
+ * Build (from repo root):
+ *   ./mino task examples
+ * Or use the amalgamation:
+ *   ./mino task amalgamate
+ *   cc -std=c99 -Idist -c dist/mino.c -o dist/mino.o
+ *   cc -std=c99 -Idist examples/embed_gc_stress.c dist/mino.o \
+ *      -lm -lpthread -o build/embed_gc_stress
  */
 
 #include "mino.h"

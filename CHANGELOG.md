@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.384.0 — Embedder UX: Amalgamation Distribution
+
+Phase 3 of the pre-1.0 Embedder UX cycle. Adds an SQLite-influenced
+single-file vendor distribution under `dist/`, the canonical
+"drop-it-in-your-project" embedding shape.
+
+### Added
+
+- `./mino task amalgamate` produces:
+  - `dist/mino.c` — a single translation unit containing every lib
+    source plus its transitively-referenced internal headers, with
+    project-local `#include "X"` lines pre-expanded inline.
+    System `#include <X>` lines are kept in place so platform-
+    conditional blocks (`#ifdef _WIN32 ... <process.h> ...`) stay
+    intact.
+  - `dist/mino.h` — bit-identical copy of the public header.
+  - `dist/README.md` — two-line build recipe.
+- `./mino task clean-dist` removes the `dist/` tree.
+- `./mino task examples-amalgam` builds and runs every
+  `examples/embed_*.c` against the amalgamation. Wired into
+  `release-gate` alongside the existing source-tree examples task,
+  so both distribution shapes are exercised pre-tag.
+
+### Build recipe
+
+An embedder vendors `dist/mino.c` + `dist/mino.h` into their tree
+and compiles with no `-I` paths beyond the vendor directory:
+
+```
+cc -std=c99 -O2 -c mino.c -o mino.o
+cc app.c mino.o -lm -lpthread -o app
+```
+
+No transitive header dependencies. No build-system requirement
+(autotools / cmake / meson / bazel are unneeded). The
+`dist/mino.c` is reproducible bit-for-bit from any commit by
+running `./mino task amalgamate`.
+
+### Changed
+
+- Three pre-existing static-name duplicates were renamed in source
+  so the unified TU compiles cleanly: `kw_eq` in `src/prim/ns.c`
+  → `ns_kw_eq`; `count_args` in `src/prim/host.c` →
+  `host_count_args`; `count_args` in `src/eval/bc/compile.c` →
+  `bc_count_args`. Each had its own static implementation
+  alongside a same-named extern in another file (`kw_eq`) or a
+  parallel static (`count_args`); the renames make the local
+  scope explicit and remove the latent collision.
+
+- The four `examples/embed_*.c` header comments now show the
+  amalgamation build recipe as the canonical path. The
+  `./mino task examples` source-tree path is documented as the
+  development-workflow alternative.
+
+### Notes
+
+- The amalgamation is not source-controlled (`dist/` is gitignored).
+  It's produced fresh from the source tree at every tag and
+  published as a release asset.
+- Compile time for `dist/mino.c` is slower than the parallelised
+  source-tree build (one large TU vs. ~80 small ones); the
+  amalgamation is the *distribution* shape, not the development
+  workflow.
+
 ## v0.383.0 — Embedder UX: Type-Name Cleanup (Drop `_t`)
 
 Phase 2 of the pre-1.0 Embedder UX cycle. POSIX 1003.1 reserves

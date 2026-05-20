@@ -227,6 +227,183 @@
       (when (and (= @compiled 0) (not need-link))
         (println "  nothing to compile")))))
 
+;; ---- Amalgamation ----
+
+(def ^:private amalgam-search-paths
+  ["src" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
+   "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
+   "src/vendor/imath" "src/eval/bc" "src/eval/bc/jit" "src/eval/bc/stencils"
+   "src/regex"])
+
+(defn- amalgam-find-header
+  "Resolve a project-local #include \"X\" string to an on-disk path.
+   Walks `amalgam-search-paths` in order. Returns nil for headers that
+   cannot be located (e.g. the system stencil header forwarded through
+   the MINO_CPJIT_STENCILS_HEADER macro -- handled separately)."
+  [name]
+  (loop [paths amalgam-search-paths]
+    (cond
+      (empty? paths) nil
+      (file-exists? (str (first paths) "/" name)) (str (first paths) "/" name)
+      :else (recur (rest paths)))))
+
+(defn- amalgam-strip-comments
+  "Strip C-style line-comment trailers so the include-line parser
+   doesn't trip on `#include \"X\" /* note */`. Keeps the rest of
+   the line."
+  [line]
+  (str/replace line #"\s*/\*.*$" ""))
+
+(defn- amalgam-block-comment-open?
+  "Returns true when `line` opens a `/*` block comment that does NOT
+   close with a matching `*/` on the same line. Naive scan: doesn't
+   handle `/*` inside string literals, which mino's headers don't
+   contain. Returning true means subsequent lines are inside the
+   block comment until a `*/` is seen."
+  [line]
+  (let [opens   (count (re-seq #"/\*" line))
+        closes  (count (re-seq #"\*/" line))]
+    (> opens closes)))
+
+(defn- amalgam-block-comment-close?
+  "Returns true when `line` closes an open block comment (contains
+   `*/`)."
+  [line]
+  (some? (re-find #"\*/" line)))
+
+(defn- amalgam-expand
+  "Recursively expand a source or header file into the amalgamation
+   output stream. Drops project-local `#include \"X\"` lines (the
+   referenced header is inlined here if not already seen); collects
+   system `#include <X>` lines into the syshdrs atom; emits every
+   other line verbatim, preceded by a `#line` directive so compile
+   errors still resolve to the original source.
+
+   When an `#include \"X\"` line carries a trailing `/* ... */` block
+   comment that continues across subsequent lines, the continuation
+   lines are also absorbed and emitted as a single comment block, so
+   the comment doesn't leak as bare code after the inlined header.
+
+   `seen` tracks absolute paths already inlined so cyclic or repeated
+   includes become no-ops. `chunks` is the rope accumulating output;
+   each appended string is one chunk."
+  [path seen syshdrs chunks]
+  (when-not (@seen path)
+    (swap! seen conj path)
+    (let [src   (slurp path)
+          lines (str/split src "\n")
+          nlines (count lines)]
+      (swap! chunks conj (str "/* === " path " === */\n"))
+      (swap! chunks conj (str "#line 1 \"" path "\"\n"))
+      (loop [i 0]
+        (when (< i nlines)
+          (let [line  (nth lines i)
+                stripped (amalgam-strip-comments line)
+                proj  (re-find #"^\s*#\s*include\s+\"([^\"]+)\"" stripped)]
+            (cond
+              ;; Skip the file's own `#line` directives.
+              (re-find #"^\s*#\s*line\b" line)
+              (recur (+ i 1))
+
+              ;; Project-local include: inline the referenced file in
+              ;; place. If the original directive line opens a multi-
+              ;; line block comment, absorb continuation lines until the
+              ;; closing `*/`, emit them as a single comment block so
+              ;; the comment doesn't leak as code after the inlined
+              ;; header expansion.
+              proj
+              (let [hdr (nth proj 1)]
+                (if-let [found (amalgam-find-header hdr)]
+                  (let [;; Absorb the comment continuation if the
+                        ;; directive line opens an unclosed `/*` so the
+                        ;; trailing comment doesn't leak as code after
+                        ;; the inlined expansion.
+                        end-i (if (amalgam-block-comment-open? line)
+                                (loop [j (+ i 1)]
+                                  (cond
+                                    (>= j nlines) j
+                                    (amalgam-block-comment-close?
+                                      (nth lines j)) j
+                                    :else (recur (+ j 1))))
+                                i)]
+                    (swap! chunks conj
+                           (str "/* AMALGAM-INLINED " hdr
+                                " (absorbed " (+ 1 (- end-i i))
+                                " line"
+                                (if (= 0 (- end-i i)) "" "s")
+                                ") */\n"))
+                    (amalgam-expand found seen syshdrs chunks)
+                    (swap! chunks conj
+                           (str "#line " (+ end-i 2) " \"" path "\"\n"))
+                    (recur (+ end-i 1)))
+                  ;; Unfound: keep the directive verbatim.
+                  (do (swap! chunks conj (str line "\n"))
+                      (recur (+ i 1)))))
+
+              ;; System include (`<...>`): leave in place. Conditional
+              ;; platform blocks (#ifdef _WIN32 ... <process.h> ...) rely
+              ;; on staying inside their guards; hoisting would break
+              ;; cross-platform builds. System headers are idempotent
+              ;; under repeated inclusion, so dup cost is negligible.
+              :else
+              (do (swap! chunks conj (str line "\n"))
+                  (recur (+ i 1))))))))))
+
+(defn amalgamate
+  "Produce a single-file vendor distribution under dist/.
+
+   Writes:
+     dist/mino.h      -- copy of the public header
+     dist/mino.c      -- unified TU of every lib src + transitively
+                         referenced internal header, with project-
+                         local includes pre-expanded inline and system
+                         includes deduped at the top.
+     dist/README.md   -- two-line build recipe.
+
+   An embedder vendors the dist/ directory into their tree, compiles
+   with `cc -std=c99 -c mino.c`, and links `mino.o app.o -lm -lpthread`.
+   No -I paths beyond the dist directory; no transitive header
+   dependencies; one TU."
+  []
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (when-not (file-exists? "dist") (sh! "mkdir" "-p" "dist"))
+  (let [seen    (atom #{})
+        syshdrs (atom #{})
+        chunks  (atom [])]
+    ;; Recursively walk lib-srcs (excluding main.c -- the embedder
+    ;; provides their own entrypoint).
+    (doseq [src lib-srcs]
+      (amalgam-expand src seen syshdrs chunks))
+    (let [header  "/* mino single-file amalgamation. See dist/README.md for usage. */\n\n"
+          body    (str/join "" @chunks)]
+      (spit "dist/mino.c" (str header body))
+      (sh! "cp" "src/mino.h" "dist/mino.h")
+      (println (str "amalgamate: dist/mino.c (" (count body) " bytes body, "
+                    (count @seen) " files inlined)"))))
+  (spit "dist/README.md"
+        (str "# mino amalgamation\n\n"
+             "Single-file distribution of mino's embedding runtime.\n\n"
+             "## Build\n\n"
+             "```\n"
+             "cc -std=c99 -O2 -c mino.c\n"
+             "cc app.c mino.o -lm -lpthread -o app\n"
+             "```\n\n"
+             "## Files\n\n"
+             "- `mino.h` -- public embedding API (the only header you include).\n"
+             "- `mino.c` -- unified translation unit; one `.c` file builds the\n"
+             "  entire runtime.\n\n"
+             "## Versioning\n\n"
+             "The amalgamation is bit-identical to the mino source tree at\n"
+             "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
+             "`MINO_VERSION_*` macros.\n")))
+
+(defn clean-dist
+  "Remove the dist/ amalgamation tree."
+  []
+  (when (file-exists? "dist") (rm-rf "dist"))
+  (println "  cleaned dist/"))
+
 (defn clean
   "Remove object files, dep files, binary, and generated header."
   []
@@ -756,6 +933,7 @@
   (println (sh! "./mino_asan" "tests/run.clj"))
   (test-jit-parity)
   (examples)
+  (examples-amalgam)
   (if-let [mt (mino-tests-adjacent)]
     (do
       (println "  release-gate: chaining to mino-tests at" mt)
@@ -1125,6 +1303,39 @@
   (doseq [src embed-examples]
     (println (str "--- " src " ---"))
     (compile-and-run-example src)))
+
+(defn- compile-and-run-example-amalgam
+  "Compile one examples/embed_*.c against the amalgamation TU at
+   dist/mino.o (built by `amalgamate`) and run it. Verifies that the
+   single-file amalgamation distribution is sufficient for the public
+   surface used by every published example."
+  [src]
+  (let [slash   (str/last-index-of src "/")
+        base    (if slash (subs src (+ 1 slash)) src)
+        bin     (str "examples/" (subs base 0 (- (count base) 2)) "_amalgam")
+        pthread (if windows? [] ["-pthread"])
+        args    (into [cc] (concat ["-std=c99" "-O2" "-Idist"]
+                                   pthread ldflags
+                                   ["-o" bin src "dist/mino.o"]
+                                   libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
+
+(defn examples-amalgam
+  "Build and run every examples/embed_*.c against the single-file
+   amalgamation (`dist/mino.c`). Enforces that the amalgamation
+   distribution surface is sufficient for the public examples."
+  []
+  (amalgamate)
+  ;; Compile the amalgamation once; reuse the .o across examples.
+  (let [args (into [cc] ["-std=c99" "-O2" "-Idist" "-c" "dist/mino.c"
+                         "-o" "dist/mino.o"])]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args))
+  (doseq [src embed-examples]
+    (println (str "--- " src " (amalgam) ---"))
+    (compile-and-run-example-amalgam src)))
 
 ;; ---- Architecture quality gates ----
 

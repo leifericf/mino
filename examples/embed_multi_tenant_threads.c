@@ -14,11 +14,13 @@
  * mino at Tokio's runtime, libuv's worker pool, ASIO's io_context,
  * or whatever scheduling primitive they already have.
  *
- * Run:
- *   ./mino task build
- *   cc -std=c99 -Isrc -o embed_multi_tenant_threads \
- *       examples/embed_multi_tenant_threads.c <objects> -lm -lpthread
- *   ./embed_multi_tenant_threads
+ * Build (from repo root):
+ *   ./mino task examples
+ * Or use the amalgamation:
+ *   ./mino task amalgamate
+ *   cc -std=c99 -Idist -c dist/mino.c -o dist/mino.o
+ *   cc -std=c99 -Idist examples/embed_multi_tenant_threads.c \
+ *      dist/mino.o -lm -lpthread -o build/embed_multi_tenant_threads
  */
 
 #include "mino.h"

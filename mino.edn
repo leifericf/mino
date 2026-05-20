@@ -60,6 +60,13 @@
   examples        {:doc  "Build and run every examples/embed_*.c against the lib srcs"
                    :deps [build]
                    :task mino.tasks.builtin/examples}
+  amalgamate      {:doc  "Produce dist/mino.c + dist/mino.h single-file distribution"
+                   :task mino.tasks.builtin/amalgamate}
+  examples-amalgam {:doc  "Build every examples/embed_*.c against the dist/ amalgamation"
+                    :deps [build]
+                    :task mino.tasks.builtin/examples-amalgam}
+  clean-dist      {:doc  "Remove the dist/ amalgamation tree"
+                   :task mino.tasks.builtin/clean-dist}
   qa-arch         {:doc  "Architecture quality gates"
                    :task mino.tasks.builtin/qa-arch}
   build-stencil-extract {:doc  "Build tools/stencil_extract"

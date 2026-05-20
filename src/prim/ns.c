@@ -409,7 +409,7 @@ mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env)
  * (refer 'ns :rename {old new ...}) renames bound symbols.
  * The three options compose: :only wins, :exclude filters whatever survives,
  * :rename remaps the surviving names. */
-static int kw_eq(const mino_val *v, const char *s)
+static int ns_kw_eq(const mino_val *v, const char *s)
 {
     return v != NULL && mino_type_of(v) == MINO_KEYWORD
         && v->as.s.len == strlen(s)
@@ -564,11 +564,11 @@ mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
             return prim_throw_classified(S, "eval/arity", "MAR001",
                 "refer: option key without value");
         }
-        if (kw_eq(kw, "only")) {
+        if (ns_kw_eq(kw, "only")) {
             only_v = cur->as.cons.cdr->as.cons.car;
-        } else if (kw_eq(kw, "exclude")) {
+        } else if (ns_kw_eq(kw, "exclude")) {
             excl_v = cur->as.cons.cdr->as.cons.car;
-        } else if (kw_eq(kw, "rename")) {
+        } else if (ns_kw_eq(kw, "rename")) {
             rename_v = cur->as.cons.cdr->as.cons.car;
         }
         cur = cur->as.cons.cdr->as.cons.cdr;
