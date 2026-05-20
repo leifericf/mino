@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.387.1 — Embedder UX: Embedded-Source Canon Pass
+
+Phase 6.5 of the pre-1.0 Embedder UX cycle. Cosmetic / doc-
+quality follow-up: every embedded mino-source C-string literal in
+the mino-examples cookbook now uses the canonical Clojure
+vector-binding shape (`(fn [args] ...)`, `(let [...] ...)`, etc.)
+instead of the legacy paren-binding shape. mino's reader accepts
+both, but teaching material should default to canon. No API
+change in the mino runtime itself; this tag is a marker for the
+mino-examples sibling repo bump.
+
 ## v0.387.0 — Embedder UX: API Ergonomics
 
 Phase 6 of the pre-1.0 Embedder UX cycle. Closes the half-dozen
