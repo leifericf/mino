@@ -28,8 +28,8 @@ mino is an embeddable runtime. The host drives everything.
 
 **Must stay true:**
 
-- The host creates and owns `mino_state_t`. No global or ambient state exists.
-- The host creates environments (`mino_env_t`) and chooses which primitives
+- The host creates and owns `mino_state`. No global or ambient state exists.
+- The host creates environments (`mino_env`) and chooses which primitives
   to install. `mino_install_core` provides the language; `mino_install_io`
   is opt-in.
 - The host drives evaluation by calling `mino_eval`, `mino_eval_string`,
@@ -46,13 +46,14 @@ mino is an embeddable runtime. The host drives everything.
 
 **Must stay true:**
 
-- Each `mino_state_t` is fully isolated. No mutable data is shared between
+- Each `mino_state` is fully isolated. No mutable data is shared between
   states. States may coexist in the same process without synchronization.
 - Cross-state value transfer uses serialization (`mino_clone`). No
   pointers cross state boundaries.
-- There are no C-side concurrency primitives. Mino is single-threaded
-  per `mino_state_t`; the host may run multiple states from different
-  threads but each state is independent.
+- There are no C-side concurrency primitives by default. Each
+  `mino_state` is single-threaded until the host calls
+  `mino_set_thread_limit(S, n > 1)`; the host may run multiple states
+  from different threads, and each state is independent.
 - `mino_interrupt` is the only function safe to call from a thread other
   than the one running eval.
 
@@ -62,9 +63,9 @@ Two ownership categories exist in the C implementation:
 
 ### GC-owned (managed)
 
-All `mino_val_t`, `mino_env_t`, `mino_vec_node_t`, `mino_hamt_node_t`,
+All `mino_val`, `mino_env`, `mino_vec_node_t`, `mino_hamt_node_t`,
 and `hamt_entry_t` values are allocated through `gc_alloc_typed` and
-managed by the mark-sweep collector.
+managed by the generational + incremental collector.
 
 - The GC traces roots: registered environments, the gc_save stack, the
   conservative C stack scan, host refs, dynamic bindings, and intern tables.
@@ -76,15 +77,15 @@ managed by the mark-sweep collector.
 
 These structures use direct `malloc`/`calloc`/`realloc`:
 
-- `mino_state_t` itself (allocated in `mino_state_new`)
+- `mino_state` itself (allocated in `mino_state_new`)
 - `root_env_t` registry nodes
-- `mino_ref_t` retention nodes
+- `mino_ref` retention nodes
 - `dyn_binding_t` dynamic binding frames
-- `mino_repl_t` and its line buffer
+- `mino_repl` and its line buffer
 - Module cache and metadata table arrays
 - Intern table arrays
 - GC range index
-- Clone serialization buffers (`sbuf_t`)
+- Clone serialization buffers
 
 **Naming conventions:**
 
@@ -174,7 +175,7 @@ unchanged.
 
 The full registry lives in `src/eval/special_registry.c` as a static
 `k_special_forms[]` table; recognition is one pointer-eq table walk
-against the cached interned-symbol slots on `mino_state_t`.
+against the cached interned-symbol slots on `mino_state`.
 
 **Must stay true:** Adding or removing a special form requires explicit
 justification. Special forms cannot be shadowed by environment bindings

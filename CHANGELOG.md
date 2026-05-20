@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.390.0 — Public-Surface Audit and Docstring Sweep
+
+Behaviour-preserving cleanup pass over the embedder-visible surface in
+preparation for the next batch of canon-edges work. The three
+`MINO_UNSTABLE_*` blocks in `src/mino.h` (host thread pool / GC tuning /
+allocation profiler) now state explicitly that they stay UNSTABLE
+through the 0.x alpha series, so a reader of the header understands
+which surfaces are committed to and which still drift.
+
+`docs/ARCHITECTURE_CONTRACT.md` and `docs/INTERNAL_MODULE_MAP.md` had
+drifted onto an old `_t`-suffixed naming for the embedder-visible types
+(`mino_state_t` etc.). The public typedefs are unsuffixed (`mino_state`,
+`mino_env`, `mino_val`, `mino_ref`, `mino_repl`); the docs are corrected
+to match the header. Truly-internal `_t`-suffixed types
+(`mino_vec_node_t`, `hamt_entry_t`, `root_env_t`, `dyn_binding_t`, ...)
+keep their suffix. Section 4's claim that mino is single-threaded per
+state was tightened: each state defaults to a thread limit of 1, and
+the host opts in to multi-thread by raising the limit. A stale
+`sbuf_t` reference in the ownership list was dropped — the clone path
+no longer carries a named buffer struct.
+
+No source code, no public symbols, no behaviour changes.
+
 ## v0.389.14 — `is-thrown` Correctly Checks the Body, Not the Type Symbol
 
 `(is (thrown? Exception body))` used to silently pass whenever

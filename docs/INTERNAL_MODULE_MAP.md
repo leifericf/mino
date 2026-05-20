@@ -103,7 +103,7 @@ src/
 
 | File | Responsibility |
 |------|----------------|
-| `src/collections/clone.c` | Value cloning across mino_state_t instances (nil/bool/int/float/string/symbol/keyword/cons/vector/map/set). Host-facing `mino_clone` only. |
+| `src/collections/clone.c` | Value cloning across `mino_state` instances (nil/bool/int/float/string/symbol/keyword/cons/vector/map/set). Host-facing `mino_clone` only. |
 
 ## Async
 
@@ -197,15 +197,15 @@ Rules:
 ## How to Add a Primitive
 
 1. Choose the domain file (`src/prim/numeric.c`, `src/prim/collections.c`, etc.).
-2. Write the function with signature `mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)`.
+2. Write the function with signature `mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)`.
 3. Declare it in `src/prim/internal.h` under the appropriate domain section.
 4. Append a `{"name", prim_name, "docstring..."}` entry to the file's `k_prims_<domain>[]` table at TU bottom. The domain is already wired into `k_core_domains[]` in `src/prim/install.c`; new entries pick up the install loop automatically.
 5. Add tests in `tests/` and run `./mino task test`.
 
 ## How to Add a Special Form
 
-1. If the form has substantive logic, add the handler in the appropriate `src/eval/{bindings,control,defs,fn}.c` file by domain. Otherwise (short inline body), add a static helper in `src/eval/special_registry.c`. Either way the handler signature is `(mino_state_t *S, mino_val_t *form, mino_val_t *args, mino_env_t *env, int tail)`; ignore `tail` with `(void)tail;` if unused.
+1. If the form has substantive logic, add the handler in the appropriate `src/eval/{bindings,control,defs,fn}.c` file by domain. Otherwise (short inline body), add a static helper in `src/eval/special_registry.c`. Either way the handler signature is `(mino_state *S, mino_val *form, mino_val *args, mino_env *env, int tail)`; ignore `tail` with `(void)tail;` if unused.
 2. Declare the handler in `src/eval/special_internal.h` if it lives outside `special_registry.c`.
-3. Add the symbol slot on `mino_state_t` (e.g. `sf_myform`) and intern + cache it in `sf_init` (`src/eval/special.c`).
+3. Add the symbol slot on `mino_state` (e.g. `sf_myform`) and intern + cache it in `sf_init` (`src/eval/special.c`).
 4. Append a row to `k_special_forms[]` in `src/eval/special_registry.c`: `SF(sf_myform, "myform", eval_myform)`. The dispatch picks it up automatically.
 5. Add tests. Special forms are recognized by the evaluator, not installed.

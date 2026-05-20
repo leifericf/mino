@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 389
-#define MINO_VERSION_PATCH 14
+#define MINO_VERSION_MINOR 390
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1579,10 +1579,10 @@ void mino_quiesce_threads(mino_state *S);
 /* Host thread pool, factory, stack-size knobs [MINO_UNSTABLE_THREADPOOL]    */
 /* ------------------------------------------------------------------------- */
 /*
- * UNSTABLE: this section is provisional. The pool ABI, factory
- * callback shape, and stack-size knobs may change in subsequent
- * releases. Symbols outside this section aim for source stability;
- * symbols inside this block do not.
+ * UNSTABLE: this section is provisional and stays UNSTABLE through the
+ * 0.x alpha series. The pool ABI, factory callback shape, and stack-
+ * size knobs may change in subsequent releases. Symbols outside this
+ * section aim for source stability; symbols inside this block do not.
  *
  * The default model is "spawn-per-future": each `(future ...)` calls
  * pthread_create / CreateThread and the resulting OS thread runs the
@@ -1658,11 +1658,12 @@ void mino_set_thread_stack_size(mino_state *S, size_t n);
 
 /*
  * UNSTABLE: GC tuning, kind enum, phase constants, and the stats
- * struct are provisional. The collector is still evolving
- * (generational + incremental layout, threshold heuristics) and this
- * section will track those changes. Pin behavior through explicit
- * mino_gc_collect calls at quiescent points; do not rely on tuning
- * parameter ranges or the stats struct layout across releases.
+ * struct stay UNSTABLE through the 0.x alpha series. The collector is
+ * still evolving (generational + incremental layout, threshold
+ * heuristics) and this section will track those changes. Pin behavior
+ * through explicit mino_gc_collect calls at quiescent points; do not
+ * rely on tuning parameter ranges or the stats struct layout across
+ * releases.
  *
  * Kinds of collection the host can request. Use at quiescent points such
  * as between REPL turns, after bulk import, or before long-idle periods.
@@ -1821,10 +1822,10 @@ void mino_gc_pause_hist(mino_state *S,
 
 /*
  * UNSTABLE: the allocation profiler is opt-in (compile-time gated on
- * -DMINO_ALLOC_PROFILE=1) and its output format is in flux. The
- * functions below are part of the public surface for parity with
- * tooling that needs profile data, but their shape may change in
- * subsequent releases.
+ * -DMINO_ALLOC_PROFILE=1) and stays UNSTABLE through the 0.x alpha
+ * series; its output format is in flux. The functions below are part
+ * of the public surface for parity with tooling that needs profile
+ * data, but their shape may change in subsequent releases.
  *
  * Reports 1 when the binary was built with -DMINO_ALLOC_PROFILE=1, else 0.
  * The recording paths and dump output are only meaningful in profile builds.
