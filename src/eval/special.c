@@ -1065,6 +1065,7 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
     case MINO_MAP_ENTRY:
     case MINO_TX_REF:
     case MINO_AGENT:
+    case MINO_CHAN:
         return form;
     case MINO_SYMBOL:
         return eval_symbol(S, form, env);

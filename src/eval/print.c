@@ -583,6 +583,10 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
     case MINO_HOST_ARRAY:
         print_host_array(S, out, v);
         return;
+    case MINO_CHAN:
+        /* `#chan[0xPTR]` -- identity-based, like agents / refs. */
+        fprintf(out, "#chan[%p]", (const void *)v);
+        return;
     }
 }
 

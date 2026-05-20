@@ -270,6 +270,7 @@ const char *type_tag_str(const mino_val *v)
     case MINO_MAP_ENTRY: return "map-entry";
     case MINO_TX_REF:    return "ref";
     case MINO_AGENT:     return "agent";
+    case MINO_CHAN:      return "chan";
     }
     return "unknown";
 }

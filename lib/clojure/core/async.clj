@@ -2,129 +2,51 @@
 ;; go macro state machine. One namespace, two halves: the channel
 ;; mechanics first, the high-level combinators after.
 ;;
-;; Channel state lives inside an atom holding a map with keys:
+;; A channel is a MINO_CHAN cell: a C primitive that owns its buffer,
+;; pending-putters and pending-takers queues, the closed flag, and
+;; optional transducer + exception handler hooks in directly-mutable
+;; C slots. Each offer!/poll!/put!/take! is one C call; no script-side
+;; state-map allocation per cycle. The transducer reducing function
+;; (when present) runs at the script level and writes into the channel
+;; buffer via `chan-buf-add` -- the xform itself stays in mino code so
+;; user-supplied transducers compose naturally with the rest of the
+;; runtime.
 ;;
-;;   :kind         -- :chan (marker used by chan?)
-;;   :buf-kind     -- :fixed | :dropping | :sliding | :promise | nil
-;;   :buf-capacity -- positive integer (1 for promise, 0 for unbuffered)
-;;   :buf-items    -- vector of buffered values (non-promise)
-;;   :promise-set? -- true once the promise latch has received a value
-;;   :promise-val  -- latched value
-;;   :takers       -- vector of pending take ops
-;;   :putters      -- vector of pending put ops
-;;   :closed?      -- true once close! has run
-;;   :xform        -- transducer reducing function (or nil)
-;;   :ex-handler   -- exception handler called when xform throws (or nil)
-;;
-;; A pending op is a map:
-;;
-;;   :val       -- value to put (nil for takes)
-;;   :callback  -- fn to invoke with the op result (or nil)
-;;   :flag      -- atom shared across alts siblings (nil for regular ops)
-;;   :ch        -- channel handle (included in alts callback result)
-;;
-;; An alts flag is (atom :pending); committing is (reset! flag :committed).
-;; Scheduling of pending callbacks goes through the C scheduler via
-;; `async-sched-enqueue*`. Timers (`timeout*`) and the drain loop
-;; (`drain!`, `drain-loop!`) stay in C so host embedders and timer
-;; callbacks share a single run queue with the mino-level code.
+;; A pending op carried by the C queue is {val, callback, flag, ch}.
+;; Alts arbitration uses a shared atom-flag (atom :pending); committing
+;; is (reset! flag :committed). The C side checks the flag before
+;; delivering the op so non-committed ops in other channels become
+;; tombstones (compacted on next access).
 
 (ns clojure.core.async
   (:refer-clojure :exclude [merge into reduce transduce partition-by]))
 
-(def ^:private MAX-PENDING 1024)
-
 ;; ---------------------------------------------------------------------
-;; Scheduling
+;; Buffer kind <-> integer code mapping
 ;; ---------------------------------------------------------------------
+;;
+;; The C `chan-new` primitive uses small integer kind codes:
+;;   0 = NONE (unbuffered)   3 = SLIDING
+;;   1 = FIXED                4 = PROMISE
+;;   2 = DROPPING
+;;
+;; Script-side descriptors (buffer / dropping-buffer / sliding-buffer)
+;; carry a {:buf-kind :fixed :capacity n} map so existing call sites
+;; that pass a descriptor instead of an int stay compatible.
 
-(defn- schedule! [cb val]
-  (when cb
-    (async-sched-enqueue* cb val)))
+(def ^:private BUF-KIND-NONE     0)
+(def ^:private BUF-KIND-FIXED    1)
+(def ^:private BUF-KIND-DROPPING 2)
+(def ^:private BUF-KIND-SLIDING  3)
+(def ^:private BUF-KIND-PROMISE  4)
 
-(defn- schedule-op! [op val]
-  (when-let [cb (:callback op)]
-    (if (:flag op)
-      (async-sched-enqueue* cb [val (:ch op)])
-      (async-sched-enqueue* cb val))))
-
-(defn- flag-active? [op]
-  (let [f (:flag op)]
-    (or (nil? f) (= :pending @f))))
-
-(defn- try-commit! [op]
-  (if-let [f (:flag op)]
-    (if (= :pending @f)
-      (do (reset! f :committed) true)
-      false)
-    true))
-
-;; ---------------------------------------------------------------------
-;; Buffer helpers (operate on the state map; no atom involved)
-;; ---------------------------------------------------------------------
-
-(defn- buf-count [state]
-  (case (:buf-kind state)
-    nil      0
-    :promise (if (:promise-set? state) 1 0)
-    (count (:buf-items state))))
-
-(defn- buf-full? [state]
-  (case (:buf-kind state)
-    nil      true
-    :fixed   (>= (count (:buf-items state)) (:buf-capacity state))
-    :dropping false
-    :sliding  false
-    :promise (:promise-set? state)))
-
-(defn- buf-add [state val]
-  (case (:buf-kind state)
-    :fixed
-    (update state :buf-items conj val)
-
-    :dropping
-    (if (>= (count (:buf-items state)) (:buf-capacity state))
-      state
-      (update state :buf-items conj val))
-
-    :sliding
-    (let [items (:buf-items state)
-          cap   (:buf-capacity state)]
-      (if (>= (count items) cap)
-        (assoc state :buf-items (conj (subvec items 1) val))
-        (assoc state :buf-items (conj items val))))
-
-    :promise
-    (if (:promise-set? state)
-      state
-      (assoc state :promise-set? true :promise-val val))))
-
-(defn- buf-remove [state]
-  (case (:buf-kind state)
-    :promise
-    [(:promise-val state) state]
-    (let [items (:buf-items state)]
-      [(first items) (assoc state :buf-items (subvec items 1))])))
-
-(defn- drop-committed
-  "Trim leading ops whose alts flag is already committed."
-  [ops]
-  (loop [ops ops]
-    (if (and (seq ops) (not (flag-active? (first ops))))
-      (recur (subvec ops 1))
-      ops)))
-
-;; ---------------------------------------------------------------------
-;; Predicates and constructors
-;; ---------------------------------------------------------------------
-
-(defn- chan-state? [x]
-  (and (map? x) (= :chan (:kind x))))
-
-(defn chan?
-  "True if x is a channel."
-  [x]
-  (and (atom? x) (chan-state? @x)))
+(defn- buf-kind->int [k]
+  (case k
+    :fixed    BUF-KIND-FIXED
+    :dropping BUF-KIND-DROPPING
+    :sliding  BUF-KIND-SLIDING
+    :promise  BUF-KIND-PROMISE
+    BUF-KIND-NONE))
 
 (defn buffer
   "Fixed-size buffer descriptor. Pairs with chan."
@@ -144,31 +66,9 @@
 (defn- buffer? [x]
   (and (map? x) (= :buf (:kind x))))
 
-(defn- new-chan-state [buf-kind buf-cap xform ex-handler]
-  {:kind         :chan
-   :buf-kind     buf-kind
-   :buf-capacity buf-cap
-   :buf-items    []
-   :promise-set? false
-   :promise-val  nil
-   :takers       []
-   :putters      []
-   :closed?      false
-   :xform        xform
-   :ex-handler   ex-handler})
-
-(defn- install-xform!
-  "Attach a transducer to a channel. The reducing step is wired to write
-   results into the channel's buffer."
-  [ch xform ex-handler]
-  (let [add-fn (fn
-                 ([result] result)
-                 ([result input]
-                  (swap! ch (fn [state] (buf-add state input)))
-                  result))
-        rf     (xform add-fn)]
-    (swap! ch assoc :xform rf :ex-handler ex-handler)
-    nil))
+;; ---------------------------------------------------------------------
+;; Channel construction
+;; ---------------------------------------------------------------------
 
 (defn chan
   "Create a channel.
@@ -182,18 +82,26 @@
   ([buf-or-n xform ex-handler]
    (let [[kind cap]
          (cond
-           (nil? buf-or-n)                       [nil 0]
+           (nil? buf-or-n)                       [BUF-KIND-NONE 0]
            (and (integer? buf-or-n)
-                (zero? buf-or-n))                [nil 0]
-           (integer? buf-or-n)                   [:fixed buf-or-n]
-           (buffer? buf-or-n)                    [(:buf-kind buf-or-n)
+                (zero? buf-or-n))                [BUF-KIND-NONE 0]
+           (integer? buf-or-n)                   [BUF-KIND-FIXED buf-or-n]
+           (buffer? buf-or-n)                    [(buf-kind->int (:buf-kind buf-or-n))
                                                   (:capacity buf-or-n)]
            :else
            (throw (str "chan: buffer-or-n must be nil, a non-negative "
                        "integer, or a buffer")))
-         ch (atom (new-chan-state kind cap nil nil))]
+         ch (chan-new kind cap nil nil)]
      (when xform
-       (install-xform! ch xform ex-handler))
+       ;; Wrap the user xform around an `add-fn` reducing step whose
+       ;; effect is to push outputs into the channel's buffer.
+       (let [add-fn (fn
+                      ([result] result)
+                      ([result input]
+                       (chan-buf-add ch input)
+                       result))
+             rf     (xform add-fn)]
+         (chan-set-xform ch rf ex-handler)))
      ch)))
 
 (defn promise-chan
@@ -201,69 +109,48 @@
   ([] (promise-chan nil nil))
   ([xform] (promise-chan xform nil))
   ([xform ex-handler]
-   (let [ch (atom (new-chan-state :promise 1 nil nil))]
+   (let [ch (chan-new BUF-KIND-PROMISE 1 nil nil)]
      (when xform
-       (install-xform! ch xform ex-handler))
+       (let [add-fn (fn
+                      ([result] result)
+                      ([result input]
+                       (chan-buf-add ch input)
+                       result))
+             rf     (xform add-fn)]
+         (chan-set-xform ch rf ex-handler)))
      ch)))
+
+;; ---------------------------------------------------------------------
+;; Basic ops
+;; ---------------------------------------------------------------------
 
 (defn closed?
   "True if the channel is closed."
   [ch]
-  (:closed? @ch))
-
-;; ---------------------------------------------------------------------
-;; Buffer → takers flushing
-;; ---------------------------------------------------------------------
-
-(defn- flush-buf-to-takers
-  "Move buffered values into waiting takers. Returns [new-state pairs]
-   where pairs is [[op val] ...]; caller commits flags and schedules."
-  [state]
-  (loop [st state pairs []]
-    (let [ts (drop-committed (:takers st))]
-      (if (and (pos? (buf-count st)) (seq ts))
-        (let [[v st'] (buf-remove st)
-              taker   (first ts)
-              rest-t  (subvec ts 1)]
-          (recur (assoc st' :takers rest-t)
-                 (conj pairs [taker v])))
-        [(assoc st :takers ts) pairs]))))
-
-(defn- commit-and-schedule-pairs! [pairs]
-  (doseq [[op v] pairs]
-    (try-commit! op)
-    (schedule-op! op v)))
-
-;; ---------------------------------------------------------------------
-;; Transducer step on a channel
-;; ---------------------------------------------------------------------
+  (chan-closed? ch))
 
 (defn- run-xform-step!
-  "Invoke the channel's xform step with val, then flush newly buffered
-   values to waiting takers. Handles the exception path via ex-handler
-   and closes the channel if the step returned (reduced ...)."
+  "Run the channel's transducer reducing fn for one input value. The
+   add-fn baked into rf writes outputs into the channel's buffer via
+   chan-buf-add. Returns true normally; false if the rf signalled
+   reduced (channel becomes closed)."
   [ch val]
-  (let [state-before @ch
-        rf           (:xform state-before)
-        ex-handler   (:ex-handler state-before)
-        result       (atom nil)]
-    (try
-      (reset! result (rf nil val))
-      (catch e
-        (when ex-handler
-          (let [recovery (try (ex-handler (str e))
-                              (catch _ nil))]
-            (when-not (nil? recovery)
-              (swap! ch (fn [s] (buf-add s recovery))))))))
-    (let [[s1 pairs] (flush-buf-to-takers @ch)]
-      (reset! ch s1)
-      (commit-and-schedule-pairs! pairs))
-    (when (and @result (reduced? @result))
-      (close! ch))))
-
-;; ---------------------------------------------------------------------
-;; offer! / poll!
-;; ---------------------------------------------------------------------
+  (let [rf  (chan-get-xform ch)
+        exh (chan-get-ex-handler ch)]
+    (let [r (if exh
+              (try (rf nil val)
+                   (catch e
+                     (let [recovery (exh e)]
+                       (when (some? recovery)
+                         (chan-buf-add ch recovery))
+                       nil)))
+              (rf nil val))]
+      (chan-flush-buf-to-takers ch)
+      (when (reduced? r)
+        ;; Drain the wrapped completion arity then close.
+        (rf (deref r))
+        (chan-close ch))
+      true)))
 
 (defn offer!
   "Put val on ch if immediately possible. Returns true/false. Never
@@ -272,74 +159,19 @@
   (when (nil? val)
     (throw "cannot put nil on a channel"))
   (cond
-    (:closed? @ch)
+    (chan-closed? ch)
     false
 
-    (:xform @ch)
-    (do (run-xform-step! ch val)
-        true)
+    (chan-get-xform ch)
+    (do (run-xform-step! ch val) true)
 
     :else
-    (let [accepted   (atom false)
-          taker-pair (atom nil)]
-      (swap! ch
-        (fn [state]
-          (let [ts (drop-committed (:takers state))]
-            (cond
-              (seq ts)
-              (let [t      (first ts)
-                    rest-t (subvec ts 1)]
-                (reset! taker-pair [t val])
-                (reset! accepted true)
-                (assoc state :takers rest-t))
-
-              (and (:buf-kind state) (not (buf-full? state)))
-              (do (reset! accepted true)
-                  (buf-add state val))
-
-              :else
-              (assoc state :takers ts)))))
-      (when-let [pair @taker-pair]
-        (try-commit! (first pair))
-        (schedule-op! (first pair) (second pair)))
-      @accepted)))
+    (chan-offer ch val)))
 
 (defn poll!
   "Take from ch if immediately available. Returns the value or nil."
   [ch]
-  (let [val         (atom nil)
-        putter-pair (atom nil)]
-    (swap! ch
-      (fn [state]
-        (cond
-          (pos? (buf-count state))
-          (let [[v s1]          (buf-remove state)
-                active-putters  (drop-committed (:putters s1))]
-            (reset! val v)
-            (if (seq active-putters)
-              (let [p      (first active-putters)
-                    rest-p (subvec active-putters 1)]
-                (reset! putter-pair [p true])
-                (buf-add (assoc s1 :putters rest-p) (:val p)))
-              (assoc s1 :putters active-putters)))
-
-          :else
-          (let [active-putters (drop-committed (:putters state))]
-            (if (seq active-putters)
-              (let [p      (first active-putters)
-                    rest-p (subvec active-putters 1)]
-                (reset! val (:val p))
-                (reset! putter-pair [p true])
-                (assoc state :putters rest-p))
-              (assoc state :putters active-putters))))))
-    (when-let [pair @putter-pair]
-      (try-commit! (first pair))
-      (schedule-op! (first pair) (second pair)))
-    @val))
-
-;; ---------------------------------------------------------------------
-;; put! / take!
-;; ---------------------------------------------------------------------
+  (chan-poll ch))
 
 (defn put!
   "Asynchronously put val on ch. Optional cb receives true (delivered) or
@@ -349,293 +181,92 @@
    (when (nil? val)
      (throw "cannot put nil on a channel"))
    (cond
-     (:closed? @ch)
-     (do (schedule! cb false) nil)
+     (chan-closed? ch)
+     (do (when cb (async-sched-enqueue* cb false)) nil)
 
-     (:xform @ch)
+     (chan-get-xform ch)
      (do (run-xform-step! ch val)
-         (schedule! cb (if (:closed? @ch) false true))
+         (when cb (async-sched-enqueue* cb (if (chan-closed? ch) false true)))
          nil)
 
      :else
-     (let [taker-pair (atom nil)
-           outcome    (atom nil)]
-       (swap! ch
-         (fn [state]
-           (let [ts (drop-committed (:takers state))]
-             (cond
-               (seq ts)
-               (let [t      (first ts)
-                     rest-t (subvec ts 1)]
-                 (reset! taker-pair [t val])
-                 (reset! outcome true)
-                 (assoc state :takers rest-t))
-
-               (and (:buf-kind state) (not (buf-full? state)))
-               (do (reset! outcome true)
-                   (buf-add state val))
-
-               (>= (count (:putters state)) MAX-PENDING)
-               (do (reset! outcome :too-many) state)
-
-               :else
-               (let [op {:val val :callback cb :flag nil :ch ch}]
-                 (reset! outcome :pending)
-                 (-> state
-                     (assoc :takers ts)
-                     (update :putters conj op)))))))
-       (case @outcome
-         :too-many (throw "channel has too many pending puts (> 1024)")
-         :pending  nil
-         (schedule! cb @outcome))
-       (when-let [pair @taker-pair]
-         (try-commit! (first pair))
-         (schedule-op! (first pair) (second pair)))
-       nil))))
+     (do (chan-put ch val cb) nil))))
 
 (defn take!
   "Asynchronously take from ch. cb receives the value, or nil if ch is
    closed and empty. Returns nil."
   [ch cb]
-  (let [putter-pair (atom nil)
-        done?       (atom false)
-        val         (atom nil)
-        err         (atom nil)]
-    (swap! ch
-      (fn [state]
-        (cond
-          (pos? (buf-count state))
-          (let [[v s1]         (buf-remove state)
-                active-putters (drop-committed (:putters s1))]
-            (reset! val v)
-            (reset! done? true)
-            (if (seq active-putters)
-              (let [p      (first active-putters)
-                    rest-p (subvec active-putters 1)]
-                (reset! putter-pair [p true])
-                (buf-add (assoc s1 :putters rest-p) (:val p)))
-              (assoc s1 :putters active-putters)))
-
-          :else
-          (let [ps (drop-committed (:putters state))]
-            (cond
-              (seq ps)
-              (let [p      (first ps)
-                    rest-p (subvec ps 1)]
-                (reset! val (:val p))
-                (reset! done? true)
-                (reset! putter-pair [p true])
-                (assoc state :putters rest-p))
-
-              (:closed? state)
-              (do (reset! val nil) (reset! done? true) state)
-
-              (>= (count (:takers state)) MAX-PENDING)
-              (do (reset! err :too-many) state)
-
-              :else
-              (let [op {:val nil :callback cb :flag nil :ch ch}]
-                (-> state
-                    (assoc :putters ps)
-                    (update :takers conj op))))))))
-    (case @err
-      :too-many (throw "channel has too many pending takes (> 1024)")
-      nil)
-    (when @done?
-      (schedule! cb @val))
-    (when-let [pair @putter-pair]
-      (try-commit! (first pair))
-      (schedule-op! (first pair) (second pair)))
-    nil))
-
-;; ---------------------------------------------------------------------
-;; close!
-;; ---------------------------------------------------------------------
+  (chan-take ch cb)
+  nil)
 
 (defn close!
   "Close the channel. Pending takers receive nil; pending putters false.
    Buffered values still flow to waiting takers."
   [ch]
-  (when-not (:closed? @ch)
-    ;; Mark closed and run the xform completion step (outside swap! so
-    ;; the step can freely swap! again).
-    (swap! ch assoc :closed? true)
-    (when-let [rf (:xform @ch)]
-      (try (rf nil) (catch _ nil)))
-    (let [[st1 buf-pairs]   (flush-buf-to-takers @ch)
-          active-takers     (drop-committed (:takers st1))
-          active-putters    (drop-committed (:putters st1))]
-      (reset! ch (assoc st1 :takers [] :putters []))
-      (commit-and-schedule-pairs! buf-pairs)
-      (doseq [op active-takers]
-        (try-commit! op)
-        (schedule-op! op nil))
-      (doseq [op active-putters]
-        (try-commit! op)
-        (schedule-op! op false))
-      ;; Drain the wake-callbacks we just enqueued. Parked takers and
-      ;; putters block on promise deref, so nothing else will pull
-      ;; them off the run queue; without this drain, blocking <!!/>!!
-      ;; calls deadlock when close! is the only signal that can release
-      ;; them.
-      (drain!)))
+  (when-not (chan-closed? ch)
+    ;; If the channel has a transducer, run its completion arity to
+    ;; flush any held state into the buffer before closing.
+    (when-let [rf (chan-get-xform ch)]
+      (try (rf nil) (catch _ nil))
+      (chan-flush-buf-to-takers ch))
+    (chan-close ch)
+    ;; Drain wake-callbacks the close pushed onto the scheduler so
+    ;; blocking <!! / >!! callers see the resolution before any other
+    ;; producer's wake has a chance to leave them parked.
+    (drain!))
   nil)
+
+(defn chan?
+  "True if x is a channel."
+  [x]
+  (chan-instance? x))
 
 ;; ---------------------------------------------------------------------
 ;; alts!
 ;; ---------------------------------------------------------------------
 
-(defn- try-immediate-put
-  "Try to complete a [ch val] put op immediately. Returns [result ch] or
-   nil if pending."
-  [ch val]
-  (when (nil? val)
-    (throw "cannot put nil on a channel"))
+(defn- alts-opts-map
+  "Normalises alts!/alts-callback trailing args to an opts map."
+  [opts]
   (cond
-    (:closed? @ch)
-    [false ch]
-
-    (:xform @ch)
-    (do (run-xform-step! ch val)
-        [true ch])
-
-    :else
-    (let [outcome    (atom :pending)
-          taker-pair (atom nil)]
-      (swap! ch
-        (fn [state]
-          (let [ts (drop-committed (:takers state))]
-            (cond
-              (seq ts)
-              (let [t      (first ts)
-                    rest-t (subvec ts 1)]
-                (reset! taker-pair [t val])
-                (reset! outcome :delivered)
-                (assoc state :takers rest-t))
-
-              (and (:buf-kind state) (not (buf-full? state)))
-              (do (reset! outcome :delivered)
-                  (buf-add state val))
-
-              :else
-              (assoc state :takers ts)))))
-      (when-let [pair @taker-pair]
-        (try-commit! (first pair))
-        (schedule-op! (first pair) (second pair)))
-      (when (= :delivered @outcome)
-        [true ch]))))
-
-(defn- try-immediate-take
-  "Try to complete a take op on ch immediately. Returns [val ch] or nil."
-  [ch]
-  (let [outcome     (atom :pending)
-        val         (atom nil)
-        putter-pair (atom nil)]
-    (swap! ch
-      (fn [state]
-        (cond
-          (pos? (buf-count state))
-          (let [[v s1]         (buf-remove state)
-                active-putters (drop-committed (:putters s1))]
-            (reset! val v)
-            (reset! outcome :delivered)
-            (if (seq active-putters)
-              (let [p      (first active-putters)
-                    rest-p (subvec active-putters 1)]
-                (reset! putter-pair [p true])
-                (buf-add (assoc s1 :putters rest-p) (:val p)))
-              (assoc s1 :putters active-putters)))
-
-          :else
-          (let [ps (drop-committed (:putters state))]
-            (cond
-              (seq ps)
-              (let [p      (first ps)
-                    rest-p (subvec ps 1)]
-                (reset! val (:val p))
-                (reset! outcome :delivered)
-                (reset! putter-pair [p true])
-                (assoc state :putters rest-p))
-
-              (:closed? state)
-              (do (reset! val nil)
-                  (reset! outcome :delivered) state)
-
-              :else
-              (assoc state :putters ps))))))
-    (when-let [pair @putter-pair]
-      (try-commit! (first pair))
-      (schedule-op! (first pair) (second pair)))
-    (when (= :delivered @outcome)
-      [@val (second [nil ch])])))
-
-(defn- try-immediate
-  "Walk ops in index order, return [result ch] for the first op that can
-   complete immediately; nil if none can."
-  [ops indexed]
-  (loop [i 0]
-    (if (>= i (count indexed))
-      nil
-      (let [k  (nth indexed i)
-            op (nth ops k)
-            r  (if (vector? op)
-                 (try-immediate-put (nth op 0) (nth op 1))
-                 (try-immediate-take op))]
-        (if r
-          (if (vector? op)
-            [(first r) (nth op 0)]
-            [(first r) op])
-          (recur (+ i 1)))))))
-
-(defn- register-pending-alts [ops flag cb]
-  (doseq [op ops]
-    (if (vector? op)
-      (let [ch  (nth op 0)
-            val (nth op 1)]
-        (when (nil? val) (throw "cannot put nil on a channel"))
-        (let [new-op {:val val :callback cb :flag flag :ch ch}]
-          (swap! ch (fn [state]
-                      (if (:closed? state)
-                        state
-                        (update state :putters conj new-op))))))
-      (let [ch     op
-            new-op {:val nil :callback cb :flag flag :ch ch}]
-        (swap! ch (fn [state]
-                    (if (:closed? state)
-                      state
-                      (update state :takers conj new-op))))))))
+    (empty? opts)                                 {}
+    (and (= 1 (count opts)) (map? (first opts)))  (first opts)
+    :else                                         (apply hash-map opts)))
 
 (defn- alts-start
-  "Core alts machinery. Tries immediate completion; if nothing ready and
-   a :default is given, returns [default :default]; otherwise registers
-   pending ops on each channel with a shared arbitration flag.
-   Returns [result ch] or nil (= pending)."
+  "Core alts machinery. Registers each op on its channel with a shared
+   arbitration flag. The C side attempts immediate completion on each
+   register call; if any op completes immediately, it schedules the cb
+   and the other registered ops become tombstones (their flag is
+   committed elsewhere). If none completes and :default is given,
+   schedules cb with [default :default]. Returns nil; the cb fires once
+   exactly one op wins."
   [ops opts cb]
   (when (zero? (count ops))
     (throw "alts!: ops vector must not be empty"))
   (let [n         (count ops)
         base      (vec (range n))
         indices   (if (:priority opts) base (shuffle base))
-        immediate (try-immediate ops indices)]
-    (cond
-      immediate             immediate
-      (contains? opts :default)
-      [(:default opts) :default]
-
-      :else
-      (let [flag (atom :pending)]
-        (register-pending-alts ops flag cb)
-        nil))))
-
-(defn- alts-opts-map
-  "Normalises alts!/alts-callback trailing args to an opts map. Accepts
-   the canon kwargs surface (:priority true :default val), the legacy
-   single-map form ({:priority true :default val}), or none."
-  [opts]
-  (cond
-    (empty? opts)                                 {}
-    (and (= 1 (count opts)) (map? (first opts)))  (first opts)
-    :else                                         (apply hash-map opts)))
+        flag      (atom :pending)
+        default?  (contains? opts :default)]
+    ;; Register all ops on the flag. The C side attempts immediate
+    ;; completion; the first one to win commits the flag.
+    (loop [i 0]
+      (when (and (< i n) (= :pending @flag))
+        (let [k (nth indices i)
+              op (nth ops k)]
+          (if (vector? op)
+            (let [ch  (nth op 0)
+                  val (nth op 1)]
+              (when (nil? val) (throw "cannot put nil on a channel"))
+              (chan-put-alts ch val cb flag))
+            (chan-take-alts op cb flag))
+          (recur (inc i)))))
+    ;; If still pending and :default given, deliver default.
+    (when (and default? (= :pending @flag))
+      (reset! flag :committed)
+      (async-sched-enqueue* cb [(:default opts) :default]))
+    nil))
 
 (defn alts!
   "Atomically complete one of several channel operations.
@@ -648,8 +279,9 @@
   (let [opts-m (alts-opts-map opts)
         result (atom nil)
         cb     (fn [r] (reset! result r))]
-    (or (alts-start ops opts-m cb)
-        (do (drain!) @result))))
+    (alts-start ops opts-m cb)
+    (drain!)
+    @result))
 
 (defn alts-callback
   "Callback-style alts matching the old C alts* contract. cb fires with
@@ -657,17 +289,15 @@
    ops register pending on a shared flag and cb fires when one wins.
    Returns 1 (matches the old C contract)."
   [ops opts cb]
-  (when-let [immediate (alts-start ops opts cb)]
-    (async-sched-enqueue* cb immediate))
+  (alts-start ops opts cb)
   1)
 
 ;; ---------------------------------------------------------------------
 ;; Compatibility aliases
 ;;
-;; The go macro transform (in core/async) emits calls to chan-take* /
-;; chan-put* / alts* / chan* / chan?* / buf-fixed* etc. These used to be
-;; C primitives. Point them at the mino-level functions so the transform
-;; keeps working once the C primitives are removed.
+;; The go macro transform emits calls to chan-take* / chan-put* /
+;; alts* / chan* / chan?* / buf-fixed* etc. These names parallel the
+;; user-visible mino-level fns above.
 ;; ---------------------------------------------------------------------
 
 (def chan*         chan)
@@ -684,24 +314,13 @@
 (def buf-sliding*  sliding-buffer)
 
 (defn buf-promise*
-  "Kept for compatibility: returns a promise buffer descriptor. In the
-   old C layer this was a buffer value passed to chan*; with pure-mino
-   channels we collapse chan + promise buffer into promise-chan."
+  "Kept for compatibility: returns a promise buffer descriptor."
   []
   {:kind :buf :buf-kind :promise :capacity 1})
 
-(defn chan-set-xform*
-  "Set transducer rf (and optional ex-handler) on an existing channel."
-  [ch rf ex-handler]
-  (swap! ch assoc :xform rf :ex-handler ex-handler)
-  nil)
-
-(defn chan-buf-add*
-  "Raw buffer add, called from a transducer reducing step."
-  [ch val]
-  (swap! ch (fn [state] (buf-add state val)))
-  nil)
-
+;; Forwards for the script-side names that legacy code may still call.
+(def chan-set-xform* chan-set-xform)
+(def chan-buf-add*   chan-buf-add)
 ;; ---------------------------------------------------------------------
 ;; High-level combinators (timeout, go, blocking bridges, mult/pub/sub,
 ;; pipe, mix, pipeline). The go macro transforms its body into a state

@@ -21,6 +21,7 @@
 #include "eval/bc/internal.h"        /* mino_bc_trace_fn_bc */
 #include "runtime/host_threads.h"    /* mino_future_trace_impl, mino_future_gc_sweep */
 #include "collections/internal.h"    /* mino_bigint_free (collections-adjacent bignum) */
+#include "async/chan.h"              /* mino_chan_trace, mino_chan_finalize */
 
 #include <stdlib.h>                  /* free() for malloc-owned slot arrays */
 
@@ -168,6 +169,9 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
         PUSH(v->as.agent.err);
         PUSH(v->as.agent.err_handler);
         break;
+    case MINO_CHAN:
+        mino_chan_trace(S, v);
+        break;
     default:
         break;
     }
@@ -208,6 +212,9 @@ static void finalize_val(mino_state *S, gc_hdr_t *h)
         break;
     case MINO_FUTURE:
         mino_future_gc_sweep(v);
+        break;
+    case MINO_CHAN:
+        mino_chan_finalize(S, v);
         break;
     default:
         break;

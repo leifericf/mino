@@ -1363,6 +1363,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
     case MINO_HOST_ARRAY:
     case MINO_TX_REF:
     case MINO_AGENT:
+    case MINO_CHAN:
         return a == b;
     case MINO_HANDLE:
         /* Two MINO_HANDLE values are equal iff they wrap the same host

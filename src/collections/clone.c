@@ -216,6 +216,7 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
     case MINO_MAP_ENTRY:
     case MINO_TX_REF:
     case MINO_AGENT:
+    case MINO_CHAN:
         return NULL;
     case MINO_UUID:
         return mino_uuid_from_bytes(dst, v->as.uuid.bytes);
@@ -302,6 +303,7 @@ static const char *non_transferable_name(mino_type t)
     case MINO_MAP_ENTRY:    return "map-entry";
     case MINO_TX_REF:       return "ref";
     case MINO_AGENT:        return "agent";
+    case MINO_CHAN:         return "chan";
     case MINO_SORTED_MAP:   return "sorted-map";
     case MINO_SORTED_SET:   return "sorted-set";
     case MINO_REGEX:        return "regex";

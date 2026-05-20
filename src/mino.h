@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 388
-#define MINO_VERSION_PATCH 1
+#define MINO_VERSION_MINOR 389
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -182,7 +182,7 @@ typedef enum {
                      * was already taken by the embedder rooting handle
                      * (mino_ref), so the enum tag is MINO_TX_REF; the
                      * Clojure-level type keyword is `:ref`. */
-    MINO_AGENT      /* Asynchronous mutable cell with a per-state
+    MINO_AGENT,     /* Asynchronous mutable cell with a per-state
                      * action run-queue. send / send-off enqueue
                      * (fn args) onto the queue and return the agent
                      * immediately; a worker thread drains the queue
@@ -195,6 +195,17 @@ typedef enum {
                      * thread_limit, so send / send-off throw MTH001
                      * if the host hasn't granted a thread budget
                      * (default thread_limit == 1 means no agents). */
+    MINO_CHAN       /* clojure.core.async channel. Owns its buffer
+                     * (for :fixed / :dropping / :sliding kinds),
+                     * pending-putters and pending-takers queues, a
+                     * closed flag, and optional transducer + ex-
+                     * handler hooks directly in C-side mutable
+                     * slots. Replaces the previous atom-of-map
+                     * shape so each offer!/poll!/put!/take! is one
+                     * C call with no script-side state-map
+                     * allocation. Equality is identity. Constructed
+                     * via `(chan)` / `(chan n)` / `(chan n xform)` /
+                     * `(promise-chan)`. */
 } mino_type;
 
 typedef struct mino_val    mino_val;   /* opaque */

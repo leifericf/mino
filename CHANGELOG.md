@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.389.0 — Native Channels
+
+`clojure.core.async` channels are now a C primitive (`MINO_CHAN`)
+instead of an atom wrapping a state map. Each offer!/poll!/put!/take!
+is one C function call; the channel's buffer, pending-putters and
+pending-takers queues, the closed flag, and optional transducer
+hooks live in directly-mutable C slots inside the channel cell. The
+previous implementation stored the same shape inside a script-side
+map and mutated via `swap!` on every operation; the per-cycle
+state-map allocation plus the swap!-body closure dominated benchmark
+runtime at high iteration counts.
+
+### Performance
+
+`mino-bench` async suite, offer!/poll! row at 5000 iterations:
+
+|                                | before  | after  | delta  |
+|--------------------------------|---------|--------|--------|
+| offer!/poll! on (chan 1024)    | 30.32s  | 16.01s | -47%   |
+| offer!/poll! on (chan 1)       | 30.40s  | 19.21s | -37%   |
+| offer! full returns false      | 14.12s  |  9.24s | -35%   |
+| poll! empty returns nil        | 13.61s  |  8.70s | -36%   |
+
+GC share of wall time on the same rows drops from ~45% to ~34-40%
+because the per-op state-map alloc and the swap!-body closure are
+no longer in the hot path.
+
+### Internals
+
+- `MINO_CHAN` is a new value tag with its impl carrying buffer +
+  pending queues directly. Allocation goes through the standard GC
+  path; the malloc-owned ring buffer and op queues are released by
+  the per-tag finalizer.
+- Eighteen new C primitives in `clojure.core` cover construction,
+  operations (offer / poll / put / take / close / closed?),
+  inspection (buf-count, buf-full?, has-pending-taker?,
+  has-pending-putter?), transducer wiring (set-xform, get-xform,
+  get-ex-handler, buf-add, flush-buf-to-takers), and the alts!
+  variants (put-alts, take-alts). The script-side
+  `clojure.core.async` namespace wraps these into the public surface
+  (chan, chan?, offer!, poll!, put!, take!, close!, closed?, alts!,
+  alts-callback, plus the `*`-suffixed aliases the go macro emits).
+- alts! arbitration moved from the script-side state-map race-loop
+  to the C side: each registered op carries the shared `:pending`
+  atom-flag, and the C primitive atomically commits the flag when
+  it delivers the op. Non-committed siblings become tombstones,
+  compacted on next access.
+- The transducer reducing function still runs at the script level;
+  it writes outputs into the channel via `chan-buf-add`, the only
+  hot-path call that crosses the C/script boundary per output.
+
+### API
+
+No user-visible changes. `(chan)`, `(chan n)`, `(chan n xform)`,
+`(promise-chan)`, `offer!`, `poll!`, `put!`, `take!`, `close!`,
+`closed?`, `chan?`, `alts!`, `alts!!`, `alts-callback`, and the
+go-block compat aliases (`chan*`, `chan-put*`, `chan-take*`,
+`chan-close*`, `chan-closed?*`, `offer!*`, `poll!*`, `alts*`,
+`buf-fixed*`, `buf-dropping*`, `buf-sliding*`, `buf-promise*`) all
+keep their previous shape and contracts. The `(type ch)` keyword
+changes from `:atom` (the channel was an atom) to `:chan` (it is
+a channel value now).
+
 ## v0.388.1 — Multi-Cycle Remset Filter
 
 Bug fix. An OLD container holding a YOUNG child could fall out of

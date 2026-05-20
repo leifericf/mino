@@ -325,6 +325,9 @@ struct mino_val {
             uint64_t    agent_id;
             mino_state *owning_state;
         } agent;
+        struct {          /* MINO_CHAN: clojure.core.async channel */
+            struct mino_chan_impl *impl;
+        } chan;
     } as;
 };
 
