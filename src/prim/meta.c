@@ -6,31 +6,36 @@
 
 /* Type tags whose meta can be CHANGED through with-meta / vary-meta
  * (which return a copy of the value carrying the new metadata).
- * Stateful types -- atom / agent -- are intentionally NOT here:
- * with-meta would shallow-copy the cell, producing a sibling whose
- * `val` slot diverges from the original on the next mutation. The
- * proper Clojure-canon fix needs a separate indirection cell so two
- * with-meta'd atoms share their state; absent that, throw a clear
- * error and direct callers at alter-meta! (in-place) or the
- * constructor's :meta option. */
+ * Identity-tied types are intentionally NOT here:
+ *   - Atom / agent / ref: a shallow copy of the cell would produce a
+ *     sibling whose `val` slot diverges from the original on the
+ *     next mutation. Direct callers at alter-meta! (in-place) or the
+ *     constructor's :meta option.
+ *   - Var: a shallow copy yields a sibling whose `root` slot
+ *     diverges from the original on every later (def x ...), so the
+ *     copy's @ never matches the namespace var lookup. JVM Clojure
+ *     rejects with-meta on a Var for the same reason
+ *     (clojure.lang.Var is not IObj); follow canon. (meta #'x) is
+ *     still supported via meta_readable and synth_var_meta. */
 static int supports_meta(mino_type t)
 {
     return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
         || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
-        || t == MINO_MACRO  || t == MINO_VAR;
+        || t == MINO_MACRO;
 }
 
 /* Type tags whose meta can be READ via (meta x) and MUTATED in
  * place via alter-meta!. Includes everything supports_meta covers
- * plus the stateful types (atom / agent / ref) -- alter-meta! does
- * an in-place mutation of obj->meta rather than copying the cell,
- * so it stays safe for identity-tied values, and (meta x) is
- * read-only. The constructor form `(ref init :meta m)` populates
- * the slot at construction; alter-meta! can mutate it later. */
+ * plus every identity-tied type (atom / agent / ref / var) --
+ * alter-meta! does an in-place mutation of obj->meta rather than
+ * copying the cell, so it stays safe for identity-tied values, and
+ * (meta x) is read-only. (meta var) additionally synthesizes a
+ * fresh map of {:ns :name :private :dynamic} from the var fields
+ * when obj->meta is NULL. */
 static int meta_readable(mino_type t)
 {
     return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT
-        || t == MINO_TX_REF;
+        || t == MINO_TX_REF || t == MINO_VAR;
 }
 
 /* Vars don't store an explicit meta map -- :ns and :name come from the
@@ -116,11 +121,14 @@ mino_val *prim_with_meta(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "with-meta: type does not support metadata");
     }
-    if (mino_type_of(obj) == MINO_ATOM || mino_type_of(obj) == MINO_AGENT) {
+    if (mino_type_of(obj) == MINO_ATOM
+        || mino_type_of(obj) == MINO_AGENT
+        || mino_type_of(obj) == MINO_TX_REF
+        || mino_type_of(obj) == MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "with-meta: stateful types (atom/agent) cannot be copied "
-            "to attach new meta; use alter-meta! for in-place mutation "
-            "or the constructor's :meta option");
+            "with-meta: identity-tied types (atom/agent/ref/var) "
+            "cannot be copied to attach new meta; use alter-meta! "
+            "for in-place mutation or the constructor's :meta option");
     }
     if (!supports_meta(mino_type_of(obj))) {
         return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: type does not support metadata");
@@ -149,11 +157,14 @@ mino_val *prim_vary_meta(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "vary-meta: type does not support metadata");
     }
-    if (mino_type_of(obj) == MINO_ATOM || mino_type_of(obj) == MINO_AGENT) {
+    if (mino_type_of(obj) == MINO_ATOM
+        || mino_type_of(obj) == MINO_AGENT
+        || mino_type_of(obj) == MINO_TX_REF
+        || mino_type_of(obj) == MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "vary-meta: stateful types (atom/agent) cannot be copied "
-            "to attach new meta; use alter-meta! for in-place mutation "
-            "or the constructor's :meta option");
+            "vary-meta: identity-tied types (atom/agent/ref/var) "
+            "cannot be copied to attach new meta; use alter-meta! "
+            "for in-place mutation or the constructor's :meta option");
     }
     if (!supports_meta(mino_type_of(obj))) {
         return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: type does not support metadata");

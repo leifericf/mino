@@ -206,6 +206,27 @@
       (alter-meta! v assoc :b 2)
       (is (= {:a 1 :b 2} (meta v))))))
 
+(def with-meta-var-target 10)
+
+(defn- catches-throw? [thunk]
+  (let [thrown? (atom false)]
+    (try (thunk)
+         (catch _e (reset! thrown? true)))
+    @thrown?))
+
+(deftest with-meta-on-var-rejected
+  (testing "with-meta on a Var throws because Var is not IObj"
+    (is (= true
+           (catches-throw?
+             #(with-meta (var with-meta-var-target) {:doc "y"})))))
+  (testing "vary-meta on a Var throws for the same reason"
+    (is (= true
+           (catches-throw?
+             #(vary-meta (var with-meta-var-target) assoc :doc "y")))))
+  (testing "(meta var) still synthesizes :ns and :name from var fields"
+    (let [m (meta (var with-meta-var-target))]
+      (is (= 'with-meta-var-target (:name m))))))
+
 ;; --- Single quote in symbols ---
 
 (deftest quote-in-symbols

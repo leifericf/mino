@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.389.7 — Reject `with-meta` / `vary-meta` on a Var
+
+`with-meta` and `vary-meta` shallow-copied a Var when handed one,
+producing a sibling whose `root` slot diverged from the original
+on every later `(def x ...)`. The sibling's `@` returned the value
+the var held at copy time forever, decoupled from the namespace
+binding. JVM Clojure rejects `with-meta` on a Var for the same
+reason: `clojure.lang.Var` is not `IObj`. mino now follows canon
+and throws `eval/type` for both primitives.
+
+Reading meta still works: `(meta #'x)` returns the synthesized
+`{:ns :name :private :dynamic}` map and `(alter-meta! #'x f)`
+continues to mutate the var's meta slot in place.
+
 ## v0.389.6 — `swap!` Barrier Only on Successful CAS
 
 `prim_swap_bang`'s multi-threaded retry loop fired the GC write
