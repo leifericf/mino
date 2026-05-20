@@ -112,6 +112,60 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
     }
 }
 
+int mino_to_bigdec_str(const mino_val *v, char *buf, size_t n,
+                       size_t *out_written)
+{
+    char *digits;
+    int   scale, neg, len, int_part_len;
+    size_t w = 0;
+    if (v == NULL || mino_type_of(v) != MINO_BIGDEC) return 0;
+    if (buf == NULL || n == 0) return -1;
+    digits = mino_bigint_to_cstr(v->as.bigdec.unscaled);
+    if (digits == NULL) return 0;
+    scale = v->as.bigdec.scale;
+    neg   = (digits[0] == '-');
+    len   = (int)strlen(digits);
+    if (scale == 0) {
+        if ((size_t)len >= n) { free(digits); return -1; }
+        memcpy(buf, digits, (size_t)len);
+        buf[len] = '\0';
+        w = (size_t)len;
+    } else {
+        int_part_len = len - (neg ? 1 : 0) - scale;
+        if (int_part_len > 0) {
+            size_t total = (size_t)len + 1; /* one extra for the '.' */
+            if (total >= n) { free(digits); return -1; }
+            {
+                int i, j = 0;
+                for (i = 0; i < (neg ? 1 : 0) + int_part_len; i++) buf[j++] = digits[i];
+                buf[j++] = '.';
+                for (; i < len; i++) buf[j++] = digits[i];
+                buf[j] = '\0';
+                w = (size_t)j;
+            }
+        } else {
+            int pad = -int_part_len;
+            size_t total = (neg ? 1u : 0u) + 2u + (size_t)pad
+                         + (size_t)len - (neg ? 1u : 0u);
+            int j = 0;
+            if (total >= n) { free(digits); return -1; }
+            if (neg) buf[j++] = '-';
+            buf[j++] = '0';
+            buf[j++] = '.';
+            { int p; for (p = 0; p < pad; p++) buf[j++] = '0'; }
+            {
+                int i;
+                for (i = (neg ? 1 : 0); i < len; i++) buf[j++] = digits[i];
+            }
+            buf[j] = '\0';
+            w = (size_t)j;
+        }
+    }
+    free(digits);
+    if (out_written != NULL) *out_written = w;
+    return 1;
+}
+
 /* Print a bigdec as "123.45M" — Clojure's bigdec literal form. */
 void mino_bigdec_print(mino_state *S, const mino_val *v, FILE *out)
 {

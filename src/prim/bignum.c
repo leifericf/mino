@@ -263,6 +263,52 @@ char *mino_bigint_to_cstr(const mino_val *v)
     return buf;
 }
 
+int mino_to_bigint_str(const mino_val *v, char *buf, size_t n,
+                       size_t *out_written)
+{
+    mp_result lenr;
+    int       len;
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT
+                  || v->as.bigint.mpz == NULL) {
+        return 0;
+    }
+    if (buf == NULL || n == 0) return -1;
+    lenr = mp_int_string_len((mp_int)v->as.bigint.mpz, 10);
+    if (lenr < 1) return 0;
+    len = (int)lenr;
+    if ((size_t)len > n) return -1;
+    if (mp_int_to_string((mp_int)v->as.bigint.mpz, 10, buf, len) != MP_OK) {
+        return 0;
+    }
+    if (out_written != NULL) {
+        size_t w = 0;
+        while (w + 1 < (size_t)len && buf[w] != '\0') w++;
+        *out_written = w;
+    }
+    return 1;
+}
+
+int mino_to_ratio(const mino_val *v, long long *out_num, long long *out_den)
+{
+    mp_int   zn, zd;
+    mp_small n = 0;
+    mp_small d = 0;
+    if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0;
+    if (v->as.ratio.num == NULL || v->as.ratio.denom == NULL) return 0;
+    if (mino_type_of(v->as.ratio.num) != MINO_BIGINT
+        || mino_type_of(v->as.ratio.denom) != MINO_BIGINT) {
+        return 0;
+    }
+    zn = (mp_int)v->as.ratio.num->as.bigint.mpz;
+    zd = (mp_int)v->as.ratio.denom->as.bigint.mpz;
+    if (zn == NULL || zd == NULL) return 0;
+    if (mp_int_to_int(zn, &n) != MP_OK) return 0;
+    if (mp_int_to_int(zd, &d) != MP_OK) return 0;
+    if (out_num != NULL) *out_num = (long long)n;
+    if (out_den != NULL) *out_den = (long long)d;
+    return 1;
+}
+
 void mino_bigint_print(mino_state *S, const mino_val *v, FILE *out)
 {
     mp_int z;

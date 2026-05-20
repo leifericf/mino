@@ -862,6 +862,32 @@ int mino_to_symbol(const mino_val *v, const char **out, size_t *len)
     return 1;
 }
 
+int mino_to_float32(const mino_val *v, float *out)
+{
+    if (v == NULL || mino_type_of(v) != MINO_FLOAT32) return 0;
+    if (out != NULL) *out = (float)v->as.f;
+    return 1;
+}
+
+int mino_to_uuid_bytes(const mino_val *v, uint8_t out[16])
+{
+    if (v == NULL || mino_type_of(v) != MINO_UUID) return 0;
+    if (out != NULL) memcpy(out, v->as.uuid.bytes, 16);
+    return 1;
+}
+
+int mino_to_regex_source(const mino_val *v, const char **out, size_t *len)
+{
+    if (v == NULL || mino_type_of(v) != MINO_REGEX) return 0;
+    if (v->as.regex.source == NULL
+        || mino_type_of(v->as.regex.source) != MINO_STRING) {
+        return 0;
+    }
+    if (out != NULL) *out = v->as.regex.source->as.s.data;
+    if (len != NULL) *len = v->as.regex.source->as.s.len;
+    return 1;
+}
+
 mino_type mino_typeof(const mino_val *v)
 {
     return mino_type_of(v);
@@ -903,6 +929,12 @@ int mino_is_ratio(const mino_val *v)   { return mino_type_of(v) == MINO_RATIO; }
 int mino_is_bigdec(const mino_val *v)  { return mino_type_of(v) == MINO_BIGDEC; }
 int mino_is_uuid(const mino_val *v)    { return mino_type_of(v) == MINO_UUID; }
 int mino_is_regex(const mino_val *v)   { return mino_type_of(v) == MINO_REGEX; }
+int mino_is_float32(const mino_val *v) { return mino_type_of(v) == MINO_FLOAT32; }
+int mino_is_sorted_map(const mino_val *v) { return mino_type_of(v) == MINO_SORTED_MAP; }
+int mino_is_sorted_set(const mino_val *v) { return mino_type_of(v) == MINO_SORTED_SET; }
+int mino_is_map_entry(const mino_val *v) { return mino_type_of(v) == MINO_MAP_ENTRY; }
+int mino_is_host_array(const mino_val *v) { return mino_type_of(v) == MINO_HOST_ARRAY; }
+int mino_is_future(const mino_val *v)  { return mino_type_of(v) == MINO_FUTURE; }
 
 
 /* ------------------------------------------------------------------------- */

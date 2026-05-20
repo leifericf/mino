@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.385.0 — Embedder UX: Predicate / Extractor Grid
+
+Phase 4 of the pre-1.0 Embedder UX cycle. Closes the holes in the
+type-predicate grid and adds the missing extractors so embedders
+have a complete `mino_is_X` / `mino_to_X` surface for every public
+value type.
+
+### Added (predicates)
+
+Eight new predicates land in the consolidated grid block:
+
+- `mino_is_float32(v)` — distinct from `mino_is_float`, which
+  matches both `MINO_FLOAT` and `MINO_FLOAT32`.
+- `mino_is_sorted_map(v)` / `mino_is_sorted_set(v)` — distinct from
+  `mino_is_map` / `mino_is_set`, which match both sorted and
+  unsorted variants.
+- `mino_is_map_entry(v)` — for entries returned by `first` / `seq`
+  on a map.
+- `mino_is_host_array(v)` — JVM-style fixed-length host array.
+- `mino_is_future(v)`.
+- Cross-references to the predicates that already exist next to
+  their constructors (`mino_is_handle`, `mino_is_atom`,
+  `mino_is_volatile`, `mino_is_agent`, `mino_is_tx_ref`,
+  `mino_is_transient`, `mino_is_record`, `mino_is_record_type`).
+  An embedder grep'ing `mino_is_` against `mino.h` now finds the
+  full set in one block.
+
+### Added (extractors)
+
+Six new extractors:
+
+- `mino_to_float32(v, float *out)`.
+- `mino_to_bigint_str(v, char *buf, size_t n, size_t *out_written)` —
+  serialises a bigint to a base-10 NUL-terminated string in a
+  caller-owned buffer. Returns -1 when the buffer is too small.
+- `mino_to_ratio(v, long long *num, long long *den)` — succeeds when
+  both numerator and denominator fit in `long long`; returns 0 for
+  bigint-backed ratios that overflow.
+- `mino_to_bigdec_str(v, char *buf, size_t n, size_t *out_written)` —
+  Clojure-style decimal printing (`1.5M` value → `"1.5"`).
+- `mino_to_uuid_bytes(v, uint8_t out[16])` — copies the 16 RFC 4122
+  bytes into the caller's array.
+- `mino_to_regex_source(v, const char **out, size_t *len)` — exposes
+  the pattern's source string, mino-owned.
+
+### Verification
+
+`embed_api_test` carries a `test_predicate_grid` block that
+exercises every new predicate (with a true-shaped and a
+mismatching value) and every new extractor (success path + type-
+mismatch path; buffer-too-small path for the str extractors).
+
 ## v0.384.0 — Embedder UX: Amalgamation Distribution
 
 Phase 3 of the pre-1.0 Embedder UX cycle. Adds an SQLite-influenced

@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 384
+#define MINO_VERSION_MINOR 385
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -757,6 +757,20 @@ int mino_is_ratio     (const mino_val *v);
 int mino_is_bigdec    (const mino_val *v);
 int mino_is_uuid      (const mino_val *v);
 int mino_is_regex     (const mino_val *v);
+int mino_is_float32   (const mino_val *v);
+int mino_is_sorted_map(const mino_val *v);
+int mino_is_sorted_set(const mino_val *v);
+int mino_is_map_entry (const mino_val *v);
+int mino_is_host_array(const mino_val *v);
+int mino_is_record    (const mino_val *v);  /* also at mino_defrecord */
+int mino_is_record_type(const mino_val *v); /* also at mino_defrecord */
+int mino_is_handle    (const mino_val *v);  /* also near mino_handle */
+int mino_is_atom      (const mino_val *v);  /* also near mino_atom */
+int mino_is_volatile  (const mino_val *v);  /* also near mino_volatile */
+int mino_is_agent     (const mino_val *v);  /* also near mino_agent */
+int mino_is_tx_ref    (const mino_val *v);  /* also near mino_tx_ref */
+int mino_is_transient (const mino_val *v);  /* also near mino_transient */
+int mino_is_future    (const mino_val *v);
 
 /* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
 int mino_eq(const mino_val *a, const mino_val *b);
@@ -776,11 +790,42 @@ size_t mino_length(const mino_val *list);
  * `out` (NUL-terminated, mino-owned) and the byte length through `len`. */
 int mino_to_int    (const mino_val *v, long long *out);
 int mino_to_float  (const mino_val *v, double *out);
+int mino_to_float32(const mino_val *v, float *out);
 int mino_to_bool   (const mino_val *v);
 int mino_to_char   (const mino_val *v, int *cp);
 int mino_to_string (const mino_val *v, const char **out, size_t *len);
 int mino_to_keyword(const mino_val *v, const char **out, size_t *len);
 int mino_to_symbol (const mino_val *v, const char **out, size_t *len);
+
+/* Bigint -> decimal-string serialiser. Writes into the caller-owned
+ * `buf` of `n` bytes; the number of bytes written (not counting the
+ * NUL terminator) lands in `*out_written` when non-NULL. Returns 1
+ * on success, 0 on type mismatch, -1 if the buffer is too small to
+ * hold the formatted result + NUL. */
+int mino_to_bigint_str(const mino_val *v, char *buf, size_t n,
+                       size_t *out_written);
+
+/* Ratio extractor for ratios whose numerator and denominator both fit
+ * in `long long`. Returns 1 on success, 0 on type mismatch or out-of-
+ * range (bigint-backed ratios that overflow `long long`). */
+int mino_to_ratio(const mino_val *v, long long *out_num,
+                  long long *out_den);
+
+/* Bigdec -> string serialiser (canonical Clojure-style printing,
+ * e.g. "1.5M"-shaped value prints as "1.5"). Same buffer contract as
+ * mino_to_bigint_str. */
+int mino_to_bigdec_str(const mino_val *v, char *buf, size_t n,
+                       size_t *out_written);
+
+/* UUID extractor. Writes the 16 RFC 4122 bytes into the caller-owned
+ * `out[16]` array. Returns 1 on success, 0 on type mismatch. */
+int mino_to_uuid_bytes(const mino_val *v, uint8_t out[16]);
+
+/* Regex source extractor. Writes the pattern source pointer through
+ * `out` (mino-owned, NUL-terminated) and the byte length through
+ * `len`. Returns 1 on success, 0 on type mismatch. */
+int mino_to_regex_source(const mino_val *v, const char **out,
+                         size_t *len);
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */

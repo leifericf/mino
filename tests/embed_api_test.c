@@ -12,6 +12,7 @@
 
 #include "mino.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -351,6 +352,110 @@ static void test_eval_string_null_src(mino_state *S, mino_env *env)
             "null-src: mino_eval_string_ex leaves out == NULL");
 }
 
+/* Smoke the grid additions (mino_is_* + mino_to_*) from v0.385.0.
+ * Every predicate built in this phase has its own MINO_* tag-shaped
+ * value evaluated and checked, and every new extractor is exercised
+ * with both an in-type input (success path) and an out-of-type input
+ * (the type-mismatch return-0 path). */
+static void test_predicate_grid(mino_state *S, mino_env *env)
+{
+    mino_val *v;
+
+    /* mino_is_float32 — distinct from MINO_FLOAT. */
+    v = mino_eval_string(S, "(float 1.5)", env);
+    REQUIRE(v != NULL && mino_is_float32(v),
+            "grid: (float 1.5) is float32");
+    {
+        float f = 0.0f;
+        REQUIRE(mino_to_float32(v, &f) && f == 1.5f,
+                "grid: mino_to_float32 round-trips");
+        REQUIRE(!mino_to_float32(mino_int(S, 1), &f),
+                "grid: mino_to_float32 rejects non-float32");
+    }
+
+    /* mino_is_sorted_map / mino_is_sorted_set. */
+    v = mino_eval_string(S, "(sorted-map :a 1)", env);
+    REQUIRE(v != NULL && mino_is_sorted_map(v) && mino_is_map(v),
+            "grid: sorted-map is sorted-map AND map");
+    v = mino_eval_string(S, "(sorted-set 1 2)", env);
+    REQUIRE(v != NULL && mino_is_sorted_set(v) && mino_is_set(v),
+            "grid: sorted-set is sorted-set AND set");
+
+    /* mino_is_map_entry. */
+    v = mino_eval_string(S, "(first {:a 1})", env);
+    REQUIRE(v != NULL && mino_is_map_entry(v),
+            "grid: (first {}) returns a map-entry");
+
+    /* mino_is_record / mino_is_record_type. */
+    {
+        const char *fields[1] = {"x"};
+        mino_val   *T = mino_defrecord(S, "user", "TGrid", fields, 1);
+        mino_val   *vals[1] = {mino_int(S, 1)};
+        mino_val   *r = mino_record(S, T, vals, 1);
+        REQUIRE(mino_is_record_type(T),
+                "grid: defrecord result is a record-type");
+        REQUIRE(mino_is_record(r),
+                "grid: ctor result is a record");
+    }
+
+    /* mino_is_future is hard to construct without async; check the
+     * negative path only. */
+    REQUIRE(!mino_is_future(mino_int(S, 1)),
+            "grid: int is not a future");
+
+    /* mino_to_bigint_str / mino_to_ratio / mino_to_bigdec_str /
+     * mino_to_uuid_bytes / mino_to_regex_source. */
+    {
+        char   buf[64];
+        size_t w = 0;
+        v = mino_eval_string(S, "100000000000000000000N", env);
+        REQUIRE(v != NULL && mino_is_bigint(v), "grid: bigint literal");
+        REQUIRE(mino_to_bigint_str(v, buf, sizeof(buf), &w) == 1
+                && strcmp(buf, "100000000000000000000") == 0,
+                "grid: mino_to_bigint_str round-trips");
+        REQUIRE(mino_to_bigint_str(v, buf, 5, NULL) == -1,
+                "grid: mino_to_bigint_str returns -1 on small buf");
+        REQUIRE(mino_to_bigint_str(mino_int(S, 1), buf, sizeof(buf), NULL) == 0,
+                "grid: mino_to_bigint_str rejects non-bigint");
+    }
+    {
+        long long num = 0, den = 0;
+        v = mino_eval_string(S, "3/4", env);
+        REQUIRE(v != NULL && mino_is_ratio(v), "grid: ratio literal");
+        REQUIRE(mino_to_ratio(v, &num, &den) == 1
+                && num == 3 && den == 4,
+                "grid: mino_to_ratio extracts 3/4");
+    }
+    {
+        char   buf[64];
+        size_t w = 0;
+        v = mino_eval_string(S, "1.5M", env);
+        REQUIRE(v != NULL && mino_is_bigdec(v), "grid: bigdec literal");
+        REQUIRE(mino_to_bigdec_str(v, buf, sizeof(buf), &w) == 1
+                && strcmp(buf, "1.5") == 0,
+                "grid: mino_to_bigdec_str round-trips");
+    }
+    {
+        uint8_t bytes[16];
+        v = mino_eval_string(S,
+            "(parse-uuid \"00000000-0000-0000-0000-000000000001\")",
+            env);
+        REQUIRE(v != NULL && mino_is_uuid(v), "grid: uuid literal");
+        REQUIRE(mino_to_uuid_bytes(v, bytes) == 1
+                && bytes[15] == 1 && bytes[0] == 0,
+                "grid: mino_to_uuid_bytes extracts 16 bytes");
+    }
+    {
+        const char *src = NULL;
+        size_t      slen = 0;
+        v = mino_eval_string(S, "#\"a+b*\"", env);
+        REQUIRE(v != NULL && mino_is_regex(v), "grid: regex literal");
+        REQUIRE(mino_to_regex_source(v, &src, &slen) == 1
+                && src != NULL && slen == 4 && memcmp(src, "a+b*", 4) == 0,
+                "grid: mino_to_regex_source extracts pattern");
+    }
+}
+
 int main(void)
 {
     mino_state *S = mino_state_new();
@@ -367,6 +472,7 @@ int main(void)
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
     test_to_int_bignum_round_trip();
+    test_predicate_grid(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);
