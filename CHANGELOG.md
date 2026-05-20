@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.389.10 — Preserve Empty-String Namespace on Symbols and Keywords
+
+`(keyword "" "hi")` and `(symbol "" "hi")` previously collapsed to a
+no-namespace value because the 2-arg constructors short-circuited
+the empty-namespace case through the same path as `ns == nil`. JVM
+Clojure treats the empty string as a legal namespace and preserves
+it across `(namespace x)`, `(name x)`, and `(str x)`. mino now
+matches: the constructor builds the interned data as
+`/<name>` when the namespace is the empty string, and the
+`namespace` / `name` accessors detect the leading-`/` with
+`ns_len == 0` to recover the empty-string namespace. The bare-slash
+literal `:/` (and the symbol `/`) keeps its existing reading --
+`name` is `"/"`, `namespace` is `nil` -- so the literal path is
+unchanged.
+
 ## v0.389.9 — Lock-Invariant Asserts on Shared Tables
 
 The intern table and the record-type registry are shared across

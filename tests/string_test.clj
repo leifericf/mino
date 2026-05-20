@@ -102,6 +102,23 @@
   (is (keyword? (keyword "foo")))
   (is (= "bar" (name (keyword "bar")))))
 
+(deftest empty-string-namespace-is-preserved
+  ;; Two-arg (keyword "" name) and (symbol "" name) construct a value
+  ;; whose namespace is the empty string, not nil. This matches
+  ;; JVM Clojure, where empty-string is a legal namespace and the
+  ;; (str ...) form interleaves the bare separator.
+  (let [k (keyword "" "hi")]
+    (is (= ""    (namespace k)))
+    (is (= "hi"  (name k)))
+    (is (= ":/hi" (str k))))
+  (let [s (symbol "" "hi")]
+    (is (= ""    (namespace s)))
+    (is (= "hi"  (name s)))
+    (is (= "/hi" (str s))))
+  ;; Single-arg constructors with no slash still produce ns=nil.
+  (is (nil? (namespace (keyword "hi"))))
+  (is (nil? (namespace (symbol "hi")))))
+
 (deftest read-string-fn
   (is (= 42 (read-string "42")))
   (is (= '(+ 1 2) (read-string "(+ 1 2)")))

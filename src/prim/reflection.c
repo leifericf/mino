@@ -26,6 +26,15 @@ mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
         if (ns_len > 0 && ns_len < len) {
             return mino_string_n(S, data + ns_len + 1, len - ns_len - 1);
         }
+        /* Empty-string namespace encodes as a leading '/' with
+         * ns_len == 0 and len > 1; the name is everything after that
+         * slash. JVM Clojure: `(name (keyword "" "hi"))` is "hi",
+         * not "/hi". Reserve data == "/" alone (len == 1) for the
+         * bare-slash literal `:/`, whose name is "/" and namespace
+         * is nil. */
+        if (ns_len == 0 && len > 1 && data[0] == '/') {
+            return mino_string_n(S, data + 1, len - 1);
+        }
         return mino_string_n(S, data, len);
     }
     {
@@ -1130,11 +1139,16 @@ mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
     (void)slash;
     /* Use the explicit ns_len from the construction site rather than
      * re-scanning data; preserves the (ns, name) split that 2-arg
-     * (keyword ns name) recorded. */
+     * (keyword ns name) recorded. Empty-string namespace encodes as
+     * a leading '/' with ns_len == 0 and len > 1; distinguish it
+     * from "no namespace at all" (data with no slash) and from the
+     * bare-slash literal `:/` (data == "/", len == 1) so JVM canon
+     * `(namespace (keyword "" "hi"))` returns "" rather than nil. */
     {
         size_t ns_len = v->as.s.ns_len;
-        if (ns_len == 0 || len == 1) return mino_nil(S);
-        return mino_string_n(S, data, ns_len);
+        if (ns_len > 0) return mino_string_n(S, data, ns_len);
+        if (len > 1 && data[0] == '/') return mino_string_n(S, data, 0);
+        return mino_nil(S);
     }
 }
 

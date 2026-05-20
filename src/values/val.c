@@ -329,10 +329,16 @@ mino_val *mino_keyword_ns_n(mino_state *S,
                               const char *ns, size_t ns_len,
                               const char *name, size_t name_len)
 {
-    if (ns == NULL || ns_len == 0) {
+    if (ns == NULL) {
         return intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
                                           name, name_len, 0);
     }
+    /* ns != NULL but possibly empty. Build data as `<ns>/<name>` and
+     * record ns_len; for ns_len == 0 the data starts with '/', which
+     * the namespace / name accessors detect to distinguish
+     * empty-string ns from nil ns. Matches JVM Clojure where
+     * (keyword "" "hi") prints as ":/hi" and (namespace ...) returns
+     * "" rather than nil. */
     {
         size_t total = ns_len + 1 + name_len;
         char  *buf;
@@ -362,10 +368,12 @@ mino_val *mino_symbol_ns_n(mino_state *S,
                              const char *ns, size_t ns_len,
                              const char *name, size_t name_len)
 {
-    if (ns == NULL || ns_len == 0) {
+    if (ns == NULL) {
         return intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
                                           name, name_len, 0);
     }
+    /* ns != NULL but possibly empty -- preserve via the leading-slash
+     * convention; see mino_keyword_ns_n for the encoding rationale. */
     {
         size_t total = ns_len + 1 + name_len;
         char  *buf;
