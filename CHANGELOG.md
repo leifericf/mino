@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.398.0 — Reader-Conditional `:preserve` Round-Trips Through `pr-str`
+
+`pr-str` on a value carrying `:mino/reader-conditional` or
+`:mino/tagged-literal` meta now emits the canonical reader-syntax
+shape (`#?(...)` / `#?@(...)` / `#tag form`) rather than the underlying
+map. The reader was already building these values under
+`(read-string {:read-cond :preserve} ...)`; the printer just hadn't
+been taught to round-trip them.
+
+The ClojureDocs probe drops `reader-conditional:0`, `:3`, `:4`, and
+`reader-conditional?:1`. New tests cover both splicing forms,
+round-trip idempotence (str → read → pr-str → read), the
+`clojure.edn/read-string` :preserve default, and a direct
+`(reader-conditional form splicing?)` builder check.
+
 ## v0.397.0 — `clojure.core.reducers` (Sequential)
 
 A new bundled namespace lands at `lib/clojure/core/reducers.clj`,

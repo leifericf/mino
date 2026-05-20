@@ -168,9 +168,71 @@ static void print_vector(mino_state *S, FILE *out, const mino_val *v)
     fputc(']', out);
 }
 
+/* If v's meta carries :mino/reader-conditional or :mino/tagged-literal,
+ * print the canonical reader-syntax shape so pr-str / read-string
+ * round-trip preserves the value. Returns 1 when the special-print
+ * was emitted, 0 otherwise. */
+static int print_map_meta_special(mino_state *S, FILE *out, const mino_val *v)
+{
+    mino_val *meta;
+    mino_val *form_kw;
+    mino_val *splicing_kw;
+    mino_val *form;
+    mino_val *splicing;
+    mino_val *rc_marker;
+    mino_val *tl_marker;
+    mino_val *tag_kw;
+    mino_val *tag;
+    if (v == NULL) return 0;
+    meta = (mino_val *)v->meta;
+    if (meta == NULL || mino_type_of(meta) != MINO_MAP) return 0;
+
+    rc_marker = map_get_val(meta, mino_keyword(S, "mino/reader-conditional"));
+    if (rc_marker != NULL && rc_marker != mino_nil(S)
+        && rc_marker != mino_false(S)) {
+        form_kw     = mino_keyword(S, "form");
+        splicing_kw = mino_keyword(S, "splicing?");
+        form        = map_get_val(v, form_kw);
+        splicing    = map_get_val(v, splicing_kw);
+        if (splicing != NULL && splicing != mino_nil(S)
+            && splicing != mino_false(S)) {
+            fputs("#?@", out);
+        } else {
+            fputs("#?", out);
+        }
+        /* form is the body list (e.g. (:mino 1 :clj 2)). Print it as
+         * a parenthesised body. */
+        if (form != NULL && mino_is_cons(form)) {
+            mino_print_to(S, out, form);
+        } else if (form != NULL && mino_type_of(form) == MINO_EMPTY_LIST) {
+            fputs("()", out);
+        } else {
+            /* Defensive: print whatever the form slot carries. */
+            mino_print_to(S, out, form);
+        }
+        return 1;
+    }
+
+    tl_marker = map_get_val(meta, mino_keyword(S, "mino/tagged-literal"));
+    if (tl_marker != NULL && tl_marker != mino_nil(S)
+        && tl_marker != mino_false(S)) {
+        tag_kw      = mino_keyword(S, "tag");
+        form_kw     = mino_keyword(S, "form");
+        tag         = map_get_val(v, tag_kw);
+        form        = map_get_val(v, form_kw);
+        fputc('#', out);
+        mino_print_to(S, out, tag);
+        fputc(' ', out);
+        mino_print_to(S, out, form);
+        return 1;
+    }
+    return 0;
+}
+
 static void print_map(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
+    if (print_map_meta_special(S, out, v)) return;
     fputc('{', out);
     S->print_depth++;
     for (i = 0; i < v->as.map.len; i++) {
