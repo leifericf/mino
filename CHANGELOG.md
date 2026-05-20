@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.388.1 — Multi-Cycle Remset Filter
+
+Bug fix. An OLD container holding a YOUNG child could fall out of
+the remembered set the cycle after the promote-safety-net add and
+become invisible to subsequent minors except through the
+conservative C-stack scan. With a tight nursery and a raised
+`MINO_GC_PROMOTION_AGE` value, the YOUNG child could die between
+minor cycles while the parent slot still pointed at it; the freed
+slot then got reused by an unrelated allocation, and the next
+mutator dereference returned that unrelated value instead of the
+original. The user-visible symptom was `unbound symbol: if` (or
+any other special-form name) at script time, because the parent's
+cons body had effectively been rewritten by allocator churn. ASan
+was clean, and any `fprintf` placed on the dispatch path masked
+the symptom -- a Heisenbug whose appearance depended on which
+local variables the compiler chose to spill into stack slots that
+the conservative scan would then pin.
+
+### Fix
+
+`gc_mark_remset` drives a side-channel flag through
+`gc_mark_child_push` that records whether each remset entry's
+trace observed any YOUNG child header. `gc_remset_reset` filters
+the remset by that signal: entries with at least one OLD->YOUNG
+edge keep `dirty=1` and ride into the next minor; entries with no
+remaining OLD->YOUNG edges drop. This extends the one-cycle
+promotion safety net into a multi-cycle one whose duration is
+bounded naturally by the time the children themselves take to
+promote.
+
+The hot-path cost is one load + one conditional store inside
+`gc_mark_child_push`, both inside the cache line of `mino_state`
+that the surrounding tracer already touches. The walker flag is
+predicted false outside the remset walk.
+
+### Verified
+
+`examples/embed_gc_stress.c` no longer needs the
+`MINO_GC_PROMOTION_AGE` reset workaround at the end of
+`test_param_bounds`; the stress test runs the rest of the suite
+against `promotion_age=8` without firing the bug. `MINO_GC_VERIFY=1`
+is clean across the 1371-test suite at four nursery sizes
+(64 KiB / 256 KiB / 1 MiB / 4 MiB). Release-gate green.
+
 ## v0.388.0 — Embedder UX: Cycle Close
 
 Final tag of the pre-1.0 Embedder UX cycle. The per-phase tags

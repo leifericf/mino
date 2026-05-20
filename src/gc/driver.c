@@ -616,11 +616,22 @@ static void gc_mark_child_push(mino_state *S, const void *p)
      * trace. The check has to come before the singleton-range test
      * because the singleton range straddles aligned addresses. */
     if (((uintptr_t)p & MINO_TAG_MASK) != 0) return;
+    /* Remset-walk side channel: when gc_mark_remset is iterating
+     * remembered-set entries to mark their children, raise a flag the
+     * moment any child resolves to a YOUNG header. This stays correct
+     * even when the YOUNG child is already marked through another root,
+     * which the mark-stack delta heuristic alone would miss. The branch
+     * is predicted false outside the remset walk and adds one load + one
+     * conditional store; both are inside the cache line of S->gc that
+     * the surrounding tracer already touches. */
     u  = (uintptr_t)p;
     lo = (uintptr_t)S;
     hi = lo + sizeof(*S);
     if (u >= lo && u < hi) return;  /* singleton inside state struct */
     h = ((gc_hdr_t *)p) - 1;
+    if (S->gc_remset_walker_active && h->gen == GC_GEN_YOUNG) {
+        S->gc_remset_walker_young_seen = 1;
+    }
     gc_mark_push(S, h);
 }
 

@@ -228,15 +228,26 @@ static void gc_remset_pin_bc_regs(mino_state *S)
     mino_worker_list_lock_release(S);
 }
 
+/* Filter pass: keep entries whose dirty bit is still set (the parent
+ * still holds at least one OLD->YOUNG edge as observed by the trace-
+ * time walker in gc_mark_remset), drop entries whose dirty bit was
+ * cleared during the walk. Entries kept here ride into the next minor
+ * with dirty=1; entries dropped here are out of the remset and will
+ * be re-added by gc_write_barrier on the next mutator store that
+ * creates a fresh OLD->YOUNG edge. The kept-entry path is the multi-
+ * cycle safety net that the promote-then-add-once design lacked. */
 void gc_remset_reset(mino_state *S)
 {
-    size_t i;
+    size_t i, dst = 0;
     gc_evt_record(S, GC_EVT_REMSET_RESET, NULL, NULL, NULL,
                   (uintptr_t)S->gc.remset_len, 0);
     for (i = 0; i < S->gc.remset_len; i++) {
-        S->gc.remset[i]->dirty = 0;
+        gc_hdr_t *h = S->gc.remset[i];
+        if (h->dirty) {
+            S->gc.remset[dst++] = h;
+        }
     }
-    S->gc.remset_len = 0;
+    S->gc.remset_len = dst;
     gc_remset_pin_bc_regs(S);
 }
 

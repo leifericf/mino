@@ -241,6 +241,20 @@ struct mino_state {
     size_t          gc_major_sweep_ns;
     size_t          gc_root_scan_ns;
 
+    /* Remset trace-time YOUNG observation flags. Set by gc_mark_remset
+     * to enter "walk mode" before each remset entry's gc_trace_children
+     * call; gc_mark_child_push raises gc_remset_walker_young_seen when
+     * it encounters a heap pointer whose header is GC_GEN_YOUNG. The
+     * minor collector reads the flag after each trace to decide whether
+     * the parent still has any OLD->YOUNG edges this cycle; if not, the
+     * parent's dirty bit is cleared and gc_remset_reset drops it. The
+     * resulting multi-cycle remset retention covers the window where a
+     * raised promotion_age delays the children's own promotion past the
+     * one-cycle safety net the promotion-side add provides. Past
+     * jit_hot_threshold so stencil offsets are unaffected. */
+    unsigned char   gc_remset_walker_active;
+    unsigned char   gc_remset_walker_young_seen;
+
     /* Write-barrier counters. satb_pushes ticks for each old_value
      * snapshot push during MAJOR_MARK (Yuasa); dijkstra_pushes ticks
      * for each new_value insertion push. mark_stack_overflows counts

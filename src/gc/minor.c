@@ -28,13 +28,33 @@
 /* Seed the mark stack with the YOUNG outgoing pointers held by every
  * remembered-set container. gc_trace_children pushes each child into
  * the mark stack unconditionally; gc_mark_push's minor filter then
- * drops OLD children and marks YOUNG children for later tracing. */
+ * drops OLD children and marks YOUNG children for later tracing.
+ *
+ * As a side effect, observe whether each remset entry still holds any
+ * OLD->YOUNG edge. The walker flag in mino_state is raised by
+ * gc_mark_child_push whenever it sees a YOUNG-gen header during this
+ * iteration; if no YOUNG edge was seen by the end of one entry's
+ * trace, clear the entry's dirty bit so the upcoming gc_remset_reset
+ * drops it. Without this filter, an OLD container whose YOUNG children
+ * outlive the one-cycle promotion safety net stays out of the remset
+ * the moment its dirty bit gets cleared, and its YOUNG children become
+ * invisible to subsequent minors except through conservative stack
+ * scan -- a silent-correctness defect that fires only when a tight
+ * nursery and a raised promotion_age combine to delay the children's
+ * own promotion past one cycle. */
 static void gc_mark_remset(mino_state *S)
 {
     size_t i;
+    S->gc_remset_walker_active = 1;
     for (i = 0; i < S->gc.remset_len; i++) {
-        gc_trace_children(S, S->gc.remset[i]);
+        gc_hdr_t *h = S->gc.remset[i];
+        S->gc_remset_walker_young_seen = 0;
+        gc_trace_children(S, h);
+        if (!S->gc_remset_walker_young_seen) {
+            h->dirty = 0;
+        }
     }
+    S->gc_remset_walker_active = 0;
 }
 
 /* Sweep the YOUNG generation by walking gc_all_young. Dead (unmarked)
