@@ -1,5 +1,118 @@
 # Changelog
 
+## v0.381.0 — C Micro-refactor: Hygiene, Identity-by-name, Dispatch Tables, God-function Splits
+
+Closes the file/function-level cleanup the architecture cycles
+deferred. Behavior-preserving throughout — every commit kept the
+full test suite green (1371 tests, 4828 assertions) and the mino-tests
+batteries (adv-test 18/18, diff-test 7/7, fault-inject 5/5,
+test-migrated 483 tests / 3397 assertions).
+
+### Hygiene
+
+Stripped tracking metadata out of source comments so they describe
+intent instead of release history:
+
+- `vX.Y.Z` version stamps removed from 15+ sites across `runtime/`,
+  `prim/`, `eval/`, and `eval/bc/jit/`.
+- `Phase N` / `Cycle N` breadcrumbs removed from `eval/fn.c`,
+  `eval/defs.c`, `runtime/internal.h`.
+- "legacy" annotations rewritten without the legacy framing
+  (transient wrappers, JIT slab-vs-mmap path, regex string source,
+  reader depth cap, `gc_tick_should_suppress`).
+- `gc_sweep` doc aligned with what the body actually does
+  (it does walk all_young, both to clear major-frontier mark bits
+  and to tally live young bytes).
+
+### Identity-by-name for primitives
+
+Pointer-comparing `as.prim.fn` to detect canonical prims was
+fragile: it would treat two distinct argv-only prims (both with
+`fn == NULL`) as equal. Switched every identity-check site to the
+stable registered name:
+
+- `mino_eq` for `MINO_PRIM` is now allocation-pointer equality
+  (each prim is allocated once per state, so this is correct and
+  fastest).
+- `compile.c`'s pure-prim shadow-check uses `strcmp` against the
+  recorded name.
+- `sequences.c`'s `classify_subseq_test`, `reduce_int_kind_from_fn`,
+  and `pipeline_fast_callable` all match by name.
+- `reduce_step`'s per-element identity check was hoisted into a
+  `reduce_int_kind_t kind` parameter the caller classifies once,
+  so the inner loop runs a small switch rather than per-element
+  `strcmp`.
+- The install-time dual-fill hack in `prim/install.c` no longer
+  carries the "identity-pin" justification (it stays as a pure
+  ABI-compat shim until the cons-spine port lands).
+
+### Dispatch tables / per-handler extraction
+
+Five tag-dispatch switches reshaped so each branch reads as a
+named unit:
+
+| Switch                  | File                          | Shape                                    |
+|-------------------------|-------------------------------|------------------------------------------|
+| `mino_iter_next`        | `collections/iter.c`          | `{kind, iter_step_fn}` table             |
+| `read_dispatch`         | `eval/read.c`                 | `{char, read_dispatch_fn}` table         |
+| `mino_print_to`         | `eval/print.c`                | per-tag `print_*` helpers, switch driver |
+| `mino_eq`               | `values/val.c`                | `eq_cross_type` helper + identity group  |
+| `prim_conj`             | `prim/collections.c`          | per-kind `conj_*` helpers                |
+
+### God-function splits
+
+`compile_call_impl` was the Tier-1 target. 614-line dispatcher
+shrinks to a 77-line orchestrator with nine `try_emit_*` helpers
+(arith unop, n-arity arith, two-arg binop, collection-op
+arity-2/1/3, keyword-as-fn, IC-cached call, plain call) plus two
+`{name, opcode}` tables that fold seven shape-identical 2-arg ops
+(nth, get, conj, dissoc, conj!, dissoc!, disj!) and three 1-arg
+read ops (first, count, empty?) into single dispatch entries.
+
+| Function                  | Before | After |
+|---------------------------|-------:|------:|
+| `compile_call_impl`       |    614 |    77 |
+| `main`                    |    488 |   296 |
+| `mino_print_to`           |    486 |   ~80 |
+| `bind_vec_destructure`    |    193 |    80 |
+| `apply_callable` (PRIM)   |     54 |     3 |
+
+`run_repl` extracted from `main`. `apply_prim_cons` extracted
+from `apply_callable` (with a shared `current_call_location`
+helper for the file/line/col lookup that fn.c repeats around every
+`push_frame`). `vec_destructure_args` extracted from
+`bind_vec_destructure` — the value-to-cons normaliser is now its
+own ~80-line helper with three named cases (vector / map-entry /
+lazy-or-chunked).
+
+The FN/MACRO branches of `apply_callable`, `bc_run_dispatch_from`
+(~1180 lines), and `mino_jit_compile_inner` are documented as
+deferred — each carries tail-call trampoline / per-pass-state
+invariants that are real changes rather than pure motion.
+
+### Process notes
+
+The Cycle 2 plan assumed all primitives already used the argv ABI
+and that `fn` was kept only for identity tagging. Survey at
+execution time showed the opposite: 344 of 386 prim entries use
+the cons-spine `fn` only. Dropping the `fn` field is its own
+multi-file port and was carved out into a follow-up cycle; this
+release ships the identity-by-name fix that makes that future
+port mechanical instead of behavioral.
+
+The `bc_run_dispatch_from` / `mino_jit_compile_inner` / quasiquote
+splits are documented in `.local/micro-refactor-plan.md` as
+deferred targets — each is sizable structural work that earns its
+own cycle.
+
+**Verification.** Full mino test suite green (1371 tests, 4828
+assertions). mino-tests adv-test (18/18 probes), diff-test (7/7),
+test-fault-inject (5/5), test-migrated (483 tests / 3397
+assertions) all green after companion fix in mino-tests
+(`gc_generational_test` switched to a `mapv inc (range N)`
+workload that still exercises the generational invariant under
+mino's now-fused lazy-seq paths).
+
 ## v0.380.0 — Architecture Cycle 6c: Splits in numeric / collections / sequences
 
 Closes the cycle 6 deferred work on the three plan-named mega-files.
