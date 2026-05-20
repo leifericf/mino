@@ -35,6 +35,43 @@ static mino_val *seq_kv_pair(mino_state *S, mino_val *k, mino_val *v)
     return mino_map_entry(S, k, v);
 }
 
+/* Public seq quartet. Each wraps the corresponding prim_* with a
+ * one-shot cons-spine arg list so embedders don't have to construct
+ * the list themselves. */
+
+mino_val *mino_seq(mino_state *S, mino_val *coll)
+{
+    mino_val *args = mino_cons(S, coll, mino_nil(S));
+    return prim_seq(S, args, NULL);
+}
+
+mino_val *mino_first(mino_val *coll)
+{
+    if (coll == NULL) return NULL;
+    if (mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
+        return NULL;
+    }
+    if (mino_type_of(coll) == MINO_CONS) return coll->as.cons.car;
+    /* For non-cons collections, embedders should call mino_seq first
+     * (or use mino_iter). This entry point is the cheap branch: it
+     * does not force lazy thunks or build a seq spine. */
+    return NULL;
+}
+
+mino_val *mino_rest(mino_state *S, mino_val *coll)
+{
+    mino_val *args = mino_cons(S, coll, mino_nil(S));
+    return prim_rest(S, args, NULL);
+}
+
+mino_val *mino_next(mino_state *S, mino_val *coll)
+{
+    mino_val *r = mino_rest(S, coll);
+    if (r == NULL) return NULL;
+    return mino_seq(S, r);
+}
+
 mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;

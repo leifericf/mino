@@ -65,6 +65,23 @@ static mino_val *synth_var_meta(mino_state *S, mino_val *var)
     return mino_map(S, keys, vals, n);
 }
 
+mino_val *mino_meta(const mino_val *v)
+{
+    if (v == NULL) return NULL;
+    if (!meta_readable(mino_type_of(v))) return NULL;
+    return v->meta;
+}
+
+mino_val *mino_with_meta(mino_state *S, mino_val *v, mino_val *meta)
+{
+    /* Reuse prim_with_meta -- it does the type-validation and
+     * throws on non-supported types (atom, agent, ...) via the
+     * runtime's error mechanism. */
+    mino_val *args = mino_cons(S, meta, mino_nil(S));
+    args = mino_cons(S, v, args);
+    return prim_with_meta(S, args, NULL);
+}
+
 mino_val *prim_meta(mino_state *S, mino_val *args,
                        mino_env *env)
 {

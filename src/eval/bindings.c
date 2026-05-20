@@ -1085,6 +1085,77 @@ mino_val *eval_binding(mino_state *S, mino_val *form,
 }
 
 /* ------------------------------------------------------------------------- */
+/* Public binding push/pop (mino.h)                                          */
+/* ------------------------------------------------------------------------- */
+
+/* Push a dynamic-binding frame from C. Returns an opaque handle the
+ * embedder pops with mino_pop_bindings; nests correctly with script-
+ * side `(binding [...] ...)` frames. */
+mino_binding_frame *mino_push_bindings(mino_state *S,
+                                       mino_val **vars,
+                                       mino_val **vals,
+                                       size_t n)
+{
+    dyn_binding_t *bhead = NULL;
+    dyn_frame_t   *frame;
+    size_t         i;
+    if (S == NULL) return NULL;
+    if (n > 0 && (vars == NULL || vals == NULL)) return NULL;
+    for (i = 0; i < n; i++) {
+        mino_val *sym = vars[i];
+        mino_val *v   = vals[i];
+        dyn_binding_t *b;
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            dyn_binding_list_free(bhead);
+            return NULL;
+        }
+        b = (dyn_binding_t *)malloc(sizeof(*b));
+        if (b == NULL) { dyn_binding_list_free(bhead); return NULL; }
+        b->name = sym->as.s.data;   /* interned */
+        b->val  = v;
+        b->next = bhead;
+        bhead   = b;
+    }
+    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    if (frame == NULL) { dyn_binding_list_free(bhead); return NULL; }
+    frame->bindings = bhead;
+    frame->prev     = mino_current_ctx(S)->dyn_stack;
+    mino_current_ctx(S)->dyn_stack = frame;
+    return (mino_binding_frame *)frame;
+}
+
+void mino_pop_bindings(mino_state *S, mino_binding_frame *frame)
+{
+    dyn_frame_t *df = (dyn_frame_t *)frame;
+    if (S == NULL || df == NULL) return;
+    /* Tolerate script-side `throw` having already unwound through us:
+     * if the current dyn_stack is BELOW our frame, this pop is a
+     * no-op. Otherwise we splice df out by popping frames until df is
+     * the top, then unlink. */
+    {
+        dyn_frame_t *cur = mino_current_ctx(S)->dyn_stack;
+        while (cur != NULL && cur != df) cur = cur->prev;
+        if (cur == NULL) return;  /* Already unwound. */
+    }
+    /* df is somewhere in the dyn stack: pop everything down to and
+     * including df. The runtime's normal unwinder frees frame
+     * bindings via dyn_binding_list_free on unwind, but a clean pop
+     * from C has to do it here. */
+    while (mino_current_ctx(S)->dyn_stack != NULL
+           && mino_current_ctx(S)->dyn_stack != df) {
+        dyn_frame_t *top = mino_current_ctx(S)->dyn_stack;
+        mino_current_ctx(S)->dyn_stack = top->prev;
+        dyn_binding_list_free(top->bindings);
+        free(top);
+    }
+    if (mino_current_ctx(S)->dyn_stack == df) {
+        mino_current_ctx(S)->dyn_stack = df->prev;
+        dyn_binding_list_free(df->bindings);
+        free(df);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /* destructure: emit a flat let-binding vector for macro authors             */
 /* ------------------------------------------------------------------------- */
 

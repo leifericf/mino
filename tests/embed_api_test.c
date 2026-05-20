@@ -474,6 +474,93 @@ int main(void)
     test_to_int_bignum_round_trip();
     test_predicate_grid(S, env);
 
+    /* Phase 5 -- Clojure-canon surface additions. */
+    {
+        mino_val *v, *m, *cp;
+        /* mino_meta / mino_with_meta. */
+        v = mino_eval_string(S, "(with-meta [1 2] {:n 1})", env);
+        REQUIRE(v != NULL && mino_is_vector(v), "phase5: with-meta returns vector");
+        m = mino_meta(v);
+        REQUIRE(m != NULL && mino_is_map(m), "phase5: mino_meta retrieves map");
+        {
+            mino_val *m2 = mino_eval_string(S, "{:m 2}", env);
+            cp = mino_with_meta(S, v, m2);
+            REQUIRE(cp != NULL && mino_is_vector(cp), "phase5: mino_with_meta builds copy");
+            REQUIRE(mino_meta(cp) == m2, "phase5: mino_with_meta meta is attached");
+        }
+
+        /* mino_seq / mino_first / mino_rest / mino_next. */
+        v = mino_eval_string(S, "[10 20 30]", env);
+        {
+            mino_val *s = mino_seq(S, v);
+            REQUIRE(s != NULL, "phase5: mino_seq returns non-nil on non-empty vec");
+            REQUIRE(!mino_is_nil(s), "phase5: mino_seq result not nil");
+        }
+        v = mino_eval_string(S, "(list 10 20 30)", env);
+        {
+            mino_val *f = mino_first(v);
+            long long n = 0;
+            REQUIRE(f != NULL && mino_to_int(f, &n) && n == 10,
+                    "phase5: mino_first returns 10");
+        }
+        v = mino_eval_string(S, "(list 1)", env);
+        {
+            mino_val *nx = mino_next(S, v);
+            REQUIRE(nx != NULL && mino_is_nil(nx),
+                    "phase5: mino_next of (list 1) is nil");
+        }
+        v = mino_eval_string(S, "(list 1 2)", env);
+        {
+            mino_val *nx = mino_next(S, v);
+            REQUIRE(nx != NULL && !mino_is_nil(nx),
+                    "phase5: mino_next of (list 1 2) non-nil");
+        }
+
+        /* mino_compare / mino_hash. */
+        REQUIRE(mino_compare(S, mino_int(S, 1), mino_int(S, 2)) == -1,
+                "phase5: mino_compare 1 vs 2 == -1");
+        REQUIRE(mino_compare(S, mino_int(S, 2), mino_int(S, 2)) == 0,
+                "phase5: mino_compare 2 vs 2 == 0");
+        REQUIRE(mino_hash(mino_eval_string(S, "[1 2 3]", env))
+                == mino_hash(mino_eval_string(S, "[1 2 3]", env)),
+                "phase5: mino_hash agrees on equal vecs");
+
+        /* mino_push_bindings / mino_pop_bindings. Bind *out* in a
+         * single-frame push, evaluate (deref #'*out*) -- the var read
+         * picks up the dyn frame. */
+        v = mino_eval_string(S, "(def ^:dynamic *phase5*) 0", env);
+        {
+            mino_val *vars[1];
+            mino_val *vals[1];
+            mino_binding_frame *fr;
+            mino_val *got;
+            vars[0] = mino_symbol(S, "*phase5*");
+            vals[0] = mino_int(S, 42);
+            fr = mino_push_bindings(S, vars, vals, 1);
+            REQUIRE(fr != NULL, "phase5: push_bindings returns frame");
+            got = mino_eval_string(S, "*phase5*", env);
+            {
+                long long n = 0;
+                REQUIRE(got != NULL && mino_to_int(got, &n) && n == 42,
+                        "phase5: dyn-bound var visible during frame");
+            }
+            mino_pop_bindings(S, fr);
+        }
+
+        /* mino_can_clone. */
+        {
+            const char *reason = NULL;
+            REQUIRE(mino_can_clone(mino_eval_string(S, "[1 2 3]", env),
+                                   &reason) == 1
+                    && reason == NULL,
+                    "phase5: can_clone vec");
+            REQUIRE(mino_can_clone(mino_eval_string(S, "(atom 1)", env),
+                                   &reason) == 0
+                    && reason != NULL && strcmp(reason, "atom") == 0,
+                    "phase5: can_clone reports atom");
+        }
+    }
+
     mino_env_free(S, env);
     mino_state_free(S);
 

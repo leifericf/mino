@@ -265,3 +265,109 @@ mino_val *mino_clone(mino_state *dst, mino_state *src, mino_val *val)
     return result;
 }
 
+/* Name of the first non-transferable type encountered during walk.
+ * Maps to mino_type tag string; used by mino_can_clone's out_reason. */
+static const char *non_transferable_name(mino_type t)
+{
+    switch (t) {
+    case MINO_FN:           return "fn";
+    case MINO_MACRO:        return "macro";
+    case MINO_PRIM:         return "prim";
+    case MINO_HANDLE:       return "handle";
+    case MINO_ATOM:         return "atom";
+    case MINO_VOLATILE:     return "volatile";
+    case MINO_LAZY:         return "lazy-seq";
+    case MINO_CHUNK:        return "chunk";
+    case MINO_CHUNKED_CONS: return "chunked-cons";
+    case MINO_VAR:          return "var";
+    case MINO_TYPE:         return "record-type";
+    case MINO_RECORD:       return "record";
+    case MINO_FUTURE:       return "future";
+    case MINO_HOST_ARRAY:   return "host-array";
+    case MINO_MAP_ENTRY:    return "map-entry";
+    case MINO_TX_REF:       return "ref";
+    case MINO_AGENT:        return "agent";
+    case MINO_SORTED_MAP:   return "sorted-map";
+    case MINO_SORTED_SET:   return "sorted-set";
+    case MINO_REGEX:        return "regex";
+    default:                return "non-transferable";
+    }
+}
+
+/* Recursive transferability check. Mirrors clone_val's switch but
+ * without performing the copy. Returns 1 if v and all reachable
+ * children are transferable; 0 otherwise, with *reason set to the
+ * name of the first non-transferable type. */
+static int can_clone_walk(const mino_val *v, const char **reason)
+{
+    mino_type t;
+    if (v == NULL) return 1;
+    t = mino_type_of(v);
+    switch (t) {
+    case MINO_NIL:
+    case MINO_BOOL:
+    case MINO_INT:
+    case MINO_FLOAT:
+    case MINO_FLOAT32:
+    case MINO_CHAR:
+    case MINO_STRING:
+    case MINO_SYMBOL:
+    case MINO_KEYWORD:
+    case MINO_EMPTY_LIST:
+    case MINO_UUID:
+    case MINO_BIGINT:
+    case MINO_BIGDEC:
+        return 1;
+    case MINO_RATIO:
+        return can_clone_walk(v->as.ratio.num, reason)
+            && can_clone_walk(v->as.ratio.denom, reason);
+    case MINO_CONS:
+        return can_clone_walk(v->as.cons.car, reason)
+            && can_clone_walk(v->as.cons.cdr, reason);
+    case MINO_VECTOR: {
+        size_t i, n = v->as.vec.len;
+        for (i = 0; i < n; i++) {
+            if (!can_clone_walk(vec_nth((mino_val *)v, i), reason)) return 0;
+        }
+        return 1;
+    }
+    case MINO_MAP: {
+        /* Walk all (k, v) pairs via the iter. */
+        size_t isz = mino_iter_sizeof();
+        mino_iter *it = (mino_iter *)malloc(isz);
+        mino_val *k, *vv;
+        int ok = 1;
+        mino_iter_init(NULL, it, (mino_val *)v);
+        while (mino_iter_next(it, &k, &vv)) {
+            if (!can_clone_walk(k, reason)
+                || !can_clone_walk(vv, reason)) { ok = 0; break; }
+        }
+        mino_iter_done(it);
+        free(it);
+        return ok;
+    }
+    case MINO_SET: {
+        size_t isz = mino_iter_sizeof();
+        mino_iter *it = (mino_iter *)malloc(isz);
+        mino_val *k, *vv;
+        int ok = 1;
+        mino_iter_init(NULL, it, (mino_val *)v);
+        while (mino_iter_next(it, &k, &vv)) {
+            if (!can_clone_walk(k, reason)) { ok = 0; break; }
+        }
+        mino_iter_done(it);
+        free(it);
+        return ok;
+    }
+    default:
+        if (reason != NULL) *reason = non_transferable_name(t);
+        return 0;
+    }
+}
+
+int mino_can_clone(const mino_val *v, const char **out_reason)
+{
+    if (out_reason != NULL) *out_reason = NULL;
+    return can_clone_walk(v, out_reason);
+}
+

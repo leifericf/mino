@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 385
+#define MINO_VERSION_MINOR 386
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -775,11 +775,83 @@ int mino_is_future    (const mino_val *v);
 /* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
 int mino_eq(const mino_val *a, const mino_val *b);
 
+/* Three-way comparison. Returns -1, 0, or 1 for orderable arguments
+ * matching Clojure `compare`. Cross-type comparison throws via the
+ * runtime's error path (the caller sees a NULL last_error change);
+ * orderless types (`fn`, `prim`, `handle`, ...) likewise throw.
+ * NULL is treated as nil; (compare nil nil) is 0. */
+int mino_compare(mino_state *S, const mino_val *a, const mino_val *b);
+
+/* Canonical 32-bit value hash matching Clojure's hash contract: for
+ * any pair where `mino_eq(a, b)` is 1, `mino_hash(a) == mino_hash(b)`.
+ * Tag-aware; NULL hashes the same as nil. */
+uint32_t mino_hash(const mino_val *v);
+
 /* Return the first element of a cons cell, or NULL. */
 mino_val *mino_car(const mino_val *v);
 
 /* Return the rest of a cons cell, or NULL. */
 mino_val *mino_cdr(const mino_val *v);
+
+/* Universal seq abstraction matching Clojure's `seq` / `first` /
+ * `rest` / `next`:
+ *
+ *   mino_seq(S, coll)   -- coerce coll to a seq; returns NULL for an
+ *                          eval error, mino_nil() for an empty input.
+ *   mino_first(coll)    -- first element of the seq; mino_nil() if
+ *                          empty.
+ *   mino_rest(S, coll)  -- the seq of everything after the first; an
+ *                          empty list when there's nothing left.
+ *   mino_next(S, coll)  -- (seq (rest coll)): nil when empty, the
+ *                          forced seq otherwise. Matches the
+ *                          Clojure idiom for terminating while-let
+ *                          loops.
+ *
+ * The cons-spine-only mino_car/mino_cdr above stay; this quartet
+ * covers the universal walk across vec / map / set / lazy / chunked /
+ * sorted variants. */
+mino_val *mino_seq  (mino_state *S, mino_val *coll);
+mino_val *mino_first(mino_val *coll);
+mino_val *mino_rest (mino_state *S, mino_val *coll);
+mino_val *mino_next (mino_state *S, mino_val *coll);
+
+/* Metadata read / attach matching script-side `(meta x)` and
+ * `(with-meta x m)`. `mino_with_meta` returns a fresh shallow-copy
+ * with the new meta map; identity-shaped types (atom, agent) throw.
+ * `m` must be a MINO_MAP or MINO_NIL. */
+mino_val *mino_meta(const mino_val *v);
+mino_val *mino_with_meta(mino_state *S, mino_val *v, mino_val *meta);
+
+/* Dynamic-binding push/pop from C, peer to script-side
+ * `(binding [...] ...)`. `vars` is an array of MINO_SYMBOL values
+ * naming the dynamic vars to rebind; `vals` is the parallel array
+ * of values. Returns an opaque frame handle the embedder pops with
+ * `mino_pop_bindings` after evaluating the dynamically-scoped work.
+ *
+ * Nests correctly with script-side `binding` frames: a script-side
+ * unwind through `throw` walks the dyn stack and clears any frames
+ * still open above the catching frame, including ones the embedder
+ * pushed.
+ *
+ * Returns NULL on allocation failure or invalid argument shape (any
+ * non-symbol in `vars`, or attempting to bind a non-dynamic var). */
+typedef struct mino_binding_frame mino_binding_frame;
+mino_binding_frame *mino_push_bindings(mino_state *S,
+                                        mino_val **vars,
+                                        mino_val **vals,
+                                        size_t n);
+void                mino_pop_bindings (mino_state *S,
+                                        mino_binding_frame *frame);
+
+/* Cross-state transferability pre-flight. Returns 1 if the value
+ * tree contains only transferable types (nil, bool, int, float,
+ * string, symbol, keyword, cons, vector, map, set, sorted variants,
+ * lazy, bigint, ratio, bigdec, uuid, regex source); returns 0 if
+ * any identity-bearing leaf (atom, agent, handle, future, tx_ref,
+ * fn, prim, etc.) is reached. When non-NULL, `*out_reason` names
+ * the first non-transferable type encountered. Cheaper than
+ * `mino_clone` because no copy is performed. */
+int mino_can_clone(const mino_val *v, const char **out_reason);
 
 /* Return the number of cons cells in a list. */
 size_t mino_length(const mino_val *list);

@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.386.0 — Embedder UX: Clojure-Canon C Surface
+
+Phase 5 of the pre-1.0 Embedder UX cycle. Adds the C-side
+peers for canon idioms an embedder hits within their first few
+hours of binding work.
+
+### Added
+
+- `mino_meta(v)` / `mino_with_meta(S, v, m)` — peer to `(meta x)`
+  and `(with-meta x m)`. `mino_with_meta` returns a shallow-copy
+  with the new meta map attached; identity-shaped types (atom,
+  agent) throw via the runtime's error mechanism.
+
+- `mino_seq(S, coll)` / `mino_first(coll)` / `mino_rest(S, coll)`
+  / `mino_next(S, coll)` — universal seq quartet matching
+  Clojure's `seq` / `first` / `rest` / `next`. Routes through
+  the existing `prim_seq` / `prim_first` / `prim_rest` so
+  embedders can walk any collection type without learning the
+  internal seq protocol. The cons-spine-only `mino_car` /
+  `mino_cdr` stay.
+
+- `mino_compare(S, a, b)` — three-way compare matching Clojure
+  `compare`. Returns -1 / 0 / 1 for orderable values, throws on
+  cross-type or orderless comparisons through the runtime's
+  error path.
+
+- `mino_hash(v)` — canonical 32-bit Clojure hash. Routes
+  through the same internal `hash_val` that HAMT and sorted
+  collections use, so a value retrieved via this API hashes
+  identically to one keyed in a collection.
+
+- `mino_push_bindings(S, vars, vals, n)` / `mino_pop_bindings(S, fr)`
+  — peer to `(binding [...] ...)`. Returns an opaque frame
+  handle. Nests properly with script-side `binding` frames; a
+  script-side `throw` walks the dyn stack and clears any
+  embedder-pushed frames still open above the catching frame.
+
+- `mino_can_clone(v, out_reason)` — cross-state transferability
+  pre-flight. Walks the value tree without copying; returns 0
+  with `*out_reason` naming the first non-transferable type
+  encountered (`"atom"`, `"agent"`, `"handle"`, `"future"`,
+  `"fn"`, ...). Cheaper than `mino_clone` because no copy is
+  performed; useful for the embedder's "can I cross this
+  state boundary?" check.
+
+### Verification
+
+`embed_api_test` carries a new block exercising each entry
+point: meta round-trip; seq/first/next on vec and list inputs;
+compare on int pairs and hash agreement across equal vecs;
+push/pop_bindings with a dynamic var read through the frame;
+can_clone success / failure paths with reason reporting.
+
 ## v0.385.0 — Embedder UX: Predicate / Extractor Grid
 
 Phase 4 of the pre-1.0 Embedder UX cycle. Closes the holes in the

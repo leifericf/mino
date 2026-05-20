@@ -888,6 +888,41 @@ int mino_to_regex_source(const mino_val *v, const char **out, size_t *len)
     return 1;
 }
 
+/* Public 32-bit canonical hash. Routes through the internal hash_val
+ * helper that the HAMT and ratbset paths share, so a value retrieved
+ * via this API hashes identically to one keyed in a collection. */
+uint32_t mino_hash(const mino_val *v)
+{
+    return hash_val(v);
+}
+
+/* Forward declaration -- prim_compare lives in prim/numeric.c. We
+ * don't pull in prim/internal.h from the values layer (which would
+ * invert the layering); a focused extern works here. */
+mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env);
+
+/* Public 3-way compare. Routes through prim_compare via a one-shot
+ * cons-spine arg list; prim_compare throws on cross-type compares the
+ * runtime can't order. Returns -1 / 0 / 1 on success; in the throw
+ * path the function returns 0 and the runtime's last_error carries
+ * the diagnostic (same contract as other mino_* functions that
+ * route through prim_*). */
+int mino_compare(mino_state *S, const mino_val *a, const mino_val *b)
+{
+    mino_val *args, *r;
+    long long n = 0;
+    args = mino_cons(S, (mino_val *)b, mino_nil(S));
+    args = mino_cons(S, (mino_val *)a, args);
+    r = prim_compare(S, args, NULL);
+    if (r == NULL) return 0;
+    if (mino_to_int(r, &n)) {
+        if (n < 0) return -1;
+        if (n > 0) return 1;
+        return 0;
+    }
+    return 0;
+}
+
 mino_type mino_typeof(const mino_val *v)
 {
     return mino_type_of(v);
