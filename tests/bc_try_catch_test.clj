@@ -108,3 +108,46 @@
                  (throw e)))))
     (is (= "try nesting too deep"
            (try (rec__td2 200) (catch e (ex-message e)))))))
+
+(deftest bc-catch-releases-intermediate-frame-state
+  ;; A throw from a deeply-nested fn unwinds through intermediate
+  ;; bc_run frames whose bc_pop_window calls are skipped by the
+  ;; longjmp. If the catching fn loops over many such catches, the
+  ;; intermediate-frame register slots stay pinned as GC roots in
+  ;; bc_regs[base..bc_top) across iterations and accumulate -- the
+  ;; loop's next OP_CALL pushes its new window ABOVE the leaked
+  ;; range. The catch landing must restore bc_top so loop iterations
+  ;; reuse the same window range.
+  (defn alloc-leak__catch [n]
+    (let [big (vec (range 50000))]   ;; ~50k YOUNG cells pinned in a reg
+      (throw {:msg "x", :big-size (count big)})))
+  (defn middle__catch [n] (alloc-leak__catch n))
+  ;; Catching fn that loops and observes peak bytes-live INSIDE its
+  ;; own bc_run frame. The catching frame is long-lived (single
+  ;; bc_run instance across all iterations), so leaked
+  ;; intermediate-frame slots from earlier iterations stay in
+  ;; bc_regs[base..bc_top) until this fn returns. The peak inside
+  ;; this fn captures the in-flight retention; the value AFTER
+  ;; return would not, because bc_pop_window on outermost return
+  ;; flushes everything.
+  (defn loop-catcher [iters]
+    (let [peak (atom 0)]
+      (loop [i 0]
+        (when (< i iters)
+          (try (middle__catch i) (catch e :caught))
+          (gc!)
+          (let [b (long (:bytes-live (gc-stats)))]
+            (swap! peak max b))
+          (recur (inc i))))
+      @peak))
+  (gc!)
+  (let [baseline (long (:bytes-live (gc-stats)))
+        peak     (loop-catcher 32)
+        delta    (- peak baseline)]
+    ;; 32 leaked intermediate-frame `big` vecs would each pin a
+    ;; 50k-element vector (~400 KB of cells per vec, often 12+ MB
+    ;; total). 2 MB is well above unrelated alloc noise and well
+    ;; below leak magnitude.
+    (is (< delta (* 2 1024 1024))
+        (str "bc_top leak suspected: bytes-live peak grew "
+             delta " bytes above baseline during 32 looped catches"))))

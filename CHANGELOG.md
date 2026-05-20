@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.389.11 — Restore `bc_top` on Catch Unwind
+
+A throw from a deeply-nested fn longjmps to the catching try
+frame's setjmp, bypassing every intermediate fn's
+`bc_pop_window` call. The catch landing pads in both the bytecode
+VM (`OP_PUSHCATCH`) and the tree-walker (`eval_try`) used to
+restore the catching frame's `regs` pointer but leave
+`S->bc.bc_top` at the deeper post-throw value. Intermediate
+register slots therefore stayed inside `[0, bc_top)` for the
+remainder of the catching fn's lifetime; the GC root walker kept
+tracing whatever those slots happened to hold, so a long-lived
+catching loop accumulated stale references and the GC could not
+reclaim values that the program logically dropped at each catch.
+
+Both landing pads now pop `bc_top` back to its value at
+PUSHCATCH / `eval_try` entry and zero the freed slots, matching
+the work a normal `bc_pop_window` would do on a clean return.
+The bytecode pad reconstructs `bc_top` from the catching fn's own
+`base + bc->n_regs` locals (no struct-field expansion that would
+shift JIT-pinned offsets); the tree-walker pad snapshots
+`S->bc.bc_top` at entry and pops on the longjmp arm and on a
+catch-handler rethrow.
+
 ## v0.389.10 — Preserve Empty-String Namespace on Symbols and Keywords
 
 `(keyword "" "hi")` and `(symbol "" "hi")` previously collapsed to a

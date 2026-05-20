@@ -213,6 +213,15 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     saved_call  = mino_current_ctx(S)->call_depth;
     saved_trace = mino_current_ctx(S)->trace_added;
     saved_dyn   = mino_current_ctx(S)->dyn_stack;
+    /* Snapshot bc_top so a longjmp that unwinds through bc_run
+     * frames (intermediate fns called by the body) doesn't leave
+     * their register windows stranded in [0, bc_top). The catch
+     * arm below pops down to this value and zeroes the freed
+     * slots, matching what the bypassed bc_pop_window would have
+     * done on a normal return. Without this, leaked register
+     * slots root their contents as GC roots until the outermost
+     * mino_bc_run returns. */
+    size_t saved_bc_top = S->bc.bc_top;
 
     if (mino_current_ctx(S)->try_depth >= MAX_TRY_DEPTH) {
         set_eval_diag(S, form, "limit", "MLM002", "try nesting too deep");
@@ -256,6 +265,10 @@ mino_val *eval_try(mino_state *S, mino_val *form,
              * reclaimed here on the unwind path. */
             free(f);
         }
+        while (S->bc.bc_top > saved_bc_top) {
+            S->bc.bc_top--;
+            S->bc.bc_regs[S->bc.bc_top] = NULL;
+        }
         clear_error(S);
         got_exception = 1;
     }
@@ -279,6 +292,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             int         it = mino_current_ctx(S)->trace_added;
             int         is = mino_current_ctx(S)->try_depth; /* save before setjmp */
             dyn_frame_t *id = mino_current_ctx(S)->dyn_stack;
+            size_t      ibt = S->bc.bc_top; /* bc_top before catch-handler */
             mino_current_ctx(S)->try_stack[is].exception      = NULL;
             mino_current_ctx(S)->try_stack[is].saved_ns       = S->ns_vars.current_ns;
             mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
@@ -308,6 +322,10 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                     mino_current_ctx(S)->dyn_stack = f->prev;
                     dyn_binding_list_free(f->bindings);
                     free(f);
+                }
+                while (S->bc.bc_top > ibt) {
+                    S->bc.bc_top--;
+                    S->bc.bc_regs[S->bc.bc_top] = NULL;
                 }
                 clear_error(S);
                 /* got_exception stays 1, vol_ex updated. */

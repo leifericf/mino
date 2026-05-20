@@ -2358,6 +2358,25 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 S->ns_vars.fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
                 load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
                 ctx->try_depth = my_td;
+                /* Pop the register-window stack back down to this fn's
+                 * own window. A throw from a deeper bc_run frame
+                 * bypassed every intermediate fn's bc_pop_window, so
+                 * without this restore the leaked register slots stay
+                 * inside [0, bc_top) and the GC root walker keeps
+                 * tracing their stale contents until the outermost
+                 * mino_bc_run returns. bc_top at the PUSHCATCH that
+                 * armed us was exactly `base + bc->n_regs` (bc_run's
+                 * entry-time bc_push_window for THIS fn), so reusing
+                 * those locals reconstructs it without a struct
+                 * field. Zero the freed slots the way bc_pop_window
+                 * does so the GC root walker sees NULL. */
+                {
+                    size_t saved_top = base + (size_t)bc->n_regs;
+                    while (S->bc.bc_top > saved_top) {
+                        S->bc.bc_top--;
+                        S->bc.bc_regs[S->bc.bc_top] = NULL;
+                    }
+                }
                 /* Pop any dyn frames that the body PUSHDYN'd but never
                  * POPDYN'd because the throw bypassed the matching
                  * cleanup. Matches eval_try's saved_dyn unwind so a
