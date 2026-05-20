@@ -260,3 +260,74 @@
 
 (deftest get-spec-returns-nil-for-unknown
   (is (nil? (s/get-spec :clojure.spec.alpha.test/unknown-spec))))
+
+;; ---------------------------------------------------------------------------
+;; unform: inverse of conform.
+;; ---------------------------------------------------------------------------
+
+(s/def ::distance (s/cat :amount (s/and number? pos?) :unit #{:meters :miles}))
+
+(deftest unform-cat-reconstructs-sequence
+  (is (= '(3 :meters) (s/unform ::distance {:amount 3 :unit :meters})))
+  (is (= '(3 :foo)    (s/unform ::distance {:amount 3 :unit :foo})))
+  ;; Missing key drops that position
+  (is (= '(3)         (s/unform ::distance {:amount 3 :foo :miles})))
+  (is (= '()          (s/unform ::distance {:bar 3 :foo :miles}))))
+
+(s/def ::ll (s/or :kw keyword? :n number?))
+
+(deftest unform-or-extracts-from-tagged-pair
+  (is (= :foo (s/unform ::ll [:kw :foo])))
+  (is (= 42   (s/unform ::ll [:n 42]))))
+
+(s/def ::pos-num (s/and number? pos?))
+
+(deftest unform-and-passes-through-pred-chain
+  (is (= 3 (s/unform ::pos-num 3))))
+
+(deftest unform-pred-is-identity
+  (is (= 42 (s/unform number? 42)))
+  (is (= :x (s/unform keyword? :x))))
+
+(s/def ::tuple-pair (s/tuple keyword? number?))
+
+(deftest unform-tuple-roundtrip
+  (let [c (s/conform ::tuple-pair [:age 30])]
+    (is (= [:age 30] (s/unform ::tuple-pair c)))))
+
+;; ---------------------------------------------------------------------------
+;; conformer: arbitrary fn-driven specs.
+;; ---------------------------------------------------------------------------
+
+(deftest conformer-uses-fn-as-conform-path
+  (is (true? (s/conform (s/conformer map?) {:a 1})))
+  (is (false? (s/conform (s/conformer map?) [:a 1])))
+  (is (= :b (s/conform (s/conformer second) [:a :b :c]))))
+
+(deftest conformer-explain-reports-invalid
+  (let [spec (s/conformer (fn [x] (if (pos? x) x :clojure.spec.alpha/invalid)))]
+    (is (= 3 (s/conform spec 3)))
+    (is (= :clojure.spec.alpha/invalid (s/conform spec -1)))))
+
+(deftest conformer-unform-uses-supplied-fn
+  (let [spec (s/conformer #(* 2 %) #(/ % 2))]
+    (is (= 6 (s/conform spec 3)))
+    (is (= 3 (s/unform  spec 6)))))
+
+(deftest conformer-unform-default-identity
+  (let [spec (s/conformer keyword)]
+    (is (= :hello (s/conform spec "hello")))
+    (is (= :hello (s/unform  spec :hello)))))
+
+;; ---------------------------------------------------------------------------
+;; with-gen: attach a generator to a spec.
+;; ---------------------------------------------------------------------------
+
+(deftest with-gen-attaches-generator
+  (let [base   (s/and number? pos?)
+        marker (fn [] :a-generator)
+        with   (s/with-gen base marker)]
+    (is (= marker (:clojure.spec.alpha/gen with)))
+    ;; Conform / valid? still work on the underlying spec
+    (is (= 3 (s/conform with 3)))
+    (is (true? (s/valid? with 3)))))

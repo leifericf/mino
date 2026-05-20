@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.395.0 — `spec.alpha`: `unform`, `conformer`, `with-gen`
+
+`unform` (the inverse of `conform`) now ships as a multimethod
+dispatching on `::kind`. For pred / wrap / and / or / nilable / tuple /
+every / keys / regex specs the inverse is implemented in terms of the
+spec map; for the unspecified case (regex `&`, custom conformer specs
+without an explicit unform-fn), unform falls back to identity.
+
+`conformer` builds a spec from an arbitrary conform fn and an optional
+unform fn. The conform fn must return `:clojure.spec.alpha/invalid`
+when the value does not conform; otherwise the returned value is the
+conformed value.
+
+`with-gen` attaches an alternative generator fn to a spec; the
+generator is stored on the spec map's `::gen` key. The fn is only
+realised when `gen` is called against the spec (still requires a
+generator backend, deferred).
+
+The ClojureDocs probe drops `unform:0-3`, `conformer:0`, and
+`with-gen:0`. Tests cover cat-shaped sequence reconstruction, the
+default identity unform, conformer's fn-driven conform/unform, and
+the `::gen` attachment.
+
 ## v0.394.0 — `unchecked-*` Narrowing Casts and -Int Arithmetic
 
 The seven JVM-style narrowing casts now ship: `unchecked-long`,

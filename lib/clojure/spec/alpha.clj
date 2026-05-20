@@ -41,6 +41,8 @@
   (fn [spec _x] (::kind spec)))
 (defmulti ^:private explain-impl
   (fn [spec _path _via _in _x] (::kind spec)))
+(defmulti ^:private unform-impl
+  (fn [spec _y] (::kind spec)))
 
 (defn- spec? [x]
   (and (map? x) (contains? x ::kind)))
@@ -75,6 +77,11 @@
   [spec path via in x]
   (explain-impl spec path via in x))
 
+(defn unform*
+  "Internal dispatch for unform.  Public callers use unform."
+  [spec y]
+  (unform-impl spec y))
+
 ;; ---------------------------------------------------------------------------
 ;; Public conform / valid? / explain entry points.
 ;; ---------------------------------------------------------------------------
@@ -89,6 +96,15 @@
   "Return true iff x conforms to spec."
   [spec x]
   (not= ::invalid (conform spec x)))
+
+(defn unform
+  "Return the destructuring inverse of conform.  Given a conformed
+  value y produced by (conform spec x), unform returns a value that
+  conforms to spec and conforms to it back to y.  For specs without
+  an inverse (registered :clojure.spec.alpha/conformer specs without
+  an :unform key), unform returns y unchanged."
+  [spec y]
+  (unform* (as-spec spec) y))
 
 (defn explain-data
   "Return a problem map describing why x fails spec, or nil if it
@@ -176,6 +192,8 @@
   (when-not ((::pred s) x)
     [{:path path :pred (::form s) :val x :via via :in in}]))
 
+(defmethod unform-impl ::pred [_s y] y)
+
 (defn spec-impl
   "Build a spec value from a form and predicate.  When pred resolves to
   a regex spec (cat / * / + / ? / alt / a registered regex), the result
@@ -212,6 +230,12 @@
 
     :else
     (explain-impl (as-spec (::wrapped s)) path via in x)))
+
+(defmethod unform-impl ::wrap [s y]
+  (let [inner (::wrapped s)]
+    (if (regex-spec? inner)
+      (unform-impl inner y)
+      (unform-impl (as-spec inner) y))))
 
 ;; ---------------------------------------------------------------------------
 ;; def-impl -- registry intern.
@@ -261,6 +285,13 @@
           (explain* sp path via in v)
           (recur r (rest specs) (rest forms)))))))
 
+(defmethod unform-impl ::and [s y]
+  ;; Chain unforms in reverse: the last spec produced the final value,
+  ;; so unform through it first, then through each preceding spec.
+  (reduce (fn [acc sp] (unform* (as-spec sp) acc))
+          y
+          (reverse (::specs s))))
+
 ;; ---------------------------------------------------------------------------
 ;; or -- branch with named tags.
 ;; ---------------------------------------------------------------------------
@@ -284,6 +315,24 @@
               (explain* (as-spec sp) (conj path k) via in x))
             (::keys s) (::specs s) (::forms s))))
 
+(defn- spec-index-of
+  "Find tag in the seq of keys; returns the 0-based index or -1."
+  [keys tag]
+  (loop [ks keys i 0]
+    (cond
+      (empty? ks)        -1
+      (= (first ks) tag) i
+      :else              (recur (rest ks) (inc i)))))
+
+(defmethod unform-impl ::or [s y]
+  ;; y is a [tag conformed-val] tuple produced by conform. Look up the
+  ;; matching spec for the tag and unform through it.
+  (let [[tag v] y
+        idx     (spec-index-of (::keys s) tag)]
+    (if (neg? idx)
+      v
+      (unform* (as-spec (nth (::specs s) idx)) v))))
+
 ;; ---------------------------------------------------------------------------
 ;; nilable -- spec-or-nil.
 ;; ---------------------------------------------------------------------------
@@ -295,6 +344,9 @@
 
 (defmethod conform-impl ::nilable [s x]
   (if (nil? x) nil (conform* (as-spec (::spec s)) x)))
+
+(defmethod unform-impl ::nilable [s y]
+  (if (nil? y) nil (unform* (as-spec (::spec s)) y)))
 
 (defmethod explain-impl ::nilable [s path via in x]
   (when-not (nil? x)
@@ -325,6 +377,12 @@
               ::invalid
               (recur (conj out r) (inc i))))))
       ::invalid)))
+
+(defmethod unform-impl ::tuple [s y]
+  ;; y is a vector of conformed values; unform each element through its
+  ;; corresponding spec.
+  (vec (map (fn [sp v] (unform* (as-spec sp) v))
+            (::specs s) y)))
 
 (defmethod explain-impl ::tuple [s path via in x]
   (cond
@@ -388,6 +446,21 @@
               (set? x)         (set conformed)
               :else            (apply list conformed)))
           ::invalid)))))
+
+(defmethod unform-impl ::every [s y]
+  ;; Elements are conformed individually; unform each through the
+  ;; element spec and reconstruct in the original collection shape.
+  (let [sp        (as-spec (::spec s))
+        conformed (map (fn [v] (unform* sp v)) y)
+        target    (::into s)]
+    (cond
+      (vector? target) (vec conformed)
+      (set? target)    (set conformed)
+      (list? target)   (apply list conformed)
+      (vector? y)      (vec conformed)
+      (set? y)         (set conformed)
+      (map? y)         (into {} conformed)
+      :else            (apply list conformed))))
 
 (defmethod explain-impl ::every [s path via in x]
   (let [kp (::kind-pred s)
@@ -476,6 +549,11 @@
                               (check-fn % (unqualified-key %)) true) opt-un))]
           (if all-ok? x ::invalid))))))
 
+(defmethod unform-impl ::keys [_s y]
+  ;; keys-conformed values pass through identity; per-key values were
+  ;; not transformed by conform.
+  y)
+
 (defmethod explain-impl ::keys [s path via in x]
   (if-not (map? x)
     [{:path path :pred 'map? :val x :via via :in in}]
@@ -562,6 +640,10 @@
     (nil? x)        (re-explain s path via in ())
     (sequential? x) (re-explain s path via in (seq x))
     :else           [{:path path :pred 'sequential? :val x :via via :in in}]))
+
+(declare re-unform)
+
+(defmethod unform-impl ::regex [s y] (re-unform s y))
 
 (defn- re-conform-cat
   "Greedy cat: consume each declared element from xs.  Returns
@@ -660,6 +742,62 @@
       (= ::invalid r) ::invalid
       (seq rem)       ::invalid
       :else           r)))
+
+(defn- re-unform
+  "Reconstruct the input sequence that conformed to spec. Inverse of
+  re-consume: cat unfolds a map of tagged values into the declared key
+  order; *, +, ? unfold a collection or single value; alt unfolds the
+  [tag val] pair via the matching branch."
+  [spec y]
+  (let [op (::op spec)]
+    (cond
+      (= ::cat op)
+      ;; y is a map keyed by ::keys-listed tags. Walk in declared
+      ;; order; if a tag was not produced (missing key) we drop that
+      ;; position, matching JVM-Clojure's spec.alpha behaviour.
+      (mapcat (fn [k sp]
+                (let [present? (contains? y k)
+                      v        (get y k)
+                      rsp      (as-regex-spec sp)]
+                  (cond
+                    (not present?) ()
+                    rsp            (let [sub (re-unform rsp v)]
+                                     (if (sequential? sub) sub (list sub)))
+                    :else          (list (unform* (as-spec sp) v)))))
+              (::keys spec) (::specs spec))
+
+      (or (= ::* op) (= ::+ op))
+      (let [sp  (::spec spec)
+            rsp (as-regex-spec sp)]
+        (mapcat (fn [v]
+                  (if rsp
+                    (let [sub (re-unform rsp v)]
+                      (if (sequential? sub) sub (list sub)))
+                    (list (unform* (as-spec sp) v))))
+                y))
+
+      (= ::? op)
+      (if (nil? y)
+        ()
+        (let [sp  (::spec spec)
+              rsp (as-regex-spec sp)]
+          (if rsp
+            (let [sub (re-unform rsp y)]
+              (if (sequential? sub) sub (list sub)))
+            (list (unform* (as-spec sp) y)))))
+
+      (= ::alt op)
+      (let [[tag v] y
+            idx     (spec-index-of (::keys spec) tag)]
+        (if (neg? idx)
+          ()
+          (let [sp  (nth (::specs spec) idx)
+                rsp (as-regex-spec sp)]
+            (if rsp
+              (re-unform rsp v)
+              (list (unform* (as-spec sp) v))))))
+
+      :else y)))
 
 (defn- re-explain [spec path via in xs]
   (let [r (re-conform spec xs)]
@@ -883,6 +1021,46 @@
 ;; `s/def`, etc. resolve correctly because qualified-symbol dispatch
 ;; bypasses the special-form table.
 ;; ---------------------------------------------------------------------------
+
+;; ---------------------------------------------------------------------------
+;; conformer -- a spec built from an arbitrary conform fn (and optional
+;; unform fn). The conform fn must return ::invalid when the value does
+;; not conform, otherwise the returned value is the conformed value.
+;; ---------------------------------------------------------------------------
+
+(defn conformer
+  "Return a spec that uses cfn as the conform path. cfn takes a value
+  and returns the conformed value or :clojure.spec.alpha/invalid.
+  Optionally takes an unform fn; if omitted, unform is identity."
+  ([cfn]      (conformer cfn identity))
+  ([cfn ufn]
+   {::kind ::conformer
+    ::form (list 'clojure.spec.alpha/conformer cfn)
+    ::conform-fn cfn
+    ::unform-fn  ufn}))
+
+(defmethod conform-impl ::conformer [s x]
+  ((::conform-fn s) x))
+
+(defmethod explain-impl ::conformer [s path via in x]
+  (when (= ::invalid ((::conform-fn s) x))
+    [{:path path :pred (::form s) :val x :via via :in in}]))
+
+(defmethod unform-impl ::conformer [s y]
+  ((::unform-fn s) y))
+
+;; ---------------------------------------------------------------------------
+;; with-gen -- attach an alternative generator to a spec. Generators
+;; require clojure.test.check; the alternative is stored on the spec
+;; map and surfaced through gen.
+;; ---------------------------------------------------------------------------
+
+(defn with-gen
+  "Return a copy of spec that uses gen-fn as its generator. spec may
+  be a registered keyword, a spec map, or any predicate-shaped value
+  acceptable to as-spec."
+  [spec gen-fn]
+  (assoc (as-spec spec) ::gen gen-fn))
 
 (defn- res
   "Resolve a symbol to its qualified form for stable :form data."
