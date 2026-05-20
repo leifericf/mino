@@ -73,4 +73,16 @@ void mino_worker_list_lock_release(mino_state *S);
 int  mino_yield_lock(mino_state *S);
 void mino_resume_lock(mino_state *S, int saved_depth);
 
+/* Debug-only invariant: assert that the caller is in a state-safe
+ * window -- either single-threaded (no other writer can interpose,
+ * including the init path before any future has been spawned) or
+ * holding state_lock recursively on this thread. Used to guard
+ * shared-table mutators (intern table, record-type registry) whose
+ * documented contract is "caller must hold state_lock"; the assert
+ * surfaces a missing lock at the offending call site under a debug
+ * build instead of letting a torn table escape into production. */
+#define MINO_ASSERT_STATE_SAFE(S) \
+    assert(!(S)->threading.multi_threaded \
+           || mino_current_ctx(S)->lock_depth > 0)
+
 #endif /* RUNTIME_COORDINATION_H */

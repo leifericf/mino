@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.389.9 — Lock-Invariant Asserts on Shared Tables
+
+The intern table and the record-type registry are shared across
+host worker threads but mutated with plain stores; the documented
+contract was "caller holds `state_lock`" and nothing enforced it.
+Add a debug-build assert (`MINO_ASSERT_STATE_SAFE`) at the head of
+`intern_lookup_or_create_ns` and `mino_defrecord` so a missing
+lock surfaces at the offending call site instead of letting a
+torn table escape into production.
+
+Two genuine missing-lock call sites were uncovered and fixed by
+the assert:
+
+- The future worker (`worker_run` in `runtime/host_threads.c`)
+  built its convey-binding chain before `mino_call` acquired
+  state_lock; the `mino_symbol` interns ran unprotected. The
+  convey loop now wraps the intern calls in `mino_lock` /
+  `mino_unlock`.
+- The agent worker (`agent_worker_run` in `prim/agent.c`) took
+  state_lock via the raw `mino_state_lock_acquire` mutex, which
+  does not bump `lock_depth`. Switch to `mino_lock` so the
+  recursion counter stays accurate; the assert and any future
+  lock-aware introspection now see the held lock.
+
 ## v0.389.8 — `eval_try` Catch-Rethrow Protection Hygiene
 
 The catch-with-finally branch was gated on

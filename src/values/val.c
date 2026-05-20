@@ -182,6 +182,14 @@ mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
     mino_val *v;
     size_t ns_len;
 
+    /* Caller-must-hold-state_lock contract: the intern table is shared
+     * across host worker threads, but its open-addressing hash, the
+     * append-only entries[] array, and the GC-coupled allocations
+     * inside the insert path all assume serialized writers. Surface
+     * a missing lock at the call site (debug builds) instead of
+     * letting a torn entries[] cell escape into production. */
+    MINO_ASSERT_STATE_SAFE(S);
+
     /* ns_len resolution: callers that constructed via 2-arg (keyword
      * ns name) pass an explicit `ns_len_hint`. Single-string callers
      * pass (size_t)-1; we derive ns_len from the LAST '/' in `s` so a
@@ -562,6 +570,13 @@ mino_val *mino_defrecord(mino_state *S,
     if (S == NULL || ns == NULL || name == NULL) {
         return NULL;
     }
+
+    /* Caller-must-hold-state_lock contract: the linked record-type
+     * registry is shared across host worker threads but mutated with
+     * a plain prepend below; concurrent defrecords would race on the
+     * head pointer. Surface a missing lock at the call site (debug
+     * builds) before the torn list escapes. */
+    MINO_ASSERT_STATE_SAFE(S);
 
     /* Intern ns and name strings via the symbol table so we can compare
      * with pointer equality and the storage outlives any caller-owned

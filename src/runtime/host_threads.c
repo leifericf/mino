@@ -316,6 +316,12 @@ static void worker_run(mino_future *impl, char *stack_anchor)
             dyn_binding_t *bhead = NULL;
             size_t i;
             int    oom = 0;
+            /* Symbol interning mutates the shared intern table; on a
+             * multi-threaded state every writer must hold state_lock.
+             * The thunk's mino_call acquires it just below, but the
+             * convey-binding build runs before that, so take the lock
+             * explicitly for the symbol/string installs. */
+            mino_lock(S);
             for (i = 0; i < snap->as.map.len; i++) {
                 mino_val    *key = vec_nth(snap->as.map.key_order, i);
                 mino_val    *val = map_get_val(snap, key);
@@ -331,6 +337,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
                 b->next = bhead;
                 bhead   = b;
             }
+            mino_unlock(S);
             if (!oom) {
                 conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
                 if (conveyed == NULL) { dyn_binding_list_free(bhead); }

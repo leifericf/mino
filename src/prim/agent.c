@@ -468,10 +468,15 @@ static void agent_worker_run(mino_state *S, agent_pool_kind_t kind,
         n = agent_runq_pop(S, kind);
         agent_mu_unlock(&S->agent.mu);
 
-        /* Run the action under state_lock so eval invariants hold. */
-        mino_state_lock_acquire(S);
+        /* Run the action under state_lock so eval invariants hold.
+         * Use mino_lock here rather than the raw state_lock_acquire so
+         * lock_depth tracks the recursion: the convey-binding build
+         * inside agent_worker_run_one interns symbols, and the intern
+         * table's caller-must-hold-lock assert checks lock_depth, not
+         * the underlying mutex. */
+        mino_lock(S);
         agent_worker_run_one(S, n);
-        mino_state_lock_release(S);
+        mino_unlock(S);
 
         /* Decrement the agent's in_flight and signal await waiters. */
         agent_mu_lock(&S->agent.mu);
