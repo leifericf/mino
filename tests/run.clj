@@ -90,6 +90,7 @@
 (require "tests/data_test")
 (require "tests/data_readers_test")
 (require "tests/spec_test")
+(require "tests/reducers_test")
 (require "tests/capability_metadata_test")
 (require "tests/async_smoke_test")
 (require "tests/fs_test")

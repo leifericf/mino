@@ -40,6 +40,7 @@
 #include "lib_clojure_stacktrace.h"
 #include "lib_clojure_datafy.h"
 #include "lib_clojure_core_protocols.h"
+#include "lib_clojure_core_reducers.h"
 #include "lib_clojure_instant.h"
 #include "lib_clojure_spec_alpha.h"
 #include "lib_clojure_core_specs_alpha.h"
@@ -131,6 +132,15 @@ void mino_install_clojure_datafy(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "clojure.datafy",          lib_clojure_datafy_src);
     mino_register_bundled_lib(S, "clojure.core.protocols",  lib_clojure_core_protocols_src);
+}
+
+/* clojure.core.reducers: sequential transducer-layer wrapper. Parallel
+ * fork/join is deferred until the multi-state OS-thread cycle. */
+void mino_install_clojure_reducers(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.core.reducers",
+                              lib_clojure_core_reducers_src);
 }
 
 void mino_install_clojure_instant(mino_state *S, mino_env *env)

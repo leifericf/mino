@@ -115,6 +115,7 @@ void mino_install_clojure_test      (mino_state *S, mino_env *env);
 void mino_install_clojure_test_check(mino_state *S, mino_env *env);
 void mino_install_clojure_repl      (mino_state *S, mino_env *env);
 void mino_install_clojure_datafy    (mino_state *S, mino_env *env);
+void mino_install_clojure_reducers  (mino_state *S, mino_env *env);
 void mino_install_clojure_instant   (mino_state *S, mino_env *env);
 void mino_install_clojure_spec      (mino_state *S, mino_env *env);
 void mino_install_mino_tooling      (mino_state *S, mino_env *env);

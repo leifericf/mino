@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 396
+#define MINO_VERSION_MINOR 397
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -1432,6 +1432,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_SPEC          (1u << 24)  /* clojure.spec.alpha */
 #define MINO_CAP_TOOLING       (1u << 25)  /* mino.deps + mino.tasks */
 #define MINO_CAP_MATH_LIB      (1u << 26)  /* clojure.math */
+#define MINO_CAP_REDUCERS      (1u << 27)  /* clojure.core.reducers */
 
 /* The sandbox preset: floor + Clojure-core (multimethods, protocols,
  * transducers, regex, bignum) + the bundled libraries that have no I/O
@@ -1442,7 +1443,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
                           MINO_CAP_SET_LIB | MINO_CAP_WALK | MINO_CAP_EDN | \
                           MINO_CAP_DATA | MINO_CAP_TEST | MINO_CAP_DATAFY | \
-                          MINO_CAP_MATH_LIB)
+                          MINO_CAP_MATH_LIB | MINO_CAP_REDUCERS)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFu

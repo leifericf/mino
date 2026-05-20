@@ -158,6 +158,7 @@
    ["lib/clojure/stacktrace.clj"      "clojure.stacktrace"      "lib_clojure_stacktrace"]
    ["lib/clojure/datafy.clj"          "clojure.datafy"          "lib_clojure_datafy"]
    ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]
+   ["lib/clojure/core/reducers.clj"   "clojure.core.reducers"   "lib_clojure_core_reducers"]
    ["lib/clojure/instant.clj"         "clojure.instant"         "lib_clojure_instant"]
    ["lib/clojure/spec/alpha.clj"      "clojure.spec.alpha"      "lib_clojure_spec_alpha"]
    ["lib/clojure/core/specs/alpha.clj" "clojure.core.specs.alpha" "lib_clojure_core_specs_alpha"]

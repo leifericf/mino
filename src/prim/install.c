@@ -232,6 +232,10 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.spec.alpha (spec/def / spec/valid? / spec/explain / ...)." },
     { "tooling",      MINO_CAP_TOOLING,
       "mino.deps + mino.tasks (deps resolution, task runner)." },
+    { "math-lib",     MINO_CAP_MATH_LIB,
+      "clojure.math (sqrt / sin / log / floor / etc.)." },
+    { "reducers",     MINO_CAP_REDUCERS,
+      "clojure.core.reducers (sequential transducer-layer wrapper)." },
     { NULL,           0u,                                                NULL },
 };
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.397.0 — `clojure.core.reducers` (Sequential)
+
+A new bundled namespace lands at `lib/clojure/core/reducers.clj`,
+gated by a new `MINO_CAP_REDUCERS` capability bit included in
+`MINO_CAP_DEFAULT`. The surface mirrors the JVM canon:
+`r/map / filter / mapcat / remove / take / take-while / drop /
+drop-while / flatten / cat / monoid / foldcat / reduce / fold`.
+
+Each transformer builds a transducer-shaped eduction over the source
+collection, which is reduced through the standard `reduce` path. The
+`fold` variant is **sequential** — mino does not yet ship the JVM
+fork/join machinery that backs parallel reducers; `fold` reduces
+left-to-right via `reduce` regardless of the partition size arg.
+Parallel fork/join is queued for the multi-state OS-thread cycle.
+
 ## v0.396.0 — `spec.alpha`: `:via` Propagation, `explain-str` Format, `s/&`
 
 `explain-data` problems now carry the registered spec name in their

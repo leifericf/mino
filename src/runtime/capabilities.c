@@ -69,6 +69,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
      * too without a separate bit. */
     { MINO_CAP_REPL_LIB,    mino_install_clojure_repl    },
     { MINO_CAP_DATAFY,      mino_install_clojure_datafy  },
+    { MINO_CAP_REDUCERS,    mino_install_clojure_reducers},
     { MINO_CAP_INSTANT,     mino_install_clojure_instant },
     { MINO_CAP_SPEC,        mino_install_clojure_spec    },
     { MINO_CAP_TOOLING,     mino_install_mino_tooling    },
