@@ -17,9 +17,9 @@
 
 #include "abi.h"
 
-mino_val_t *stencil_op_tailcall(mino_val_t **regs,
-                                mino_val_t **consts,
-                                mino_state_t *S)
+mino_val *stencil_op_tailcall(mino_val **regs,
+                                mino_val **consts,
+                                mino_state *S)
 {
     (void)consts;
     return mino_jit_tailcall_slow(S, regs,

@@ -145,6 +145,7 @@
 (def ^:private bundled-stdlib
   [["lib/clojure/string.clj"          "clojure.string"          "lib_clojure_string"]
    ["lib/clojure/set.clj"             "clojure.set"             "lib_clojure_set"]
+   ["lib/clojure/math.clj"            "clojure.math"            "lib_clojure_math"]
    ["lib/clojure/walk.clj"            "clojure.walk"            "lib_clojure_walk"]
    ["lib/clojure/edn.clj"             "clojure.edn"             "lib_clojure_edn"]
    ["lib/clojure/pprint.clj"          "clojure.pprint"          "lib_clojure_pprint"]
@@ -1153,8 +1154,8 @@
     "src/eval/read.c:read_form"
     "src/values/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
     "src/eval/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
-    "src/prim/module.c:mino_env_t *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
-    "src/prim/module.c:mino_val_t *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
+    "src/prim/module.c:mino_env *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
+    "src/prim/module.c:mino_val *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
 
 (defn- count-lines
   "Return the number of lines in a file."

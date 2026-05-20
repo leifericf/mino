@@ -25,7 +25,7 @@
  * conservative stack scan -- that is deferred to gc_major_remark so
  * the scan sees whatever stack state is live at the END of mark, not
  * whatever was live at the start. */
-void gc_major_begin(mino_state_t *S)
+void gc_major_begin(mino_state *S)
 {
     long long t0, troots;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_IDLE) {
@@ -51,7 +51,7 @@ void gc_major_begin(mino_state_t *S)
  * does not need the range index, so step skips a rebuild here even
  * though the mutator may have invalidated the index between slices.
  * Callers that want a full drain pass (size_t)-1. */
-void gc_major_step(mino_state_t *S, size_t budget_words)
+void gc_major_step(mino_state *S, size_t budget_words)
 {
     long long t0;
     size_t    popped = 0;
@@ -75,7 +75,7 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
  * lives in this frame and is visible to gc_scan_stack. Must run with
  * the mutator paused -- no partial progress is acceptable between
  * remark and sweep. */
-void gc_major_remark(mino_state_t *S)
+void gc_major_remark(mino_state *S)
 {
     jmp_buf   jb;
     long long t0;
@@ -119,7 +119,7 @@ void gc_major_remark(mino_state_t *S)
  * memory; subsequent intern_lookup_or_create probes would dereference
  * the dangling pointer. YOUNG entries are not swept by major (minor
  * owns YOUNG lifecycle), so they are skipped. */
-static void gc_intern_sweep_tombstones(mino_state_t *S)
+static void gc_intern_sweep_tombstones(mino_state *S)
 {
     intern_table_t *tables[2];
     int             ti;
@@ -130,7 +130,7 @@ static void gc_intern_sweep_tombstones(mino_state_t *S)
         size_t          i;
         size_t          mask;
         for (i = 0; i < tbl->len; i++) {
-            mino_val_t *e = tbl->entries[i];
+            mino_val *e = tbl->entries[i];
             gc_hdr_t   *h;
             uint32_t    hash;
             size_t      idx;
@@ -157,7 +157,7 @@ static void gc_intern_sweep_tombstones(mino_state_t *S)
     }
 }
 
-void gc_major_sweep_phase(mino_state_t *S)
+void gc_major_sweep_phase(mino_state *S)
 {
     long long t0;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_MAJOR_MARK) {
@@ -197,7 +197,7 @@ void gc_major_sweep_phase(mino_state_t *S)
  * frontier set on YOUNG via cross-gen tracing (so the next minor
  * starts from a clean slate) and to tally live_young for the
  * post-sweep byte counters. */
-void gc_sweep(mino_state_t *S)
+void gc_sweep(mino_state *S)
 {
     gc_hdr_t **pp         = &S->gc.all_old;
     size_t     live_young = 0;

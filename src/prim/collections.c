@@ -13,7 +13,7 @@
 static void coll_utf8_step(const unsigned char *data, size_t len, size_t pos,
                            unsigned int *cp_out, size_t *step_out);
 
-mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -22,7 +22,7 @@ mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_car(args->as.cons.car);
 }
 
-mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_cdr(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -36,10 +36,10 @@ mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * vectors, maps, sets, and strings.  Used by prim_cons so that
  * (cons 1 #{2 3}) returns (1 2 3), not (1 . #{2 3}). */
 
-mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
+mino_val *val_to_seq(mino_state *S, mino_val *v)
 {
-    mino_val_t *head;
-    mino_val_t *tail;
+    mino_val *head;
+    mino_val *tail;
     size_t i;
 
     if (v == NULL || mino_type_of(v) == MINO_NIL) return mino_nil(S);
@@ -64,7 +64,7 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         head = mino_nil(S);
         tail = NULL;
         for (i = 0; i < v->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(v, i), mino_nil(S));
+            mino_val *cell = mino_cons(S, vec_nth(v, i), mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
@@ -76,10 +76,10 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         head = mino_nil(S);
         tail = NULL;
         for (i = 0; i < v->as.map.len; i++) {
-            mino_val_t *key = vec_nth(v->as.map.key_order, i);
-            mino_val_t *val = map_get_val(v, key);
-            mino_val_t *kv[2];
-            mino_val_t *cell;
+            mino_val *key = vec_nth(v->as.map.key_order, i);
+            mino_val *val = map_get_val(v, key);
+            mino_val *kv[2];
+            mino_val *cell;
             kv[0] = key; kv[1] = val;
             cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
             if (tail == NULL) head = cell;
@@ -93,8 +93,8 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         head = mino_nil(S);
         tail = NULL;
         for (i = 0; i < v->as.set.len; i++) {
-            mino_val_t *elem = vec_nth(v->as.set.key_order, i);
-            mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+            mino_val *elem = vec_nth(v->as.set.key_order, i);
+            mino_val *cell = mino_cons(S, elem, mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
@@ -115,7 +115,7 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         while (pos < v->as.s.len) {
             unsigned int cp;
             size_t       step;
-            mino_val_t  *cell;
+            mino_val  *cell;
             coll_utf8_step(bytes, v->as.s.len, pos, &cp, &step);
             cell = mino_cons(S, mino_char(S, (int)cp), mino_nil(S));
             if (tail == NULL) head = cell;
@@ -139,11 +139,11 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
  * length filled with the kind's zero value (nil for Object, 0 for
  * int / long, etc.). When given a collection, copies its elements
  * into a host array of the corresponding length. */
-static mino_val_t *prim_host_array_helper(mino_state_t *S, mino_val_t *args,
+static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
                                           host_array_kind_t kind,
                                           const char *opname)
 {
-    mino_val_t *arg;
+    mino_val *arg;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         char buf[80];
         snprintf(buf, sizeof(buf), "%s requires one argument", opname);
@@ -162,61 +162,61 @@ static mino_val_t *prim_host_array_helper(mino_state_t *S, mino_val_t *args,
     return mino_host_array_from_coll(S, arg, kind);
 }
 
-mino_val_t *prim_object_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_object_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "object-array");
 }
 
-mino_val_t *prim_int_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_int_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_INT, "int-array");
 }
 
-mino_val_t *prim_long_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_long_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_LONG, "long-array");
 }
 
-mino_val_t *prim_short_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, "short-array");
 }
 
-mino_val_t *prim_byte_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_BYTE, "byte-array");
 }
 
-mino_val_t *prim_float_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_float_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_FLOAT, "float-array");
 }
 
-mino_val_t *prim_double_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_double_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_DOUBLE, "double-array");
 }
 
-mino_val_t *prim_char_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_char_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_CHAR, "char-array");
 }
 
-mino_val_t *prim_boolean_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_boolean_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_BOOLEAN, "boolean-array");
 }
 
-mino_val_t *prim_to_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_to_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
@@ -228,11 +228,11 @@ mino_val_t *prim_to_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * the *only* mutation path mino offers outside MINO_ATOM /
  * MINO_VOLATILE -- the host-array tier exists specifically to mirror
  * JVM array semantics for cross-dialect tests. */
-mino_val_t *prim_aset(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *arr;
-    mino_val_t *idx_val;
-    mino_val_t *new_val;
+    mino_val *arr;
+    mino_val *idx_val;
+    mino_val *new_val;
     long long   idx;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -264,7 +264,7 @@ mino_val_t *prim_aset(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return new_val;
 }
 
-mino_val_t *prim_map_entry(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_map_entry(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -276,11 +276,11 @@ mino_val_t *prim_map_entry(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                           args->as.cons.cdr->as.cons.car);
 }
 
-static mino_val_t *prim_cons_step(mino_state_t *S, mino_val_t *car,
-                                   mino_val_t *cdr_arg, mino_env_t *env)
+static mino_val *prim_cons_step(mino_state *S, mino_val *car,
+                                   mino_val *cdr_arg, mino_env *env)
 {
-    mino_val_t *cdr;
-    mino_val_t *result;
+    mino_val *cdr;
+    mino_val *result;
     (void)env;
     cdr = val_to_seq(S, cdr_arg);
     if (cdr == NULL) return NULL;
@@ -296,7 +296,7 @@ static mino_val_t *prim_cons_step(mino_state_t *S, mino_val_t *car,
     return result;
 }
 
-mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -306,8 +306,8 @@ mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                            args->as.cons.cdr->as.cons.car, env);
 }
 
-mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env)
+mino_val *prim_cons_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env)
 {
     if (argc != 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -325,7 +325,7 @@ mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc,
 /* behind the public primitive contracts and may change without API drift.   */
 /* ------------------------------------------------------------------------- */
 
-size_t list_length(mino_state_t *S, mino_val_t *list)
+size_t list_length(mino_state *S, mino_val *list)
 {
     size_t n = 0;
     while (list != NULL && mino_type_of(list) == MINO_LAZY) {
@@ -342,14 +342,14 @@ size_t list_length(mino_state_t *S, mino_val_t *list)
     return n;
 }
 
-int arg_count(mino_state_t *S, mino_val_t *args, size_t *out)
+int arg_count(mino_state *S, mino_val *args, size_t *out)
 {
     *out = list_length(S, args);
     return 1;
 }
 
-static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
-                                    mino_env_t *env)
+static mino_val *prim_count_step(mino_state *S, mino_val *coll,
+                                    mino_env *env)
 {
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_int(S, 0);
@@ -376,7 +376,7 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
         return mino_int(S,
             utf8_codepoint_count(coll->as.s.data, coll->as.s.len));
     case MINO_RECORD: {
-        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        mino_val *fields = coll->as.record.type->as.record_type.fields;
         size_t n = (fields != NULL) ? fields->as.vec.len : 0;
         if (coll->as.record.ext != NULL) n += coll->as.record.ext->as.map.len;
         return mino_int(S, (long long)n);
@@ -386,7 +386,7 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
          * be a flat cons spine, a chunked-cons spine (lazy range), or
          * another lazy. Dispatch instead of assuming the cons-only
          * walk. */
-        mino_val_t *forced = lazy_force(S, coll);
+        mino_val *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
         if (mino_type_of(forced) == MINO_NIL) return mino_int(S, 0);
         if (mino_type_of(forced) == MINO_CHUNKED_CONS) {
@@ -401,19 +401,19 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
         return mino_int(S, 2);
     case MINO_CHUNKED_CONS: {
         long long          n = 0;
-        const mino_val_t  *cur = coll;
+        const mino_val  *cur = coll;
         while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
-            const mino_val_t *ch = cur->as.chunked_cons.chunk;
+            const mino_val *ch = cur->as.chunked_cons.chunk;
             n += (long long)(ch->as.chunk.len - cur->as.chunked_cons.off);
             cur = cur->as.chunked_cons.more;
             if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-                cur = lazy_force(S, (mino_val_t *)cur);
+                cur = lazy_force(S, (mino_val *)cur);
                 if (cur == NULL) return NULL;
             }
         }
         if (cur != NULL && mino_type_of(cur) != MINO_NIL
             && mino_type_of(cur) != MINO_EMPTY_LIST) {
-            n += (long long)list_length(S, (mino_val_t *)cur);
+            n += (long long)list_length(S, (mino_val *)cur);
         }
         return mino_int(S, n);
     }
@@ -427,7 +427,7 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
     }
 }
 
-mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_count(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -436,8 +436,8 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_count_step(S, args->as.cons.car, env);
 }
 
-mino_val_t *prim_count_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env)
+mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env)
 {
     if (argc != 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -446,12 +446,12 @@ mino_val_t *prim_count_argv(mino_state_t *S, mino_val_t **argv, int argc,
     return prim_count_step(S, argv[0], env);
 }
 
-mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_vector(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     size_t i;
-    mino_val_t **tmp;
-    mino_val_t *p;
+    mino_val **tmp;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n == 0) {
@@ -460,7 +460,7 @@ mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* GC_T_VALARR keeps partially-gathered pointers visible to the collector;
      * without this, the optimizer may drop the `args` parameter and the cons
      * cells holding the element values become unreachable mid-construction. */
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
     p = args;
     for (i = 0; i < n; i++) {
         tmp[i] = p->as.cons.car;
@@ -469,14 +469,14 @@ mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_vector(S, tmp, n);
 }
 
-mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     size_t pairs;
     size_t i;
-    mino_val_t **ks;
-    mino_val_t **vs;
-    mino_val_t *p;
+    mino_val **ks;
+    mino_val **vs;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n % 2 != 0) {
@@ -486,8 +486,8 @@ mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_map(S, NULL, NULL, 0);
     }
     pairs = n / 2;
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
     p = args;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car;
@@ -498,11 +498,11 @@ mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_map(S, ks, vs, pairs);
 }
 
-mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *idx_val;
-    mino_val_t *def_val = NULL;
+    mino_val *coll;
+    mino_val *idx_val;
+    mino_val *def_val = NULL;
     size_t      n;
     long long   idx;
     (void)env;
@@ -576,7 +576,7 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (mino_type_of(coll) == MINO_CONS) {
-        mino_val_t *p = coll;
+        mino_val *p = coll;
         long long   i;
         for (i = 0; i < idx; i++) {
             if (!mino_is_cons(p)) {
@@ -597,9 +597,9 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
         long long remaining = idx;
-        mino_val_t *p = coll;
+        mino_val *p = coll;
         while (p != NULL && mino_type_of(p) == MINO_CHUNKED_CONS) {
-            const mino_val_t *ch = p->as.chunked_cons.chunk;
+            const mino_val *ch = p->as.chunked_cons.chunk;
             unsigned available = ch->as.chunk.len - p->as.chunked_cons.off;
             if (remaining < (long long)available) {
                 return ch->as.chunk.vals[p->as.chunked_cons.off + remaining];
@@ -655,8 +655,8 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-static mino_val_t *prim_first_step(mino_state_t *S, mino_val_t *coll,
-                                    mino_env_t *env)
+static mino_val *prim_first_step(mino_state *S, mino_val *coll,
+                                    mino_env *env)
 {
     (void)env;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
@@ -675,18 +675,18 @@ static mino_val_t *prim_first_step(mino_state_t *S, mino_val_t *coll,
         return vec_nth(coll, 0);
     }
     if (mino_type_of(coll) == MINO_LAZY) {
-        mino_val_t *s = lazy_force(S, coll);
+        mino_val *s = lazy_force(S, coll);
         if (s == NULL) return NULL;
         if (mino_type_of(s) == MINO_NIL || s == NULL) return mino_nil(S);
         if (mino_type_of(s) == MINO_CONS) return s->as.cons.car;
         if (mino_type_of(s) == MINO_CHUNKED_CONS) {
-            const mino_val_t *ch = s->as.chunked_cons.chunk;
+            const mino_val *ch = s->as.chunked_cons.chunk;
             return ch->as.chunk.vals[s->as.chunked_cons.off];
         }
         return mino_nil(S);
     }
     if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
-        const mino_val_t *ch = coll->as.chunked_cons.chunk;
+        const mino_val *ch = coll->as.chunked_cons.chunk;
         return ch->as.chunk.vals[coll->as.chunked_cons.off];
     }
     if (mino_type_of(coll) == MINO_HOST_ARRAY) {
@@ -708,8 +708,8 @@ static mino_val_t *prim_first_step(mino_state_t *S, mino_val_t *coll,
     if (mino_type_of(coll) == MINO_MAP) {
         if (coll->as.map.len == 0) return mino_nil(S);
         {
-            mino_val_t *key = vec_nth(coll->as.map.key_order, 0);
-            mino_val_t *val = map_get_val(coll, key);
+            mino_val *key = vec_nth(coll->as.map.key_order, 0);
+            mino_val *val = map_get_val(coll, key);
             return mino_map_entry(S, key, val);
         }
     }
@@ -734,7 +734,7 @@ static mino_val_t *prim_first_step(mino_state_t *S, mino_val_t *coll,
     }
 }
 
-mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_first(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -743,8 +743,8 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_first_step(S, args->as.cons.car, env);
 }
 
-mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env)
+mino_val *prim_first_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env)
 {
     if (argc != 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -754,10 +754,10 @@ mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc,
 }
 
 /* Lazy rest thunks: each takes a cons(collection, int-index) as context. */
-static mino_val_t *make_c_lazy(mino_state_t *S, mino_val_t *ctx,
-                               mino_val_t *(*thunk)(mino_state_t *, mino_val_t *))
+static mino_val *make_c_lazy(mino_state *S, mino_val *ctx,
+                               mino_val *(*thunk)(mino_state *, mino_val *))
 {
-    mino_val_t *lz = alloc_val(S, MINO_LAZY);
+    mino_val *lz = alloc_val(S, MINO_LAZY);
     lz->as.lazy.body    = ctx;
     lz->as.lazy.c_thunk = thunk;
     return lz;
@@ -790,9 +790,9 @@ static void coll_utf8_step(const unsigned char *data, size_t len, size_t pos,
     *step_out = n;
 }
 
-static mino_val_t *vec_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *vec_rest_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t *vec = ctx->as.cons.car;
+    mino_val *vec = ctx->as.cons.car;
     size_t idx      = (size_t)mino_val_int_get(ctx->as.cons.cdr);
     if (idx >= vec->as.vec.len) return mino_nil(S);
     return mino_cons(S, vec_nth(vec, idx),
@@ -800,9 +800,9 @@ static mino_val_t *vec_rest_thunk(mino_state_t *S, mino_val_t *ctx)
                     vec_rest_thunk));
 }
 
-static mino_val_t *str_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *str_rest_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t  *str = ctx->as.cons.car;
+    mino_val  *str = ctx->as.cons.car;
     size_t idx       = (size_t)mino_val_int_get(ctx->as.cons.cdr);
     unsigned int cp;
     size_t       step;
@@ -815,23 +815,23 @@ static mino_val_t *str_rest_thunk(mino_state_t *S, mino_val_t *ctx)
                     str_rest_thunk));
 }
 
-static mino_val_t *map_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *map_rest_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t *m  = ctx->as.cons.car;
+    mino_val *m  = ctx->as.cons.car;
     size_t idx     = (size_t)mino_val_int_get(ctx->as.cons.cdr);
     if (idx >= m->as.map.len) return mino_nil(S);
     {
-        mino_val_t *k = vec_nth(m->as.map.key_order, idx);
-        mino_val_t *v = map_get_val(m, k);
+        mino_val *k = vec_nth(m->as.map.key_order, idx);
+        mino_val *v = map_get_val(m, k);
         return mino_cons(S, mino_map_entry(S, k, v),
             make_c_lazy(S, mino_cons(S, m, mino_int(S, (long long)(idx + 1))),
                         map_rest_thunk));
     }
 }
 
-static mino_val_t *set_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *set_rest_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t *s = ctx->as.cons.car;
+    mino_val *s = ctx->as.cons.car;
     size_t idx    = (size_t)mino_val_int_get(ctx->as.cons.cdr);
     if (idx >= s->as.set.len) return mino_nil(S);
     return mino_cons(S, vec_nth(s->as.set.key_order, idx),
@@ -839,8 +839,8 @@ static mino_val_t *set_rest_thunk(mino_state_t *S, mino_val_t *ctx)
                     set_rest_thunk));
 }
 
-static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
-                                   mino_env_t *env)
+static mino_val *prim_rest_step(mino_state *S, mino_val *coll,
+                                   mino_env *env)
 {
     /* User-visible empty rest is the empty-list singleton, not nil:
      * (rest '()) -> (), (rest nil) -> (), (rest '(1)) -> (). */
@@ -851,7 +851,7 @@ static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
         return mino_empty_list(S);
     }
     if (mino_type_of(coll) == MINO_CONS) {
-        mino_val_t *cdr = coll->as.cons.cdr;
+        mino_val *cdr = coll->as.cons.cdr;
         if (cdr == NULL || mino_type_of(cdr) == MINO_NIL) return mino_empty_list(S);
         /* Lazy cdr stays lazy here so infinite seqs don't blow the
          * stack; the lazy-seq seam is handled at the next prim_rest /
@@ -865,36 +865,36 @@ static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
                         vec_rest_thunk));
     }
     if (mino_type_of(coll) == MINO_LAZY) {
-        mino_val_t *s = lazy_force(S, coll);
+        mino_val *s = lazy_force(S, coll);
         if (s == NULL) return NULL;
         if (mino_type_of(s) == MINO_NIL) return mino_empty_list(S);
         if (mino_type_of(s) == MINO_EMPTY_LIST) return mino_empty_list(S);
         if (mino_type_of(s) == MINO_CONS) {
-            mino_val_t *cdr = s->as.cons.cdr;
+            mino_val *cdr = s->as.cons.cdr;
             if (cdr == NULL || mino_type_of(cdr) == MINO_NIL) return mino_empty_list(S);
             return cdr;
         }
         if (mino_type_of(s) == MINO_CHUNKED_CONS) {
-            mino_val_t *r = mino_chunked_cons_advance(S, s);
+            mino_val *r = mino_chunked_cons_advance(S, s);
             if (r == NULL || mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
             return r;
         }
         return mino_empty_list(S);
     }
     if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
-        mino_val_t *r = mino_chunked_cons_advance(S, coll);
+        mino_val *r = mino_chunked_cons_advance(S, coll);
         if (r == NULL || mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
         return r;
     }
     if (mino_type_of(coll) == MINO_HOST_ARRAY) {
         /* Defer to seq, which builds a chunked-cons; rest of that is
          * the chunked-cons advance. Seq returns nil on empty. */
-        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
-        mino_val_t *s = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val *s = prim_seq(S, seq_args, env);
         if (s == NULL) return NULL;
         if (mino_type_of(s) == MINO_NIL) return mino_empty_list(S);
         if (mino_type_of(s) == MINO_CHUNKED_CONS) {
-            mino_val_t *r = mino_chunked_cons_advance(S, s);
+            mino_val *r = mino_chunked_cons_advance(S, s);
             if (r == NULL || mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
             return r;
         }
@@ -928,8 +928,8 @@ static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
     if (mino_type_of(coll) == MINO_MAP) {
         if (coll->as.map.len <= 1) return mino_empty_list(S);
         {
-            mino_val_t *k = vec_nth(coll->as.map.key_order, 1);
-            mino_val_t *v = map_get_val(coll, k);
+            mino_val *k = vec_nth(coll->as.map.key_order, 1);
+            mino_val *v = map_get_val(coll, k);
             return mino_cons(S, mino_map_entry(S, k, v),
                 make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
                             map_rest_thunk));
@@ -942,7 +942,7 @@ static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
                         set_rest_thunk));
     }
     if (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET) {
-        mino_val_t *r = sorted_rest(S, coll);
+        mino_val *r = sorted_rest(S, coll);
         if (r == NULL) return NULL;
         if (mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
         return r;
@@ -955,7 +955,7 @@ static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
     }
 }
 
-mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rest(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -964,8 +964,8 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_rest_step(S, args->as.cons.car, env);
 }
 
-mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env)
+mino_val *prim_rest_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env)
 {
     if (argc != 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -979,21 +979,21 @@ mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc,
  * through mino_map_assoc1 so both flatmap and HAMT representations are
  * handled transparently, including any flatmap -> HAMT promotion when
  * the accumulating size crosses the threshold. */
-static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
-                                    mino_val_t *p, size_t extra_pairs)
+static mino_val *map_assoc_pairs(mino_state *S, mino_val *coll,
+                                    mino_val *p, size_t extra_pairs)
 {
-    mino_val_t *acc;
+    mino_val *acc;
     size_t      i;
     mino_current_ctx(S)->gc_depth++;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
-        mino_val_t **noargs = NULL;
+        mino_val **noargs = NULL;
         acc = mino_map(S, noargs, noargs, 0);
     } else {
         acc = coll;
     }
     for (i = 0; i < extra_pairs; i++) {
-        mino_val_t *k = p->as.cons.car;
-        mino_val_t *v = p->as.cons.cdr->as.cons.car;
+        mino_val *k = p->as.cons.car;
+        mino_val *v = p->as.cons.cdr->as.cons.car;
         acc = mino_map_assoc1(S, acc, k, v);
         if (acc == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
         p = p->as.cons.cdr->as.cons.cdr;
@@ -1005,13 +1005,13 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
     return acc;
 }
 
-mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     size_t      n;
     size_t      extra_pairs;
     size_t      i;
-    mino_val_t *p;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 3 || (n - 1) % 2 != 0) {
@@ -1024,11 +1024,11 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * index == len is a one-past-end append. Apply pairs in order on
          * successively-derived vectors so each update shares structure with
          * its predecessor. */
-        mino_val_t *acc = coll;
+        mino_val *acc = coll;
         p = args->as.cons.cdr;
         for (i = 0; i < extra_pairs; i++) {
-            mino_val_t *k = p->as.cons.car;
-            mino_val_t *v = p->as.cons.cdr->as.cons.car;
+            mino_val *k = p->as.cons.car;
+            mino_val *v = p->as.cons.cdr->as.cons.car;
             long long   idx;
             if (k == NULL || !mino_val_int_p(k)) {
                 return prim_throw_classified(S, "eval/type", "MTY001", "assoc on vector requires integer indices");
@@ -1046,7 +1046,7 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return map_assoc_pairs(S, coll, args->as.cons.cdr, extra_pairs);
     }
     if (mino_type_of(coll) == MINO_SORTED_MAP) {
-        mino_val_t *acc = coll;
+        mino_val *acc = coll;
         p = args->as.cons.cdr;
         for (i = 0; i < extra_pairs; i++) {
             acc = sorted_map_assoc1(S, acc, p->as.cons.car,
@@ -1060,14 +1060,14 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * key => share vals, update ext map (allocating one if
          * needed). The new record keeps its type, so (record? r')
          * stays true and dispatch on (type r') is unchanged. */
-        mino_val_t *acc = coll;
+        mino_val *acc = coll;
         p = args->as.cons.cdr;
         for (i = 0; i < extra_pairs; i++) {
-            mino_val_t *k = p->as.cons.car;
-            mino_val_t *v = p->as.cons.cdr->as.cons.car;
+            mino_val *k = p->as.cons.car;
+            mino_val *v = p->as.cons.cdr->as.cons.car;
             int         idx;
-            mino_val_t *new_rec;
-            mino_val_t *fields = acc->as.record.type->as.record_type.fields;
+            mino_val *new_rec;
+            mino_val *fields = acc->as.record.type->as.record_type.fields;
             size_t      n_fields = (fields != NULL) ? fields->as.vec.len : 0;
             idx = record_field_index(acc, k);
             new_rec = alloc_val(S, MINO_RECORD);
@@ -1078,7 +1078,7 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             new_rec->as.record.type = acc->as.record.type;
             if (n_fields > 0) {
                 size_t j;
-                mino_val_t **slots = (mino_val_t **)malloc(
+                mino_val **slots = (mino_val **)malloc(
                     n_fields * sizeof(*slots));
                 if (slots == NULL) {
                     return prim_throw_classified(S, "internal", "MIN001",
@@ -1090,9 +1090,9 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             }
             if (idx < 0) {
                 /* Ext key: build/extend the ext map. */
-                mino_val_t *ext = acc->as.record.ext;
-                mino_val_t *new_ext;
-                mino_val_t *kv_args = mino_cons(S, k,
+                mino_val *ext = acc->as.record.ext;
+                mino_val *new_ext;
+                mino_val *kv_args = mino_cons(S, k,
                                        mino_cons(S, v, mino_nil(S)));
                 if (ext == NULL) {
                     new_ext = mino_map(S, NULL, NULL, 0);
@@ -1118,11 +1118,11 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *key;
-    mino_val_t *def_val = mino_nil(S);
+    mino_val *coll;
+    mino_val *key;
+    mino_val *def_val = mino_nil(S);
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -1145,7 +1145,7 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return def_val;
     }
     if (mino_type_of(coll) == MINO_MAP) {
-        mino_val_t *v = map_get_val(coll, key);
+        mino_val *v = map_get_val(coll, key);
         return v == NULL ? def_val : v;
     }
     if (mino_type_of(coll) == MINO_VECTOR) {
@@ -1175,11 +1175,11 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (mino_type_of(coll) == MINO_SET) {
         uint32_t h = hash_val(key);
-        mino_val_t *found = hamt_get(coll->as.set.root, key, h, 0u);
+        mino_val *found = hamt_get(coll->as.set.root, key, h, 0u);
         return found != NULL ? key : def_val;
     }
     if (mino_type_of(coll) == MINO_SORTED_MAP) {
-        mino_val_t *v = rb_get(S, coll->as.sorted.root, key, coll->as.sorted.comparator);
+        mino_val *v = rb_get(S, coll->as.sorted.root, key, coll->as.sorted.comparator);
         return v == NULL ? def_val : v;
     }
     if (mino_type_of(coll) == MINO_SORTED_SET) {
@@ -1231,7 +1231,7 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int idx = record_field_index(coll, key);
         if (idx >= 0) return coll->as.record.vals[idx];
         if (coll->as.record.ext != NULL) {
-            mino_val_t *v = map_get_val(coll->as.record.ext, key);
+            mino_val *v = map_get_val(coll->as.record.ext, key);
             if (v != NULL) return v;
         }
         return def_val;
@@ -1242,12 +1242,12 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Per-collection-kind conj implementations. `items` is a cons-list of
  * arguments to prepend / append, in left-to-right argument order. */
 
-static mino_val_t *conj_list(mino_state_t *S, mino_val_t *coll,
-                             mino_val_t *items)
+static mino_val *conj_list(mino_state *S, mino_val *coll,
+                             mino_val *items)
 {
     /* List/nil/empty-list: prepend each item so
      * (conj '(1 2) 3 4) => (4 3 1 2). */
-    mino_val_t *out = (coll == NULL || mino_type_of(coll) == MINO_NIL
+    mino_val *out = (coll == NULL || mino_type_of(coll) == MINO_NIL
                        || mino_type_of(coll) == MINO_EMPTY_LIST)
         ? mino_nil(S) : coll;
     while (mino_is_cons(items)) {
@@ -1258,10 +1258,10 @@ static mino_val_t *conj_list(mino_state_t *S, mino_val_t *coll,
     return out;
 }
 
-static mino_val_t *conj_vector(mino_state_t *S, mino_val_t *coll,
-                               mino_val_t *items)
+static mino_val *conj_vector(mino_state *S, mino_val *coll,
+                               mino_val *items)
 {
-    mino_val_t *acc = coll;
+    mino_val *acc = coll;
     while (mino_is_cons(items)) {
         acc = vec_conj1(S, acc, items->as.cons.car);
         items = items->as.cons.cdr;
@@ -1269,27 +1269,27 @@ static mino_val_t *conj_vector(mino_state_t *S, mino_val_t *coll,
     return acc;
 }
 
-static mino_val_t *conj_map_entry(mino_state_t *S, mino_val_t *coll,
-                                  mino_val_t *items)
+static mino_val *conj_map_entry(mino_state *S, mino_val *coll,
+                                  mino_val *items)
 {
     /* (conj entry x ...) is JVM-equivalent to (conj [k v] x ...).
      * Promote to a 2-vector then fall through to vector conj. */
-    mino_val_t *kv[2];
+    mino_val *kv[2];
     kv[0] = coll->as.map_entry.k;
     kv[1] = coll->as.map_entry.v;
     return conj_vector(S, mino_vector(S, kv, 2), items);
 }
 
-static mino_val_t *conj_map(mino_state_t *S, mino_val_t *coll,
-                            mino_val_t *items)
+static mino_val *conj_map(mino_state *S, mino_val *coll,
+                            mino_val *items)
 {
     /* Each added item must be a 2-element vector [k v], a map
      * (entries are merged), a map-entry, or nil (no-op, per Clojure's
      * (conj coll nil) returning coll unchanged). Assoc each onto the
      * accumulator so successor maps share structure with the source. */
-    mino_val_t *acc = coll;
+    mino_val *acc = coll;
     while (mino_is_cons(items)) {
-        mino_val_t *item = items->as.cons.car;
+        mino_val *item = items->as.cons.car;
         if (item == NULL || mino_type_of(item) == MINO_NIL) {
             items = items->as.cons.cdr;
             continue;
@@ -1298,20 +1298,20 @@ static mino_val_t *conj_map(mino_state_t *S, mino_val_t *coll,
             /* Merge map entries: (conj {:a 0} {:b 1}) */
             size_t j;
             for (j = 0; j < item->as.map.len; j++) {
-                mino_val_t *k = vec_nth(item->as.map.key_order, j);
-                mino_val_t *v = map_get_val(item, k);
-                mino_val_t *pair_args =
+                mino_val *k = vec_nth(item->as.map.key_order, j);
+                mino_val *v = map_get_val(item, k);
+                mino_val *pair_args =
                     mino_cons(S, k, mino_cons(S, v, mino_nil(S)));
                 acc = map_assoc_pairs(S, acc, pair_args, 1);
             }
         } else if (mino_type_of(item) == MINO_VECTOR
                    && item->as.vec.len == 2) {
-            mino_val_t *pair_args =
+            mino_val *pair_args =
                 mino_cons(S, vec_nth(item, 0),
                     mino_cons(S, vec_nth(item, 1), mino_nil(S)));
             acc = map_assoc_pairs(S, acc, pair_args, 1);
         } else if (mino_type_of(item) == MINO_MAP_ENTRY) {
-            mino_val_t *pair_args =
+            mino_val *pair_args =
                 mino_cons(S, item->as.map_entry.k,
                     mino_cons(S, item->as.map_entry.v, mino_nil(S)));
             acc = map_assoc_pairs(S, acc, pair_args, 1);
@@ -1324,10 +1324,10 @@ static mino_val_t *conj_map(mino_state_t *S, mino_val_t *coll,
     return acc;
 }
 
-static mino_val_t *conj_set(mino_state_t *S, mino_val_t *coll,
-                            mino_val_t *items)
+static mino_val *conj_set(mino_state *S, mino_val *coll,
+                            mino_val *items)
 {
-    mino_val_t *acc = coll;
+    mino_val *acc = coll;
     while (mino_is_cons(items)) {
         acc = set_conj1(S, acc, items->as.cons.car);
         items = items->as.cons.cdr;
@@ -1335,13 +1335,13 @@ static mino_val_t *conj_set(mino_state_t *S, mino_val_t *coll,
     return acc;
 }
 
-static mino_val_t *conj_sorted_map(mino_state_t *S, mino_val_t *coll,
-                                   mino_val_t *items)
+static mino_val *conj_sorted_map(mino_state *S, mino_val *coll,
+                                   mino_val *items)
 {
-    mino_val_t *v = coll;
+    mino_val *v = coll;
     while (mino_is_cons(items)) {
-        mino_val_t *item = items->as.cons.car;
-        mino_val_t *ek, *ev;
+        mino_val *item = items->as.cons.car;
+        mino_val *ek, *ev;
         if (item != NULL && mino_type_of(item) == MINO_VECTOR
             && item->as.vec.len == 2) {
             ek = vec_nth(item, 0);
@@ -1359,10 +1359,10 @@ static mino_val_t *conj_sorted_map(mino_state_t *S, mino_val_t *coll,
     return v;
 }
 
-static mino_val_t *conj_sorted_set(mino_state_t *S, mino_val_t *coll,
-                                   mino_val_t *items)
+static mino_val *conj_sorted_set(mino_state *S, mino_val *coll,
+                                   mino_val *items)
 {
-    mino_val_t *v = coll;
+    mino_val *v = coll;
     while (mino_is_cons(items)) {
         v = sorted_set_conj1(S, v, items->as.cons.car);
         items = items->as.cons.cdr;
@@ -1370,12 +1370,12 @@ static mino_val_t *conj_sorted_set(mino_state_t *S, mino_val_t *coll,
     return v;
 }
 
-mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     size_t      n;
-    mino_val_t *items;
-    mino_type_t kind;
+    mino_val *items;
+    mino_type kind;
     (void)env;
     arg_count(S, args, &n);
     if (n == 0) {
@@ -1417,11 +1417,11 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *coll;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1443,19 +1443,19 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(coll) == MINO_RECORD) {
         /* Declared field keywords first in declared order, then ext
          * keys in insertion order. */
-        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        mino_val *fields = coll->as.record.type->as.record_type.fields;
         size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
         for (i = 0; i < n_fields; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(fields, i), mino_nil(S));
+            mino_val *cell = mino_cons(S, vec_nth(fields, i), mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         if (coll->as.record.ext != NULL) {
-            const mino_val_t *e = coll->as.record.ext;
+            const mino_val *e = coll->as.record.ext;
             size_t k;
             for (k = 0; k < e->as.map.len; k++) {
-                mino_val_t *cell = mino_cons(S,
+                mino_val *cell = mino_cons(S,
                     vec_nth(e->as.map.key_order, k), mino_nil(S));
                 if (tail == NULL) head = cell;
                 else mino_cons_cdr_set(S, tail, cell);
@@ -1474,8 +1474,8 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             seq_iter_t it;
             seq_iter_init(S, &it, coll);
             while (!seq_iter_done(&it)) {
-                mino_val_t *entry = seq_iter_val(S, &it);
-                mino_val_t *k;
+                mino_val *entry = seq_iter_val(S, &it);
+                mino_val *k;
                 if (entry == NULL) {
                     return prim_throw_classified(
                         S, "eval/type", "MTY001",
@@ -1492,7 +1492,7 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         "keys: seq element is not a map entry (expected [k v])");
                 }
                 {
-                    mino_val_t *cell = mino_cons(S, k, mino_nil(S));
+                    mino_val *cell = mino_cons(S, k, mino_nil(S));
                     if (tail == NULL) head = cell;
                     else mino_cons_cdr_set(S, tail, cell);
                     tail = cell;
@@ -1504,7 +1504,7 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
-        mino_val_t *cell = mino_cons(S, vec_nth(coll->as.map.key_order, i),
+        mino_val *cell = mino_cons(S, vec_nth(coll->as.map.key_order, i),
                                       mino_nil(S));
         if (tail == NULL) {
             head = cell;
@@ -1516,11 +1516,11 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return head;
 }
 
-mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *coll;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1531,13 +1531,13 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_nil(S);
     }
     if (mino_type_of(coll) == MINO_SORTED_MAP) {
-        mino_val_t *keys = mino_nil(S);
-        mino_val_t *kt   = NULL;
+        mino_val *keys = mino_nil(S);
+        mino_val *kt   = NULL;
         rb_to_list(S, coll->as.sorted.root, &keys, &kt);
         while (mino_is_cons(keys)) {
-            mino_val_t *v = rb_get(S, coll->as.sorted.root, keys->as.cons.car,
+            mino_val *v = rb_get(S, coll->as.sorted.root, keys->as.cons.car,
                                    coll->as.sorted.comparator);
-            mino_val_t *cell = mino_cons(S, v, mino_nil(S));
+            mino_val *cell = mino_cons(S, v, mino_nil(S));
             if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
             keys = keys->as.cons.cdr;
@@ -1550,21 +1550,21 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(coll) == MINO_SORTED_SET)                      return mino_nil(S);
     if (mino_type_of(coll) == MINO_STRING && coll->as.s.len == 0)   return mino_nil(S);
     if (mino_type_of(coll) == MINO_RECORD) {
-        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        mino_val *fields = coll->as.record.type->as.record_type.fields;
         size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
         for (i = 0; i < n_fields; i++) {
-            mino_val_t *cell = mino_cons(S, coll->as.record.vals[i],
+            mino_val *cell = mino_cons(S, coll->as.record.vals[i],
                                           mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         if (coll->as.record.ext != NULL) {
-            const mino_val_t *e = coll->as.record.ext;
+            const mino_val *e = coll->as.record.ext;
             size_t k;
             for (k = 0; k < e->as.map.len; k++) {
-                mino_val_t *ek = vec_nth(e->as.map.key_order, k);
-                mino_val_t *cell = mino_cons(S, map_get_val(e, ek),
+                mino_val *ek = vec_nth(e->as.map.key_order, k);
+                mino_val *cell = mino_cons(S, map_get_val(e, ek),
                                               mino_nil(S));
                 if (tail == NULL) head = cell;
                 else mino_cons_cdr_set(S, tail, cell);
@@ -1580,8 +1580,8 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             seq_iter_t it;
             seq_iter_init(S, &it, coll);
             while (!seq_iter_done(&it)) {
-                mino_val_t *entry = seq_iter_val(S, &it);
-                mino_val_t *v;
+                mino_val *entry = seq_iter_val(S, &it);
+                mino_val *v;
                 if (entry == NULL) {
                     return prim_throw_classified(
                         S, "eval/type", "MTY001",
@@ -1598,7 +1598,7 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         "vals: seq element is not a map entry (expected [k v])");
                 }
                 {
-                    mino_val_t *cell = mino_cons(S, v, mino_nil(S));
+                    mino_val *cell = mino_cons(S, v, mino_nil(S));
                     if (tail == NULL) head = cell;
                     else mino_cons_cdr_set(S, tail, cell);
                     tail = cell;
@@ -1610,8 +1610,8 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
-        mino_val_t *key  = vec_nth(coll->as.map.key_order, i);
-        mino_val_t *cell = mino_cons(S, map_get_val(coll, key), mino_nil(S));
+        mino_val *key  = vec_nth(coll->as.map.key_order, i);
+        mino_val *cell = mino_cons(S, map_get_val(coll, key), mino_nil(S));
         if (tail == NULL) {
             head = cell;
         } else {
@@ -1623,10 +1623,10 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* Set helper: add one element to a set, returning a new set. */
-mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
+mino_val *set_conj1(mino_state *S, const mino_val *s, mino_val *elem)
 {
-    mino_val_t       *v;
-    mino_val_t       *sentinel;
+    mino_val       *v;
+    mino_val       *sentinel;
     hamt_entry_t     *e;
     uint32_t          h;
     int               replaced = 0;
@@ -1636,7 +1636,7 @@ mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
      * "already-present" idiom and saves the HAMT rebuild traffic. */
     if (s->as.set.len > 0
         && hamt_get(s->as.set.root, elem, hash_val(elem), 0u) != NULL) {
-        return (mino_val_t *)s;
+        return (mino_val *)s;
     }
     v        = alloc_val(S, MINO_SET);
     sentinel = mino_true(S);
@@ -1659,11 +1659,11 @@ mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
  * walk and the key_order conj through the owned variants so a
  * transient batch reuses spine nodes and tail-chunk slots in place
  * after the first touch. */
-mino_val_t *set_conj1_owned(mino_state_t *S, mino_val_t *s, mino_val_t *elem,
+mino_val *set_conj1_owned(mino_state *S, mino_val *s, mino_val *elem,
                              uintptr_t owner)
 {
-    mino_val_t       *v;
-    mino_val_t       *sentinel;
+    mino_val       *v;
+    mino_val       *sentinel;
     hamt_entry_t     *e;
     uint32_t          h;
     int               replaced = 0;
@@ -1693,12 +1693,12 @@ mino_val_t *set_conj1_owned(mino_state_t *S, mino_val_t *s, mino_val_t *elem,
 }
 
 /* Owner-tagged set disj. */
-mino_val_t *set_disj1_owned(mino_state_t *S, mino_val_t *s,
-                             const mino_val_t *elem, uintptr_t owner)
+mino_val *set_disj1_owned(mino_state *S, mino_val *s,
+                             const mino_val *elem, uintptr_t owner)
 {
-    mino_val_t       *v;
+    mino_val       *v;
     mino_hamt_node_t *root;
-    mino_val_t       *order;
+    mino_val       *order;
     int               removed = 0;
     size_t            i;
     if (s->as.set.len == 0) return s;
@@ -1707,7 +1707,7 @@ mino_val_t *set_disj1_owned(mino_state_t *S, mino_val_t *s,
     if (!removed) return s;
     order = mino_vector(S, NULL, 0);
     for (i = 0; i < s->as.set.len; i++) {
-        mino_val_t *cur = vec_nth(s->as.set.key_order, i);
+        mino_val *cur = vec_nth(s->as.set.key_order, i);
         if (mino_eq(cur, elem)) continue;
         order = vec_conj1_owned(S, order, cur, owner);
     }
@@ -1719,15 +1719,15 @@ mino_val_t *set_disj1_owned(mino_state_t *S, mino_val_t *s,
     return v;
 }
 
-mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_hash_set(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t      n;
     size_t      i;
-    mino_val_t **tmp;
-    mino_val_t *p;
+    mino_val **tmp;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, (n > 0 ? n : 1) * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, (n > 0 ? n : 1) * sizeof(*tmp));
     p = args;
     for (i = 0; i < n; i++) {
         tmp[i] = p->as.cons.car;
@@ -1736,10 +1736,10 @@ mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_set(S, tmp, n);
 }
 
-mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *key;
+    mino_val *coll;
+    mino_val *key;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1808,10 +1808,10 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *p;
+    mino_val *coll;
+    mino_val *p;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -1837,17 +1837,17 @@ mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * approach, but keeps the code simple and correct. */
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
-        mino_val_t *key = p->as.cons.car;
+        mino_val *key = p->as.cons.car;
         uint32_t    h   = hash_val(key);
         if (hamt_get(coll->as.set.root, key, h, 0u) != NULL) {
             /* Element exists; rebuild without it. */
-            mino_val_t *new_set = alloc_val(S, MINO_SET);
-            mino_val_t *order   = mino_vector(S, NULL, 0);
+            mino_val *new_set = alloc_val(S, MINO_SET);
+            mino_val *order   = mino_vector(S, NULL, 0);
             mino_hamt_node_t *root = NULL;
             size_t i;
             size_t new_len = 0;
             for (i = 0; i < coll->as.set.len; i++) {
-                mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
+                mino_val *elem = vec_nth(coll->as.set.key_order, i);
                 if (!mino_eq(elem, key)) {
                     hamt_entry_t *e2 = hamt_entry_new(S, elem, mino_true(S));
                     uint32_t h2 = hash_val(elem);
@@ -1868,10 +1868,10 @@ mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return coll;
 }
 
-mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *p;
+    mino_val *coll;
+    mino_val *p;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -1900,29 +1900,29 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * key returns a new record with the ext map updated. Each
          * key is processed in order against the running accumulator,
          * which may flip from RECORD to MAP partway through. */
-        mino_val_t *acc = coll;
+        mino_val *acc = coll;
         p = args->as.cons.cdr;
         while (mino_is_cons(p)) {
-            mino_val_t *key = p->as.cons.car;
+            mino_val *key = p->as.cons.car;
             if (mino_type_of(acc) == MINO_RECORD) {
                 int idx = record_field_index(acc, key);
                 if (idx >= 0) {
                     /* Degrade: build a plain map from declared fields
                      * (skipping the dissoc'd one) and the ext entries. */
-                    mino_val_t *fields = acc->as.record.type
+                    mino_val *fields = acc->as.record.type
                         ->as.record_type.fields;
                     size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
                     size_t cap = n_fields - 1;
                     size_t mi  = 0;
                     size_t j;
-                    mino_val_t **mk;
-                    mino_val_t **mv;
+                    mino_val **mk;
+                    mino_val **mv;
                     if (acc->as.record.ext != NULL) {
                         cap += acc->as.record.ext->as.map.len;
                     }
-                    mk = (cap > 0) ? (mino_val_t **)gc_alloc_typed(S,
+                    mk = (cap > 0) ? (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, cap * sizeof(*mk)) : NULL;
-                    mv = (cap > 0) ? (mino_val_t **)gc_alloc_typed(S,
+                    mv = (cap > 0) ? (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, cap * sizeof(*mv)) : NULL;
                     for (j = 0; j < n_fields; j++) {
                         if ((int)j == idx) continue;
@@ -1931,10 +1931,10 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         mi++;
                     }
                     if (acc->as.record.ext != NULL) {
-                        const mino_val_t *e = acc->as.record.ext;
+                        const mino_val *e = acc->as.record.ext;
                         size_t k;
                         for (k = 0; k < e->as.map.len; k++) {
-                            mino_val_t *ek = vec_nth(e->as.map.key_order, k);
+                            mino_val *ek = vec_nth(e->as.map.key_order, k);
                             mk[mi] = ek;
                             mv[mi] = map_get_val(e, ek);
                             mi++;
@@ -1945,19 +1945,19 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                            && map_get_val(acc->as.record.ext, key) != NULL) {
                     /* Ext key drop: rebuild ext without it, keep
                      * record. */
-                    const mino_val_t *e   = acc->as.record.ext;
+                    const mino_val *e   = acc->as.record.ext;
                     size_t            len = e->as.map.len;
-                    mino_val_t      **ek  = (mino_val_t **)gc_alloc_typed(S,
+                    mino_val      **ek  = (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, (len > 0 ? len : 1) * sizeof(*ek));
-                    mino_val_t      **ev  = (mino_val_t **)gc_alloc_typed(S,
+                    mino_val      **ev  = (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, (len > 0 ? len : 1) * sizeof(*ev));
                     size_t  ext_n  = 0;
                     size_t  k, n_fields_acc;
-                    mino_val_t  *new_rec, *new_ext;
-                    mino_val_t **slots;
-                    mino_val_t  *fields_acc;
+                    mino_val  *new_rec, *new_ext;
+                    mino_val **slots;
+                    mino_val  *fields_acc;
                     for (k = 0; k < len; k++) {
-                        mino_val_t *kk = vec_nth(e->as.map.key_order, k);
+                        mino_val *kk = vec_nth(e->as.map.key_order, k);
                         if (!mino_eq(kk, key)) {
                             ek[ext_n] = kk;
                             ev[ext_n] = map_get_val(e, kk);
@@ -1976,7 +1976,7 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     n_fields_acc = (fields_acc != NULL)
                         ? fields_acc->as.vec.len : 0;
                     if (n_fields_acc > 0) {
-                        slots = (mino_val_t **)malloc(
+                        slots = (mino_val **)malloc(
                             n_fields_acc * sizeof(*slots));
                         if (slots == NULL) {
                             return prim_throw_classified(S, "internal",
@@ -2008,7 +2008,7 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
-        mino_val_t *key = p->as.cons.car;
+        mino_val *key = p->as.cons.car;
         coll = mino_map_dissoc1(S, coll, key);
         if (coll == NULL) return NULL;
         p = p->as.cons.cdr;
@@ -2019,7 +2019,7 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Coerce any numeric tier (int, float, bigint, ratio, bigdec) to long
  * via JVM-style truncation. NaN -> 0, matching Java's (long) cast.
  * Returns 0 with *ok=0 if v is non-numeric. */
-static long long subvec_to_long(const mino_val_t *v, int *ok)
+static long long subvec_to_long(const mino_val *v, int *ok)
 {
     *ok = 1;
     if (v == NULL) { *ok = 0; return 0; }
@@ -2037,12 +2037,12 @@ static long long subvec_to_long(const mino_val_t *v, int *ok)
     }
 }
 
-mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_subvec(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     long long   start, end;
     size_t      nargs = 0;
-    mino_val_t *p;
+    mino_val *p;
     int         ok;
     (void)env;
     for (p = args; mino_is_cons(p); p = p->as.cons.cdr) nargs++;
@@ -2072,7 +2072,7 @@ mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 
-mino_val_t *prim_list(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_list(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (args == NULL || !mino_is_cons(args)) return mino_empty_list(S);

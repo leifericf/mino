@@ -47,7 +47,7 @@
  *     skipping commute-log replay for refs already in the write set.
  *
  *  9. mino-only addition: cross-state ref defense. JVM has one global
- *     transactional surface; mino has many `mino_state_t` per host
+ *     transactional surface; mino has many `mino_state` per host
  *     process. Every public C entry checks `tx_ref.owning_state == S`
  *     and throws `eval/state` MST007 on mismatch.
  *
@@ -76,7 +76,7 @@
  * never been installed (the bool stays 0); otherwise a plain pthread
  * mutex acquire. The single-threaded fast path skips the lock since
  * no other thread can interfere with the commit phase. */
-static void stm_lock(mino_state_t *S)
+static void stm_lock(mino_state *S)
 {
     if (!S->stm.lock_inited) return;
     if (S->threading.thread_limit <= 1) return;
@@ -85,7 +85,7 @@ static void stm_lock(mino_state_t *S)
 #endif
 }
 
-static void stm_unlock(mino_state_t *S)
+static void stm_unlock(mino_state *S)
 {
     if (!S->stm.lock_inited) return;
     if (S->threading.thread_limit <= 1) return;
@@ -96,8 +96,8 @@ static void stm_unlock(mino_state_t *S)
 
 /* Fetch or create the per-tx state node for a given ref within the
  * active transaction. Returns NULL outside a transaction. */
-static tx_ref_state_t *tx_get_or_create_ref_state(mino_state_t *S,
-                                                   mino_val_t *ref)
+static tx_ref_state_t *tx_get_or_create_ref_state(mino_state *S,
+                                                   mino_val *ref)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     tx_state_t        *tx  = ctx->current_tx;
@@ -140,8 +140,8 @@ static void tx_clear_ref_states(tx_state_t *tx)
 /* (io!-check) -- throws if a transaction is active on the current
  * thread. The `io!` macro in core.clj expands to
  * (do (io!-check) body...) so the throw fires before body evaluates. */
-mino_val_t *prim_io_bang_check(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+mino_val *prim_io_bang_check(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
     mino_thread_ctx_t *ctx;
     (void)env;
@@ -157,7 +157,7 @@ mino_val_t *prim_io_bang_check(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-mino_val_t *prim_in_tx_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_thread_ctx_t *ctx;
     (void)env;
@@ -172,8 +172,8 @@ mino_val_t *prim_in_tx_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* History stubs. mino's STM uses single-version optimistic locking,
  * NOT MVCC with history. The min/max/count surface exists for
  * Clojure-script compatibility but the value is fixed. */
-mino_val_t *prim_ref_min_history(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -183,8 +183,8 @@ mino_val_t *prim_ref_min_history(mino_state_t *S, mino_val_t *args,
     return mino_int(S, 0);
 }
 
-mino_val_t *prim_ref_max_history(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -194,8 +194,8 @@ mino_val_t *prim_ref_max_history(mino_state_t *S, mino_val_t *args,
     return mino_int(S, 10);
 }
 
-mino_val_t *prim_ref_history_count(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env)
+mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
+                                    mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -207,13 +207,13 @@ mino_val_t *prim_ref_history_count(mino_state_t *S, mino_val_t *args,
 
 /* --- ref construction + identity predicate -------------------------------- */
 
-mino_val_t *prim_ref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *initial;
-    mino_val_t *opts;
-    mino_val_t *validator = NULL;
-    mino_val_t *meta      = NULL;
-    mino_val_t *ref;
+    mino_val *initial;
+    mino_val *opts;
+    mino_val *validator = NULL;
+    mino_val *meta      = NULL;
+    mino_val *ref;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -228,8 +228,8 @@ mino_val_t *prim_ref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * validator. */
     opts = args->as.cons.cdr;
     while (mino_is_cons(opts)) {
-        mino_val_t *k = opts->as.cons.car;
-        mino_val_t *v;
+        mino_val *k = opts->as.cons.car;
+        mino_val *v;
         if (k == NULL || mino_type_of(k) != MINO_KEYWORD) {
             return prim_throw_classified(S, "eval/arity", "MAR001",
                 "ref: option keys must be keywords");
@@ -276,9 +276,9 @@ mino_val_t *prim_ref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return ref;
 }
 
-mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ref_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -291,12 +291,12 @@ mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Forward declaration -- alter_build_args is defined below the deref
  * dispatch but used by commute_log_replay above. */
-static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
-                                    mino_val_t *extra);
+static mino_val *alter_build_args(mino_state *S, mino_val *cur,
+                                    mino_val *extra);
 
 /* Forward declaration -- tx_check_ref_owned is defined just below
  * mino_is_tx_ref but called from mino_tx_ref_deref above it. */
-static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref);
+static int tx_check_ref_owned(mino_state *S, mino_val *ref);
 
 /* C-side commute closure: pairs a host transformer with its user
  * pointer. Stored on the heap and wrapped in a MINO_HANDLE so the
@@ -335,31 +335,31 @@ static void tx_c_closure_finalize(void *ptr, const char *tag)
  * contract, host transformers must surface failure via NULL, not
  * longjmp.
  */
-static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
-                                      mino_val_t *base, mino_env_t *env,
-                                      mino_val_t **out_ex)
+static mino_val *commute_log_replay(mino_state *S, mino_val *log,
+                                      mino_val *base, mino_env *env,
+                                      mino_val **out_ex)
 {
-    mino_val_t *reversed = mino_empty_list(S);
-    mino_val_t *p = log;
-    mino_val_t *cur = base;
+    mino_val *reversed = mino_empty_list(S);
+    mino_val *p = log;
+    mino_val *cur = base;
     if (out_ex != NULL) *out_ex = NULL;
     while (mino_is_cons(p)) {
         reversed = mino_cons(S, p->as.cons.car, reversed);
         p = p->as.cons.cdr;
     }
     for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
-        mino_val_t *entry  = p->as.cons.car;
-        mino_val_t *result = NULL;
+        mino_val *entry  = p->as.cons.car;
+        mino_val *result = NULL;
         if (entry != NULL && mino_type_of(entry) == MINO_HANDLE
             && entry->as.handle.tag == TX_C_CLOSURE_TAG) {
             struct tx_c_closure *c = (struct tx_c_closure *)
                                       entry->as.handle.ptr;
             result = c->fn(S, cur, c->user, env);
         } else if (mino_is_cons(entry)) {
-            mino_val_t *fn        = entry->as.cons.car;
-            mino_val_t *extra     = entry->as.cons.cdr;
-            mino_val_t *call_args = alter_build_args(S, cur, extra);
-            mino_val_t *thrown    = NULL;
+            mino_val *fn        = entry->as.cons.car;
+            mino_val *extra     = entry->as.cons.cdr;
+            mino_val *call_args = alter_build_args(S, cur, extra);
+            mino_val *thrown    = NULL;
             int         pc        = mino_pcall(S, fn, call_args, env,
                                                 &result, &thrown);
             if (pc != 0) {
@@ -378,8 +378,8 @@ static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
 /* Compute the in-transaction value of a ref WITHOUT marking the read.
  * Used by deref / alter / ref-set (which then mark the read) and by
  * commute (which deliberately does not). */
-static mino_val_t *tx_effective_value(mino_state_t *S, tx_ref_state_t *rs,
-                                      mino_env_t *env)
+static mino_val *tx_effective_value(mino_state *S, tx_ref_state_t *rs,
+                                      mino_env *env)
 {
     if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
         return rs->tentative;
@@ -403,14 +403,14 @@ static mino_val_t *tx_effective_value(mino_state_t *S, tx_ref_state_t *rs,
  *
  * Public-API entry point: also called by C hosts as the C-level @ref.
  * Tolerates NULL or non-ref input (returns NULL) so a host can
- * defensively pass any mino_val_t * without pre-checking the type.
+ * defensively pass any mino_val * without pre-checking the type.
  */
-mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
+mino_val *mino_tx_ref_deref(mino_state *S, mino_val *ref)
 {
     mino_thread_ctx_t *ctx;
     tx_state_t        *tx;
     tx_ref_state_t    *rs;
-    mino_val_t        *val;
+    mino_val        *val;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) return NULL;
     if (tx_check_ref_owned(S, ref)) return NULL;
     ctx = mino_current_ctx(S);
@@ -429,7 +429,7 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
     return val;
 }
 
-int mino_is_tx_ref(const mino_val_t *v)
+int mino_is_tx_ref(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_TX_REF;
 }
@@ -448,7 +448,7 @@ int mino_is_tx_ref(const mino_val_t *v)
  * into S's env via mino_env_set was always reachable from a
  * Clojure program; the earlier "C entries only" gate left that
  * gap. */
-static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref)
+static int tx_check_ref_owned(mino_state *S, mino_val *ref)
 {
     if (ref->as.tx_ref.owning_state != S) {
         prim_throw_classified(S, "eval/state", "MST007",
@@ -463,8 +463,8 @@ static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref)
 /* Shared core for prim_ref_set / mino_tx_ref_set. Caller has already
  * type-checked ref. Returns val on success; NULL on throw (the throw
  * has already been raised via prim_throw_classified). */
-static mino_val_t *tx_ref_set_core(mino_state_t *S, mino_val_t *ref,
-                                    mino_val_t *val)
+static mino_val *tx_ref_set_core(mino_state *S, mino_val *ref,
+                                    mino_val *val)
 {
     tx_ref_state_t    *rs;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
@@ -497,10 +497,10 @@ static mino_val_t *tx_ref_set_core(mino_state_t *S, mino_val_t *ref,
     return val;
 }
 
-mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ref_set(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ref;
-    mino_val_t *val;
+    mino_val *ref;
+    mino_val *val;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -516,7 +516,7 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return tx_ref_set_core(S, ref, val);
 }
 
-mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
+mino_val *mino_tx_ref_set(mino_state *S, mino_val *ref, mino_val *val)
 {
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -528,14 +528,14 @@ mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
 /* Build the argument list (cur-val arg1 arg2 ...) for invoking f
  * during alter / commute. The cur-val is the tentative or committed
  * value as of this call site. */
-static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
-                                    mino_val_t *extra)
+static mino_val *alter_build_args(mino_state *S, mino_val *cur,
+                                    mino_val *extra)
 {
-    mino_val_t *cell, *head;
+    mino_val *cell, *head;
     head = mino_cons(S, cur, mino_nil(S));
     cell = head;
     while (mino_is_cons(extra)) {
-        mino_val_t *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
+        mino_val *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
         cell->as.cons.cdr = next;
         cell = next;
         extra = extra->as.cons.cdr;
@@ -546,19 +546,19 @@ static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
 /* Compute-new callback: produces the post-transformer value given
  * the current in-tx value. Implementations bind to either a Clojure
  * fn invocation (mino_call) or a direct C transformer call. */
-typedef mino_val_t *(*tx_compute_fn)(mino_state_t *S, mino_val_t *cur,
-                                      void *ctx, mino_env_t *env);
+typedef mino_val *(*tx_compute_fn)(mino_state *S, mino_val *cur,
+                                      void *ctx, mino_env *env);
 
 struct compute_clj_ctx {
-    mino_val_t *fn;
-    mino_val_t *extra;
+    mino_val *fn;
+    mino_val *extra;
 };
 
-static mino_val_t *compute_clj(mino_state_t *S, mino_val_t *cur,
-                                void *ctx, mino_env_t *env)
+static mino_val *compute_clj(mino_state *S, mino_val *cur,
+                                void *ctx, mino_env *env)
 {
     struct compute_clj_ctx *c = (struct compute_clj_ctx *)ctx;
-    mino_val_t *call_args = alter_build_args(S, cur, c->extra);
+    mino_val *call_args = alter_build_args(S, cur, c->extra);
     return mino_call(S, c->fn, call_args, env);
 }
 
@@ -567,8 +567,8 @@ struct compute_c_ctx {
     void            *user;
 };
 
-static mino_val_t *compute_c(mino_state_t *S, mino_val_t *cur,
-                              void *ctx, mino_env_t *env)
+static mino_val *compute_c(mino_state *S, mino_val *cur,
+                              void *ctx, mino_env *env)
 {
     struct compute_c_ctx *c = (struct compute_c_ctx *)ctx;
     return c->fn(S, cur, c->user, env);
@@ -578,12 +578,12 @@ static mino_val_t *compute_c(mino_state_t *S, mino_val_t *cur,
  * type-checked ref. The compute callback runs under the in-tx
  * effective value AFTER the read mark is recorded, since alter
  * implicitly reads the ref. Returns the new value, or NULL on throw. */
-static mino_val_t *tx_alter_core(mino_state_t *S, mino_val_t *ref,
+static mino_val *tx_alter_core(mino_state *S, mino_val *ref,
                                   tx_compute_fn compute, void *ctx,
-                                  mino_env_t *env)
+                                  mino_env *env)
 {
     tx_ref_state_t    *rs;
-    mino_val_t        *cur, *result;
+    mino_val        *cur, *result;
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
@@ -616,9 +616,9 @@ static mino_val_t *tx_alter_core(mino_state_t *S, mino_val_t *ref,
     return result;
 }
 
-mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_alter(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ref;
+    mino_val *ref;
     struct compute_clj_ctx clj_ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -634,9 +634,9 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return tx_alter_core(S, ref, compute_clj, &clj_ctx, env);
 }
 
-mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
+mino_val *mino_tx_alter_c(mino_state *S, mino_val *ref,
                             mino_tx_xform_fn fn, void *user,
-                            mino_env_t *env)
+                            mino_env *env)
 {
     struct compute_c_ctx c_ctx;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
@@ -657,13 +657,13 @@ mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
 /* Build a log entry for the given commute. For Clojure-side commutes
  * the entry is a `(fn . extra)` cons; for C-side it is a HANDLE
  * wrapping a malloc'd struct freed by tx_c_closure_finalize on GC. */
-static mino_val_t *make_clj_log_entry(mino_state_t *S, void *ctx)
+static mino_val *make_clj_log_entry(mino_state *S, void *ctx)
 {
     struct compute_clj_ctx *c = (struct compute_clj_ctx *)ctx;
     return mino_cons(S, c->fn, c->extra);
 }
 
-static mino_val_t *make_c_log_entry(mino_state_t *S, void *ctx)
+static mino_val *make_c_log_entry(mino_state *S, void *ctx)
 {
     struct compute_c_ctx *c = (struct compute_c_ctx *)ctx;
     struct tx_c_closure  *closure = (struct tx_c_closure *)
@@ -679,20 +679,20 @@ static mino_val_t *make_c_log_entry(mino_state_t *S, void *ctx)
                            tx_c_closure_finalize);
 }
 
-typedef mino_val_t *(*tx_log_entry_fn)(mino_state_t *S, void *ctx);
+typedef mino_val *(*tx_log_entry_fn)(mino_state *S, void *ctx);
 
 /* Shared core for prim_commute / mino_tx_commute_c. Caller has
  * already type-checked ref. Returns the call-site value, or NULL on
  * throw. The compute callback runs eagerly to produce the call-site
  * return; if a fresh-or-chained commute, make_log_entry produces the
  * value pushed onto the log for replay at commit. */
-static mino_val_t *tx_commute_core(mino_state_t *S, mino_val_t *ref,
+static mino_val *tx_commute_core(mino_state *S, mino_val *ref,
                                     tx_compute_fn compute,
                                     tx_log_entry_fn make_log_entry,
-                                    void *ctx, mino_env_t *env)
+                                    void *ctx, mino_env *env)
 {
     tx_ref_state_t    *rs;
-    mino_val_t        *cur, *result, *entry;
+    mino_val        *cur, *result, *entry;
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
@@ -732,9 +732,9 @@ static mino_val_t *tx_commute_core(mino_state_t *S, mino_val_t *ref,
     return result;
 }
 
-mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_commute(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ref;
+    mino_val *ref;
     struct compute_clj_ctx clj_ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -751,9 +751,9 @@ mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                             &clj_ctx, env);
 }
 
-mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
+mino_val *mino_tx_commute_c(mino_state *S, mino_val *ref,
                               mino_tx_xform_fn fn, void *user,
-                              mino_env_t *env)
+                              mino_env *env)
 {
     struct compute_c_ctx c_ctx;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
@@ -773,11 +773,11 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
 /* Shared core for prim_ensure / mino_tx_ensure. Caller has already
  * type-checked ref. Returns the in-tx effective value, or NULL on
  * throw. */
-static mino_val_t *tx_ensure_core(mino_state_t *S, mino_val_t *ref,
-                                   mino_env_t *env)
+static mino_val *tx_ensure_core(mino_state *S, mino_val *ref,
+                                   mino_env *env)
 {
     tx_ref_state_t    *rs;
-    mino_val_t        *val;
+    mino_val        *val;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (ctx->current_tx == NULL) {
@@ -800,9 +800,9 @@ static mino_val_t *tx_ensure_core(mino_state_t *S, mino_val_t *ref,
     return val;
 }
 
-mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ensure(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ref;
+    mino_val *ref;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "ensure requires one argument");
@@ -815,8 +815,8 @@ mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return tx_ensure_core(S, ref, env);
 }
 
-mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
-                           mino_env_t *env)
+mino_val *mino_tx_ensure(mino_state *S, mino_val *ref,
+                           mino_env *env)
 {
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -841,14 +841,14 @@ mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
  *   0  -- validator threw; *out_ex set to the thrown value
  *  -1  -- validator returned falsy (no throw); *out_ex unchanged.
  * vfn==NULL is treated as "no validator" and returns 1. */
-static int run_ref_validator(mino_state_t *S, mino_val_t *ref,
-                              mino_val_t *new_val, mino_env_t *env,
-                              mino_val_t **out_ex)
+static int run_ref_validator(mino_state *S, mino_val *ref,
+                              mino_val *new_val, mino_env *env,
+                              mino_val **out_ex)
 {
-    mino_val_t *vfn = ref->as.tx_ref.validator;
-    mino_val_t *vargs;
-    mino_val_t *result = NULL;
-    mino_val_t *thrown = NULL;
+    mino_val *vfn = ref->as.tx_ref.validator;
+    mino_val *vargs;
+    mino_val *result = NULL;
+    mino_val *thrown = NULL;
     int         pc;
     if (vfn == NULL) return 1;
     vargs = mino_cons(S, new_val, mino_nil(S));
@@ -862,7 +862,7 @@ static int run_ref_validator(mino_state_t *S, mino_val_t *ref,
     return 1;
 }
 
-static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
+static int tx_commit(mino_state *S, tx_state_t *tx, mino_env *env,
                      int *out_validator_rejected)
 {
     tx_ref_state_t *rs;
@@ -895,14 +895,14 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
      * already committed (atomicity violation). */
     /* Pass 1: stage. */
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
-        mino_val_t *new_val = NULL;
+        mino_val *new_val = NULL;
         rs->committed_old = NULL;
         rs->committed_new = NULL;
         if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
             new_val = rs->tentative;
         } else if (rs->kind == TX_STATE_COMMUTE_LOG
                    && rs->commute_log != NULL) {
-            mino_val_t *replay_ex = NULL;
+            mino_val *replay_ex = NULL;
             new_val = commute_log_replay(S, rs->commute_log,
                                           rs->ref->as.tx_ref.val, env,
                                           &replay_ex);
@@ -922,7 +922,7 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
             }
         }
         if (new_val != NULL) {
-            mino_val_t *vex = NULL;
+            mino_val *vex = NULL;
             int vc = run_ref_validator(S, rs->ref, new_val, env, &vex);
             if (vc != 1) {
                 tx->in_commit = 0;
@@ -970,13 +970,13 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
  * to fire, so the dosync caller still surfaces a watch error but
  * never silently loses unrelated watches.
  */
-static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
-                             mino_env_t *env)
+static int dispatch_watches(mino_state *S, tx_state_t *tx,
+                             mino_env *env)
 {
     tx_ref_state_t *rs;
-    mino_val_t     *first_thrown = NULL;
+    mino_val     *first_thrown = NULL;
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
-        mino_val_t *watches;
+        mino_val *watches;
         size_t      i, n;
         if (rs->committed_new == NULL) continue;
         watches = rs->ref->as.tx_ref.watches;
@@ -986,11 +986,11 @@ static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
         }
         n = watches->as.map.len;
         for (i = 0; i < n; i++) {
-            mino_val_t *key = vec_nth(watches->as.map.key_order, i);
-            mino_val_t *fn  = map_get_val(watches, key);
-            mino_val_t *wargs;
-            mino_val_t *result = NULL;
-            mino_val_t *thrown = NULL;
+            mino_val *key = vec_nth(watches->as.map.key_order, i);
+            mino_val *fn  = map_get_val(watches, key);
+            mino_val *wargs;
+            mino_val *result = NULL;
+            mino_val *thrown = NULL;
             int         pc;
             if (fn == NULL) continue;
             wargs = mino_cons(S, key,
@@ -1023,13 +1023,13 @@ static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
  * call (mino_call) or a direct C body invocation. Re-invoked on
  * retry, so the body must be idempotent w.r.t. user state outside
  * the tx. */
-typedef mino_val_t *(*tx_invoke_body_fn)(mino_state_t *S, void *body_user,
-                                          mino_env_t *env);
+typedef mino_val *(*tx_invoke_body_fn)(mino_state *S, void *body_user,
+                                          mino_env *env);
 
-struct invoke_clj_thunk { mino_val_t *thunk; };
+struct invoke_clj_thunk { mino_val *thunk; };
 
-static mino_val_t *invoke_clj_thunk(mino_state_t *S, void *body_user,
-                                     mino_env_t *env)
+static mino_val *invoke_clj_thunk(mino_state *S, void *body_user,
+                                     mino_env *env)
 {
     struct invoke_clj_thunk *c = (struct invoke_clj_thunk *)body_user;
     return mino_call(S, c->thunk, mino_nil(S), env);
@@ -1037,8 +1037,8 @@ static mino_val_t *invoke_clj_thunk(mino_state_t *S, void *body_user,
 
 struct invoke_c_body { mino_tx_body_fn fn; void *user; };
 
-static mino_val_t *invoke_c_body(mino_state_t *S, void *body_user,
-                                  mino_env_t *env)
+static mino_val *invoke_c_body(mino_state *S, void *body_user,
+                                  mino_env *env)
 {
     struct invoke_c_body *c = (struct invoke_c_body *)body_user;
     return c->fn(S, c->user, env);
@@ -1047,13 +1047,13 @@ static mino_val_t *invoke_c_body(mino_state_t *S, void *body_user,
 /* Retry loop body: split off the setjmp-bearing tx_outer_run so it
  * does minimal work, sidestepping -Wclobbered for locals that mutate
  * across iterations. */
-static mino_val_t *tx_run_loop(mino_state_t *S,
+static mino_val *tx_run_loop(mino_state *S,
                                 tx_invoke_body_fn invoke,
-                                void *body_user, mino_env_t *env,
+                                void *body_user, mino_env *env,
                                 tx_state_t *tx)
 {
     for (;;) {
-        mino_val_t *r;
+        mino_val *r;
         int         validator_rejected = 0;
         tx->refs_head     = NULL;
         tx->pending_sends = NULL;
@@ -1072,7 +1072,7 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
             return r;
         }
         if (validator_rejected) {
-            mino_val_t *vex = tx->validator_thrown_ex;
+            mino_val *vex = tx->validator_thrown_ex;
             tx_clear_ref_states(tx);
             tx->validator_thrown_ex = NULL;
             tx->pending_sends       = NULL;
@@ -1106,16 +1106,16 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
  * that case (nested dosync / mino_tx_run) is handled at the public
  * entry by absorbing the inner into the outer's tx without touching
  * the setjmp frame. */
-static mino_val_t *tx_outer_run(mino_state_t *S,
+static mino_val *tx_outer_run(mino_state *S,
                                  tx_invoke_body_fn invoke,
-                                 void *body_user, mino_env_t *env,
+                                 void *body_user, mino_env *env,
                                  const char *origin_label)
 {
     /* Volatile-qualified so the setjmp-clobber analysis stays clean:
      * any local needed in both the success and longjmp arms must be
      * either declared volatile or reloaded after setjmp. */
     mino_thread_ctx_t * volatile ctx_v;
-    mino_val_t        * volatile result_v = NULL;
+    mino_val        * volatile result_v = NULL;
     int                          saved_try;
     tx_state_t                   tx;
     try_frame_t                 *frame;
@@ -1144,7 +1144,7 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
          * we don't re-enter the inlined mino_current_ctx (whose locals
          * trigger -Wclobbered). */
         mino_thread_ctx_t *c  = ctx_v;
-        mino_val_t        *ex = c->try_stack[saved_try].exception;
+        mino_val        *ex = c->try_stack[saved_try].exception;
         tx_clear_ref_states(&tx);
         c->current_tx    = NULL;
         c->try_depth     = saved_try;
@@ -1177,7 +1177,7 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
          * via the catch arm (refs_head freed there). */
         c->current_tx = NULL;
         if (result_v != NULL) {
-            mino_val_t *pending = tx.pending_sends;
+            mino_val *pending = tx.pending_sends;
             tx.pending_sends = NULL;
             /* Drain agent pending sends BEFORE watch dispatch. A
              * thrown ref watch longjmps past everything that
@@ -1198,10 +1198,10 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
     return result_v;
 }
 
-mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+mino_val *prim_dosync_star(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
-    mino_val_t              *thunk;
+    mino_val              *thunk;
     mino_thread_ctx_t       *ctx;
     struct invoke_clj_thunk  body_ctx;
 
@@ -1219,7 +1219,7 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
     ctx = mino_current_ctx(S);
     /* Nested dosync: bump depth, reuse the outer tx, run the thunk. */
     if (ctx->current_tx != NULL) {
-        mino_val_t *r;
+        mino_val *r;
         ctx->current_tx->depth++;
         r = mino_call(S, thunk, mino_nil(S), env);
         if (ctx->current_tx != NULL) ctx->current_tx->depth--;
@@ -1230,8 +1230,8 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
                          "dosync*: try-stack overflow");
 }
 
-mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body, void *user,
-                        mino_env_t *env)
+mino_val *mino_tx_run(mino_state *S, mino_tx_body_fn body, void *user,
+                        mino_env *env)
 {
     mino_thread_ctx_t    *ctx;
     struct invoke_c_body  body_ctx;
@@ -1244,7 +1244,7 @@ mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body, void *user,
     /* Nested tx: absorb into the outer just like a Clojure dosync
      * inside another dosync. The body runs once, no retry frame. */
     if (ctx->current_tx != NULL) {
-        mino_val_t *r;
+        mino_val *r;
         ctx->current_tx->depth++;
         r = body(S, user, env);
         if (ctx->current_tx != NULL) ctx->current_tx->depth--;
@@ -1304,7 +1304,7 @@ const size_t k_prims_stm_count = sizeof(k_prims_stm) / sizeof(k_prims_stm[0]);
 /* Lazy-init the global commit lock on the first mino_install_stm
  * call. State_init does not pay this cost so embedders that never
  * opt into STM keep the bool flag and nothing else. */
-static void stm_lazy_init_commit_lock(mino_state_t *S)
+static void stm_lazy_init_commit_lock(mino_state *S)
 {
     if (S->stm.lock_inited) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
@@ -1315,9 +1315,9 @@ static void stm_lazy_init_commit_lock(mino_state_t *S)
     S->stm.lock_inited = 1;
 }
 
-void mino_install_stm(mino_state_t *S, mino_env_t *env)
+void mino_install_stm(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     stm_lazy_init_commit_lock(S);
     prim_install_table_with_capability(S, core_env, "clojure.core",

@@ -9,11 +9,11 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_eq_ik(mino_val_t **regs, mino_val_t **consts,
-                       mino_state_t *S)
+void stencil_op_eq_ik(mino_val **regs, mino_val **consts,
+                       mino_state *S)
 {
-    mino_val_t *lhs  = regs[IMM_B];
-    mino_val_t *kimm = IMM_KIMM;
+    mino_val *lhs  = regs[IMM_B];
+    mino_val *kimm = IMM_KIMM;
     if (__builtin_expect(MINO_IS_INT(lhs), 1)) {
         regs[IMM_A] = MINO_MAKE_BOOL(MINO_INT_VAL(lhs) == MINO_INT_VAL(kimm));
     } else {

@@ -47,7 +47,7 @@ static char *dup_str(const char *s, size_t n)
  * exists its full_name is replaced. Returns 0 on success and -1 on
  * OOM; callers should surface failures via the standard diagnostic
  * path so OOM during alias add is catchable. */
-int runtime_module_add_alias(mino_state_t *S,
+int runtime_module_add_alias(mino_state *S,
                              const char *alias, const char *full)
 {
     size_t i;

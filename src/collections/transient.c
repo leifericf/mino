@@ -28,17 +28,17 @@
 /* Small helpers                                                             */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *transient_error(mino_state_t *S, const char *msg)
+static mino_val *transient_error(mino_state *S, const char *msg)
 {
     return prim_throw_classified(S, "eval/type", "MTY001", msg);
 }
 
-static void transient_set_current(mino_state_t *S, mino_val_t *t,
-                                  mino_val_t *new_inner);
+static void transient_set_current(mino_state *S, mino_val *t,
+                                  mino_val *new_inner);
 
 /* Build a one-link cons list (car . cdr). Callers pre-root any
  * values that must survive across the allocation. */
-static mino_val_t *cons1(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
+static mino_val *cons1(mino_state *S, mino_val *car, mino_val *cdr)
 {
     return mino_cons(S, car, cdr);
 }
@@ -47,18 +47,18 @@ static mino_val_t *cons1(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
 
-int mino_is_transient(const mino_val_t *v)
+int mino_is_transient(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_TRANSIENT;
 }
 
-size_t mino_transient_count(const mino_val_t *t)
+size_t mino_transient_count(const mino_val *t)
 {
     if (!mino_is_transient(t) || !t->as.transient.valid) {
         return 0;
     }
     {
-        const mino_val_t *c = t->as.transient.current;
+        const mino_val *c = t->as.transient.current;
         if (c == NULL) return 0;
         switch (mino_type_of(c)) {
         case MINO_VECTOR: return c->as.vec.len;
@@ -73,9 +73,9 @@ size_t mino_transient_count(const mino_val_t *t)
 /* Transient creation and sealing                                            */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
+mino_val *mino_transient(mino_state *S, mino_val *coll)
 {
-    mino_val_t *t;
+    mino_val *t;
     if (coll == NULL
         || (mino_type_of(coll) != MINO_VECTOR
             && mino_type_of(coll) != MINO_MAP
@@ -102,7 +102,7 @@ mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
 }
 
 /* MINO_COLL_SIZE_STATS=1 tri-state sniff. Returns 1 when enabled. */
-static int coll_size_stats_enabled(mino_state_t *S)
+static int coll_size_stats_enabled(mino_state *S)
 {
     if (S->coll_size_stats_enabled == 0) {
         const char *e = getenv("MINO_COLL_SIZE_STATS");
@@ -114,7 +114,7 @@ static int coll_size_stats_enabled(mino_state_t *S)
 
 /* Tick the size histogram for one finalized collection. kind: 0=vec,
  * 1=map, 2=set. bucket = clamp(floor(log2(size+1)), 0..31). */
-static void coll_size_tick(mino_state_t *S, int kind, size_t size)
+static void coll_size_tick(mino_state *S, int kind, size_t size)
 {
     unsigned bucket;
     size_t n;
@@ -129,9 +129,9 @@ static void coll_size_tick(mino_state_t *S, int kind, size_t size)
     S->coll_size_hist[kind][bucket]++;
 }
 
-mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t)
+mino_val *mino_persistent(mino_state *S, mino_val *t)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (!mino_is_transient(t)) {
         return transient_error(S, "persistent!: expected a transient");
     }
@@ -168,8 +168,8 @@ mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t)
  * barrier: a long batch loop can promote t to OLD, after which a
  * direct store of a YOUNG persistent result would install an
  * OLD->YOUNG edge that the remset never hears about. */
-static void transient_set_current(mino_state_t *S, mino_val_t *t,
-                                  mino_val_t *new_inner)
+static void transient_set_current(mino_state *S, mino_val *t,
+                                  mino_val *new_inner)
 {
     gc_write_barrier(S, t, t->as.transient.current, new_inner);
     t->as.transient.current = new_inner;
@@ -177,7 +177,7 @@ static void transient_set_current(mino_state_t *S, mino_val_t *t,
 
 /* Guard shared by every *_bang. Returns 1 when t is a live transient,
  * 0 after installing a classified error (the caller propagates NULL). */
-static int require_valid_transient(mino_state_t *S, const mino_val_t *t,
+static int require_valid_transient(mino_state *S, const mino_val *t,
                                    const char *name)
 {
     char buf[96];
@@ -195,12 +195,12 @@ static int require_valid_transient(mino_state_t *S, const mino_val_t *t,
     return 1;
 }
 
-mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
-                            mino_val_t *key, mino_val_t *val)
+mino_val *mino_assoc_bang(mino_state *S, mino_val *t,
+                            mino_val *key, mino_val *val)
 {
-    mino_val_t *inner;
-    mino_val_t *result;
-    mino_val_t *args;
+    mino_val *inner;
+    mino_val *result;
+    mino_val *args;
     if (!require_valid_transient(S, t, "assoc!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
@@ -249,12 +249,12 @@ mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
     return t;
 }
 
-mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
-                           mino_val_t *val)
+mino_val *mino_conj_bang(mino_state *S, mino_val *t,
+                           mino_val *val)
 {
-    mino_val_t *inner;
-    mino_val_t *result;
-    mino_val_t *args;
+    mino_val *inner;
+    mino_val *result;
+    mino_val *args;
     if (!require_valid_transient(S, t, "conj!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
@@ -298,12 +298,12 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
     return t;
 }
 
-mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
-                             mino_val_t *key)
+mino_val *mino_dissoc_bang(mino_state *S, mino_val *t,
+                             mino_val *key)
 {
-    mino_val_t *inner;
-    mino_val_t *result;
-    mino_val_t *args;
+    mino_val *inner;
+    mino_val *result;
+    mino_val *args;
     if (!require_valid_transient(S, t, "dissoc!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_MAP) {
@@ -323,12 +323,12 @@ mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
     return t;
 }
 
-mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
-                           mino_val_t *key)
+mino_val *mino_disj_bang(mino_state *S, mino_val *t,
+                           mino_val *key)
 {
-    mino_val_t *inner;
-    mino_val_t *result;
-    mino_val_t *args;
+    mino_val *inner;
+    mino_val *result;
+    mino_val *args;
     if (!require_valid_transient(S, t, "disj!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_SET) {
@@ -347,11 +347,11 @@ mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
     return t;
 }
 
-mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t)
+mino_val *mino_pop_bang(mino_state *S, mino_val *t)
 {
-    mino_val_t *inner;
-    mino_val_t *result;
-    mino_val_t *args;
+    mino_val *inner;
+    mino_val *result;
+    mino_val *args;
     if (!require_valid_transient(S, t, "pop!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_VECTOR) {

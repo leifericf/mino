@@ -36,8 +36,8 @@
 
 /* Forward-declared types kept opaque to the stencil compilation unit so
  * the bytes the compiler emits never depend on the runtime layout. */
-typedef struct mino_state    mino_state_t;
-typedef struct mino_val      mino_val_t;
+typedef struct mino_state    mino_state;
+typedef struct mino_val      mino_val;
 typedef struct mino_bc_fn    mino_bc_fn_t;
 
 /* Chain mechanism for non-final stencils.
@@ -71,9 +71,9 @@ typedef struct mino_bc_fn    mino_bc_fn_t;
  * The marker function exists only so the linker resolves the
  * symbol; the runtime never executes it. The JIT rewrites every
  * call site before the region is set RX. */
-extern void mino_jit_chain_continue_marker(mino_val_t **regs,
-                                           mino_val_t **consts,
-                                           mino_state_t *S);
+extern void mino_jit_chain_continue_marker(mino_val **regs,
+                                           mino_val **consts,
+                                           mino_state *S);
 
 #define MINO_STENCIL_CHAIN_RETURN(regs_, consts_, S_)                      \
     do {                                                                   \
@@ -86,7 +86,7 @@ extern void mino_jit_chain_continue_marker(mino_val_t **regs,
  * read site; the extractor records the offsets and the runtime overwrites
  * those bytes with the materialised immediate.
  *
- * MINO_STENCIL_IMM_KIMM holds a pre-tagged mino_val_t* for the signed
+ * MINO_STENCIL_IMM_KIMM holds a pre-tagged mino_val* for the signed
  * 8-bit immediate carried by the OP_*_IK opcodes. The pool slot stores
  * the result of MINO_MAKE_INT((int8_t)C_OF(insn)) so the stencil can
  * pass it through to binop_int_fast / the slow helper exactly the way
@@ -113,7 +113,7 @@ extern char MINO_STENCIL_IMM_BX2[];
 #define IMM_C    ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_C)
 #define IMM_BX   ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_BX)
 #define IMM_SBX  ((long)(intptr_t)MINO_STENCIL_IMM_SBX)
-#define IMM_KIMM ((mino_val_t *)(uintptr_t)MINO_STENCIL_IMM_KIMM)
+#define IMM_KIMM ((mino_val *)(uintptr_t)MINO_STENCIL_IMM_KIMM)
 #define IMM_BC   ((mino_bc_fn_t *)(uintptr_t)MINO_STENCIL_IMM_BC)
 #define IMM_BX2  ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_BX2)
 
@@ -166,17 +166,17 @@ extern char MINO_STENCIL_IMM_BX2[];
  *   immediate (passed by value, not by register index). The helper
  *   conses the literal directly onto the spine so OP_*_IK stencils
  *   reach the same prim fallback path as their II siblings. */
-extern mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
-                                  mino_val_t *rhs, unsigned subop);
-extern mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
+extern mino_val *binop_int_fast(mino_state *S, mino_val *lhs,
+                                  mino_val *rhs, unsigned subop);
+extern mino_val *unop_int_fast(mino_state *S, mino_val *v,
                                  unsigned subop);
-extern mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+extern mino_val **mino_jit_binop_slow(mino_state *S, mino_val **regs,
                                         unsigned a, unsigned b, unsigned c,
                                         unsigned subop);
-extern mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
+extern mino_val **mino_jit_binop_k_slow(mino_state *S, mino_val **regs,
                                           unsigned a, unsigned b,
-                                          mino_val_t *kimm, unsigned subop);
-extern mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
+                                          mino_val *kimm, unsigned subop);
+extern mino_val **mino_jit_unop_slow(mino_state *S, mino_val **regs,
                                        unsigned a, unsigned b, unsigned subop);
 
 /* OP_GETGLOBAL_CACHED slow helper. Resolves the bc's ic-slot at index
@@ -187,8 +187,8 @@ extern mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
  * have `captures == 0` so their bodies never read env-bound names
  * inside ic_resolve_global's env-lookup branch. Returns the (possibly
  * relocated) regs base on success or NULL on resolve failure. */
-extern mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
-                                                    mino_val_t **regs,
+extern mino_val **mino_jit_getglobal_cached_slow(mino_state *S,
+                                                    mino_val **regs,
                                                     unsigned a,
                                                     mino_bc_fn_t *bc,
                                                     unsigned slot_idx);
@@ -200,8 +200,8 @@ extern mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
  * at regs[dst]. Refreshes the regs base on return; returns NULL on
  * resolve failure or apply-side error (longjmp-style errors fire
  * through the caller's try frame and never reach this NULL path). */
-extern mino_val_t **mino_jit_call_cached_slow(mino_state_t *S,
-                                               mino_val_t **regs,
+extern mino_val **mino_jit_call_cached_slow(mino_state *S,
+                                               mino_val **regs,
                                                unsigned arg_base,
                                                unsigned argc,
                                                unsigned dst,
@@ -213,9 +213,9 @@ extern mino_val_t **mino_jit_call_cached_slow(mino_state_t *S,
  * pre-resolved the callee. This helper skips the second IC lookup
  * and goes straight to `apply_callable_argv`. Same regs / GC
  * refresh contract as `mino_jit_call_cached_slow`. */
-extern mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S,
-                                                 mino_val_t **regs,
-                                                 mino_val_t *callee,
+extern mino_val **mino_jit_call_resolved_slow(mino_state *S,
+                                                 mino_val **regs,
+                                                 mino_val *callee,
                                                  unsigned arg_base,
                                                  unsigned argc,
                                                  unsigned dst);
@@ -226,9 +226,9 @@ extern mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S,
  * skips the var-unwrap + type-of dispatch switch inside
  * apply_callable_argv and enters at mino_apply_known_bc_fn_argv. Same
  * regs / GC refresh contract as `mino_jit_call_resolved_slow`. */
-extern mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S,
-                                                 mino_val_t **regs,
-                                                 mino_val_t *callee,
+extern mino_val **mino_jit_call_known_fn_slow(mino_state *S,
+                                                 mino_val **regs,
+                                                 mino_val *callee,
                                                  unsigned arg_base,
                                                  unsigned argc,
                                                  unsigned dst);
@@ -238,9 +238,9 @@ extern mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S,
  * callee is a MINO_PRIM with fn2 set. Skips apply_callable_argv's
  * dispatch switch and invokes the prim directly. Same regs / GC
  * refresh contract as `mino_jit_call_resolved_slow`. */
-extern mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
-                                                   mino_val_t **regs,
-                                                   mino_val_t *callee,
+extern mino_val **mino_jit_call_known_prim_slow(mino_state *S,
+                                                   mino_val **regs,
+                                                   mino_val *callee,
                                                    unsigned arg_base,
                                                    unsigned argc,
                                                    unsigned dst);
@@ -256,9 +256,9 @@ extern mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
  * apply_callable_argv when the cached bc has drifted out from under
  * the slot (mino_bc_run returns NULL on shape mismatch). Same regs /
  * GC refresh contract as `mino_jit_call_resolved_slow`. */
-extern mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
-                                                     mino_val_t **regs,
-                                                     mino_val_t *fn,
+extern mino_val **mino_jit_call_known_native_slow(mino_state *S,
+                                                     mino_val **regs,
+                                                     mino_val *fn,
                                                      mino_bc_fn_t *bc,
                                                      unsigned arg_base,
                                                      unsigned argc,
@@ -266,74 +266,74 @@ extern mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
 
 /* OP_NTH_VEC slow helper. Inlined vector fast lane + cons-and-prim_nth
  * fallback. */
-extern mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S,
-                                           mino_val_t **regs,
+extern mino_val **mino_jit_nth_vec_slow(mino_state *S,
+                                           mino_val **regs,
                                            unsigned a, unsigned b,
                                            unsigned c);
 
 /* OP_FIRST_VEC slow helper. Inlined vector fast lane + cons-and-prim_first
  * fallback. */
-extern mino_val_t **mino_jit_first_vec_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_first_vec_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b);
 
 /* OP_COUNT_VEC slow helper. Tagged-int len fast lane on MINO_VECTOR,
  * cons-and-prim_count fallback. */
-extern mino_val_t **mino_jit_count_vec_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_count_vec_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b);
 
 /* OP_EMPTY_VEC slow helper. true/false fast lane on MINO_VECTOR by
  * .len comparison, cons-and-prim_empty_p fallback. */
-extern mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_empty_vec_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b);
 
 /* OP_GET_KW_MAP slow helper. MINO_MAP + MINO_RECORD/KEYWORD fast lanes
  * mirroring the bc_run handler; falls through to prim_get for
  * sorted-maps, transients, 3-arg-default forms, and record ext-map
  * hits. */
-extern mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S,
-                                              mino_val_t **regs,
+extern mino_val **mino_jit_get_kw_map_slow(mino_state *S,
+                                              mino_val **regs,
                                               unsigned a, unsigned b,
                                               unsigned c);
 
 /* OP_CONJ_VEC slow helper. MINO_VECTOR fast lane via vec_conj1
  * (allocates -- regs base may relocate); cons-and-prim_conj fallback
  * for lists, sets, sorted-colls, etc. */
-extern mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S,
-                                            mino_val_t **regs,
+extern mino_val **mino_jit_conj_vec_slow(mino_state *S,
+                                            mino_val **regs,
                                             unsigned a, unsigned b,
                                             unsigned c);
 
 /* OP_ASSOC slow helper. 3-arg shape: [coll, k, v] sits at regs[b..b+2].
  * MINO_VECTOR+int-key fast lane via vec_assoc1; MINO_MAP fast lane
  * via mino_map_assoc1; falls through to prim_assoc otherwise. */
-extern mino_val_t **mino_jit_assoc_slow(mino_state_t *S,
-                                         mino_val_t **regs,
+extern mino_val **mino_jit_assoc_slow(mino_state *S,
+                                         mino_val **regs,
                                          unsigned a, unsigned b);
 /* OP_ASSOC_BANG slow helper. 3-arg transient shape: [tcoll, k, v]
  * at regs[b..b+2]. Routes a valid transient to mino_assoc_bang;
  * other shapes fall through to prim_assoc_bang. */
-extern mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S,
-                                              mino_val_t **regs,
+extern mino_val **mino_jit_assoc_bang_slow(mino_state *S,
+                                              mino_val **regs,
                                               unsigned a, unsigned b);
 /* OP_CONJ_BANG / OP_DISSOC_BANG / OP_DISJ_BANG slow helpers. Arity-2
  * shape: tcoll in regs[b], second arg in regs[c]. */
-extern mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_conj_bang_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b,
                                              unsigned c);
-extern mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S,
-                                               mino_val_t **regs,
+extern mino_val **mino_jit_dissoc_bang_slow(mino_state *S,
+                                               mino_val **regs,
                                                unsigned a, unsigned b,
                                                unsigned c);
-extern mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_disj_bang_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b,
                                              unsigned c);
-extern mino_val_t **mino_jit_dissoc_slow(mino_state_t *S,
-                                          mino_val_t **regs,
+extern mino_val **mino_jit_dissoc_slow(mino_state *S,
+                                          mino_val **regs,
                                           unsigned a, unsigned b,
                                           unsigned c);
 
@@ -342,8 +342,8 @@ extern mino_val_t **mino_jit_dissoc_slow(mino_state_t *S,
  * return value lands at regs[dst]. Routes through
  * `apply_callable_argv` so every callable kind reaches its correct
  * entry. */
-extern mino_val_t **mino_jit_call_slow(mino_state_t *S,
-                                        mino_val_t **regs,
+extern mino_val **mino_jit_call_slow(mino_state *S,
+                                        mino_val **regs,
                                         unsigned fn_reg,
                                         unsigned argc,
                                         unsigned dst);
@@ -354,8 +354,8 @@ extern mino_val_t **mino_jit_call_slow(mino_state_t *S,
  * to mino_bc_run via its natural fn ret; mino_bc_run's caller
  * (apply_callable's trampoline loop) picks up the new (fn, args)
  * without growing the C stack. Returns NULL on cons OOM. */
-extern mino_val_t *mino_jit_tailcall_slow(mino_state_t *S,
-                                           mino_val_t **regs,
+extern mino_val *mino_jit_tailcall_slow(mino_state *S,
+                                           mino_val **regs,
                                            unsigned fn_reg,
                                            unsigned argc);
 
@@ -367,35 +367,35 @@ extern mino_val_t *mino_jit_tailcall_slow(mino_state_t *S,
  * mino_jit_invoke restores the prior env on JIT-region exit so
  * neighbouring JIT regions and the surrounding interpreter frame
  * are unaffected. */
-extern mino_val_t **mino_jit_closure_slow(mino_state_t *S,
-                                           mino_val_t **regs,
+extern mino_val **mino_jit_closure_slow(mino_state *S,
+                                           mino_val **regs,
                                            unsigned a,
                                            mino_bc_fn_t *bc,
                                            unsigned bx);
-extern mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+extern mino_val **mino_jit_make_lazy_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a,
                                              mino_bc_fn_t *bc,
                                              unsigned bx);
-extern mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
-                                                        mino_val_t **regs,
+extern mino_val **mino_jit_protocol_call_cached_slow(mino_state *S,
+                                                        mino_val **regs,
                                                         unsigned a,
                                                         unsigned argn,
                                                         unsigned ret,
                                                         mino_bc_fn_t *bc,
                                                         unsigned slot_idx);
-extern mino_val_t  *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
-                                                            mino_val_t **regs,
+extern mino_val  *mino_jit_protocol_tailcall_cached_slow(mino_state *S,
+                                                            mino_val **regs,
                                                             unsigned a,
                                                             unsigned argn,
                                                             mino_bc_fn_t *bc,
                                                             unsigned slot_idx);
-extern mino_val_t **mino_jit_push_env_slow(mino_state_t *S,
-                                            mino_val_t **regs);
-extern mino_val_t **mino_jit_pop_env_slow(mino_state_t *S,
-                                           mino_val_t **regs);
-extern mino_val_t **mino_jit_env_bind_slow(mino_state_t *S,
-                                            mino_val_t **regs,
+extern mino_val **mino_jit_push_env_slow(mino_state *S,
+                                            mino_val **regs);
+extern mino_val **mino_jit_pop_env_slow(mino_state *S,
+                                           mino_val **regs);
+extern mino_val **mino_jit_env_bind_slow(mino_state *S,
+                                            mino_val **regs,
                                             unsigned a,
                                             mino_bc_fn_t *bc,
                                             unsigned bx);
@@ -411,25 +411,25 @@ extern mino_val_t **mino_jit_env_bind_slow(mino_state_t *S,
  * The low-bit tag is safe because regs always points to 8-byte-aligned
  * storage. NULL is reserved for hard errors (e.g., a cons OOM that the
  * caller propagates back up the JIT region as a NULL return). */
-extern mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S,
-                                               mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_lt_slow(mino_state *S,
+                                               mino_val **regs,
                                                unsigned a, unsigned b);
-extern mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S,
-                                                mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_dec_slow(mino_state *S,
+                                                mino_val **regs,
                                                 unsigned a);
-extern mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S,
-                                                   mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_lt_inc_slow(mino_state *S,
+                                                   mino_val **regs,
                                                    unsigned a, unsigned b,
                                                    unsigned c);
-extern mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
-                                                    mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_dec_inc_slow(mino_state *S,
+                                                    mino_val **regs,
                                                     unsigned a, unsigned b);
-extern mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S,
-                                                   mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_lt_acc_slow(mino_state *S,
+                                                   mino_val **regs,
                                                    unsigned a, unsigned b,
                                                    unsigned c, unsigned d);
-extern mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S,
-                                                    mino_val_t **regs,
+extern mino_val **mino_jit_loop_int_dec_acc_slow(mino_state *S,
+                                                    mino_val **regs,
                                                     unsigned a, unsigned c,
                                                     unsigned d);
 
@@ -448,6 +448,6 @@ extern void mino_jit_loop_continue_marker(void);
  * so the per-iter cost stays at one decrement + one branch on the
  * hot path. Cancel-response latency is bounded by the downcounter's
  * reload value (currently 256 iterations). */
-extern int mino_bc_safepoint(mino_state_t *S);
+extern int mino_bc_safepoint(mino_state *S);
 
 #endif /* MINO_BC_STENCIL_ABI_H */

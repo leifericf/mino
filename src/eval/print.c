@@ -36,7 +36,7 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  */
 #define MINO_PRINT_DEPTH_MAX 128
 
-static void print_rb_inorder(mino_state_t *S, FILE *out,
+static void print_rb_inorder(mino_state *S, FILE *out,
                              const mino_rb_node_t *n, int is_map, int *first)
 {
     if (n == NULL) return;
@@ -130,9 +130,9 @@ static void print_char(FILE *out, int cp)
     }
 }
 
-static void print_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_cons(mino_state *S, FILE *out, const mino_val *v)
 {
-    const mino_val_t *p = v;
+    const mino_val *p = v;
     fputc('(', out);
     S->print_depth++;
     while (p != NULL && mino_type_of(p) == MINO_CONS) {
@@ -140,7 +140,7 @@ static void print_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
         p = p->as.cons.cdr;
         /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
         if (p != NULL && mino_type_of(p) == MINO_LAZY) {
-            p = lazy_force(S, (mino_val_t *)p);
+            p = lazy_force(S, (mino_val *)p);
         }
         if (p != NULL && mino_type_of(p) == MINO_CONS) {
             fputc(' ', out);
@@ -155,7 +155,7 @@ static void print_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc(')', out);
 }
 
-static void print_vector(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_vector(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
     fputc('[', out);
@@ -168,13 +168,13 @@ static void print_vector(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc(']', out);
 }
 
-static void print_map(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_map(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
     fputc('{', out);
     S->print_depth++;
     for (i = 0; i < v->as.map.len; i++) {
-        mino_val_t *key = vec_nth(v->as.map.key_order, i);
+        mino_val *key = vec_nth(v->as.map.key_order, i);
         if (i > 0) fputs(", ", out);
         mino_print_to(S, out, key);
         fputc(' ', out);
@@ -184,7 +184,7 @@ static void print_map(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc('}', out);
 }
 
-static void print_set(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_set(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
     fputs("#{", out);
@@ -197,7 +197,7 @@ static void print_set(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc('}', out);
 }
 
-static void print_sorted(mino_state_t *S, FILE *out, const mino_val_t *v,
+static void print_sorted(mino_state *S, FILE *out, const mino_val *v,
                          int is_map)
 {
     int first = 1;
@@ -208,7 +208,7 @@ static void print_sorted(mino_state_t *S, FILE *out, const mino_val_t *v,
     fputc('}', out);
 }
 
-static void print_chunk(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_chunk(mino_state *S, FILE *out, const mino_val *v)
 {
     /* Internal seq leaf; surface as `#chunk[…]` rather than
      * pretending to be a vector. */
@@ -223,16 +223,16 @@ static void print_chunk(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc(']', out);
 }
 
-static void print_chunked_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_chunked_cons(mino_state *S, FILE *out, const mino_val *v)
 {
     /* Print as a list. Walk the chunk from off..len-1, then recurse
      * into the more pointer (which may be cons / lazy / another
      * chunked-cons). */
-    const mino_val_t *cur = v;
+    const mino_val *cur = v;
     fputc('(', out);
     S->print_depth++;
     while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
-        const mino_val_t *ch = cur->as.chunked_cons.chunk;
+        const mino_val *ch = cur->as.chunked_cons.chunk;
         unsigned k;
         for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
             if (k > cur->as.chunked_cons.off || cur != v) fputc(' ', out);
@@ -240,7 +240,7 @@ static void print_chunked_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
         }
         cur = cur->as.chunked_cons.more;
         if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-            cur = lazy_force(S, (mino_val_t *)cur);
+            cur = lazy_force(S, (mino_val *)cur);
         }
     }
     if (cur != NULL && mino_type_of(cur) == MINO_CONS) {
@@ -250,7 +250,7 @@ static void print_chunked_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
             mino_print_to(S, out, cur->as.cons.car);
             cur = cur->as.cons.cdr;
             if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-                cur = lazy_force(S, (mino_val_t *)cur);
+                cur = lazy_force(S, (mino_val *)cur);
             }
             if (cur != NULL && mino_type_of(cur) == MINO_CONS) fputc(' ', out);
         }
@@ -259,12 +259,12 @@ static void print_chunked_cons(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc(')', out);
 }
 
-static void print_lazy(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_lazy(mino_state *S, FILE *out, const mino_val *v)
 {
     /* Force the lazy seq and print the realized value. A lazy seq
      * that resolves to nil is the canonical empty seq — print as ()
      * so cross-type seq equality and printer agree. */
-    mino_val_t *forced = lazy_force(S, (mino_val_t *)v);
+    mino_val *forced = lazy_force(S, (mino_val *)v);
     if (forced == NULL || mino_type_of(forced) == MINO_NIL
         || mino_type_of(forced) == MINO_EMPTY_LIST) {
         fputs("()", out);
@@ -273,12 +273,12 @@ static void print_lazy(mino_state_t *S, FILE *out, const mino_val_t *v)
     mino_print_to(S, out, forced);
 }
 
-static void print_record(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_record(mino_state *S, FILE *out, const mino_val *v)
 {
     /* #ns.Name{:f1 v1, :f2 v2, ...[ext...]} -- declared fields first
      * in declared order, then ext entries in insertion order. */
-    const mino_val_t *t      = v->as.record.type;
-    mino_val_t       *fields = t->as.record_type.fields;
+    const mino_val *t      = v->as.record.type;
+    mino_val       *fields = t->as.record_type.fields;
     size_t            i, n_fields;
     int               first  = 1;
     fputc('#', out);
@@ -300,10 +300,10 @@ static void print_record(mino_state_t *S, FILE *out, const mino_val_t *v)
         mino_print_to(S, out, v->as.record.vals[i]);
     }
     if (v->as.record.ext != NULL) {
-        const mino_val_t *e = v->as.record.ext;
+        const mino_val *e = v->as.record.ext;
         size_t k;
         for (k = 0; k < e->as.map.len; k++) {
-            mino_val_t *key = vec_nth(e->as.map.key_order, k);
+            mino_val *key = vec_nth(e->as.map.key_order, k);
             if (!first) fputs(", ", out);
             first = 0;
             mino_print_to(S, out, key);
@@ -315,9 +315,9 @@ static void print_record(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputc('}', out);
 }
 
-static void print_future(FILE *out, const mino_val_t *v)
+static void print_future(FILE *out, const mino_val *v)
 {
-    const mino_future_t *impl = v->as.future.impl;
+    const mino_future *impl = v->as.future.impl;
     const char *st = "pending";
     if (impl != NULL) {
         switch (impl->state_tag) {
@@ -332,7 +332,7 @@ static void print_future(FILE *out, const mino_val_t *v)
     fputc('>', out);
 }
 
-static void print_uuid(FILE *out, const mino_val_t *v)
+static void print_uuid(FILE *out, const mino_val *v)
 {
     /* Canonical lowercase 8-4-4-4-12 form prefixed with #uuid so the
      * printed form roundtrips through the reader. */
@@ -346,12 +346,12 @@ static void print_uuid(FILE *out, const mino_val_t *v)
     fputs(buf, out);
 }
 
-static void print_regex(FILE *out, const mino_val_t *v)
+static void print_regex(FILE *out, const mino_val *v)
 {
     /* Print as `#"source"` so the regex round-trips through the
      * reader. The source bytes pass through unescaped -- the reader's
      * regex literal accepts the same form. */
-    const mino_val_t *src = v->as.regex.source;
+    const mino_val *src = v->as.regex.source;
     fputs("#\"", out);
     if (src != NULL && mino_type_of(src) == MINO_STRING) {
         fwrite(src->as.s.data, 1, src->as.s.len, out);
@@ -359,7 +359,7 @@ static void print_regex(FILE *out, const mino_val_t *v)
     fputc('"', out);
 }
 
-static void print_host_array(mino_state_t *S, FILE *out, const mino_val_t *v)
+static void print_host_array(mino_state *S, FILE *out, const mino_val *v)
 {
     /* Mirror Clojure JVM's #object[...] form for arrays since arrays
      * don't round-trip through the reader. */
@@ -378,7 +378,7 @@ static void print_host_array(mino_state_t *S, FILE *out, const mino_val_t *v)
     fputs("}]", out);
 }
 
-void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
+void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
 {
     if (v == NULL || (MINO_IS_PTR(v) && mino_type_of(v) == MINO_NIL)) {
         fputs("nil", out);
@@ -586,18 +586,18 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     }
 }
 
-void mino_print(mino_state_t *S, const mino_val_t *v)
+void mino_print(mino_state *S, const mino_val *v)
 {
     mino_print_to(S, stdout, v);
 }
 
-void mino_println(mino_state_t *S, const mino_val_t *v)
+void mino_println(mino_state *S, const mino_val *v)
 {
     mino_print_to(S, stdout, v);
     fputc('\n', stdout);
 }
 
-int mino_print_to_buf(mino_state_t *S, const mino_val_t *v,
+int mino_print_to_buf(mino_state *S, const mino_val *v,
                       char *buf, size_t n)
 {
     FILE *out;

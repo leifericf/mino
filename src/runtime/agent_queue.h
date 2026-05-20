@@ -2,7 +2,7 @@
  * agent_queue.h -- agent run-queue node and pool-kind enum.
  *
  * One queued action targeting a specific agent lives in the malloc
- * heap (not GC); the mino_val_t pointers it holds are GC roots
+ * heap (not GC); the mino_val pointers it holds are GC roots
  * reached via gc_mark_agent_runq during root marking.
  *
  * Two agent pools live alongside each other: POOLED is the target of
@@ -25,11 +25,11 @@
 #include "mino_internal.h"
 
 typedef struct agent_action_node {
-    mino_val_t                *agent;     /* MINO_AGENT target */
-    mino_val_t                *fn;        /* action fn */
-    mino_val_t                *extra;     /* extra arg list (nil/cons) */
-    mino_val_t                *dyn_snap;  /* dyn-binding snapshot at send */
-    mino_env_t                *env;       /* env captured at send time */
+    mino_val                *agent;     /* MINO_AGENT target */
+    mino_val                *fn;        /* action fn */
+    mino_val                *extra;     /* extra arg list (nil/cons) */
+    mino_val                *dyn_snap;  /* dyn-binding snapshot at send */
+    mino_env                *env;       /* env captured at send time */
     struct agent_action_node  *next;
 } agent_action_node_t;
 

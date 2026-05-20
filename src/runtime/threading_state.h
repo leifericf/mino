@@ -13,7 +13,7 @@
 
 #include "mino_internal.h"
 #include "runtime/thread_ctx.h"    /* mino_thread_ctx_t */
-#include "runtime/host_future.h"   /* mino_future_t */
+#include "runtime/host_future.h"   /* mino_future */
 
 #include <stddef.h>
 
@@ -35,8 +35,8 @@ typedef struct threading_state {
     int             multi_threaded;
 
     struct mino_thread_pool *thread_pool;
-    void          (*thread_start_fn)(mino_state_t *S, void *ctx);
-    void          (*thread_end_fn)(mino_state_t *S, void *ctx);
+    void          (*thread_start_fn)(mino_state *S, void *ctx);
+    void          (*thread_end_fn)(mino_state *S, void *ctx);
     void           *thread_factory_ctx;
     size_t          thread_stack_size;
 
@@ -46,7 +46,7 @@ typedef struct threading_state {
     pthread_mutex_t state_lock;
 #endif
 
-    mino_future_t  *future_list_head;
+    mino_future  *future_list_head;
     mino_thread_ctx_t *worker_ctxs_head;
 
 #if defined(_WIN32) && defined(_MSC_VER)

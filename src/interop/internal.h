@@ -47,7 +47,7 @@ typedef struct {
 } host_type_t;
 
 /* syntax.c: capability registry lookup. */
-host_type_t   *host_type_find(mino_state_t *S, const char *type_key);
+host_type_t   *host_type_find(mino_state *S, const char *type_key);
 host_member_t *host_member_find(host_type_t *t, const char *name,
                                 int kind, int arity);
 

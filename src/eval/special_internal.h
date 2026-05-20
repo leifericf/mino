@@ -14,19 +14,19 @@
 #include "runtime/internal.h"
 
 /* prim/module.c: needed by eval_ns for require delegation. */
-mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env);
 
 /* bindings.c: destructuring and binding helpers. */
-int kw_eq(const mino_val_t *v, const char *s);
-int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
-                mino_val_t *args, const char *ctx);
+int kw_eq(const mino_val *v, const char *s);
+int bind_params(mino_state *S, mino_env *env, mino_val *params,
+                mino_val *args, const char *ctx);
 /* Closure-shape pre-compile helpers. fn_params_simple_shape returns 1
  * iff `params` is a vector of plain interned symbols with no
  * destructure / no &-rest / no :as. bind_simple_params binds such a
  * vector to args without going through bind_form's dispatch tower. */
-int fn_params_simple_shape(mino_val_t *params);
-int bind_simple_params(mino_state_t *S, mino_env_t *env,
-                       mino_val_t *params, mino_val_t *args, const char *ctx);
+int fn_params_simple_shape(mino_val *params);
+int bind_simple_params(mino_state *S, mino_env *env,
+                       mino_val *params, mino_val *args, const char *ctx);
 
 /*
  * Special-form handler signature. Every entry in the special-form
@@ -34,51 +34,51 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
  * tail). Handlers that don't need `tail` accept it and ignore it; the
  * uniform shape is what makes the data-table dispatch work.
  */
-typedef mino_val_t *(*special_fn)(mino_state_t *S, mino_val_t *form,
-                                   mino_val_t *args, mino_env_t *env,
+typedef mino_val *(*special_fn)(mino_state *S, mino_val *form,
+                                   mino_val *args, mino_env *env,
                                    int tail);
 
 /* defs.c */
-mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail);
+mino_val *eval_defmacro(mino_state *S, mino_val *form,
+                          mino_val *args, mino_env *env, int tail);
+mino_val *eval_declare(mino_state *S, mino_val *form,
+                         mino_val *args, mino_env *env, int tail);
+mino_val *eval_def(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail);
 
-mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env, int tail);
+mino_val *eval_ns(mino_state *S, mino_val *form,
+                    mino_val *args, mino_env *env, int tail);
 
 /* bindings.c */
-mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
-                            mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
-                      mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env, int tail);
+mino_val *eval_let(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail);
+mino_val *eval_letfn_star(mino_state *S, mino_val *form,
+                            mino_val *args, mino_env *env, int tail);
+mino_val *eval_loop(mino_state *S, mino_val *form,
+                      mino_val *args, mino_env *env, int tail);
+mino_val *eval_binding(mino_state *S, mino_val *form,
+                         mino_val *args, mino_env *env, int tail);
 
 /* control.c */
-mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val);
+mino_val *eval_try(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail);
+mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
 /* fn.c */
-mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env, int tail);
-mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
-                                      mino_val_t *arity_list,
+mino_val *eval_fn(mino_state *S, mino_val *form,
+                    mino_val *args, mino_env *env, int tail);
+mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
+                                      mino_val *arity_list,
                                       const char *diag_code,
                                       const char *label);
 
 /* eval/special_registry.c */
-int eval_try_special_form(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *head, mino_val_t *args,
-                          mino_env_t *env, int tail,
-                          mino_val_t **out);
-mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
-                                      mino_val_t *arity_list,
+int eval_try_special_form(mino_state *S, mino_val *form,
+                          mino_val *head, mino_val *args,
+                          mino_env *env, int tail,
+                          mino_val **out);
+mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
+                                      mino_val *arity_list,
                                       const char *diag_code,
                                       const char *label);
 
@@ -93,7 +93,7 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
  *
  * Returns the call result on success, NULL on error.
  */
-mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
-                                  mino_val_t *args, const mino_val_t *form);
+mino_val *apply_non_fn_callable(mino_state *S, mino_val *fn,
+                                  mino_val *args, const mino_val *form);
 
 #endif /* EVAL_SPECIAL_INTERNAL_H */

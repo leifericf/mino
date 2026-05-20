@@ -149,7 +149,7 @@ typedef enum {
     IMM_KIND_C    = 2,
     IMM_KIND_BX   = 3,
     IMM_KIND_SBX  = 4,
-    /* Signed 8-bit C field re-tagged as a mino_val_t* via MINO_MAKE_INT. */
+    /* Signed 8-bit C field re-tagged as a mino_val* via MINO_MAKE_INT. */
     IMM_KIND_KIMM = 5,
     /* The bc pointer of the fn this stencil belongs to. */
     IMM_KIND_BC   = 6,
@@ -267,127 +267,127 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
  * stencils for pcs [0, deopt_at_pc) and an OP_DEOPT_TO_INTERP stencil
  * at deopt_at_pc; the resulting native region falls through to deopt
  * if execution reaches the unstenciled tail. */
-int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
+int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                             size_t deopt_at_pc);
 
 /* Slow-path helpers (defined in helpers.c; referenced by name from
  * stencils through the extern-fn table in entry.c, and addressed
  * directly by entry.c when building that table). */
-mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_binop_slow(mino_state *S, mino_val **regs,
                                  unsigned a, unsigned b, unsigned c,
                                  unsigned subop);
-mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_binop_k_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b,
-                                   mino_val_t *kimm, unsigned subop);
-mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
+                                   mino_val *kimm, unsigned subop);
+mino_val **mino_jit_unop_slow(mino_state *S, mino_val **regs,
                                 unsigned a, unsigned b, unsigned subop);
-mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
-                                            mino_val_t **regs,
+mino_val **mino_jit_getglobal_cached_slow(mino_state *S,
+                                            mino_val **regs,
                                             unsigned a,
                                             mino_bc_fn_t *bc,
                                             unsigned slot_idx);
-mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_call_slow(mino_state *S, mino_val **regs,
                                 unsigned fn_reg, unsigned argc,
                                 unsigned dst);
-mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_call_cached_slow(mino_state *S, mino_val **regs,
                                        unsigned arg_base, unsigned argc,
                                        unsigned dst,
                                        mino_bc_fn_t *bc, unsigned slot_idx);
-mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
-                                         mino_val_t *callee,
+mino_val **mino_jit_call_resolved_slow(mino_state *S, mino_val **regs,
+                                         mino_val *callee,
                                          unsigned arg_base, unsigned argc,
                                          unsigned dst);
-mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
-                                         mino_val_t *callee,
+mino_val **mino_jit_call_known_fn_slow(mino_state *S, mino_val **regs,
+                                         mino_val *callee,
                                          unsigned arg_base, unsigned argc,
                                          unsigned dst);
-mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
-                                           mino_val_t **regs,
-                                           mino_val_t *callee,
+mino_val **mino_jit_call_known_prim_slow(mino_state *S,
+                                           mino_val **regs,
+                                           mino_val *callee,
                                            unsigned arg_base,
                                            unsigned argc,
                                            unsigned dst);
-mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
-                                             mino_val_t **regs,
-                                             mino_val_t *fn,
+mino_val **mino_jit_call_known_native_slow(mino_state *S,
+                                             mino_val **regs,
+                                             mino_val *fn,
                                              mino_bc_fn_t *bc,
                                              unsigned arg_base,
                                              unsigned argc,
                                              unsigned dst);
-mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_nth_vec_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_first_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b);
-mino_val_t **mino_jit_count_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_count_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b);
-mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_empty_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b);
-mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_get_kw_map_slow(mino_state *S, mino_val **regs,
                                       unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_conj_vec_slow(mino_state *S, mino_val **regs,
                                     unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_assoc_slow(mino_state *S, mino_val **regs,
                                  unsigned a, unsigned b);
-mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_assoc_bang_slow(mino_state *S, mino_val **regs,
                                       unsigned a, unsigned b);
-mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_conj_bang_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_dissoc_bang_slow(mino_state *S, mino_val **regs,
                                        unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_disj_bang_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b, unsigned c);
-mino_val_t **mino_jit_dissoc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_dissoc_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b, unsigned c);
-mino_val_t  *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
+mino_val  *mino_jit_tailcall_slow(mino_state *S, mino_val **regs,
                                     unsigned fn_reg, unsigned argc);
-mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_closure_slow(mino_state *S, mino_val **regs,
                                    unsigned a, mino_bc_fn_t *bc,
                                    unsigned bx);
-mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_make_lazy_slow(mino_state *S, mino_val **regs,
                                       unsigned a, mino_bc_fn_t *bc,
                                       unsigned bx);
-mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
-                                                 mino_val_t **regs,
+mino_val **mino_jit_protocol_call_cached_slow(mino_state *S,
+                                                 mino_val **regs,
                                                  unsigned a,
                                                  unsigned argn,
                                                  unsigned ret,
                                                  mino_bc_fn_t *bc,
                                                  unsigned slot_idx);
-mino_val_t  *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
-                                                     mino_val_t **regs,
+mino_val  *mino_jit_protocol_tailcall_cached_slow(mino_state *S,
+                                                     mino_val **regs,
                                                      unsigned a,
                                                      unsigned argn,
                                                      mino_bc_fn_t *bc,
                                                      unsigned slot_idx);
-mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs);
-mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs);
-mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_push_env_slow(mino_state *S, mino_val **regs);
+mino_val **mino_jit_pop_env_slow(mino_state *S, mino_val **regs);
+mino_val **mino_jit_env_bind_slow(mino_state *S, mino_val **regs,
                                     unsigned a, mino_bc_fn_t *bc,
                                     unsigned bx);
-mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_slow(mino_state *S, mino_val **regs,
                                        unsigned a, unsigned b);
-mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_slow(mino_state *S, mino_val **regs,
                                         unsigned a);
-mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_inc_slow(mino_state *S, mino_val **regs,
                                            unsigned a, unsigned b,
                                            unsigned c);
-mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_inc_slow(mino_state *S, mino_val **regs,
                                             unsigned a, unsigned b);
-mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_acc_slow(mino_state *S, mino_val **regs,
                                             unsigned a, unsigned b,
                                             unsigned c, unsigned d);
-mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_acc_slow(mino_state *S, mino_val **regs,
                                              unsigned a, unsigned c,
                                              unsigned d);
 void         mino_jit_loop_continue_marker(void);
-void         mino_jit_chain_continue_marker(mino_val_t **regs,
-                                             mino_val_t **consts,
-                                             mino_state_t *S);
+void         mino_jit_chain_continue_marker(mino_val **regs,
+                                             mino_val **consts,
+                                             mino_state *S);
 /* Side-exit runtime helper. The deopt stencil tail-calls into this
  * function: it sets S->jit_deopt_pending = 1, writes the resume PC to
  * S->jit_deopt_pc, then returns NULL. mino_jit_invoke checks the
  * pending flag after the native region returns. */
-mino_val_t  *mino_jit_deopt_exit(mino_state_t *S, size_t resume_pc);
+mino_val  *mino_jit_deopt_exit(mino_state *S, size_t resume_pc);
 
 #endif /* MINO_CPJIT_HOST */
 

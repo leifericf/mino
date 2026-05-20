@@ -29,13 +29,13 @@ static int failures = 0;
 
 /* Primitive that uses mino_args_parse to take (int, string) and returns a
  * vector [i, len(s)] so the test can assert both destructured values. */
-static mino_val_t *prim_demo(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+static mino_val *prim_demo(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
     long long    i;
     const char  *s;
     size_t       slen;
-    mino_val_t  *items[2];
+    mino_val  *items[2];
     (void)env;
 
     if (mino_args_parse(S, "demo", args, "iS", &i, &s, &slen) != 0) {
@@ -51,8 +51,8 @@ static mino_val_t *prim_demo(mino_state_t *S, mino_val_t *args,
 /* Primitive that always throws a keyword exception via mino_throw. Used
  * to prove (a) the longjmp delivers to the surrounding (try ... catch)
  * and (b) the payload is the same value we passed in. */
-static mino_val_t *prim_boom(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+static mino_val *prim_boom(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
     (void)args;
     (void)env;
@@ -72,9 +72,9 @@ static void test_version(void)
     REQUIRE(MINO_VERSION_MINOR >= 48, "unexpected MINOR");
 }
 
-static void test_args_parse_ok(mino_state_t *S, mino_env_t *env)
+static void test_args_parse_ok(mino_state *S, mino_env *env)
 {
-    mino_val_t *r;
+    mino_val *r;
     long long   first, second;
     mino_register_fn(S, env, "demo", prim_demo);
 
@@ -97,9 +97,9 @@ static void test_args_parse_ok(mino_state_t *S, mino_env_t *env)
     }
 }
 
-static void test_args_parse_arity(mino_state_t *S, mino_env_t *env)
+static void test_args_parse_arity(mino_state *S, mino_env *env)
 {
-    mino_val_t *r = mino_eval_string(S, "(demo 1)", env);
+    mino_val *r = mino_eval_string(S, "(demo 1)", env);
     const char *err;
     REQUIRE(r == NULL, "arity: demo with 1 arg should error");
     err = mino_last_error(S);
@@ -107,9 +107,9 @@ static void test_args_parse_arity(mino_state_t *S, mino_env_t *env)
             "arity: error does not mention expected 2");
 }
 
-static void test_args_parse_type(mino_state_t *S, mino_env_t *env)
+static void test_args_parse_type(mino_state *S, mino_env *env)
 {
-    mino_val_t *r = mino_eval_string(S, "(demo \"not-int\" \"s\")", env);
+    mino_val *r = mino_eval_string(S, "(demo \"not-int\" \"s\")", env);
     const char *err;
     REQUIRE(r == NULL, "type: demo with wrong first arg should error");
     err = mino_last_error(S);
@@ -117,9 +117,9 @@ static void test_args_parse_type(mino_state_t *S, mino_env_t *env)
             "type: error does not mention expected int");
 }
 
-static void test_throw_caught(mino_state_t *S, mino_env_t *env)
+static void test_throw_caught(mino_state *S, mino_env *env)
 {
-    mino_val_t *r;
+    mino_val *r;
     mino_register_fn(S, env, "boom", prim_boom);
 
     r = mino_eval_string(S,
@@ -140,9 +140,9 @@ static void test_throw_caught(mino_state_t *S, mino_env_t *env)
     }
 }
 
-static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
+static void test_throw_uncaught(mino_state *S, mino_env *env)
 {
-    mino_val_t *r = mino_eval_string(S, "(boom)", env);
+    mino_val *r = mino_eval_string(S, "(boom)", env);
     const char *err;
     REQUIRE(r == NULL, "throw-uncaught: should produce NULL result");
     err = mino_last_error(S);
@@ -158,33 +158,33 @@ static void test_to_int_bignum_round_trip(void)
 {
     /* (a) bignum installed: mino_int(42) is a bigint and round-trips. */
     {
-        mino_state_t *S   = mino_state_new();
-        mino_env_t   *env = mino_env_new(S);
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
         long long     out = 0;
         mino_install(S, env, MINO_CAP_BIGNUM);
         {
-            mino_val_t *v = mino_int(S, 42);
+            mino_val *v = mino_int(S, 42);
             REQUIRE(mino_to_int(v, &out) && out == 42,
                     "to_int/bignum: small mino_int round-trips");
         }
         /* (b) Large value above the tag range round-trips too. */
         {
             long long large = (long long)1 << 62;
-            mino_val_t *v = mino_int(S, large);
+            mino_val *v = mino_int(S, large);
             out = 0;
             REQUIRE(mino_to_int(v, &out) && out == large,
                     "to_int/bignum: tag-overflow mino_int round-trips");
         }
         /* (c) bigint_from_ll: explicit bigint construction round-trips. */
         {
-            mino_val_t *bi = mino_bigint_from_ll(S, 7);
+            mino_val *bi = mino_bigint_from_ll(S, 7);
             out = 0;
             REQUIRE(mino_to_int(bi, &out) && out == 7,
                     "to_int/bignum: bigint_from_ll(7) round-trips");
         }
         /* (d) Out-of-range bigint correctly rejected. */
         {
-            mino_val_t *bi = mino_bigint_from_string(S,
+            mino_val *bi = mino_bigint_from_string(S,
                 "100000000000000000000");
             REQUIRE(bi != NULL, "to_int/bignum: huge bigint constructs");
             REQUIRE(!mino_to_int(bi, &out),
@@ -197,11 +197,11 @@ static void test_to_int_bignum_round_trip(void)
     /* (e) No bignum cap: tag-overflow mino_int stays MINO_INT and
      *     still round-trips (existing behavior preserved). */
     {
-        mino_state_t *S   = mino_state_new();
-        mino_env_t   *env = mino_env_new(S);
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
         long long large   = (long long)1 << 62;
         long long out = 0;
-        mino_val_t *v;
+        mino_val *v;
         mino_install_minimal(S, env);
         v = mino_int(S, large);
         REQUIRE(mino_to_int(v, &out) && out == large,
@@ -213,9 +213,9 @@ static void test_to_int_bignum_round_trip(void)
 
 /* The _ex eval family delivers the raw thrown payload through out_ex,
  * matching the contract documented for mino_pcall. */
-static void test_eval_ex_out_ex_payload(mino_state_t *S, mino_env_t *env)
+static void test_eval_ex_out_ex_payload(mino_state *S, mino_env *env)
 {
-    mino_val_t *out, *out_ex;
+    mino_val *out, *out_ex;
     int         rc;
 
     /* Throw a keyword from script-side. */
@@ -242,7 +242,7 @@ static void test_eval_ex_out_ex_payload(mino_state_t *S, mino_env_t *env)
 
     /* mino_eval_ex with a pre-read throw form. */
     {
-        mino_val_t *form = mino_read(S,
+        mino_val *form = mino_read(S,
             "(throw (ex-info \"y\" {:m 1}))", NULL);
         out = NULL; out_ex = NULL;
         REQUIRE(form != NULL, "out_ex/eval_ex: form parsed");
@@ -255,15 +255,15 @@ static void test_eval_ex_out_ex_payload(mino_state_t *S, mino_env_t *env)
 
 /* mino_iter walks every k/v of a sorted-map (in sort order) and every
  * element of a sorted-set, just like it does for hashed variants. */
-static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
+static void test_iter_sorted(mino_state *S, mino_env *env)
 {
     size_t       isz = mino_iter_sizeof();
-    mino_iter_t *it  = (mino_iter_t *)malloc(isz);
-    mino_val_t  *k, *v;
+    mino_iter *it  = (mino_iter *)malloc(isz);
+    mino_val  *k, *v;
 
     /* sorted-map */
     {
-        mino_val_t *sm = mino_eval_string(S,
+        mino_val *sm = mino_eval_string(S,
             "(sorted-map :a 1 :b 2 :c 3)", env);
         long long sum = 0, n;
         int       seen = 0;
@@ -280,7 +280,7 @@ static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
 
     /* sorted-set */
     {
-        mino_val_t *ss = mino_eval_string(S, "(sorted-set 1 2 3 4 5)", env);
+        mino_val *ss = mino_eval_string(S, "(sorted-set 1 2 3 4 5)", env);
         long long sum = 0, n;
         int       seen = 0;
         REQUIRE(ss != NULL, "iter-sorted-set: construction");
@@ -296,7 +296,7 @@ static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
 
     /* empty sorted-map */
     {
-        mino_val_t *sm = mino_eval_string(S, "(sorted-map)", env);
+        mino_val *sm = mino_eval_string(S, "(sorted-map)", env);
         int seen = 0;
         REQUIRE(sm != NULL, "iter-sorted-map-empty: construction");
         mino_iter_init(S, it, sm);
@@ -310,10 +310,10 @@ static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
 
 /* mino_read with NULL src must follow the EOF path: return NULL with
  * no error and leave *end NULL (or unchanged), matching empty input. */
-static void test_read_null_src(mino_state_t *S)
+static void test_read_null_src(mino_state *S)
 {
     const char *end = NULL;
-    mino_val_t *v   = mino_read(S, NULL, &end);
+    mino_val *v   = mino_read(S, NULL, &end);
     REQUIRE(v == NULL, "null-src: mino_read returns NULL");
     REQUIRE(mino_last_error(S) == NULL,
             "null-src: mino_read sets no error (EOF parity)");
@@ -328,15 +328,15 @@ static void test_read_null_src(mino_state_t *S)
 
 /* NULL `src` to mino_eval_string and mino_eval_string_ex must surface
  * a classified error, matching mino_load_file's NULL-arg behaviour. */
-static void test_eval_string_null_src(mino_state_t *S, mino_env_t *env)
+static void test_eval_string_null_src(mino_state *S, mino_env *env)
 {
-    mino_val_t *out    = NULL;
-    mino_val_t *out_ex = NULL;
+    mino_val *out    = NULL;
+    mino_val *out_ex = NULL;
     int         rc;
 
     /* Public, non-_ex form: returns NULL + sets last_error. */
     {
-        mino_val_t *r = mino_eval_string(S, NULL, env);
+        mino_val *r = mino_eval_string(S, NULL, env);
         const char *err;
         REQUIRE(r == NULL, "null-src: mino_eval_string returns NULL");
         err = mino_last_error(S);
@@ -353,8 +353,8 @@ static void test_eval_string_null_src(mino_state_t *S, mino_env_t *env)
 
 int main(void)
 {
-    mino_state_t *S = mino_state_new();
-    mino_env_t   *env = mino_env_new_default(S);
+    mino_state *S = mino_state_new();
+    mino_env   *env = mino_env_new_default(S);
 
     test_version();
     test_args_parse_ok(S, env);

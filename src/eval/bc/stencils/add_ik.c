@@ -3,7 +3,7 @@
  *
  * OP_ADD_IK A B sC is the immediate-rhs form of `(+ x N)` where N is a
  * signed 8-bit literal baked into the bytecode word. The JIT patches
- * MINO_STENCIL_IMM_KIMM to a pre-tagged mino_val_t* carrying the
+ * MINO_STENCIL_IMM_KIMM to a pre-tagged mino_val* carrying the
  * literal so the stencil treats it as another tagged-int operand
  * without re-checking its tag. The lhs (regs[B]) still needs the tag
  * check; on a miss or arith overflow the stencil falls through to
@@ -13,11 +13,11 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_add_ik(mino_val_t **regs, mino_val_t **consts,
-                        mino_state_t *S)
+void stencil_op_add_ik(mino_val **regs, mino_val **consts,
+                        mino_state *S)
 {
-    mino_val_t *lhs  = regs[IMM_B];
-    mino_val_t *kimm = IMM_KIMM;
+    mino_val *lhs  = regs[IMM_B];
+    mino_val *kimm = IMM_KIMM;
     long long   r;
     if (__builtin_expect(MINO_IS_INT(lhs), 1)) {
         r = MINO_INT_VAL(lhs) + MINO_INT_VAL(kimm);

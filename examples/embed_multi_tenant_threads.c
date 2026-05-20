@@ -145,10 +145,10 @@ int main(void)
 {
     pthread_t            workers[N_WORKERS];
     demo_pool_t         *p_impl;
-    mino_thread_pool_t   pool;
-    mino_state_t        *tenants[N_TENANTS];
-    mino_env_t          *envs[N_TENANTS];
-    mino_val_t          *results[N_TENANTS];
+    mino_thread_pool   pool;
+    mino_state        *tenants[N_TENANTS];
+    mino_env          *envs[N_TENANTS];
+    mino_val          *results[N_TENANTS];
     int i, failures = 0;
 
     p_impl = demo_pool_new(N_WORKERS, workers);
@@ -158,8 +158,8 @@ int main(void)
     /* Spin up N tenants, each with its own runtime + isolated env.
      * Wire each tenant to the same host pool. */
     for (i = 0; i < N_TENANTS; i++) {
-        mino_state_t *S = mino_state_new();
-        mino_env_t   *env = mino_env_new(S);
+        mino_state *S = mino_state_new();
+        mino_env   *env = mino_env_new(S);
         mino_install_all(S, env);
         mino_set_thread_limit(S, 4);
         mino_set_thread_pool(S, &pool);
@@ -187,7 +187,7 @@ int main(void)
     for (i = 0; i < N_TENANTS; i++) {
         char form[64];
         long long val;
-        mino_val_t *got;
+        mino_val *got;
         snprintf(form, sizeof(form),
                  "(deref (future (* %d 100)))", i);
         got = mino_eval_string(tenants[i], form, envs[i]);

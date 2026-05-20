@@ -38,7 +38,7 @@
 #define INTERN_HT_TOMBSTONE (SIZE_MAX - 1)
 
 struct intern_table {
-    mino_val_t **entries;
+    mino_val **entries;
     size_t       len;
     size_t       cap;
     size_t      *ht_buckets;  /* open-addressing hash table: index into entries[] */
@@ -85,8 +85,8 @@ struct mino_vec_node {
 #define MINO_FLATMAP_THRESHOLD 8u
 
 typedef struct {
-    mino_val_t *key;
-    mino_val_t *val;
+    mino_val *key;
+    mino_val *val;
 } hamt_entry_t;
 
 struct mino_hamt_node {
@@ -110,8 +110,8 @@ struct mino_hamt_node {
 /* ------------------------------------------------------------------------- */
 
 struct mino_rb_node {
-    mino_val_t     *key;
-    mino_val_t     *val;    /* NULL sentinel for sorted sets */
+    mino_val     *key;
+    mino_val     *val;    /* NULL sentinel for sorted sets */
     mino_rb_node_t *left;
     mino_rb_node_t *right;
     unsigned char   red;    /* 1 = red, 0 = black */
@@ -125,7 +125,7 @@ struct mino_rb_node {
  * (vec/hamt/hamt_entry/rb). Called from runtime/state.c::state_init
  * before the first allocation. Implemented in
  * src/collections/gc_handlers.c. */
-void mino_collections_register_gc_handlers(mino_state_t *S);
+void mino_collections_register_gc_handlers(mino_state *S);
 
 /* ------------------------------------------------------------------------- */
 /* vec.c: persistent vector operations                                       */
@@ -133,15 +133,15 @@ void mino_collections_register_gc_handlers(mino_state_t *S);
 
 /* vec_nth returns a borrowed pointer into existing trie storage.
  * vec_conj1/vec_assoc1/vec_pop/vec_from_array return new GC-owned vectors. */
-mino_val_t *vec_nth(const mino_val_t *v, size_t i);              /* borrowed */
-mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v,
-                      mino_val_t *item);                          /* GC-owned */
-mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
-                       mino_val_t *item);                         /* GC-owned */
-mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v);       /* GC-owned */
-mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
+mino_val *vec_nth(const mino_val *v, size_t i);              /* borrowed */
+mino_val *vec_conj1(mino_state *S, const mino_val *v,
+                      mino_val *item);                          /* GC-owned */
+mino_val *vec_assoc1(mino_state *S, const mino_val *v, size_t i,
+                       mino_val *item);                         /* GC-owned */
+mino_val *vec_pop(mino_state *S, const mino_val *v);       /* GC-owned */
+mino_val *vec_subvec(mino_state *S, const mino_val *v,
                        size_t start, size_t end);                 /* GC-owned */
-mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
+mino_val *vec_from_array(mino_state *S, mino_val **items,
                            size_t len);                           /* GC-owned */
 
 /* Owned-edit conj / assoc / pop variants. The `owner` argument is the
@@ -150,11 +150,11 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
  * cloned once with `owner` stamped and then mutated in place by
  * subsequent calls. Used by `conj!` / `assoc!` / `pop!` on transient
  * wrappers around persistent vectors (`transient.c`). */
-mino_val_t *vec_conj1_owned(mino_state_t *S, mino_val_t *v,
-                            mino_val_t *item, uintptr_t owner);       /* GC-owned */
-mino_val_t *vec_assoc1_owned(mino_state_t *S, mino_val_t *v, size_t i,
-                             mino_val_t *item, uintptr_t owner);       /* GC-owned */
-mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner); /* GC-owned */
+mino_val *vec_conj1_owned(mino_state *S, mino_val *v,
+                            mino_val *item, uintptr_t owner);       /* GC-owned */
+mino_val *vec_assoc1_owned(mino_state *S, mino_val *v, size_t i,
+                             mino_val *item, uintptr_t owner);       /* GC-owned */
+mino_val *vec_pop_owned(mino_state *S, mino_val *v, uintptr_t owner); /* GC-owned */
 
 /* ------------------------------------------------------------------------- */
 /* map.c: HAMT operations                                                    */
@@ -163,14 +163,14 @@ mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner); /* G
 /* hamt_get/map_get_val return borrowed pointers into existing HAMT nodes.
  * hamt_assoc/hamt_entry_new return new GC-owned nodes. */
 unsigned     popcount32(uint32_t x);                              /* pure */
-hamt_entry_t *hamt_entry_new(mino_state_t *S, mino_val_t *key,
-                             mino_val_t *val);                    /* GC-owned */
-mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
+hamt_entry_t *hamt_entry_new(mino_state *S, mino_val *key,
+                             mino_val *val);                    /* GC-owned */
+mino_hamt_node_t *hamt_assoc(mino_state *S, const mino_hamt_node_t *n,
                               hamt_entry_t *entry, uint32_t hash,
                               unsigned shift, int *replaced);     /* GC-owned */
-mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
+mino_val *hamt_get(const mino_hamt_node_t *n, const mino_val *key,
                      uint32_t hash, unsigned shift);              /* borrowed */
-mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed */
+mino_val *map_get_val(const mino_val *m, const mino_val *key); /* borrowed */
 
 /* Owned-edit assoc / dissoc variants for HAMT walks. Mirrors the
  * vec_*_owned pattern: `owner` is the editing transient's monotonic
@@ -178,22 +178,22 @@ mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed
  * are cloned once with `owner` stamped and then mutated in place by
  * subsequent calls. Caller is responsible for routing through these
  * only when `transient.owner_id != 0`. */
-mino_hamt_node_t *hamt_assoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                                     hamt_entry_t *entry, uint32_t hash,
                                     unsigned shift, int *replaced,
                                     uintptr_t owner);                  /* GC-owned */
-mino_hamt_node_t *hamt_dissoc_owned(mino_state_t *S, mino_hamt_node_t *n,
-                                     const mino_val_t *key, uint32_t hash,
+mino_hamt_node_t *hamt_dissoc_owned(mino_state *S, mino_hamt_node_t *n,
+                                     const mino_val *key, uint32_t hash,
                                      unsigned shift, int *removed,
                                      uintptr_t owner);                 /* GC-owned, may be NULL when node empties */
 
 /* Owned-edit map / set mutators. The persistent path stays the
  * default; transient.c calls these only when `owner_id != 0`. */
-mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
-                                   mino_val_t *key, mino_val_t *val,
+mino_val *mino_map_assoc1_owned(mino_state *S, mino_val *m,
+                                   mino_val *key, mino_val *val,
                                    uintptr_t owner);                   /* GC-owned */
-mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
-                                    mino_val_t *key,
+mino_val *mino_map_dissoc1_owned(mino_state *S, mino_val *m,
+                                    mino_val *key,
                                     uintptr_t owner);                  /* GC-owned */
 
 /* Unified persistent-map ops covering both flatmap (small) and HAMT
@@ -210,11 +210,11 @@ mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
  * mino_map_assoc1/dissoc1 carry the source map's meta forward when the
  * caller does not need to override it; print/seq/clone all operate on
  * either representation via the existing key_order vector. */
-mino_val_t *mino_map_lookup(const mino_val_t *m, const mino_val_t *key);
-mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
-                            mino_val_t *key, mino_val_t *val);
-mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
-                             mino_val_t *key);
+mino_val *mino_map_lookup(const mino_val *m, const mino_val *key);
+mino_val *mino_map_assoc1(mino_state *S, mino_val *m,
+                            mino_val *key, mino_val *val);
+mino_val *mino_map_dissoc1(mino_state *S, mino_val *m,
+                             mino_val *key);
 
 /* ------------------------------------------------------------------------- */
 /* val.c: record helpers                                                     */
@@ -225,56 +225,56 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
  * defined to return -1 on any other input shape (used directly by
  * the map-iso primitives so they can fall through to ext lookup or
  * the default-value branch on type mismatch). */
-int record_field_index(const mino_val_t *r, const mino_val_t *key);
+int record_field_index(const mino_val *r, const mino_val *key);
 
 /* ------------------------------------------------------------------------- */
 /* rbtree.c: persistent red-black tree operations for sorted map/set         */
 /* ------------------------------------------------------------------------- */
 
 /* rb_get returns a borrowed pointer; rb_assoc/rb_dissoc return new trees. */
-int val_compare(const mino_val_t *a, const mino_val_t *b);          /* pure */
-int rb_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b,
-               mino_val_t *comparator);
-mino_val_t *rb_get(mino_state_t *S, const mino_rb_node_t *n,
-                   const mino_val_t *key, mino_val_t *comparator);  /* borrowed */
-int rb_contains(mino_state_t *S, const mino_rb_node_t *n,
-                const mino_val_t *key, mino_val_t *comparator);
-mino_rb_node_t *rb_assoc(mino_state_t *S, const mino_rb_node_t *n,
-                          mino_val_t *key, mino_val_t *val,
-                          mino_val_t *comparator, int *replaced);    /* GC-owned */
-mino_rb_node_t *rb_dissoc(mino_state_t *S, const mino_rb_node_t *n,
-                           const mino_val_t *key,
-                           mino_val_t *comparator);                  /* GC-owned */
-void rb_to_list(mino_state_t *S, const mino_rb_node_t *n,
-                mino_val_t **head, mino_val_t **tail);
+int val_compare(const mino_val *a, const mino_val *b);          /* pure */
+int rb_compare(mino_state *S, const mino_val *a, const mino_val *b,
+               mino_val *comparator);
+mino_val *rb_get(mino_state *S, const mino_rb_node_t *n,
+                   const mino_val *key, mino_val *comparator);  /* borrowed */
+int rb_contains(mino_state *S, const mino_rb_node_t *n,
+                const mino_val *key, mino_val *comparator);
+mino_rb_node_t *rb_assoc(mino_state *S, const mino_rb_node_t *n,
+                          mino_val *key, mino_val *val,
+                          mino_val *comparator, int *replaced);    /* GC-owned */
+mino_rb_node_t *rb_dissoc(mino_state *S, const mino_rb_node_t *n,
+                           const mino_val *key,
+                           mino_val *comparator);                  /* GC-owned */
+void rb_to_list(mino_state *S, const mino_rb_node_t *n,
+                mino_val **head, mino_val **tail);
 int rb_trees_content_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
                             int compare_vals);
 int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
                    int compare_vals);
-mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,
-                                mino_val_t **keys, mino_val_t **vals,
+mino_val *mino_sorted_map_by(mino_state *S, mino_val *comparator,
+                                mino_val **keys, mino_val **vals,
                                 size_t len);
-mino_val_t *mino_sorted_set_by(mino_state_t *S, mino_val_t *comparator,
-                                mino_val_t **items, size_t len);
-mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
-                             mino_val_t **vals, size_t len);
-mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items,
+mino_val *mino_sorted_set_by(mino_state *S, mino_val *comparator,
+                                mino_val **items, size_t len);
+mino_val *mino_sorted_map(mino_state *S, mino_val **keys,
+                             mino_val **vals, size_t len);
+mino_val *mino_sorted_set(mino_state *S, mino_val **items,
                              size_t len);
-mino_val_t *sorted_map_assoc1(mino_state_t *S, const mino_val_t *m,
-                               mino_val_t *key, mino_val_t *val);
-mino_val_t *sorted_map_dissoc1(mino_state_t *S, const mino_val_t *m,
-                                const mino_val_t *key);
-mino_val_t *sorted_set_conj1(mino_state_t *S, const mino_val_t *s,
-                              mino_val_t *elem);
-mino_val_t *sorted_set_disj1(mino_state_t *S, const mino_val_t *s,
-                              const mino_val_t *elem);
-mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll);
-mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll);
-void rb_bounded_seq(mino_state_t *S, const mino_rb_node_t *n, int is_map,
-                    int has_lo, int lo_inclusive, mino_val_t *lo,
-                    int has_hi, int hi_inclusive, mino_val_t *hi,
-                    mino_val_t *comparator, int reverse,
-                    mino_val_t **head, mino_val_t **tail);
+mino_val *sorted_map_assoc1(mino_state *S, const mino_val *m,
+                               mino_val *key, mino_val *val);
+mino_val *sorted_map_dissoc1(mino_state *S, const mino_val *m,
+                                const mino_val *key);
+mino_val *sorted_set_conj1(mino_state *S, const mino_val *s,
+                              mino_val *elem);
+mino_val *sorted_set_disj1(mino_state *S, const mino_val *s,
+                              const mino_val *elem);
+mino_val *sorted_seq(mino_state *S, const mino_val *coll);
+mino_val *sorted_rest(mino_state *S, const mino_val *coll);
+void rb_bounded_seq(mino_state *S, const mino_rb_node_t *n, int is_map,
+                    int has_lo, int lo_inclusive, mino_val *lo,
+                    int has_hi, int hi_inclusive, mino_val *hi,
+                    mino_val *comparator, int reverse,
+                    mino_val **head, mino_val **tail);
 
 /* ------------------------------------------------------------------------- */
 /* prim/bignum.c: bignum / ratio / bigdec value support                      */
@@ -285,78 +285,78 @@ void rb_bounded_seq(mino_state_t *S, const mino_rb_node_t *n, int is_map,
 /* mino_bigint_equals / mino_bigint_hash.                                    */
 /* ------------------------------------------------------------------------- */
 
-void     mino_bigint_free(mino_val_t *v);
-void     mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out);
-int      mino_bigint_equals(const mino_val_t *a, const mino_val_t *b);
-int      mino_bigint_equals_ll(const mino_val_t *a, long long n);
-int      mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b);
-uint32_t mino_bigint_hash(const mino_val_t *v);
-mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len);
-char    *mino_bigint_to_cstr(const mino_val_t *v);   /* malloc; caller frees */
-int      mino_as_ll(const mino_val_t *v, long long *out);
+void     mino_bigint_free(mino_val *v);
+void     mino_bigint_print(mino_state *S, const mino_val *v, FILE *out);
+int      mino_bigint_equals(const mino_val *a, const mino_val *b);
+int      mino_bigint_equals_ll(const mino_val *a, long long n);
+int      mino_bigint_cmp(const mino_val *a, const mino_val *b);
+uint32_t mino_bigint_hash(const mino_val *v);
+mino_val *mino_bigint_from_string_n(mino_state *S, const char *s, size_t len);
+char    *mino_bigint_to_cstr(const mino_val *v);   /* malloc; caller frees */
+int      mino_as_ll(const mino_val *v, long long *out);
 
 /* Bigint arithmetic helpers for the promoting tower primitives. Each
  * accepts MINO_INT or MINO_BIGINT operands (callers classify first) and
  * returns a GC-owned MINO_BIGINT, or NULL on allocation failure (error
  * raised via prim_throw_classified). */
-mino_val_t *mino_bigint_add(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigint_sub(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a);
-mino_val_t *mino_bigint_quot(mino_state_t *S, const mino_val_t *a,
-                             const mino_val_t *b);
-mino_val_t *mino_bigint_rem(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-int mino_bigint_quotrem(mino_state_t *S, const mino_val_t *a,
-                        const mino_val_t *b, mino_val_t **q_out,
-                        mino_val_t **r_out);
-double   mino_bigint_to_double(const mino_val_t *v);
+mino_val *mino_bigint_add(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigint_sub(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigint_mul(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigint_neg(mino_state *S, const mino_val *a);
+mino_val *mino_bigint_quot(mino_state *S, const mino_val *a,
+                             const mino_val *b);
+mino_val *mino_bigint_rem(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigint_mod(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+int mino_bigint_quotrem(mino_state *S, const mino_val *a,
+                        const mino_val *b, mino_val **q_out,
+                        mino_val **r_out);
+double   mino_bigint_to_double(const mino_val *v);
 
 /* MINO_RATIO support. */
-mino_val_t *mino_ratio_make(mino_state_t *S, mino_val_t *num, mino_val_t *denom);
-mino_val_t *mino_ratio_make_unchecked(mino_state_t *S, mino_val_t *num,
-                                      mino_val_t *denom);
-void     mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out);
-int      mino_ratio_equals(const mino_val_t *a, const mino_val_t *b);
-int      mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b);
-uint32_t mino_ratio_hash(const mino_val_t *v);
-double   mino_ratio_to_double(const mino_val_t *v);
-mino_val_t *mino_ratio_add(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b);
-mino_val_t *mino_ratio_sub(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b);
-mino_val_t *mino_ratio_mul(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b);
-mino_val_t *mino_ratio_div(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b);
+mino_val *mino_ratio_make(mino_state *S, mino_val *num, mino_val *denom);
+mino_val *mino_ratio_make_unchecked(mino_state *S, mino_val *num,
+                                      mino_val *denom);
+void     mino_ratio_print(mino_state *S, const mino_val *v, FILE *out);
+int      mino_ratio_equals(const mino_val *a, const mino_val *b);
+int      mino_ratio_cmp(const mino_val *a, const mino_val *b);
+uint32_t mino_ratio_hash(const mino_val *v);
+double   mino_ratio_to_double(const mino_val *v);
+mino_val *mino_ratio_add(mino_state *S, const mino_val *a,
+                           const mino_val *b);
+mino_val *mino_ratio_sub(mino_state *S, const mino_val *a,
+                           const mino_val *b);
+mino_val *mino_ratio_mul(mino_state *S, const mino_val *a,
+                           const mino_val *b);
+mino_val *mino_ratio_div(mino_state *S, const mino_val *a,
+                           const mino_val *b);
 
 /* MINO_BIGDEC support. */
-mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale);
-mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
-                             const mino_val_t *b);
-mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-void     mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out);
-int      mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b);
-int      mino_bigdec_cmp(const mino_val_t *a, const mino_val_t *b);
-uint32_t mino_bigdec_hash(const mino_val_t *v);
-double   mino_bigdec_to_double(const mino_val_t *v);
-mino_val_t *mino_bigdec_add(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b);
-mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a);
-mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v);
+mino_val *mino_bigdec_make(mino_state *S, mino_val *unscaled, int scale);
+mino_val *mino_bigdec_quot(mino_state *S, const mino_val *a,
+                             const mino_val *b);
+mino_val *mino_bigdec_rem(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigdec_mod(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+void     mino_bigdec_print(mino_state *S, const mino_val *v, FILE *out);
+int      mino_bigdec_equals(const mino_val *a, const mino_val *b);
+int      mino_bigdec_cmp(const mino_val *a, const mino_val *b);
+uint32_t mino_bigdec_hash(const mino_val *v);
+double   mino_bigdec_to_double(const mino_val *v);
+mino_val *mino_bigdec_add(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigdec_sub(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigdec_mul(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
+                            const mino_val *b);
+mino_val *mino_bigdec_neg(mino_state *S, const mino_val *a);
+mino_val *mino_to_bigdec(mino_state *S, const mino_val *v);
 
 #endif /* COLLECTIONS_INTERNAL_H */

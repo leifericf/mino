@@ -20,7 +20,7 @@
 /* just marshal args. Supported inner types are vector, map, and set.        */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *prim_transient(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_transient(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     (void)env;
@@ -32,7 +32,7 @@ mino_val_t *prim_transient(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_transient(S, args->as.cons.car);
 }
 
-mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_persistent_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     (void)env;
@@ -44,7 +44,7 @@ mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *
     return mino_persistent(S, args->as.cons.car);
 }
 
-mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_assoc_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Clojure: (assoc! tcoll k v & kvs) -- extra args supplied as
      * key/value pairs and assoc'd left-to-right. Unlike assoc, assoc!
@@ -52,8 +52,8 @@ mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * is the documented Clojure JVM behaviour the conformance suite
      * exercises. The final transient is returned. */
     size_t      n;
-    mino_val_t *t;
-    mino_val_t *p;
+    mino_val *t;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 3) {
@@ -63,8 +63,8 @@ mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     t = args->as.cons.car;
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
-        mino_val_t *k = p->as.cons.car;
-        mino_val_t *v;
+        mino_val *k = p->as.cons.car;
+        mino_val *v;
         if (mino_is_cons(p->as.cons.cdr)) {
             v = p->as.cons.cdr->as.cons.car;
             p = p->as.cons.cdr->as.cons.cdr;
@@ -79,7 +79,7 @@ mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return t;
 }
 
-mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_conj_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Clojure: (conj!)              -> (transient [])
      *          (conj! tcoll)        -> tcoll unchanged
@@ -87,8 +87,8 @@ mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      *          (conj! tcoll x & xs) -> additional values conj'd left-
      *                                  to-right; final transient is
      *                                  returned. */
-    mino_val_t *t;
-    mino_val_t *p;
+    mino_val *t;
+    mino_val *p;
     (void)env;
     if (!mino_is_cons(args)) {
         return mino_transient(S, mino_vector(S, NULL, 0));
@@ -103,13 +103,13 @@ mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return t;
 }
 
-mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_dissoc_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Clojure: (dissoc! tcoll k & ks) -- additional keys removed
      * left-to-right; the final transient is returned. */
     size_t      n;
-    mino_val_t *t;
-    mino_val_t *p;
+    mino_val *t;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 2) {
@@ -126,13 +126,13 @@ mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return t;
 }
 
-mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_disj_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Clojure: (disj! tcoll k & ks) -- additional keys removed
      * left-to-right; the final transient is returned. */
     size_t      n;
-    mino_val_t *t;
-    mino_val_t *p;
+    mino_val *t;
+    mino_val *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 2) {
@@ -149,7 +149,7 @@ mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return t;
 }
 
-mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_pop_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     (void)env;
@@ -161,7 +161,7 @@ mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_pop_bang(S, args->as.cons.car);
 }
 
-mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_transient_p(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     (void)env;

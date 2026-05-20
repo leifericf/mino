@@ -17,10 +17,10 @@
 
 /* seq_cons_append -- append one cell carrying elem to the (head, tail)
  * cons chain. Used while building seq lists from indexable sources. */
-static void seq_cons_append(mino_state_t *S, mino_val_t **head,
-                            mino_val_t **tail, mino_val_t *elem)
+static void seq_cons_append(mino_state *S, mino_val **head,
+                            mino_val **tail, mino_val *elem)
 {
-    mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+    mino_val *cell = mino_cons(S, elem, mino_nil(S));
     if (*tail == NULL) *head = cell;
     else mino_cons_cdr_set(S, *tail, cell);
     *tail = cell;
@@ -30,14 +30,14 @@ static void seq_cons_append(mino_state_t *S, mino_val_t **head,
  * seqs. Returns a MINO_MAP_ENTRY so key / val type-check on the
  * result; equality with `[k v]` compares element-wise via the
  * cross-type sequential path in mino_eq. */
-static mino_val_t *seq_kv_pair(mino_state_t *S, mino_val_t *k, mino_val_t *v)
+static mino_val *seq_kv_pair(mino_state *S, mino_val *k, mino_val *v)
 {
     return mino_map_entry(S, k, v);
 }
 
-mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "seq requires one argument");
@@ -46,7 +46,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_nil(S);
     if (mino_type_of(coll) == MINO_EMPTY_LIST) return mino_nil(S);
     if (mino_type_of(coll) == MINO_LAZY) {
-        mino_val_t *forced = lazy_force(S, coll);
+        mino_val *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
         if (mino_type_of(forced) == MINO_NIL) return mino_nil(S);
         if (mino_type_of(forced) == MINO_EMPTY_LIST) return mino_nil(S);
@@ -64,16 +64,16 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t i;
         size_t n_chunks;
         size_t c;
-        mino_val_t **chunks;
-        mino_val_t  *more;
+        mino_val **chunks;
+        mino_val  *more;
         if (total == 0) return mino_nil(S);
         n_chunks = (total + 31u) / 32u;
-        chunks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        chunks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             n_chunks * sizeof(*chunks));
         for (c = 0; c < n_chunks; c++) {
             size_t base = c * 32u;
             unsigned cap = (unsigned)(total - base < 32u ? total - base : 32u);
-            mino_val_t *buf = mino_chunk_buffer(S, cap);
+            mino_val *buf = mino_chunk_buffer(S, cap);
             if (buf == NULL) return NULL;
             for (i = 0; i < cap; i++) {
                 if (!mino_chunk_append(buf, vec_nth(coll, base + i))) return NULL;
@@ -90,7 +90,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (mino_type_of(coll) == MINO_MAP_ENTRY) {
         /* Two-element chunked-seq over (k, v). */
-        mino_val_t *buf = mino_chunk_buffer(S, 2);
+        mino_val *buf = mino_chunk_buffer(S, 2);
         if (buf == NULL) return NULL;
         if (!mino_chunk_append(buf, coll->as.map_entry.k)) return NULL;
         if (!mino_chunk_append(buf, coll->as.map_entry.v)) return NULL;
@@ -103,7 +103,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * vector? / coll? / counted? remain false (no MINO_HOST_ARRAY
          * in their type-tag lists). */
         size_t total = coll->as.host_array.len;
-        mino_val_t *buf;
+        mino_val *buf;
         size_t i;
         if (total == 0) return mino_nil(S);
         buf = mino_chunk_buffer(S, (unsigned)total);
@@ -115,18 +115,18 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_chunked_cons(S, buf, mino_nil(S));
     }
     if (mino_type_of(coll) == MINO_MAP) {
-        mino_val_t *head = mino_nil(S), *tail = NULL;
+        mino_val *head = mino_nil(S), *tail = NULL;
         size_t i;
         if (coll->as.map.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.map.len; i++) {
-            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
+            mino_val *key = vec_nth(coll->as.map.key_order, i);
             seq_cons_append(S, &head, &tail,
                 seq_kv_pair(S, key, map_get_val(coll, key)));
         }
         return head;
     }
     if (mino_type_of(coll) == MINO_SET) {
-        mino_val_t *head = mino_nil(S), *tail = NULL;
+        mino_val *head = mino_nil(S), *tail = NULL;
         size_t i;
         if (coll->as.set.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.set.len; i++) {
@@ -143,8 +143,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * while everything else (first, rest, count, ...) keeps
          * working. Sorted collections are typically small enough that
          * one chunk is fine. */
-        mino_val_t *cons_seq = sorted_seq(S, coll);
-        mino_val_t *p, *buf, *result;
+        mino_val *cons_seq = sorted_seq(S, coll);
+        mino_val *p, *buf, *result;
         unsigned    n, i = 0;
         if (cons_seq == NULL || !mino_is_cons(cons_seq)) return cons_seq;
         n = 0;
@@ -166,8 +166,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * MINO_CHAR values. Malformed bytes are emitted as their
          * raw byte value (matching the read path's lenient byte
          * fallback). */
-        mino_val_t  *head = mino_nil(S);
-        mino_val_t  *tail = NULL;
+        mino_val  *head = mino_nil(S);
+        mino_val  *tail = NULL;
         const unsigned char *bytes = (const unsigned char *)coll->as.s.data;
         size_t i = 0;
         size_t len = coll->as.s.len;
@@ -201,11 +201,11 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Declared field [k v] pairs first in declared order, then
          * ext entries in insertion order. Returns nil for an empty
          * record (no fields and no ext entries). */
-        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        mino_val *fields = coll->as.record.type->as.record_type.fields;
         size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
         size_t ext_n = (coll->as.record.ext != NULL)
             ? coll->as.record.ext->as.map.len : 0;
-        mino_val_t *head = mino_nil(S), *tail = NULL;
+        mino_val *head = mino_nil(S), *tail = NULL;
         size_t i;
         if (n_fields == 0 && ext_n == 0) return mino_nil(S);
         for (i = 0; i < n_fields; i++) {
@@ -214,10 +214,10 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                coll->as.record.vals[i]));
         }
         if (ext_n > 0) {
-            const mino_val_t *e = coll->as.record.ext;
+            const mino_val *e = coll->as.record.ext;
             size_t k;
             for (k = 0; k < e->as.map.len; k++) {
-                mino_val_t *ek = vec_nth(e->as.map.key_order, k);
+                mino_val *ek = vec_nth(e->as.map.key_order, k);
                 seq_cons_append(S, &head, &tail,
                     seq_kv_pair(S, ek, map_get_val(e, ek)));
             }
@@ -232,13 +232,13 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Per Clojure, realized? accepts only "pending" values
      * (lazy seqs, delays, promises, futures) and throws on any
      * other input. mino's pending types are MINO_LAZY (lazy seqs
      * and delays share this representation) and MINO_FUTURE. */
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "realized? requires one argument");

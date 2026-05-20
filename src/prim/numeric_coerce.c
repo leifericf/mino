@@ -25,7 +25,7 @@
 /* Helper for narrow integer casts: extract an integer value from any
  * numeric type, checking for NaN/infinity on floats and bigdecs. The
  * caller then range-checks the result against the target tier. */
-static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
+static int extract_integer_for_cast(mino_state *S, mino_val *v,
                                     long long *out, const char **err)
 {
     (void)S;
@@ -71,7 +71,7 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
  * byte all check the double value itself, so values like
  * -128.000001 throw for byte even though they truncate to the
  * in-range -128. */
-static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
+static mino_val *narrow_cast(mino_state *S, mino_val *v,
                                long long lo, long long hi,
                                const char *opname)
 {
@@ -122,7 +122,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
     return mino_int(S, ll);
 }
 
-mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_int(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -131,9 +131,9 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return narrow_cast(S, args->as.cons.car, -2147483648LL, 2147483647LL, "int");
 }
 
-mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_long(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     long long ll;
     const char *err = NULL;
     (void)env;
@@ -155,7 +155,7 @@ mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int(S, ll);
 }
 
-mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_short(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -165,7 +165,7 @@ mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return narrow_cast(S, args->as.cons.car, -32768LL, 32767LL, "short");
 }
 
-mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_byte(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -175,9 +175,9 @@ mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return narrow_cast(S, args->as.cons.car, -128LL, 127LL, "byte");
 }
 
-mino_val_t *prim_char(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_char(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     long long   ll;
     const char *err = NULL;
     (void)env;
@@ -209,9 +209,9 @@ mino_val_t *prim_char(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_char(S, (int)ll);
 }
 
-mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_float(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     double      d;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -242,9 +242,9 @@ mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_float32(S, d);
 }
 
-mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_double(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -262,9 +262,9 @@ mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "double: expected a number");
 }
 
-mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_parse_long(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     const char *s;
     char *end;
     long long result;
@@ -285,9 +285,9 @@ mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int(S, result);
 }
 
-mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_parse_double(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     const char *s;
     char *end;
     double result;

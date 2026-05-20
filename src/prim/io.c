@@ -17,7 +17,7 @@
 #  include <time.h>
 #endif
 
-void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
+void print_str_to(mino_state *S, FILE *out, const mino_val *v)
 {
     if (v != NULL && mino_type_of(v) == MINO_STRING) {
         fwrite(v->as.s.data, 1, v->as.s.len, out);
@@ -32,10 +32,10 @@ void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
  * bare symbol to the qualified form), then falls back to the var's
  * root value. Returns NULL only when the var has never been interned
  * (the boot-time path before mino_install_clojure_core finishes). */
-static mino_val_t *resolve_io_sink(mino_state_t *S, const char *name)
+static mino_val *resolve_io_sink(mino_state *S, const char *name)
 {
-    mino_val_t *v;
-    mino_val_t *var;
+    mino_val *v;
+    mino_val *var;
     char        qualified[64];
     if (mino_current_ctx(S)->dyn_stack != NULL) {
         v = dyn_lookup(S, name);
@@ -60,11 +60,11 @@ static mino_val_t *resolve_io_sink(mino_state_t *S, const char *name)
  * is a MINO_ATOM holding a MINO_STRING. Returns 1 on capture, 0 if
  * sink is not a string-atom (caller falls back to a FILE*), and -1
  * on OOM. */
-static int try_capture_to_atom(mino_state_t *S, mino_val_t *sink,
+static int try_capture_to_atom(mino_state *S, mino_val *sink,
                                const char *buf, size_t len)
 {
-    mino_val_t *cur;
-    mino_val_t *new_str;
+    mino_val *cur;
+    mino_val *new_str;
     char       *combined;
     size_t      cur_len;
     if (sink == NULL || mino_type_of(sink) != MINO_ATOM) return 0;
@@ -96,10 +96,10 @@ static int try_capture_to_atom(mino_state_t *S, mino_val_t *sink,
  * This means (binding [*out* *err*] (println "x")) routes through
  * stderr because *out* resolves to :mino/stderr.
  * Returns 0 on success, -1 on error. */
-static int io_emit(mino_state_t *S, const char *out_var_name,
+static int io_emit(mino_state *S, const char *out_var_name,
                    const char *buf, size_t len)
 {
-    mino_val_t *sink;
+    mino_val *sink;
     int         captured;
     FILE       *fallback;
     sink     = resolve_io_sink(S, out_var_name);
@@ -125,13 +125,13 @@ static int io_emit(mino_state_t *S, const char *out_var_name,
  * growing buffer. `readably` is non-zero for pr/prn (strings quoted,
  * chars escaped) and zero for print/println. Returns 0 on success,
  * -1 on error (caller frees buf). */
-static int append_print_chunk(mino_state_t *S, mino_val_t *v,
+static int append_print_chunk(mino_state *S, mino_val *v,
                               char **buf, size_t *len, size_t *cap,
                               int readably)
 {
     const char *src;
     size_t      slen;
-    mino_val_t *formatted = NULL;
+    mino_val *formatted = NULL;
     char        char_buf[4];
     if (!readably && v != NULL && mino_type_of(v) == MINO_STRING) {
         src  = v->as.s.data;
@@ -185,7 +185,7 @@ static int append_print_chunk(mino_state_t *S, mino_val_t *v,
 }
 
 /* Append a single byte to a growing buffer. */
-static int append_byte(mino_state_t *S, char **buf, size_t *len,
+static int append_byte(mino_state *S, char **buf, size_t *len,
                        size_t *cap, char c)
 {
     if (*len + 1 > *cap) {
@@ -214,18 +214,18 @@ static int append_byte(mino_state_t *S, char **buf, size_t *len,
 /* Format one value through the print-method hook (if installed) or
  * the built-in C formatter, returning the bytes as a mino string.
  * Used by pr/prn when readably=1. Returns NULL on error. */
-static mino_val_t *format_via_hook_or_builtin(mino_state_t *S,
-                                              mino_val_t *v,
-                                              mino_env_t *env)
+static mino_val *format_via_hook_or_builtin(mino_state *S,
+                                              mino_val *v,
+                                              mino_env *env)
 {
     if (S->print_method_fn != NULL) {
         /* The hook calls pr-builtin (now routed through *out*) or
          * the user-supplied method. Capture its output by binding
          * *out* to a temporary string-atom for the duration of the
          * hook call, then return the captured string. */
-        mino_val_t   *atom_str = mino_string_n(S, "", 0);
-        mino_val_t   *atom_val;
-        mino_val_t   *call_args;
+        mino_val   *atom_str = mino_string_n(S, "", 0);
+        mino_val   *atom_val;
+        mino_val   *call_args;
         dyn_frame_t  *frame;
         dyn_binding_t *binding;
         atom_val = mino_atom(S, atom_str);
@@ -264,8 +264,8 @@ static mino_val_t *format_via_hook_or_builtin(mino_state_t *S,
  * trailing newline, and emit through *out*. `readably` selects the
  * pr/prn family (strings quoted, chars escaped, print-method hook
  * consulted) versus the print/println family. */
-static mino_val_t *print_args_to_out(mino_state_t *S, mino_val_t *args,
-                                     mino_env_t *env,
+static mino_val *print_args_to_out(mino_state *S, mino_val *args,
+                                     mino_env *env,
                                      int readably, int newline)
 {
     char   *buf   = NULL;
@@ -273,7 +273,7 @@ static mino_val_t *print_args_to_out(mino_state_t *S, mino_val_t *args,
     size_t  cap   = 0;
     int     first = 1;
     while (mino_is_cons(args)) {
-        mino_val_t *v = args->as.cons.car;
+        mino_val *v = args->as.cons.car;
         if (!first) {
             if (append_byte(S, &buf, &len, &cap, ' ') < 0) {
                 free(buf);
@@ -281,7 +281,7 @@ static mino_val_t *print_args_to_out(mino_state_t *S, mino_val_t *args,
             }
         }
         if (readably) {
-            mino_val_t *formatted = format_via_hook_or_builtin(S, v, env);
+            mino_val *formatted = format_via_hook_or_builtin(S, v, env);
             if (formatted == NULL) {
                 free(buf);
                 return NULL;
@@ -341,22 +341,22 @@ static mino_val_t *print_args_to_out(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_println(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 0, 1);
 }
 
-mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_prn(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 1, 1);
 }
 
-mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_print(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 0, 0);
 }
 
-mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 1, 0);
 }
@@ -366,9 +366,9 @@ mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * default path does not recurse into itself. Routes through *out* so a
  * binding to a string-atom captures, and falls through to stdout
  * otherwise. */
-mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *formatted;
+    mino_val *formatted;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -386,10 +386,10 @@ mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (set-print-method! fn) — install a late-binding hook for pr / prn.
  * Calling with nil removes the hook. The hook must be a fn that prints
  * its one argument to stdout. */
-mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args,
-                                       mino_env_t *env)
+mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
+                                       mino_env *env)
 {
-    mino_val_t *fn;
+    mino_val *fn;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -409,7 +409,7 @@ mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args,
 }
 
 /* (newline) writes a single line separator. Returns nil. */
-mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -427,9 +427,9 @@ mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  *   :mino/stdin / unbound → read a line from stdin via fgets,
  *                           growing as needed for long lines
  * Returns nil on EOF. */
-mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *src;
+    mino_val *src;
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -437,12 +437,12 @@ mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     src = resolve_io_sink(S, "*in*");
     if (src != NULL && mino_type_of(src) == MINO_ATOM) {
-        mino_val_t *cur = src->as.atom.val;
+        mino_val *cur = src->as.atom.val;
         size_t      i;
         size_t      llen;
         size_t      rstart;
-        mino_val_t *line;
-        mino_val_t *rem;
+        mino_val *line;
+        mino_val *rem;
         if (cur == NULL || mino_type_of(cur) != MINO_STRING
             || cur->as.s.len == 0) {
             return mino_nil(S);
@@ -492,7 +492,7 @@ mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_nil(S);
         }
         {
-            mino_val_t *result = mino_string_n(S, buf == NULL ? "" : buf, len);
+            mino_val *result = mino_string_n(S, buf == NULL ? "" : buf, len);
             free(buf);
             return result;
         }
@@ -503,9 +503,9 @@ mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * cursor: the form is parsed from the head, the atom is updated to
  * the unread tail. Stdin-backed *in* (default) is not supported;
  * use (read-string ...) on a captured input or with-in-str instead. */
-mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *src;
+    mino_val *src;
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -513,10 +513,10 @@ mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     src = resolve_io_sink(S, "*in*");
     if (src != NULL && mino_type_of(src) == MINO_ATOM) {
-        mino_val_t *cur = src->as.atom.val;
+        mino_val *cur = src->as.atom.val;
         const char *end = NULL;
-        mino_val_t *form;
-        mino_val_t *rem;
+        mino_val *form;
+        mino_val *rem;
         size_t      consumed;
         if (cur == NULL || mino_type_of(cur) != MINO_STRING
             || cur->as.s.len == 0) {
@@ -545,9 +545,9 @@ mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * writes the resulting string to *out*. Equivalent to
  * (print (apply format fmt args)) but lives in C to keep the
  * boot-time core.clj footprint small. */
-mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *formatted;
+    mino_val *formatted;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -569,7 +569,7 @@ mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (flush) flushes any pending output on *out* and *err*. For a
  * string-atom binding this is a no-op (writes are immediate); for
  * the FILE* fallback paths it calls fflush. */
-mino_val_t *prim_flush(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -584,15 +584,15 @@ mino_val_t *prim_flush(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (slurp path) — read a file's entire contents as a string. I/O
  * capability; only installed by mino_install(S, env, MINO_CAP_IO),
  * not the floor install. */
-mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     const char *path;
     FILE       *f;
     long        sz;
     size_t      rd;
     char       *buf;
-    mino_val_t *result;
+    mino_val *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "slurp requires one argument");
@@ -628,10 +628,10 @@ mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *path_val;
-    mino_val_t *content;
+    mino_val *path_val;
+    mino_val *content;
     const char *path;
     FILE       *f;
     (void)env;
@@ -662,12 +662,12 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (exit code) — terminate the process with the given exit code.
  * Defaults to 0 if no argument is given. */
-mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env)
 {
     int code = 0;
     (void)env;
     if (mino_is_cons(args)) {
-        mino_val_t *v = args->as.cons.car;
+        mino_val *v = args->as.cons.car;
         if (v != NULL && mino_val_int_p(v)) {
             code = (int)mino_val_int_get(v);
         } else if (v != NULL && mino_type_of(v) == MINO_FLOAT) {
@@ -694,7 +694,7 @@ mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * CPU time. That made `(time (thread-sleep 200))` print "0.194 ms"
  * and any wall-clock benchmarking that built on (time-ms) silently
  * undercounted by however long the thread spent blocked. */
-mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args;
     (void)env;
@@ -705,7 +705,7 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (nano-time) — return monotonic wall-clock time in nanoseconds as an integer. */
-mino_val_t *prim_nano_time(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -716,7 +716,7 @@ mino_val_t *prim_nano_time(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (getcwd) -- return the current working directory as a string. */
-mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
 {
     char buf[PATH_BUF_CAP];
     (void)env;
@@ -732,9 +732,9 @@ mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (chdir path) -- change current working directory. Returns nil. */
-mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -753,9 +753,9 @@ mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (getenv name) -- return environment variable value or nil. */
-mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_getenv(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *name_val;
+    mino_val *name_val;
     const char *val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -774,8 +774,8 @@ mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* ---- file-seq: recursive directory listing ---- */
 
-static void file_seq_recurse(mino_state_t *S, const char *dir,
-                             mino_val_t ***items, size_t *len, size_t *cap)
+static void file_seq_recurse(mino_state *S, const char *dir,
+                             mino_val ***items, size_t *len, size_t *cap)
 {
     DIR *d = opendir(dir);
     struct dirent *ent;
@@ -792,7 +792,7 @@ static void file_seq_recurse(mino_state_t *S, const char *dir,
             if (*len == *cap) {
                 size_t nc;
                 size_t alloc_sz;
-                mino_val_t **nb;
+                mino_val **nb;
                 if (*cap == 0) {
                     nc = 64;
                 } else if (!checked_double_sz(*cap, &nc)) {
@@ -801,7 +801,7 @@ static void file_seq_recurse(mino_state_t *S, const char *dir,
                 if (!checked_mul_sz(nc, sizeof(**items), &alloc_sz)) {
                     closedir(d); return;
                 }
-                nb = (mino_val_t **)realloc(*items, alloc_sz);
+                nb = (mino_val **)realloc(*items, alloc_sz);
                 if (nb == NULL) { closedir(d); return; }
                 *items = nb;
                 *cap = nc;
@@ -813,13 +813,13 @@ static void file_seq_recurse(mino_state_t *S, const char *dir,
     closedir(d);
 }
 
-mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *dir_val;
+    mino_val *dir_val;
     const char *dir;
-    mino_val_t **items = NULL;
+    mino_val **items = NULL;
     size_t len = 0, cap = 0;
-    mino_val_t *result;
+    mino_val *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -899,9 +899,9 @@ const mino_prim_def k_prims_io[] = {
 const size_t k_prims_io_count =
     sizeof(k_prims_io) / sizeof(k_prims_io[0]);
 
-void mino_install_io(mino_state_t *S, mino_env_t *env)
+void mino_install_io(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_io, k_prims_io_count, "io");

@@ -42,7 +42,7 @@ unsigned popcount32(uint32_t x)
     return c;
 }
 
-hamt_entry_t *hamt_entry_new(mino_state_t *S, mino_val_t *key, mino_val_t *val)
+hamt_entry_t *hamt_entry_new(mino_state *S, mino_val *key, mino_val *val)
 {
     hamt_entry_t *e = (hamt_entry_t *)gc_alloc_typed(
         S, GC_T_HAMT_ENTRY, sizeof(*e));
@@ -129,10 +129,10 @@ static uint32_t hash_uint32_bytes(uint32_t h, uint32_t x)
  * holding the same would-be content still hash differently. Callers
  * that need lazy-content hash equality must force first via
  * `(seq ...)`, `(doall ...)`, or any operation that drives iteration. */
-static uint32_t hash_sequential(const mino_val_t *original)
+static uint32_t hash_sequential(const mino_val *original)
 {
     uint32_t h;
-    const mino_val_t *v;
+    const mino_val *v;
     if (original != NULL && mino_type_of(original) == MINO_VECTOR
         && original->as.vec.cached_hash != 0) {
         return original->as.vec.cached_hash;
@@ -147,7 +147,7 @@ static uint32_t hash_sequential(const mino_val_t *original)
         }
         if (v == NULL) break;
         {
-            mino_type_t t = mino_type_of(v);
+            mino_type t = mino_type_of(v);
             if (t == MINO_NIL || t == MINO_EMPTY_LIST) break;
             if (t == MINO_VECTOR) {
                 size_t i;
@@ -165,7 +165,7 @@ static uint32_t hash_sequential(const mino_val_t *original)
             if (t == MINO_CHUNKED_CONS) {
                 size_t idx = v->as.chunked_cons.off;
                 while (v != NULL && mino_type_of(v) == MINO_CHUNKED_CONS) {
-                    const mino_val_t *ch = v->as.chunked_cons.chunk;
+                    const mino_val *ch = v->as.chunked_cons.chunk;
                     for (; idx < ch->as.chunk.len; idx++) {
                         h = hash_uint32_bytes(h, hash_val(ch->as.chunk.vals[idx]));
                     }
@@ -188,7 +188,7 @@ static uint32_t hash_sequential(const mino_val_t *original)
         }
     }
     if (original != NULL && mino_type_of(original) == MINO_VECTOR) {
-        ((mino_val_t *)original)->as.vec.cached_hash = h;
+        ((mino_val *)original)->as.vec.cached_hash = h;
     }
     return h;
 }
@@ -223,7 +223,7 @@ static uint32_t rb_xor_fold_entries(const mino_rb_node_t *n, int include_val)
  *     order-insensitivity.
  *   - Non-hashable types (PRIM, FN) fall back to pointer identity.
  */
-uint32_t hash_val(const mino_val_t *v)
+uint32_t hash_val(const mino_val *v)
 {
     uint32_t h = 2166136261u;   /* FNV-1a offset basis */
     if (v == NULL || mino_type_of(v) == MINO_NIL) {
@@ -290,7 +290,7 @@ uint32_t hash_val(const mino_val_t *v)
         size_t   i;
         if (v->as.map.cached_hash != 0) return v->as.map.cached_hash;
         for (i = 0; i < n; i++) {
-            mino_val_t *key = vec_nth(v->as.map.key_order, i);
+            mino_val *key = vec_nth(v->as.map.key_order, i);
             uint32_t    hk  = hash_val(key);
             uint32_t    hv  = hash_val(map_get_val(v, key));
             hk ^= hv * 2654435761u;
@@ -298,7 +298,7 @@ uint32_t hash_val(const mino_val_t *v)
         }
         h = fnv_mix(h, 0x0a);
         h = hash_uint32_bytes(h, acc);
-        ((mino_val_t *)v)->as.map.cached_hash = h;
+        ((mino_val *)v)->as.map.cached_hash = h;
         return h;
     }
     case MINO_SET: {
@@ -308,12 +308,12 @@ uint32_t hash_val(const mino_val_t *v)
         size_t   i;
         if (v->as.set.cached_hash != 0) return v->as.set.cached_hash;
         for (i = 0; i < n; i++) {
-            mino_val_t *elem = vec_nth(v->as.set.key_order, i);
+            mino_val *elem = vec_nth(v->as.set.key_order, i);
             acc ^= hash_val(elem);
         }
         h = fnv_mix(h, 0x0d);
         h = hash_uint32_bytes(h, acc);
-        ((mino_val_t *)v)->as.set.cached_hash = h;
+        ((mino_val *)v)->as.set.cached_hash = h;
         return h;
     }
     case MINO_SORTED_MAP: {
@@ -408,7 +408,7 @@ uint32_t hash_val(const mino_val_t *v)
     }
 }
 
-static mino_hamt_node_t *hamt_bitmap_node(mino_state_t *S, uint32_t bitmap,
+static mino_hamt_node_t *hamt_bitmap_node(mino_state *S, uint32_t bitmap,
                                            uint32_t subnode_mask, void **slots)
 {
     mino_hamt_node_t *n = (mino_hamt_node_t *)gc_alloc_typed(
@@ -419,7 +419,7 @@ static mino_hamt_node_t *hamt_bitmap_node(mino_state_t *S, uint32_t bitmap,
     return n;
 }
 
-static mino_hamt_node_t *hamt_collision_node(mino_state_t *S, uint32_t hash,
+static mino_hamt_node_t *hamt_collision_node(mino_state *S, uint32_t hash,
                                               void **slots, unsigned count)
 {
     mino_hamt_node_t *n = (mino_hamt_node_t *)gc_alloc_typed(
@@ -453,7 +453,7 @@ static mino_hamt_node_t *hamt_collision_node(mino_state_t *S, uint32_t hash,
  * OLD-array -> YOUNG-target edge. The barrier is a no-op for YOUNG
  * containers, so freshly cloned (still-young) slot arrays pay no
  * extra cost. */
-static void hnode_slot_set(mino_state_t *S, void **slots, unsigned idx,
+static void hnode_slot_set(mino_state *S, void **slots, unsigned idx,
                             void *val)
 {
     gc_write_barrier(S, slots, slots[idx], val);
@@ -467,7 +467,7 @@ static void hnode_slot_set(mino_state_t *S, void **slots, unsigned idx,
  * (OLD, not in remset), miss the YOUNG slots[] array entirely, and
  * sweep it -- the subsequent iteration's `n->slots[phys]` would then
  * read garbage. */
-static void hnode_slots_install(mino_state_t *S, mino_hamt_node_t *node,
+static void hnode_slots_install(mino_state *S, mino_hamt_node_t *node,
                                  void **slots)
 {
     gc_write_barrier(S, node, node->slots, slots);
@@ -478,7 +478,7 @@ static void hnode_slots_install(mino_state_t *S, mino_hamt_node_t *node,
  * existing node when its owner already matches; otherwise clones the
  * node, copies the slots[] array (so the clone can mutate without
  * disturbing the persistent source), and stamps owner. */
-static mino_hamt_node_t *hnode_ensure_owned(mino_state_t *S,
+static mino_hamt_node_t *hnode_ensure_owned(mino_state *S,
                                              const mino_hamt_node_t *node,
                                              unsigned slot_count,
                                              uintptr_t owner)
@@ -514,7 +514,7 @@ static mino_hamt_node_t *hnode_ensure_owned(mino_state_t *S,
  * leaving the remainder NULL. Used when an insert grows the slot
  * count; the fresh array is YOUNG so per-slot stores can skip the
  * barrier. */
-static void **hnode_slots_grow(mino_state_t *S, void **src, unsigned pop,
+static void **hnode_slots_grow(mino_state *S, void **src, unsigned pop,
                                 unsigned new_pop)
 {
     void   **slots;
@@ -526,7 +526,7 @@ static void **hnode_slots_grow(mino_state_t *S, void **src, unsigned pop,
     return slots;
 }
 
-static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
+static mino_hamt_node_t *merge_entries_owned(mino_state *S,
                                               hamt_entry_t *e1, uint32_t h1,
                                               hamt_entry_t *e2, uint32_t h2,
                                               unsigned shift, uintptr_t owner);
@@ -534,7 +534,7 @@ static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
 /* hamt_assoc_owned: same semantics as hamt_assoc but mutates owner-
  * tagged nodes in place. Returns the (possibly-new) subtree root for
  * this level. Caller writes the result into the parent slot. */
-mino_hamt_node_t *hamt_assoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                                     hamt_entry_t *new_entry, uint32_t h,
                                     unsigned shift, int *replaced,
                                     uintptr_t owner)
@@ -692,7 +692,7 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state_t *S, mino_hamt_node_t *n,
     }
 }
 
-static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
+static mino_hamt_node_t *merge_entries_owned(mino_state *S,
                                               hamt_entry_t *e1, uint32_t h1,
                                               hamt_entry_t *e2, uint32_t h2,
                                               unsigned shift, uintptr_t owner)
@@ -758,8 +758,8 @@ static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
  * tagged nodes in place. Returns the updated subtree root, NULL when
  * the subtree empties (caller drops the parent slot accordingly), or
  * `n` unchanged when the key is absent (with *removed left 0). */
-mino_hamt_node_t *hamt_dissoc_owned(mino_state_t *S, mino_hamt_node_t *n,
-                                     const mino_val_t *key, uint32_t h,
+mino_hamt_node_t *hamt_dissoc_owned(mino_state *S, mino_hamt_node_t *n,
+                                     const mino_val *key, uint32_t h,
                                      unsigned shift, int *removed,
                                      uintptr_t owner)
 {
@@ -864,7 +864,7 @@ mino_hamt_node_t *hamt_dissoc_owned(mino_state_t *S, mino_hamt_node_t *n,
  * whose hashes collide at `shift - HAMT_B` (the parent level). The returned
  * subtree lives at level `shift`.
  */
-static mino_hamt_node_t *merge_entries(mino_state_t *S, hamt_entry_t *e1, uint32_t h1,
+static mino_hamt_node_t *merge_entries(mino_state *S, hamt_entry_t *e1, uint32_t h1,
                                         hamt_entry_t *e2, uint32_t h2,
                                         unsigned shift)
 {
@@ -904,7 +904,7 @@ static mino_hamt_node_t *merge_entries(mino_state_t *S, hamt_entry_t *e1, uint32
  * Sets *replaced = 1 when the key was already present (so the map's len
  * and key_order don't grow).
  */
-mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
+mino_hamt_node_t *hamt_assoc(mino_state *S, const mino_hamt_node_t *n,
                                      hamt_entry_t *new_entry, uint32_t h,
                                      unsigned shift, int *replaced)
 {
@@ -1027,7 +1027,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
 }
 
 /* Look up a key; returns NULL if absent. */
-mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
+mino_val *hamt_get(const mino_hamt_node_t *n, const mino_val *key,
                              uint32_t h, unsigned shift)
 {
     while (n != NULL) {
@@ -1083,8 +1083,8 @@ mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
 
 /* Linear scan for `key` in a flat key_order vector. Returns the
  * matching index, or len when absent. */
-static size_t flat_find_index(const mino_val_t *key_order,
-                              const mino_val_t *key, size_t len)
+static size_t flat_find_index(const mino_val *key_order,
+                              const mino_val *key, size_t len)
 {
     size_t i;
     for (i = 0; i < len; i++) {
@@ -1096,16 +1096,16 @@ static size_t flat_find_index(const mino_val_t *key_order,
 /* Build a HAMT from a parallel (key_order, val_order) pair of vectors.
  * Used by the flat -> HAMT promotion path. Caller is responsible for
  * gc_depth suppression around the call. */
-static mino_hamt_node_t *hamt_from_flat(mino_state_t *S,
-                                         const mino_val_t *key_order,
-                                         const mino_val_t *val_order,
+static mino_hamt_node_t *hamt_from_flat(mino_state *S,
+                                         const mino_val *key_order,
+                                         const mino_val *val_order,
                                          size_t len)
 {
     mino_hamt_node_t *root = NULL;
     size_t i;
     for (i = 0; i < len; i++) {
-        mino_val_t   *k = vec_nth(key_order, i);
-        mino_val_t   *vv = vec_nth(val_order, i);
+        mino_val   *k = vec_nth(key_order, i);
+        mino_val   *vv = vec_nth(val_order, i);
         hamt_entry_t *e  = hamt_entry_new(S, k, vv);
         uint32_t      h  = hash_val(k);
         int           replaced = 0;
@@ -1117,12 +1117,12 @@ static mino_hamt_node_t *hamt_from_flat(mino_state_t *S,
 }
 
 /* Convenience: look up a key in a map value. */
-mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
+mino_val *map_get_val(const mino_val *m, const mino_val *key)
 {
     return mino_map_lookup(m, key);
 }
 
-mino_val_t *mino_map_lookup(const mino_val_t *m, const mino_val_t *key)
+mino_val *mino_map_lookup(const mino_val *m, const mino_val *key)
 {
     if (m == NULL || m->as.map.len == 0) return NULL;
     if (m->as.map.val_order != NULL) {
@@ -1137,10 +1137,10 @@ mino_val_t *mino_map_lookup(const mino_val_t *m, const mino_val_t *key)
     }
 }
 
-mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
-                            mino_val_t *key, mino_val_t *val)
+mino_val *mino_map_assoc1(mino_state *S, mino_val *m,
+                            mino_val *key, mino_val *val)
 {
-    mino_val_t *out;
+    mino_val *out;
     /* Identity short-circuit: if the key already maps to a value that
      * compares `mino_eq`-equal to `val`, return m unchanged. The
      * cached-hash on collection values keeps this O(1) in the miss
@@ -1149,14 +1149,14 @@ mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
      * k (get m k)))` hold and saves the rebuild traffic on the
      * surprisingly common "replace with current value" idiom. */
     if (m != NULL && m->as.map.len > 0) {
-        mino_val_t *existing = map_get_val(m, key);
+        mino_val *existing = map_get_val(m, key);
         if (existing != NULL && mino_eq(existing, val)) return m;
     }
     mino_current_ctx(S)->gc_depth++;
     out = alloc_val(S, MINO_MAP);
     if (m == NULL || m->as.map.len == 0) {
-        mino_val_t *ko = mino_vector(S, NULL, 0);
-        mino_val_t *vo = mino_vector(S, NULL, 0);
+        mino_val *ko = mino_vector(S, NULL, 0);
+        mino_val *vo = mino_vector(S, NULL, 0);
         ko = vec_conj1(S, ko, key);
         vo = vec_conj1(S, vo, val);
         out->as.map.root      = NULL;
@@ -1171,7 +1171,7 @@ mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
         /* Flatmap source. */
         size_t      old_len = m->as.map.len;
         size_t      i       = flat_find_index(m->as.map.key_order, key, old_len);
-        mino_val_t *ko, *vo;
+        mino_val *ko, *vo;
         if (i < old_len) {
             /* Replace existing value in place. */
             ko = m->as.map.key_order;
@@ -1221,7 +1221,7 @@ mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
         uint32_t          h        = hash_val(key);
         int               replaced = 0;
         mino_hamt_node_t *root;
-        mino_val_t       *ko       = m->as.map.key_order;
+        mino_val       *ko       = m->as.map.key_order;
         if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
         root = hamt_assoc(S, m->as.map.root, e, h, 0u, &replaced);
         if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
@@ -1236,10 +1236,10 @@ mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
     }
 }
 
-mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
-                             mino_val_t *key)
+mino_val *mino_map_dissoc1(mino_state *S, mino_val *m,
+                             mino_val *key)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (m == NULL || m->as.map.len == 0) return m;
     mino_current_ctx(S)->gc_depth++;
     if (m->as.map.val_order != NULL) {
@@ -1247,7 +1247,7 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
         size_t old_len = m->as.map.len;
         size_t idx     = flat_find_index(m->as.map.key_order, key, old_len);
         size_t i;
-        mino_val_t *ko, *vo;
+        mino_val *ko, *vo;
         if (idx == old_len) { mino_current_ctx(S)->gc_depth--; return m; }
         ko = mino_vector(S, NULL, 0);
         vo = mino_vector(S, NULL, 0);
@@ -1271,7 +1271,7 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
      * absent so unchanged maps stay pointer-equal. */
     {
         size_t            old_len = m->as.map.len;
-        mino_val_t       *ko;
+        mino_val       *ko;
         mino_hamt_node_t *root    = NULL;
         size_t            i;
         if (mino_map_lookup(m, key) == NULL) {
@@ -1280,13 +1280,13 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
         }
         ko = mino_vector(S, NULL, 0);
         for (i = 0; i < old_len; i++) {
-            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            mino_val *k = vec_nth(m->as.map.key_order, i);
             if (mino_eq(k, key)) continue;
             ko = vec_conj1(S, ko, k);
         }
         for (i = 0; i < old_len; i++) {
-            mino_val_t   *k = vec_nth(m->as.map.key_order, i);
-            mino_val_t   *vv;
+            mino_val   *k = vec_nth(m->as.map.key_order, i);
+            mino_val   *vv;
             hamt_entry_t *e;
             int           replaced = 0;
             if (mino_eq(k, key)) continue;
@@ -1319,20 +1319,20 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
  * key_order / val_order vectors.
  */
 
-mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
-                                   mino_val_t *key, mino_val_t *val,
+mino_val *mino_map_assoc1_owned(mino_state *S, mino_val *m,
+                                   mino_val *key, mino_val *val,
                                    uintptr_t owner)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (m != NULL && m->as.map.len > 0) {
-        mino_val_t *existing = map_get_val(m, key);
+        mino_val *existing = map_get_val(m, key);
         if (existing != NULL && mino_eq(existing, val)) return m;
     }
     mino_current_ctx(S)->gc_depth++;
     out = alloc_val(S, MINO_MAP);
     if (m == NULL || m->as.map.len == 0) {
-        mino_val_t *ko = mino_vector(S, NULL, 0);
-        mino_val_t *vo = mino_vector(S, NULL, 0);
+        mino_val *ko = mino_vector(S, NULL, 0);
+        mino_val *vo = mino_vector(S, NULL, 0);
         ko = vec_conj1_owned(S, ko, key, owner);
         vo = vec_conj1_owned(S, vo, val, owner);
         out->as.map.root      = NULL;
@@ -1346,7 +1346,7 @@ mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
     if (m->as.map.val_order != NULL) {
         size_t      old_len = m->as.map.len;
         size_t      i       = flat_find_index(m->as.map.key_order, key, old_len);
-        mino_val_t *ko, *vo;
+        mino_val *ko, *vo;
         if (i < old_len) {
             ko = m->as.map.key_order;
             vo = vec_assoc1_owned(S, m->as.map.val_order, i, val, owner);
@@ -1393,7 +1393,7 @@ mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
         uint32_t          h        = hash_val(key);
         int               replaced = 0;
         mino_hamt_node_t *root;
-        mino_val_t       *ko       = m->as.map.key_order;
+        mino_val       *ko       = m->as.map.key_order;
         if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
         root = hamt_assoc_owned(S, m->as.map.root, e, h, 0u, &replaced, owner);
         if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
@@ -1408,10 +1408,10 @@ mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
     }
 }
 
-mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
-                                    mino_val_t *key, uintptr_t owner)
+mino_val *mino_map_dissoc1_owned(mino_state *S, mino_val *m,
+                                    mino_val *key, uintptr_t owner)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (m == NULL || m->as.map.len == 0) return m;
     mino_current_ctx(S)->gc_depth++;
     if (m->as.map.val_order != NULL) {
@@ -1421,7 +1421,7 @@ mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
         size_t old_len = m->as.map.len;
         size_t idx     = flat_find_index(m->as.map.key_order, key, old_len);
         size_t i;
-        mino_val_t *ko, *vo;
+        mino_val *ko, *vo;
         if (idx == old_len) { mino_current_ctx(S)->gc_depth--; return m; }
         ko = mino_vector(S, NULL, 0);
         vo = mino_vector(S, NULL, 0);
@@ -1441,7 +1441,7 @@ mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
     }
     {
         size_t            old_len = m->as.map.len;
-        mino_val_t       *ko;
+        mino_val       *ko;
         mino_hamt_node_t *root;
         size_t            i;
         int               removed = 0;
@@ -1453,7 +1453,7 @@ mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
         }
         ko = mino_vector(S, NULL, 0);
         for (i = 0; i < old_len; i++) {
-            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            mino_val *k = vec_nth(m->as.map.key_order, i);
             if (mino_eq(k, key)) continue;
             ko = vec_conj1_owned(S, ko, k, owner);
         }
@@ -1478,9 +1478,9 @@ mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
  * land in flatmap form (root = NULL, val_order non-NULL); otherwise we
  * build the HAMT directly with no flat intermediary.
  */
-mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size_t len)
+mino_val *mino_map(mino_state *S, mino_val **keys, mino_val **vals, size_t len)
 {
-    mino_val_t       *v;
+    mino_val       *v;
     /* Suppress GC during construction so caller-owned key/value arrays
      * stay valid. Without this, intermediate allocations (hamt_entry_new,
      * vec_conj1) could trigger collection that reclaims values the caller
@@ -1489,8 +1489,8 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
     v = alloc_val(S, MINO_MAP);
     if (len <= MINO_FLATMAP_THRESHOLD) {
         /* Flat path: keep keys/vals in parallel order vectors, no HAMT. */
-        mino_val_t *order = mino_vector(S, NULL, 0);
-        mino_val_t *vals_ord = (len == 0) ? NULL : mino_vector(S, NULL, 0);
+        mino_val *order = mino_vector(S, NULL, 0);
+        mino_val *vals_ord = (len == 0) ? NULL : mino_vector(S, NULL, 0);
         size_t      len_out = 0;
         size_t      i;
         for (i = 0; i < len; i++) {
@@ -1522,7 +1522,7 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
         }
     } else {
         mino_hamt_node_t *root    = NULL;
-        mino_val_t       *order   = mino_vector(S, NULL, 0);
+        mino_val       *order   = mino_vector(S, NULL, 0);
         size_t            len_out = 0;
         size_t            i;
         for (i = 0; i < len; i++) {
@@ -1544,14 +1544,14 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
     return v;
 }
 
-mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
+mino_val *mino_set(mino_state *S, mino_val **items, size_t len)
 {
-    mino_val_t       *v;
+    mino_val       *v;
     mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order;
+    mino_val       *order;
     size_t            len_out  = 0;
     size_t            i;
-    mino_val_t       *sentinel;
+    mino_val       *sentinel;
     mino_current_ctx(S)->gc_depth++;
     v        = alloc_val(S, MINO_SET);
     order    = mino_vector(S, NULL, 0);
@@ -1573,52 +1573,52 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
     return v;
 }
 
-mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn)
+mino_val *mino_prim(mino_state *S, const char *name, mino_prim_fn fn)
 {
 
-    mino_val_t *v = alloc_val(S, MINO_PRIM);
+    mino_val *v = alloc_val(S, MINO_PRIM);
     v->as.prim.name = name;
     v->as.prim.fn   = fn;
     v->as.prim.fn2  = NULL;
     return v;
 }
 
-mino_val_t *mino_prim_argv(mino_state_t *S, const char *name, mino_prim_fn2 fn)
+mino_val *mino_prim_argv(mino_state *S, const char *name, mino_prim_fn2 fn)
 {
-    mino_val_t *v = alloc_val(S, MINO_PRIM);
+    mino_val *v = alloc_val(S, MINO_PRIM);
     v->as.prim.name = name;
     v->as.prim.fn   = NULL;
     v->as.prim.fn2  = fn;
     return v;
 }
 
-mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag)
+mino_val *mino_handle(mino_state *S, void *ptr, const char *tag)
 {
 
-    mino_val_t *v = alloc_val(S, MINO_HANDLE);
+    mino_val *v = alloc_val(S, MINO_HANDLE);
     v->as.handle.ptr       = ptr;
     v->as.handle.tag       = tag;
     v->as.handle.finalizer = NULL;
     return v;
 }
 
-mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
+mino_val *mino_handle_ex(mino_state *S, void *ptr, const char *tag,
                            mino_finalizer_fn finalizer)
 {
 
-    mino_val_t *v = alloc_val(S, MINO_HANDLE);
+    mino_val *v = alloc_val(S, MINO_HANDLE);
     v->as.handle.ptr       = ptr;
     v->as.handle.tag       = tag;
     v->as.handle.finalizer = finalizer;
     return v;
 }
 
-int mino_is_handle(const mino_val_t *v)
+int mino_is_handle(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_HANDLE;
 }
 
-void *mino_handle_ptr(const mino_val_t *v)
+void *mino_handle_ptr(const mino_val *v)
 {
     if (v == NULL || mino_type_of(v) != MINO_HANDLE) {
         return NULL;
@@ -1626,7 +1626,7 @@ void *mino_handle_ptr(const mino_val_t *v)
     return v->as.handle.ptr;
 }
 
-const char *mino_handle_tag(const mino_val_t *v)
+const char *mino_handle_tag(const mino_val *v)
 {
     if (v == NULL || mino_type_of(v) != MINO_HANDLE) {
         return NULL;
@@ -1634,61 +1634,61 @@ const char *mino_handle_tag(const mino_val_t *v)
     return v->as.handle.tag;
 }
 
-mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val)
+mino_val *mino_atom(mino_state *S, mino_val *val)
 {
-    mino_val_t *v = alloc_val(S, MINO_ATOM);
+    mino_val *v = alloc_val(S, MINO_ATOM);
     v->as.atom.val       = val;
     v->as.atom.watches   = NULL;
     v->as.atom.validator = NULL;
     return v;
 }
 
-int mino_is_atom(const mino_val_t *v)
+int mino_is_atom(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_ATOM;
 }
 
-mino_val_t *mino_atom_deref(const mino_val_t *a)
+mino_val *mino_atom_deref(const mino_val *a)
 {
     if (a == NULL || mino_type_of(a) != MINO_ATOM) return NULL;
     return a->as.atom.val;
 }
 
-mino_val_t *mino_agent_deref(const mino_val_t *a)
+mino_val *mino_agent_deref(const mino_val *a)
 {
     if (a == NULL || mino_type_of(a) != MINO_AGENT) return NULL;
     return a->as.agent.val;
 }
 
-mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val)
+mino_val *mino_volatile(mino_state *S, mino_val *val)
 {
-    mino_val_t *v = alloc_val(S, MINO_VOLATILE);
+    mino_val *v = alloc_val(S, MINO_VOLATILE);
     v->as.volatile_.val = val;
     return v;
 }
 
-int mino_is_volatile(const mino_val_t *v)
+int mino_is_volatile(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_VOLATILE;
 }
 
-mino_val_t *mino_volatile_deref(const mino_val_t *v)
+mino_val *mino_volatile_deref(const mino_val *v)
 {
     if (v == NULL || mino_type_of(v) != MINO_VOLATILE) return NULL;
     return v->as.volatile_.val;
 }
 
-void mino_atom_reset(mino_val_t *a, mino_val_t *val)
+void mino_atom_reset(mino_val *a, mino_val *val)
 {
     if (a != NULL && mino_type_of(a) == MINO_ATOM) {
         a->as.atom.val = val;
     }
 }
 
-mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
-                    mino_env_t *env)
+mino_val *make_fn(mino_state *S, mino_val *params, mino_val *body,
+                    mino_env *env)
 {
-    mino_val_t *v = alloc_val(S, MINO_FN);
+    mino_val *v = alloc_val(S, MINO_FN);
     v->as.fn.params      = params;
     v->as.fn.body        = body;
     v->as.fn.env         = env;

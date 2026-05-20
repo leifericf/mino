@@ -813,7 +813,7 @@ void *mino_jit_lookup_extern_fn(const char *name)
 
 /* ----- Public entry points ----------------------------------------------- */
 
-int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
+int mino_jit_compile(mino_state *S, mino_val *fn_val)
 {
     if (fn_val == NULL || mino_type_of(fn_val) != MINO_FN) return -1;
     mino_bc_fn_t *bc = fn_val->as.fn.bc;
@@ -856,19 +856,19 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     return -1;
 }
 
-mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
-                            mino_val_t **regs, mino_val_t **consts,
-                            mino_env_t *env)
+mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
+                            mino_val **regs, mino_val **consts,
+                            mino_env *env)
 {
-    typedef mino_val_t *(*native_t)(mino_val_t **, mino_val_t **,
-                                     mino_state_t *);
+    typedef mino_val *(*native_t)(mino_val **, mino_val **,
+                                     mino_state *);
     native_t f = (native_t)bc->native;
     /* Publish env on the current thread ctx so slow helpers running
      * from inside the JIT region can read it. Save / restore around
      * the call to support re-entry from a nested JIT'd callee in a
      * later release. */
     mino_thread_ctx_t *ctx        = mino_current_ctx(S);
-    mino_env_t        *saved_env  = ctx->jit_invoke_env;
+    mino_env        *saved_env  = ctx->jit_invoke_env;
     mino_thread_ctx_t *saved_ctx  = S->jit.jit_invoke_ctx;
     ctx->jit_invoke_env = env;
     /* Publish ctx on S so stencil-emitted code can reach
@@ -904,7 +904,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
         }
         if (jit_time_fns) {
             long long t0 = mino_monotonic_ns();
-            mino_val_t *r1 = f(regs, consts, S);
+            mino_val *r1 = f(regs, consts, S);
             uint64_t dt = (uint64_t)(mino_monotonic_ns() - t0);
             bc->jit_native_total_ns += dt;
             if (dt > (uint64_t)bc->jit_native_max_ns) {
@@ -913,7 +913,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
                                         : (uint32_t)dt;
             }
             ctx->jit_invoke_depth--;
-            mino_val_t *r = r1;
+            mino_val *r = r1;
             /* Side-exit detection is identical to the untimed path;
              * fall through to the shared block below. */
             if (r == NULL && S->jit_deopt_pending) {
@@ -931,7 +931,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
             return r;
         }
     }
-    mino_val_t *r = f(regs, consts, S);
+    mino_val *r = f(regs, consts, S);
     ctx->jit_invoke_depth--;
     /* Side-exit detection: when the deopt stencil fires, it sets
      * jit_deopt_pending = 1 and returns NULL. Clear the flag, then
@@ -954,7 +954,7 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
     return r;
 }
 
-void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn_val)
+void mino_jit_invalidate(mino_state *S, mino_val *fn_val)
 {
     if (fn_val == NULL || mino_type_of(fn_val) != MINO_FN) return;
     mino_bc_fn_t *bc = fn_val->as.fn.bc;
@@ -1020,24 +1020,24 @@ int mino_jit_eligible(const mino_bc_fn_t *bc)
     (void)bc; return 0;
 }
 
-int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
+int mino_jit_compile(mino_state *S, mino_val *fn_val)
 {
     (void)S; (void)fn_val; return -1;
 }
 
-mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
-                            mino_val_t **regs, mino_val_t **consts,
-                            mino_env_t *env)
+mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
+                            mino_val **regs, mino_val **consts,
+                            mino_env *env)
 {
     (void)S; (void)bc; (void)regs; (void)consts; (void)env; return NULL;
 }
 
-void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn)
+void mino_jit_invalidate(mino_state *S, mino_val *fn)
 {
     (void)S; (void)fn;
 }
 
-void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
+void mino_jit_slab_release(mino_state *S, struct mino_jit_slab *slab)
 {
     (void)S; (void)slab;
 }
@@ -1047,7 +1047,7 @@ long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
     (void)bc; (void)native_off; return -1;
 }
 
-void mino_jit_free_all(mino_state_t *S)
+void mino_jit_free_all(mino_state *S)
 {
     /* Nothing tracked when the host is unsupported. */
     (void)S;

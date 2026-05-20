@@ -19,7 +19,7 @@
 /* mino_throw                                                                */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex)
+mino_val *mino_throw(mino_state *S, mino_val *ex)
 {
     if (S == NULL) return NULL;
 
@@ -64,7 +64,7 @@ static const char *args_type_label(char spec)
     }
 }
 
-static int args_type_match(char spec, const mino_val_t *v)
+static int args_type_match(char spec, const mino_val *v)
 {
     if (v == NULL) return spec == 'v' || spec == 'L';
     switch (spec) {
@@ -85,21 +85,21 @@ static int args_type_match(char spec, const mino_val_t *v)
     }
 }
 
-int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
+int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                     const char *fmt, ...)
 {
     va_list ap;
     size_t  idx = 0;
     size_t  expected = 0;
     const char *f;
-    mino_val_t *cursor = args;
+    mino_val *cursor = args;
     char msg[256];
 
     for (f = fmt; *f != '\0'; f++) expected++;
 
     va_start(ap, fmt);
     for (f = fmt; *f != '\0'; f++, idx++) {
-        mino_val_t *v;
+        mino_val *v;
 
         if (!mino_is_cons(cursor)) {
             snprintf(msg, sizeof(msg),
@@ -163,7 +163,7 @@ int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
         }
         case 'v': case 'V': case 'M': case 'L':
         case 'H': case 'A': {
-            mino_val_t **out = va_arg(ap, mino_val_t **);
+            mino_val **out = va_arg(ap, mino_val **);
             *out = v;
             break;
         }

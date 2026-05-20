@@ -20,7 +20,7 @@
 
 #include "runtime/internal.h"
 
-extern mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
+extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                           const char *code, const char *msg);
 
 /* FNV-1a over the bytes of s. 32-bit form is enough for the table
@@ -49,7 +49,7 @@ static unsigned ptr_pair_hash(const char *a, const char *b)
 
 /* ----- interned_var_strs_hash --------------------------------------- */
 
-static void intern_str_hash_resize(mino_state_t *S, size_t new_cap)
+static void intern_str_hash_resize(mino_state *S, size_t new_cap)
 {
     size_t       i;
     const char **new_tbl;
@@ -71,7 +71,7 @@ static void intern_str_hash_resize(mino_state_t *S, size_t new_cap)
 /* Look up s in the hash. Returns the canonical interned pointer or
  * NULL if not present. Walks open-addressed slots until either match
  * (pointer-string-equal) or empty slot. */
-static const char *intern_str_hash_lookup(mino_state_t *S, const char *s)
+static const char *intern_str_hash_lookup(mino_state *S, const char *s)
 {
     unsigned h;
     size_t   probe;
@@ -86,7 +86,7 @@ static const char *intern_str_hash_lookup(mino_state_t *S, const char *s)
     return NULL;
 }
 
-static void intern_str_hash_insert(mino_state_t *S, const char *s)
+static void intern_str_hash_insert(mino_state *S, const char *s)
 {
     unsigned h;
     size_t   probe;
@@ -108,7 +108,7 @@ static void intern_str_hash_insert(mino_state_t *S, const char *s)
 
 /* Intern a string into the state's var-string table. Returns a pointer
  * that is stable for the life of the state. Strings are malloc-owned. */
-static const char *intern_var_str(mino_state_t *S, const char *s)
+static const char *intern_var_str(mino_state *S, const char *s)
 {
     const char *existing;
     size_t      n;
@@ -138,7 +138,7 @@ static const char *intern_var_str(mino_state_t *S, const char *s)
 
 /* ----- var_hash ----------------------------------------------------- */
 
-static void var_hash_resize(mino_state_t *S, size_t new_cap)
+static void var_hash_resize(mino_state *S, size_t new_cap)
 {
     size_t           i;
     var_hash_slot_t *new_tbl;
@@ -165,7 +165,7 @@ static void var_hash_resize(mino_state_t *S, size_t new_cap)
 /* Hot path: lookup by (ns*, name*). Both must be interned for pointer
  * equality to hit. When ns/name are caller-supplied non-interned
  * strings the caller must first intern via intern_var_str(). */
-static mino_val_t *var_hash_lookup(mino_state_t *S, const char *i_ns,
+static mino_val *var_hash_lookup(mino_state *S, const char *i_ns,
                                     const char *i_name)
 {
     unsigned h;
@@ -183,8 +183,8 @@ static mino_val_t *var_hash_lookup(mino_state_t *S, const char *i_ns,
     return NULL;
 }
 
-static void var_hash_insert(mino_state_t *S, const char *i_ns,
-                            const char *i_name, mino_val_t *var)
+static void var_hash_insert(mino_state *S, const char *i_ns,
+                            const char *i_name, mino_val *var)
 {
     unsigned h;
     size_t   probe;
@@ -208,7 +208,7 @@ static void var_hash_insert(mino_state_t *S, const char *i_ns,
 /* var_unintern is rare. Drop the matching entry from the linear
  * array and rebuild the hash from scratch -- simpler than tombstone
  * bookkeeping. */
-static void var_hash_rebuild(mino_state_t *S)
+static void var_hash_rebuild(mino_state *S)
 {
     size_t cap = S->ns_vars.var_hash_cap > 0 ? S->ns_vars.var_hash_cap : 128u;
     var_hash_resize(S, cap);
@@ -216,9 +216,9 @@ static void var_hash_rebuild(mino_state_t *S)
 
 /* ----- public surface ---------------------------------------------- */
 
-mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
+mino_val *var_intern(mino_state *S, const char *ns, const char *name)
 {
-    mino_val_t *v;
+    mino_val *v;
     const char *i_ns, *i_name;
 
     /* Intern the strings first; subsequent lookups key on pointers. */
@@ -260,12 +260,12 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
     return v;
 }
 
-void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
+void var_set_root(mino_state *S, mino_val *var, mino_val *val)
 {
-    mino_val_t *old_val   = var->as.var.root;
-    mino_val_t *validator = var->as.var.validator;
-    mino_val_t *watches   = var->as.var.watches;
-    mino_env_t *env;
+    mino_val *old_val   = var->as.var.root;
+    mino_val *validator = var->as.var.validator;
+    mino_val *watches   = var->as.var.watches;
+    mino_env *env;
 
     /* Fast path: no watches, no validator, no env lookup. Early-bound
      * install paths (state init, runtime/install_stdlib bootstrap)
@@ -291,8 +291,8 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
      * the validator (via prim_throw_classified) longjmps out without
      * mutating the var. */
     if (validator != NULL) {
-        mino_val_t *vargs  = mino_cons(S, val, mino_nil(S));
-        mino_val_t *result = mino_call(S, validator, vargs, env);
+        mino_val *vargs  = mino_cons(S, val, mino_nil(S));
+        mino_val *result = mino_call(S, validator, vargs, env);
         if (result == NULL) return;  /* validator threw */
         if (!mino_is_truthy(result)) {
             prim_throw_classified(S, "eval/contract", "MCT001",
@@ -313,9 +313,9 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
         size_t n = watches->as.map.len;
         size_t i;
         for (i = 0; i < n; i++) {
-            mino_val_t *key = vec_nth(watches->as.map.key_order, i);
-            mino_val_t *fn  = map_get_val(watches, key);
-            mino_val_t *wargs;
+            mino_val *key = vec_nth(watches->as.map.key_order, i);
+            mino_val *fn  = map_get_val(watches, key);
+            mino_val *wargs;
             if (fn == NULL) continue;
             wargs = mino_cons(S, key,
                       mino_cons(S, var,
@@ -326,7 +326,7 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
     }
 }
 
-mino_val_t *var_find(mino_state_t *S, const char *ns, const char *name)
+mino_val *var_find(mino_state *S, const char *ns, const char *name)
 {
     /* Caller may pass non-interned strings. Intern first; strings used
      * for lookup get registered, but the cost is amortised across the
@@ -336,7 +336,7 @@ mino_val_t *var_find(mino_state_t *S, const char *ns, const char *name)
     return var_hash_lookup(S, i_ns, i_name);
 }
 
-void var_unintern(mino_state_t *S, const char *ns, const char *name)
+void var_unintern(mino_state *S, const char *ns, const char *name)
 {
     const char *i_ns   = intern_var_str(S, ns);
     const char *i_name = intern_var_str(S, name);

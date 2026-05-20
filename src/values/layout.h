@@ -35,7 +35,7 @@ struct mino_bc_fn;            /* compiled-fn record */
 /* ------------------------------------------------------------------------- */
 
 /*
- * A mino_val_t* is either a real heap pointer to struct mino_val or an
+ * A mino_val* is either a real heap pointer to struct mino_val or an
  * inline tagged scalar. The three low bits encode which.
  *
  *   tag 000 -> heap pointer (alloc guarantees 8-byte alignment; every
@@ -77,7 +77,7 @@ struct mino_bc_fn;            /* compiled-fn record */
 #define MINO_INT_MIN   (-((long long)(1LL << 60)))
 
 #define MINO_MAKE_INT(n) \
-    ((mino_val_t *)((uintptr_t)((uint64_t)(long long)(n) << MINO_TAG_BITS) \
+    ((mino_val *)((uintptr_t)((uint64_t)(long long)(n) << MINO_TAG_BITS) \
                     | MINO_TAG_INT))
 
 #define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
@@ -89,15 +89,15 @@ struct mino_bc_fn;            /* compiled-fn record */
 #define MINO_TRUE_PAYLOAD  ((uintptr_t)0x1)
 #define MINO_FALSE_PAYLOAD ((uintptr_t)0x0)
 #define MINO_MAKE_BOOL(b) \
-    ((mino_val_t *)(((b) ? MINO_TRUE_PAYLOAD : MINO_FALSE_PAYLOAD) << MINO_TAG_BITS \
+    ((mino_val *)(((b) ? MINO_TRUE_PAYLOAD : MINO_FALSE_PAYLOAD) << MINO_TAG_BITS \
                     | MINO_TAG_BOOL))
 #define MINO_BOOL_VAL(v) \
     ((int)(((uintptr_t)(v) >> MINO_TAG_BITS) & 0x1))
 
-#define MINO_MAKE_NIL ((mino_val_t *)MINO_TAG_NIL)
+#define MINO_MAKE_NIL ((mino_val *)MINO_TAG_NIL)
 
 #define MINO_MAKE_CHAR(cp) \
-    ((mino_val_t *)(((uintptr_t)(uint32_t)(cp) << MINO_TAG_BITS) | MINO_TAG_CHAR))
+    ((mino_val *)(((uintptr_t)(uint32_t)(cp) << MINO_TAG_BITS) | MINO_TAG_CHAR))
 #define MINO_CHAR_VAL(v) \
     ((int)((uintptr_t)(v) >> MINO_TAG_BITS))
 
@@ -106,8 +106,8 @@ struct mino_bc_fn;            /* compiled-fn record */
 /* ------------------------------------------------------------------------- */
 
 struct mino_val {
-    mino_type_t type;     /* value type tag */
-    mino_val_t *meta;     /* metadata map (NULL when absent) */
+    mino_type type;     /* value type tag */
+    mino_val *meta;     /* metadata map (NULL when absent) */
     union {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
@@ -137,8 +137,8 @@ struct mino_val {
             size_t ns_len;
         } s;
         struct {          /* MINO_CONS */
-            mino_val_t *car;   /* first element */
-            mino_val_t *cdr;   /* rest of the list */
+            mino_val *car;   /* first element */
+            mino_val *cdr;   /* rest of the list */
             const char *file;  /* source file (NULL if unknown) */
             int         line;  /* source line (0 if unknown) */
             int         column;/* source column (0 if unknown) */
@@ -159,20 +159,20 @@ struct mino_val {
         } vec;
         struct {          /* MINO_MAP: flatmap (small) or HAMT (large) */
             mino_hamt_node_t *root;      /* HAMT root, or NULL for flatmap/empty */
-            mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
-            mino_val_t       *val_order; /* MINO_VECTOR of vals (flatmap), or NULL */
+            mino_val       *key_order; /* MINO_VECTOR of keys, insertion order */
+            mino_val       *val_order; /* MINO_VECTOR of vals (flatmap), or NULL */
             size_t            len;       /* number of entries */
             uint32_t          cached_hash; /* hash_val of this map; 0 = uncomputed. */
         } map;
         struct {          /* MINO_SET: HAMT with sentinel values */
             mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
-            mino_val_t       *key_order; /* MINO_VECTOR of elements */
+            mino_val       *key_order; /* MINO_VECTOR of elements */
             size_t            len;       /* number of elements */
             uint32_t          cached_hash; /* hash_val of this set; 0 = uncomputed. */
         } set;
         struct {          /* MINO_SORTED_MAP / MINO_SORTED_SET: red-black tree */
             mino_rb_node_t *root;       /* RB tree root (NULL when empty) */
-            mino_val_t     *comparator; /* NULL = natural order, fn = custom */
+            mino_val     *comparator; /* NULL = natural order, fn = custom */
             size_t          len;        /* number of entries */
         } sorted;
         struct {          /* MINO_PRIM */
@@ -181,9 +181,9 @@ struct mino_val {
             mino_prim_fn2 fn2; /* argv ABI; non-NULL takes precedence */
         } prim;
         struct {          /* MINO_FN: user-defined closure */
-            mino_val_t *params;
-            mino_val_t *body;
-            mino_env_t *env;
+            mino_val *params;
+            mino_val *body;
+            mino_env *env;
             const char *defining_ns;
             int         shape;
             struct mino_bc_fn *bc;
@@ -194,14 +194,14 @@ struct mino_val {
              * straight to the prim's specialised path. NULL means the
              * fn is opaque (custom body, multi-arity, captures, etc.)
              * and must use the regular call path. */
-            mino_val_t *wraps_prim;
+            mino_val *wraps_prim;
             /* Closure -> template back-pointer. Closures created by
              * OP_CLOSURE point at the template fn whose bc / clauses
              * they inherit; templates and plain fns leave this NULL.
              * Used by invoke_bc_fn_argv's fold-staleness recompile to
              * recompile once via the template instead of per-closure.
              * GC-traced through the MINO_FN walker. */
-            mino_val_t *template_fn;
+            mino_val *template_fn;
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;
@@ -209,54 +209,54 @@ struct mino_val {
             void       (*finalizer)(void *ptr, const char *tag);
         } handle;
         struct {          /* MINO_ATOM: mutable reference cell */
-            mino_val_t *val;
-            mino_val_t *watches;
-            mino_val_t *validator;
+            mino_val *val;
+            mino_val *watches;
+            mino_val *validator;
         } atom;
         struct {          /* MINO_VOLATILE: single-slot mutable cell */
-            mino_val_t *val;
+            mino_val *val;
         } volatile_;
         struct {          /* MINO_LAZY: deferred sequence */
-            mino_val_t *body;
-            mino_env_t *env;
-            mino_val_t *cached;
-            mino_val_t *(*c_thunk)(struct mino_state *, mino_val_t *);
+            mino_val *body;
+            mino_env *env;
+            mino_val *cached;
+            mino_val *(*c_thunk)(struct mino_state *, mino_val *);
             int         realized;
         } lazy;
         struct {          /* MINO_CHUNK: fixed-cap value buffer */
-            mino_val_t **vals;
+            mino_val **vals;
             unsigned     cap;
             unsigned     len;
             int          sealed;
         } chunk;
         struct {          /* MINO_CHUNKED_CONS: chunk + offset + more */
-            mino_val_t *chunk;
-            mino_val_t *more;
+            mino_val *chunk;
+            mino_val *more;
             unsigned    off;
         } chunked_cons;
         struct {          /* MINO_RECUR */
-            mino_val_t *args;
+            mino_val *args;
         } recur;
         struct {          /* MINO_TAIL_CALL */
-            mino_val_t *fn;
-            mino_val_t *args;
+            mino_val *fn;
+            mino_val *args;
         } tail_call;
         struct {          /* MINO_REDUCED */
-            mino_val_t *val;
+            mino_val *val;
         } reduced;
         struct {          /* MINO_VAR: first-class var */
             const char *ns;
             const char *sym;
-            mino_val_t *root;
+            mino_val *root;
             int         dynamic;
             int         bound;
             int         is_private;
-            mino_val_t *watches;
-            mino_val_t *validator;
+            mino_val *watches;
+            mino_val *validator;
             unsigned    version;
         } var;
         struct {          /* MINO_TRANSIENT */
-            mino_val_t *current;
+            mino_val *current;
             int         valid;
             /* Owner ID minted at creation by
              * S->ns_vars.transient_owner_next++; written into the owner field
@@ -271,22 +271,22 @@ struct mino_val {
             void *mpz;
         } bigint;
         struct {          /* MINO_RATIO */
-            mino_val_t *num;
-            mino_val_t *denom;
+            mino_val *num;
+            mino_val *denom;
         } ratio;
         struct {          /* MINO_BIGDEC */
-            mino_val_t *unscaled;
+            mino_val *unscaled;
             int         scale;
         } bigdec;
         struct {          /* MINO_TYPE: first-class record type */
             const char *ns;
             const char *name;
-            mino_val_t *fields;
+            mino_val *fields;
         } record_type;
         struct {          /* MINO_RECORD */
-            mino_val_t  *type;
-            mino_val_t **vals;
-            mino_val_t  *ext;
+            mino_val  *type;
+            mino_val **vals;
+            mino_val  *ext;
         } record;
         struct {          /* MINO_FUTURE */
             struct mino_future *impl;
@@ -295,35 +295,35 @@ struct mino_val {
             unsigned char bytes[16];
         } uuid;
         struct {          /* MINO_REGEX */
-            mino_val_t *source;
+            mino_val *source;
         } regex;
         struct {          /* MINO_HOST_ARRAY */
-            mino_val_t **vals;
+            mino_val **vals;
             size_t       len;
             unsigned char element_kind; /* host_array_kind_t */
         } host_array;
         struct {          /* MINO_MAP_ENTRY */
-            mino_val_t *k;
-            mino_val_t *v;
+            mino_val *k;
+            mino_val *v;
         } map_entry;
         struct {          /* MINO_TX_REF */
-            mino_val_t    *val;
-            mino_val_t    *watches;
-            mino_val_t    *validator;
+            mino_val    *val;
+            mino_val    *watches;
+            mino_val    *validator;
             uint64_t       version;
             uint64_t       ref_id;
-            mino_state_t  *owning_state;
+            mino_state  *owning_state;
         } tx_ref;
         struct {          /* MINO_AGENT */
-            mino_val_t *val;
-            mino_val_t *watches;
-            mino_val_t *validator;
-            mino_val_t *err;
-            mino_val_t *err_handler;
+            mino_val *val;
+            mino_val *watches;
+            mino_val *validator;
+            mino_val *err;
+            mino_val *err_handler;
             int         err_mode;
             int         in_flight;
             uint64_t    agent_id;
-            mino_state_t *owning_state;
+            mino_state *owning_state;
         } agent;
     } as;
 };

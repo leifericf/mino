@@ -10,7 +10,7 @@
  * and bc->native_gen matches S->ns_vars.ic_gen.
  *
  * The whole module is compiled in only when MINO_CPJIT is defined; the
- * default build is unaffected. The `jit_regions` slot in mino_state_t
+ * default build is unaffected. The `jit_regions` slot in mino_state
  * stays present in both configurations so the field offsets don't drift
  * between builds (cleanup walks NULL when JIT is disabled).
  */
@@ -79,7 +79,7 @@
  * to the region (currently the per-pc native-offset side table);
  * the free path calls `free(aux_ptr)` before munmap'ing `ptr`.
  * The structure lives in jit.c when MINO_CPJIT is defined; the type
- * stays declared here unconditionally so mino_state_t's pointer
+ * stays declared here unconditionally so mino_state's pointer
  * field is well-typed. */
 struct mino_jit_region {
     void                   *ptr;

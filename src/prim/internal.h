@@ -29,51 +29,51 @@
 
 /* Shared helpers (defined in prim.c).
  * These operate on borrowed args and return GC-owned values unless noted. */
-int          args_have_float(mino_val_t *args);             /* pure predicate */
-mino_val_t  *prim_throw_error(mino_state_t *S, const char *msg); /* longjmp or set_error+NULL */
-mino_val_t  *prim_throw_classified(mino_state_t *S, const char *kind,
+int          args_have_float(mino_val *args);             /* pure predicate */
+mino_val  *prim_throw_error(mino_state *S, const char *msg); /* longjmp or set_error+NULL */
+mino_val  *prim_throw_classified(mino_state *S, const char *kind,
                                    const char *code, const char *msg);
-int          as_double(const mino_val_t *v, double *out);   /* pure extraction */
-int          as_long(const mino_val_t *v, long long *out);  /* pure extraction */
-double       tower_to_double(const mino_val_t *v);           /* full numeric tower */
-size_t       list_length(mino_state_t *S, mino_val_t *list); /* pure traversal */
-int          arg_count(mino_state_t *S, mino_val_t *args, size_t *out); /* pure */
-mino_val_t  *print_to_string(mino_state_t *S, const mino_val_t *v); /* GC-owned */
+int          as_double(const mino_val *v, double *out);   /* pure extraction */
+int          as_long(const mino_val *v, long long *out);  /* pure extraction */
+double       tower_to_double(const mino_val *v);           /* full numeric tower */
+size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
+int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
+mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
 /* Sequence iterator: borrows the collection being iterated.
  * seq_iter_val returns a borrowed pointer into the collection's storage;
  * do not retain it across allocations without gc_pin. */
 typedef struct {
-    const mino_val_t *coll;
+    const mino_val *coll;
     size_t            idx;       /* for vectors, maps, sets */
-    const mino_val_t *cons_p;   /* for cons lists */
+    const mino_val *cons_p;   /* for cons lists */
 } seq_iter_t;
 
-void         seq_iter_init(mino_state_t *S, seq_iter_t *it,
-                           const mino_val_t *coll);
+void         seq_iter_init(mino_state *S, seq_iter_t *it,
+                           const mino_val *coll);
 int          seq_iter_done(const seq_iter_t *it);
-mino_val_t  *seq_iter_val(mino_state_t *S, const seq_iter_t *it); /* borrowed */
-void         seq_iter_next(mino_state_t *S, seq_iter_t *it);
+mino_val  *seq_iter_val(mino_state *S, const seq_iter_t *it); /* borrowed */
+void         seq_iter_next(mino_state *S, seq_iter_t *it);
 
 /* val_to_seq: coerce a value to a cons-list sequence (GC-owned). */
-mino_val_t  *val_to_seq(mino_state_t *S, mino_val_t *v);
+mino_val  *val_to_seq(mino_state *S, mino_val *v);
 
 /* set_conj1: return a new set with elem added (GC-owned). */
-mino_val_t  *set_conj1(mino_state_t *S, const mino_val_t *s,
-                       mino_val_t *elem);
+mino_val  *set_conj1(mino_state *S, const mino_val *s,
+                       mino_val *elem);
 
 /* Owner-tagged set conj/disj: mirror the persistent path but route
  * the HAMT walk and the key_order conj through the owned variants so
  * a transient batch reuses spine nodes and tail-chunk slots in place
  * after the first touch. The persistent path stays the default;
  * transient.c calls these only when `owner_id != 0`. */
-mino_val_t  *set_conj1_owned(mino_state_t *S, mino_val_t *s,
-                              mino_val_t *elem, uintptr_t owner);
-mino_val_t  *set_disj1_owned(mino_state_t *S, mino_val_t *s,
-                              const mino_val_t *elem, uintptr_t owner);
+mino_val  *set_conj1_owned(mino_state *S, mino_val *s,
+                              mino_val *elem, uintptr_t owner);
+mino_val  *set_disj1_owned(mino_state *S, mino_val *s,
+                              const mino_val *elem, uintptr_t owner);
 
 /* print_str_to: write v to out; strings as raw bytes, others via printer. */
-void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
+void         print_str_to(mino_state *S, FILE *out, const mino_val *v);
 
 /* Primitive install tables.  Each prim_*.c defines a static array of
  * mino_prim_def at file bottom; the central install.c composes them
@@ -96,7 +96,7 @@ typedef struct {
     const size_t         *count_ptr;  /* &k_prims_<domain>_count */
 } mino_prim_domain;
 
-void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
+void prim_install_table(mino_state *S, mino_env *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count);
 
 /* Same as prim_install_table but also tags each registered binding's
@@ -104,7 +104,7 @@ void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
  * via (doc fn) and (mino-capability 'fn) so script writers see which
  * group their code requires. NULL or "" capability falls back to the
  * unlabelled install. */
-void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
+void prim_install_table_with_capability(mino_state *S, mino_env *env,
                                         const char *ns_name,
                                         const mino_prim_def *defs,
                                         size_t count,
@@ -115,183 +115,183 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
  * return value is GC-owned (NULL on error via set_error). */
 
 /* numeric.c */
-mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_addp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_incp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_decp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_mulp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_char(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unchecked_negate(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_floor(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_ceil(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_round(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_sqrt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_log(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_exp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_sin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_cos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_tan(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_pow(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_atan2(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_asin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_acos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_atan(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_sinh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_cosh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_tanh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_log10(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_log1p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_expm1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_cbrt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_signum(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_to_radians(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_to_degrees(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_hypot(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_copy_sign(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_next_up(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_next_down(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_math_ieee_remainder(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_num_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_gt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_gte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_add(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_addp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_inc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_incp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dec(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_decp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sub(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_subp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mul(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mulp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_short(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_byte(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_char(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_long(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_double(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_add(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_sub(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_mul(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_inc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_dec(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unchecked_negate(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_div(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mod(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rem(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_quot(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_int(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_float(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_parse_long(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_parse_double(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_and(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_or(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_xor(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_not(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_shift_left(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unsigned_bit_shift_right(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_floor(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_ceil(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_sqrt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_log(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_exp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_sin(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_cos(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_tan(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_pow(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_atan2(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_asin(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_acos(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_atan(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_sinh(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_cosh(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_tanh(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_log10(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_log1p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_expm1(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_cbrt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_signum(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_to_radians(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_to_degrees(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_hypot(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_copy_sign(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_next_up(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_next_down(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_math_ieee_remainder(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_eq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_num_eq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_identical(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lte(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gte(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_nan_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_infinite_p(mino_state *S, mino_val *args, mino_env *env);
 
 /* meta.c */
-mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_meta(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_with_meta(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vary_meta(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_alter_meta(mino_state *S, mino_val *args, mino_env *env);
 
 /* collections.c */
-mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_list(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_transient(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_cdr(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_list(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_count(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_first(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rest(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vector(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_hash_set(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_transient(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_persistent_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_assoc_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_conj_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dissoc_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_disj_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pop_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_transient_p(mino_state *S, mino_val *args, mino_env *env);
 
 /* sequences.c */
-mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_reduced(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_reduced_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_reverse(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env);
 /* Recognise a not-yet-realized lazy seq emitted by prim_range, used by
  * prim_reduce's int-range fast path. Returns 1 and fills the param
  * pointers on a hit, 0 otherwise. */
-int         lazy_is_int_range(const mino_val_t *coll, long long *start_out,
+int         lazy_is_int_range(const mino_val *coll, long long *start_out,
                               long long *end_out, long long *step_out,
                               int *infinite_out);
 /* Pipeline-stage detection: returns 1 iff `coll` is an unrealized
  * LAZY whose thunk matches the named map/filter/take stage. Used by
  * prim_reduce to recognise a `(->> src (map ...) (filter ...) (take ...))`
  * chain and fuse it into a single walk over `src`. */
-int         lazy_thunk_is_map1  (const mino_val_t *coll);
-int         lazy_thunk_is_filter(const mino_val_t *coll);
-int         lazy_thunk_is_take  (const mino_val_t *coll);
-mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_doall(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_subseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+int         lazy_thunk_is_map1  (const mino_val *coll);
+int         lazy_thunk_is_filter(const mino_val *coll);
+int         lazy_thunk_is_take  (const mino_val *coll);
+mino_val *prim_rangev(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_map_1(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_filter(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_take(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_doall(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_peek(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_find(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_subvec(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sorted_set(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sorted_set_by(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_subseq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rsubseq(mino_state *S, mino_val *args, mino_env *env);
 
 /* string.c */
-mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
+mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_str_replace(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_random_uuid(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_parse_uuid(mino_state *S, mino_val *args, mino_env *env);
+mino_val *mino_uuid_from_bytes(mino_state *S, const unsigned char *b);
 int mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
 /* UTF-8 helpers used by string and collection primitives to count and
  * walk codepoints. Step returns the byte length of the codepoint at
@@ -304,227 +304,227 @@ size_t    utf8_skip_codepoints(const char *data, size_t bytes,
 long long utf8_codepoint_count(const char *data, size_t bytes);
 
 /* io.c */
-mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_flush(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_println(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_prn(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_print(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args, mino_env *env);
 
 /* bignum.c */
-mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_biginteger(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_biginteger(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_denominator(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ratio_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rational_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_decimal_p(mino_state *S, mino_val *args, mino_env *env);
 /* Internal bignum/ratio/bigdec helpers (mino_bigint_*, mino_ratio_*,
  * mino_bigdec_*) are declared in collections_internal.h because val.c
  * equality, the printer, and the GC sweep hook all need them. */
 
 /* io.c (continued) */
-mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_nano_time(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_getenv(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env);
 
 /* reflection.c */
-mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_nil_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_cons_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vector_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_int_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_float_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_string_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_keyword_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_symbol_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_fn_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_char_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_number_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_map_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_set_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_seq_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_boolean_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_true_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_false_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_zero_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_pos_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_neg_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_destructure(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_last_error(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_resolve(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_nil_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_cons_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vector_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_int_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_float_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_string_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_keyword_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_symbol_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_fn_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_char_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_number_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_map_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_seq_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_boolean_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_true_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_false_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_some_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_zero_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pos_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_odd_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_destructure(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_last_error(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_error_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ex_message(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env);
 
 /* argv-ABI variants for hot fixed-arity prims. */
-mino_val_t *prim_inc_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_incp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_dec_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_decp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_count_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val *prim_inc_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_incp_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_dec_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_decp_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_first_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_rest_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_cons_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
 
 /* argv-ABI variants for variadic numeric / comparison prims. */
-mino_val_t *prim_add_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_addp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_sub_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_subp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_mul_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_mulp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_div_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_lt_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_lte_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_gt_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_gte_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val *prim_add_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_addp_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_sub_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_subp_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_mul_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_mulp_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_div_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_lt_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_lte_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_gt_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_gte_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
 
 /* argv-ABI variants emitted by DEFINE_TYPE_PRED. fn_name##_argv. */
-mino_val_t *prim_nil_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_cons_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_list_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_vector_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_int_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_float_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_string_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_keyword_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_symbol_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_fn_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_char_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_number_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_map_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_set_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_seq_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_boolean_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_true_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_false_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_record_type_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_record_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_uuid_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_regex_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val *prim_nil_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_cons_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_list_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_vector_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_int_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_float_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_string_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_keyword_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_symbol_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_fn_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_char_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_number_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_map_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_set_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_seq_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_boolean_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_true_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_false_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_record_type_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_record_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_uuid_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_regex_p_argv(mino_state *S, mino_val **argv, int argc, mino_env *env);
 
 /* argv-ABI variants for numeric predicates. Their cons-ABI siblings
  * stay in place; the install table picks the argv path automatically
  * when fn2 is set in the def. Cuts the one-cell cons-spine cost of
  * each predicate call out of the hot loop in (reduce + (filter pred ...)). */
-mino_val_t *prim_zero_p_argv (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_pos_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_neg_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_odd_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
-mino_val_t *prim_even_p_argv (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val *prim_zero_p_argv (mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_pos_p_argv  (mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_neg_p_argv  (mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_odd_p_argv  (mino_state *S, mino_val **argv, int argc, mino_env *env);
+mino_val *prim_even_p_argv (mino_state *S, mino_val **argv, int argc, mino_env *env);
 
 /* regex.c */
-mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
+mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env);
+mino_val *mino_regex_from_source(mino_state *S, mino_val *source);
 
 /* stateful.c */
-mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_volatile_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_volatile_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vreset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_vswap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_volatile_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_volatile_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vreset_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_vswap_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_remove_watch(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set_validator(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_get_validator(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args, mino_env *env);
 
 /* module.c */
-mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_source(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_apropos(mino_state *S, mino_val *args, mino_env *env);
 
 /* ns.c -- namespace and var introspection */
-mino_val_t *prim_in_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_the_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_create_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_remove_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_publics(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_interns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_unalias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_all_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_loaded_libs(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_find_var(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_requiring_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_intern(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_var_get(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_var_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_alter_var_root(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val *prim_in_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_find_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_the_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_create_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_remove_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_name(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_publics(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_map(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_unalias(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_unmap(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_loaded_libs(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_resolve(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_requiring_resolve(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_alter_var_root(mino_state *S, mino_val *args, mino_env *env);
 extern const mino_prim_def k_prims_ns[];
 extern const size_t        k_prims_ns_count;
 
 /* proc.c */
-mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-void mino_install_proc(mino_state_t *S, mino_env_t *env);
+mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env);
+void mino_install_proc(mino_state *S, mino_env *env);
 
 /* fs.c */
-mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_mkdir_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-void mino_install_fs(mino_state_t *S, mino_env_t *env);
+mino_val *prim_file_exists_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_directory_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env);
+void mino_install_fs(mino_state *S, mino_env *env);
 
 /* host.c */
-void mino_install_host(mino_state_t *S, mino_env_t *env);
+void mino_install_host(mino_state *S, mino_env *env);
 
 /* async.c */
-void mino_install_async(mino_state_t *S, mino_env_t *env);
+void mino_install_async(mino_state *S, mino_env *env);
 
 /* Per-domain primitive tables.  Each prim_*.c exports the table and
  * its element count; prim/install.c composes them into k_core_domains[]
@@ -599,8 +599,8 @@ extern const size_t        k_prims_stm_count;
  * after a successful commit with the list already detached from
  * the tx, so a recursive dosync triggered by an action's body
  * cannot mutate the list being walked. */
-void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
-                               mino_env_t *env);
+void mino_agent_drain_pending(mino_state *S, mino_val *pending,
+                               mino_env *env);
 
 /* Stop the per-state agent worker thread. Sets agents_shutdown,
  * wakes the worker, drops state_lock, joins. Idempotent. Safe to
@@ -610,6 +610,6 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
  * the worker thread (would self-join). prim_shutdown_agents catches
  * that case and throws; mino_state_free runs after eval has
  * unwound, so the embedder thread is the caller. */
-void mino_agent_quiesce_workers(mino_state_t *S);
+void mino_agent_quiesce_workers(mino_state *S);
 
 #endif /* PRIM_INTERNAL_H */

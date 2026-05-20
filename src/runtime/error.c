@@ -9,42 +9,42 @@
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
 
-const char *mino_last_error(mino_state_t *S)
+const char *mino_last_error(mino_state *S)
 {
     return mino_current_ctx(S)->error_buf[0] ? mino_current_ctx(S)->error_buf : NULL;
 }
 
-const mino_diag_t *mino_last_diag(mino_state_t *S)
+const mino_diag *mino_last_diag(mino_state *S)
 {
     return mino_current_ctx(S)->last_diag;
 }
 
-mino_val_t *mino_last_error_map(mino_state_t *S)
+mino_val *mino_last_error_map(mino_state *S)
 {
     if (mino_current_ctx(S)->last_diag == NULL) return mino_nil(S);
     return diag_to_map(S, mino_current_ctx(S)->last_diag);
 }
 
-const char *mino_error_kind(mino_state_t *S)
+const char *mino_error_kind(mino_state *S)
 {
-    const mino_diag_t *d = mino_current_ctx(S)->last_diag;
+    const mino_diag *d = mino_current_ctx(S)->last_diag;
     return (d != NULL) ? d->kind : NULL;
 }
 
-const char *mino_error_code(mino_state_t *S)
+const char *mino_error_code(mino_state *S)
 {
-    const mino_diag_t *d = mino_current_ctx(S)->last_diag;
+    const mino_diag *d = mino_current_ctx(S)->last_diag;
     return (d != NULL) ? d->code : NULL;
 }
 
-void mino_clear_error(mino_state_t *S)
+void mino_clear_error(mino_state *S)
 {
     clear_error(S);
 }
 
 /* Install a fully-built diagnostic as the current error. Takes ownership
  * of d. Renders a compact form into error_buf for backward compat. */
-void set_diag(mino_state_t *S, mino_diag_t *d)
+void set_diag(mino_state *S, mino_diag *d)
 {
     if (mino_current_ctx(S)->last_diag != NULL) {
         diag_free(mino_current_ctx(S)->last_diag);
@@ -57,9 +57,9 @@ void set_diag(mino_state_t *S, mino_diag_t *d)
     }
 }
 
-void set_error(mino_state_t *S, const char *msg)
+void set_error(mino_state *S, const char *msg)
 {
-    mino_diag_t *d;
+    mino_diag *d;
     size_t n = strlen(msg);
     if (n >= sizeof(mino_current_ctx(S)->error_buf)) {
         n = sizeof(mino_current_ctx(S)->error_buf) - 1;
@@ -73,7 +73,7 @@ void set_error(mino_state_t *S, const char *msg)
     mino_current_ctx(S)->last_diag = d;
 }
 
-void clear_error(mino_state_t *S)
+void clear_error(mino_state *S)
 {
     mino_current_ctx(S)->error_buf[0] = '\0';
     if (mino_current_ctx(S)->last_diag != NULL) {
@@ -83,7 +83,7 @@ void clear_error(mino_state_t *S)
 }
 
 /* Location-aware error: prepend file:line when the form has source info. */
-void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
+void set_error_at(mino_state *S, const mino_val *form, const char *msg)
 {
     if (form != NULL && mino_type_of(form) == MINO_CONS
         && form->as.cons.file != NULL && form->as.cons.line > 0) {
@@ -106,7 +106,7 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
 }
 
 /* Classified eval-phase diagnostic from a form with source info. */
-void set_eval_diag(mino_state_t *S, const mino_val_t *form,
+void set_eval_diag(mino_state *S, const mino_val *form,
                    const char *kind, const char *code, const char *msg)
 {
     set_eval_diag_with_data(S, form, kind, code, msg, NULL, NULL);
@@ -118,9 +118,9 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
  * :enable-via "..."}` and a follow-on hint pointing at the C install
  * entry point. Falls back to set_eval_diag's behaviour when the
  * extension fields are NULL. */
-void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
+void set_eval_diag_with_data(mino_state *S, const mino_val *form,
                              const char *kind, const char *code,
-                             const char *msg, mino_val_t *data,
+                             const char *msg, mino_val *data,
                              const char *note)
 {
     /* Inside a try block, convert diagnostics to thrown exceptions so
@@ -146,7 +146,7 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
                                             &loc_file, &loc_line, &loc_col);
             }
         }
-        mino_val_t *keys[7], *vals[7];
+        mino_val *keys[7], *vals[7];
         size_t      n = 0;
         keys[n] = mino_keyword(S, "mino/kind");
         vals[n] = mino_keyword(S, kind);
@@ -164,7 +164,7 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
         vals[n] = data != NULL ? data : mino_nil(S);
         n++;
         if (loc_file != NULL && loc_line > 0) {
-            mino_val_t *lkeys[3], *lvals[3];
+            mino_val *lkeys[3], *lvals[3];
             lkeys[0] = mino_keyword(S, "file");
             lvals[0] = mino_string(S, loc_file);
             lkeys[1] = mino_keyword(S, "line");
@@ -175,13 +175,13 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
             vals[n] = mino_map(S, lkeys, lvals, 3);
             n++;
         }
-        mino_val_t *ex = mino_map(S, keys, vals, n);
+        mino_val *ex = mino_map(S, keys, vals, n);
         (void)note;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
     {
-        mino_diag_t *d = diag_new(kind, code, "eval", msg);
+        mino_diag *d = diag_new(kind, code, "eval", msg);
         if (d != NULL && form != NULL && mino_type_of(form) == MINO_CONS
             && form->as.cons.file != NULL && form->as.cons.line > 0) {
             mino_span_t span;
@@ -224,7 +224,7 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
 }
 
 /* Return a short human-readable label for a value's type. */
-const char *type_tag_str(const mino_val_t *v)
+const char *type_tag_str(const mino_val *v)
 {
     if (v == NULL) return "nil";
     switch (mino_type_of(v)) {
@@ -278,7 +278,7 @@ const char *type_tag_str(const mino_val_t *v)
 /* Call stack (for stack traces on error)                                     */
 /* ------------------------------------------------------------------------- */
 
-void push_frame(mino_state_t *S, const char *name, const char *file,
+void push_frame(mino_state *S, const char *name, const char *file,
                 int line, int column)
 {
     if (mino_current_ctx(S)->call_depth < MAX_CALL_DEPTH) {
@@ -290,7 +290,7 @@ void push_frame(mino_state_t *S, const char *name, const char *file,
     }
 }
 
-void pop_frame(mino_state_t *S)
+void pop_frame(mino_state *S)
 {
     if (mino_current_ctx(S)->call_depth > 0) {
         mino_current_ctx(S)->call_depth--;
@@ -298,7 +298,7 @@ void pop_frame(mino_state_t *S)
 }
 
 /* Append the current call stack to error_buf. Called once per error. */
-void append_trace(mino_state_t *S)
+void append_trace(mino_state *S)
 {
     size_t pos;
     int    i;
@@ -323,7 +323,7 @@ void append_trace(mino_state_t *S)
 /* Metadata                                                                  */
 /* ------------------------------------------------------------------------- */
 
-meta_entry_t *meta_find(mino_state_t *S, const char *name)
+meta_entry_t *meta_find(mino_state *S, const char *name)
 {
     size_t i;
     for (i = 0; i < S->module.meta_table_len; i++) {
@@ -334,8 +334,8 @@ meta_entry_t *meta_find(mino_state_t *S, const char *name)
     return NULL;
 }
 
-void meta_set(mino_state_t *S, const char *name, const char *doc,
-              size_t doc_len, mino_val_t *source)
+void meta_set(mino_state *S, const char *name, const char *doc,
+              size_t doc_len, mino_val *source)
 {
     meta_entry_t *e = meta_find(S, name);
     if (e != NULL) {
@@ -378,7 +378,7 @@ void meta_set(mino_state_t *S, const char *name, const char *doc,
     S->module.meta_table_len++;
 }
 
-void meta_set_capability(mino_state_t *S, const char *name,
+void meta_set_capability(mino_state *S, const char *name,
                          const char *capability)
 {
     meta_entry_t *e = meta_find(S, name);

@@ -21,29 +21,29 @@
 #include <stdint.h>
 
 /* ns_env.c: per-namespace root env table. */
-void load_stack_truncate(mino_state_t *S, size_t len);
-mino_env_t *ns_env_lookup(mino_state_t *S, const char *name);   /* borrowed */
-mino_env_t *ns_env_ensure(mino_state_t *S, const char *name);   /* GC-owned, rooted */
-mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name);
-void        mino_publish_current_ns(mino_state_t *S);
-mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name);
-void        ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta);
-mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, rooted */
+void load_stack_truncate(mino_state *S, size_t len);
+mino_env *ns_env_lookup(mino_state *S, const char *name);   /* borrowed */
+mino_env *ns_env_ensure(mino_state *S, const char *name);   /* GC-owned, rooted */
+mino_val *ns_symbol_with_meta(mino_state *S, const char *name);
+void        mino_publish_current_ns(mino_state *S);
+mino_val *ns_env_get_meta(mino_state *S, const char *name);
+void        ns_env_set_meta(mino_state *S, const char *name, mino_val *meta);
+mino_env *current_ns_env(mino_state *S);                    /* GC-owned, rooted */
 
 /* var.c: var registry helpers. */
-mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
-void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
-mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
-void           var_unintern(mino_state_t *S, const char *ns, const char *name);
+mino_val    *var_intern(mino_state *S, const char *ns, const char *name);
+void           var_set_root(mino_state *S, mino_val *var, mino_val *val);
+mino_val    *var_find(mino_state *S, const char *ns, const char *name);
+void           var_unintern(mino_state *S, const char *ns, const char *name);
 
 /* state.c: per-state PRNG. Seeds lazily on first call. */
-uint64_t state_rand64(mino_state_t *S);
+uint64_t state_rand64(mino_state *S);
 
 /* module.c: shared module-resolution helpers used by the ns special
  * form (eval/defs.c) and the require primitive (prim/module.c). */
 int  runtime_module_dotted_to_path(const char *name, size_t nlen,
                                    char *buf, size_t bufsize);
-int  runtime_module_add_alias(mino_state_t *S,
+int  runtime_module_add_alias(mino_state *S,
                               const char *alias, const char *full);
 
 #endif /* RUNTIME_VAR_MODULE_H */

@@ -3,7 +3,7 @@
  *
  * The evaluator's special-form recognition runs through one table.
  * Each entry pairs the cached interned-symbol pointer (looked up at
- * runtime via offsetof, since the cache lives on mino_state_t) with
+ * runtime via offsetof, since the cache lives on mino_state) with
  * the handler. Inline handlers for forms small enough to leave their
  * body in the registry (quote, quasiquote, if, do, recur, lazy-seq,
  * when, and, or, var) live here too.
@@ -19,8 +19,8 @@
 
 /* --- Inline-form handlers ----------------------------------------------- */
 
-static mino_val_t *eval_quote(mino_state_t *S, mino_val_t *form,
-                              mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_quote(mino_state *S, mino_val *form,
+                              mino_val *args, mino_env *env, int tail)
 {
     (void)env; (void)tail;
     if (!mino_is_cons(args)) {
@@ -31,8 +31,8 @@ static mino_val_t *eval_quote(mino_state_t *S, mino_val_t *form,
     return args->as.cons.car;
 }
 
-static mino_val_t *eval_quasiquote(mino_state_t *S, mino_val_t *form,
-                                   mino_val_t *args, mino_env_t *env,
+static mino_val *eval_quasiquote(mino_state *S, mino_val *form,
+                                   mino_val *args, mino_env *env,
                                    int tail)
 {
     (void)tail;
@@ -44,8 +44,8 @@ static mino_val_t *eval_quasiquote(mino_state_t *S, mino_val_t *form,
     return quasiquote_expand(S, args->as.cons.car, env);
 }
 
-static mino_val_t *eval_unquote_outside(mino_state_t *S, mino_val_t *form,
-                                        mino_val_t *args, mino_env_t *env,
+static mino_val *eval_unquote_outside(mino_state *S, mino_val *form,
+                                        mino_val *args, mino_env *env,
                                         int tail)
 {
     (void)args; (void)env; (void)tail;
@@ -54,11 +54,11 @@ static mino_val_t *eval_unquote_outside(mino_state_t *S, mino_val_t *form,
     return NULL;
 }
 
-static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
-                            mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_var(mino_state *S, mino_val *form,
+                            mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *sym_arg;
-    mino_val_t *var;
+    mino_val *sym_arg;
+    mino_val *var;
     char        vbuf[256];
     size_t      vn;
     (void)tail;
@@ -88,7 +88,7 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
             char        ns_buf[256];
             size_t      ns_len = (size_t)(sl - vbuf);
             const char *name   = sl + 1;
-            mino_env_t *target;
+            mino_env *target;
             memcpy(ns_buf, vbuf, ns_len);
             ns_buf[ns_len] = '\0';
             var = var_find(S, ns_buf, name);
@@ -126,9 +126,9 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
      * embedder env no longer chains to clojure.core, so we fall through
      * to current_ns_env (which does) to mirror eval_symbol's lookup. */
     {
-        mino_val_t *val = mino_env_get(env, vbuf);
+        mino_val *val = mino_env_get(env, vbuf);
         if (val == NULL) {
-            mino_env_t *ns_env = current_ns_env(S);
+            mino_env *ns_env = current_ns_env(S);
             if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
         }
         if (val != NULL) {
@@ -145,13 +145,13 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
     }
 }
 
-static mino_val_t *eval_if(mino_state_t *S, mino_val_t *form,
-                           mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_if(mino_state *S, mino_val *form,
+                           mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *cond_form;
-    mino_val_t *then_form;
-    mino_val_t *else_form = mino_nil(S);
-    mino_val_t *cond;
+    mino_val *cond_form;
+    mino_val *then_form;
+    mino_val *else_form = mino_nil(S);
+    mino_val *cond;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         set_eval_diag(S, form, "syntax", "MSY001",
                       "if requires a condition and a then-branch");
@@ -171,17 +171,17 @@ static mino_val_t *eval_if(mino_state_t *S, mino_val_t *form,
                      env, tail);
 }
 
-static mino_val_t *eval_do(mino_state_t *S, mino_val_t *form,
-                           mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_do(mino_state *S, mino_val *form,
+                           mino_val *args, mino_env *env, int tail)
 {
     (void)form;
     return eval_implicit_do_impl(S, args, env, tail);
 }
 
-static mino_val_t *eval_recur(mino_state_t *S, mino_val_t *form,
-                              mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_recur(mino_state *S, mino_val *form,
+                              mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *evaled;
+    mino_val *evaled;
     (void)form; (void)tail;
     evaled = eval_args(S, args, env);
     if (evaled == NULL && mino_last_error(S) != NULL) {
@@ -191,10 +191,10 @@ static mino_val_t *eval_recur(mino_state_t *S, mino_val_t *form,
     return &S->recur_sentinel;
 }
 
-static mino_val_t *eval_lazy_seq(mino_state_t *S, mino_val_t *form,
-                                 mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_lazy_seq(mino_state *S, mino_val *form,
+                                 mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *lz;
+    mino_val *lz;
     (void)form; (void)tail;
     lz = alloc_val(S, MINO_LAZY);
     lz->as.lazy.body     = args;
@@ -204,10 +204,10 @@ static mino_val_t *eval_lazy_seq(mino_state_t *S, mino_val_t *form,
     return lz;
 }
 
-static mino_val_t *eval_when(mino_state_t *S, mino_val_t *form,
-                             mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_when(mino_state *S, mino_val *form,
+                             mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *cond;
+    mino_val *cond;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001",
                       "when requires a condition");
@@ -219,13 +219,13 @@ static mino_val_t *eval_when(mino_state_t *S, mino_val_t *form,
     return eval_implicit_do_impl(S, args->as.cons.cdr, env, tail);
 }
 
-static mino_val_t *eval_and(mino_state_t *S, mino_val_t *form,
-                            mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_and(mino_state *S, mino_val *form,
+                            mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *result = mino_true(S);
+    mino_val *result = mino_true(S);
     (void)form;
     while (mino_is_cons(args)) {
-        mino_val_t *rest = args->as.cons.cdr;
+        mino_val *rest = args->as.cons.cdr;
         /* Last clause is tail position. */
         if (!mino_is_cons(rest)) {
             return eval_impl(S, args->as.cons.car, env, tail);
@@ -238,13 +238,13 @@ static mino_val_t *eval_and(mino_state_t *S, mino_val_t *form,
     return result;
 }
 
-static mino_val_t *eval_or(mino_state_t *S, mino_val_t *form,
-                           mino_val_t *args, mino_env_t *env, int tail)
+static mino_val *eval_or(mino_state *S, mino_val *form,
+                           mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *result = mino_nil(S);
+    mino_val *result = mino_nil(S);
     (void)form;
     while (mino_is_cons(args)) {
-        mino_val_t *rest = args->as.cons.cdr;
+        mino_val *rest = args->as.cons.cdr;
         if (!mino_is_cons(rest)) {
             return eval_impl(S, args->as.cons.car, env, tail);
         }
@@ -259,7 +259,7 @@ static mino_val_t *eval_or(mino_state_t *S, mino_val_t *form,
 /* --- Registry table ----------------------------------------------------- */
 
 /*
- * Each entry pairs the cached-symbol slot (offset into mino_state_t)
+ * Each entry pairs the cached-symbol slot (offset into mino_state)
  * with the handler. The first three pairs that share a handler
  * (let/let*, fn/fn*, loop/loop*, unquote/unquote-splicing) appear
  * twice so pointer-eq resolves both spellings; the order is the
@@ -273,7 +273,7 @@ typedef struct {
 } special_form_entry;
 
 #define SF(member, lit, handler) \
-    { offsetof(mino_state_t, member), (lit), sizeof(lit) - 1, (handler) }
+    { offsetof(mino_state, member), (lit), sizeof(lit) - 1, (handler) }
 
 static const special_form_entry k_special_forms[] = {
     SF(sf_quote,            "quote",            eval_quote),
@@ -308,15 +308,15 @@ static const size_t k_special_forms_count =
 
 #undef SF
 
-static mino_val_t *cached_at(mino_state_t *S, size_t off)
+static mino_val *cached_at(mino_state *S, size_t off)
 {
-    return *(mino_val_t **)((char *)S + off);
+    return *(mino_val **)((char *)S + off);
 }
 
-int eval_try_special_form(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *head, mino_val_t *args,
-                          mino_env_t *env, int tail,
-                          mino_val_t **out)
+int eval_try_special_form(mino_state *S, mino_val *form,
+                          mino_val *head, mino_val *args,
+                          mino_env *env, int tail,
+                          mino_val **out)
 {
     size_t i;
     if (head == NULL || mino_type_of(head) != MINO_SYMBOL) {
@@ -324,7 +324,7 @@ int eval_try_special_form(mino_state_t *S, mino_val_t *form,
     }
     for (i = 0; i < k_special_forms_count; i++) {
         const special_form_entry *e = &k_special_forms[i];
-        mino_val_t *cached = cached_at(S, e->sf_offset);
+        mino_val *cached = cached_at(S, e->sf_offset);
         if (head == cached
             || (head->meta != NULL
                 && head->as.s.len == e->name_len

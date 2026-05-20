@@ -83,7 +83,7 @@ static size_t append_escaped(char *buf, size_t pos, size_t cap,
 
 /* Build a shell command string from a cons-list of string arguments.
  * Returns a malloc'd string or NULL on failure. */
-static char *build_command(mino_state_t *S, mino_val_t *args)
+static char *build_command(mino_state *S, mino_val *args)
 {
     char *buf;
     size_t cap = 4096;
@@ -95,7 +95,7 @@ static char *build_command(mino_state_t *S, mino_val_t *args)
     buf[0] = '\0';
 
     while (mino_is_cons(args)) {
-        mino_val_t *arg = args->as.cons.car;
+        mino_val *arg = args->as.cons.car;
         size_t new_pos;
         if (arg == NULL || mino_type_of(arg) != MINO_STRING) {
             free(buf);
@@ -171,15 +171,15 @@ static char *read_all(FILE *fp, size_t *out_len)
 /* ---- primitives ---- */
 
 /* (sh cmd & args) -- run command, return {:exit n :out "..."} */
-mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
 {
     char *cmd;
     FILE *fp;
     char *out;
     size_t out_len;
     int status;
-    mino_val_t *keys[2], *vals[2];
-    mino_val_t *result;
+    mino_val *keys[2], *vals[2];
+    mino_val *result;
     (void)env;
 
     if (!mino_is_cons(args)) {
@@ -247,12 +247,12 @@ mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (sh! cmd & args) -- run command, return stdout; throw on non-zero exit. */
-mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *result = prim_sh(S, args, env);
-    mino_val_t *exit_val;
-    mino_val_t *out_val;
-    mino_val_t *exit_key;
+    mino_val *result = prim_sh(S, args, env);
+    mino_val *exit_val;
+    mino_val *out_val;
+    mino_val *exit_key;
 
     if (result == NULL) return NULL;
 
@@ -277,9 +277,9 @@ mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (thread-sleep ms) -- block the current thread for ms milliseconds.
  * Returns nil. Negative or non-integer ms throws. */
-mino_val_t *prim_thread_sleep(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ms_val;
+    mino_val *ms_val;
     long long   ms;
     struct timespec ts;
     (void)env;
@@ -332,9 +332,9 @@ const mino_prim_def k_prims_proc[] = {
 const size_t k_prims_proc_count =
     sizeof(k_prims_proc) / sizeof(k_prims_proc[0]);
 
-void mino_install_proc(mino_state_t *S, mino_env_t *env)
+void mino_install_proc(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_proc, k_prims_proc_count,

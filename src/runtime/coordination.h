@@ -31,20 +31,20 @@
 /* worker ctx.                                                              */
 /* ------------------------------------------------------------------------- */
 
-void mino_safepoint_park(mino_state_t *S);
+void mino_safepoint_park(mino_state *S);
 
 /* BC dispatch safepoint poll: cooperative cancel + state_lock
  * auto-yield. Called from every backward jump in the BC VM. Returns
  * 1 to continue, 0 to abort (caller propagates NULL via bc_done).
  * Fast path is one branch on cancel_ptr (NULL on the embedder)
  * plus an unsigned counter increment. */
-int mino_bc_safepoint(mino_state_t *S);
+int mino_bc_safepoint(mino_state *S);
 
 /* GC-side STW driver: request all worker ctxs park before a major sweep,
  * then release them after. Single-threaded today these are O(1) on
  * S->main_ctx; multi-threaded variants iterate the worker set. */
-void gc_request_stw(mino_state_t *S);
-void gc_release_stw(mino_state_t *S);
+void gc_request_stw(mino_state *S);
+void gc_release_stw(mino_state *S);
 
 /* ------------------------------------------------------------------------- */
 /* Per-state lock helpers                                                    */
@@ -55,22 +55,22 @@ void gc_release_stw(mino_state_t *S);
 /* Cross-state work runs fully concurrent (each state has its own lock).    */
 /* ------------------------------------------------------------------------- */
 
-void mino_state_lock_init(mino_state_t *S);
-void mino_state_lock_destroy(mino_state_t *S);
-void mino_state_lock_acquire(mino_state_t *S);
-void mino_state_lock_release(mino_state_t *S);
+void mino_state_lock_init(mino_state *S);
+void mino_state_lock_destroy(mino_state *S);
+void mino_state_lock_acquire(mino_state *S);
+void mino_state_lock_release(mino_state *S);
 
 /* worker_list_lock: brief lock for worker_ctxs_head + thread_count.
  * Inner to state_lock; never wraps an eval. Workers at entry/exit
  * acquire alone; spawn + GC root scan acquire from inside state_lock. */
-void mino_worker_list_lock_init(mino_state_t *S);
-void mino_worker_list_lock_destroy(mino_state_t *S);
-void mino_worker_list_lock_acquire(mino_state_t *S);
-void mino_worker_list_lock_release(mino_state_t *S);
+void mino_worker_list_lock_init(mino_state *S);
+void mino_worker_list_lock_destroy(mino_state *S);
+void mino_worker_list_lock_acquire(mino_state *S);
+void mino_worker_list_lock_release(mino_state *S);
 
 /* Yield: drop down to lock_depth==0, returning the previous depth so
  * the caller can resume to the same level after a blocking wait. */
-int  mino_yield_lock(mino_state_t *S);
-void mino_resume_lock(mino_state_t *S, int saved_depth);
+int  mino_yield_lock(mino_state *S);
+void mino_resume_lock(mino_state *S, int saved_depth);
 
 #endif /* RUNTIME_COORDINATION_H */

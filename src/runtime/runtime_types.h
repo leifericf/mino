@@ -19,7 +19,7 @@
 /* Module cache entry. */
 typedef struct {
     char       *name;
-    mino_val_t *value;
+    mino_val *value;
 } module_entry_t;
 
 /* Bundled-stdlib registry entry. Source pointer is a static C-string
@@ -38,7 +38,7 @@ typedef struct {
     char       *name;
     char       *docstring;
     char       *capability;
-    mino_val_t *source;
+    mino_val *source;
 } meta_entry_t;
 
 /* Call-stack frame for stack traces. */
@@ -53,13 +53,13 @@ typedef struct {
 
 /* GC root-environment registry node (malloc-owned). */
 typedef struct root_env {
-    mino_env_t      *env;
+    mino_env      *env;
     struct root_env *next;
 } root_env_t;
 
 /* Host-retained value ref (malloc-owned). */
 struct mino_ref {
-    mino_val_t      *val;
+    mino_val      *val;
     struct mino_ref *next;
     struct mino_ref *prev;
 };
@@ -67,7 +67,7 @@ struct mino_ref {
 /* Dynamic binding frame. */
 typedef struct dyn_binding {
     const char          *name;
-    mino_val_t          *val;
+    mino_val          *val;
     struct dyn_binding  *next;
 } dyn_binding_t;
 
@@ -79,7 +79,7 @@ typedef struct dyn_frame {
 /* Environment binding. */
 typedef struct {
     char       *name;
-    mino_val_t *val;
+    mino_val *val;
 } env_binding_t;
 
 /* Namespace alias entry. Each alias is owned by the namespace that
@@ -94,15 +94,15 @@ typedef struct {
 /* Per-namespace root env entry. */
 typedef struct {
     const char *name;     /* interned ns name */
-    mino_env_t *env;      /* root env for this ns; parent → clojure.core (or NULL for clojure.core itself) */
-    mino_val_t *meta;     /* nil or a map of ns-level metadata */
+    mino_env *env;      /* root env for this ns; parent → clojure.core (or NULL for clojure.core itself) */
+    mino_val *meta;     /* nil or a map of ns-level metadata */
 } ns_env_entry_t;
 
 /* Var registry entry. */
 typedef struct {
     const char *ns;      /* interned namespace */
     const char *name;    /* interned name */
-    mino_val_t *var;     /* the MINO_VAR value */
+    mino_val *var;     /* the MINO_VAR value */
 } var_entry_t;
 
 /* Open-addressing hash slot for the var registry. Keyed on the
@@ -111,7 +111,7 @@ typedef struct {
 typedef struct {
     const char *ns;
     const char *name;
-    mino_val_t *var;
+    mino_val *var;
 } var_hash_slot_t;
 
 /* Record-type registry entry. Pinned for the life of the state so
@@ -121,7 +121,7 @@ typedef struct {
 typedef struct record_type_entry {
     const char               *ns;    /* interned ns */
     const char               *name;  /* interned name */
-    mino_val_t               *type;  /* the MINO_TYPE value */
+    mino_val               *type;  /* the MINO_TYPE value */
     struct record_type_entry *next;
 } record_type_entry_t;
 
@@ -138,7 +138,7 @@ struct mino_env {
     env_binding_t *bindings;
     size_t         len;
     size_t         cap;
-    mino_env_t    *parent;
+    mino_env    *parent;
     size_t        *ht_buckets;  /* hash index: maps hash -> binding slot */
     size_t         ht_cap;      /* power of 2; SIZE_MAX = empty slot */
 };

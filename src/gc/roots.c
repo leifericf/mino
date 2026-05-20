@@ -12,7 +12,7 @@
 
 /* Helpers with file-local linkage. */
 static int  gc_range_cmp(const void *a, const void *b);
-static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl);
+static void gc_mark_intern_table(mino_state *S, const intern_table_t *tbl);
 
 static int gc_range_cmp(const void *a, const void *b)
 {
@@ -29,7 +29,7 @@ static int gc_range_cmp(const void *a, const void *b)
  * interior pointers. After this returns, gc_ranges holds one entry per
  * live header in ascending payload-start order.
  */
-void gc_build_range_index(mino_state_t *S)
+void gc_build_range_index(mino_state *S)
 {
     gc_hdr_t *h;
     size_t    n = 0;
@@ -79,7 +79,7 @@ void gc_build_range_index(mino_state_t *S)
  * main + unsorted pending) via a binary search followed by a linear
  * pending scan.
  */
-void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
+void gc_range_insert(mino_state *S, gc_hdr_t *h)
 {
     gc_range_t entry;
 
@@ -121,7 +121,7 @@ void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
  * the previous "invalidate + rebuild from gc_all + qsort" path, which
  * paid O(n log n) every collection.
  */
-void gc_range_merge_pending(mino_state_t *S)
+void gc_range_merge_pending(mino_state *S)
 {
     size_t K, N, need, i, j, k;
     gc_range_t *merged;
@@ -182,7 +182,7 @@ void gc_range_merge_pending(mino_state_t *S)
  * Call site: gc_minor_collect, after the drain loops and before
  * gc_minor_sweep, while mark bits still indicate YOUNG liveness.
  */
-void gc_range_compact_after_minor_mark(mino_state_t *S)
+void gc_range_compact_after_minor_mark(mino_state *S)
 {
     size_t dst = 0, src;
     if (!S->gc.ranges_valid) {
@@ -210,7 +210,7 @@ void gc_range_compact_after_minor_mark(mino_state_t *S)
  * allocation). Fast-rejects words outside [heap_min, heap_max) when no
  * pending inserts are in flight.
  */
-gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
+gc_hdr_t *gc_find_header_for_ptr(mino_state *S, const void *p)
 {
     uintptr_t u  = (uintptr_t)p;
     size_t    lo = 0;
@@ -255,7 +255,7 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
  * proportional to intern table size. Replaces an O(N log M) hot spot
  * that dominated gc_mark_roots at 190k+ interned symbols (one per
  * gensym call) in spawn-heavy workloads. */
-static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
+static void gc_mark_intern_table(mino_state *S, const intern_table_t *tbl)
 {
     size_t i;
     /* MAJOR_MARK skips the walk: intern entries survive only when
@@ -269,7 +269,7 @@ static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
      * loop is bounded by intern.len. */
     if (S->gc.phase == GC_PHASE_MAJOR_MARK) return;
     for (i = 0; i < tbl->len; i++) {
-        mino_val_t *v = tbl->entries[i];
+        mino_val *v = tbl->entries[i];
         gc_hdr_t   *h;
         if (v == NULL) continue;
         h = ((gc_hdr_t *)v) - 1;
@@ -287,7 +287,7 @@ static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
  */
 /* gc_mark_ctx_dyn_stack -- mark every value bound in this ctx's dyn
  * stack. Walks frame -> bindings -> val. */
-static void gc_mark_ctx_dyn_stack(mino_state_t *S, mino_thread_ctx_t *ctx)
+static void gc_mark_ctx_dyn_stack(mino_state *S, mino_thread_ctx_t *ctx)
 {
     dyn_frame_t   *f;
     dyn_binding_t *b;
@@ -301,7 +301,7 @@ static void gc_mark_ctx_dyn_stack(mino_state_t *S, mino_thread_ctx_t *ctx)
 /* gc_mark_ctx_gc_save -- mark every value pinned on this ctx's gc_save
  * stack. Used so blocked workers' pinned values stay visible to a GC
  * initiated from another thread. */
-static void gc_mark_ctx_gc_save(mino_state_t *S, mino_thread_ctx_t *ctx)
+static void gc_mark_ctx_gc_save(mino_state *S, mino_thread_ctx_t *ctx)
 {
     int si;
     int limit = ctx->gc_save_len < GC_SAVE_MAX
@@ -315,7 +315,7 @@ static void gc_mark_ctx_gc_save(mino_state_t *S, mino_thread_ctx_t *ctx)
  * cells held by this thread's active transaction (if any). Without
  * this, a tentative value not yet committed could be collected
  * mid-transaction since it has no other reachable owner. */
-static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
+static void gc_mark_ctx_tx(mino_state *S, mino_thread_ctx_t *ctx)
 {
     tx_state_t     *tx = ctx->current_tx;
     tx_ref_state_t *rs;
@@ -337,7 +337,7 @@ static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
  * intern_table entries by pointer identity; without a precise root
  * here the weak intern sweep would tombstone them once nothing else
  * mentioned the symbol, leaving the cached pointer dangling. */
-static void gc_mark_envs_and_interns(mino_state_t *S)
+static void gc_mark_envs_and_interns(mino_state *S)
 {
     root_env_t *r;
     for (r = S->gc.root_envs; r != NULL; r = r->next) {
@@ -379,11 +379,11 @@ static void gc_mark_envs_and_interns(mino_state_t *S)
  * results, namespace metadata maps, source-form metadata, the var
  * registry, and host-retained refs. These are all pre-allocated tables
  * or linked structures that hold runtime-visible state. */
-static void gc_mark_module_and_meta(mino_state_t *S)
+static void gc_mark_module_and_meta(mino_state *S)
 {
     int         i;
     size_t      idx;
-    mino_ref_t *ref;
+    mino_ref *ref;
     for (i = 0; i < mino_current_ctx(S)->try_depth; i++) {
         gc_mark_interior(S, mino_current_ctx(S)->try_stack[i].exception);
     }
@@ -421,7 +421,7 @@ static void gc_mark_module_and_meta(mino_state_t *S)
  * inside state_lock (gc_alloc_typed -> major collect), so the
  * effective lock order is state_lock outer, worker_list_lock inner --
  * matching the spawn path. */
-static void gc_mark_thread_state(mino_state_t *S)
+static void gc_mark_thread_state(mino_state *S)
 {
     mino_thread_ctx_t *w;
     gc_mark_ctx_dyn_stack(S, &S->main_ctx);
@@ -471,7 +471,7 @@ static void gc_mark_thread_state(mino_state_t *S)
 
 /* Pin runtime singletons: hooks (sort comparator, print-method),
  * trampoline sentinel payloads, and the cached core.clj form vector. */
-static void gc_mark_runtime_globals(mino_state_t *S)
+static void gc_mark_runtime_globals(mino_state *S)
 {
     gc_mark_interior(S, S->sort_comp_fn);
     gc_mark_interior(S, S->print_method_fn);
@@ -563,7 +563,7 @@ static void gc_mark_runtime_globals(mino_state_t *S)
 
 /* Pin async-subsystem live values: scheduler run-queue callbacks/values
  * and timer channel payloads. */
-static void gc_mark_async_roots(mino_state_t *S)
+static void gc_mark_async_roots(mino_state *S)
 {
     struct sched_entry *e;
     for (e = S->async.run_head; e != NULL; e = e->next) {
@@ -576,7 +576,7 @@ static void gc_mark_async_roots(mino_state_t *S)
 /* Pin record-type registry entries. Record types are interned per
  * (ns, name) and live for the state's lifetime so re-eval'd defrecord
  * forms keep the same MINO_TYPE pointer identity. */
-static void gc_mark_record_types(mino_state_t *S)
+static void gc_mark_record_types(mino_state *S)
 {
     record_type_entry_t *rt;
     for (rt = S->record_types; rt != NULL; rt = rt->next) {
@@ -585,13 +585,13 @@ static void gc_mark_record_types(mino_state_t *S)
 }
 
 /* Pin queued agent action nodes. The nodes themselves are malloc'd
- * (not GC values), but they hold mino_val_t pointers (agent, fn,
+ * (not GC values), but they hold mino_val pointers (agent, fn,
  * extra args, dyn snapshot, env) that must stay live until the
  * worker thread pops and applies the action. The worker holds
  * state_lock while running each action, so concurrent mutation of
  * the queue is impossible during a major GC (which suspends all
  * workers via the safepoint mechanism). */
-static void gc_mark_agent_runq(mino_state_t *S)
+static void gc_mark_agent_runq(mino_state *S)
 {
     int pi;
     for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
@@ -601,12 +601,12 @@ static void gc_mark_agent_runq(mino_state_t *S)
             gc_mark_interior(S, n->fn);
             gc_mark_interior(S, n->extra);
             gc_mark_interior(S, n->dyn_snap);
-            gc_mark_interior(S, (mino_val_t *)n->env);
+            gc_mark_interior(S, (mino_val *)n->env);
         }
     }
 }
 
-void gc_mark_roots(mino_state_t *S)
+void gc_mark_roots(mino_state *S)
 {
     gc_mark_envs_and_interns(S);
     gc_mark_module_and_meta(S);
@@ -643,7 +643,7 @@ __attribute__((no_sanitize_address))
 #elif defined(__SANITIZE_ADDRESS__)
 __attribute__((no_sanitize_address))
 #endif
-void gc_scan_stack(mino_state_t *S)
+void gc_scan_stack(mino_state *S)
 {
     volatile char probe = 0;
     char         *lo;

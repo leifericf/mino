@@ -22,7 +22,7 @@ typedef struct bc_vm_state {
      * n_regs slots, a fn exit pops them. Every slot in [0, bc_top) is
      * a live GC root walked by gc_mark_roots. Allocated lazily on
      * first compile + run; NULL until then. */
-    mino_val_t    **bc_regs;          /* stencil-ABI-pinned offset 47888 */
+    mino_val    **bc_regs;          /* stencil-ABI-pinned offset 47888 */
     size_t          bc_regs_cap;
     size_t          bc_top;
 

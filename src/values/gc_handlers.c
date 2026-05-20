@@ -24,13 +24,13 @@
 
 #include <stdlib.h>                  /* free() for malloc-owned slot arrays */
 
-void gc_mark_child_push_exported(mino_state_t *S, const void *p);
+void gc_mark_child_push_exported(mino_state *S, const void *p);
 
 #define PUSH(p) gc_mark_child_push_exported(S, (p))
 
-static void trace_val(mino_state_t *S, gc_hdr_t *h)
+static void trace_val(mino_state *S, gc_hdr_t *h)
 {
-    mino_val_t *v = (mino_val_t *)(h + 1);
+    mino_val *v = (mino_val *)(h + 1);
     PUSH(v->meta);
     switch (mino_type_of(v)) {
     case MINO_STRING:
@@ -181,9 +181,9 @@ static void trace_val(mino_state_t *S, gc_hdr_t *h)
  * MINO_HOST_ARRAY free the malloc-owned slot arrays; MINO_FUTURE
  * tears down the worker thread, mu/cv, and impl struct. All other
  * types have nothing external to release. */
-static void finalize_val(mino_state_t *S, gc_hdr_t *h)
+static void finalize_val(mino_state *S, gc_hdr_t *h)
 {
-    mino_val_t *v = (mino_val_t *)(h + 1);
+    mino_val *v = (mino_val *)(h + 1);
     (void)S;
     switch (mino_type_of(v)) {
     case MINO_HANDLE:
@@ -214,7 +214,7 @@ static void finalize_val(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-void mino_values_register_gc_handlers(mino_state_t *S)
+void mino_values_register_gc_handlers(mino_state *S)
 {
     gc_register_tracer(S, GC_T_VAL, trace_val);
     gc_register_finalizer(S, GC_T_VAL, finalize_val);

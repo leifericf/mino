@@ -37,7 +37,7 @@
 /* Ring buffer: init / free / record / dump                         */
 /* ---------------------------------------------------------------- */
 
-void gc_evt_init(mino_state_t *S)
+void gc_evt_init(mino_state *S)
 {
     const char *env = getenv("MINO_GC_EVT");
     if (env == NULL || env[0] == '\0' || env[0] == '0') {
@@ -51,7 +51,7 @@ void gc_evt_init(mino_state_t *S)
     S->gc.evt_seq = 1; /* 0 reserved for "empty" */
 }
 
-void gc_evt_free(mino_state_t *S)
+void gc_evt_free(mino_state *S)
 {
     free(S->gc.evt_ring);
     S->gc.evt_ring = NULL;
@@ -59,7 +59,7 @@ void gc_evt_free(mino_state_t *S)
 
 /* Callers reach this via the gc_evt_record macro, which already
  * short-circuits when the ring is NULL. Never call this directly. */
-void gc_evt_record_impl(mino_state_t *S, uint8_t kind, const void *a,
+void gc_evt_record_impl(mino_state *S, uint8_t kind, const void *a,
                         const void *b, const void *c, uintptr_t aux,
                         uint16_t extra)
 {
@@ -116,7 +116,7 @@ static int gc_evt_mentions(const gc_evt_t *e, const void *p1,
     return 0;
 }
 
-void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
+void gc_evt_dump_around(mino_state *S, const void *p1, const void *p2,
                         const void *p3)
 {
     uint64_t end, start, i;
@@ -153,7 +153,7 @@ void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
 
 /* Walk both generation lists and apply fn to every header. Used by
  * the classifier to save, clear, and restore mark bits. */
-static void gc_for_each_hdr(mino_state_t *S,
+static void gc_for_each_hdr(mino_state *S,
                             void (*fn)(gc_hdr_t *h, void *user),
                             void *user)
 {
@@ -163,7 +163,7 @@ static void gc_for_each_hdr(mino_state_t *S,
 }
 
 /* Count headers live on both lists, used to size the save buffer. */
-static size_t gc_count_hdrs(mino_state_t *S)
+static size_t gc_count_hdrs(mino_state *S)
 {
     size_t    n = 0;
     gc_hdr_t *h;
@@ -189,7 +189,7 @@ static void save_mark_fn(gc_hdr_t *h, void *user)
     c->idx++;
 }
 
-int gc_classify_offender(mino_state_t *S, gc_hdr_t *offender)
+int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
 {
     struct mark_save_ctx ctx;
     size_t   i, n;

@@ -13,7 +13,7 @@
 #include "eval/bc/internal.h"
 #include "gc/internal.h"
 
-void gc_mark_child_push_exported(mino_state_t *S, const void *p);
+void gc_mark_child_push_exported(mino_state *S, const void *p);
 
 #define PUSH(p) gc_mark_child_push_exported(S, (p))
 
@@ -23,7 +23,7 @@ void gc_mark_child_push_exported(mino_state_t *S, const void *p);
  * GC can't see without an explicit walk; this helper centralises
  * the slot-kind -> field mapping so the MINO_FN walker and the
  * GC_T_BC walker can't drift. */
-void mino_bc_trace_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc)
+void mino_bc_trace_ic_slots(mino_state *S, const struct mino_bc_fn *bc)
 {
     int i;
     if (bc == NULL || bc->ic_slots == NULL || bc->ic_slots_len <= 0) return;
@@ -45,7 +45,7 @@ void mino_bc_trace_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc)
  * code buffer) adds the bc directly to the remset, and minor mark
  * then needs to push its YOUNG children itself. Without this case
  * the bc lives but its buffers are silently swept. */
-static void trace_bc(mino_state_t *S, gc_hdr_t *h)
+static void trace_bc(mino_state *S, gc_hdr_t *h)
 {
     struct mino_bc_fn *bc = (struct mino_bc_fn *)(h + 1);
     PUSH(bc->code);
@@ -67,7 +67,7 @@ static void trace_bc(mino_state_t *S, gc_hdr_t *h)
  * an explicit push. The const pool is GC_T_VALARR so the GC's
  * tag-walk scans its slots automatically once the buffer itself
  * is marked. */
-void mino_bc_trace_fn_bc(mino_state_t *S, const void *bc_ptr)
+void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr)
 {
     const struct mino_bc_fn *bc = (const struct mino_bc_fn *)bc_ptr;
     int i;
@@ -93,7 +93,7 @@ void mino_bc_trace_fn_bc(mino_state_t *S, const void *bc_ptr)
     PUSH(bc->ic_stats);
 }
 
-void mino_bc_register_gc_handlers(mino_state_t *S)
+void mino_bc_register_gc_handlers(mino_state *S)
 {
     gc_register_tracer(S, GC_T_BC, trace_bc);
 }

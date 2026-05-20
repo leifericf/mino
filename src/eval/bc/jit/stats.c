@@ -385,7 +385,7 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     if (bc != NULL && bc->source_map.positions != NULL
         && bc->source_map.len > 0) {
         /* strdup the filename: the borrowed pointer's pool lives in the
-         * mino_state_t and is freed before atexit handlers fire. */
+         * mino_state and is freed before atexit handlers fire. */
         if (bc->source_map.file != NULL) {
             size_t n = strlen(bc->source_map.file);
             char  *copy = (char *)malloc(n + 1);

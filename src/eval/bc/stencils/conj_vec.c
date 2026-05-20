@@ -13,9 +13,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_conj_vec(mino_val_t **regs,
-                          mino_val_t **consts,
-                          mino_state_t *S)
+void stencil_op_conj_vec(mino_val **regs,
+                          mino_val **consts,
+                          mino_state *S)
 {
     regs = mino_jit_conj_vec_slow(S, regs,
                                   (unsigned)IMM_A,

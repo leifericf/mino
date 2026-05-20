@@ -10,9 +10,9 @@
  * body forms (so eval_implicit_do can walk it); catch_body and
  * finally_body are tails of the original args list (no copy). */
 typedef struct {
-    mino_val_t *body_head;
-    mino_val_t *catch_body;
-    mino_val_t *finally_body;
+    mino_val *body_head;
+    mino_val *catch_body;
+    mino_val *finally_body;
     int         has_catch;
     int         has_finally;
     char        catch_var[256];
@@ -22,11 +22,11 @@ typedef struct {
  * form as a body, catch, or finally clause, and emitting a try_clauses_t.
  * Returns 0 on success, -1 on a syntax error with the diagnostic
  * already set. */
-static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
-                                 mino_val_t *args, try_clauses_t *out)
+static int partition_try_clauses(mino_state *S, mino_val *form,
+                                 mino_val *args, try_clauses_t *out)
 {
-    mino_val_t *body_tail = NULL;
-    mino_val_t *rest      = args;
+    mino_val *body_tail = NULL;
+    mino_val *rest      = args;
 
     out->body_head    = NULL;
     out->catch_body   = NULL;
@@ -36,11 +36,11 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
     out->catch_var[0] = '\0';
 
     while (mino_is_cons(rest)) {
-        mino_val_t *clause = rest->as.cons.car;
+        mino_val *clause = rest->as.cons.car;
         if (mino_is_cons(clause)
             && sym_eq(clause->as.cons.car, "catch")) {
             /* (catch e handler...) */
-            mino_val_t *cv;
+            mino_val *cv;
             size_t      vl;
             if (!mino_is_cons(clause->as.cons.cdr)) {
                 set_eval_diag(S, form, "syntax", "MSY001",
@@ -75,7 +75,7 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
         }
         /* Body form -- append to list. */
         {
-            mino_val_t *cell = mino_cons(S, clause, mino_nil(S));
+            mino_val *cell = mino_cons(S, clause, mino_nil(S));
             if (body_tail == NULL) {
                 out->body_head = cell;
             } else {
@@ -100,10 +100,10 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
  * (the inner instruction position); tree-walker frames fall back to
  * `eval_current_form`. This brings user-throw catch values in line
  * with system-throw catch values, which already carry the field. */
-mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
+mino_val *normalize_exception(mino_state *S, mino_val *ex_val)
 {
-    mino_val_t *keys[6], *vals[6];
-    mino_val_t *result;
+    mino_val *keys[6], *vals[6];
+    mino_val *result;
     size_t n;
     const char *loc_file = NULL;
     int loc_line = 0;
@@ -122,7 +122,7 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
     if (mino_type_of(ex_val) == MINO_STRING) {
         vals[3] = ex_val;
     } else if (mino_type_of(ex_val) == MINO_MAP) {
-        mino_val_t *msg_val = map_get_val(ex_val,
+        mino_val *msg_val = map_get_val(ex_val,
             mino_keyword(S, "message"));
         vals[3] = (msg_val != NULL && mino_type_of(msg_val) == MINO_STRING)
             ? msg_val : mino_string(S, "uncaught exception");
@@ -145,7 +145,7 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
                                         &loc_file, &loc_line, &loc_col);
         }
         if (loc_file == NULL || loc_line <= 0) {
-            const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+            const mino_val *form = mino_current_ctx(S)->eval_current_form;
             if (form != NULL && mino_is_cons(form)
                 && form->as.cons.file != NULL && form->as.cons.line > 0) {
                 loc_file = form->as.cons.file;
@@ -155,7 +155,7 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
         }
     }
     if (loc_file != NULL && loc_line > 0) {
-        mino_val_t *lkeys[3], *lvals[3];
+        mino_val *lkeys[3], *lvals[3];
         lkeys[0] = mino_keyword(S, "file");
         lvals[0] = mino_string(S, loc_file);
         lkeys[1] = mino_keyword(S, "line");
@@ -172,15 +172,15 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
      * piggybacks cause chains through metadata; rich-error-info
      * patterns rely on it too. Guard with MINO_IS_PTR -- tagged
      * primitives (ints, bools) cannot carry meta and dereferencing
-     * them as `mino_val_t *` would segfault. */
+     * them as `mino_val *` would segfault. */
     if (result != NULL && MINO_IS_PTR(ex_val) && ex_val->meta != NULL) {
         result->meta = ex_val->meta;
     }
     return result;
 }
 
-mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_try(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail)
 {
     try_clauses_t clauses;
     int           saved_try;
@@ -188,8 +188,8 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     int           saved_trace;
     dyn_frame_t  *saved_dyn;
     volatile int       got_exception = 0;
-    mino_val_t * volatile vol_result = NULL;
-    mino_val_t * volatile vol_ex     = NULL;
+    mino_val * volatile vol_result = NULL;
+    mino_val * volatile vol_ex     = NULL;
     (void)tail;
 
     if (partition_try_clauses(S, form, args, &clauses) != 0) {
@@ -211,7 +211,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
-        mino_val_t *r;
+        mino_val *r;
         mino_current_ctx(S)->try_depth++;
         r = eval_implicit_do(S, clauses.body_head, env);
         mino_current_ctx(S)->try_depth = saved_try;
@@ -248,9 +248,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
 
     /* Catch: run the handler if the body threw. */
     if (got_exception && clauses.has_catch) {
-        mino_val_t *ex_val = normalize_exception(S,
-            vol_ex ? (mino_val_t *)vol_ex : mino_nil(S));
-        mino_env_t *local  = env_child(S, env);
+        mino_val *ex_val = normalize_exception(S,
+            vol_ex ? (mino_val *)vol_ex : mino_nil(S));
+        mino_env *local  = env_child(S, env);
         env_bind(S, local, clauses.catch_var, ex_val);
 
         if (clauses.has_finally
@@ -266,7 +266,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
             mino_current_ctx(S)->try_stack[is].saved_load_len = S->module.load_stack_len;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
-                mino_val_t *r;
+                mino_val *r;
                 mino_current_ctx(S)->try_depth++;
                 r = eval_implicit_do(S, clauses.catch_body, local);
                 mino_current_ctx(S)->try_depth = is;
@@ -296,7 +296,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             }
         } else {
             /* No finally or nesting limit -- run catch directly. */
-            mino_val_t *r =
+            mino_val *r =
                 eval_implicit_do(S, clauses.catch_body, local);
             if (r == NULL) {
                 if (clauses.has_finally)
@@ -315,7 +315,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
 
     /* Rethrow: if no handler matched, propagate to the enclosing try. */
     if (got_exception) {
-        mino_val_t *e = (mino_val_t *)vol_ex;
+        mino_val *e = (mino_val *)vol_ex;
         if (mino_current_ctx(S)->try_depth > 0) {
             mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = e;
             longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
@@ -332,5 +332,5 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
 
-    return (mino_val_t *)vol_result;
+    return (mino_val *)vol_result;
 }

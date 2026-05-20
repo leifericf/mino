@@ -17,39 +17,39 @@
 
 #include <stdlib.h>
 
-struct mino_vec_builder { mino_state_t *S; mino_ref_t *ref; };
-struct mino_map_builder { mino_state_t *S; mino_ref_t *ref; };
-struct mino_set_builder { mino_state_t *S; mino_ref_t *ref; };
+struct mino_vec_builder { mino_state *S; mino_ref *ref; };
+struct mino_map_builder { mino_state *S; mino_ref *ref; };
+struct mino_set_builder { mino_state *S; mino_ref *ref; };
 
-mino_vec_builder_t *mino_vector_builder_new(mino_state_t *S)
+mino_vec_builder *mino_vector_builder_new(mino_state *S)
 {
-    mino_vec_builder_t *b;
-    mino_val_t *seed;
+    mino_vec_builder *b;
+    mino_val *seed;
     if (S == NULL) return NULL;
-    b = (mino_vec_builder_t *)malloc(sizeof(*b));
+    b = (mino_vec_builder *)malloc(sizeof(*b));
     if (b == NULL) return NULL;
     seed = mino_transient(S, mino_vector(S, NULL, 0));
     if (seed == NULL) { free(b); return NULL; }
     b->S   = S;
-    b->ref = mino_ref(S, seed);
+    b->ref = mino_ref_new(S, seed);
     return b;
 }
 
-void mino_vector_builder_push(mino_vec_builder_t *b, mino_val_t *v)
+void mino_vector_builder_push(mino_vec_builder *b, mino_val *v)
 {
-    mino_val_t *cur, *next;
+    mino_val *cur, *next;
     if (b == NULL) return;
     cur  = mino_deref(b->ref);
     next = mino_conj_bang(b->S, cur, v);
     if (next != NULL && next != cur) {
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref(b->S, next);
+        b->ref = mino_ref_new(b->S, next);
     }
 }
 
-mino_val_t *mino_vector_builder_finish(mino_vec_builder_t *b)
+mino_val *mino_vector_builder_finish(mino_vec_builder *b)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (b == NULL) return NULL;
     out = mino_persistent(b->S, mino_deref(b->ref));
     mino_unref(b->S, b->ref);
@@ -57,35 +57,35 @@ mino_val_t *mino_vector_builder_finish(mino_vec_builder_t *b)
     return out;
 }
 
-mino_map_builder_t *mino_map_builder_new(mino_state_t *S)
+mino_map_builder *mino_map_builder_new(mino_state *S)
 {
-    mino_map_builder_t *b;
-    mino_val_t *seed;
+    mino_map_builder *b;
+    mino_val *seed;
     if (S == NULL) return NULL;
-    b = (mino_map_builder_t *)malloc(sizeof(*b));
+    b = (mino_map_builder *)malloc(sizeof(*b));
     if (b == NULL) return NULL;
     seed = mino_transient(S, mino_map(S, NULL, NULL, 0));
     if (seed == NULL) { free(b); return NULL; }
     b->S   = S;
-    b->ref = mino_ref(S, seed);
+    b->ref = mino_ref_new(S, seed);
     return b;
 }
 
-void mino_map_builder_put(mino_map_builder_t *b, mino_val_t *k, mino_val_t *v)
+void mino_map_builder_put(mino_map_builder *b, mino_val *k, mino_val *v)
 {
-    mino_val_t *cur, *next;
+    mino_val *cur, *next;
     if (b == NULL) return;
     cur  = mino_deref(b->ref);
     next = mino_assoc_bang(b->S, cur, k, v);
     if (next != NULL && next != cur) {
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref(b->S, next);
+        b->ref = mino_ref_new(b->S, next);
     }
 }
 
-mino_val_t *mino_map_builder_finish(mino_map_builder_t *b)
+mino_val *mino_map_builder_finish(mino_map_builder *b)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (b == NULL) return NULL;
     out = mino_persistent(b->S, mino_deref(b->ref));
     mino_unref(b->S, b->ref);
@@ -93,35 +93,35 @@ mino_val_t *mino_map_builder_finish(mino_map_builder_t *b)
     return out;
 }
 
-mino_set_builder_t *mino_set_builder_new(mino_state_t *S)
+mino_set_builder *mino_set_builder_new(mino_state *S)
 {
-    mino_set_builder_t *b;
-    mino_val_t *seed;
+    mino_set_builder *b;
+    mino_val *seed;
     if (S == NULL) return NULL;
-    b = (mino_set_builder_t *)malloc(sizeof(*b));
+    b = (mino_set_builder *)malloc(sizeof(*b));
     if (b == NULL) return NULL;
     seed = mino_transient(S, mino_set(S, NULL, 0));
     if (seed == NULL) { free(b); return NULL; }
     b->S   = S;
-    b->ref = mino_ref(S, seed);
+    b->ref = mino_ref_new(S, seed);
     return b;
 }
 
-void mino_set_builder_add(mino_set_builder_t *b, mino_val_t *v)
+void mino_set_builder_add(mino_set_builder *b, mino_val *v)
 {
-    mino_val_t *cur, *next;
+    mino_val *cur, *next;
     if (b == NULL) return;
     cur  = mino_deref(b->ref);
     next = mino_conj_bang(b->S, cur, v);
     if (next != NULL && next != cur) {
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref(b->S, next);
+        b->ref = mino_ref_new(b->S, next);
     }
 }
 
-mino_val_t *mino_set_builder_finish(mino_set_builder_t *b)
+mino_val *mino_set_builder_finish(mino_set_builder *b)
 {
-    mino_val_t *out;
+    mino_val *out;
     if (b == NULL) return NULL;
     out = mino_persistent(b->S, mino_deref(b->ref));
     mino_unref(b->S, b->ref);

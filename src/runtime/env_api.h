@@ -14,28 +14,28 @@
 
 #include <stddef.h>
 
-mino_env_t    *env_alloc(mino_state_t *S, mino_env_t *parent); /* GC-owned */
-env_binding_t *env_find_here(mino_env_t *env, const char *name); /* borrowed */
-env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen);
+mino_env    *env_alloc(mino_state *S, mino_env *parent); /* GC-owned */
+env_binding_t *env_find_here(mino_env *env, const char *name); /* borrowed */
+env_binding_t *env_find_here_n(mino_env *env, const char *name, size_t nlen);
 /* Symbol-aware lookup. Caller already has sym->as.s.{data,len}; we
  * skip strlen and walk the parent chain with the cached length. */
-mino_val_t    *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym);
-void           env_bind(mino_state_t *S, mino_env_t *env,
+mino_val    *mino_env_get_sym(mino_env *env, const mino_val *sym);
+void           env_bind(mino_state *S, mino_env *env,
                         const char *name,                      /* borrowed (copied) */
-                        mino_val_t *val);                      /* GC-owned, retained */
-void           env_bind_sym(mino_state_t *S, mino_env_t *env,
-                        mino_val_t *sym,                       /* interned symbol */
-                        mino_val_t *val);                      /* GC-owned, retained */
-int            env_unbind(mino_state_t *S, mino_env_t *env,
+                        mino_val *val);                      /* GC-owned, retained */
+void           env_bind_sym(mino_state *S, mino_env *env,
+                        mino_val *sym,                       /* interned symbol */
+                        mino_val *val);                      /* GC-owned, retained */
+int            env_unbind(mino_state *S, mino_env *env,
                         const char *name);                     /* 1 if removed */
-mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
-mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
-mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
+mino_env    *env_child(mino_state *S, mino_env *parent); /* GC-owned */
+mino_env    *env_root(mino_state *S, mino_env *env);     /* borrowed (walks up) */
+mino_val    *dyn_lookup(mino_state *S, const char *name);  /* borrowed */
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
 
 /* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
  * Returns mino_nil(S) when the stack is empty. Used by future spawn to
  * convey caller bindings to the worker, and by get-thread-bindings. */
-mino_val_t    *mino_snapshot_thread_bindings(mino_state_t *S);
+mino_val    *mino_snapshot_thread_bindings(mino_state *S);
 
 #endif /* RUNTIME_ENV_API_H */

@@ -5,9 +5,9 @@
 #include "prim/internal.h"
 #include "imath.h"
 
-mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "name requires one argument");
@@ -30,7 +30,7 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     {
         char        buf[256];
-        mino_val_t *printed = print_to_string(S, v);
+        mino_val *printed = print_to_string(S, v);
         snprintf(buf, sizeof(buf),
                  "name: expected a keyword, symbol, or string, got: %.*s",
                  printed != NULL ? (int)printed->as.s.len : 0,
@@ -39,7 +39,7 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env)
 {
     double r;
     (void)env;
@@ -63,10 +63,10 @@ mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * reproducible stream. Returns the seed. The seed must be a
  * non-zero integer; a zero seed degenerates the xorshift step, so
  * we re-seed to a fixed non-zero constant in that case. */
-mino_val_t *prim_random_seed_bang(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+mino_val *prim_random_seed_bang(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -85,14 +85,14 @@ mino_val_t *prim_random_seed_bang(mino_state_t *S, mino_val_t *args,
     return v;
 }
 
-mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env)
 {
     /* eval evaluates in the current namespace, not the calling fn's
      * ambient namespace. Clear fn_ambient_ns for the duration of the
      * eval so the form sees only its own current_ns + lexical chain,
      * matching Clojure's "*ns* is what counts" semantics. */
     const char *saved_ambient;
-    mino_val_t *result;
+    mino_val *result;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "eval requires one argument");
     }
@@ -103,14 +103,14 @@ mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Read and eval all forms in the given source string; return the
      * last form's value. Evaluates in the current namespace with
      * ambient ns cleared, matching `eval` semantics. */
     const char *saved_ambient;
-    mino_val_t *src;
-    mino_val_t *result;
+    mino_val *src;
+    mino_val *result;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "load-string requires one string argument");
@@ -127,14 +127,14 @@ mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Read and eval all forms in the file at `path`; return the last
      * form's value. Evaluates in the current namespace with ambient
      * ns cleared, matching `eval` and `load-string`. */
     const char *saved_ambient;
-    mino_val_t *path;
-    mino_val_t *result;
+    mino_val *path;
+    mino_val *result;
     char        cpath[1024];
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -158,17 +158,17 @@ mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
     }
     /* 2-arg: (symbol ns name) */
     if (mino_is_cons(args->as.cons.cdr)) {
-        mino_val_t *ns_arg  = args->as.cons.car;
-        mino_val_t *name_arg = args->as.cons.cdr->as.cons.car;
+        mino_val *ns_arg  = args->as.cons.car;
+        mino_val *name_arg = args->as.cons.cdr->as.cons.car;
         char buf[512];
         size_t pos = 0;
         if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
@@ -238,17 +238,17 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, keyword, or var");
 }
 
-mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
     }
     /* 2-arity: (keyword ns name) */
     if (mino_is_cons(args->as.cons.cdr)) {
-        mino_val_t *ns_val  = args->as.cons.car;
-        mino_val_t *nm_val  = args->as.cons.cdr->as.cons.car;
+        mino_val *ns_val  = args->as.cons.car;
+        mino_val *nm_val  = args->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr))
             return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
         if (mino_type_of(nm_val) != MINO_STRING)
@@ -275,7 +275,7 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
 }
 
-mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -284,9 +284,9 @@ mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int(S, (long long)hash_val(args->as.cons.car));
 }
 
-mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
@@ -303,8 +303,8 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Honor :type metadata (Clojure semantics). Enables print-method
      * dispatch for user types via (with-meta obj {:type :my-type}). */
     if (MINO_IS_PTR(v) && v->meta != NULL && mino_type_of(v->meta) == MINO_MAP) {
-        mino_val_t *tk = mino_keyword(S, "type");
-        mino_val_t *tv = map_get_val(v->meta, tk);
+        mino_val *tk = mino_keyword(S, "type");
+        mino_val *tv = map_get_val(v->meta, tk);
         if (tv != NULL) return tv;
     }
     switch (mino_type_of(v)) {
@@ -372,9 +372,9 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * and equality comparison by checking the tag directly. */
 
 #define DEFINE_TYPE_PRED(fn_name, pred_expr, label) \
-    mino_val_t *fn_name(mino_state_t *S, mino_val_t *args, mino_env_t *env) \
+    mino_val *fn_name(mino_state *S, mino_val *args, mino_env *env) \
     { \
-        mino_val_t *v; \
+        mino_val *v; \
         (void)env; \
         if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) { \
             return prim_throw_classified(S, "eval/arity", "MAR001", \
@@ -383,10 +383,10 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         v = args->as.cons.car; \
         return (pred_expr) ? mino_true(S) : mino_false(S); \
     } \
-    mino_val_t *fn_name##_argv(mino_state_t *S, mino_val_t **argv, int argc, \
-                               mino_env_t *env) \
+    mino_val *fn_name##_argv(mino_state *S, mino_val **argv, int argc, \
+                               mino_env *env) \
     { \
-        mino_val_t *v; \
+        mino_val *v; \
         (void)env; \
         if (argc != 1) { \
             return prim_throw_classified(S, "eval/arity", "MAR001", \
@@ -421,7 +421,7 @@ DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && mino_type_of(v) == MINO_REGEX
 
 #undef DEFINE_TYPE_PRED
 
-mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -431,9 +431,9 @@ mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_is_truthy_inline(args->as.cons.car) ? mino_false(S) : mino_true(S);
 }
 
-mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_some_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -443,9 +443,9 @@ mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return (v != NULL && mino_type_of(v) != MINO_NIL) ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -463,7 +463,7 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_SORTED_SET: return v->as.sorted.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_STRING:     return v->as.s.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_LAZY: {
-        mino_val_t *forced = lazy_force(S, v);
+        mino_val *forced = lazy_force(S, v);
         if (forced == NULL) return NULL;
         if (forced == NULL || mino_type_of(forced) == MINO_NIL) return mino_true(S);
         if (mino_type_of(forced) == MINO_CHUNKED_CONS) return mino_false(S);
@@ -486,7 +486,7 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * BigInt / Ratio / BigDec route through tower_to_double for the sign /
  * zero comparison. The double approximation preserves sign for any
  * finite value; (zero? 0N), (pos? 1N), (neg? -1.0M) etc. all work. */
-static mino_val_t *num_pred_step(mino_state_t *S, mino_val_t *v,
+static mino_val *num_pred_step(mino_state *S, mino_val *v,
                                  const char *name, int (*cmp_int)(long long),
                                  int (*cmp_float)(double))
 {
@@ -506,7 +506,7 @@ type_err:
     }
 }
 
-static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
+static mino_val *num_pred(mino_state *S, mino_val *args,
                             const char *name, int (*cmp_int)(long long),
                             int (*cmp_float)(double))
 {
@@ -525,39 +525,39 @@ static int is_pos_f(double   x)  { return x > 0.0; }
 static int is_neg_i(long long n)  { return n < 0; }
 static int is_neg_f(double   x)  { return x < 0.0; }
 
-mino_val_t *prim_zero_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+mino_val *prim_zero_p(mino_state *S, mino_val *args, mino_env *env) {
     (void)env; return num_pred(S, args, "zero?", is_zero_i, is_zero_f);
 }
-mino_val_t *prim_pos_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+mino_val *prim_pos_p(mino_state *S, mino_val *args, mino_env *env) {
     (void)env; return num_pred(S, args, "pos?", is_pos_i, is_pos_f);
 }
-mino_val_t *prim_neg_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env) {
     (void)env; return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
 }
 
-mino_val_t *prim_zero_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                             mino_env_t *env) {
+mino_val *prim_zero_p_argv(mino_state *S, mino_val **argv, int argc,
+                             mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "zero? requires one argument");
     return num_pred_step(S, argv[0], "zero?", is_zero_i, is_zero_f);
 }
-mino_val_t *prim_pos_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env) {
+mino_val *prim_pos_p_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "pos? requires one argument");
     return num_pred_step(S, argv[0], "pos?", is_pos_i, is_pos_f);
 }
-mino_val_t *prim_neg_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env) {
+mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "neg? requires one argument");
     return num_pred_step(S, argv[0], "neg?", is_neg_i, is_neg_f);
 }
 
-static mino_val_t *odd_p_step(mino_state_t *S, mino_val_t *v)
+static mino_val *odd_p_step(mino_state *S, mino_val *v)
 {
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -574,7 +574,7 @@ static mino_val_t *odd_p_step(mino_state_t *S, mino_val_t *v)
         "odd? requires an integer");
 }
 
-mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_odd_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -584,8 +584,8 @@ mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return odd_p_step(S, args->as.cons.car);
 }
 
-mino_val_t *prim_odd_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                            mino_env_t *env)
+mino_val *prim_odd_p_argv(mino_state *S, mino_val **argv, int argc,
+                            mino_env *env)
 {
     (void)env;
     if (argc != 1) return prim_throw_classified(
@@ -593,7 +593,7 @@ mino_val_t *prim_odd_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
     return odd_p_step(S, argv[0]);
 }
 
-static mino_val_t *even_p_step(mino_state_t *S, mino_val_t *v)
+static mino_val *even_p_step(mino_state *S, mino_val *v)
 {
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -610,7 +610,7 @@ static mino_val_t *even_p_step(mino_state_t *S, mino_val_t *v)
         "even? requires an integer");
 }
 
-mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -620,8 +620,8 @@ mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return even_p_step(S, args->as.cons.car);
 }
 
-mino_val_t *prim_even_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
-                             mino_env_t *env)
+mino_val *prim_even_p_argv(mino_state *S, mino_val **argv, int argc,
+                             mino_env *env)
 {
     (void)env;
     if (argc != 1) return prim_throw_classified(
@@ -629,7 +629,7 @@ mino_val_t *prim_even_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
     return even_p_step(S, argv[0]);
 }
 
-mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env)
 {
     int expanded;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -638,7 +638,7 @@ mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *en
     return macroexpand1(S, args->as.cons.car, env, &expanded);
 }
 
-mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "macroexpand requires one argument");
@@ -646,7 +646,7 @@ mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return macroexpand_all(S, args->as.cons.car, env);
 }
 
-mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
 {
     const char *prefix_src = "G__";
     size_t      prefix_len = 3;
@@ -658,7 +658,7 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "gensym takes 0 or 1 arguments");
     }
     if (nargs == 1) {
-        mino_val_t *p = args->as.cons.car;
+        mino_val *p = args->as.cons.car;
         if (p == NULL || mino_type_of(p) != MINO_STRING) {
             return prim_throw_classified(S, "eval/type", "MTY001", "gensym prefix must be a string");
         }
@@ -689,7 +689,7 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * downstream comparisons still behave correctly. */
         {
             char       *data = dup_n(S, buf, total_len);
-            mino_val_t *v    = alloc_val(S, MINO_SYMBOL);
+            mino_val *v    = alloc_val(S, MINO_SYMBOL);
             v->as.s.data = data;
             v->as.s.len  = total_len;
             return v;
@@ -705,14 +705,14 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * Field-vector entries may be keywords (preferred) or symbols; both
  * resolve to keywords in the type's stored fields.
  */
-mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
-    mino_val_t  *ns_arg, *name_arg, *fields_arg;
+    mino_val  *ns_arg, *name_arg, *fields_arg;
     const char  *ns_str, *name_str;
     const char **field_names;
     size_t       n_fields, i;
-    mino_val_t  *result;
+    mino_val  *result;
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -750,7 +750,7 @@ mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
                 "defrecord*: out of memory");
         }
         for (i = 0; i < n_fields; i++) {
-            mino_val_t *f = vec_nth(fields_arg, i);
+            mino_val *f = vec_nth(fields_arg, i);
             if (f == NULL || (mino_type_of(f) != MINO_KEYWORD
                               && mino_type_of(f) != MINO_SYMBOL
                               && mino_type_of(f) != MINO_STRING)) {
@@ -776,11 +776,11 @@ mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
  * constructor function. n_vals must equal the type's declared field
  * count.
  */
-mino_val_t *prim_record_star(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_record_star(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t  *type_arg, *vals_arg, *result;
-    mino_val_t **slots;
+    mino_val  *type_arg, *vals_arg, *result;
+    mino_val **slots;
     size_t       n, i;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -801,7 +801,7 @@ mino_val_t *prim_record_star(mino_state_t *S, mino_val_t *args,
     n = vals_arg->as.vec.len;
     slots = NULL;
     if (n > 0) {
-        slots = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        slots = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                               n * sizeof(*slots));
         if (slots == NULL) {
             return prim_throw_classified(S, "internal", "MIN001",
@@ -829,11 +829,11 @@ mino_val_t *prim_record_star(mino_state_t *S, mino_val_t *args,
  * fields from m by keyword; non-field keys land in ext. Runtime
  * helper for the script-side map->Type constructor function.
  */
-mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
-                                 mino_env_t *env)
+mino_val *prim_record_from_map(mino_state *S, mino_val *args,
+                                 mino_env *env)
 {
-    mino_val_t  *type_arg, *map_arg, *result, *fields;
-    mino_val_t **slots;
+    mino_val  *type_arg, *map_arg, *result, *fields;
+    mino_val **slots;
     size_t       n_fields, i;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -856,15 +856,15 @@ mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
 
     slots = NULL;
     if (n_fields > 0) {
-        slots = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        slots = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                               n_fields * sizeof(*slots));
         if (slots == NULL) {
             return prim_throw_classified(S, "internal", "MIN001",
                 "record-from-map: out of memory");
         }
         for (i = 0; i < n_fields; i++) {
-            mino_val_t *fk = vec_nth(fields, i);
-            mino_val_t *v  = map_get_val(map_arg, fk);
+            mino_val *fk = vec_nth(fields, i);
+            mino_val *v  = map_get_val(map_arg, fk);
             slots[i] = (v != NULL) ? v : mino_nil(S);
         }
     }
@@ -877,14 +877,14 @@ mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
     /* Any keys in the source map that are not declared fields go
      * into ext, preserving insertion order. */
     {
-        mino_val_t **ext_keys = NULL;
-        mino_val_t **ext_vals = NULL;
+        mino_val **ext_keys = NULL;
+        mino_val **ext_vals = NULL;
         size_t       ext_n    = 0;
         size_t       j;
         if (map_arg->as.map.len > 0) {
-            ext_keys = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            ext_keys = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                 map_arg->as.map.len * sizeof(*ext_keys));
-            ext_vals = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            ext_vals = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                 map_arg->as.map.len * sizeof(*ext_vals));
             if (ext_keys == NULL || ext_vals == NULL) {
                 return prim_throw_classified(S, "internal", "MIN001",
@@ -892,7 +892,7 @@ mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
             }
         }
         for (j = 0; j < map_arg->as.map.len; j++) {
-            mino_val_t *k = vec_nth(map_arg->as.map.key_order, j);
+            mino_val *k = vec_nth(map_arg->as.map.key_order, j);
             if (record_field_index(result, k) < 0) {
                 ext_keys[ext_n] = k;
                 ext_vals[ext_n] = map_get_val(map_arg, k);
@@ -910,10 +910,10 @@ mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
  * (record-fields type) -- returns the declared field-name vector
  * (keywords) for a record type. Useful for tooling and reflection.
  */
-mino_val_t *prim_record_fields(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_record_fields(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
-    mino_val_t *t;
+    mino_val *t;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -929,9 +929,9 @@ mino_val_t *prim_record_fields(mino_state_t *S, mino_val_t *args,
 }
 
 /* (throw value) -- raise a script exception. */
-mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ex;
+    mino_val *ex;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "throw requires one argument");
@@ -956,18 +956,18 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         const char *code = "MUS001";
         char        kbuf[64];
         char        cbuf[32];
-        mino_val_t *data = NULL;
+        mino_val *data = NULL;
         if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
         } else if (ex != NULL && mino_type_of(ex) == MINO_MAP) {
-            mino_val_t *m_msg = map_get_val(ex,
+            mino_val *m_msg = map_get_val(ex,
                 mino_keyword(S, "mino/message"));
-            mino_val_t *m_kind = map_get_val(ex,
+            mino_val *m_kind = map_get_val(ex,
                 mino_keyword(S, "mino/kind"));
-            mino_val_t *m_code = map_get_val(ex,
+            mino_val *m_code = map_get_val(ex,
                 mino_keyword(S, "mino/code"));
-            mino_val_t *m_data = map_get_val(ex,
+            mino_val *m_data = map_get_val(ex,
                 mino_keyword(S, "mino/data"));
             if (m_msg == NULL || mino_type_of(m_msg) != MINO_STRING) {
                 m_msg = map_get_val(ex, mino_keyword(S, "message"));
@@ -1011,9 +1011,9 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL; /* unreachable */
 }
 
-mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "var? requires one argument");
@@ -1022,9 +1022,9 @@ mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return (v != NULL && mino_type_of(v) == MINO_VAR) ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_resolve(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *sym;
+    mino_val *sym;
     char buf[256];
     size_t n;
     const char *slash;
@@ -1048,7 +1048,7 @@ mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t ns_len = (size_t)(slash - buf);
         const char *sym_name = slash + 1;
         const char *resolved_ns;
-        mino_val_t *var;
+        mino_val *var;
         size_t i;
 
         memcpy(ns_buf, buf, ns_len);
@@ -1073,8 +1073,8 @@ found_ns:
      * it picked up unrelated names from sibling namespaces. */
     {
         const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
-        mino_val_t *var = var_find(S, cur, buf);
-        mino_env_t *e;
+        mino_val *var = var_find(S, cur, buf);
+        mino_env *e;
         if (var != NULL) return var;
         e = ns_env_lookup(S, cur);
         for (; e != NULL; e = e->parent) {
@@ -1084,7 +1084,7 @@ found_ns:
                 for (k = 0; k < S->ns_vars.ns_env_len; k++) {
                     if (S->ns_vars.ns_env_table[k].env == e) {
                         const char *src_ns = S->ns_vars.ns_env_table[k].name;
-                        mino_val_t *v = var_find(S, src_ns, buf);
+                        mino_val *v = var_find(S, src_ns, buf);
                         if (v != NULL) return v;
                         v = var_intern(S, src_ns, buf);
                         if (v != NULL) {
@@ -1101,9 +1101,9 @@ found_ns:
     }
 }
 
-mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     const char *data;
     size_t len;
     const char *slash;
@@ -1117,7 +1117,7 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (mino_type_of(v) != MINO_SYMBOL && mino_type_of(v) != MINO_KEYWORD) {
         char        buf[256];
-        mino_val_t *printed = print_to_string(S, v);
+        mino_val *printed = print_to_string(S, v);
         snprintf(buf, sizeof(buf),
                  "namespace: expected a symbol or keyword, got: %.*s",
                  printed != NULL ? (int)printed->as.s.len : 0,
@@ -1138,16 +1138,16 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (last-error) -- return the last diagnostic as a map, or nil. */
-mino_val_t *prim_last_error(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_last_error(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args; (void)env;
     return mino_last_error_map(S);
 }
 
 /* (error? x) -- true if x is a map with :mino/kind. */
-mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_error_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v, *kind_key;
+    mino_val *v, *kind_key;
     (void)env;
     if (!mino_is_cons(args)) return mino_false(S);
     v = args->as.cons.car;
@@ -1157,9 +1157,9 @@ mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (ex-data e) -- extract :mino/data from a diagnostic map. */
-mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v, *data_key, *result;
+    mino_val *v, *data_key, *result;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1173,9 +1173,9 @@ mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (ex-message e) -- extract :mino/message from a diagnostic map. */
-mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ex_message(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v, *msg_key, *result;
+    mino_val *v, *msg_key, *result;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1189,17 +1189,17 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (gc-stats) -- return a map of GC statistics built from the public
- * mino_gc_stats_t struct. The :phase key exposes the collector's
+ * mino_gc_stats_out struct. The :phase key exposes the collector's
  * state machine position (one of :idle, :minor, :major-mark,
  * :major-sweep). The :threshold key is preserved alongside the public
  * struct fields; it is a private heuristic tracked by the major
- * collector and not part of mino_gc_stats_t. */
-mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+ * collector and not part of mino_gc_stats_out. */
+mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_gc_stats_t st;
+    mino_gc_stats_out st;
     const char *phase_name;
-    mino_val_t *ks[39];
-    mino_val_t *vs[39];
+    mino_val *ks[39];
+    mino_val *vs[39];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1283,7 +1283,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     ks[30] = mino_keyword(S, "bytes-promoted-minor");
     vs[30] = mino_int(S, (long long)st.bytes_promoted_minor);
     {
-        mino_val_t *buckets[8];
+        mino_val *buckets[8];
         size_t i;
         for (i = 0; i < 8; i++) {
             buckets[i] = mino_int(S, (long long)st.young_age_bucket[i]);
@@ -1298,7 +1298,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         uint64_t p50 = 0, p95 = 0, p99 = 0, pmax = 0;
         uint32_t hist[24];
         unsigned hist_count = 0;
-        mino_val_t *hist_vals[24];
+        mino_val *hist_vals[24];
         size_t i;
         mino_gc_stats_pauses(S, &p50, &p95, &p99, &pmax);
         mino_gc_pause_hist(S, hist, &hist_count);
@@ -1323,8 +1323,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "hamt-entry", "ptrarr", "valarr", "rb-node", "bc",
             NULL, NULL, NULL, NULL, NULL
         };
-        mino_val_t *tk[16];
-        mino_val_t *tv[16];
+        mino_val *tk[16];
+        mino_val *tv[16];
         size_t i, n = 0;
         for (i = 0; i < 16; i++) {
             if (tag_names[i] == NULL) continue;
@@ -1345,8 +1345,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "nesting-limit", "oom", "other",
             NULL, NULL, NULL, NULL, NULL, NULL
         };
-        mino_val_t *dk[16];
-        mino_val_t *dv[16];
+        mino_val *dk[16];
+        mino_val *dv[16];
         size_t i, n = 0;
         for (i = 0; i < 16; i++) {
             if (reason_names[i] == NULL) continue;
@@ -1362,12 +1362,12 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * log2-bucket counts. Empty when MINO_COLL_SIZE_STATS is unset. */
     {
         static const char *kind_names[3] = {"vector", "map", "set"};
-        mino_val_t *ck[3];
-        mino_val_t *cv[3];
+        mino_val *ck[3];
+        mino_val *cv[3];
         size_t kind, n = 0;
         for (kind = 0; kind < 3; kind++) {
             int any = 0;
-            mino_val_t *bv[32];
+            mino_val *bv[32];
             size_t b;
             for (b = 0; b < 32; b++) {
                 if (S->coll_size_hist[kind][b] != 0) any = 1;
@@ -1388,7 +1388,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * and memory-accounting scripts that need deterministic state before
  * reading gc-stats. The public mino_gc_collect honours gc_depth, so a
  * nested call during construction is a no-op. */
-mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -1400,8 +1400,8 @@ mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (alloc-profile-enabled?) -- compile-time flag. */
-mino_val_t *prim_alloc_profile_enabled_p(mino_state_t *S,
-                                         mino_val_t *args, mino_env_t *env)
+mino_val *prim_alloc_profile_enabled_p(mino_state *S,
+                                         mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -1412,8 +1412,8 @@ mino_val_t *prim_alloc_profile_enabled_p(mino_state_t *S,
 }
 
 /* (alloc-profile-reset!) -- zero the per-callsite counters. */
-mino_val_t *prim_alloc_profile_reset_bang(mino_state_t *S,
-                                          mino_val_t *args, mino_env_t *env)
+mino_val *prim_alloc_profile_reset_bang(mino_state *S,
+                                          mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -1426,13 +1426,13 @@ mino_val_t *prim_alloc_profile_reset_bang(mino_state_t *S,
 
 /* (alloc-profile-dump! n) -- dump top n callsites to stderr. n=0 means
  * all sites. Returns nil. */
-mino_val_t *prim_alloc_profile_dump_bang(mino_state_t *S,
-                                         mino_val_t *args, mino_env_t *env)
+mino_val *prim_alloc_profile_dump_bang(mino_state *S,
+                                         mino_val *args, mino_env *env)
 {
     long long n = 30;
     (void)env;
     if (mino_is_cons(args)) {
-        mino_val_t *first = args->as.cons.car;
+        mino_val *first = args->as.cons.car;
         if (first == NULL || !mino_val_int_p(first)) {
             return prim_throw_classified(S, "eval/arg", "MAR002",
                                          "alloc-profile-dump! takes an integer count");

@@ -9,7 +9,7 @@
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
 
-const char *intern_filename(mino_state_t *S, const char *name)
+const char *intern_filename(mino_state *S, const char *name)
 {
     size_t i;
     char  *dup;
@@ -66,10 +66,10 @@ const char *intern_filename(mino_state_t *S, const char *name)
  * peaks at a few hundred) and well below the overflow point. */
 #define MINO_READER_MAX_DEPTH 1024
 
-static void set_reader_diag(mino_state_t *S, const char *code,
+static void set_reader_diag(mino_state *S, const char *code,
                             const char *msg, int line, int col)
 {
-    mino_diag_t *d = diag_new("reader", code, "read", msg);
+    mino_diag *d = diag_new("reader", code, "read", msg);
     if (d != NULL) {
         mino_span_t span;
         memset(&span, 0, sizeof(span));
@@ -82,14 +82,14 @@ static void set_reader_diag(mino_state_t *S, const char *code,
 }
 
 /* Advance the cursor by one character and track column position. */
-static inline void ADVANCE(mino_state_t *S, const char **p)
+static inline void ADVANCE(mino_state *S, const char **p)
 {
     (*p)++;
     S->reader.reader_col++;
 }
 
 /* Advance by n characters (no embedded newlines expected). */
-static inline void ADVANCE_N(mino_state_t *S, const char **p, size_t n)
+static inline void ADVANCE_N(mino_state *S, const char **p, size_t n)
 {
     *p += n;
     S->reader.reader_col += (int)n;
@@ -108,7 +108,7 @@ static int is_terminator(char c)
         || is_ws(c);
 }
 
-static void skip_ws(mino_state_t *S, const char **p)
+static void skip_ws(mino_state *S, const char **p)
 {
     while (**p) {
         char c = **p;
@@ -128,9 +128,9 @@ static void skip_ws(mino_state_t *S, const char **p)
     }
 }
 
-static mino_val_t *read_form(mino_state_t *S, const char **p);
+static mino_val *read_form(mino_state *S, const char **p);
 
-static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
+static mino_val *read_regex_string(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. Reads a regex
      * literal body verbatim: backslashes pass through to the regex
@@ -208,13 +208,13 @@ static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
     }
     ADVANCE(S, p); /* skip closing quote */
     {
-        mino_val_t *v = mino_string_n(S, buf, len);
+        mino_val *v = mino_string_n(S, buf, len);
         free(buf);
         return v;
     }
 }
 
-static mino_val_t *read_string_form(mino_state_t *S, const char **p)
+static mino_val *read_string_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
     int str_line = S->reader.reader_line;
@@ -280,7 +280,7 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     }
     ADVANCE(S, p); /* skip closing quote */
     {
-        mino_val_t *v = mino_string_n(S, buf, len);
+        mino_val *v = mino_string_n(S, buf, len);
         free(buf);
         return v;
     }
@@ -291,14 +291,14 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
  * with meta {:mino/reader-conditional true}. Used by :read-cond
  * :preserve to retain the conditional as data instead of evaluating
  * it. */
-static mino_val_t *make_reader_conditional_record(
-    mino_state_t *S, mino_val_t *form, int splicing)
+static mino_val *make_reader_conditional_record(
+    mino_state *S, mino_val *form, int splicing)
 {
-    mino_val_t *keys[2];
-    mino_val_t *vals[2];
-    mino_val_t *mkeys[1];
-    mino_val_t *mvals[1];
-    mino_val_t *m;
+    mino_val *keys[2];
+    mino_val *vals[2];
+    mino_val *mkeys[1];
+    mino_val *mvals[1];
+    mino_val *m;
     keys[0]  = mino_keyword(S, "form");
     vals[0]  = form;
     keys[1]  = mino_keyword(S, "splicing?");
@@ -323,15 +323,15 @@ static int reader_cond_active(const char *dialect,
     if (klen == strlen(dialect) && memcmp(kname, dialect, klen) == 0) return 1;
     return 0;
 }
-static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
-                                  mino_val_t **found)
+static mino_val *read_cond_body(mino_state *S, const char **p,
+                                  mino_val **found)
 {
-    mino_val_t *result = NULL;
+    mino_val *result = NULL;
     int         matched = 0;
     *found = NULL;
     for (;;) {
-        mino_val_t *key;
-        mino_val_t *val;
+        mino_val *key;
+        mino_val *val;
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE005, "unterminated reader conditional",
@@ -384,7 +384,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
 /* Check whether the cursor is at a #?@ splice sequence. If so, consume
  * the prefix (leaving the cursor on the opening '(' of the body) and
  * return 1. Otherwise return 0 without advancing. */
-static int peek_reader_cond_splice(mino_state_t *S, const char **p)
+static int peek_reader_cond_splice(mino_state *S, const char **p)
 {
     if ((*p)[0] == '#' && (*p)[1] == '?' && (*p)[2] == '@') {
         ADVANCE_N(S, p, 3);
@@ -396,12 +396,12 @@ static int peek_reader_cond_splice(mino_state_t *S, const char **p)
 /* Append a single element to the list under construction. The first
  * cell carries the opening-paren's line/col so diagnostics point at the
  * list head; subsequent cells carry the element's own line/col. */
-static void list_append_cell(mino_state_t *S, mino_val_t **head,
-                             mino_val_t **tail, mino_val_t *elem,
+static void list_append_cell(mino_state *S, mino_val **head,
+                             mino_val **tail, mino_val *elem,
                              int list_line, int list_col,
                              int elem_line, int elem_col)
 {
-    mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+    mino_val *cell = mino_cons(S, elem, mino_nil(S));
     cell->as.cons.file   = S->reader.reader_file;
     cell->as.cons.line   = (*tail == NULL) ? list_line : elem_line;
     cell->as.cons.column = (*tail == NULL) ? list_col  : elem_col;
@@ -413,13 +413,13 @@ static void list_append_cell(mino_state_t *S, mino_val_t **head,
     *tail = cell;
 }
 
-static mino_val_t *read_list_form(mino_state_t *S, const char **p)
+static mino_val *read_list_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
     int         list_line = S->reader.reader_line;
     int         list_col  = S->reader.reader_col;
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     ADVANCE(S, p); /* skip '(' */
     for (;;) {
         skip_ws(S, p);
@@ -434,7 +434,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         }
         if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice: read conditional body, splice matching list */
-            mino_val_t *found = NULL;
+            mino_val *found = NULL;
             int         splice_line = S->reader.reader_line;
             skip_ws(S, p);
             if (**p != '(') {
@@ -451,8 +451,8 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             }
             if (S->reader.reader_cond_mode == 1) {
                 /* preserve: append a reader-conditional record (no splice). */
-                mino_val_t *body = read_list_form(S, p);
-                mino_val_t *record;
+                mino_val *body = read_list_form(S, p);
+                mino_val *record;
                 if (body == NULL && mino_last_error(S) != NULL) return NULL;
                 record = make_reader_conditional_record(S, body, 1);
                 list_append_cell(S, &head, &tail, record,
@@ -473,7 +473,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                                          splice_line, 0);
                     }
                 } else {
-                    mino_val_t *cur = found;
+                    mino_val *cur = found;
                     while (mino_is_cons(cur)) {
                         list_append_cell(S, &head, &tail,
                                          cur->as.cons.car,
@@ -489,7 +489,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         {
             int         elem_line = S->reader.reader_line;
             int         elem_col  = S->reader.reader_col;
-            mino_val_t *elem = read_form(S, p);
+            mino_val *elem = read_form(S, p);
             if (elem == NULL && mino_last_error(S) != NULL) {
                 return NULL;
             }
@@ -518,12 +518,12 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
  * capacity as needed (initial 8). The buffer is allocated as a GC
  * value array so intermediate allocations from later read_form calls
  * cannot reclaim already-parsed entries. */
-static void buf_push(mino_state_t *S, mino_val_t ***buf,
-                     size_t *cap, size_t *len, mino_val_t *elem)
+static void buf_push(mino_state *S, mino_val ***buf,
+                     size_t *cap, size_t *len, mino_val *elem)
 {
     if (*len == *cap) {
         size_t       new_cap = (*cap == 0) ? 8 : *cap * 2;
-        mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
+        mino_val **nb      = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, new_cap * sizeof(*nb));
         if (*buf != NULL && *len > 0) {
             memcpy(nb, *buf, *len * sizeof(*nb));
@@ -536,15 +536,15 @@ static void buf_push(mino_state_t *S, mino_val_t ***buf,
 
 /* map_buf_push -- twin-buffer version of buf_push for {key val ...}
  * pairs. Single grow keeps key and value arrays in lockstep. */
-static void map_buf_push(mino_state_t *S, mino_val_t ***kbuf,
-                         mino_val_t ***vbuf, size_t *cap, size_t *len,
-                         mino_val_t *key, mino_val_t *val)
+static void map_buf_push(mino_state *S, mino_val ***kbuf,
+                         mino_val ***vbuf, size_t *cap, size_t *len,
+                         mino_val *key, mino_val *val)
 {
     if (*len == *cap) {
         size_t       new_cap = (*cap == 0) ? 8 : *cap * 2;
-        mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(S,
+        mino_val **nk      = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, new_cap * sizeof(*nk));
-        mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(S,
+        mino_val **nv      = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, new_cap * sizeof(*nv));
         if (*kbuf != NULL && *len > 0) {
             memcpy(nk, *kbuf, *len * sizeof(*nk));
@@ -559,13 +559,13 @@ static void map_buf_push(mino_state_t *S, mino_val_t ***kbuf,
     (*len)++;
 }
 
-static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
+static mino_val *read_vector_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '['. `buf` accumulates the
      * partially-built element list and is tracked by the GC so intermediate
      * allocations inside nested read_form calls don't collect the entries
      * that have already been parsed. */
-    mino_val_t **buf = NULL;
+    mino_val **buf = NULL;
     size_t       cap = 0;
     size_t       len = 0;
     ADVANCE(S, p); /* skip '[' */
@@ -582,7 +582,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
         }
         if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice in vector */
-            mino_val_t *found = NULL;
+            mino_val *found = NULL;
             skip_ws(S, p);
             if (**p != '(') {
                 set_reader_diag(S, MRE007,
@@ -597,8 +597,8 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 return NULL;
             }
             if (S->reader.reader_cond_mode == 1) {
-                mino_val_t *body = read_list_form(S, p);
-                mino_val_t *record;
+                mino_val *body = read_list_form(S, p);
+                mino_val *record;
                 if (body == NULL && mino_last_error(S) != NULL) return NULL;
                 record = make_reader_conditional_record(S, body, 1);
                 buf_push(S, &buf, &cap, &len, record);
@@ -616,7 +616,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                         buf_push(S, &buf, &cap, &len, vec_nth(found, i));
                     }
                 } else {
-                    mino_val_t *cur = found;
+                    mino_val *cur = found;
                     while (mino_is_cons(cur)) {
                         buf_push(S, &buf, &cap, &len, cur->as.cons.car);
                         cur = cur->as.cons.cdr;
@@ -627,7 +627,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
             continue;
         }
         {
-            mino_val_t *elem = read_form(S, p);
+            mino_val *elem = read_form(S, p);
             if (elem == NULL) {
                 if (mino_last_error(S) != NULL) return NULL;
                 /* No form produced (e.g. unmatched #?). Check for
@@ -647,20 +647,20 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
     return mino_vector(S, buf, len);
 }
 
-static mino_val_t *read_map_form(mino_state_t *S, const char **p)
+static mino_val *read_map_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '{'. Elements alternate as
      * key, value, key, value. An odd count is a parse error. The key and
      * value buffers are GC-tracked so parsed entries survive allocations
      * performed by later nested read_form calls. */
-    mino_val_t **kbuf = NULL;
-    mino_val_t **vbuf = NULL;
+    mino_val **kbuf = NULL;
+    mino_val **vbuf = NULL;
     size_t       cap  = 0;
     size_t       len  = 0;
     ADVANCE(S, p); /* skip '{' */
     for (;;) {
-        mino_val_t *key;
-        mino_val_t *val;
+        mino_val *key;
+        mino_val *val;
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE003, "unterminated map",
@@ -672,7 +672,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             break;
         }
         if (peek_reader_cond_splice(S, p)) {
-            mino_val_t *found = NULL;
+            mino_val *found = NULL;
             skip_ws(S, p);
             if (**p != '(') {
                 set_reader_diag(S, MRE007,
@@ -712,7 +712,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
                                      vec_nth(found, i + 1));
                     }
                 } else {
-                    mino_val_t *cur = found;
+                    mino_val *cur = found;
                     while (mino_is_cons(cur) && mino_is_cons(cur->as.cons.cdr)) {
                         map_buf_push(S, &kbuf, &vbuf, &cap, &len,
                                      cur->as.cons.car,
@@ -739,7 +739,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             skip_ws(S, p);
             if (**p == '}') { ADVANCE(S, p); break; }
             {
-                mino_val_t *discard = read_form(S, p);
+                mino_val *discard = read_form(S, p);
                 if (discard == NULL && mino_last_error(S) != NULL)
                     return NULL;
             }
@@ -767,15 +767,15 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
     return mino_map(S, kbuf, vbuf, len);
 }
 
-static mino_val_t *read_set_form(mino_state_t *S, const char **p)
+static mino_val *read_set_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '{' after '#'. */
-    mino_val_t **buf = NULL;
+    mino_val **buf = NULL;
     size_t       cap = 0;
     size_t       len = 0;
     ADVANCE(S, p); /* skip '{' */
     for (;;) {
-        mino_val_t *elem;
+        mino_val *elem;
         skip_ws(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE003, "unterminated set",
@@ -808,7 +808,7 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
  * bad ratio literal), sets *err to 1 with the reader diag already set
  * and returns NULL. On not-numeric (caller should fall through to
  * symbol), returns NULL with *err 0. */
-static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
+static mino_val *try_parse_numeric(mino_state *S, const char *start,
                                      size_t len, int *err)
 {
     char        stack_buf[64];
@@ -819,7 +819,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
     size_t      num_len        = len;
     int         has_dot_or_exp = 0;
     int         looks_numeric  = 1;
-    mino_val_t *out            = NULL;
+    mino_val *out            = NULL;
     size_t      i;
 
     *err = 0;
@@ -906,9 +906,9 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                  * back as `2`). */
                 size_t      num_str_len = (size_t)(slash - buf);
                 size_t      den_str_len = len - num_str_len - 1;
-                mino_val_t *num_bi = mino_bigint_from_string_n(
+                mino_val *num_bi = mino_bigint_from_string_n(
                     S, buf, num_str_len);
-                mino_val_t *den_bi;
+                mino_val *den_bi;
                 if (num_bi == NULL) {
                     set_reader_diag(S, MRE008,
                                     "invalid ratio literal",
@@ -946,7 +946,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
             }
         }
         if (all_digits) {
-            mino_val_t *bi;
+            mino_val *bi;
             buf[num_len] = '\0';
             bi = mino_bigint_from_string_n(S, buf, num_len);
             buf[num_len] = 'N';
@@ -957,7 +957,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
 
     /* Bigdec M suffix: 1.5M -> arbitrary-precision decimal. */
     if (looks_numeric && len > 1 && buf[len - 1] == 'M') {
-        mino_val_t *bd;
+        mino_val *bd;
         num_len = len - 1;
         buf[num_len] = '\0';
         bd = mino_bigdec_from_string(S, buf);
@@ -995,7 +995,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                  * literals like 9223372036854775808 don't silently
                  * collapse into the long range. */
                 if (errno == ERANGE) {
-                    mino_val_t *bi = mino_bigint_from_string_n(S, buf, len);
+                    mino_val *bi = mino_bigint_from_string_n(S, buf, len);
                     if (bi != NULL) TRY_PARSE_RETURN(bi);
                 }
                 TRY_PARSE_RETURN(mino_int_wrap(S, n));
@@ -1008,7 +1008,7 @@ try_parse_done:
 #undef TRY_PARSE_RETURN
 }
 
-static mino_val_t *read_atom(mino_state_t *S, const char **p)
+static mino_val *read_atom(mino_state *S, const char **p)
 {
     const char *start = *p;
     size_t len = 0;
@@ -1120,7 +1120,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     /* Try numeric. */
     {
         int         err = 0;
-        mino_val_t *num = try_parse_numeric(S, start, len, &err);
+        mino_val *num = try_parse_numeric(S, start, len, &err);
         if (num != NULL) return num;
         if (err) return NULL;
     }
@@ -1142,7 +1142,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
  * used[0] = true means bare % or %1, used[1] = %2, ..., used[8] = %9.
  * *has_rest = true means %& was found.  *max_arg = highest numbered slot.
  */
-static void scan_percent_args(mino_val_t *form, int used[9],
+static void scan_percent_args(mino_val *form, int used[9],
                               int *max_arg, int *has_rest)
 {
     if (form == NULL) return;
@@ -1196,7 +1196,7 @@ static void scan_percent_args(mino_val_t *form, int used[9],
  * Replace bare % with %1 in a parsed form tree so the evaluator
  * sees a single canonical name.
  */
-static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
+static mino_val *normalize_percent(mino_state *S, mino_val *form)
 {
     if (form == NULL) return form;
     if (mino_type_of(form) == MINO_SYMBOL && form->as.s.len == 1
@@ -1204,12 +1204,12 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
         return mino_symbol(S, "%1");
     }
     if (mino_is_cons(form)) {
-        mino_val_t *car = normalize_percent(S, form->as.cons.car);
-        mino_val_t *cdr = normalize_percent(S, form->as.cons.cdr);
+        mino_val *car = normalize_percent(S, form->as.cons.car);
+        mino_val *cdr = normalize_percent(S, form->as.cons.cdr);
         if (car == form->as.cons.car && cdr == form->as.cons.cdr)
             return form;
         {
-            mino_val_t *c = mino_cons(S, car, cdr);
+            mino_val *c = mino_cons(S, car, cdr);
             c->as.cons.file   = form->as.cons.file;
             c->as.cons.line   = form->as.cons.line;
             c->as.cons.column = form->as.cons.column;
@@ -1219,8 +1219,8 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
     if (mino_type_of(form) == MINO_VECTOR) {
         size_t      i;
         int         changed = 0;
-        mino_val_t *stack_items[64];
-        mino_val_t **items;
+        mino_val *stack_items[64];
+        mino_val **items;
         size_t      len = form->as.vec.len;
         if (len <= 64) {
             items = stack_items;
@@ -1232,7 +1232,7 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
                                 S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            items = (mino_val_t **)malloc(alloc_sz);
+            items = (mino_val **)malloc(alloc_sz);
             if (items == NULL) {
                 set_reader_diag(S, MRE004,
                                 "out of memory in anonymous fn expansion",
@@ -1245,7 +1245,7 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
             if (items[i] != vec_nth(form, i)) changed = 1;
         }
         {
-            mino_val_t *result = changed ? mino_vector(S, items, len) : form;
+            mino_val *result = changed ? mino_vector(S, items, len) : form;
             if (items != stack_items) free(items);
             return result;
         }
@@ -1257,22 +1257,22 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
  * read_anon_fn_form: #(inc %) => (fn [%1] (inc %1))
  * Called after '#' has been verified; caller already checked *(*p+1)=='('.
  */
-static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
+static mino_val *read_anon_fn_form(mino_state *S, const char **p)
 {
     int fn_line = S->reader.reader_line;
     int fn_col  = S->reader.reader_col;
     int used[9] = {0};
     int max_arg = 0, has_rest = 0;
-    mino_val_t *body;
-    mino_val_t *params_vec;
-    mino_val_t *fn_form;
+    mino_val *body;
+    mino_val *params_vec;
+    mino_val *fn_form;
     ADVANCE(S, p); /* skip '#', read_list_form will handle '(' */
     body = read_list_form(S, p);
     if (body == NULL) return NULL;
     scan_percent_args(body, used, &max_arg, &has_rest);
     body = normalize_percent(S, body);
     {
-        mino_val_t *items[12]; /* max 9 + & + %& */
+        mino_val *items[12]; /* max 9 + & + %& */
         size_t      nparams = 0;
         int         i;
         char        name[4];
@@ -1301,9 +1301,9 @@ static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
  * read_metadata_form: ^{:k v} form, ^:k form, ^Symbol form, ^"S" form.
  * Called after '^' has been verified at **p.
  */
-static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
+static mino_val *read_metadata_form(mino_state *S, const char **p)
 {
-    mino_val_t *meta_val, *target;
+    mino_val *meta_val, *target;
     ADVANCE(S, p);
     meta_val = read_form(S, p);
     if (meta_val == NULL) {
@@ -1315,21 +1315,21 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     }
     /* ^:key shorthand: expand to {:key true}. */
     if (mino_type_of(meta_val) == MINO_KEYWORD) {
-        mino_val_t *kv[1], *vv[1];
+        mino_val *kv[1], *vv[1];
         kv[0] = meta_val;
         vv[0] = mino_true(S);
         meta_val = mino_map(S, kv, vv, 1);
     }
     /* ^Symbol shorthand: expand to {:tag Symbol}. */
     if (mino_type_of(meta_val) == MINO_SYMBOL) {
-        mino_val_t *kv[1], *vv[1];
+        mino_val *kv[1], *vv[1];
         kv[0] = mino_keyword(S, "tag");
         vv[0] = meta_val;
         meta_val = mino_map(S, kv, vv, 1);
     }
     /* ^"String" shorthand: expand to {:tag "String"}. */
     if (mino_type_of(meta_val) == MINO_STRING) {
-        mino_val_t *kv[1], *vv[1];
+        mino_val *kv[1], *vv[1];
         kv[0] = mino_keyword(S, "tag");
         vv[0] = meta_val;
         meta_val = mino_map(S, kv, vv, 1);
@@ -1355,7 +1355,7 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         /* Symbols are interned (shared). Make a fresh copy so we
          * do not mutate the interned instance. */
         if (mino_type_of(target) == MINO_SYMBOL) {
-            mino_val_t *fresh = alloc_val(S, MINO_SYMBOL);
+            mino_val *fresh = alloc_val(S, MINO_SYMBOL);
             fresh->as.s.data = target->as.s.data;
             fresh->as.s.len  = target->as.s.len;
             target = fresh;
@@ -1364,12 +1364,12 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         if (target->meta != NULL && mino_type_of(target->meta) == MINO_MAP) {
             size_t      i;
             size_t      ko_len;
-            mino_val_t *ko    = meta_val->as.map.key_order;
-            mino_val_t *merged = target->meta;
+            mino_val *ko    = meta_val->as.map.key_order;
+            mino_val *merged = target->meta;
             ko_len = (ko != NULL) ? ko->as.vec.len : 0;
             for (i = 0; i < ko_len; i++) {
-                mino_val_t *k = vec_nth(ko, i);
-                mino_val_t *v = map_get_val(meta_val, k);
+                mino_val *k = vec_nth(ko, i);
+                mino_val *v = map_get_val(meta_val, k);
                 merged = mino_map_assoc1(S, merged, k, v);
                 if (merged == NULL) return NULL;
             }
@@ -1382,7 +1382,7 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     /* Fallback for types that do not support metadata: desugar to
      * (with-meta target meta-map) so it fails at eval time. */
     {
-        mino_val_t *outer;
+        mino_val *outer;
         outer = mino_cons(S, mino_symbol(S, "with-meta"),
                     mino_cons(S, target,
                         mino_cons(S, meta_val, mino_nil(S))));
@@ -1396,7 +1396,7 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
  * Produces a first-class MINO_CHAR holding the decoded codepoint.
  * On entry, **p == '\\'.
  */
-static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
+static mino_val *read_char_literal(mino_state *S, const char **p)
 {
     const char *start = *p + 1;
     size_t      tlen  = 0;
@@ -1520,12 +1520,12 @@ static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
  * (`'`, `\``, `@`, `~`, `~@`, `#'`) where each macro reads exactly
  * one following form and tags it with a known head symbol.
  */
-static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
+static mino_val *read_wrap_one(mino_state *S, const char **p,
                                  const char *sym_name, const char *after_msg,
                                  int q_line, int q_col)
 {
-    mino_val_t *inner;
-    mino_val_t *outer;
+    mino_val *inner;
+    mino_val *outer;
     S->reader.reader_last_cond_empty = 0;
     inner = read_form(S, p);
     if (inner == NULL) {
@@ -1574,7 +1574,7 @@ static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
  *   :_/name         -> :name (the underscore namespace strips off)
  *   non keyword/sym -> unchanged
  */
-static mino_val_t *namespaced_map_qualify_key(mino_state_t *S, mino_val_t *k,
+static mino_val *namespaced_map_qualify_key(mino_state *S, mino_val *k,
                                               const char *prefix,
                                               size_t prefix_len)
 {
@@ -1610,13 +1610,13 @@ static mino_val_t *namespaced_map_qualify_key(mino_state_t *S, mino_val_t *k,
     return mino_symbol_n(S, full, flen);
 }
 
-static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
+static mino_val *read_namespaced_map(mino_state *S, const char **p)
 {
     /* On entry, **p == '#'. Caller already saw "#:" prefix. */
     char        prefix[256];
     size_t      prefix_len = 0;
     int         saw_double_colon = 0;
-    mino_val_t *out;
+    mino_val *out;
     int         line = S->reader.reader_line;
     int         col  = S->reader.reader_col;
     ADVANCE_N(S, p, 2); /* skip "#:" */
@@ -1717,17 +1717,17 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
         /* Read the inner map as a flat key/value sequence to catch
          * duplicate keys; an upstream-visible duplicate (whether bare
          * or after prefix qualification) is a reader error. */
-        mino_val_t **rk    = NULL;
-        mino_val_t **rv    = NULL;
+        mino_val **rk    = NULL;
+        mino_val **rv    = NULL;
         size_t       cap   = 0;
         size_t       len   = 0;
         size_t       i, j;
-        mino_val_t **ks;
-        mino_val_t **vs;
+        mino_val **ks;
+        mino_val **vs;
         ADVANCE(S, p); /* skip '{' */
         for (;;) {
-            mino_val_t *k;
-            mino_val_t *v;
+            mino_val *k;
+            mino_val *v;
             skip_ws(S, p);
             if (**p == '\0') {
                 set_reader_diag(S, MRE003, "unterminated map",
@@ -1746,7 +1746,7 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
                 skip_ws(S, p);
                 if (**p == '}') { ADVANCE(S, p); break; }
                 {
-                    mino_val_t *discard = read_form(S, p);
+                    mino_val *discard = read_form(S, p);
                     if (discard == NULL && mino_last_error(S) != NULL)
                         return NULL;
                 }
@@ -1771,9 +1771,9 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             }
             if (len == cap) {
                 size_t       nc  = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nk  = (mino_val_t **)gc_alloc_typed(S,
+                mino_val **nk  = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, nc * sizeof(*nk));
-                mino_val_t **nv  = (mino_val_t **)gc_alloc_typed(S,
+                mino_val **nv  = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, nc * sizeof(*nv));
                 if (rk != NULL && len > 0) {
                     for (i = 0; i < len; i++) {
@@ -1787,12 +1787,12 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             gc_valarr_set(S, rv, len, v);
             len++;
         }
-        ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             len > 0 ? len * sizeof(*ks) : sizeof(*ks));
-        vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             len > 0 ? len * sizeof(*vs) : sizeof(*vs));
         for (i = 0; i < len; i++) {
-            mino_val_t *qk = namespaced_map_qualify_key(S, rk[i], prefix,
+            mino_val *qk = namespaced_map_qualify_key(S, rk[i], prefix,
                                                        prefix_len);
             if (qk == NULL) return NULL;
             for (j = 0; j < i; j++) {
@@ -1817,23 +1817,23 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
  * populated). The tagged-literal branch is handled separately because
  * its trigger is a character class (alpha) rather than a single
  * literal char. */
-typedef mino_val_t *(*read_dispatch_fn)(mino_state_t *S, const char **p);
+typedef mino_val *(*read_dispatch_fn)(mino_state *S, const char **p);
 
-static mino_val_t *read_dispatch_namespaced_map(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_namespaced_map(mino_state *S, const char **p)
 {
     return read_namespaced_map(S, p);
 }
 
-static mino_val_t *read_dispatch_set(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_set(mino_state *S, const char **p)
 {
     ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
     return read_set_form(S, p);
 }
 
-static mino_val_t *read_dispatch_discard(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_discard(mino_state *S, const char **p)
 {
     /* Discard reader macro: #_ discards the next form. */
-    mino_val_t *discarded;
+    mino_val *discarded;
     ADVANCE_N(S, p, 2);
     discarded = read_form(S, p);
     (void)discarded;
@@ -1844,12 +1844,12 @@ static mino_val_t *read_dispatch_discard(mino_state_t *S, const char **p)
     return read_form(S, p);
 }
 
-static mino_val_t *read_dispatch_anon_fn(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_anon_fn(mino_state *S, const char **p)
 {
     return read_anon_fn_form(S, p);
 }
 
-static mino_val_t *read_dispatch_var(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_var(mino_state *S, const char **p)
 {
     int vq_line = S->reader.reader_line;
     int vq_col  = S->reader.reader_col;
@@ -1858,7 +1858,7 @@ static mino_val_t *read_dispatch_var(mino_state_t *S, const char **p)
                          vq_line, vq_col);
 }
 
-static mino_val_t *read_dispatch_special_float(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_special_float(mino_state *S, const char **p)
 {
     /* Special float tokens: ##Inf, ##-Inf, ##NaN */
     const char *start;
@@ -1879,7 +1879,7 @@ static mino_val_t *read_dispatch_special_float(mino_state_t *S, const char **p)
     return NULL;
 }
 
-static mino_val_t *read_dispatch_regex(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_regex(mino_state *S, const char **p)
 {
     /* Regex literal: #"pattern" -- construct a MINO_REGEX directly.
      * Body bytes pass through to the regex engine verbatim -- no
@@ -1887,8 +1887,8 @@ static mino_val_t *read_dispatch_regex(mino_state_t *S, const char **p)
      * two characters backslash and d. Each literal is a distinct
      * value (MINO_REGEX equality is identity), matching Clojure JVM
      * where two `#"x"` literals are not `=`. */
-    mino_val_t *str;
-    mino_val_t *rx;
+    mino_val *str;
+    mino_val *rx;
     ADVANCE(S, p); /* skip '#', now *p points at '"' */
     str = read_regex_string(S, p);
     if (str == NULL) return NULL;
@@ -1901,10 +1901,10 @@ static mino_val_t *read_dispatch_regex(mino_state_t *S, const char **p)
     return rx;
 }
 
-static mino_val_t *read_dispatch_cond(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_cond(mino_state *S, const char **p)
 {
     int         splicing = (*(*p + 2) == '@');
-    mino_val_t *found    = NULL;
+    mino_val *found    = NULL;
     if (S->reader.reader_cond_mode == 2 /* disallow */) {
         set_reader_diag(S, MRE007,
             "reader conditional not allowed when :read-cond is :disallow",
@@ -1912,7 +1912,7 @@ static mino_val_t *read_dispatch_cond(mino_state_t *S, const char **p)
         return NULL;
     }
     if (S->reader.reader_cond_mode == 1 /* preserve */) {
-        mino_val_t *body;
+        mino_val *body;
         ADVANCE_N(S, p, splicing ? 3 : 2);
         skip_ws(S, p);
         if (**p != '(') {
@@ -1969,15 +1969,15 @@ static mino_val_t *read_dispatch_cond(mino_state_t *S, const char **p)
  * time decides the reader fn (preserves read/eval separation: the
  * eval-time binding doesn't affect a value already produced by
  * read-string). */
-static mino_val_t *read_dispatch_tagged(mino_state_t *S, const char **p)
+static mino_val *read_dispatch_tagged(mino_state *S, const char **p)
 {
     const char *tag_start;
     size_t      tag_len;
-    mino_val_t *tag_sym;
-    mino_val_t *body;
-    mino_val_t *readers;
-    mino_val_t *fn;
-    mino_env_t *call_env;
+    mino_val *tag_sym;
+    mino_val *body;
+    mino_val *readers;
+    mino_val *fn;
+    mino_env *call_env;
     ADVANCE(S, p);
     tag_start = *p;
     tag_len = 0;
@@ -2046,13 +2046,13 @@ static mino_val_t *read_dispatch_tagged(mino_state_t *S, const char **p)
     readers = (mino_current_ctx(S)->dyn_stack != NULL)
                 ? dyn_lookup(S, "*data-readers*") : NULL;
     if (readers == NULL) {
-        mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
+        mino_val *var = var_find(S, "clojure.core", "*data-readers*");
         if (var != NULL && var->as.var.bound) readers = var->as.var.root;
     }
     if (readers != NULL && mino_type_of(readers) == MINO_MAP) {
         fn = map_get_val(readers, tag_sym);
         if (fn != NULL && call_env != NULL) {
-            mino_val_t *args = mino_cons(S, body, mino_nil(S));
+            mino_val *args = mino_cons(S, body, mino_nil(S));
             return mino_call(S, fn, args, call_env);
         }
     }
@@ -2061,12 +2061,12 @@ static mino_val_t *read_dispatch_tagged(mino_state_t *S, const char **p)
     fn = (mino_current_ctx(S)->dyn_stack != NULL)
             ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
     if (fn == NULL) {
-        mino_val_t *var = var_find(S, "clojure.core",
+        mino_val *var = var_find(S, "clojure.core",
                                    "*default-data-reader-fn*");
         if (var != NULL && var->as.var.bound) fn = var->as.var.root;
     }
     if (fn != NULL && mino_type_of(fn) != MINO_NIL && call_env != NULL) {
-        mino_val_t *args = mino_cons(S, tag_sym,
+        mino_val *args = mino_cons(S, tag_sym,
                                      mino_cons(S, body, mino_nil(S)));
         return mino_call(S, fn, args, call_env);
     }
@@ -2075,9 +2075,9 @@ static mino_val_t *read_dispatch_tagged(mino_state_t *S, const char **p)
      * read result is a value (matching canonical Clojure), not a
      * deferred (tagged-literal ...) call form. */
     {
-        mino_val_t *tl_var = var_find(S, "clojure.core", "tagged-literal");
+        mino_val *tl_var = var_find(S, "clojure.core", "tagged-literal");
         if (tl_var != NULL && tl_var->as.var.bound && call_env != NULL) {
-            mino_val_t *args = mino_cons(S, tag_sym,
+            mino_val *args = mino_cons(S, tag_sym,
                                          mino_cons(S, body, mino_nil(S)));
             return mino_call(S, tl_var->as.var.root, args, call_env);
         }
@@ -2108,7 +2108,7 @@ static const struct {
     {'?',  read_dispatch_cond},
 };
 
-static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
+static mino_val *read_dispatch(mino_state *S, const char **p)
 {
     char   next = *(*p + 1);
     size_t i;
@@ -2125,7 +2125,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
     return NULL;
 }
 
-static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
+static mino_val *read_form_dispatch(mino_state *S, const char **p)
 {
     skip_ws(S, p);
     if (**p == '\0') {
@@ -2208,9 +2208,9 @@ static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
  * overflowing the embedder. Increments reader_depth on entry,
  * decrements on the single exit, so every container type and
  * reader macro funnels through one balanced pair. */
-static mino_val_t *read_form(mino_state_t *S, const char **p)
+static mino_val *read_form(mino_state *S, const char **p)
 {
-    mino_val_t *v;
+    mino_val *v;
     if (S->reader_depth >= MINO_READER_MAX_DEPTH) {
         set_reader_diag(S, MRE011, "nesting too deep",
                         S->reader.reader_line, S->reader.reader_col);
@@ -2222,11 +2222,11 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     return v;
 }
 
-mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
+mino_val *mino_read(mino_state *S, const char *src, const char **end)
 {
     volatile char probe = 0;
     const char   *p;
-    mino_val_t   *v;
+    mino_val   *v;
     if (S == NULL) {
         if (end != NULL) *end = NULL;
         return NULL;

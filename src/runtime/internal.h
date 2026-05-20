@@ -110,22 +110,22 @@ struct mino_state {
     /* === Value caches: singletons, sentinels, interns, special forms === */
 
     /* Singletons */
-    mino_val_t      nil_singleton;
-    mino_val_t      true_singleton;
-    mino_val_t      false_singleton;
-    mino_val_t      empty_list_singleton;
+    mino_val      nil_singleton;
+    mino_val      true_singleton;
+    mino_val      false_singleton;
+    mino_val      empty_list_singleton;
     /* Trampoline sentinels reused across recur/tail-call to avoid
      * per-iteration allocation. Their args/fn fields are replaced in-place
      * and the containing eval loop consumes them before any other code
      * runs, so sharing one cell per kind is safe. */
-    mino_val_t      recur_sentinel;
-    mino_val_t      tail_call_sentinel;
+    mino_val      recur_sentinel;
+    mino_val      tail_call_sentinel;
 
     /* Small-integer cache: mino_int(S, n) returns the shared cell for
      * n in [MINO_SMALL_INT_LO, MINO_SMALL_INT_HI]. Arithmetic-heavy code
      * (fib, loops, reductions) produces many small-int results and
      * re-boxing them dominates allocation without this cache. */
-    mino_val_t      small_ints[256];
+    mino_val      small_ints[256];
 
     /* Intern tables */
     intern_table_t  sym_intern;
@@ -139,31 +139,31 @@ struct mino_state {
     /* Cached interned special-form symbols for O(1) pointer-eq dispatch.
      * Populated lazily on first eval_impl call. */
     int             sf_initialized;
-    mino_val_t     *sf_quote;
-    mino_val_t     *sf_quasiquote;
-    mino_val_t     *sf_unquote;
-    mino_val_t     *sf_unquote_splicing;
-    mino_val_t     *sf_defmacro;
-    mino_val_t     *sf_declare;
-    mino_val_t     *sf_ns;
-    mino_val_t     *sf_var;
-    mino_val_t     *sf_def;
-    mino_val_t     *sf_if;
-    mino_val_t     *sf_do;
-    mino_val_t     *sf_let;
-    mino_val_t     *sf_let_star;
-    mino_val_t     *sf_fn;
-    mino_val_t     *sf_fn_star;
-    mino_val_t     *sf_recur;
-    mino_val_t     *sf_loop;
-    mino_val_t     *sf_loop_star;
-    mino_val_t     *sf_try;
-    mino_val_t     *sf_binding;
-    mino_val_t     *sf_lazy_seq;
-    mino_val_t     *sf_new;
-    mino_val_t     *sf_when;
-    mino_val_t     *sf_and;
-    mino_val_t     *sf_or;
+    mino_val     *sf_quote;
+    mino_val     *sf_quasiquote;
+    mino_val     *sf_unquote;
+    mino_val     *sf_unquote_splicing;
+    mino_val     *sf_defmacro;
+    mino_val     *sf_declare;
+    mino_val     *sf_ns;
+    mino_val     *sf_var;
+    mino_val     *sf_def;
+    mino_val     *sf_if;
+    mino_val     *sf_do;
+    mino_val     *sf_let;
+    mino_val     *sf_let_star;
+    mino_val     *sf_fn;
+    mino_val     *sf_fn_star;
+    mino_val     *sf_recur;
+    mino_val     *sf_loop;
+    mino_val     *sf_loop_star;
+    mino_val     *sf_try;
+    mino_val     *sf_binding;
+    mino_val     *sf_lazy_seq;
+    mino_val     *sf_new;
+    mino_val     *sf_when;
+    mino_val     *sf_and;
+    mino_val     *sf_or;
 
     /* === Module system, execution limits, metadata ===================== */
     /* Lives in src/runtime/module_state.h. The block is embedded at
@@ -358,15 +358,15 @@ struct mino_state {
     uint64_t        rand_state;
 
     /* Sort comparator */
-    mino_val_t     *sort_comp_fn;
-    mino_env_t     *sort_comp_env;
+    mino_val     *sort_comp_fn;
+    mino_env     *sort_comp_env;
 
     /* Late-binding print-method hook. NULL during core bootstrap and any
      * state that never installed one; set via set-print-method! once the
      * multimethod is registered. When non-NULL, prim_pr / prim_prn route
      * each argument through this fn instead of calling mino_print
      * directly. The hook is expected to write to stdout as a side effect. */
-    mino_val_t     *print_method_fn;
+    mino_val     *print_method_fn;
 
     /* Gensym counter */
     long            gensym_counter;
@@ -376,17 +376,17 @@ struct mino_state {
      * pinned by the JIT layout assertions in
      * src/eval/bc/stencils/runtime_layout.h. New special-form symbols
      * land after the layout-tracked region. */
-    mino_val_t     *sf_letfn_star;
+    mino_val     *sf_letfn_star;
 
     /* Host-retained value refs */
-    mino_ref_t     *ref_roots;
+    mino_ref     *ref_roots;
 
     /* Dynamic bindings, interrupt flag, and GC save stack moved to
      * mino_thread_ctx_t (dyn_stack, interrupted, gc_save, gc_save_len). */
 
     /* Cached parsed core.clj forms (avoids re-parsing on second
      * mino_install_clojure_core call within the same state). */
-    mino_val_t    **core_forms;
+    mino_val    **core_forms;
     size_t          core_forms_len;
 
     /* Fault injection: when fi_alloc_countdown > 0, decrement on each
@@ -507,7 +507,7 @@ struct mino_state {
  * Worker threads set TLS at spawn; the embedder's thread leaves it
  * NULL and falls through to &S->main_ctx. Inline so the fast path
  * is a TLS load + predictable branch. */
-static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
+static inline mino_thread_ctx_t *mino_current_ctx(mino_state *S)
 {
     return mino_tls_ctx != NULL ? mino_tls_ctx : &S->main_ctx;
 }
@@ -524,7 +524,7 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
 
 /* Safepoint fast path: the branch inlines into every alloc /
  * eval-impl-entry / loop-recur site. */
-static inline void mino_safepoint_poll(mino_state_t *S)
+static inline void mino_safepoint_poll(mino_state *S)
 {
     if (mino_current_ctx(S)->should_yield) {
         mino_safepoint_park(S);
@@ -547,7 +547,7 @@ static inline void mino_safepoint_poll(mino_state_t *S)
  * outermost release, snapshot back so the next acquirer can install
  * theirs. Without this, concurrent (fn [x] (thread-sleep) x) calls
  * share one bc_regs stack and clobber each other's args. */
-static inline void mino_lock(mino_state_t *S)
+static inline void mino_lock(mino_state *S)
 {
     mino_thread_ctx_t *ctx;
     mino_state_lock_acquire(S);
@@ -566,7 +566,7 @@ static inline void mino_lock(mino_state_t *S)
     ctx->lock_depth++;
 }
 
-static inline void mino_unlock(mino_state_t *S)
+static inline void mino_unlock(mino_state *S)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     ctx->lock_depth--;
@@ -595,19 +595,19 @@ long long mino_monotonic_ns(void);
 /* UUID helpers (defined in src/prim/string.c) -- declared here so the
  * reader can build a MINO_UUID directly for the `#uuid "..."` literal
  * without pulling in the full prim/internal.h. */
-mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
+mino_val *mino_uuid_from_bytes(mino_state *S, const unsigned char *b);
 int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
 
 /* Regex constructor (defined in src/prim/regex.c) -- declared here so
  * the reader can build a MINO_REGEX for the `#"..."` literal. */
-mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
+mino_val *mino_regex_from_source(mino_state *S, mino_val *source);
 
 /* Inline truthiness for hot branch-dispatch paths (eval_if, eval_when,
  * eval_and, eval_or). The exported `mino_is_truthy` in src/mino.h
  * stays available for embedders; this internal sibling sidesteps the
  * function-call cost on the eval-side hot loop. The two must stay in
  * lockstep — adversarial tests catch divergence. */
-static inline int mino_is_truthy_inline(const mino_val_t *v)
+static inline int mino_is_truthy_inline(const mino_val *v)
 {
     if (v == NULL) return 0;
     if (mino_type_of(v) == MINO_NIL) return 0;

@@ -15,7 +15,7 @@
 #include "gc/internal.h"        /* for GC_T__COUNT in stats copy */
 #include "eval/bc/internal.h"  /* for mino_bc_fn_t + mino_sample_t */
 
-void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
+void mino_gc_collect(mino_state *S, mino_gc_kind kind)
 {
     if (S == NULL || mino_current_ctx(S)->gc_depth > 0) {
         return;
@@ -62,7 +62,7 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
 /* Range-validating setters. Each returns 1 on accept, 0 on reject.
  * The outer dispatcher turns the 1/0 result into 0/-1 per the
  * documented mino_set_limit convention. */
-static int set_nursery_bytes(mino_state_t *S, size_t v)
+static int set_nursery_bytes(mino_state *S, size_t v)
 {
     if (v < 64u * 1024u || v > 256u * 1024u * 1024u) {
         return 0;
@@ -71,7 +71,7 @@ static int set_nursery_bytes(mino_state_t *S, size_t v)
     return 1;
 }
 
-static int set_major_growth_tenths(mino_state_t *S, size_t v)
+static int set_major_growth_tenths(mino_state *S, size_t v)
 {
     if (v < 11u || v > 40u) {
         return 0;
@@ -80,7 +80,7 @@ static int set_major_growth_tenths(mino_state_t *S, size_t v)
     return 1;
 }
 
-static int set_promotion_age(mino_state_t *S, size_t v)
+static int set_promotion_age(mino_state *S, size_t v)
 {
     if (v < 1u || v > 8u) {
         return 0;
@@ -89,7 +89,7 @@ static int set_promotion_age(mino_state_t *S, size_t v)
     return 1;
 }
 
-static int set_incremental_budget(mino_state_t *S, size_t v)
+static int set_incremental_budget(mino_state *S, size_t v)
 {
     if (v < 64u || v > 65536u) {
         return 0;
@@ -98,7 +98,7 @@ static int set_incremental_budget(mino_state_t *S, size_t v)
     return 1;
 }
 
-static int set_step_alloc_bytes(mino_state_t *S, size_t v)
+static int set_step_alloc_bytes(mino_state *S, size_t v)
 {
     if (v < 1024u || v > 16u * 1024u * 1024u) {
         return 0;
@@ -107,7 +107,7 @@ static int set_step_alloc_bytes(mino_state_t *S, size_t v)
     return 1;
 }
 
-int mino_gc_set_param(mino_state_t *S, mino_gc_param_t p, size_t value)
+int mino_gc_set_param(mino_state *S, mino_gc_param p, size_t value)
 {
     int ok = 0;
     if (S == NULL) {
@@ -138,7 +138,7 @@ static int phase_to_public(int gc_phase)
     }
 }
 
-void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
+void mino_gc_stats(mino_state *S, mino_gc_stats_out *out)
 {
     if (S == NULL || out == NULL) {
         return;
@@ -189,7 +189,7 @@ static int u32_cmp(const void *a, const void *b)
     return 0;
 }
 
-void mino_gc_stats_pauses(mino_state_t *S,
+void mino_gc_stats_pauses(mino_state *S,
                           uint64_t *out_p50_ns,
                           uint64_t *out_p95_ns,
                           uint64_t *out_p99_ns,
@@ -238,7 +238,7 @@ void mino_gc_stats_pauses(mino_state_t *S,
     }
 }
 
-void mino_gc_pause_hist(mino_state_t *S,
+void mino_gc_pause_hist(mino_state *S,
                         uint32_t out_buckets[24],
                         unsigned *out_count)
 {
@@ -287,7 +287,7 @@ static int sampler_agg_cmp(const void *a, const void *b)
     return 0;
 }
 
-unsigned mino_sampler_dump(mino_state_t *S, FILE *out)
+unsigned mino_sampler_dump(mino_state *S, FILE *out)
 {
     static sampler_agg_t agg[SAMPLER_DUMP_TABLE_MAX];
     unsigned             n_agg = 0;
@@ -347,7 +347,7 @@ static int alloc_agg_cmp(const void *a, const void *b)
     return 0;
 }
 
-unsigned mino_alloc_sampler_dump(mino_state_t *S, FILE *out)
+unsigned mino_alloc_sampler_dump(mino_state *S, FILE *out)
 {
     static alloc_agg_t agg[1024];
     unsigned           n_agg = 0;

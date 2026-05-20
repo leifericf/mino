@@ -33,20 +33,20 @@
 /* All eval/expand functions return GC-owned values (NULL on error).         */
 /* ------------------------------------------------------------------------- */
 
-int         sym_eq(const mino_val_t *v, const char *s);        /* pure */
-mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env);
-mino_val_t *eval_implicit_do(mino_state_t *S, mino_val_t *body,
-                             mino_env_t *env);
-mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
-                                  mino_env_t *env, int tail);
-mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v);       /* mutates lazy cache */
-mino_val_t *eval_args(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+int         sym_eq(const mino_val *v, const char *s);        /* pure */
+mino_val *eval_value(mino_state *S, mino_val *form, mino_env *env);
+mino_val *eval_implicit_do(mino_state *S, mino_val *body,
+                             mino_env *env);
+mino_val *eval_implicit_do_impl(mino_state *S, mino_val *body,
+                                  mino_env *env, int tail);
+mino_val *lazy_force(mino_state *S, mino_val *v);       /* mutates lazy cache */
+mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env);
+mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
                          int *expanded);
-mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form,
-                            mino_env_t *env);
-mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
-                              mino_env_t *env);
+mino_val *macroexpand_all(mino_state *S, mino_val *form,
+                            mino_env *env);
+mino_val *quasiquote_expand(mino_state *S, mino_val *form,
+                              mino_env *env);
 
 /* ------------------------------------------------------------------------- */
 /* special.c: dispatch, special forms, destructuring, apply                  */
@@ -54,11 +54,11 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
 /* All return GC-owned values (NULL on error).                               */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env,
                       int tail);
-mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
-mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-                           mino_env_t *env);
+mino_val *eval(mino_state *S, mino_val *form, mino_env *env);
+mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
+                           mino_env *env);
 /* argv ABI variant: invoke `fn` with a slice of `argc` pointers from
  * `argv`. Skips the cons-spine build+walk used by callers that already
  * have their args in argv form (BC's OP_CALL, in particular).
@@ -67,17 +67,17 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
  * Slow paths (PRIM-fn1, MINO_FN tree-walker, MINO_MACRO, non-fn
  * callables) build a cons list internally and delegate to
  * apply_callable to reuse its trampoline and multi-arity dispatch. */
-mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
-                                mino_val_t **argv, int argc,
-                                mino_env_t *env);
+mino_val *apply_callable_argv(mino_state *S, mino_val *fn,
+                                mino_val **argv, int argc,
+                                mino_env *env);
 
 /* JIT-only fast entry into apply_callable_argv's bc-fn branch. Skips
  * the dispatch switch and reuses the shared bc-fn invocation core.
  * Defensive: returns to apply_callable_argv if the callee's shape
  * has drifted from what the IC slot captured. */
-mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
-                                        mino_val_t **argv, int argc,
-                                        mino_env_t *env);
+mino_val *mino_apply_known_bc_fn_argv(mino_state *S, mino_val *fn,
+                                        mino_val **argv, int argc,
+                                        mino_env *env);
 
 /* fn_lazy_safe_rest -- predicate used by prim_apply to decide whether
  * the final-arg collection can be spliced into the args spine
@@ -89,18 +89,18 @@ mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
  * terminate on an infinite lazy tail. Anything that isn't an FN
  * with rest-args (MINO_PRIM, fixed-arity FN, MACRO, keywords-as-fn,
  * ...) is rejected so the caller falls back to eager materialization. */
-int fn_lazy_safe_rest(mino_val_t *fn);
+int fn_lazy_safe_rest(mino_val *fn);
 
 /* ------------------------------------------------------------------------- */
 /* print.c                                                                   */
 /* ------------------------------------------------------------------------- */
 
-void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);
+void print_val(mino_state *S, FILE *out, const mino_val *v, int readably);
 
 /* ------------------------------------------------------------------------- */
 /* read.c                                                                    */
 /* ------------------------------------------------------------------------- */
 
-const char *intern_filename(mino_state_t *S, const char *name);  /* interned for state's lifetime */
+const char *intern_filename(mino_state *S, const char *name);  /* interned for state's lifetime */
 
 #endif /* EVAL_INTERNAL_H */

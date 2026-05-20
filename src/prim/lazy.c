@@ -15,8 +15,8 @@
 /* Pull the head element and the rest seq from a coll that has already
  * been normalized to one of {CONS, CHUNKED_CONS}. Returns 1 on
  * success (sets *out_head and *out_rest), 0 on end-of-seq. */
-static int seq_head_rest(mino_state_t *S, mino_val_t *coll,
-                         mino_val_t **out_head, mino_val_t **out_rest)
+static int seq_head_rest(mino_state *S, mino_val *coll,
+                         mino_val **out_head, mino_val **out_rest)
 {
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) return 0;
     if (mino_type_of(coll) == MINO_CONS) {
@@ -25,7 +25,7 @@ static int seq_head_rest(mino_state_t *S, mino_val_t *coll,
         return 1;
     }
     if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
-        const mino_val_t *ch = coll->as.chunked_cons.chunk;
+        const mino_val *ch = coll->as.chunked_cons.chunk;
         *out_head = ch->as.chunk.vals[coll->as.chunked_cons.off];
         *out_rest = mino_chunked_cons_advance(S, coll);
         if (*out_rest == NULL) return 0;
@@ -36,7 +36,7 @@ static int seq_head_rest(mino_state_t *S, mino_val_t *coll,
 
 /* Force any leading lazy seqs and coerce the result to a CONS-shaped
  * or CHUNKED_CONS-shaped seq. Returns nil/NULL when the seq is empty. */
-static mino_val_t *normalize_seq(mino_state_t *S, mino_val_t *coll)
+static mino_val *normalize_seq(mino_state *S, mino_val *coll)
 {
     if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
         coll = lazy_force(S, coll);
@@ -59,16 +59,16 @@ static mino_val_t *normalize_seq(mino_state_t *S, mino_val_t *coll)
     return mino_nil(S);
 }
 
-static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *lazy_map1_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t *fn   = ctx->as.cons.car;
-    mino_val_t *coll = ctx->as.cons.cdr->as.cons.car;
-    mino_val_t *head;
-    mino_val_t *rest;
-    mino_val_t *mapped;
-    mino_val_t *call_args;
-    mino_val_t *next_ctx;
-    mino_val_t *next_lz;
+    mino_val *fn   = ctx->as.cons.car;
+    mino_val *coll = ctx->as.cons.cdr->as.cons.car;
+    mino_val *head;
+    mino_val *rest;
+    mino_val *mapped;
+    mino_val *call_args;
+    mino_val *next_ctx;
+    mino_val *next_lz;
     coll = normalize_seq(S, coll);
     if (coll == NULL) return NULL;
     if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
@@ -79,18 +79,18 @@ static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
          * lazy of this same thunk. Preserves chunkedness through the
          * pipeline so a downstream filter/keep/etc. can also pull
          * chunks at a time. */
-        const mino_val_t *src = coll->as.chunked_cons.chunk;
+        const mino_val *src = coll->as.chunked_cons.chunk;
         unsigned          off = coll->as.chunked_cons.off;
         unsigned          n   = src->as.chunk.len - off;
-        mino_val_t       *buf;
-        mino_val_t       *more;
+        mino_val       *buf;
+        mino_val       *more;
         unsigned          k;
         buf = mino_chunk_buffer(S, n);
         if (buf == NULL) return NULL;
         gc_pin(buf);
         for (k = 0; k < n; k++) {
-            mino_val_t *elem = src->as.chunk.vals[off + k];
-            mino_val_t *m;
+            mino_val *elem = src->as.chunk.vals[off + k];
+            mino_val *m;
             call_args = mino_cons(S, elem, mino_nil(S));
             gc_pin(call_args);
             m = apply_callable(S, fn, call_args, NULL);
@@ -132,12 +132,12 @@ static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
  * leading "lazy-" prefix to signal it is the single-coll fast path; the
  * public `map` in core.clj dispatches to it for the 1-collection case
  * and keeps the multi-coll implementation for the uncommon wide form. */
-mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_lazy_map_1(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn;
-    mino_val_t *coll;
-    mino_val_t *ctx;
-    mino_val_t *lz;
+    mino_val *fn;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
     size_t n;
     (void)env;
     arg_count(S, args, &n);
@@ -169,15 +169,15 @@ mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Lazy c_thunk for (filter pred coll): ctx = cons(pred, coll_state). On
  * force, advances through coll until pred(elem) is truthy; returns
  * cons(elem, lazy-filter(pred, rest)), or nil at end. */
-static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *lazy_filter_thunk(mino_state *S, mino_val *ctx)
 {
-    mino_val_t *pred = ctx->as.cons.car;
-    mino_val_t *coll = ctx->as.cons.cdr->as.cons.car;
+    mino_val *pred = ctx->as.cons.car;
+    mino_val *coll = ctx->as.cons.cdr->as.cons.car;
     for (;;) {
-        mino_val_t *head;
-        mino_val_t *rest;
-        mino_val_t *call_args;
-        mino_val_t *ok;
+        mino_val *head;
+        mino_val *rest;
+        mino_val *call_args;
+        mino_val *ok;
         coll = normalize_seq(S, coll);
         if (coll == NULL) return NULL;
         if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
@@ -188,20 +188,20 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
              * chunk-rest. The fresh buffer can be smaller than the
              * source chunk; we size it pessimistically at the source
              * chunk's remaining length. */
-            const mino_val_t *src = coll->as.chunked_cons.chunk;
+            const mino_val *src = coll->as.chunked_cons.chunk;
             unsigned          off = coll->as.chunked_cons.off;
             unsigned          n   = src->as.chunk.len - off;
-            mino_val_t       *buf;
-            mino_val_t       *more;
-            mino_val_t       *next_ctx;
-            mino_val_t       *next_lz;
+            mino_val       *buf;
+            mino_val       *more;
+            mino_val       *next_ctx;
+            mino_val       *next_lz;
             unsigned          k;
             buf = mino_chunk_buffer(S, n);
             if (buf == NULL) return NULL;
             gc_pin(buf);
             for (k = 0; k < n; k++) {
-                mino_val_t *elem = src->as.chunk.vals[off + k];
-                mino_val_t *r;
+                mino_val *elem = src->as.chunk.vals[off + k];
+                mino_val *r;
                 call_args = mino_cons(S, elem, mino_nil(S));
                 gc_pin(call_args);
                 r = apply_callable(S, pred, call_args, NULL);
@@ -247,8 +247,8 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
         gc_unpin(1);
         if (ok == NULL) return NULL;
         if (mino_is_truthy_inline(ok)) {
-            mino_val_t *next_ctx;
-            mino_val_t *next_lz;
+            mino_val *next_ctx;
+            mino_val *next_lz;
             gc_pin(head);
             next_ctx = mino_cons(S, pred,
                         mino_cons(S, rest, mino_nil(S)));
@@ -264,12 +264,12 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
 
 /* (lazy-filter pred coll) -- lazy filter. Pairs with lazy-map-1; see
  * its comment for dispatch rationale. */
-mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_lazy_filter(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pred;
-    mino_val_t *coll;
-    mino_val_t *ctx;
-    mino_val_t *lz;
+    mino_val *pred;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
     size_t n;
     (void)env;
     arg_count(S, args, &n);
@@ -302,18 +302,18 @@ mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * The context is a cons(start, cons(end, step)) triple of interned ints; a
  * vector would work too but this keeps alloc count low for the hot path.
  */
-static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx);
-static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx);
+static mino_val *range_thunk(mino_state *S, mino_val *ctx);
+static mino_val *lazy_take_thunk(mino_state *S, mino_val *ctx);
 
 /* Recognise a lazy seq created by prim_range. Used by prim_reduce's
  * int-range fast path to lift the iteration into a tight C loop
  * instead of forcing every chunk and rebuilding a 2-arg cons spine
  * per call. Returns 1 and fills the params on a hit, 0 on a miss. */
-int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
+int lazy_is_int_range(const mino_val *coll, long long *start_out,
                       long long *end_out, long long *step_out,
                       int *infinite_out)
 {
-    const mino_val_t *ctx;
+    const mino_val *ctx;
     if (coll == NULL || mino_type_of(coll) != MINO_LAZY) return 0;
     if (coll->as.lazy.c_thunk != range_thunk) return 0;
     if (coll->as.lazy.realized) return 0;  /* would be a chunked cons by now */
@@ -336,7 +336,7 @@ int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
  * the per-stage lazy-cell allocations. A realized LAZY returns 0 — its
  * body has been cleared and the cached value is just a regular cons /
  * chunked-cons / nil. */
-int lazy_thunk_is_map1(const mino_val_t *coll)
+int lazy_thunk_is_map1(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
@@ -344,7 +344,7 @@ int lazy_thunk_is_map1(const mino_val_t *coll)
         && coll->as.lazy.c_thunk == lazy_map1_thunk;
 }
 
-int lazy_thunk_is_filter(const mino_val_t *coll)
+int lazy_thunk_is_filter(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
@@ -352,7 +352,7 @@ int lazy_thunk_is_filter(const mino_val_t *coll)
         && coll->as.lazy.c_thunk == lazy_filter_thunk;
 }
 
-int lazy_thunk_is_take(const mino_val_t *coll)
+int lazy_thunk_is_take(const mino_val *coll)
 {
     return coll != NULL
         && mino_type_of(coll) == MINO_LAZY
@@ -360,12 +360,12 @@ int lazy_thunk_is_take(const mino_val_t *coll)
         && coll->as.lazy.c_thunk == lazy_take_thunk;
 }
 
-static mino_val_t *range_make_lazy(mino_state_t *S, long long start,
+static mino_val *range_make_lazy(mino_state *S, long long start,
                                    long long end, long long step,
                                    int infinite)
 {
-    mino_val_t *lz;
-    mino_val_t *ctx;
+    mino_val *lz;
+    mino_val *ctx;
     if (!infinite) {
         if (step > 0 ? start >= end : start <= end) {
             return mino_nil(S);
@@ -382,7 +382,7 @@ static mino_val_t *range_make_lazy(mino_state_t *S, long long start,
     return lz;
 }
 
-static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *range_thunk(mino_state *S, mino_val *ctx)
 {
     long long start = mino_val_int_get(ctx->as.cons.car);
     long long end   = mino_val_int_get(ctx->as.cons.cdr->as.cons.car);
@@ -396,7 +396,7 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
     long long count = CHUNK_N;
     long long cur   = start;
     long long i;
-    mino_val_t *buf;
+    mino_val *buf;
     if (!infinite) {
         if (step > 0) {
             long long remaining = (end - start + step - 1) / step;
@@ -427,20 +427,20 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
  * inside the chunk). One allocation per chunk instead of one per
  * element. Realising `(take 10000 (range))` produces ~313 chunk-cons
  * cells instead of 10000. */
-static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
+static mino_val *lazy_take_thunk(mino_state *S, mino_val *ctx)
 {
     long long n   = mino_val_int_get(ctx->as.cons.car);
-    mino_val_t *coll = ctx->as.cons.cdr->as.cons.car;
-    mino_val_t *head;
-    mino_val_t *rest;
-    mino_val_t *next_ctx;
-    mino_val_t *next_lz;
+    mino_val *coll = ctx->as.cons.cdr->as.cons.car;
+    mino_val *head;
+    mino_val *rest;
+    mino_val *next_ctx;
+    mino_val *next_lz;
     if (n <= 0) return mino_nil(S);
     coll = normalize_seq(S, coll);
     if (coll == NULL) return NULL;
     if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
     if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
-        const mino_val_t *src = coll->as.chunked_cons.chunk;
+        const mino_val *src = coll->as.chunked_cons.chunk;
         unsigned          off = coll->as.chunked_cons.off;
         unsigned          avail = src->as.chunk.len - off;
         if ((long long)avail <= n) {
@@ -448,11 +448,11 @@ static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
              * that preserves the source offset and either points at the
              * rest (recursing through a fresh lazy) or terminates when
              * we've taken all we need. */
-            mino_val_t *more = coll->as.chunked_cons.more;
+            mino_val *more = coll->as.chunked_cons.more;
             long long   left = n - (long long)avail;
-            mino_val_t *cell = alloc_val(S, MINO_CHUNKED_CONS);
+            mino_val *cell = alloc_val(S, MINO_CHUNKED_CONS);
             if (cell == NULL) return NULL;
-            cell->as.chunked_cons.chunk = (mino_val_t *)src;
+            cell->as.chunked_cons.chunk = (mino_val *)src;
             cell->as.chunked_cons.off   = off;
             if (left <= 0 || more == NULL || mino_type_of(more) == MINO_NIL
                 || mino_type_of(more) == MINO_EMPTY_LIST) {
@@ -470,7 +470,7 @@ static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
         } else {
             /* `n < avail`: materialise a fresh chunk of exactly `n`
              * elements so the resulting seq stops at the boundary. */
-            mino_val_t *buf;
+            mino_val *buf;
             long long   i;
             buf = mino_chunk_buffer(S, (unsigned)n);
             if (buf == NULL) return NULL;
@@ -496,12 +496,12 @@ static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
 }
 
 /* (lazy-take n coll) -- lazy take for n items; see lazy-map-1 comment. */
-mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_lazy_take(mino_state *S, mino_val *args, mino_env *env)
 {
     long long n;
-    mino_val_t *coll;
-    mino_val_t *ctx;
-    mino_val_t *lz;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
     size_t na;
     (void)env;
     arg_count(S, args, &na);
@@ -534,10 +534,10 @@ mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (drop-seq n coll) -- eagerly walk past n items, returning the tail
  * seq. Mirrors Clojure's eager-drop; the public `drop` dispatches here
  * for the 2-arg form and keeps the transducer path in core.clj. */
-mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env)
 {
     long long n;
-    mino_val_t *coll;
+    mino_val *coll;
     size_t na;
     (void)env;
     arg_count(S, args, &na);
@@ -551,8 +551,8 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.cdr->as.cons.car;
     if (n <= 0) {
-        mino_val_t *seq_args;
-        mino_val_t *seqd;
+        mino_val *seq_args;
+        mino_val *seqd;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
         /* `drop` always returns a seq, never the source collection. A
          * vector / map / set / chunked source becomes its seq view so
@@ -576,7 +576,7 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             /* Bulk-skip the head chunk when `n` exceeds its remaining
              * elements. One advance walks past the whole chunk instead
              * of `len - off` per-element advances. */
-            const mino_val_t *src = coll->as.chunked_cons.chunk;
+            const mino_val *src = coll->as.chunked_cons.chunk;
             unsigned          off = coll->as.chunked_cons.off;
             unsigned          avail = src->as.chunk.len - off;
             if ((long long)avail <= n) {
@@ -590,9 +590,9 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             }
             /* `n < avail`: rebase the head chunk's offset. */
             {
-                mino_val_t *cell = alloc_val(S, MINO_CHUNKED_CONS);
+                mino_val *cell = alloc_val(S, MINO_CHUNKED_CONS);
                 if (cell == NULL) return NULL;
-                cell->as.chunked_cons.chunk = (mino_val_t *)src;
+                cell->as.chunked_cons.chunk = (mino_val *)src;
                 cell->as.chunked_cons.off   = off + (unsigned)n;
                 cell->as.chunked_cons.more  = coll->as.chunked_cons.more;
                 return cell;
@@ -613,7 +613,7 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (range), (range end), (range start end), (range start end step). */
-mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
 {
     long long start = 0, end = 0, step = 1;
     size_t n;
@@ -649,7 +649,7 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "range takes 0, 1, 2, or 3 arguments");
     }
     {
-        mino_val_t *r = range_make_lazy(S, start, end, step, infinite);
+        mino_val *r = range_make_lazy(S, start, end, step, infinite);
         if (r == NULL) return NULL;
         if (mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
         return r;
@@ -660,12 +660,12 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Chunked-seq family                                                        */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *prim_chunk_buffer(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+mino_val *prim_chunk_buffer(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
     long long  cap;
     size_t     n;
-    mino_val_t *buf;
+    mino_val *buf;
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
@@ -688,10 +688,10 @@ mino_val_t *prim_chunk_buffer(mino_state_t *S, mino_val_t *args,
     return buf;
 }
 
-mino_val_t *prim_chunk_append(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+mino_val *prim_chunk_append(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
-    mino_val_t *buf, *elem;
+    mino_val *buf, *elem;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -722,9 +722,9 @@ mino_val_t *prim_chunk_append(mino_state_t *S, mino_val_t *args,
     return buf;
 }
 
-mino_val_t *prim_chunk(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_chunk(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *buf;
+    mino_val *buf;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -740,10 +740,10 @@ mino_val_t *prim_chunk(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_chunk_seal(buf);
 }
 
-mino_val_t *prim_chunk_cons(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_chunk_cons(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *chunk, *more;
+    mino_val *chunk, *more;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -764,10 +764,10 @@ mino_val_t *prim_chunk_cons(mino_state_t *S, mino_val_t *args,
     return mino_chunked_cons(S, chunk, more);
 }
 
-mino_val_t *prim_chunk_first(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_chunk_first(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *cs;
+    mino_val *cs;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -786,11 +786,11 @@ mino_val_t *prim_chunk_first(mino_state_t *S, mino_val_t *args,
     return cs->as.chunked_cons.chunk;
 }
 
-mino_val_t *prim_chunk_rest(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *cs;
-    mino_val_t *more;
+    mino_val *cs;
+    mino_val *more;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -808,11 +808,11 @@ mino_val_t *prim_chunk_rest(mino_state_t *S, mino_val_t *args,
     return more;
 }
 
-mino_val_t *prim_chunk_next(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_chunk_next(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *cs;
-    mino_val_t *more;
+    mino_val *cs;
+    mino_val *more;
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
@@ -837,8 +837,8 @@ mino_val_t *prim_chunk_next(mino_state_t *S, mino_val_t *args,
     return more;
 }
 
-mino_val_t *prim_chunked_seq_p(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_chunked_seq_p(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
     size_t n;
     (void)env;

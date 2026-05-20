@@ -18,11 +18,11 @@
  * skipping inline-tagged values, NULL, and singletons inside the
  * state struct. Declared (and defined static) in gc/driver.c; we
  * re-declare its external shim here so each tracer can call it. */
-void gc_mark_child_push_exported(mino_state_t *S, const void *p);
+void gc_mark_child_push_exported(mino_state *S, const void *p);
 
 #define PUSH(p) gc_mark_child_push_exported(S, (p))
 
-static void trace_vec_node(mino_state_t *S, gc_hdr_t *h)
+static void trace_vec_node(mino_state *S, gc_hdr_t *h)
 {
     mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
     unsigned i;
@@ -31,7 +31,7 @@ static void trace_vec_node(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-static void trace_hamt_node(mino_state_t *S, gc_hdr_t *h)
+static void trace_hamt_node(mino_state *S, gc_hdr_t *h)
 {
     mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
     unsigned count, i;
@@ -45,14 +45,14 @@ static void trace_hamt_node(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-static void trace_hamt_entry(mino_state_t *S, gc_hdr_t *h)
+static void trace_hamt_entry(mino_state *S, gc_hdr_t *h)
 {
     hamt_entry_t *e = (hamt_entry_t *)(h + 1);
     PUSH(e->key);
     PUSH(e->val);
 }
 
-static void trace_rb_node(mino_state_t *S, gc_hdr_t *h)
+static void trace_rb_node(mino_state *S, gc_hdr_t *h)
 {
     mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
     PUSH(rb->key);
@@ -61,7 +61,7 @@ static void trace_rb_node(mino_state_t *S, gc_hdr_t *h)
     PUSH(rb->right);
 }
 
-void mino_collections_register_gc_handlers(mino_state_t *S)
+void mino_collections_register_gc_handlers(mino_state *S)
 {
     gc_register_tracer(S, GC_T_VEC_NODE,   trace_vec_node);
     gc_register_tracer(S, GC_T_HAMT_NODE,  trace_hamt_node);

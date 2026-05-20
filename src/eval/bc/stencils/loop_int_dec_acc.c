@@ -14,9 +14,9 @@
 #define MINO_TAGGED_INT_MIN \
     ((uintptr_t)((unsigned long long)0x8000000000000000ull) | (uintptr_t)1)
 
-void stencil_op_loop_int_dec_acc(mino_val_t **regs,
-                                  mino_val_t **consts,
-                                  mino_state_t *S)
+void stencil_op_loop_int_dec_acc(mino_val **regs,
+                                  mino_val **consts,
+                                  mino_state *S)
 {
     unsigned long ticks = 256;
     for (;;) {
@@ -26,9 +26,9 @@ void stencil_op_loop_int_dec_acc(mino_val_t **regs,
             }
             ticks = 256;
         }
-        mino_val_t *vt = regs[IMM_A];
-        mino_val_t *vk = regs[IMM_C];
-        mino_val_t *vs = regs[IMM_BX2];
+        mino_val *vt = regs[IMM_A];
+        mino_val *vk = regs[IMM_C];
+        mino_val *vs = regs[IMM_BX2];
         uintptr_t ut = (uintptr_t)vt;
         uintptr_t uk = (uintptr_t)vk;
         uintptr_t us = (uintptr_t)vs;
@@ -39,7 +39,7 @@ void stencil_op_loop_int_dec_acc(mino_val_t **regs,
                 MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             if (((uintptr_t)regs & 1) != 0) {
-                regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);
+                regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
                 MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
             }
             continue;
@@ -55,7 +55,7 @@ void stencil_op_loop_int_dec_acc(mino_val_t **regs,
                 MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             if (((uintptr_t)regs & 1) != 0) {
-                regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);
+                regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
                 MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
             }
             continue;
@@ -70,13 +70,13 @@ void stencil_op_loop_int_dec_acc(mino_val_t **regs,
                 MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             if (((uintptr_t)regs & 1) != 0) {
-                regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);
+                regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
                 MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
             }
             continue;
         }
-        regs[IMM_A] = (mino_val_t *)(((uintptr_t)(t - 1) << 3) | (uintptr_t)1);
-        regs[IMM_C] = (mino_val_t *)(((uintptr_t)new_k << 3) | (uintptr_t)1);
+        regs[IMM_A] = (mino_val *)(((uintptr_t)(t - 1) << 3) | (uintptr_t)1);
+        regs[IMM_C] = (mino_val *)(((uintptr_t)new_k << 3) | (uintptr_t)1);
         /* continue */
     }
 }

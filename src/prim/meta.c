@@ -13,7 +13,7 @@
  * with-meta'd atoms share their state; absent that, throw a clear
  * error and direct callers at alter-meta! (in-place) or the
  * constructor's :meta option. */
-static int supports_meta(mino_type_t t)
+static int supports_meta(mino_type t)
 {
     return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
         || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
@@ -27,7 +27,7 @@ static int supports_meta(mino_type_t t)
  * so it stays safe for identity-tied values, and (meta x) is
  * read-only. The constructor form `(ref init :meta m)` populates
  * the slot at construction; alter-meta! can mutate it later. */
-static int meta_readable(mino_type_t t)
+static int meta_readable(mino_type t)
 {
     return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT
         || t == MINO_TX_REF;
@@ -37,10 +37,10 @@ static int meta_readable(mino_type_t t)
  * var's ns and sym fields, and ^:private / ^:dynamic come from flags.
  * Synthesize a fresh map on each call (callers don't expect identity
  * stability on var meta). */
-static mino_val_t *synth_var_meta(mino_state_t *S, mino_val_t *var)
+static mino_val *synth_var_meta(mino_state *S, mino_val *var)
 {
-    mino_val_t *keys[4];
-    mino_val_t *vals[4];
+    mino_val *keys[4];
+    mino_val *vals[4];
     size_t      n = 0;
     keys[n] = mino_keyword(S, "ns");
     vals[n] = var->as.var.ns != NULL
@@ -65,10 +65,10 @@ static mino_val_t *synth_var_meta(mino_state_t *S, mino_val_t *var)
     return mino_map(S, keys, vals, n);
 }
 
-mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
-                       mino_env_t *env)
+mino_val *prim_meta(mino_state *S, mino_val *args,
+                       mino_env *env)
 {
-    mino_val_t *obj;
+    mino_val *obj;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "meta requires one argument");
@@ -85,10 +85,10 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
     return obj->meta != NULL ? obj->meta : mino_nil(S);
 }
 
-mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_with_meta(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *obj, *m, *copy;
+    mino_val *obj, *m, *copy;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "with-meta requires 2 arguments");
@@ -118,10 +118,10 @@ mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
     return copy;
 }
 
-mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_vary_meta(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
+    mino_val *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "vary-meta requires at least 2 arguments");
     }
@@ -157,10 +157,10 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
     return copy;
 }
 
-mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_alter_meta(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta;
+    mino_val *obj, *f, *old_meta, *extra, *call_args, *new_meta;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "alter-meta! requires at least 2 arguments");
     }
@@ -183,7 +183,7 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: f must return a map or nil");
     }
     {
-        mino_val_t *next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
+        mino_val *next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
         gc_write_barrier(S, obj, obj->meta, next);
         obj->meta = next;
     }

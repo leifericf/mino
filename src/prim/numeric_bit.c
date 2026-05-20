@@ -16,7 +16,7 @@
 /* Bitwise operations                                                        */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_and(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -31,7 +31,7 @@ mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int_wrap(S, a & b);
 }
 
-mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_or(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -46,7 +46,7 @@ mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int_wrap(S, a | b);
 }
 
-mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_xor(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -61,7 +61,7 @@ mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int_wrap(S, a ^ b);
 }
 
-mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_not(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a;
     (void)env;
@@ -84,7 +84,7 @@ static int shift_amount_ok(long long b)
     return b >= 0 && b < MINO_SHIFT_WIDTH;
 }
 
-mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_shift_left(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -107,7 +107,7 @@ mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *e
     return mino_int_wrap(S, (long long)((unsigned long long)a << b));
 }
 
-mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -129,7 +129,7 @@ mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *
     return mino_int_wrap(S, a >> b);
 }
 
-mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_unsigned_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;

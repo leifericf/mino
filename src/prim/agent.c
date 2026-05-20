@@ -93,7 +93,7 @@ static void agent_cv_broadcast(pthread_cond_t *c) { pthread_cond_broadcast(c); }
 
 /* Lazy-init agent_mu/cv. Called under state_lock (so the inited flag
  * read is race-free against concurrent sends from other threads). */
-static void agent_mu_ensure_inited(mino_state_t *S)
+static void agent_mu_ensure_inited(mino_state *S)
 {
     if (!S->agent.mu_inited) {
         agent_mu_init(&S->agent.mu);
@@ -104,24 +104,24 @@ static void agent_mu_ensure_inited(mino_state_t *S)
 
 /* Forward declarations for the C-API perimeter (defined further down
  * with the prim handlers and the shared core helpers). */
-static int          agent_check_state(mino_state_t *S, mino_val_t *agent);
-static mino_val_t  *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
-                                     mino_val_t *agent, mino_val_t *fn,
-                                     mino_val_t *extra, mino_env_t *env,
+static int          agent_check_state(mino_state *S, mino_val *agent);
+static mino_val  *agent_send_core(mino_state *S, agent_pool_kind_t kind,
+                                     mino_val *agent, mino_val *fn,
+                                     mino_val *extra, mino_env *env,
                                      const char *prim_name);
-static mino_val_t  *agent_array_to_list(mino_state_t *S, mino_val_t **agents);
-mino_val_t         *prim_await(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env);
-mino_val_t         *prim_await_for(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env);
-mino_val_t         *prim_restart_agent(mino_state_t *S, mino_val_t *args,
-                                        mino_env_t *env);
+static mino_val  *agent_array_to_list(mino_state *S, mino_val **agents);
+mino_val         *prim_await(mino_state *S, mino_val *args,
+                                mino_env *env);
+mino_val         *prim_await_for(mino_state *S, mino_val *args,
+                                    mino_env *env);
+mino_val         *prim_restart_agent(mino_state *S, mino_val *args,
+                                        mino_env *env);
 
 /* --- public-API constructor + predicate ----------------------------------- */
 
-mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
+mino_val *mino_agent(mino_state *S, mino_val *initial)
 {
-    mino_val_t *v = alloc_val(S, MINO_AGENT);
+    mino_val *v = alloc_val(S, MINO_AGENT);
     v->as.agent.val          = initial;
     v->as.agent.watches      = NULL;
     v->as.agent.validator    = NULL;
@@ -134,7 +134,7 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
     return v;
 }
 
-int mino_is_agent(const mino_val_t *v)
+int mino_is_agent(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_AGENT;
 }
@@ -143,9 +143,9 @@ int mino_is_agent(const mino_val_t *v)
  * the shape that prim_await / prim_await_for already consume. Returns
  * an empty list when agents is NULL or its first slot is NULL.
  * Caller must already hold state_lock so cons allocations are safe. */
-static mino_val_t *agent_array_to_list(mino_state_t *S, mino_val_t **agents)
+static mino_val *agent_array_to_list(mino_state *S, mino_val **agents)
 {
-    mino_val_t *head;
+    mino_val *head;
     size_t      i, n;
     if (agents == NULL) return mino_empty_list(S);
     n = 0;
@@ -162,7 +162,7 @@ static mino_val_t *agent_array_to_list(mino_state_t *S, mino_val_t **agents)
  * that injects a foreign agent through mino_env_set / mino_call
  * cannot tunnel mutations into another state's heap. Returns 0 on
  * match, 1 on mismatch (caller should propagate NULL). */
-static int agent_check_state(mino_state_t *S, mino_val_t *agent)
+static int agent_check_state(mino_state *S, mino_val *agent)
 {
     if (agent->as.agent.owning_state != S) {
         prim_throw_classified(S, "eval/state", "MST007",
@@ -175,13 +175,13 @@ static int agent_check_state(mino_state_t *S, mino_val_t *agent)
 /* --- action dispatch ------------------------------------------------------ */
 
 /* Build (cur arg1 arg2 ...) for invoking an action fn. */
-static mino_val_t *agent_build_call(mino_state_t *S, mino_val_t *cur,
-                                     mino_val_t *extra)
+static mino_val *agent_build_call(mino_state *S, mino_val *cur,
+                                     mino_val *extra)
 {
-    mino_val_t *head = mino_cons(S, cur, mino_nil(S));
-    mino_val_t *cell = head;
+    mino_val *head = mino_cons(S, cur, mino_nil(S));
+    mino_val *cell = head;
     while (mino_is_cons(extra)) {
-        mino_val_t *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
+        mino_val *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
         cell->as.cons.cdr = next;
         cell = next;
         extra = extra->as.cons.cdr;
@@ -195,12 +195,12 @@ static mino_val_t *agent_build_call(mino_state_t *S, mino_val_t *cur,
  * latching it wants. If the handler itself throws, capture its
  * thrown payload into err so the failure isn't silently lost. With
  * no handler, latch ex into err directly. */
-static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
-                                  mino_val_t *ex, mino_env_t *env)
+static void agent_report_failure(mino_state *S, mino_val *agent,
+                                  mino_val *ex, mino_env *env)
 {
-    mino_val_t *handler = agent->as.agent.err_handler;
-    mino_val_t *result  = NULL;
-    mino_val_t *hthrown = NULL;
+    mino_val *handler = agent->as.agent.err_handler;
+    mino_val *result  = NULL;
+    mino_val *hthrown = NULL;
     int         pc;
     if (handler == NULL) {
         gc_write_barrier(S, agent, agent->as.agent.err, ex);
@@ -208,7 +208,7 @@ static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
         return;
     }
     {
-        mino_val_t *args = mino_cons(S, agent,
+        mino_val *args = mino_cons(S, agent,
                               mino_cons(S, ex, mino_nil(S)));
         pc = mino_pcall(S, handler, args, env, &result, &hthrown);
     }
@@ -228,15 +228,15 @@ static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
  * is true). The dyn_frame is stack-allocated; mino_pcall catches
  * throws within itself so the push/pop bracket cannot be skipped by
  * a longjmp escaping past us. */
-static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
-                                mino_val_t *fn, mino_val_t *extra,
-                                mino_env_t *env)
+static void agent_apply_action(mino_state *S, mino_val *agent,
+                                mino_val *fn, mino_val *extra,
+                                mino_env *env)
 {
-    mino_val_t        *call_args = agent_build_call(S, agent->as.agent.val,
+    mino_val        *call_args = agent_build_call(S, agent->as.agent.val,
                                                      extra);
-    mino_val_t        *new_state = NULL;
-    mino_val_t        *old_state = agent->as.agent.val;
-    mino_val_t        *thrown_ex = NULL;
+    mino_val        *new_state = NULL;
+    mino_val        *old_state = agent->as.agent.val;
+    mino_val        *thrown_ex = NULL;
     mino_thread_ctx_t *ctx       = mino_current_ctx(S);
     dyn_binding_t      ag_bind;
     dyn_frame_t        ag_frame;
@@ -257,12 +257,12 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
 
     /* Validator: rejects bypass the publish + watch dispatch. */
     if (agent->as.agent.validator != NULL) {
-        mino_val_t *vargs = mino_cons(S, new_state, mino_nil(S));
-        mino_val_t *vresult = NULL;
+        mino_val *vargs = mino_cons(S, new_state, mino_nil(S));
+        mino_val *vresult = NULL;
         pc = mino_pcall(S, agent->as.agent.validator, vargs, env,
                           &vresult, &thrown_ex);
         if (pc != 0 || vresult == NULL || !mino_is_truthy(vresult)) {
-            mino_val_t *ex = thrown_ex;
+            mino_val *ex = thrown_ex;
             if (ex == NULL) {
                 /* Validator returned falsy without throwing: synthesize. */
                 ex = mino_string(S, "Invalid reference state");
@@ -284,15 +284,15 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
     if (agent->as.agent.watches != NULL
         && mino_type_of(agent->as.agent.watches) == MINO_MAP
         && agent->as.agent.watches->as.map.len > 0) {
-        mino_val_t *watches = agent->as.agent.watches;
+        mino_val *watches = agent->as.agent.watches;
         size_t      n = watches->as.map.len;
         size_t      i;
         for (i = 0; i < n; i++) {
-            mino_val_t *key = vec_nth(watches->as.map.key_order, i);
-            mino_val_t *wfn = map_get_val(watches, key);
-            mino_val_t *wargs;
-            mino_val_t *wresult = NULL;
-            mino_val_t *wthrown = NULL;
+            mino_val *key = vec_nth(watches->as.map.key_order, i);
+            mino_val *wfn = map_get_val(watches, key);
+            mino_val *wargs;
+            mino_val *wresult = NULL;
+            mino_val *wthrown = NULL;
             if (wfn == NULL) continue;
             wargs = mino_cons(S, key,
                       mino_cons(S, agent,
@@ -319,7 +319,7 @@ out:
 /* --- worker thread + queue dispatch --------------------------------------- */
 
 /* Pop the head node of S->agent.pool[kind].run_head. Caller must hold agent_mu. */
-static agent_action_node_t *agent_runq_pop(mino_state_t *S,
+static agent_action_node_t *agent_runq_pop(mino_state *S,
                                             agent_pool_kind_t kind)
 {
     agent_action_node_t *n = S->agent.pool[kind].run_head;
@@ -334,7 +334,7 @@ static agent_action_node_t *agent_runq_pop(mino_state_t *S,
 
 /* Append node to the tail of S->agent.pool[kind].run_head. Caller must
  * hold agent_mu. */
-static void agent_runq_push_tail(mino_state_t *S, agent_pool_kind_t kind,
+static void agent_runq_push_tail(mino_state *S, agent_pool_kind_t kind,
                                   agent_action_node_t *n)
 {
     n->next = NULL;
@@ -357,7 +357,7 @@ static void agent_runq_push_tail(mino_state_t *S, agent_pool_kind_t kind,
  * time throw before the queue gets here, so the only way to land in
  * this branch is for an earlier action to have failed the agent
  * mid-queue. Document this as a deviation. */
-static void agent_worker_run_one(mino_state_t *S, agent_action_node_t *n)
+static void agent_worker_run_one(mino_state *S, agent_action_node_t *n)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     dyn_frame_t       *conveyed = NULL;
@@ -369,8 +369,8 @@ static void agent_worker_run_one(mino_state_t *S, agent_action_node_t *n)
         size_t i;
         int    oom = 0;
         for (i = 0; i < n->dyn_snap->as.map.len; i++) {
-            mino_val_t    *key = vec_nth(n->dyn_snap->as.map.key_order, i);
-            mino_val_t    *val = map_get_val(n->dyn_snap, key);
+            mino_val    *key = vec_nth(n->dyn_snap->as.map.key_order, i);
+            mino_val    *val = map_get_val(n->dyn_snap, key);
             dyn_binding_t *b;
             if (key == NULL
                 || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
@@ -423,7 +423,7 @@ cleanup:
  * state_lock to run, retakes agent_mu to decrement in_flight and
  * broadcast. Awaiters yield state_lock before blocking on agent_cv,
  * so they don't block the worker. */
-static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
+static void agent_worker_run(mino_state *S, agent_pool_kind_t kind,
                               char *stack_anchor)
 {
     mino_thread_ctx_t *ctx;
@@ -511,26 +511,26 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
 static unsigned __stdcall agent_worker_entry_pooled(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, AGENT_POOL_POOLED, &anchor);
+    agent_worker_run((mino_state *)arg, AGENT_POOL_POOLED, &anchor);
     return 0;
 }
 static unsigned __stdcall agent_worker_entry_solo(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, AGENT_POOL_SOLO, &anchor);
+    agent_worker_run((mino_state *)arg, AGENT_POOL_SOLO, &anchor);
     return 0;
 }
 #else
 static void *agent_worker_entry_pooled(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, AGENT_POOL_POOLED, &anchor);
+    agent_worker_run((mino_state *)arg, AGENT_POOL_POOLED, &anchor);
     return NULL;
 }
 static void *agent_worker_entry_solo(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, AGENT_POOL_SOLO, &anchor);
+    agent_worker_run((mino_state *)arg, AGENT_POOL_SOLO, &anchor);
     return NULL;
 }
 #endif
@@ -539,7 +539,7 @@ static void *agent_worker_entry_solo(void *arg)
  * its pthread handle can be released before the next spawn. Caller
  * must hold state_lock; the join itself yields the lock so the
  * exiting worker can finish its ctx detach + thread_count decrement. */
-static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
+static void agent_worker_reap_pending(mino_state *S, agent_pool_kind_t kind)
 {
     int saved_depth;
     if (!S->agent.pool[kind].worker_pending_join) return;
@@ -573,9 +573,9 @@ static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
  * propagates NULL). On 1, the diag has been published via
  * prim_throw_classified and no observable state change happened
  * (no enqueue, no in_flight bump, no pthread spawned). */
-static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
-                          mino_val_t *agent, mino_val_t *fn,
-                          mino_val_t *extra, mino_env_t *env)
+static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
+                          mino_val *agent, mino_val *fn,
+                          mino_val *extra, mino_env *env)
 {
     agent_action_node_t *n;
     int                  need_spawn = 0;
@@ -748,7 +748,7 @@ static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
  * and throws; this helper is a no-op when invoked in that
  * pathological state since each pool's worker_pending_join is set
  * only by the spawn path on a different thread. */
-void mino_agent_quiesce_workers(mino_state_t *S)
+void mino_agent_quiesce_workers(mino_state *S)
 {
     int pi;
     /* Flag shutdown + wake workers so they can drain + exit. */
@@ -772,7 +772,7 @@ void mino_agent_quiesce_workers(mino_state_t *S)
  * Clojure-level primitives use, with the embedder mino_lock /
  * mino_unlock perimeter that mino_call / mino_eval_string already
  * use. The cross-state guard catches a host that mistakenly hands an
- * agent from another mino_state_t into S.
+ * agent from another mino_state into S.
  *
  * The action env passed at queue time is NULL; closures bring their
  * own captured env via the closure value, and unbound symbols would
@@ -781,10 +781,10 @@ void mino_agent_quiesce_workers(mino_state_t *S)
  * env for symbol resolution within an action should hand in a
  * closure built from mino_eval_string. */
 
-mino_val_t *mino_send(mino_state_t *S, mino_val_t *agent,
-                      mino_val_t *fn, mino_val_t *extra_args)
+mino_val *mino_send(mino_state *S, mino_val *agent,
+                      mino_val *fn, mino_val *extra_args)
 {
-    mino_val_t   *result;
+    mino_val   *result;
     volatile char probe = 0;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
@@ -797,10 +797,10 @@ mino_val_t *mino_send(mino_state_t *S, mino_val_t *agent,
     return result;
 }
 
-mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
-                          mino_val_t *fn, mino_val_t *extra_args)
+mino_val *mino_send_off(mino_state *S, mino_val *agent,
+                          mino_val *fn, mino_val *extra_args)
 {
-    mino_val_t   *result;
+    mino_val   *result;
     volatile char probe = 0;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
@@ -813,10 +813,10 @@ mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
     return result;
 }
 
-mino_val_t *mino_await(mino_state_t *S, mino_val_t **agents)
+mino_val *mino_await(mino_state *S, mino_val **agents)
 {
-    mino_val_t   *list;
-    mino_val_t   *result;
+    mino_val   *list;
+    mino_val   *result;
     volatile char probe = 0;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
@@ -827,11 +827,11 @@ mino_val_t *mino_await(mino_state_t *S, mino_val_t **agents)
     return result;
 }
 
-int mino_await_for(mino_state_t *S, long long timeout_ms,
-                   mino_val_t **agents)
+int mino_await_for(mino_state *S, long long timeout_ms,
+                   mino_val **agents)
 {
-    mino_val_t   *list, *args;
-    mino_val_t   *result;
+    mino_val   *list, *args;
+    mino_val   *result;
     volatile char probe = 0;
     int           ok;
     mino_lock(S);
@@ -849,9 +849,9 @@ int mino_await_for(mino_state_t *S, long long timeout_ms,
     return ok;
 }
 
-mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent)
+mino_val *mino_agent_error(mino_state *S, mino_val *agent)
 {
-    mino_val_t   *err;
+    mino_val   *err;
     volatile char probe = 0;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
@@ -868,10 +868,10 @@ mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent)
     return err;
 }
 
-mino_val_t *mino_restart_agent(mino_state_t *S, mino_val_t *agent,
-                                mino_val_t *new_state, int clear_actions)
+mino_val *mino_restart_agent(mino_state *S, mino_val *agent,
+                                mino_val *new_state, int clear_actions)
 {
-    mino_val_t   *args, *result;
+    mino_val   *args, *result;
     volatile char probe = 0;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
@@ -896,9 +896,9 @@ mino_val_t *mino_restart_agent(mino_state_t *S, mino_val_t *agent,
  * Returns the agent on success, NULL on throw (caller propagates).
  * The caller must already hold state_lock (the prims do via their
  * mino_lock perimeter; the C-API entries acquire it themselves). */
-static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
-                                    mino_val_t *agent, mino_val_t *fn,
-                                    mino_val_t *extra, mino_env_t *env,
+static mino_val *agent_send_core(mino_state *S, agent_pool_kind_t kind,
+                                    mino_val *agent, mino_val *fn,
+                                    mino_val *extra, mino_env *env,
                                     const char *prim_name)
 {
     mino_thread_ctx_t *ctx;
@@ -920,7 +920,7 @@ static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
     }
     ctx = mino_current_ctx(S);
     if (ctx->current_tx != NULL) {
-        mino_val_t *triple = mino_cons(S, agent,
+        mino_val *triple = mino_cons(S, agent,
                                 mino_cons(S, fn, extra));
         ctx->current_tx->pending_sends =
             mino_cons(S, triple,
@@ -965,18 +965,18 @@ static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
  * so throwing here would not undo the ref writes and would surprise
  * a caller that wasn't holding state_lock. Document this contract:
  * STM dosync sends require the same thread budget as direct sends. */
-void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
-                               mino_env_t *env)
+void mino_agent_drain_pending(mino_state *S, mino_val *pending,
+                               mino_env *env)
 {
-    mino_val_t *reversed = mino_empty_list(S);
-    mino_val_t *p;
+    mino_val *reversed = mino_empty_list(S);
+    mino_val *p;
     if (pending == NULL) return;
     for (p = pending; mino_is_cons(p); p = p->as.cons.cdr) {
         reversed = mino_cons(S, p->as.cons.car, reversed);
     }
     for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
-        mino_val_t *triple = p->as.cons.car;
-        mino_val_t *agent_v, *fn, *extra;
+        mino_val *triple = p->as.cons.car;
+        mino_val *agent_v, *fn, *extra;
         if (!mino_is_cons(triple)) continue;
         agent_v = triple->as.cons.car;
         if (!mino_is_cons(triple->as.cons.cdr)) continue;
@@ -1005,11 +1005,11 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
 
 /* --- primitives ----------------------------------------------------------- */
 
-mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *initial;
-    mino_val_t *opts;
-    mino_val_t *agent;
+    mino_val *initial;
+    mino_val *opts;
+    mino_val *agent;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1024,8 +1024,8 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * be invisible to (meta a)). Unknown keys throw -- silent
      * acceptance would mask user typos. */
     for (opts = args->as.cons.cdr; mino_is_cons(opts); ) {
-        mino_val_t *key = opts->as.cons.car;
-        mino_val_t *val;
+        mino_val *key = opts->as.cons.car;
+        mino_val *val;
         if (!mino_is_cons(opts->as.cons.cdr)) {
             return prim_throw_classified(S, "eval/arity", "MAR001",
                 "agent: option key without value");
@@ -1088,7 +1088,7 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return agent;
 }
 
-mino_val_t *prim_agent_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_agent_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1098,9 +1098,9 @@ mino_val_t *prim_agent_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_is_agent(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_send(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *agent, *fn, *extra;
+    mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "send requires at least two arguments: agent and fn");
@@ -1112,9 +1112,9 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                            "send: first argument must be an agent");
 }
 
-mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_send_off(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *agent, *fn, *extra;
+    mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "send-off requires at least two arguments: agent and fn");
@@ -1138,14 +1138,14 @@ mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * mino_tls_ctx is non-NULL on the worker; check before yielding the
  * lock and throw MST002. The embedder thread leaves tls_ctx NULL so
  * the normal path is unaffected. */
-mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_await(mino_state *S, mino_val *args, mino_env *env)
 {
     int saved_depth;
-    mino_val_t *iter;
+    mino_val *iter;
     (void)env;
     /* Validate args + cross-state guard before any blocking. */
     for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-        mino_val_t *a = iter->as.cons.car;
+        mino_val *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await: argument must be an agent");
@@ -1169,7 +1169,7 @@ mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     for (;;) {
         int still_busy = 0;
         for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-            mino_val_t *a = iter->as.cons.car;
+            mino_val *a = iter->as.cons.car;
             if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
         }
         if (!still_busy) break;
@@ -1195,13 +1195,13 @@ static void timespec_add_ms(struct timespec *ts, long long ms)
 }
 #endif
 
-mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_await_for(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
     long long timeout_ms;
-    mino_val_t *first;
-    mino_val_t *agents;
-    mino_val_t *iter;
+    mino_val *first;
+    mino_val *agents;
+    mino_val *iter;
     int saved_depth;
     int timed_out = 0;
     (void)env;
@@ -1218,7 +1218,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
     if (timeout_ms < 0) timeout_ms = 0;
     agents = args->as.cons.cdr;
     for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-        mino_val_t *a = iter->as.cons.car;
+        mino_val *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await-for: argument must be an agent");
@@ -1239,7 +1239,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
             int still_busy = 0;
             DWORD now;
             for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-                mino_val_t *a = iter->as.cons.car;
+                mino_val *a = iter->as.cons.car;
                 if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
             }
             if (!still_busy) break;
@@ -1261,7 +1261,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
             int still_busy = 0;
             int rc;
             for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-                mino_val_t *a = iter->as.cons.car;
+                mino_val *a = iter->as.cons.car;
                 if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
             }
             if (!still_busy) break;
@@ -1276,7 +1276,7 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
     if (timed_out) {
         int still_busy = 0;
         for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
-            mino_val_t *a = iter->as.cons.car;
+            mino_val *a = iter->as.cons.car;
             if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
         }
         if (!still_busy) timed_out = 0;
@@ -1286,10 +1286,10 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
     return timed_out ? mino_false(S) : mino_true(S);
 }
 
-mino_val_t *prim_agent_error(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+mino_val *prim_agent_error(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
-    mino_val_t *agent;
+    mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1304,11 +1304,11 @@ mino_val_t *prim_agent_error(mino_state_t *S, mino_val_t *args,
     return agent->as.agent.err != NULL ? agent->as.agent.err : mino_nil(S);
 }
 
-mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+mino_val *prim_restart_agent(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
-    mino_val_t *agent, *new_state;
-    mino_val_t *opts;
+    mino_val *agent, *new_state;
+    mino_val *opts;
     int         clear_actions = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -1319,8 +1319,8 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
     new_state = args->as.cons.cdr->as.cons.car;
     /* Parse trailing keyword options. JVM accepts :clear-actions. */
     for (opts = args->as.cons.cdr->as.cons.cdr; mino_is_cons(opts); ) {
-        mino_val_t *key = opts->as.cons.car;
-        mino_val_t *val;
+        mino_val *key = opts->as.cons.car;
+        mino_val *val;
         if (!mino_is_cons(opts->as.cons.cdr)) {
             return prim_throw_classified(S, "eval/arity", "MAR001",
                 "restart-agent: option key without value");
@@ -1353,9 +1353,9 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
      * the next send would just refail. Throws here propagate to
      * the caller; the agent stays in its failed state. */
     if (agent->as.agent.validator != NULL) {
-        mino_val_t *vargs   = mino_cons(S, new_state, mino_nil(S));
-        mino_val_t *vresult = NULL;
-        mino_val_t *thrown  = NULL;
+        mino_val *vargs   = mino_cons(S, new_state, mino_nil(S));
+        mino_val *vresult = NULL;
+        mino_val *thrown  = NULL;
         int         pc      = mino_pcall(S, agent->as.agent.validator,
                                           vargs, env, &vresult, &thrown);
         if (pc != 0) {
@@ -1407,10 +1407,10 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
     return new_state;
 }
 
-mino_val_t *prim_set_error_handler_bang(mino_state_t *S, mino_val_t *args,
-                                         mino_env_t *env)
+mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
+                                         mino_env *env)
 {
-    mino_val_t *agent, *fn;
+    mino_val *agent, *fn;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1440,10 +1440,10 @@ mino_val_t *prim_set_error_handler_bang(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-mino_val_t *prim_error_handler(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+mino_val *prim_error_handler(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
-    mino_val_t *agent;
+    mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1459,10 +1459,10 @@ mino_val_t *prim_error_handler(mino_state_t *S, mino_val_t *args,
          ? agent->as.agent.err_handler : mino_nil(S);
 }
 
-mino_val_t *prim_set_error_mode_bang(mino_state_t *S, mino_val_t *args,
-                                      mino_env_t *env)
+mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
+                                      mino_env *env)
 {
-    mino_val_t *agent, *mode;
+    mino_val *agent, *mode;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1492,10 +1492,10 @@ mino_val_t *prim_set_error_mode_bang(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-mino_val_t *prim_error_mode(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_error_mode(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *agent;
+    mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1511,8 +1511,8 @@ mino_val_t *prim_error_mode(mino_state_t *S, mino_val_t *args,
         agent->as.agent.err_mode == 1 ? "continue" : "fail");
 }
 
-mino_val_t *prim_shutdown_agents(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -1534,7 +1534,7 @@ mino_val_t *prim_shutdown_agents(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-mino_val_t *prim_send_via(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args;
     (void)env;
@@ -1551,12 +1551,12 @@ mino_val_t *prim_send_via(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         "per-state worker.");
 }
 
-mino_val_t *prim_release_pending_sends(mino_state_t *S, mino_val_t *args,
-                                        mino_env_t *env)
+mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
+                                        mino_env *env)
 {
     mino_thread_ctx_t *ctx;
     long long          count = 0;
-    mino_val_t        *p;
+    mino_val        *p;
     (void)args;
     (void)env;
     /* JVM canon: returns the number of sends that were queued by the
@@ -1639,9 +1639,9 @@ const mino_prim_def k_prims_agent[] = {
 const size_t k_prims_agent_count = sizeof(k_prims_agent)
                                     / sizeof(k_prims_agent[0]);
 
-void mino_install_agent(mino_state_t *S, mino_env_t *env)
+void mino_install_agent(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_agent, k_prims_agent_count,
@@ -1654,7 +1654,7 @@ void mino_install_agent(mino_state_t *S, mino_env_t *env)
      * dispatch the var resolves to nil through dyn_lookup falling
      * back on the var's root value. */
     {
-        mino_val_t *agent_var = var_intern(S, "clojure.core", "*agent*");
+        mino_val *agent_var = var_intern(S, "clojure.core", "*agent*");
         if (agent_var != NULL) {
             agent_var->as.var.dynamic = 1;
             var_set_root(S, agent_var, mino_nil(S));

@@ -163,7 +163,7 @@ static const char *project_resolve(const char *name, void *ctx)
 {
     static char pbuf[PATH_BUF_CAP];
     size_t i, nlen;
-    mino_state_t *S = (mino_state_t *)ctx;
+    mino_state *S = (mino_state *)ctx;
     if (name == NULL) return NULL;
     nlen = strlen(name);
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
@@ -190,7 +190,7 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
 {
     static char pbuf[PATH_BUF_CAP];
     size_t i, nlen;
-    mino_state_t *S = (mino_state_t *)ctx;
+    mino_state *S = (mino_state *)ctx;
     const char *cwd_result;
     if (name == NULL) return NULL;
     nlen = strlen(name);
@@ -208,10 +208,10 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
 
 /* Read mino.edn and configure project paths + deps.
  * Called before any script execution if mino.edn exists. */
-static void setup_project(mino_state_t *S, mino_env_t *env)
+static void setup_project(mino_state *S, mino_env *env)
 {
-    mino_val_t *result;
-    mino_ref_t *ref;
+    mino_val *result;
+    mino_ref *ref;
 
     if (!file_exists("mino.edn")) return;
 
@@ -224,13 +224,13 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
     if (result == NULL || result->type != MINO_VECTOR) return;
 
     /* Root the result so GC cannot collect it while we extract paths. */
-    ref = mino_ref(S, result);
+    ref = mino_ref_new(S, result);
     {
         size_t i;
         size_t count = result->as.vec.len;
         if (count > MAX_PROJECT_PATHS) count = MAX_PROJECT_PATHS;
         for (i = 0; i < count; i++) {
-            mino_val_t *p = vec_nth(result, i);
+            mino_val *p = vec_nth(result, i);
             if (p != NULL && p->type == MINO_STRING) {
                 project_paths[project_path_count] = strdup(p->as.s.data);
                 if (project_paths[project_path_count] != NULL)
@@ -245,9 +245,9 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
 }
 
 /* Report an evaluation error to stderr. */
-static void report_eval_error(mino_state_t *S)
+static void report_eval_error(mino_state *S)
 {
-    const mino_diag_t *d = mino_last_diag(S);
+    const mino_diag *d = mino_last_diag(S);
     if (d != NULL) {
         char dbuf[2048];
         mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
@@ -275,7 +275,7 @@ static int is_valid_task_name(const char *name)
 }
 
 /* Run `mino task <name>` subcommand. */
-static int run_task(mino_state_t *S, mino_env_t *env, const char *task_name)
+static int run_task(mino_state *S, mino_env *env, const char *task_name)
 {
     char eval_buf[512];
 
@@ -301,7 +301,7 @@ static int run_task(mino_state_t *S, mino_env_t *env, const char *task_name)
 }
 
 /* Run `mino task` with no args: list available tasks. */
-static int run_task_list(mino_state_t *S, mino_env_t *env)
+static int run_task_list(mino_state *S, mino_env *env)
 {
     if (!file_exists("mino.edn")) {
         fprintf(stderr, "mino: no mino.edn found in current directory\n");
@@ -319,9 +319,9 @@ static int run_task_list(mino_state_t *S, mino_env_t *env)
 }
 
 /* Run `mino deps` subcommand: fetch all dependencies. */
-static int run_deps(mino_state_t *S, mino_env_t *env)
+static int run_deps(mino_state *S, mino_env *env)
 {
-    mino_val_t *result;
+    mino_val *result;
 
     if (!file_exists("mino.edn")) {
         fprintf(stderr, "mino: no mino.edn found in current directory\n");
@@ -406,9 +406,9 @@ static void print_repl_help(FILE *out)
 /* Two-column capability listing for the REPL `:capabilities` command.
  * The full registry is enumerated; each entry is printed under
  * INSTALLED or AVAILABLE depending on the runtime's bitmask. */
-static void print_repl_capabilities(FILE *out, mino_state_t *S)
+static void print_repl_capabilities(FILE *out, mino_state *S)
 {
-    const mino_capability_info_t *p;
+    const mino_capability_info *p;
     int total = 0, installed = 0, longest = 0;
 
     for (p = mino_capability_list(); p->name != NULL; p++) {
@@ -453,9 +453,9 @@ static int exec_companion(const char *bin, char **rest)
 }
 
 /* Run `mino -e EXPR`: evaluate one expression and print its result. */
-static int run_eval_expr(mino_state_t *S, mino_env_t *env, const char *expr)
+static int run_eval_expr(mino_state *S, mino_env *env, const char *expr)
 {
-    mino_val_t *result = mino_eval_string(S, expr, env);
+    mino_val *result = mino_eval_string(S, expr, env);
     if (result == NULL) {
         report_eval_error(S);
         return 1;
@@ -543,18 +543,18 @@ static int parse_cli_flags(int argc, char **argv,
  * only mutated by the REPL loop, but interning them up-front keeps
  * unqualified lookup honest in either mode. */
 typedef struct {
-    mino_val_t *star1;
-    mino_val_t *star2;
-    mino_val_t *star3;
-    mino_val_t *stare;
-    mino_val_t *cmdargs;
-    mino_val_t *file;
-    mino_env_t *core_env;
+    mino_val *star1;
+    mino_val *star2;
+    mino_val *star3;
+    mino_val *stare;
+    mino_val *cmdargs;
+    mino_val *file;
+    mino_env *core_env;
 } repl_specials_t;
 
-static void repl_set_special(mino_state_t *S, mino_env_t *core_env,
-                             mino_val_t *var, const char *name,
-                             mino_val_t *val)
+static void repl_set_special(mino_state *S, mino_env *core_env,
+                             mino_val *var, const char *name,
+                             mino_val *val)
 {
     if (val == NULL) val = mino_nil(S);
     if (var != NULL) {
@@ -565,10 +565,10 @@ static void repl_set_special(mino_state_t *S, mino_env_t *core_env,
     }
 }
 
-static mino_val_t *repl_intern_special(mino_state_t *S, mino_env_t *core_env,
+static mino_val *repl_intern_special(mino_state *S, mino_env *core_env,
                                        const char *name)
 {
-    mino_val_t *var = var_intern(S, "clojure.core", name);
+    mino_val *var = var_intern(S, "clojure.core", name);
     if (var != NULL) {
         var->as.var.dynamic = 1;
     }
@@ -578,22 +578,22 @@ static mino_val_t *repl_intern_special(mino_state_t *S, mino_env_t *core_env,
 
 /* Build a cons-list of remaining argv entries as mino strings. Returns nil
  * (the canon empty value for *command-line-args*) when start >= argc. */
-static mino_val_t *build_cmd_args(mino_state_t *S, int argc, char **argv,
+static mino_val *build_cmd_args(mino_state *S, int argc, char **argv,
                                   int start)
 {
-    mino_val_t *head = mino_nil(S);
+    mino_val *head = mino_nil(S);
     int i;
     for (i = argc - 1; i >= start; i--) {
-        mino_val_t *str = mino_string(S, argv[i]);
+        mino_val *str = mino_string(S, argv[i]);
         head = mino_cons(S, str, head);
     }
     return head;
 }
 
-static void repl_specials_init(mino_state_t *S, repl_specials_t *r,
+static void repl_specials_init(mino_state *S, repl_specials_t *r,
                                int argc, char **argv, int first)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     r->core_env = core_env;
     r->star1   = repl_intern_special(S, core_env, "*1");
     r->star2   = repl_intern_special(S, core_env, "*2");
@@ -619,12 +619,12 @@ static void repl_specials_init(mino_state_t *S, repl_specials_t *r,
 
 /* Rotate *1 → *2 → *3 and install `result` as the new *1. Called after each
  * successful REPL eval, including when result is nil. */
-static void repl_specials_rotate(mino_state_t *S, repl_specials_t *r,
-                                 mino_val_t *result)
+static void repl_specials_rotate(mino_state *S, repl_specials_t *r,
+                                 mino_val *result)
 {
-    mino_val_t *prev1 = (r->star1 != NULL) ? r->star1->as.var.root
+    mino_val *prev1 = (r->star1 != NULL) ? r->star1->as.var.root
                                            : mino_nil(S);
-    mino_val_t *prev2 = (r->star2 != NULL) ? r->star2->as.var.root
+    mino_val *prev2 = (r->star2 != NULL) ? r->star2->as.var.root
                                            : mino_nil(S);
     repl_set_special(S, r->core_env, r->star3, "*3", prev2);
     repl_set_special(S, r->core_env, r->star2, "*2", prev1);
@@ -634,9 +634,9 @@ static void repl_specials_rotate(mino_state_t *S, repl_specials_t *r,
 /* Capture the current diagnostic into *e as a structured map.
  * mino_last_error_map() materializes the map representation of the
  * pending diagnostic, which becomes *e for the next user-side query. */
-static void repl_specials_capture_error(mino_state_t *S, repl_specials_t *r)
+static void repl_specials_capture_error(mino_state *S, repl_specials_t *r)
 {
-    mino_val_t *err = mino_last_error_map(S);
+    mino_val *err = mino_last_error_map(S);
     repl_set_special(S, r->core_env, r->stare, "*e", err);
 }
 
@@ -670,7 +670,7 @@ static int has_only_whitespace(const char *s)
  *      never malloc or free.
  *
  *   2. Best-effort GC stats. mino_gc_stats only copies scalar counters
- *      out of mino_state_t; if the state is torn mid-mutation those
+ *      out of mino_state; if the state is torn mid-mutation those
  *      numbers may be a little off, but reading them will not segfault
  *      because every field the accessor touches is a plain integer.
  *
@@ -684,7 +684,7 @@ static int has_only_whitespace(const char *s)
  * rather handle the crash itself).
  */
 
-static mino_state_t *crash_handler_state = NULL;
+static mino_state *crash_handler_state = NULL;
 
 static const char *signal_name(int sig)
 {
@@ -718,7 +718,7 @@ static void crash_handler_report(int sig)
     if (n > 0) crash_handler_write_line(buf);
 
     if (crash_handler_state != NULL) {
-        mino_gc_stats_t st;
+        mino_gc_stats_out st;
         mino_gc_stats(crash_handler_state, &st);
         n = snprintf(buf, sizeof(buf),
                      "[mino] gc: minor=%zu major=%zu live=%zu alloc=%zu "
@@ -782,7 +782,7 @@ const char *__asan_default_options(void)
 }
 #endif
 
-static void install_crash_handler(mino_state_t *S)
+static void install_crash_handler(mino_state *S)
 {
     const char *disabled = getenv("MINO_NO_CRASH_HANDLER");
     if (disabled != NULL && disabled[0] != '\0' && disabled[0] != '0') {
@@ -837,7 +837,7 @@ static void install_crash_handler(mino_state_t *S)
  * carries the `*1 *2 *3 *e` bookkeeping inherited from main; the env
  * is mino's default user-environment seeded with the standard
  * library. */
-static int run_repl(mino_state_t *S, mino_env_t *env,
+static int run_repl(mino_state *S, mino_env *env,
                     repl_specials_t *specials)
 {
     char  *buf       = NULL;
@@ -856,7 +856,7 @@ static int run_repl(mino_state_t *S, mino_env_t *env,
     int    exit_code = 0;
 
     {
-        const mino_capability_info_t *p;
+        const mino_capability_info *p;
         int total = 0, installed = 0;
         for (p = mino_capability_list(); p->name != NULL; p++) {
             total++;
@@ -925,8 +925,8 @@ static int run_repl(mino_state_t *S, mino_env_t *env,
         for (;;) {
             const char *cursor = buf;
             const char *end    = buf;
-            mino_val_t *form;
-            mino_val_t *result;
+            mino_val *form;
+            mino_val *result;
 
             if (has_only_whitespace(buf)) {
                 /* Don't discard trailing whitespace: newlines in it feed
@@ -980,7 +980,7 @@ static int run_repl(mino_state_t *S, mino_env_t *env,
                     break;
                 }
                 {
-                    const mino_diag_t *d = mino_last_diag(S);
+                    const mino_diag *d = mino_last_diag(S);
                     if (d != NULL) {
                         char dbuf[2048];
                         mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
@@ -999,7 +999,7 @@ static int run_repl(mino_state_t *S, mino_env_t *env,
 
             result = mino_eval(S, form, env);
             if (result == NULL) {
-                const mino_diag_t *d = mino_last_diag(S);
+                const mino_diag *d = mino_last_diag(S);
                 if (d != NULL) {
                     char dbuf[2048];
                     mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
@@ -1040,7 +1040,7 @@ cleanup:
 
 int main(int argc, char **argv)
 {
-    mino_state_t *S;
+    mino_state *S;
     int           first       = 1;
     const char   *eval_expr   = NULL;
     int           dash_dash   = 0;
@@ -1067,7 +1067,7 @@ int main(int argc, char **argv)
     /* --jit=auto|off|on rejects anything else loudly. Matches the
      * MINO_JIT env var's case-insensitive parsing in state.c, so
      * --jit=ON and MINO_JIT=ON don't diverge in behavior. */
-    mino_jit_mode_t cli_jit = MINO_JIT_MODE_AUTO;
+    mino_jit_mode cli_jit = MINO_JIT_MODE_AUTO;
     int cli_jit_set = 0;
     if (cli_jit_mode != NULL) {
         if (mino_strcasecmp(cli_jit_mode, "auto") == 0) {
@@ -1151,7 +1151,7 @@ int main(int argc, char **argv)
      * got JIT. AUTO and OFF don't trigger the warning because they're
      * compatible with a no-JIT build. */
     {
-        mino_jit_capability_t cap = mino_state_jit_capability(S);
+        mino_jit_capability cap = mino_state_jit_capability(S);
         if (cap.available == 0) {
             int explicit_on = (cli_jit_set && cli_jit == MINO_JIT_MODE_ON);
             if (!explicit_on) {
@@ -1170,7 +1170,7 @@ int main(int argc, char **argv)
     }
 
     install_crash_handler(S);
-    mino_env_t *env = mino_env_new(S);
+    mino_env *env = mino_env_new(S);
     int exit_code   = 0;
 
     /* Development knobs. These override the collector defaults before
@@ -1178,7 +1178,7 @@ int main(int argc, char **argv)
      * default because a CLI user fat-fingering an env var should not
      * block the interpreter from starting. */
     {
-        struct { const char *name; mino_gc_param_t p; } knobs[] = {
+        struct { const char *name; mino_gc_param p; } knobs[] = {
             { "MINO_NURSERY",          MINO_GC_NURSERY_BYTES       },
             { "MINO_GC_MAJOR_GROWTH",  MINO_GC_MAJOR_GROWTH_TENTHS },
             { "MINO_GC_PROMOTION_AGE", MINO_GC_PROMOTION_AGE       },
@@ -1307,12 +1307,12 @@ int main(int argc, char **argv)
 
     /* File mode: evaluate a script and exit. */
     if (first < argc) {
-        mino_val_t *result;
+        mino_val *result;
         repl_set_special(S, specials.core_env, specials.file, "*file*",
                          mino_string(S, argv[first]));
         result = mino_load_file(S, argv[first], env);
         if (result == NULL) {
-            const mino_diag_t *d = mino_last_diag(S);
+            const mino_diag *d = mino_last_diag(S);
             if (d != NULL) {
                 char dbuf[2048];
                 mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,

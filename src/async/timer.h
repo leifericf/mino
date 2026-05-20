@@ -15,22 +15,22 @@
 /* Timer queue entry. */
 typedef struct timer_entry {
     double               deadline_ms;
-    mino_val_t          *callback;
-    mino_ref_t          *cb_ref;
+    mino_val          *callback;
+    mino_ref          *cb_ref;
     struct timer_entry  *next;
 } timer_entry_t;
 
 /* Schedule callback to fire after ms milliseconds. Returns 0 on success. */
-int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback);
+int async_timer_schedule(mino_state *S, double ms, mino_val *callback);
 
 /* Check and fire any expired timers.
  * Called from the scheduler drain loop. */
-void async_timers_check(mino_state_t *S);
+void async_timers_check(mino_state *S);
 
 /* Free all timer entries. */
-void async_timers_free(mino_state_t *S);
+void async_timers_free(mino_state *S);
 
 /* Mark timer values for GC. */
-void async_timers_mark(mino_state_t *S);
+void async_timers_mark(mino_state *S);
 
 #endif /* ASYNC_TIMER_H */

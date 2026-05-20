@@ -11,7 +11,7 @@
  * realloc'd) buffer, or NULL if allocation failed (in which case an
  * MIN001 diagnostic has already been recorded on S). The caller updates
  * its own `cap` via cap_ptr; `buf` is replaced by the return value. */
-static inline char *fmt_ensure(mino_state_t *S, char *buf,
+static inline char *fmt_ensure(mino_state *S, char *buf,
                                size_t len, size_t *cap_ptr, size_t extra)
 {
     size_t need;
@@ -57,12 +57,12 @@ static inline char *fmt_ensure(mino_state_t *S, char *buf,
  * (format fmt & args) — simple string formatting.
  * Directives: %s (str of arg), %d (integer), %f (float), %% (literal %).
  */
-mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fmt_val;
+    mino_val *fmt_val;
     const char *fmt;
     size_t      fmt_len;
-    mino_val_t *arg_list;
+    mino_val *arg_list;
     char  *buf = NULL;
     size_t len = 0;
     size_t cap = 0;
@@ -123,7 +123,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 if (buf == NULL) return NULL;
                 buf[len++] = '%';
             } else if (spec == 's') {
-                mino_val_t *a;
+                mino_val *a;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
                     return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
@@ -136,7 +136,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     memcpy(buf + len, a->as.s.data, a->as.s.len);
                     len += a->as.s.len;
                 } else {
-                    mino_val_t *s = print_to_string(S, a);
+                    mino_val *s = print_to_string(S, a);
                     if (s == NULL) { free(buf); return NULL; }
                     buf = fmt_ensure(S, buf, len, &cap, s->as.s.len);
                     if (buf == NULL) return NULL;
@@ -206,17 +206,17 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
     }
     {
-        mino_val_t *result = mino_string_n(S, buf != NULL ? buf : "", len);
+        mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
 }
 
-mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s;
-    mino_val_t *opts = NULL;
-    mino_val_t *result;
+    mino_val *s;
+    mino_val *opts = NULL;
+    mino_val *result;
     int         saved_mode = S->reader.reader_cond_mode;
     (void)env;
     if (!mino_is_cons(args)) {
@@ -238,7 +238,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "read-string: argument must be a string");
     }
     if (opts != NULL && mino_type_of(opts) != MINO_NIL) {
-        mino_val_t *rc;
+        mino_val *rc;
         if (mino_type_of(opts) != MINO_MAP) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "read-string: opts must be a map");
@@ -264,7 +264,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (result == NULL && mino_last_error(S) != NULL) {
         /* Throw parse errors as catchable exceptions so user code can
          * handle them via try/catch. */
-        mino_val_t *ex = mino_string(S, mino_last_error(S));
+        mino_val *ex = mino_string(S, mino_last_error(S));
         if (mino_current_ctx(S)->try_depth > 0) {
             mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
             longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
@@ -280,7 +280,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result != NULL ? result : mino_nil(S);
 }
 
-mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
 {
     char  *buf = NULL;
     size_t len = 0;
@@ -288,7 +288,7 @@ mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     int    first = 1;
     (void)env;
     while (mino_is_cons(args)) {
-        mino_val_t *printed = print_to_string(S, args->as.cons.car);
+        mino_val *printed = print_to_string(S, args->as.cons.car);
         size_t      need;
         if (printed == NULL) {
             free(buf);
@@ -310,15 +310,15 @@ mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         args = args->as.cons.cdr;
     }
     {
-        mino_val_t *result = mino_string_n(S, buf != NULL ? buf : "", len);
+        mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
 }
 
-mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s, *idx_val;
+    mino_val *s, *idx_val;
     long long idx;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -380,9 +380,9 @@ long long utf8_codepoint_count(const char *data, size_t bytes)
     return count;
 }
 
-mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s_val;
+    mino_val *s_val;
     long long   start, end_idx;
     size_t      n;
     size_t      byte_start, byte_end;
@@ -426,17 +426,17 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                          byte_end - byte_start);
 }
 
-mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t  *s_val;
-    mino_val_t  *sep_val;
-    mino_val_t  *limit_val = NULL;
+    mino_val  *s_val;
+    mino_val  *sep_val;
+    mino_val  *limit_val = NULL;
     const char  *s;
     size_t       slen;
     const char  *sep;
     size_t       sep_len;
     long long    limit = 0;       /* 0 / negative = no cap */
-    mino_val_t **buf = NULL;
+    mino_val **buf = NULL;
     size_t       cap = 0, len = 0;
     const char  *p;
     (void)env;
@@ -473,7 +473,7 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * an empty vector here. The single-empty form is what downstream
      * Clojure code expects from (str/split "" re). */
     if (slen == 0) {
-        mino_val_t **buf1 = (mino_val_t **)gc_alloc_typed(S,
+        mino_val **buf1 = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, 1 * sizeof(*buf1));
         if (buf1 == NULL) return NULL;
         buf1[0] = mino_string_n(S, "", 0);
@@ -504,7 +504,7 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             idx = re_matchp(compiled, s + pos, &mlen);
             if (len == cap) {
                 size_t new_cap = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nb = (mino_val_t **)gc_alloc_typed(S,
+                mino_val **nb = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, new_cap * sizeof(*nb));
                 if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
                 buf = nb;
@@ -551,7 +551,7 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Split into individual characters. */
         size_t i;
         size_t out_len = (limit > 0 && (size_t)limit < slen) ? (size_t)limit : slen;
-        buf = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        buf = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
               (out_len > 0 ? out_len : 1) * sizeof(*buf));
         if (limit > 0 && (size_t)limit < slen) {
             for (i = 0; i + 1 < out_len; i++) {
@@ -577,7 +577,7 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (len == cap) {
             size_t new_cap = cap == 0 ? 8 : cap * 2;
-            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(S,
+            mino_val **nb = (mino_val **)gc_alloc_typed(S,
                 GC_T_VALARR, new_cap * sizeof(*nb));
             if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
             buf = nb;
@@ -600,10 +600,10 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_vector(S, buf, len);
 }
 
-mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t  *sep_val;
-    mino_val_t  *coll;
+    mino_val  *sep_val;
+    mino_val  *coll;
     const char  *sep = "";
     size_t       sep_len = 0;
     char        *buf = NULL;
@@ -634,7 +634,7 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val *elem = seq_iter_val(S, &it);
         const char *part;
         size_t      part_len;
         size_t      need;
@@ -647,8 +647,8 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             part_len = elem->as.s.len;
         } else {
             /* Convert to string. */
-            mino_val_t *str_a = mino_cons(S, elem, mino_nil(S));
-            mino_val_t *str   = prim_str(S, str_a, env);
+            mino_val *str_a = mino_cons(S, elem, mino_nil(S));
+            mino_val *str   = prim_str(S, str_a, env);
             if (str == NULL) return NULL;
             part     = str->as.s.data;
             part_len = str->as.s.len;
@@ -672,7 +672,7 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         seq_iter_next(S, &it);
     }
     {
-        mino_val_t *result = mino_string_n(S, buf != NULL ? buf : "", buf_len);
+        mino_val *result = mino_string_n(S, buf != NULL ? buf : "", buf_len);
         free(buf);
         return result;
     }
@@ -681,7 +681,7 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Grow `*pbuf` so `*plen + n + 1` bytes fit, then append `n` bytes from
  * `src`. On OOM, frees `*pbuf` and returns -1 (caller must surface the
  * error to S). Used by the regex-replace and template-expansion paths. */
-static int str_replace_buf_append(mino_state_t *S, char **pbuf,
+static int str_replace_buf_append(mino_state *S, char **pbuf,
                                   size_t *plen, size_t *pcap,
                                   const char *src, size_t n)
 {
@@ -729,7 +729,7 @@ static int str_replace_buf_append(mino_state_t *S, char **pbuf,
  * Other characters are copied verbatim. `text_base` plus the offsets in
  * `g` and `match_idx` resolves to absolute group bytes in the search
  * input. Returns 0 on success or -1 on error (S has the diag). */
-static int str_replace_expand_template(mino_state_t *S,
+static int str_replace_expand_template(mino_state *S,
                                        char **pbuf, size_t *plen, size_t *pcap,
                                        const char *tmpl, size_t tlen,
                                        const char *text_base,
@@ -780,7 +780,7 @@ static int str_replace_expand_template(mino_state_t *S,
  * match string when the pattern has no capture groups, or
  * `[whole g1 g2 ...]` when it does. Returns NULL on allocation failure
  * (diag already set). */
-static mino_val_t *str_replace_match_arg(mino_state_t *S,
+static mino_val *str_replace_match_arg(mino_state *S,
                                          const char *text_base,
                                          int match_idx, int match_len,
                                          const re_groups_t *g)
@@ -789,7 +789,7 @@ static mino_val_t *str_replace_match_arg(mino_state_t *S,
         return mino_string_n(S, text_base + match_idx, (size_t)match_len);
     }
     {
-        mino_val_t *items[1 + RE_MAX_GROUPS];
+        mino_val *items[1 + RE_MAX_GROUPS];
         size_t      n = 1;
         int         i;
         items[0] = mino_string_n(S, text_base + match_idx, (size_t)match_len);
@@ -816,10 +816,10 @@ static mino_val_t *str_replace_match_arg(mino_state_t *S,
  *                  the pattern has no groups, or `[whole g1 g2 ...]`
  *                  when it does) and its (str-coerced) result is used
  *                  literally. */
-mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_str_replace(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *s_val, *match_val, *repl_val;
+    mino_val *s_val, *match_val, *repl_val;
     const char *s;
     size_t      slen;
     char       *buf = NULL;
@@ -887,7 +887,7 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
             }
         }
         {
-            mino_val_t *result = mino_string_n(S, buf, buf_len);
+            mino_val *result = mino_string_n(S, buf, buf_len);
             free(buf);
             return result;
         }
@@ -949,9 +949,9 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
                     return NULL;
                 }
             } else {
-                mino_val_t *argv1[1];
-                mino_val_t *call_arg;
-                mino_val_t *call_res;
+                mino_val *argv1[1];
+                mino_val *call_arg;
+                mino_val *call_res;
                 call_arg = str_replace_match_arg(S, s + pos, idx, match_len,
                                                  &groups);
                 if (call_arg == NULL) {
@@ -1002,16 +1002,16 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
         }
         re_free(compiled);
         {
-            mino_val_t *result = mino_string_n(S, buf, buf_len);
+            mino_val *result = mino_string_n(S, buf, buf_len);
             free(buf);
             return result;
         }
     }
 }
 
-mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s, *prefix;
+    mino_val *s, *prefix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "starts-with? requires two string arguments");
@@ -1027,9 +1027,9 @@ mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *en
         ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s, *suffix;
+    mino_val *s, *suffix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "ends-with? requires two string arguments");
@@ -1046,9 +1046,9 @@ mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s, *sub;
+    mino_val *s, *sub;
     const char *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -1070,9 +1070,9 @@ mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_false(S);
 }
 
-mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s;
+    mino_val *s;
     char       *buf;
     size_t      i;
     (void)env;
@@ -1091,15 +1091,15 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
     }
     {
-        mino_val_t *result = mino_string_n(S, buf, s->as.s.len);
+        mino_val *result = mino_string_n(S, buf, s->as.s.len);
         free(buf);
         return result;
     }
 }
 
-mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s;
+    mino_val *s;
     char       *buf;
     size_t      i;
     (void)env;
@@ -1118,15 +1118,15 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
     }
     {
-        mino_val_t *result = mino_string_n(S, buf, s->as.s.len);
+        mino_val *result = mino_string_n(S, buf, s->as.s.len);
         free(buf);
         return result;
     }
 }
 
-mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s;
+    mino_val *s;
     const char *start, *end_ptr;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1147,14 +1147,14 @@ mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * (str & args) — concatenate printed representations. Strings contribute
  * their raw content (no quotes); everything else uses the printer form.
  */
-mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
 {
     char  *buf = NULL;
     size_t len = 0;
     size_t cap = 0;
     (void)env;
     while (mino_is_cons(args)) {
-        mino_val_t *a = args->as.cons.car;
+        mino_val *a = args->as.cons.car;
         if (a != NULL && mino_type_of(a) == MINO_STRING) {
             /* Append raw string content without quotes. */
             size_t need = len + a->as.s.len + 1;
@@ -1342,7 +1342,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 /* Collections (vector, map, set, cons, lazy, atom) and
                  * opaque types: print via the standard printer so str
                  * produces readable output, not #<?>. */
-                mino_val_t *printed = print_to_string(S, a);
+                mino_val *printed = print_to_string(S, a);
                 if (printed != NULL && mino_type_of(printed) == MINO_STRING) {
                     size_t plen = printed->as.s.len;
                     size_t need2 = len + plen + 1;
@@ -1384,7 +1384,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         args = args->as.cons.cdr;
     }
     {
-        mino_val_t *result = mino_string_n(S, buf != NULL ? buf : "", len);
+        mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
@@ -1392,9 +1392,9 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* mino_uuid_from_bytes -- copy 16 bytes into a freshly-allocated
  * MINO_UUID. */
-mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b)
+mino_val *mino_uuid_from_bytes(mino_state *S, const unsigned char *b)
 {
-    mino_val_t *v = alloc_val(S, MINO_UUID);
+    mino_val *v = alloc_val(S, MINO_UUID);
     if (v == NULL) return NULL;
     memcpy(v->as.uuid.bytes, b, 16);
     return v;
@@ -1435,8 +1435,8 @@ int mino_uuid_parse(const char *s, size_t len, unsigned char out[16])
 }
 
 /* (random-uuid) — generate a UUID v4. */
-mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_random_uuid(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
     unsigned char bytes[16];
     int i;
@@ -1465,9 +1465,9 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
  * Strict canonical form (36 chars, dashes at 8/13/18/23). Throws on
  * non-string input; returns nil for strings that fail the strict
  * form. */
-mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_parse_uuid(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *s;
+    mino_val *s;
     unsigned char bytes[16];
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {

@@ -4,7 +4,7 @@
  *
  * Trust model.
  *
- * A `mino_state_t` is single-embedder: the C/C++ application that
+ * A `mino_state` is single-embedder: the C/C++ application that
  * calls `mino_state_new` is inside the trust boundary and may freely
  * set step limits, alloc limits, fault injection, and interrupt flags.
  * Script authors observe these limits but cannot raise them from
@@ -69,7 +69,7 @@ mino_thread_ctx_t *mino_tls_ctx = NULL;
 /* State lifecycle                                                           */
 /* ------------------------------------------------------------------------- */
 
-static void state_init(mino_state_t *S)
+static void state_init(mino_state *S)
 {
     memset(S, 0, sizeof(*S));
     /* main_ctx is the embedder thread's view; spawned worker threads
@@ -226,9 +226,9 @@ static void state_init(mino_state_t *S)
     mino_bc_register_gc_handlers(S);
 }
 
-mino_state_t *mino_state_new(void)
+mino_state *mino_state_new(void)
 {
-    mino_state_t *st = (mino_state_t *)calloc(1, sizeof(*st));
+    mino_state *st = (mino_state *)calloc(1, sizeof(*st));
     if (st == NULL) {
         abort(); /* unrecoverable: no state to report error through */
     }
@@ -239,7 +239,7 @@ mino_state_t *mino_state_new(void)
 /* Free the linked list of registered root environments. The mino_env
  * objects themselves are GC-owned; only the root_env_t link nodes
  * (malloc'd by mino_env_new_root) belong to us here. */
-static void state_free_root_envs(mino_state_t *S)
+static void state_free_root_envs(mino_state *S)
 {
     root_env_t *r, *rnext;
     for (r = S->gc.root_envs; r != NULL; r = rnext) {
@@ -249,10 +249,10 @@ static void state_free_root_envs(mino_state_t *S)
 }
 
 /* Free the host-retained value ref doubly-linked list. */
-static void state_free_refs(mino_state_t *S)
+static void state_free_refs(mino_state *S)
 {
-    mino_ref_t *ref = S->ref_roots;
-    mino_ref_t *rnxt;
+    mino_ref *ref = S->ref_roots;
+    mino_ref *rnxt;
     while (ref != NULL) {
         rnxt = ref->next;
         free(ref);
@@ -261,7 +261,7 @@ static void state_free_refs(mino_state_t *S)
 }
 
 /* Free namespace alias strings (owning_ns + alias + full_name) and the array. */
-static void state_free_ns_aliases(mino_state_t *S)
+static void state_free_ns_aliases(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
@@ -275,13 +275,13 @@ static void state_free_ns_aliases(mino_state_t *S)
 /* Free the per-ns env table. Names are interned via intern_filename
  * (freed by state_free_string_interns); envs themselves are GC-owned
  * (freed by state_free_heap). Only the array storage is malloc-owned. */
-static void state_free_ns_env_table(mino_state_t *S)
+static void state_free_ns_env_table(mino_state *S)
 {
     free(S->ns_vars.ns_env_table);
 }
 
 /* Free the module cache: per-entry names, then the array itself. */
-static void state_free_module_cache(mino_state_t *S)
+static void state_free_module_cache(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->module.module_cache_len; i++) {
@@ -296,7 +296,7 @@ static void state_free_module_cache(mino_state_t *S)
 
 /* Free the bundled-stdlib registry: per-entry names, then the array.
  * Source pointers are static literals and not freed. */
-static void state_free_bundled_libs(mino_state_t *S)
+static void state_free_bundled_libs(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->module.bundled_libs_len; i++) {
@@ -306,7 +306,7 @@ static void state_free_bundled_libs(mino_state_t *S)
 }
 
 /* Free extra load paths registered via (add-load-path! ...). */
-static void state_free_extra_load_paths(mino_state_t *S)
+static void state_free_extra_load_paths(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->module.extra_load_paths_len; i++) {
@@ -318,7 +318,7 @@ static void state_free_extra_load_paths(mino_state_t *S)
 /* Truncate the load stack back to LEN, freeing any entries pushed past
  * that point. Used when a throw unwinds out of a require call before its
  * normal cleanup runs. */
-void load_stack_truncate(mino_state_t *S, size_t len)
+void load_stack_truncate(mino_state *S, size_t len)
 {
     while (S->module.load_stack_len > len) {
         free(S->module.load_stack[--S->module.load_stack_len]);
@@ -327,7 +327,7 @@ void load_stack_truncate(mino_state_t *S, size_t len)
 
 /* Free the host-interop type registry: per-type member arrays, then
  * the host_types array. */
-static void state_free_host_types(mino_state_t *S)
+static void state_free_host_types(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->host_types_len; i++) {
@@ -338,7 +338,7 @@ static void state_free_host_types(mino_state_t *S)
 
 /* Free the metadata table: per-entry name + docstring + capability,
  * then array. */
-static void state_free_meta_table(mino_state_t *S)
+static void state_free_meta_table(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->module.meta_table_len; i++) {
@@ -351,7 +351,7 @@ static void state_free_meta_table(mino_state_t *S)
 
 /* Free both intern tables (symbols + keywords). The interned values
  * themselves are GC-owned and freed by state_free_heap below. */
-static void state_free_intern_tables(mino_state_t *S)
+static void state_free_intern_tables(mino_state *S)
 {
     free(S->sym_intern.entries);
     free(S->sym_intern.ht_buckets);
@@ -362,7 +362,7 @@ static void state_free_intern_tables(mino_state_t *S)
 /* Free the record-type registry chain. Type values themselves are
  * GC-owned and reclaimed by state_free_heap below; we only release
  * the malloc'd link nodes here. */
-static void state_free_record_types(mino_state_t *S)
+static void state_free_record_types(mino_state *S)
 {
     record_type_entry_t *e = S->record_types;
     while (e != NULL) {
@@ -375,7 +375,7 @@ static void state_free_record_types(mino_state_t *S)
 
 /* Free the filename and var-name interning tables (string copies plus
  * the pointer arrays). */
-static void state_free_string_interns(mino_state_t *S)
+static void state_free_string_interns(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->reader.interned_files_len; i++) {
@@ -391,7 +391,7 @@ static void state_free_string_interns(mino_state_t *S)
 
 /* Free GC bookkeeping arrays + freelists. The actual heap (gc_all_young
  * / gc_all_old) is freed last, by state_free_heap. */
-static void state_free_gc_aux(mino_state_t *S)
+static void state_free_gc_aux(mino_state *S)
 {
     int i;
     free(S->gc.ranges);
@@ -412,7 +412,7 @@ static void state_free_gc_aux(mino_state_t *S)
 
 /* Free the structured-diagnostic chain plus the source-cache strings.
  * The diag may reference into source_cache, so it must run first. */
-static void state_free_diag_state(mino_state_t *S)
+static void state_free_diag_state(mino_state *S)
 {
     int sci;
     diag_free(mino_current_ctx(S)->last_diag);
@@ -423,7 +423,7 @@ static void state_free_diag_state(mino_state_t *S)
 }
 
 /* Free the async-scheduler run queue and timer priority queue. */
-static void state_free_async(mino_state_t *S)
+static void state_free_async(mino_state *S)
 {
     struct sched_entry *e = S->async.run_head;
     struct sched_entry *enext;
@@ -439,14 +439,14 @@ static void state_free_async(mino_state_t *S)
  * finalizers, and free the underlying memory. Must run last because
  * earlier helpers may inspect heap-resident state (interned values,
  * meta map entries, etc.). */
-static void state_free_heap(mino_state_t *S)
+static void state_free_heap(mino_state *S)
 {
     gc_hdr_t *h, *hnext;
     gc_bump_slab_t *slab, *snext;
     for (h = S->gc.all_young; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
-            mino_val_t *v = (mino_val_t *)(h + 1);
+            mino_val *v = (mino_val *)(h + 1);
             if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
@@ -456,7 +456,7 @@ static void state_free_heap(mino_state_t *S)
     for (h = S->gc.all_old; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
-            mino_val_t *v = (mino_val_t *)(h + 1);
+            mino_val *v = (mino_val *)(h + 1);
             if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
@@ -479,7 +479,7 @@ static void state_free_heap(mino_state_t *S)
  * on a NULL state -- consistent with the rest of the embed surface --
  * and validate the mode enum range so a stray int doesn't end up
  * triggering AUTO-class behaviour with an OFF caller. */
-void mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode)
+void mino_state_set_jit_mode(mino_state *S, mino_jit_mode mode)
 {
     if (S == NULL) return;
     switch (mode) {
@@ -492,13 +492,13 @@ void mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode)
     /* Unknown enum value: leave the current mode untouched. */
 }
 
-mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S)
+mino_jit_mode mino_state_jit_mode(const mino_state *S)
 {
     if (S == NULL) return MINO_JIT_MODE_AUTO;
-    return (mino_jit_mode_t)S->jit.jit_mode;
+    return (mino_jit_mode)S->jit.jit_mode;
 }
 
-void mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold)
+void mino_state_set_jit_hot_threshold(mino_state *S, unsigned threshold)
 {
     if (S == NULL) return;
     /* Clamp 0 to 1: a zero threshold would let the existing
@@ -508,17 +508,17 @@ void mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold)
     S->jit.jit_hot_threshold = threshold < 1u ? 1u : threshold;
 }
 
-unsigned mino_state_jit_hot_threshold(const mino_state_t *S)
+unsigned mino_state_jit_hot_threshold(const mino_state *S)
 {
     if (S == NULL) return MINO_JIT_THRESHOLD;
     return S->jit.jit_hot_threshold;
 }
 
-mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S)
+mino_jit_capability mino_state_jit_capability(const mino_state *S)
 {
-    mino_jit_capability_t cap;
+    mino_jit_capability cap;
     cap.mode      = (S == NULL) ? MINO_JIT_MODE_AUTO
-                                : (mino_jit_mode_t)S->jit.jit_mode;
+                                : (mino_jit_mode)S->jit.jit_mode;
     cap.threshold = (S == NULL) ? MINO_JIT_THRESHOLD
                                 : S->jit.jit_hot_threshold;
 #if defined(__aarch64__)
@@ -550,7 +550,7 @@ mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S)
  * the names before state_free_heap walks the heap; diag releases
  * source-cache references before the cache itself goes away; the
  * heap is always last. */
-void mino_state_free(mino_state_t *S)
+void mino_state_free(mino_state *S)
 {
     if (S == NULL) {
         return;
@@ -587,7 +587,7 @@ void mino_state_free(mino_state_t *S)
      * (or a successful host_threads quiesce above) normally empties
      * this; if the embedder tore down without calling shutdown-agents,
      * the worker has been joined and the remaining nodes are stale.
-     * They reference GC-owned mino_val_t pointers, but we're past
+     * They reference GC-owned mino_val pointers, but we're past
      * heap teardown ordering -- the heap is freed last, so we just
      * release the malloc-owned shells. */
     {
@@ -642,7 +642,7 @@ void mino_state_free(mino_state_t *S)
 /* Per-state PRNG (xorshift64*)                                              */
 /* ------------------------------------------------------------------------- */
 
-uint64_t state_rand64(mino_state_t *S)
+uint64_t state_rand64(mino_state *S)
 {
     uint64_t x = S->rand_state;
     if (x == 0) {
@@ -663,9 +663,9 @@ uint64_t state_rand64(mino_state_t *S)
 /* Value retention (refs)                                                    */
 /* ------------------------------------------------------------------------- */
 
-mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val)
+mino_ref *mino_ref_new(mino_state *S, mino_val *val)
 {
-    mino_ref_t *r = (mino_ref_t *)calloc(1, sizeof(*r));
+    mino_ref *r = (mino_ref *)calloc(1, sizeof(*r));
     if (r == NULL) {
         return NULL;
     }
@@ -679,7 +679,7 @@ mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val)
     return r;
 }
 
-mino_val_t *mino_deref(const mino_ref_t *ref)
+mino_val *mino_deref(const mino_ref *ref)
 {
     if (ref == NULL) {
         return NULL;
@@ -687,7 +687,7 @@ mino_val_t *mino_deref(const mino_ref_t *ref)
     return ref->val;
 }
 
-void mino_unref(mino_state_t *S, mino_ref_t *ref)
+void mino_unref(mino_state *S, mino_ref *ref)
 {
     if (ref == NULL) {
         return;
@@ -707,10 +707,10 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
 /* Public eval entry points                                                  */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
 {
     volatile char probe = 0;
-    mino_val_t   *v;
+    mino_val   *v;
     int           saved_try;
     saved_try = mino_current_ctx(S)->try_depth;
     gc_note_host_frame(S, (void *)&probe);
@@ -730,7 +730,7 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
-            mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+            mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
             /* Stash the raw user payload for an outer pcall-style frame
              * so it can deliver the original cell via `*out_ex` even
              * after the diagnostic publish below converts non-string
@@ -750,14 +750,14 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
                  * ex-info values reach the top-level handler with the
                  * un-namespaced :message key and we'd fall through to
                  * generic "uncaught exception". */
-                mino_val_t *nex = (ex != NULL)
+                mino_val *nex = (ex != NULL)
                     ? normalize_exception(S, ex) : NULL;
                 if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
-                    mino_val_t *msg = map_get_val(nex,
+                    mino_val *msg = map_get_val(nex,
                         mino_keyword(S, "mino/message"));
-                    mino_val_t *kind = map_get_val(nex,
+                    mino_val *kind = map_get_val(nex,
                         mino_keyword(S, "mino/kind"));
-                    mino_val_t *code = map_get_val(nex,
+                    mino_val *code = map_get_val(nex,
                         mino_keyword(S, "mino/code"));
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                         (kind && mino_type_of(kind) == MINO_KEYWORD)
@@ -811,20 +811,20 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
  * threads are active. Recursive lock so nested mino_call from
  * primitives is fine; lock_depth tracks recursion so future-deref
  * can yield + resume around a blocking cv_wait. */
-mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+mino_val *mino_eval(mino_state *S, mino_val *form, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     mino_lock(S);
     v = mino_eval_inner(S, form, env);
     mino_unlock(S);
     return v;
 }
 
-static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, mino_env_t *env)
+static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_env *env)
 {
     volatile char   probe = 0;
     const char * volatile src = src_in;
-    mino_val_t     *last  = mino_nil(S);
+    mino_val     *last  = mino_nil(S);
     const char     *saved_file = S->reader.reader_file;
     int             saved_line = S->reader.reader_line;
     int             saved_col  = S->reader.reader_col;
@@ -852,7 +852,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
-            mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+            mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
             /* Same payload-stash as in mino_eval_inner: outer pcall-style
              * frames can recover the raw user payload via `*out_ex`. */
             if (ex != NULL && mino_current_ctx(S)->pending_user_ex == NULL) {
@@ -874,14 +874,14 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                  * would take different paths and degrade to a generic
                  * MCT001 wrapper. */
                 const char *file = S->reader.reader_file;
-                mino_val_t *nex = (ex != NULL)
+                mino_val *nex = (ex != NULL)
                     ? normalize_exception(S, ex) : NULL;
                 if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
-                    mino_val_t *msg = map_get_val(nex,
+                    mino_val *msg = map_get_val(nex,
                         mino_keyword(S, "mino/message"));
-                    mino_val_t *kind = map_get_val(nex,
+                    mino_val *kind = map_get_val(nex,
                         mino_keyword(S, "mino/kind"));
-                    mino_val_t *code = map_get_val(nex,
+                    mino_val *code = map_get_val(nex,
                         mino_keyword(S, "mino/code"));
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                         (kind && mino_type_of(kind) == MINO_KEYWORD)
@@ -914,7 +914,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
 
     while (*src != '\0') {
         const char *end  = NULL;
-        mino_val_t *form = mino_read(S, src, &end);
+        mino_val *form = mino_read(S, src, &end);
         if (form == NULL) {
             if (mino_last_error(S) != NULL) {
                 mino_current_ctx(S)->try_depth   = saved_try;
@@ -946,9 +946,9 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
     return last;
 }
 
-mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
+mino_val *mino_eval_string(mino_state *S, const char *src, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     if (S == NULL) return NULL;
     if (src == NULL || env == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -962,13 +962,13 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     return v;
 }
 
-mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
+mino_val *mino_load_file(mino_state *S, const char *path, mino_env *env)
 {
     FILE  *f;
     char  *buf;
     long   sz;
     size_t rd;
-    mino_val_t    *result;
+    mino_val    *result;
     const char    *saved_file;
     if (path == NULL || env == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "mino_load_file: NULL argument");
@@ -1020,22 +1020,22 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     return result;
 }
 
-mino_env_t *mino_env_new_default(mino_state_t *S)
+mino_env *mino_env_new_default(mino_state *S)
 {
-    mino_env_t *env = mino_env_new(S);
+    mino_env *env = mino_env_new(S);
     mino_install_sandbox(S, env);
     return env;
 }
 
-void mino_register_fn(mino_state_t *S, mino_env_t *env, const char *name, mino_prim_fn fn)
+void mino_register_fn(mino_state *S, mino_env *env, const char *name, mino_prim_fn fn)
 {
     mino_env_set(S, env, name, mino_prim(S, name, fn));
 }
 
-mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env)
+mino_val *mino_call(mino_state *S, mino_val *fn, mino_val *args, mino_env *env)
 {
     volatile char probe = 0;
-    mino_val_t   *result;
+    mino_val   *result;
     mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
@@ -1052,15 +1052,15 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
  * the env, and returns the eval result. On a thrown exception, *out_ex
  * captures the raw thrown value and the function returns -1 without
  * publishing to mino_last_error (matching mino_pcall's contract). */
-typedef mino_val_t *(*eval_body_fn)(mino_state_t *S, void *payload,
-                                    mino_env_t *env);
+typedef mino_val *(*eval_body_fn)(mino_state *S, void *payload,
+                                    mino_env *env);
 
-static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
-                      mino_env_t *env, mino_val_t **out, mino_val_t **out_ex)
+static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
+                      mino_env *env, mino_val **out, mino_val **out_ex)
 {
     int saved_try   = mino_current_ctx(S)->try_depth;
     int saved_lock  = mino_current_ctx(S)->lock_depth;
-    mino_val_t *result;
+    mino_val *result;
 
     if (out_ex != NULL) *out_ex = NULL;
     /* Reset the per-thread stash so a previous _ex / pcall call's
@@ -1077,7 +1077,7 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
     mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
-        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+        mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         /* Inner-eval try frames may have caught the original throw and
          * re-thrown a stringified diagnostic here; prefer the raw
          * payload if the inner stashed one. */
@@ -1115,48 +1115,48 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
     return result == NULL ? -1 : 0;
 }
 
-static mino_val_t *eval_body_form(mino_state_t *S, void *payload,
-                                  mino_env_t *env)
+static mino_val *eval_body_form(mino_state *S, void *payload,
+                                  mino_env *env)
 {
-    return mino_eval(S, (mino_val_t *)payload, env);
+    return mino_eval(S, (mino_val *)payload, env);
 }
 
-static mino_val_t *eval_body_string(mino_state_t *S, void *payload,
-                                    mino_env_t *env)
+static mino_val *eval_body_string(mino_state *S, void *payload,
+                                    mino_env *env)
 {
     return mino_eval_string(S, (const char *)payload, env);
 }
 
-static mino_val_t *eval_body_file(mino_state_t *S, void *payload,
-                                  mino_env_t *env)
+static mino_val *eval_body_file(mino_state *S, void *payload,
+                                  mino_env *env)
 {
     return mino_load_file(S, (const char *)payload, env);
 }
 
-int mino_eval_ex(mino_state_t *S, mino_val_t *form, mino_env_t *env,
-                 mino_val_t **out, mino_val_t **out_ex)
+int mino_eval_ex(mino_state *S, mino_val *form, mino_env *env,
+                 mino_val **out, mino_val **out_ex)
 {
     return eval_pcall(S, eval_body_form, form, env, out, out_ex);
 }
 
-int mino_eval_string_ex(mino_state_t *S, const char *src, mino_env_t *env,
-                        mino_val_t **out, mino_val_t **out_ex)
+int mino_eval_string_ex(mino_state *S, const char *src, mino_env *env,
+                        mino_val **out, mino_val **out_ex)
 {
     return eval_pcall(S, eval_body_string, (void *)src, env, out, out_ex);
 }
 
-int mino_load_file_ex(mino_state_t *S, const char *path, mino_env_t *env,
-                      mino_val_t **out, mino_val_t **out_ex)
+int mino_load_file_ex(mino_state *S, const char *path, mino_env *env,
+                      mino_val **out, mino_val **out_ex)
 {
     return eval_pcall(S, eval_body_file, (void *)path, env, out, out_ex);
 }
 
-int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
-               mino_val_t **out, mino_val_t **out_ex)
+int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
+               mino_val **out, mino_val **out_ex)
 {
     int saved_try   = mino_current_ctx(S)->try_depth;
     int saved_lock  = mino_current_ctx(S)->lock_depth;
-    mino_val_t *result;
+    mino_val *result;
 
     if (out_ex != NULL) *out_ex = NULL;
     /* Reset the per-thread stash so a previous _ex / pcall call's
@@ -1196,7 +1196,7 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
          * agents) that calls pcall and later yields ends up unable to
          * fully release state_lock, deadlocking await/deref. Unwind
          * here while we still hold the lock. */
-        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+        mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         /* Inner-eval / nested pcall may have caught the original throw
          * and re-thrown a stringified diagnostic here; prefer the raw
          * payload if a stash is present. */
@@ -1234,7 +1234,7 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
 /* Execution limits, fault injection, interrupt                              */
 /* ------------------------------------------------------------------------- */
 
-void mino_set_limit(mino_state_t *S, int kind, size_t value)
+void mino_set_limit(mino_state *S, int kind, size_t value)
 {
     switch (kind) {
     case MINO_LIMIT_STEPS: S->module.limit_steps = value; break;
@@ -1243,17 +1243,17 @@ void mino_set_limit(mino_state_t *S, int kind, size_t value)
     }
 }
 
-void mino_set_fail_alloc_at(mino_state_t *S, long n)
+void mino_set_fail_alloc_at(mino_state *S, long n)
 {
     S->fi_alloc_countdown = n;
 }
 
-void mino_set_fail_raw_at(mino_state_t *S, long n)
+void mino_set_fail_raw_at(mino_state *S, long n)
 {
     S->fi_raw_countdown = n;
 }
 
-int mino_fi_should_fail_raw(mino_state_t *S)
+int mino_fi_should_fail_raw(mino_state *S)
 {
     if (S->fi_raw_countdown > 0) {
         S->fi_raw_countdown--;
@@ -1264,7 +1264,7 @@ int mino_fi_should_fail_raw(mino_state_t *S)
     return 0;
 }
 
-void mino_interrupt(mino_state_t *S)
+void mino_interrupt(mino_state *S)
 {
     mino_current_ctx(S)->interrupted = 1;
 }
@@ -1273,14 +1273,14 @@ void mino_interrupt(mino_state_t *S)
 /* Host-thread grant                                                         */
 /* ------------------------------------------------------------------------- */
 
-void mino_set_thread_limit(mino_state_t *S, int n)
+void mino_set_thread_limit(mino_state *S, int n)
 {
     if (S == NULL) { return; }
     if (n < 0) { n = 0; }
     S->threading.thread_limit = n;
 }
 
-int mino_get_thread_limit(mino_state_t *S)
+int mino_get_thread_limit(mino_state *S)
 {
     if (S == NULL) { return 1; }
     return S->threading.thread_limit;
@@ -1296,13 +1296,13 @@ int mino_get_thread_limit(mino_state_t *S)
  * mino_future_spawn increments under the caller-held state_lock from
  * mino_call (apply path); worker exit decrements after taking the lock
  * explicitly. Plain int is acceptable for this counter. */
-int mino_thread_count(mino_state_t *S)
+int mino_thread_count(mino_state *S)
 {
     if (S == NULL) { return 0; }
     return __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED);
 }
 
-void mino_quiesce_threads(mino_state_t *S)
+void mino_quiesce_threads(mino_state *S)
 {
     /* Walk S->threading.future_list_head and join every worker that hasn't been
      * joined yet. The implementation lives in runtime/host_threads.c;
@@ -1314,13 +1314,13 @@ void mino_quiesce_threads(mino_state_t *S)
     mino_host_threads_quiesce(S);
 }
 
-void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool)
+void mino_set_thread_pool(mino_state *S, mino_thread_pool *pool)
 {
     if (S == NULL) { return; }
     S->threading.thread_pool = pool;
 }
 
-void mino_set_thread_factory(mino_state_t *S,
+void mino_set_thread_factory(mino_state *S,
                              mino_thread_lifecycle_fn start_fn,
                              mino_thread_lifecycle_fn end_fn,
                              void *ctx)
@@ -1331,7 +1331,7 @@ void mino_set_thread_factory(mino_state_t *S,
     S->threading.thread_factory_ctx  = ctx;
 }
 
-void mino_set_thread_stack_size(mino_state_t *S, size_t n)
+void mino_set_thread_stack_size(mino_state *S, size_t n)
 {
     if (S == NULL) { return; }
     S->threading.thread_stack_size = n;
@@ -1349,7 +1349,7 @@ void mino_set_thread_stack_size(mino_state_t *S, size_t n)
 /* with no contention. Multi-worker walk slots into the same path.          */
 /* ------------------------------------------------------------------------- */
 
-void mino_safepoint_park(mino_state_t *S)
+void mino_safepoint_park(mino_state *S)
 {
     /* Single-threaded path: should_yield is set and cleared by
      * gc_request_stw / gc_release_stw on the same thread, so the
@@ -1362,7 +1362,7 @@ void mino_safepoint_park(mino_state_t *S)
     mino_current_ctx(S)->should_yield = 0;
 }
 
-void gc_request_stw(mino_state_t *S)
+void gc_request_stw(mino_state *S)
 {
     if (S == NULL) { return; }
     S->threading.stw_request = 1;
@@ -1422,7 +1422,7 @@ unsigned int mino_tls_safepoint_count = 0;
  * on, every sampler_period-th call records the current ctx's bc/pc
  * into the ring buffer. The ring buffer is malloc'd lazily on the
  * first sample. */
-static void mino_sampler_fire(mino_state_t *S)
+static void mino_sampler_fire(mino_state *S)
 {
     mino_thread_ctx_t *ctx;
     mino_sample_t     *slot;
@@ -1476,7 +1476,7 @@ static void mino_sampler_fire(mino_state_t *S)
     }
 }
 
-int mino_bc_safepoint(mino_state_t *S)
+int mino_bc_safepoint(mino_state *S)
 {
     if (S == NULL) return 1;
     mino_sampler_fire(S);
@@ -1505,7 +1505,7 @@ int mino_bc_safepoint(mino_state_t *S)
     return 1;
 }
 
-void gc_release_stw(mino_state_t *S)
+void gc_release_stw(mino_state *S)
 {
     if (S == NULL) { return; }
     S->threading.stw_request = 0;
@@ -1523,7 +1523,7 @@ void gc_release_stw(mino_state_t *S)
 
 #if defined(_WIN32) && defined(_MSC_VER)
 #  include <windows.h>
-void mino_state_lock_init(mino_state_t *S)
+void mino_state_lock_init(mino_state *S)
 {
     CRITICAL_SECTION *cs = (CRITICAL_SECTION *)calloc(1, sizeof(*cs));
     /* unrecoverable: init-time OOM allocating state_lock */
@@ -1531,7 +1531,7 @@ void mino_state_lock_init(mino_state_t *S)
     InitializeCriticalSection(cs);
     S->threading.state_lock = cs;
 }
-void mino_state_lock_destroy(mino_state_t *S)
+void mino_state_lock_destroy(mino_state *S)
 {
     CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->threading.state_lock;
     if (cs != NULL) {
@@ -1540,15 +1540,15 @@ void mino_state_lock_destroy(mino_state_t *S)
         S->threading.state_lock = NULL;
     }
 }
-void mino_state_lock_acquire(mino_state_t *S)
+void mino_state_lock_acquire(mino_state *S)
 {
     EnterCriticalSection((CRITICAL_SECTION *)S->threading.state_lock);
 }
-void mino_state_lock_release(mino_state_t *S)
+void mino_state_lock_release(mino_state *S)
 {
     LeaveCriticalSection((CRITICAL_SECTION *)S->threading.state_lock);
 }
-void mino_worker_list_lock_init(mino_state_t *S)
+void mino_worker_list_lock_init(mino_state *S)
 {
     CRITICAL_SECTION *cs = (CRITICAL_SECTION *)calloc(1, sizeof(*cs));
     /* unrecoverable: init-time OOM allocating worker_list_lock */
@@ -1556,7 +1556,7 @@ void mino_worker_list_lock_init(mino_state_t *S)
     InitializeCriticalSection(cs);
     S->threading.worker_list_lock = cs;
 }
-void mino_worker_list_lock_destroy(mino_state_t *S)
+void mino_worker_list_lock_destroy(mino_state *S)
 {
     CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->threading.worker_list_lock;
     if (cs != NULL) {
@@ -1565,16 +1565,16 @@ void mino_worker_list_lock_destroy(mino_state_t *S)
         S->threading.worker_list_lock = NULL;
     }
 }
-void mino_worker_list_lock_acquire(mino_state_t *S)
+void mino_worker_list_lock_acquire(mino_state *S)
 {
     EnterCriticalSection((CRITICAL_SECTION *)S->threading.worker_list_lock);
 }
-void mino_worker_list_lock_release(mino_state_t *S)
+void mino_worker_list_lock_release(mino_state *S)
 {
     LeaveCriticalSection((CRITICAL_SECTION *)S->threading.worker_list_lock);
 }
 #else
-void mino_state_lock_init(mino_state_t *S)
+void mino_state_lock_init(mino_state *S)
 {
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
@@ -1586,31 +1586,31 @@ void mino_state_lock_init(mino_state_t *S)
     pthread_mutex_init(&S->threading.state_lock, &attr);
     pthread_mutexattr_destroy(&attr);
 }
-void mino_state_lock_destroy(mino_state_t *S)
+void mino_state_lock_destroy(mino_state *S)
 {
     pthread_mutex_destroy(&S->threading.state_lock);
 }
-void mino_state_lock_acquire(mino_state_t *S)
+void mino_state_lock_acquire(mino_state *S)
 {
     pthread_mutex_lock(&S->threading.state_lock);
 }
-void mino_state_lock_release(mino_state_t *S)
+void mino_state_lock_release(mino_state *S)
 {
     pthread_mutex_unlock(&S->threading.state_lock);
 }
-void mino_worker_list_lock_init(mino_state_t *S)
+void mino_worker_list_lock_init(mino_state *S)
 {
     pthread_mutex_init(&S->threading.worker_list_lock, NULL);
 }
-void mino_worker_list_lock_destroy(mino_state_t *S)
+void mino_worker_list_lock_destroy(mino_state *S)
 {
     pthread_mutex_destroy(&S->threading.worker_list_lock);
 }
-void mino_worker_list_lock_acquire(mino_state_t *S)
+void mino_worker_list_lock_acquire(mino_state *S)
 {
     pthread_mutex_lock(&S->threading.worker_list_lock);
 }
-void mino_worker_list_lock_release(mino_state_t *S)
+void mino_worker_list_lock_release(mino_state *S)
 {
     pthread_mutex_unlock(&S->threading.worker_list_lock);
 }
@@ -1628,7 +1628,7 @@ void mino_worker_list_lock_release(mino_state_t *S)
  * this, two concurrent `(fn [x] (thread-sleep 5) x)` calls would
  * share one bc_regs array, and the second worker's bc_pop_window
  * would NULL the first worker's still-alive arg slot. */
-int mino_yield_lock(mino_state_t *S)
+int mino_yield_lock(mino_state *S)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     int depth = ctx->lock_depth;
@@ -1644,7 +1644,7 @@ int mino_yield_lock(mino_state_t *S)
     return depth;
 }
 
-void mino_resume_lock(mino_state_t *S, int saved_depth)
+void mino_resume_lock(mino_state *S, int saved_depth)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     while (saved_depth-- > 0) {
@@ -1668,16 +1668,16 @@ void mino_resume_lock(mino_state_t *S, int saved_depth)
 /* ------------------------------------------------------------------------- */
 
 struct mino_repl {
-    mino_state_t *state;
-    mino_env_t   *env;
+    mino_state *state;
+    mino_env   *env;
     char         *buf;
     size_t        len;
     size_t        cap;
 };
 
-mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env)
+mino_repl *mino_repl_new(mino_state *S, mino_env *env)
 {
-    mino_repl_t *r = (mino_repl_t *)malloc(sizeof(*r));
+    mino_repl *r = (mino_repl *)malloc(sizeof(*r));
     if (r == NULL) { return NULL; }
     r->state = S;
     r->env   = env;
@@ -1698,14 +1698,14 @@ static int repl_is_whitespace(const char *s)
     return 1;
 }
 
-int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
+int mino_repl_feed(mino_repl *repl, const char *line, mino_val **out)
 {
-    mino_state_t  *S;
+    mino_state  *S;
     size_t         add;
     const char    *cursor;
     const char    *end;
-    mino_val_t    *form;
-    mino_val_t    *result;
+    mino_val    *form;
+    mino_val    *result;
 
     if (out != NULL) { *out = NULL; }
     if (repl == NULL) { return MINO_REPL_ERROR; }
@@ -1781,7 +1781,7 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
     return MINO_REPL_OK;
 }
 
-void mino_repl_free(mino_repl_t *repl)
+void mino_repl_free(mino_repl *repl)
 {
     if (repl == NULL) { return; }
     free(repl->buf);

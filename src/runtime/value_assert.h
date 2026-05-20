@@ -5,7 +5,7 @@
  * Internal to the runtime; embedders should only use mino.h.
  *
  * No transitive dependencies on subsystem internal headers. Anyone who
- * needs a quick way to inspect a pointer-tagged mino_val_t or compute
+ * needs a quick way to inspect a pointer-tagged mino_val or compute
  * a checked size_t can include just this file.
  */
 
@@ -42,7 +42,7 @@
  * tagged scalars, MINO_NIL for NULL, otherwise the boxed header type.
  * Use this in switch / type comparisons so the dispatch is
  * form-agnostic and NULL-safe. */
-static inline mino_type_t mino_type_of(const mino_val_t *v)
+static inline mino_type mino_type_of(const mino_val *v)
 {
     uintptr_t tag;
     if (v == NULL) return MINO_NIL;
@@ -60,32 +60,32 @@ static inline mino_type_t mino_type_of(const mino_val_t *v)
  * cases; readers go through these helpers to stay form-agnostic. The
  * boxed form is still reachable for out-of-tagged-range ints, so each
  * helper handles both forms. */
-static inline int mino_val_int_p(const mino_val_t *v)
+static inline int mino_val_int_p(const mino_val *v)
 {
     return mino_type_of(v) == MINO_INT;
 }
 
-static inline long long mino_val_int_get(const mino_val_t *v)
+static inline long long mino_val_int_get(const mino_val *v)
 {
     return MINO_IS_INT(v) ? MINO_INT_VAL(v) : v->as.i;
 }
 
-static inline int mino_val_bool_p(const mino_val_t *v)
+static inline int mino_val_bool_p(const mino_val *v)
 {
     return mino_type_of(v) == MINO_BOOL;
 }
 
-static inline int mino_val_bool_get(const mino_val_t *v)
+static inline int mino_val_bool_get(const mino_val *v)
 {
     return MINO_IS_BOOL(v) ? MINO_BOOL_VAL(v) : v->as.b;
 }
 
-static inline int mino_val_char_p(const mino_val_t *v)
+static inline int mino_val_char_p(const mino_val *v)
 {
     return mino_type_of(v) == MINO_CHAR;
 }
 
-static inline int mino_val_char_get(const mino_val_t *v)
+static inline int mino_val_char_get(const mino_val *v)
 {
     return MINO_IS_CHAR(v) ? MINO_CHAR_VAL(v) : v->as.ch;
 }

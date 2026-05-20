@@ -9,9 +9,9 @@
 /* Construct a MINO_REGEX wrapping the given source string. The source
  * is held by reference (no copy) -- callers must pass an interned or
  * already GC-owned string. */
-mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
+mino_val *mino_regex_from_source(mino_state *S, mino_val *source)
 {
-    mino_val_t *v;
+    mino_val *v;
     if (source == NULL || mino_type_of(source) != MINO_STRING) return NULL;
     v = alloc_val(S, MINO_REGEX);
     if (v == NULL) return NULL;
@@ -23,7 +23,7 @@ mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
  * a MINO_STRING (callers that pass a pattern source directly, such as
  * (re-find #"..." s) shorthand variants). Returns 0 if the argument
  * is neither. */
-static int regex_source_view(const mino_val_t *v, const char **data, size_t *len)
+static int regex_source_view(const mino_val *v, const char **data, size_t *len)
 {
     if (v == NULL) return 0;
     if (mino_type_of(v) == MINO_STRING) {
@@ -43,9 +43,9 @@ static int regex_source_view(const mino_val_t *v, const char **data, size_t *len
 /* (re-pattern s) -- compile a regex from a source string, returning a
  * MINO_REGEX. Accepts a MINO_REGEX too (re-returned identically) so
  * `(re-pattern existing-pattern)` is a no-op. */
-mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -64,11 +64,11 @@ mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * pattern's group ids start at 1; missing/unmatched groups surface as
  * nil. The whole-match offset is the absolute start position in
  * text->as.s.data. */
-static mino_val_t *match_vector(mino_state_t *S, mino_val_t *text_val,
+static mino_val *match_vector(mino_state *S, mino_val *text_val,
                                 int match_idx, int match_len,
                                 const re_groups_t *g)
 {
-    mino_val_t *items[1 + RE_MAX_GROUPS];
+    mino_val *items[1 + RE_MAX_GROUPS];
     size_t      n = 1;
     int         i;
     items[0] = mino_string_n(S, text_val->as.s.data + match_idx,
@@ -89,9 +89,9 @@ static mino_val_t *match_vector(mino_state_t *S, mino_val_t *text_val,
 /* (re-find pattern text) -- find first match of pattern in text.
  * Returns the matched substring (no groups) or [whole g1 g2 ...]
  * (when the pattern has capture groups), or nil if no match. */
-mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pat_val, *text_val;
+    mino_val *pat_val, *text_val;
     re_t        compiled;
     re_groups_t groups;
     int         match_len = 0;
@@ -135,9 +135,9 @@ mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (re-matches pattern text) -- match anchored to whole string.
  * Returns the matched substring (no groups) or [whole g1 g2 ...]
  * (with groups), or nil. */
-mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pat_val, *text_val;
+    mino_val *pat_val, *text_val;
     re_t        compiled;
     re_groups_t groups;
     int         match_len = 0;
@@ -189,9 +189,9 @@ const mino_prim_def k_prims_regex[] = {
 const size_t k_prims_regex_count =
     sizeof(k_prims_regex) / sizeof(k_prims_regex[0]);
 
-void mino_install_regex(mino_state_t *S, mino_env_t *env)
+void mino_install_regex(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_regex, k_prims_regex_count,

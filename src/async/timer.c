@@ -36,7 +36,7 @@ static double now_ms(void)
 #endif
 }
 
-int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
+int async_timer_schedule(mino_state *S, double ms, mino_val *callback)
 {
     timer_entry_t *entry;
 
@@ -54,7 +54,7 @@ int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
     }
     entry->deadline_ms = now_ms() + ms;
     entry->callback    = callback;
-    entry->cb_ref      = mino_ref(S, callback);
+    entry->cb_ref      = mino_ref_new(S, callback);
     entry->next        = NULL;
 
     /* Insert sorted by deadline (earliest first). */
@@ -75,7 +75,7 @@ int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
     return 0;
 }
 
-void async_timers_check(mino_state_t *S)
+void async_timers_check(mino_state *S)
 {
     double t = now_ms();
     timer_entry_t *entry;
@@ -95,7 +95,7 @@ void async_timers_check(mino_state_t *S)
     }
 }
 
-void async_timers_free(mino_state_t *S)
+void async_timers_free(mino_state *S)
 {
     timer_entry_t *entry = S->async.timers;
     while (entry != NULL) {
@@ -107,7 +107,7 @@ void async_timers_free(mino_state_t *S)
     S->async.timers = NULL;
 }
 
-void async_timers_mark(mino_state_t *S)
+void async_timers_mark(mino_state *S)
 {
     timer_entry_t *entry;
     for (entry = S->async.timers; entry != NULL; entry = entry->next) {

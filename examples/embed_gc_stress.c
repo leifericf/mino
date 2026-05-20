@@ -33,10 +33,10 @@ static void fail(const char *msg)
 /* mino_gc_set_param contract: returns 0 on success, -1 on invalid key or
  * out-of-range value. Cover each known key with a successful minimum, a
  * successful maximum, and an out-of-range value on each side. */
-static void test_param_bounds(mino_state_t *S)
+static void test_param_bounds(mino_state *S)
 {
     struct {
-        mino_gc_param_t p;
+        mino_gc_param p;
         size_t          lo_ok;
         size_t          hi_ok;
         size_t          lo_bad;
@@ -71,7 +71,7 @@ static void test_param_bounds(mino_state_t *S)
         }
     }
     /* Unknown param key must reject. */
-    if (mino_gc_set_param(S, (mino_gc_param_t)9999, 1) == 0) {
+    if (mino_gc_set_param(S, (mino_gc_param)9999, 1) == 0) {
         fail("unknown param key accepted");
     }
     /* Restore GC parameters to their defaults so the rest of the
@@ -90,9 +90,9 @@ static void test_param_bounds(mino_state_t *S)
 /* mino_gc_collect contract: every kind drives phase to IDLE on return.
  * MAJOR during IDLE runs a full mark+sweep; FULL always runs a STW cycle
  * regardless of prior state. Stats should reflect the progress. */
-static void test_collect_kinds(mino_state_t *S, mino_env_t *env)
+static void test_collect_kinds(mino_state *S, mino_env *env)
 {
-    mino_gc_stats_t st;
+    mino_gc_stats_out st;
     size_t minor_before, major_before;
 
     mino_gc_stats(S, &st);
@@ -116,7 +116,7 @@ static void test_collect_kinds(mino_state_t *S, mino_env_t *env)
     /* Invalid kind must be rejected as no-op (no crash, no progress). */
     {
         size_t before = st.collections_major;
-        mino_gc_collect(S, (mino_gc_kind_t)99);
+        mino_gc_collect(S, (mino_gc_kind)99);
         mino_gc_stats(S, &st);
         if (st.collections_major != before) fail("invalid kind ran a cycle");
     }
@@ -125,9 +125,9 @@ static void test_collect_kinds(mino_state_t *S, mino_env_t *env)
 
 /* Stats snapshot contract: out-param populated without side effects.
  * Repeated calls return monotone non-decreasing cumulative fields. */
-static void test_stats_monotone(mino_state_t *S, mino_env_t *env)
+static void test_stats_monotone(mino_state *S, mino_env *env)
 {
-    mino_gc_stats_t a, b;
+    mino_gc_stats_out a, b;
     const char *script =
         "(dotimes [i 800] (doall (take 200 (range 1000))))";
     mino_gc_stats(S, &a);
@@ -144,7 +144,7 @@ static void test_stats_monotone(mino_state_t *S, mino_env_t *env)
 /* Parameter changes mid-run should take effect immediately but not
  * corrupt an in-progress cycle. Drive nursery from a tight 64 KB to a
  * loose 4 MB while running allocation pressure. */
-static void test_param_change_under_pressure(mino_state_t *S, mino_env_t *env)
+static void test_param_change_under_pressure(mino_state *S, mino_env *env)
 {
     if (mino_gc_set_param(S, MINO_GC_NURSERY_BYTES, 64u * 1024u) != 0) {
         fail("set nursery 64 KB");
@@ -163,8 +163,8 @@ static void test_param_change_under_pressure(mino_state_t *S, mino_env_t *env)
 
 int main(void)
 {
-    mino_state_t *S = mino_state_new();
-    mino_env_t   *env;
+    mino_state *S = mino_state_new();
+    mino_env   *env;
     if (S == NULL) { fail("state_new"); return 1; }
     env = mino_env_new(S);
     mino_install(S, env, MINO_CAP_DEFAULT);

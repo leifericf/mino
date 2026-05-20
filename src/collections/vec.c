@@ -24,7 +24,7 @@
 
 /*/* Types and constants in collections_internal.h */
 
-static mino_vec_node_t *vnode_new(mino_state_t *S, unsigned count, int is_leaf)
+static mino_vec_node_t *vnode_new(mino_state *S, unsigned count, int is_leaf)
 {
     mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
         S, GC_T_VEC_NODE, sizeof(*n));
@@ -33,7 +33,7 @@ static mino_vec_node_t *vnode_new(mino_state_t *S, unsigned count, int is_leaf)
     return n;
 }
 
-static mino_vec_node_t *vnode_clone(mino_state_t *S,
+static mino_vec_node_t *vnode_clone(mino_state *S,
                                     const mino_vec_node_t *src)
 {
     mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
@@ -46,7 +46,7 @@ static mino_vec_node_t *vnode_clone(mino_state_t *S,
  * new_path: build a spine from a branch at level `shift` down to `leaf`,
  * placing the leaf in slot 0 at every level along the way.
  */
-static mino_vec_node_t *new_path(mino_state_t *S, unsigned shift,
+static mino_vec_node_t *new_path(mino_state *S, unsigned shift,
                                  mino_vec_node_t *leaf)
 {
     mino_vec_node_t *n;
@@ -64,7 +64,7 @@ static mino_vec_node_t *new_path(mino_state_t *S, unsigned shift,
  * index into the trie). Path-copies the walked spine; returns the new root.
  * Caller ensures `subindex` fits within the current tree (no root overflow).
  */
-static mino_vec_node_t *push_tail(mino_state_t *S,
+static mino_vec_node_t *push_tail(mino_state *S,
                                   const mino_vec_node_t *node, unsigned shift,
                                   size_t subindex, mino_vec_node_t *leaf)
 {
@@ -90,9 +90,9 @@ static mino_vec_node_t *push_tail(mino_state_t *S,
  * trie_assoc: path-copy update of the element at flat index `i`. Requires
  * i to refer to the trie (not the tail).
  */
-static mino_vec_node_t *trie_assoc(mino_state_t *S,
+static mino_vec_node_t *trie_assoc(mino_state *S,
                                     const mino_vec_node_t *node, unsigned shift,
-                                    size_t i, mino_val_t *item)
+                                    size_t i, mino_val *item)
 {
     mino_vec_node_t *clone = vnode_clone(S, node);
     if (shift == 0) {
@@ -108,12 +108,12 @@ static mino_vec_node_t *trie_assoc(mino_state_t *S,
 
 /* Construct a vector value from an already-built trie and tail.
  * If `src` is non-NULL, its metadata is carried over to the new vector. */
-static mino_val_t *vec_assemble(mino_state_t *S, const mino_val_t *src,
+static mino_val *vec_assemble(mino_state *S, const mino_val *src,
                                  mino_vec_node_t *root,
                                  mino_vec_node_t *tail,
                                  unsigned tail_len, unsigned shift, size_t len)
 {
-    mino_val_t *v = alloc_val(S, MINO_VECTOR);
+    mino_val *v = alloc_val(S, MINO_VECTOR);
     v->as.vec.root     = root;
     v->as.vec.tail     = tail;
     v->as.vec.tail_len = tail_len;
@@ -130,14 +130,14 @@ static mino_val_t *vec_assemble(mino_state_t *S, const mino_val_t *src,
 /* Read one element by flat index; undefined if i >= visible len.
  * For subvecs (offset > 0), translates the visible index to the backing
  * trie's absolute index before lookup. */
-mino_val_t *vec_nth(const mino_val_t *v, size_t i)
+mino_val *vec_nth(const mino_val *v, size_t i)
 {
     size_t                  trie_count = v->as.vec.blen - v->as.vec.tail_len;
     size_t                  abs_i      = i + v->as.vec.offset;
     const mino_vec_node_t  *node;
     unsigned                shift;
     if (abs_i >= trie_count) {
-        return (mino_val_t *)v->as.vec.tail->slots[abs_i - trie_count];
+        return (mino_val *)v->as.vec.tail->slots[abs_i - trie_count];
     }
     node  = v->as.vec.root;
     shift = v->as.vec.shift;
@@ -145,23 +145,23 @@ mino_val_t *vec_nth(const mino_val_t *v, size_t i)
         node = (const mino_vec_node_t *)node->slots[(abs_i >> shift) & MINO_VEC_MASK];
         shift -= MINO_VEC_B;
     }
-    return (mino_val_t *)node->slots[abs_i & MINO_VEC_MASK];
+    return (mino_val *)node->slots[abs_i & MINO_VEC_MASK];
 }
 
 /* Materialize a subvec (offset > 0) into a fresh vector with offset 0.
  * Required before structural mutations (conj, pop) that assume offset == 0. */
-static mino_val_t *vec_materialize(mino_state_t *S, const mino_val_t *v)
+static mino_val *vec_materialize(mino_state *S, const mino_val *v)
 {
     size_t       len = v->as.vec.len;
-    mino_val_t **buf;
-    mino_val_t  *result;
+    mino_val **buf;
+    mino_val  *result;
     size_t       i;
     if (len == 0) {
         result = vec_from_array(S, NULL, 0);
         result->meta = v->meta;
         return result;
     }
-    buf = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, len * sizeof(*buf));
+    buf = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, len * sizeof(*buf));
     for (i = 0; i < len; i++)
         buf[i] = vec_nth(v, i);
     result = vec_from_array(S, buf, len);
@@ -170,7 +170,7 @@ static mino_val_t *vec_materialize(mino_state_t *S, const mino_val_t *v)
 }
 
 /* Append one element. O(log32 n) worst case, O(1) amortized for tail appends. */
-mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item)
+mino_val *vec_conj1(mino_state *S, const mino_val *v, mino_val *item)
 {
     mino_vec_node_t *new_tail;
     mino_vec_node_t *new_root;
@@ -218,8 +218,8 @@ mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item)
 
 /* Update index i. Index equal to len appends; any other out-of-range call is
  * the caller's responsibility to guard against. */
-mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
-                       mino_val_t *item)
+mino_val *vec_assoc1(mino_state *S, const mino_val *v, size_t i,
+                       mino_val *item)
 {
     size_t           trie_count;
     mino_vec_node_t *new_tail;
@@ -257,7 +257,7 @@ mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
  * Total work is O(n): one pass writing leaves, then n/32 + n/1024 + ... ≤ n/31
  * more writes up the spine. Caller retains ownership of `items` and elements.
  */
-mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
+mino_val *vec_from_array(mino_state *S, mino_val **items, size_t len)
 {
     mino_vec_node_t  *tail;
     unsigned          tail_len;
@@ -286,7 +286,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         /* Keep gc_depth raised through vec_assemble: tail is GC-
          * allocated but the only reference to it lives in C locals
          * the optimizer may keep in registers. */
-        mino_val_t *result = vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
+        mino_val *result = vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
         mino_current_ctx(S)->gc_depth--;
         return result;
     }
@@ -335,7 +335,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         /* Keep gc_depth raised through vec_assemble: root and tail
          * are GC-allocated but only referenced from C locals. */
         mino_vec_node_t *root   = layer[0];
-        mino_val_t      *result;
+        mino_val      *result;
         free(layer);
         result = vec_assemble(S, NULL, root, tail, tail_len, shift, len);
         mino_current_ctx(S)->gc_depth--;
@@ -348,7 +348,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
  * `shift`). Returns the new subtree root, or NULL if the subtree became
  * empty. The removed leaf is returned through *out_leaf.
  */
-static mino_vec_node_t *pop_tail(mino_state_t *S,
+static mino_vec_node_t *pop_tail(mino_state *S,
                                  const mino_vec_node_t *node, unsigned shift,
                                  size_t trie_count,
                                  mino_vec_node_t **out_leaf)
@@ -379,7 +379,7 @@ static mino_vec_node_t *pop_tail(mino_state_t *S,
 }
 
 /* Owned-edit helpers used by the transient `*_bang` mutators. Each
- * accepts an `owner` pointer (the transient's mino_val_t address);
+ * accepts an `owner` pointer (the transient's mino_val address);
  * nodes whose owner field matches are mutated in place, others are
  * cloned with the owner stamped. On first mutation through a fresh
  * transient, the inner nodes are owner=NULL (the persistent default)
@@ -393,13 +393,13 @@ static mino_vec_node_t *pop_tail(mino_state_t *S,
  * picks up the OLD -> YOUNG edge. The barrier is a no-op for YOUNG
  * containers, so freshly cloned (still-young) nodes pay no extra
  * cost. */
-static void vnode_slot_set(mino_state_t *S, mino_vec_node_t *node,
+static void vnode_slot_set(mino_state *S, mino_vec_node_t *node,
                             unsigned idx, void *val)
 {
     gc_write_barrier(S, node, node->slots[idx], val);
     node->slots[idx] = val;
 }
-static mino_vec_node_t *vnode_new_owned(mino_state_t *S, unsigned count,
+static mino_vec_node_t *vnode_new_owned(mino_state *S, unsigned count,
                                          int is_leaf, uintptr_t owner)
 {
     mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
@@ -410,7 +410,7 @@ static mino_vec_node_t *vnode_new_owned(mino_state_t *S, unsigned count,
     return n;
 }
 
-static mino_vec_node_t *vnode_ensure_owned(mino_state_t *S,
+static mino_vec_node_t *vnode_ensure_owned(mino_state *S,
                                             mino_vec_node_t *node,
                                             uintptr_t owner)
 {
@@ -423,14 +423,14 @@ static mino_vec_node_t *vnode_ensure_owned(mino_state_t *S,
     return n;
 }
 
-static mino_vec_node_t *new_path_owned(mino_state_t *S, unsigned shift,
+static mino_vec_node_t *new_path_owned(mino_state *S, unsigned shift,
                                         mino_vec_node_t *leaf, uintptr_t owner);
-static mino_vec_node_t *push_tail_owned(mino_state_t *S,
+static mino_vec_node_t *push_tail_owned(mino_state *S,
                                          mino_vec_node_t *node,
                                          unsigned shift, size_t subindex,
                                          mino_vec_node_t *leaf, uintptr_t owner);
 
-static mino_vec_node_t *new_path_owned(mino_state_t *S, unsigned shift,
+static mino_vec_node_t *new_path_owned(mino_state *S, unsigned shift,
                                         mino_vec_node_t *leaf, uintptr_t owner)
 {
     mino_vec_node_t *n;
@@ -441,7 +441,7 @@ static mino_vec_node_t *new_path_owned(mino_state_t *S, unsigned shift,
     return n;
 }
 
-static mino_vec_node_t *push_tail_owned(mino_state_t *S,
+static mino_vec_node_t *push_tail_owned(mino_state *S,
                                          mino_vec_node_t *node,
                                          unsigned shift, size_t subindex,
                                          mino_vec_node_t *leaf, uintptr_t owner)
@@ -463,10 +463,10 @@ static mino_vec_node_t *push_tail_owned(mino_state_t *S,
     return edited;
 }
 
-static mino_vec_node_t *trie_assoc_owned(mino_state_t *S,
+static mino_vec_node_t *trie_assoc_owned(mino_state *S,
                                           mino_vec_node_t *node,
                                           unsigned shift, size_t i,
-                                          mino_val_t *item, uintptr_t owner)
+                                          mino_val *item, uintptr_t owner)
 {
     mino_vec_node_t *edited = vnode_ensure_owned(S, node, owner);
     if (shift == 0) {
@@ -486,8 +486,8 @@ static mino_vec_node_t *trie_assoc_owned(mino_state_t *S,
  * the tail node is owner-tagged, so subsequent conj!'s within the
  * same chunk-of-32 do a single slot write + count bump with no node
  * allocation. */
-mino_val_t *vec_conj1_owned(mino_state_t *S, mino_val_t *v,
-                             mino_val_t *item, uintptr_t owner)
+mino_val *vec_conj1_owned(mino_state *S, mino_val *v,
+                             mino_val *item, uintptr_t owner)
 {
     mino_vec_node_t *new_tail;
     mino_vec_node_t *new_root;
@@ -532,8 +532,8 @@ mino_val_t *vec_conj1_owned(mino_state_t *S, mino_val_t *v,
 }
 
 /* Owned assoc. */
-mino_val_t *vec_assoc1_owned(mino_state_t *S, mino_val_t *v, size_t i,
-                              mino_val_t *item, uintptr_t owner)
+mino_val *vec_assoc1_owned(mino_state *S, mino_val *v, size_t i,
+                              mino_val *item, uintptr_t owner)
 {
     size_t trie_count;
     if (v->as.vec.offset > 0) v = vec_materialize(S, v);
@@ -553,11 +553,11 @@ mino_val_t *vec_assoc1_owned(mino_state_t *S, mino_val_t *v, size_t i,
 /* Owned pop. Mirrors vec_pop's structure but uses vnode_ensure_owned
  * on the trie spine and tail so the in-place edits stay confined to
  * the transient's owned nodes. */
-mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner);
+mino_val *vec_pop_owned(mino_state *S, mino_val *v, uintptr_t owner);
 
 /* Remove the last element. Returns an empty vector when len == 1.
  * Caller must ensure len > 0. */
-mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
+mino_val *vec_pop(mino_state *S, const mino_val *v)
 {
     size_t new_len;
     if (v->as.vec.offset > 0)
@@ -607,7 +607,7 @@ mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
 }
 
 /* Owned variant of pop_tail. */
-static mino_vec_node_t *pop_tail_owned(mino_state_t *S,
+static mino_vec_node_t *pop_tail_owned(mino_state *S,
                                          mino_vec_node_t *node, unsigned shift,
                                          size_t trie_count,
                                          mino_vec_node_t **out_leaf,
@@ -640,7 +640,7 @@ static mino_vec_node_t *pop_tail_owned(mino_state_t *S,
     }
 }
 
-mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner)
+mino_val *vec_pop_owned(mino_state *S, mino_val *v, uintptr_t owner)
 {
     size_t new_len;
     if (v->as.vec.offset > 0) v = vec_materialize(S, v);
@@ -684,12 +684,12 @@ mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner)
 }
 
 /* O(1) subvec: share the backing trie with an offset and reduced len. */
-mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
+mino_val *vec_subvec(mino_state *S, const mino_val *v,
                        size_t start, size_t end)
 {
-    mino_val_t *sv;
+    mino_val *sv;
     if (start == 0 && end == v->as.vec.len)
-        return (mino_val_t *)v;
+        return (mino_val *)v;
     if (start == end)
         return vec_from_array(S, NULL, 0);
     sv = alloc_val(S, MINO_VECTOR);
@@ -704,7 +704,7 @@ mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
     return sv;
 }
 
-mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len)
+mino_val *mino_vector(mino_state *S, mino_val **items, size_t len)
 {
     return vec_from_array(S, items, len);
 }

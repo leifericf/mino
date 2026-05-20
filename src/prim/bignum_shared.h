@@ -23,12 +23,12 @@ mp_int bigint_alloc_zeroed(void);
 
 /* Wrap an mp_int payload as a MINO_BIGINT GC value. The payload is
  * adopted (the resulting cell owns it). */
-mino_val_t *bigint_wrap(mino_state_t *S, mp_int z);
+mino_val *bigint_wrap(mino_state *S, mp_int z);
 
 /* Convert a numeric value to a MINO_BIGINT. Accepts MINO_INT or
  * MINO_BIGINT; returns the input on bigint identity, or a fresh
  * bigint cell for ints. Returns NULL on bad input or OOM. */
-mino_val_t *to_bigint(mino_state_t *S, const mino_val_t *v);
+mino_val *to_bigint(mino_state *S, const mino_val *v);
 
 /* Shortest round-tripping double->string formatter (printf-%g-style
  * fast path with NaN / Infinity canonical tokens). Out buffer must

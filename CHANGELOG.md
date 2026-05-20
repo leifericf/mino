@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.383.0 — Embedder UX: Type-Name Cleanup (Drop `_t`)
+
+Phase 2 of the pre-1.0 Embedder UX cycle. POSIX 1003.1 reserves
+the `_t` suffix for the implementation; mino's public typedefs
+were squatting in that namespace. This cycle drops the suffix
+across every public type, matching the SQLite typedef convention
+(`typedef struct mino_X mino_X`).
+
+### Changed (public types)
+
+| Old | New |
+|---|---|
+| `mino_val_t` | `mino_val` |
+| `mino_env_t` | `mino_env` |
+| `mino_future_t` | `mino_future` |
+| `mino_state_t` | `mino_state` |
+| `mino_ref_t` | `mino_ref` |
+| `mino_type_t` | `mino_type` |
+| `mino_iter_t` | `mino_iter` |
+| `mino_repl_t` | `mino_repl` |
+| `mino_vec_builder_t` | `mino_vec_builder` |
+| `mino_map_builder_t` | `mino_map_builder` |
+| `mino_set_builder_t` | `mino_set_builder` |
+| `mino_diag_t` | `mino_diag` |
+| `mino_gc_kind_t` | `mino_gc_kind` |
+| `mino_gc_param_t` | `mino_gc_param` |
+| `mino_gc_stats_t` | `mino_gc_stats_out` (the struct; resolves the collision with the `mino_gc_stats` function) |
+| `mino_jit_mode_t` | `mino_jit_mode` |
+| `mino_jit_capability_t` | `mino_jit_capability` |
+| `mino_thread_pool_t` | `mino_thread_pool` |
+| `mino_capability_info_t` | `mino_capability_info` |
+
+Function-pointer typedefs keep their `_fn` suffix: `mino_prim_fn`,
+`mino_prim_fn2`, `mino_finalizer_fn`, `mino_host_fn`,
+`mino_resolve_fn`, `mino_tx_xform_fn`, `mino_tx_body_fn`,
+`mino_thread_lifecycle_fn`. The `_fn` is semantic, not a
+POSIX-namespace squat.
+
+### Changed (one name collision)
+
+- `mino_ref(S, val)` (the function that allocates a ref root) is
+  renamed to `mino_ref_new(S, val)`. The struct now occupies the
+  ordinary identifier namespace as `mino_ref`, so the function
+  needed a distinct name. `mino_ref_new` also lines up better
+  with `mino_state_new` / `mino_env_new` / `mino_repl_new`.
+
+### Migration
+
+- An embedder porting from v0.382.0 (or any earlier release) needs
+  to remove `_t` from each of the type names above and rewrite
+  one struct name (`mino_gc_stats_t` → `mino_gc_stats_out`) plus
+  one function name (`mino_ref(...)` → `mino_ref_new(...)`).
+  Mechanical sed recipe:
+  ```sh
+  for ty in mino_val mino_env mino_future mino_state mino_ref \
+            mino_type mino_iter mino_repl mino_vec_builder \
+            mino_map_builder mino_set_builder mino_diag \
+            mino_gc_kind mino_gc_param mino_jit_mode \
+            mino_jit_capability mino_thread_pool \
+            mino_capability_info; do
+      find your-tree -name '*.[ch]' -exec \
+          perl -i -pe "s/\\b${ty}_t\\b/${ty}/g" {} +
+  done
+  find your-tree -name '*.[ch]' -exec \
+      perl -i -pe 's/\bmino_gc_stats_t\b/mino_gc_stats_out/g' {} +
+  find your-tree -name '*.[ch]' -exec \
+      perl -i -pe 's/\bmino_ref\(/mino_ref_new(/g' {} +
+  ```
+  Internal `_t` typedefs (e.g. `mino_thread_ctx_t`) are unaffected.
+
+### Added
+
+- `lib/clojure/math.clj` is now in the bundled-stdlib generator
+  list. The header `src/lib_clojure_math.h` was already referenced
+  by `src/prim/install_stdlib.c`, but the `gen-stdlib-headers`
+  task wasn't regenerating it. `./mino task clean` followed by a
+  fresh build now reproduces a working binary; before this fix,
+  the math bundled header had to survive `clean` to keep the tree
+  buildable.
+
 ## v0.382.0 — Embedder UX: Cascade-Completion
 
 Phase 1 of the pre-1.0 Embedder UX cycle. Closes the cascade

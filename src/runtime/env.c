@@ -18,17 +18,17 @@
  * only reachable through it.
  */
 
-mino_env_t *env_alloc(mino_state_t *S, mino_env_t *parent)
+mino_env *env_alloc(mino_state *S, mino_env *parent)
 {
-    mino_env_t *env = (mino_env_t *)gc_alloc_typed(S, GC_T_ENV, sizeof(*env));
+    mino_env *env = (mino_env *)gc_alloc_typed(S, GC_T_ENV, sizeof(*env));
     env->parent = parent;
     return env;
 }
 
-mino_env_t *mino_env_new(mino_state_t *S)
+mino_env *mino_env_new(mino_state *S)
 {
     volatile char probe = 0;
-    mino_env_t   *env;
+    mino_env   *env;
     root_env_t   *r;
     /* Record the host's stack frame: this is typically the earliest point
      * the host calls into mino, so it fixes a generous stack bottom before
@@ -47,12 +47,12 @@ mino_env_t *mino_env_new(mino_state_t *S)
     return env;
 }
 
-mino_env_t *env_child(mino_state_t *S, mino_env_t *parent)
+mino_env *env_child(mino_state *S, mino_env *parent)
 {
     return env_alloc(S, parent);
 }
 
-void mino_env_free(mino_state_t *S, mino_env_t *env)
+void mino_env_free(mino_state *S, mino_env *env)
 {
     /* Unroot the env. Its memory, along with any closures and bindings
      * reachable only through it, is reclaimed at the next collection. */
@@ -76,7 +76,7 @@ static uint32_t env_hash_name(const char *name, size_t len)
     return fnv_bytes(2166136261u, (const unsigned char *)name, len);
 }
 
-static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
+static void env_ht_rebuild(mino_state *S, mino_env *env)
 {
     size_t new_cap;
     size_t target;
@@ -125,7 +125,7 @@ static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
  * `env_hash_name(name, nlen)` (e.g. from an interned symbol's
  * `sym->as.s.hash`). When zero, the hashed-frame path computes it on
  * the spot. Linear-scan frames ignore `hash` entirely. */
-static env_binding_t *env_find_here_hashed(mino_env_t *env, const char *name,
+static env_binding_t *env_find_here_hashed(mino_env *env, const char *name,
                                            size_t nlen, uint32_t hash)
 {
     /* Hash-indexed lookup for large frames. */
@@ -159,12 +159,12 @@ static env_binding_t *env_find_here_hashed(mino_env_t *env, const char *name,
 /* Length-aware variant. The caller already paid for strlen(name)
  * (typically reading sym->as.s.len from an interned symbol), so we
  * skip recomputing it on every probe. */
-env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen)
+env_binding_t *env_find_here_n(mino_env *env, const char *name, size_t nlen)
 {
     return env_find_here_hashed(env, name, nlen, 0);
 }
 
-env_binding_t *env_find_here(mino_env_t *env, const char *name)
+env_binding_t *env_find_here(mino_env *env, const char *name)
 {
     /* Most callers already paid for strlen via sym->as.s.len. Compute
      * once here only if the lookup actually needs it (hash-indexed
@@ -175,10 +175,10 @@ env_binding_t *env_find_here(mino_env_t *env, const char *name)
 
 /* Shared implementation: interned_name is a stable pointer (e.g. from
  * an intern entry) when known, otherwise NULL. */
-static void env_bind_impl(mino_state_t *S, mino_env_t *env,
+static void env_bind_impl(mino_state *S, mino_env *env,
                           const char *name, size_t nlen,
                           const char *interned_name,
-                          mino_val_t *val)
+                          mino_val *val)
 {
     env_binding_t *b = env_find_here(env, name);
     if (b != NULL) {
@@ -224,7 +224,7 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
         gc_write_barrier(S, env, NULL, interned_name);
         env->bindings[env->len].name = (char *)interned_name;
     } else {
-        mino_val_t *sym  = mino_symbol_n(S, name, nlen);
+        mino_val *sym  = mino_symbol_n(S, name, nlen);
         char       *nm   = (sym != NULL) ? sym->as.s.data
                                          : dup_n(S, name, nlen);
         gc_write_barrier(S, env, NULL, nm);
@@ -251,13 +251,13 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
     }
 }
 
-void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
-              mino_val_t *val)
+void env_bind(mino_state *S, mino_env *env, const char *name,
+              mino_val *val)
 {
     env_bind_impl(S, env, name, strlen(name), NULL, val);
 }
 
-int env_unbind(mino_state_t *S, mino_env_t *env, const char *name)
+int env_unbind(mino_state *S, mino_env *env, const char *name)
 {
     size_t i;
     for (i = 0; i < env->len; i++) {
@@ -294,14 +294,14 @@ int env_unbind(mino_state_t *S, mino_env_t *env, const char *name)
 /* Hot-path variant: caller supplies an already-interned symbol, so the
  * binding name pointer and length come free and we skip strlen plus the
  * intern hash-table probe. */
-void env_bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
-                  mino_val_t *val)
+void env_bind_sym(mino_state *S, mino_env *env, mino_val *sym,
+                  mino_val *val)
 {
     env_bind_impl(S, env, sym->as.s.data, sym->as.s.len,
                   sym->as.s.data, val);
 }
 
-mino_env_t *env_root(mino_state_t *S, mino_env_t *env)
+mino_env *env_root(mino_state *S, mino_env *env)
 {
     (void)S;
     while (env->parent != NULL) {
@@ -310,12 +310,12 @@ mino_env_t *env_root(mino_state_t *S, mino_env_t *env)
     return env;
 }
 
-mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env)
+mino_env *mino_env_clone(mino_state *S, mino_env *env)
 {
     if (env == NULL) return NULL;
 
     /* Allocate a new root env and copy all bindings from the source. */
-    mino_env_t *clone = mino_env_new(S);
+    mino_env *clone = mino_env_new(S);
     size_t i;
     for (i = 0; i < env->len; i++) {
         env_bind(S, clone, env->bindings[i].name, env->bindings[i].val);
@@ -323,12 +323,12 @@ mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env)
     return clone;
 }
 
-void mino_env_set(mino_state_t *S, mino_env_t *env, const char *name, mino_val_t *val)
+void mino_env_set(mino_state *S, mino_env *env, const char *name, mino_val *val)
 {
     env_bind(S, env, name, val);
 }
 
-mino_val_t *mino_env_get(mino_env_t *env, const char *name)
+mino_val *mino_env_get(mino_env *env, const char *name)
 {
     /* Cache strlen(name) across the parent walk: every hash-indexed
      * frame in the chain would otherwise pay for it again. The cost
@@ -353,7 +353,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name)
  * (sym->as.s.len), so we skip strlen entirely. Also reads
  * sym->as.s.hash to skip FNV recomputation per probed parent frame.
  * Used by eval_symbol on the hot lookup path. */
-mino_val_t *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym)
+mino_val *mino_env_get_sym(mino_env *env, const mino_val *sym)
 {
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
@@ -378,7 +378,7 @@ void dyn_binding_list_free(dyn_binding_t *head)
 
 /* Look up a name in the dynamic binding stack.  Returns the value if
  * found, NULL otherwise. */
-mino_val_t *dyn_lookup(mino_state_t *S, const char *name)
+mino_val *dyn_lookup(mino_state *S, const char *name)
 {
     dyn_frame_t *f;
     dyn_binding_t *b;

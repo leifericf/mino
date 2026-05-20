@@ -22,9 +22,9 @@
 /* MINO_BIGDEC                                                                */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale)
+mino_val *mino_bigdec_make(mino_state *S, mino_val *unscaled, int scale)
 {
-    mino_val_t *v;
+    mino_val *v;
     if (unscaled == NULL || mino_type_of(unscaled) != MINO_BIGINT) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "bigdec: unscaled must be a bigint");
@@ -38,13 +38,13 @@ mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale)
 /* Parse a base-10 decimal numeric string into a bigdec. Recognises:
  *   optional sign, integer part, '.' fractional part, 'e'/'E' exponent.
  * Returns NULL on parse failure. */
-mino_val_t *mino_bigdec_from_string(mino_state_t *S, const char *s)
+mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
 {
     const char *p, *frac_start;
     char       *digits;
     size_t      digit_count, dlen;
     int         sign = 1, frac_len = 0, has_dot = 0, exp = 0;
-    mino_val_t *unscaled;
+    mino_val *unscaled;
     if (s == NULL || *s == '\0') return NULL;
     p = s;
     if (*p == '+') p++;
@@ -113,7 +113,7 @@ mino_val_t *mino_bigdec_from_string(mino_state_t *S, const char *s)
 }
 
 /* Print a bigdec as "123.45M" — Clojure's bigdec literal form. */
-void mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out)
+void mino_bigdec_print(mino_state *S, const mino_val *v, FILE *out)
 {
     char *digits;
     int   scale;
@@ -160,7 +160,7 @@ void mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out)
  * the lower-scaled side to match the higher and check unscaled
  * equality. The hash strips trailing zeros so the equal-implies-
  * equal-hash invariant holds across scales. */
-int mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b)
+int mino_bigdec_equals(const mino_val *a, const mino_val *b)
 {
     int   sa, sb, smax;
     mpz_t au, bu, pw;
@@ -196,7 +196,7 @@ fail:
     return 0;
 }
 
-uint32_t mino_bigdec_hash(const mino_val_t *v)
+uint32_t mino_bigdec_hash(const mino_val *v)
 {
     /* Hash the value in trailing-zero-stripped form so 1.0M and 1.00M
      * (numerically equal) hash the same. Walk a copy of the unscaled
@@ -228,9 +228,9 @@ uint32_t mino_bigdec_hash(const mino_val_t *v)
     }
     if (mp_int_compare_zero(&acc) == 0) scale = 0;
     {
-        /* Wrap the canonical mpz in a temporary mino_val_t so we can
+        /* Wrap the canonical mpz in a temporary mino_val so we can
          * reuse mino_bigint_hash without copying again. */
-        mino_val_t tmp;
+        mino_val tmp;
         memset(&tmp, 0, sizeof(tmp));
         tmp.type = MINO_BIGINT;
         tmp.as.bigint.mpz = &acc;
@@ -244,7 +244,7 @@ uint32_t mino_bigdec_hash(const mino_val_t *v)
     return h ^ 0x165667b1u;
 }
 
-double mino_bigdec_to_double(const mino_val_t *v)
+double mino_bigdec_to_double(const mino_val *v)
 {
     double d;
     int    scale;
@@ -257,9 +257,9 @@ double mino_bigdec_to_double(const mino_val_t *v)
 }
 
 /* (bigdec x) — coerce. */
-mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -271,12 +271,12 @@ mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "bigdec: nil");
     if (mino_type_of(x) == MINO_BIGDEC) return x;
     if (mino_val_int_p(x)) {
-        mino_val_t *u = mino_bigint_from_ll(S, mino_val_int_get(x));
+        mino_val *u = mino_bigint_from_ll(S, mino_val_int_get(x));
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
     if (mino_type_of(x) == MINO_BIGINT) {
-        mino_val_t *u = to_bigint(S, x);
+        mino_val *u = to_bigint(S, x);
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
@@ -286,7 +286,7 @@ mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_bigdec_from_string(S, buf);
     }
     if (mino_type_of(x) == MINO_STRING) {
-        mino_val_t *r = mino_bigdec_from_string(S, x->as.s.data);
+        mino_val *r = mino_bigdec_from_string(S, x->as.s.data);
         if (r == NULL)
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "bigdec: invalid numeric string");
@@ -304,7 +304,7 @@ mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (decimal? x) — true for bigdec only. */
-mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_decimal_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -312,7 +312,7 @@ mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "decimal? requires one argument");
     }
     {
-        mino_val_t *x = args->as.cons.car;
+        mino_val *x = args->as.cons.car;
         return (x != NULL && mino_type_of(x) == MINO_BIGDEC)
             ? mino_true(S) : mino_false(S);
     }
@@ -323,17 +323,17 @@ mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* ------------------------------------------------------------------------- */
 
 /* Promote int / bigint / ratio to bigdec at scale 0. Lossless. */
-mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v)
+mino_val *mino_to_bigdec(mino_state *S, const mino_val *v)
 {
     if (v == NULL) return NULL;
-    if (mino_type_of(v) == MINO_BIGDEC) return (mino_val_t *)v;
+    if (mino_type_of(v) == MINO_BIGDEC) return (mino_val *)v;
     if (mino_val_int_p(v)) {
-        mino_val_t *u = mino_bigint_from_ll(S, mino_val_int_get(v));
+        mino_val *u = mino_bigint_from_ll(S, mino_val_int_get(v));
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
     if (mino_type_of(v) == MINO_BIGINT) {
-        mino_val_t *u = to_bigint(S, v);
+        mino_val *u = to_bigint(S, v);
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
@@ -343,7 +343,7 @@ mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v)
 }
 
 /* Scale an unscaled bigint up by 10^delta in place; delta must be >= 0. */
-static int bigint_mul_pow10(mino_val_t *bi, int delta)
+static int bigint_mul_pow10(mino_val *bi, int delta)
 {
     if (delta <= 0) return 1;
     {
@@ -362,11 +362,11 @@ static int bigint_mul_pow10(mino_val_t *bi, int delta)
 }
 
 /* Bigdec add / sub: align scales then add unscaled bigints. */
-mino_val_t *mino_bigdec_add(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_add(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     int        sa, sb, smax;
-    mino_val_t *au, *bu, *result;
+    mino_val *au, *bu, *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec add: bigdec operands required");
@@ -387,11 +387,11 @@ mino_val_t *mino_bigdec_add(mino_state_t *S, const mino_val_t *a,
     return mino_bigdec_make(S, result, smax);
 }
 
-mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_sub(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     int        sa, sb, smax;
-    mino_val_t *au, *bu, *result;
+    mino_val *au, *bu, *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec sub: bigdec operands required");
@@ -412,10 +412,10 @@ mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
     return mino_bigdec_make(S, result, smax);
 }
 
-mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_mul(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
-    mino_val_t *result;
+    mino_val *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec mul: bigdec operands required");
@@ -425,9 +425,9 @@ mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
     return mino_bigdec_make(S, result, a->as.bigdec.scale + b->as.bigdec.scale);
 }
 
-mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a)
+mino_val *mino_bigdec_neg(mino_state *S, const mino_val *a)
 {
-    mino_val_t *u;
+    mino_val *u;
     if (a == NULL || mino_type_of(a) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec neg: bigdec operand required");
@@ -442,15 +442,15 @@ mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a)
  * re-encoded as a bigdec by multiplying by 10^smax (for quot, where
  * the value is the integer portion of the result) or by passing the
  * unscaled remainder through directly (for rem / mod). */
-static int bigdec_align(mino_state_t *S, const mino_val_t *a,
-                        const mino_val_t *b, mino_val_t **au_out,
-                        mino_val_t **bu_out, int *smax_out)
+static int bigdec_align(mino_state *S, const mino_val *a,
+                        const mino_val *b, mino_val **au_out,
+                        mino_val **bu_out, int *smax_out)
 {
     int sa = a->as.bigdec.scale;
     int sb = b->as.bigdec.scale;
     int smax = sa > sb ? sa : sb;
-    mino_val_t *au = to_bigint(S, a->as.bigdec.unscaled);
-    mino_val_t *bu;
+    mino_val *au = to_bigint(S, a->as.bigdec.unscaled);
+    mino_val *bu;
     if (au == NULL) return 0;
     bu = to_bigint(S, b->as.bigdec.unscaled);
     if (bu == NULL) return 0;
@@ -465,10 +465,10 @@ static int bigdec_align(mino_state_t *S, const mino_val_t *a,
     return 1;
 }
 
-mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
-                             const mino_val_t *b)
+mino_val *mino_bigdec_quot(mino_state *S, const mino_val *a,
+                             const mino_val *b)
 {
-    mino_val_t *au, *bu, *q;
+    mino_val *au, *bu, *q;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -485,10 +485,10 @@ mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
     return mino_bigdec_make(S, q, smax);
 }
 
-mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_rem(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
-    mino_val_t *au, *bu, *r;
+    mino_val *au, *bu, *r;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -508,15 +508,15 @@ mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
  * mino's BigDecimal `=` (numerical equality) means callers can compare
  * results across scales without worrying about whether the algorithm
  * picked sa-sb vs sa-sb+k. */
-mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     int   sa, sb;
     mpz_t num, den, q, r, pw;
     int   extra;
     int   max_extra = 1024; /* same upper bound as Java's MAX_VALUE-bounded
                              * non-terminating detector in practice */
-    mino_val_t *result = NULL;
+    mino_val *result = NULL;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC
         || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -541,7 +541,7 @@ mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
     for (extra = 0; extra <= max_extra; extra++) {
         if (mp_int_div(&num, &den, &q, &r) != MP_OK) goto oom;
         if (mp_int_compare_zero(&r) == 0) {
-            mino_val_t *q_wrapped;
+            mino_val *q_wrapped;
             mpz_t      *qz_heap = bigint_alloc_zeroed();
             if (qz_heap == NULL) goto oom;
             mp_int_copy(&q, qz_heap);
@@ -575,10 +575,10 @@ oom_pre:
                                  "out of memory in bigdec div");
 }
 
-mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigdec_mod(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
-    mino_val_t *au, *bu, *m;
+    mino_val *au, *bu, *m;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -591,7 +591,7 @@ mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
 }
 
 /* Compare two bigdecs. Returns -1, 0, or 1. */
-int mino_bigdec_cmp(const mino_val_t *a, const mino_val_t *b)
+int mino_bigdec_cmp(const mino_val *a, const mino_val *b)
 {
     int sa = a->as.bigdec.scale;
     int sb = b->as.bigdec.scale;

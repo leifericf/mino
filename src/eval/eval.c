@@ -5,7 +5,7 @@
 
 #include "runtime/internal.h"
 
-int sym_eq(const mino_val_t *v, const char *s)
+int sym_eq(const mino_val *v, const char *s)
 {
     size_t n;
     if (v == NULL || mino_type_of(v) != MINO_SYMBOL) {
@@ -21,13 +21,13 @@ int sym_eq(const mino_val_t *v, const char *s)
  * expand it once and return the new form. If not a macro call, return the
  * input unchanged and set *expanded = 0.
  */
-mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
                          int *expanded)
 {
     char        buf[256];
     size_t      n;
-    mino_val_t *head;
-    mino_val_t *mac;
+    mino_val *head;
+    mino_val *mac;
     *expanded = 0;
     if (!mino_is_cons(form)) {
         return form;
@@ -44,14 +44,14 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
     buf[n] = '\0';
     mac = mino_env_get(env, buf);
     if (mac == NULL) {
-        mino_env_t *ns_env = current_ns_env(S);
+        mino_env *ns_env = current_ns_env(S);
         if (ns_env != NULL) mac = mino_env_get(ns_env, buf);
     }
     if (mac == NULL && S->ns_vars.fn_ambient_ns != NULL
         && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
         && (S->ns_vars.current_ns == NULL
             || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
-        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
+        mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         if (amb != NULL) mac = mino_env_get(amb, buf);
     }
     if (mac == NULL || mino_type_of(mac) != MINO_MACRO) {
@@ -62,11 +62,11 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
 }
 
 /* Expand repeatedly until `form` is no longer a macro call at the top. */
-mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+mino_val *macroexpand_all(mino_state *S, mino_val *form, mino_env *env)
 {
     for (;;) {
         int         expanded = 0;
-        mino_val_t *next     = macroexpand1(S, form, env, &expanded);
+        mino_val *next     = macroexpand1(S, form, env, &expanded);
         if (next == NULL) {
             return NULL;
         }
@@ -82,9 +82,9 @@ mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form, mino_env_t *env)
  * if `name` is bound there. Used by syntax-quote auto-qualification to
  * leave macro-local symbols (let/fn args) bare.
  */
-static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
+static int qq_locally_bound(mino_state *S, mino_env *env, const char *name)
 {
-    mino_env_t *e;
+    mino_env *e;
     for (e = env; e != NULL; e = e->parent) {
         size_t i;
         for (i = 0; i < S->ns_vars.ns_env_len; i++) {
@@ -106,8 +106,8 @@ static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
  * current_ns; for fn bodies, apply_callable sets them to the same
  * value, so this falls through to the current_ns path.
  */
-static void qq_qualifying_ns(mino_state_t *S, const char **ns_name_out,
-                             mino_env_t **ns_env_out)
+static void qq_qualifying_ns(mino_state *S, const char **ns_name_out,
+                             mino_env **ns_env_out)
 {
     if (S->ns_vars.fn_ambient_ns != NULL
         && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
@@ -127,15 +127,15 @@ static void qq_qualifying_ns(mino_state_t *S, const char **ns_name_out,
  * return ns/name. Symbols not found in any ns env stay bare so special
  * forms (try, catch, &) and gensym names pass through unchanged.
  */
-static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
-                                     mino_env_t *env)
+static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
+                                     mino_env *env)
 {
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
-    mino_env_t *e;
+    mino_env *e;
     const char *slash;
     const char *qns_name;
-    mino_env_t *qns_env;
+    mino_env *qns_env;
     if (nlen == 0) return sym;
     if (nlen == 1 && name[0] == '/') return sym;
     qq_qualifying_ns(S, &qns_name, &qns_env);
@@ -213,8 +213,8 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
 /* qq_expand_vector -- expand a vector template. The fast path (no ~@
  * present) keeps the same length; the slow path builds a cons list and
  * converts at the end so splicing can grow or shrink the result. */
-static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
-                                    mino_env_t *env)
+static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
+                                    mino_env *env)
 {
     size_t       nn  = form->as.vec.len;
     size_t       i;
@@ -222,17 +222,17 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
     if (nn == 0) { return form; }
     /* Fast path: no ~@ means fixed-size output. */
     for (i = 0; i < nn; i++) {
-        mino_val_t *e = vec_nth(form, i);
+        mino_val *e = vec_nth(form, i);
         if (mino_is_cons(e)
             && sym_eq(e->as.cons.car, "unquote-splicing")) {
             has_splice = 1; break;
         }
     }
     if (!has_splice) {
-        mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
+        mino_val **tmp = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, nn * sizeof(*tmp));
         for (i = 0; i < nn; i++) {
-            mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
+            mino_val *e = quasiquote_expand(S, vec_nth(form, i), env);
             if (e == NULL) { return NULL; }
             gc_valarr_set(S, tmp, i, e);
         }
@@ -240,15 +240,15 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
     }
     /* Slow path: ~@ present, build cons list then convert. */
     {
-        mino_val_t  *out  = mino_nil(S);
-        mino_val_t  *tail = NULL;
+        mino_val  *out  = mino_nil(S);
+        mino_val  *tail = NULL;
         size_t       count = 0;
         for (i = 0; i < nn; i++) {
-            mino_val_t *elem = vec_nth(form, i);
+            mino_val *elem = vec_nth(form, i);
             if (mino_is_cons(elem)
                 && sym_eq(elem->as.cons.car, "unquote-splicing")) {
-                mino_val_t *arg = elem->as.cons.cdr;
-                mino_val_t *spliced;
+                mino_val *arg = elem->as.cons.cdr;
+                mino_val *spliced;
                 if (!mino_is_cons(arg)) {
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax",
                         "MSY001", "unquote-splicing requires one argument");
@@ -259,7 +259,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                 if (mino_type_of(spliced) == MINO_VECTOR) {
                     size_t j;
                     for (j = 0; j < spliced->as.vec.len; j++) {
-                        mino_val_t *cell = mino_cons(S,
+                        mino_val *cell = mino_cons(S,
                             vec_nth(spliced, j), mino_nil(S));
                         if (tail == NULL) { out = cell; }
                         else { mino_cons_cdr_set(S, tail, cell); }
@@ -267,7 +267,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                         count++;
                     }
                 } else {
-                    mino_val_t *sp = spliced;
+                    mino_val *sp = spliced;
                     while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                         sp = lazy_force(S, sp);
                         if (sp == NULL) return NULL;
@@ -275,7 +275,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                     while (sp != NULL && mino_type_of(sp) != MINO_NIL
                            && mino_type_of(sp) != MINO_EMPTY_LIST) {
                         if (mino_type_of(sp) == MINO_CONS) {
-                            mino_val_t *cell = mino_cons(S,
+                            mino_val *cell = mino_cons(S,
                                 sp->as.cons.car, mino_nil(S));
                             if (tail == NULL) { out = cell; }
                             else { mino_cons_cdr_set(S, tail, cell); }
@@ -283,11 +283,11 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                             count++;
                             sp = sp->as.cons.cdr;
                         } else if (mino_type_of(sp) == MINO_CHUNKED_CONS) {
-                            const mino_val_t *ch = sp->as.chunked_cons.chunk;
+                            const mino_val *ch = sp->as.chunked_cons.chunk;
                             unsigned k;
                             for (k = sp->as.chunked_cons.off;
                                  k < ch->as.chunk.len; k++) {
-                                mino_val_t *cell = mino_cons(S,
+                                mino_val *cell = mino_cons(S,
                                     ch->as.chunk.vals[k], mino_nil(S));
                                 if (tail == NULL) { out = cell; }
                                 else { mino_cons_cdr_set(S, tail, cell); }
@@ -305,8 +305,8 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                     }
                 }
             } else {
-                mino_val_t *expanded = quasiquote_expand(S, elem, env);
-                mino_val_t *cell;
+                mino_val *expanded = quasiquote_expand(S, elem, env);
+                mino_val *cell;
                 if (expanded == NULL) { return NULL; }
                 cell = mino_cons(S, expanded, mino_nil(S));
                 if (tail == NULL) { out = cell; }
@@ -316,9 +316,9 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
             }
         }
         {
-            mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
+            mino_val **tmp = (mino_val **)gc_alloc_typed(S,
                 GC_T_VALARR, count * sizeof(*tmp));
-            mino_val_t  *p   = out;
+            mino_val  *p   = out;
             size_t       idx = 0;
             while (mino_is_cons(p)) {
                 tmp[idx++] = p->as.cons.car;
@@ -331,21 +331,21 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
 
 /* qq_expand_map -- expand both keys and values; the result keeps the
  * map shape with possibly-different key/value identities. */
-static mino_val_t *qq_expand_map(mino_state_t *S, mino_val_t *form,
-                                 mino_env_t *env)
+static mino_val *qq_expand_map(mino_state *S, mino_val *form,
+                                 mino_env *env)
 {
     size_t       nn = form->as.map.len;
-    mino_val_t **ks;
-    mino_val_t **vs;
+    mino_val **ks;
+    mino_val **vs;
     size_t       i;
     if (nn == 0) { return form; }
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*vs));
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*vs));
     for (i = 0; i < nn; i++) {
-        mino_val_t *key = vec_nth(form->as.map.key_order, i);
-        mino_val_t *val = map_get_val(form, key);
-        mino_val_t *kk  = quasiquote_expand(S, key, env);
-        mino_val_t *vv;
+        mino_val *key = vec_nth(form->as.map.key_order, i);
+        mino_val *val = map_get_val(form, key);
+        mino_val *kk  = quasiquote_expand(S, key, env);
+        mino_val *vv;
         if (kk == NULL) { return NULL; }
         vv = quasiquote_expand(S, val, env);
         if (vv == NULL) { return NULL; }
@@ -358,12 +358,12 @@ static mino_val_t *qq_expand_map(mino_state_t *S, mino_val_t *form,
 /* qq_expand_cons -- expand a cons-list template. Handles the (unquote
  * x) and (unquote-splicing x) special heads at top level, and walks
  * each child detecting unquote-splicing per-element. */
-static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
-                                  mino_env_t *env)
+static mino_val *qq_expand_cons(mino_state *S, mino_val *form,
+                                  mino_env *env)
 {
-    mino_val_t *head = form->as.cons.car;
+    mino_val *head = form->as.cons.car;
     if (sym_eq(head, "unquote")) {
-        mino_val_t *arg = form->as.cons.cdr;
+        mino_val *arg = form->as.cons.cdr;
         if (!mino_is_cons(arg)) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote requires one argument");
             return NULL;
@@ -375,16 +375,16 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     {
-        mino_val_t *out  = mino_nil(S);
-        mino_val_t *tail = NULL;
-        mino_val_t *p    = form;
+        mino_val *out  = mino_nil(S);
+        mino_val *tail = NULL;
+        mino_val *p    = form;
         while (mino_is_cons(p)) {
-            mino_val_t *elem = p->as.cons.car;
+            mino_val *elem = p->as.cons.car;
             if (mino_is_cons(elem)
                 && sym_eq(elem->as.cons.car, "unquote-splicing")) {
-                mino_val_t *arg = elem->as.cons.cdr;
-                mino_val_t *spliced;
-                mino_val_t *sp;
+                mino_val *arg = elem->as.cons.cdr;
+                mino_val *spliced;
+                mino_val *sp;
                 if (!mino_is_cons(arg)) {
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote-splicing requires one argument");
                     return NULL;
@@ -395,7 +395,7 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                 if (sp != NULL && mino_type_of(sp) == MINO_VECTOR) {
                     size_t j;
                     for (j = 0; j < sp->as.vec.len; j++) {
-                        mino_val_t *cell = mino_cons(S,
+                        mino_val *cell = mino_cons(S,
                             vec_nth(sp, j), mino_nil(S));
                         if (tail == NULL) { out = cell; }
                         else { mino_cons_cdr_set(S, tail, cell); }
@@ -409,18 +409,18 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                     while (sp != NULL && mino_type_of(sp) != MINO_NIL
                            && mino_type_of(sp) != MINO_EMPTY_LIST) {
                         if (mino_type_of(sp) == MINO_CONS) {
-                            mino_val_t *cell = mino_cons(S,
+                            mino_val *cell = mino_cons(S,
                                 sp->as.cons.car, mino_nil(S));
                             if (tail == NULL) { out = cell; }
                             else { mino_cons_cdr_set(S, tail, cell); }
                             tail = cell;
                             sp = sp->as.cons.cdr;
                         } else if (mino_type_of(sp) == MINO_CHUNKED_CONS) {
-                            const mino_val_t *ch = sp->as.chunked_cons.chunk;
+                            const mino_val *ch = sp->as.chunked_cons.chunk;
                             unsigned k;
                             for (k = sp->as.chunked_cons.off;
                                  k < ch->as.chunk.len; k++) {
-                                mino_val_t *cell = mino_cons(S,
+                                mino_val *cell = mino_cons(S,
                                     ch->as.chunk.vals[k], mino_nil(S));
                                 if (tail == NULL) { out = cell; }
                                 else { mino_cons_cdr_set(S, tail, cell); }
@@ -437,8 +437,8 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                     }
                 }
             } else {
-                mino_val_t *expanded = quasiquote_expand(S, elem, env);
-                mino_val_t *cell;
+                mino_val *expanded = quasiquote_expand(S, elem, env);
+                mino_val *cell;
                 if (expanded == NULL) { return NULL; }
                 cell = mino_cons(S, expanded, mino_nil(S));
                 if (tail == NULL) { out = cell; } else { mino_cons_cdr_set(S, tail, cell); }
@@ -458,8 +458,8 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
  * to the namespace owning the binding (when one exists), matching the
  * Clojure backquote contract.
  */
-mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
-                              mino_env_t *env)
+mino_val *quasiquote_expand(mino_state *S, mino_val *form,
+                              mino_env *env)
 {
     if (form == NULL) { return form; }
     if (mino_type_of(form) == MINO_SYMBOL) return qq_qualify_symbol(S, form, env);
@@ -475,9 +475,9 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
  * a recur is legitimately in tail position (if branches, implicit-do
  * trailing expression, fn/loop body through the trampoline).
  */
-mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+mino_val *eval_value(mino_state *S, mino_val *form, mino_env *env)
 {
-    mino_val_t *v = eval(S, form, env);
+    mino_val *v = eval(S, form, env);
     if (v == NULL) {
         return NULL;
     }
@@ -492,8 +492,8 @@ mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     return v;
 }
 
-mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
-                                  mino_env_t *env, int tail)
+mino_val *eval_implicit_do_impl(mino_state *S, mino_val *body,
+                                  mino_env *env, int tail)
 {
     /* Force a lazy body, which apply/concat-built call forms leave
      * dangling. The cdr forcing in the loop handles intermediate
@@ -506,7 +506,7 @@ mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
         return mino_nil(S);
     }
     for (;;) {
-        mino_val_t *rest = body->as.cons.cdr;
+        mino_val *rest = body->as.cons.cdr;
         while (rest != NULL && mino_type_of(rest) == MINO_LAZY) {
             rest = lazy_force(S, rest);
             if (rest == NULL) return NULL;
@@ -522,7 +522,7 @@ mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
     }
 }
 
-mino_val_t *eval_implicit_do(mino_state_t *S, mino_val_t *body, mino_env_t *env)
+mino_val *eval_implicit_do(mino_state *S, mino_val *body, mino_env *env)
 {
     return eval_implicit_do_impl(S, body, env, 0);
 }
@@ -532,13 +532,13 @@ mino_val_t *eval_implicit_do(mino_state_t *S, mino_val_t *body, mino_env_t *env)
  * cache the result, and release the thunk for GC. Iteratively unwraps
  * nested lazy seqs to avoid stack overflow.
  */
-mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
+mino_val *lazy_force(mino_state *S, mino_val *v)
 {
     if (v->as.lazy.realized) {
         return v->as.lazy.cached;
     }
     {
-        mino_val_t *result = v->as.lazy.c_thunk != NULL
+        mino_val *result = v->as.lazy.c_thunk != NULL
             ? v->as.lazy.c_thunk(S, v->as.lazy.body)
             : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
         if (result == NULL) return NULL;
@@ -547,7 +547,7 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
             if (result->as.lazy.realized) {
                 result = result->as.lazy.cached;
             } else {
-                mino_val_t *inner = result->as.lazy.c_thunk != NULL
+                mino_val *inner = result->as.lazy.c_thunk != NULL
                     ? result->as.lazy.c_thunk(S, result->as.lazy.body)
                     : eval_implicit_do(S,
                         result->as.lazy.body, result->as.lazy.env);
@@ -580,13 +580,13 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
     }
 }
 
-mino_val_t *eval_args(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     while (mino_is_cons(args)) {
-        mino_val_t *v = eval_value(S, args->as.cons.car, env);
-        mino_val_t *cell;
+        mino_val *v = eval_value(S, args->as.cons.car, env);
+        mino_val *cell;
         if (v == NULL) {
             return NULL;
         }

@@ -6,7 +6,7 @@
 #include "eval/internal.h"
 #include "collections/internal.h"
 
-int kw_eq(const mino_val_t *v, const char *s)
+int kw_eq(const mino_val *v, const char *s)
 {
     size_t n;
     if (v == NULL || mino_type_of(v) != MINO_KEYWORD) {
@@ -19,16 +19,16 @@ int kw_eq(const mino_val_t *v, const char *s)
 /* Helper: bind a single symbol name to a value. The symbol is already
  * interned (came from the reader), so env_bind_sym can reuse its data
  * pointer and length directly instead of copying into a stack buffer. */
-static int bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
-                    mino_val_t *val)
+static int bind_sym(mino_state *S, mino_env *env, mino_val *sym,
+                    mino_val *val)
 {
     env_bind_sym(S, env, sym, val);
     return 1;
 }
 
 /* Forward declaration for recursive destructuring. */
-static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
-                     mino_val_t *val, const char *ctx);
+static int bind_form(mino_state *S, mino_env *env, mino_val *pattern,
+                     mino_val *val, const char *ctx);
 
 /*
  * Destructure a vector pattern against a sequential value (list or vector).
@@ -40,14 +40,14 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
  * only as many elements as the pattern needs (one past the fixed
  * arity when no `&` is present so the surplus check has something to
  * see) and preserve the unforced tail on the rest-arg slot. */
-static mino_val_t *vec_destructure_args(mino_state_t *S,
-                                        mino_val_t *pattern,
-                                        mino_val_t *val)
+static mino_val *vec_destructure_args(mino_state *S,
+                                        mino_val *pattern,
+                                        mino_val *val)
 {
     size_t plen = pattern->as.vec.len;
     if (val == NULL) return val;
     if (mino_type_of(val) == MINO_VECTOR) {
-        mino_val_t *lst = mino_nil(S);
+        mino_val *lst = mino_nil(S);
         size_t j = val->as.vec.len;
         while (j > 0) {
             j--;
@@ -80,7 +80,7 @@ static mino_val_t *vec_destructure_args(mino_state_t *S,
         {
             size_t j;
             for (j = 0; j < plen; j++) {
-                mino_val_t *pj = vec_nth(pattern, j);
+                mino_val *pj = vec_nth(pattern, j);
                 if (sym_eq(pj, "&")) { walk_limit = j; break; }
             }
             /* When no `&` is present, force one extra element past
@@ -90,14 +90,14 @@ static mino_val_t *vec_destructure_args(mino_state_t *S,
              * beyond the smallest amount needed for that detection. */
             if (walk_limit == plen) walk_limit = plen + 1;
         }
-        mino_val_t *cur = val;
-        mino_val_t *head = NULL;
-        mino_val_t *tail_pin = NULL;
+        mino_val *cur = val;
+        mino_val *head = NULL;
+        mino_val *tail_pin = NULL;
         size_t      chunk_off = 0;
         size_t      built = 0;
         while (built < walk_limit && cur != NULL) {
-            mino_val_t *elt = NULL;
-            mino_type_t k;
+            mino_val *elt = NULL;
+            mino_type k;
             while (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
                 cur = lazy_force(S, cur);
             }
@@ -108,7 +108,7 @@ static mino_val_t *vec_destructure_args(mino_state_t *S,
                 elt = cur->as.cons.car;
                 cur = cur->as.cons.cdr;
             } else if (k == MINO_CHUNKED_CONS) {
-                mino_val_t *chk = cur->as.chunked_cons.chunk;
+                mino_val *chk = cur->as.chunked_cons.chunk;
                 size_t off = (size_t)cur->as.chunked_cons.off + chunk_off;
                 if (chk == NULL || off >= chk->as.chunk.len) {
                     cur = cur->as.chunked_cons.more;
@@ -129,7 +129,7 @@ static mino_val_t *vec_destructure_args(mino_state_t *S,
                 break;
             }
             {
-                mino_val_t *node = mino_cons(S, elt, mino_nil(S));
+                mino_val *node = mino_cons(S, elt, mino_nil(S));
                 if (head == NULL) { head = node; tail_pin = node; }
                 else { tail_pin->as.cons.cdr = node; tail_pin = node; }
             }
@@ -152,15 +152,15 @@ static mino_val_t *vec_destructure_args(mino_state_t *S,
     }
 }
 
-static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
-                                mino_val_t *pattern, mino_val_t *val,
+static int bind_vec_destructure(mino_state *S, mino_env *env,
+                                mino_val *pattern, mino_val *val,
                                 const char *ctx)
 {
     size_t plen = pattern->as.vec.len;
     size_t i;
-    mino_val_t *args = vec_destructure_args(S, pattern, val);
+    mino_val *args = vec_destructure_args(S, pattern, val);
     for (i = 0; i < plen; i++) {
-        mino_val_t *p = vec_nth(pattern, i);
+        mino_val *p = vec_nth(pattern, i);
         /* Force any lazy cell at the cursor before deciding what to bind.
          * Args may be a CONS spine that ends in a LAZY cell when apply
          * preserves the tail; vec destructure must thread that LAZY
@@ -245,8 +245,8 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
  * Destructure a map pattern against a map value.
  * Supports :keys [a b], explicit {sym :key} mapping, :or {defaults}, :as sym.
  */
-static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
-                                mino_val_t *pattern, mino_val_t *val,
+static int bind_map_destructure(mino_state *S, mino_env *env,
+                                mino_val *pattern, mino_val *val,
                                 const char *ctx)
 {
     /* Collect :keys / :strs / :syms / :or / :as and explicit bindings
@@ -254,11 +254,11 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
      * silently dropped :strs and :syms bindings when the destructure
      * landed in the tree-walker (the BC-side expander has always
      * handled all three). */
-    mino_val_t *keys_vec  = NULL;
-    mino_val_t *strs_vec  = NULL;
-    mino_val_t *syms_vec  = NULL;
-    mino_val_t *or_map    = NULL;
-    mino_val_t *as_sym    = NULL;
+    mino_val *keys_vec  = NULL;
+    mino_val *strs_vec  = NULL;
+    mino_val *syms_vec  = NULL;
+    mino_val *or_map    = NULL;
+    mino_val *as_sym    = NULL;
     size_t i;
 
     /* Clojure 1.11+ map-destructure shapes when the value is a cons
@@ -271,15 +271,15 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
      * through to the nil path so :or defaults still apply. */
     if (val != NULL && mino_type_of(val) == MINO_CONS) {
         size_t        n            = 0;
-        mino_val_t   *trailing_map = NULL;
-        mino_val_t   *p            = val;
-        mino_val_t  **ks;
-        mino_val_t  **vs;
+        mino_val   *trailing_map = NULL;
+        mino_val   *p            = val;
+        mino_val  **ks;
+        mino_val  **vs;
         size_t        total;
         size_t        j;
         while (mino_is_cons(p)) {
-            mino_val_t *first = p->as.cons.car;
-            mino_val_t *rest  = p->as.cons.cdr;
+            mino_val *first = p->as.cons.car;
+            mino_val *rest  = p->as.cons.cdr;
             if (first != NULL && mino_type_of(first) == MINO_MAP
                 && !mino_is_cons(rest)) {
                 trailing_map = first;
@@ -299,9 +299,9 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             val = trailing_map;
         } else {
             total = n + (trailing_map != NULL ? trailing_map->as.map.len : 0);
-            ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                                total * sizeof(*ks));
-            vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                                total * sizeof(*vs));
             p = val;
             for (j = 0; j < n; j++) {
@@ -313,8 +313,8 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             if (trailing_map != NULL) {
                 size_t mi;
                 for (mi = 0; mi < trailing_map->as.map.len; mi++) {
-                    mino_val_t *mk = vec_nth(trailing_map->as.map.key_order, mi);
-                    mino_val_t *mv = map_get_val(trailing_map, mk);
+                    mino_val *mk = vec_nth(trailing_map->as.map.key_order, mi);
+                    mino_val *mv = map_get_val(trailing_map, mk);
                     gc_valarr_set(S, ks, n + mi, mk);
                     gc_valarr_set(S, vs, n + mi, mv);
                 }
@@ -329,8 +329,8 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
 
     /* Iterate pattern map entries by key_order. */
     for (i = 0; i < pattern->as.map.len; i++) {
-        mino_val_t *pkey = vec_nth(pattern->as.map.key_order, i);
-        mino_val_t *pval = map_get_val(pattern, pkey);
+        mino_val *pkey = vec_nth(pattern->as.map.key_order, i);
+        mino_val *pval = map_get_val(pattern, pkey);
         if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 4
             && memcmp(pkey->as.s.data, "keys", 4) == 0) {
             keys_vec = pval;
@@ -357,8 +357,8 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
              * surrounding scope. Self-evaluating forms (keywords,
              * strings, numbers) pass through unchanged. */
             int is_leaf = mino_type_of(pkey) == MINO_SYMBOL;
-            mino_val_t *lookup_key = pval;
-            mino_val_t *found = NULL;
+            mino_val *lookup_key = pval;
+            mino_val *found = NULL;
             if (pval != NULL && mino_type_of(pval) == MINO_SYMBOL) {
                 lookup_key = eval(S, pval, env);
                 if (lookup_key == NULL) return 0;
@@ -370,7 +370,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 /* :or only allows defaults keyed by leaf symbols; nested
                  * patterns don't have a single key to look up. */
                 if (is_leaf) {
-                    mino_val_t *deflt = map_get_val(or_map, pkey);
+                    mino_val *deflt = map_get_val(or_map, pkey);
                     if (deflt != NULL) {
                         found = eval(S, deflt, env);
                         if (found == NULL) return 0;
@@ -385,9 +385,9 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     /* :keys [a b] -- look up :a, :b in val. */
     if (keys_vec != NULL && mino_type_of(keys_vec) == MINO_VECTOR) {
         for (i = 0; i < keys_vec->as.vec.len; i++) {
-            mino_val_t *ksym = vec_nth(keys_vec, i);
-            mino_val_t *lookup_key;
-            mino_val_t *found;
+            mino_val *ksym = vec_nth(keys_vec, i);
+            mino_val *lookup_key;
+            mino_val *found;
             if (ksym == NULL || mino_type_of(ksym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003", ":keys elements must be symbols");
                 return 0;
@@ -398,7 +398,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 found = map_get_val(val, lookup_key);
             }
             if (found == NULL && or_map != NULL && mino_type_of(or_map) == MINO_MAP) {
-                mino_val_t *deflt = map_get_val(or_map, ksym);
+                mino_val *deflt = map_get_val(or_map, ksym);
                 if (deflt != NULL) {
                     found = eval(S, deflt, env);
                     if (found == NULL) return 0;
@@ -412,9 +412,9 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     /* :strs [a b] -- look up "a", "b" (strings) in val. */
     if (strs_vec != NULL && mino_type_of(strs_vec) == MINO_VECTOR) {
         for (i = 0; i < strs_vec->as.vec.len; i++) {
-            mino_val_t *ssym = vec_nth(strs_vec, i);
-            mino_val_t *lookup_key;
-            mino_val_t *found;
+            mino_val *ssym = vec_nth(strs_vec, i);
+            mino_val *lookup_key;
+            mino_val *found;
             if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                               "syntax", "MSY003",
@@ -428,7 +428,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             }
             if (found == NULL && or_map != NULL
                 && mino_type_of(or_map) == MINO_MAP) {
-                mino_val_t *deflt = map_get_val(or_map, ssym);
+                mino_val *deflt = map_get_val(or_map, ssym);
                 if (deflt != NULL) {
                     found = eval(S, deflt, env);
                     if (found == NULL) return 0;
@@ -442,9 +442,9 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     /* :syms [a b] -- look up 'a, 'b (symbols) in val. */
     if (syms_vec != NULL && mino_type_of(syms_vec) == MINO_VECTOR) {
         for (i = 0; i < syms_vec->as.vec.len; i++) {
-            mino_val_t *ssym = vec_nth(syms_vec, i);
-            mino_val_t *lookup_key;
-            mino_val_t *found;
+            mino_val *ssym = vec_nth(syms_vec, i);
+            mino_val *lookup_key;
+            mino_val *found;
             if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                               "syntax", "MSY003",
@@ -458,7 +458,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             }
             if (found == NULL && or_map != NULL
                 && mino_type_of(or_map) == MINO_MAP) {
-                mino_val_t *deflt = map_get_val(or_map, ssym);
+                mino_val *deflt = map_get_val(or_map, ssym);
                 if (deflt != NULL) {
                     found = eval(S, deflt, env);
                     if (found == NULL) return 0;
@@ -487,8 +487,8 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
  * - Vector: positional destructuring
  * - Map: key destructuring
  */
-static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
-                     mino_val_t *val, const char *ctx)
+static int bind_form(mino_state *S, mino_env *env, mino_val *pattern,
+                     mino_val *val, const char *ctx)
 {
     if (pattern == NULL || mino_type_of(pattern) == MINO_SYMBOL) {
         return bind_sym(S, env, pattern, val);
@@ -508,13 +508,13 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
  * MINO_SYMBOL (no &, no :as, no nested destructure), 0 otherwise.
  * Symbols are passed by data-pointer comparison so the check is a few
  * loads per slot. */
-int fn_params_simple_shape(mino_val_t *params)
+int fn_params_simple_shape(mino_val *params)
 {
     size_t i, n;
     if (params == NULL || mino_type_of(params) != MINO_VECTOR) return 0;
     n = params->as.vec.len;
     for (i = 0; i < n; i++) {
-        mino_val_t *p = vec_nth(params, i);
+        mino_val *p = vec_nth(params, i);
         if (p == NULL || mino_type_of(p) != MINO_SYMBOL) return 0;
         if (p->as.s.len == 1 && p->as.s.data[0] == '&') return 0;
         if (p->as.s.len == 2
@@ -532,14 +532,14 @@ int fn_params_simple_shape(mino_val_t *params)
  * instead of the bare "macro arity mismatch". The expected count
  * is the params vector length; the got count is walked from the
  * args list (capped at `received_so_far + remaining`). */
-static void emit_arity_mismatch(mino_state_t *S, const char *ctx,
+static void emit_arity_mismatch(mino_state *S, const char *ctx,
                                 size_t expected, size_t received)
 {
     char              msg[256];
     char              name_buf[128] = {0};
-    const mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+    const mino_val *cur = mino_current_ctx(S)->eval_current_form;
     if (cur != NULL && mino_is_cons(cur)) {
-        mino_val_t *head = cur->as.cons.car;
+        mino_val *head = cur->as.cons.car;
         if (head != NULL && mino_type_of(head) == MINO_SYMBOL
             && head->as.s.len > 0 && head->as.s.len < sizeof(name_buf) - 4) {
             snprintf(name_buf, sizeof(name_buf), " `%.*s`",
@@ -557,13 +557,13 @@ static void emit_arity_mismatch(mino_state_t *S, const char *ctx,
  * parallel and bind each slot directly. Caller must have already
  * verified fn_params_simple_shape(params); this skips the dispatch
  * tower entirely. Returns 1 on success, 0 on arity mismatch. */
-int bind_simple_params(mino_state_t *S, mino_env_t *env,
-                       mino_val_t *params, mino_val_t *args, const char *ctx)
+int bind_simple_params(mino_state *S, mino_env *env,
+                       mino_val *params, mino_val *args, const char *ctx)
 {
     size_t n = params->as.vec.len;
     size_t i;
     for (i = 0; i < n; i++) {
-        mino_val_t *sym;
+        mino_val *sym;
         if (!mino_is_cons(args)) {
             emit_arity_mismatch(S, ctx, n, i);
             return 0;
@@ -574,7 +574,7 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
     }
     if (mino_is_cons(args)) {
         size_t extra = 0;
-        mino_val_t *cur = args;
+        mino_val *cur = args;
         while (mino_is_cons(cur)) { extra++; cur = cur->as.cons.cdr; }
         emit_arity_mismatch(S, ctx, n, n + extra);
         return 0;
@@ -586,8 +586,8 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
  * Bind a parameter list (cons list or vector) to a list of argument values.
  * Returns 1 on success, 0 on arity mismatch or error (with error set).
  */
-int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
-                mino_val_t *args, const char *ctx)
+int bind_params(mino_state *S, mino_env *env, mino_val *params,
+                mino_val *args, const char *ctx)
 {
     size_t bound = 0;
     /* Vector params: delegate to vector destructuring. */
@@ -606,7 +606,7 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
     }
     /* Cons-list params: walk in parallel with args. */
     while (mino_is_cons(params)) {
-        mino_val_t *name = params->as.cons.car;
+        mino_val *name = params->as.cons.car;
         /* `&` marks a rest-parameter. */
         if (sym_eq(name, "&")) {
             params = params->as.cons.cdr;
@@ -624,9 +624,9 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
         if (!mino_is_cons(args)) {
             /* Walk the rest of params to compute expected. */
             size_t expected = bound;
-            mino_val_t *p = params;
+            mino_val *p = params;
             while (mino_is_cons(p)) {
-                mino_val_t *pname = p->as.cons.car;
+                mino_val *pname = p->as.cons.car;
                 if (sym_eq(pname, "&")) break;
                 expected++;
                 p = p->as.cons.cdr;
@@ -667,11 +667,11 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
  * Pins the value across bind_form so any GC triggered while building
  * destructure scaffolding cannot reclaim it. Returns 0 on eval failure
  * or destructure failure (with diag already set), 1 on success. */
-static int eval_and_bind(mino_state_t *S, mino_val_t *pat,
-                         mino_val_t *val_form, mino_env_t *local,
+static int eval_and_bind(mino_state *S, mino_val *pat,
+                         mino_val *val_form, mino_env *local,
                          const char *ctx)
 {
-    mino_val_t *val = eval_value(S, val_form, local);
+    mino_val *val = eval_value(S, val_form, local);
     int ok;
     if (val == NULL) return 0;
     gc_pin(val);
@@ -688,12 +688,12 @@ static int eval_and_bind(mino_state_t *S, mino_val_t *pat,
  * [f Y]` shadowing must NOT mutate the captured env. By layering one
  * env per binding we get that for free: each step creates a new env,
  * leaving the prior layer (with all earlier bindings) untouched. */
-static int eval_and_bind_layered(mino_state_t *S, mino_val_t *pat,
-                                 mino_val_t *val_form, mino_env_t **local,
+static int eval_and_bind_layered(mino_state *S, mino_val *pat,
+                                 mino_val *val_form, mino_env **local,
                                  const char *ctx)
 {
-    mino_val_t *val = eval_value(S, val_form, *local);
-    mino_env_t *next;
+    mino_val *val = eval_value(S, val_form, *local);
+    mino_env *next;
     int ok;
     if (val == NULL) return 0;
     gc_pin(val);
@@ -705,12 +705,12 @@ static int eval_and_bind_layered(mino_state_t *S, mino_val_t *pat,
     return 1;
 }
 
-mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_let(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *bindings;
-    mino_val_t *body;
-    mino_env_t *local;
+    mino_val *bindings;
+    mino_val *body;
+    mino_env *local;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001", "let requires a binding form and body");
         return NULL;
@@ -737,8 +737,8 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
     } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
         /* Legacy list binding form: (name val name val ...) */
         while (mino_is_cons(bindings)) {
-            mino_val_t *name_form = bindings->as.cons.car;
-            mino_val_t *rest_pair = bindings->as.cons.cdr;
+            mino_val *name_form = bindings->as.cons.car;
+            mino_val *rest_pair = bindings->as.cons.cdr;
             if (!mino_is_cons(rest_pair)) {
                 set_eval_diag(S, form, "syntax", "MSY003",
                     "let binding missing value");
@@ -769,12 +769,12 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
  *
  * Mirrors JVM Clojure's `letfn*`, which is the special form that
  * the public `letfn` macro expands to. */
-mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
-                            mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_letfn_star(mino_state *S, mino_val *form,
+                            mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *bindings;
-    mino_val_t *body;
-    mino_env_t *local;
+    mino_val *bindings;
+    mino_val *body;
+    mino_env *local;
     size_t      vlen;
     size_t      vi;
     if (!mino_is_cons(args)) {
@@ -799,7 +799,7 @@ mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
     /* Pass 1: pre-bind every name to nil so the closures created in
      * pass 2 can resolve sibling names without unbound-symbol errors. */
     for (vi = 0; vi < vlen; vi += 2) {
-        mino_val_t *sym = vec_nth(bindings, vi);
+        mino_val *sym = vec_nth(bindings, vi);
         if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
             set_eval_diag(S, form, "syntax", "MSY003",
                 "letfn* binding names must be symbols");
@@ -811,23 +811,23 @@ mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
      * re-bind the name to the closure. env_bind reuses the existing
      * slot, so the closures' captured env sees the final fn. */
     for (vi = 0; vi < vlen; vi += 2) {
-        mino_val_t *sym  = vec_nth(bindings, vi);
-        mino_val_t *form2 = vec_nth(bindings, vi + 1);
-        mino_val_t *fn_val = eval_value(S, form2, local);
+        mino_val *sym  = vec_nth(bindings, vi);
+        mino_val *form2 = vec_nth(bindings, vi + 1);
+        mino_val *fn_val = eval_value(S, form2, local);
         if (fn_val == NULL) return NULL;
         env_bind_sym(S, local, sym, fn_val);
     }
     return eval_implicit_do_impl(S, body, local, tail);
 }
 
-mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
-                      mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_loop(mino_state *S, mino_val *form,
+                      mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *bindings;
-    mino_val_t *body;
-    mino_val_t *params      = mino_nil(S);
-    mino_val_t *params_tail = NULL;
-    mino_env_t *local;
+    mino_val *bindings;
+    mino_val *body;
+    mino_val *params      = mino_nil(S);
+    mino_val *params_tail = NULL;
+    mino_env *local;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001", "loop requires a binding form and body");
         return NULL;
@@ -839,17 +839,17 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
         /* Vector binding form: [name val name val ...] */
         size_t vlen = bindings->as.vec.len;
         size_t vi;
-        mino_val_t **ptmp;
+        mino_val **ptmp;
         if (vlen % 2 != 0) {
             set_eval_diag(S, form, "syntax", "MSY003",
                 "loop vector bindings must have even number of forms");
             return NULL;
         }
         /* Build a params vector of just the name symbols for recur. */
-        ptmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+        ptmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                     (vlen / 2) * sizeof(*ptmp));
         for (vi = 0; vi < vlen; vi += 2) {
-            mino_val_t *pat = vec_nth(bindings, vi);
+            mino_val *pat = vec_nth(bindings, vi);
             if (!eval_and_bind(S, pat, vec_nth(bindings, vi + 1),
                                local, "loop")) {
                 return NULL;
@@ -860,9 +860,9 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
     } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
         /* Legacy list binding form. */
         while (mino_is_cons(bindings)) {
-            mino_val_t *name_form = bindings->as.cons.car;
-            mino_val_t *rest_pair = bindings->as.cons.cdr;
-            mino_val_t *cell;
+            mino_val *name_form = bindings->as.cons.car;
+            mino_val *rest_pair = bindings->as.cons.cdr;
+            mino_val *cell;
             if (!mino_is_cons(rest_pair)) {
                 set_eval_diag(S, form, "syntax", "MSY003",
                     "loop binding missing value");
@@ -903,7 +903,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
      * allocation per iteration is a small price for sound
      * closure-capture. */
     for (;;) {
-        mino_val_t *result = eval_implicit_do_impl(S, body, local, tail);
+        mino_val *result = eval_implicit_do_impl(S, body, local, tail);
         if (result == NULL) {
             return NULL;
         }
@@ -928,13 +928,13 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
  * in env, and prepend a dyn_binding to *bhead. On any failure sets a
  * diag, frees the in-progress list (so the caller cannot leak), and
  * returns 0. */
-static int push_dyn_binding(mino_state_t *S, mino_val_t *form,
-                            mino_val_t *sym_v, mino_val_t *val_form,
-                            mino_env_t *env, dyn_binding_t **bhead)
+static int push_dyn_binding(mino_state *S, mino_val *form,
+                            mino_val *sym_v, mino_val *val_form,
+                            mino_env *env, dyn_binding_t **bhead)
 {
     char           nbuf[256];
     size_t         nlen;
-    mino_val_t    *val;
+    mino_val    *val;
     dyn_binding_t *b;
     if (sym_v == NULL || mino_type_of(sym_v) != MINO_SYMBOL) {
         set_eval_diag(S, form, "syntax", "MSY003",
@@ -958,7 +958,7 @@ static int push_dyn_binding(mino_state_t *S, mino_val_t *form,
      * fall through to the normal dynamic-scope push. */
     {
         const char *slash = (nlen > 1) ? memchr(nbuf, '/', nlen) : NULL;
-        mino_val_t *var   = NULL;
+        mino_val *var   = NULL;
         if (slash != NULL) {
             char        ns_buf[256];
             size_t      ns_len = (size_t)(slash - nbuf);
@@ -1011,10 +1011,10 @@ fail:
     return 0;
 }
 
-mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_binding(mino_state *S, mino_val *form,
+                         mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *pairs, *body, *result;
+    mino_val *pairs, *body, *result;
     /* Frame is heap-allocated so the pointer remains valid even if a
      * throw inside body unwinds this C frame past the cleanup at the
      * end. The control.c longjmp handler walks mino_current_ctx(S)->dyn_stack and frees
@@ -1047,8 +1047,8 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
     } else if (mino_is_cons(pairs)) {
         /* Legacy list binding form: (sym val sym val ...) */
         while (pairs != NULL && mino_type_of(pairs) == MINO_CONS) {
-            mino_val_t *sym_v    = pairs->as.cons.car;
-            mino_val_t *val_form;
+            mino_val *sym_v    = pairs->as.cons.car;
+            mino_val *val_form;
             pairs = pairs->as.cons.cdr;
             if (pairs == NULL || mino_type_of(pairs) != MINO_CONS) {
                 set_eval_diag(S, form, "syntax", "MSY003",
@@ -1089,24 +1089,24 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
 /* ------------------------------------------------------------------------- */
 
 /* Build (sym arg1 arg2 arg3) as a cons list. */
-static mino_val_t *call_form3(mino_state_t *S, const char *fn,
-                              mino_val_t *a, mino_val_t *b, mino_val_t *c)
+static mino_val *call_form3(mino_state *S, const char *fn,
+                              mino_val *a, mino_val *b, mino_val *c)
 {
-    mino_val_t *r = mino_cons(S, c, mino_nil(S));
+    mino_val *r = mino_cons(S, c, mino_nil(S));
     r = mino_cons(S, b, r);
     r = mino_cons(S, a, r);
     return mino_cons(S, mino_symbol(S, fn), r);
 }
 
-static mino_val_t *call_form2(mino_state_t *S, const char *fn,
-                              mino_val_t *a, mino_val_t *b)
+static mino_val *call_form2(mino_state *S, const char *fn,
+                              mino_val *a, mino_val *b)
 {
-    mino_val_t *r = mino_cons(S, b, mino_nil(S));
+    mino_val *r = mino_cons(S, b, mino_nil(S));
     r = mino_cons(S, a, r);
     return mino_cons(S, mino_symbol(S, fn), r);
 }
 
-static mino_val_t *destr_gensym(mino_state_t *S, const char *prefix)
+static mino_val *destr_gensym(mino_state *S, const char *prefix)
 {
     char    buf[64];
     int     used;
@@ -1118,28 +1118,28 @@ static mino_val_t *destr_gensym(mino_state_t *S, const char *prefix)
     return mino_symbol_n(S, buf, prefix_len + (size_t)used);
 }
 
-static int destructure_pair(mino_state_t *S, mino_val_t *lhs, mino_val_t *rhs,
-                            mino_val_t **acc);
+static int destructure_pair(mino_state *S, mino_val *lhs, mino_val *rhs,
+                            mino_val **acc);
 
-static void emit_pair(mino_state_t *S, mino_val_t **acc,
-                      mino_val_t *name, mino_val_t *expr)
+static void emit_pair(mino_state *S, mino_val **acc,
+                      mino_val *name, mino_val *expr)
 {
     *acc = vec_conj1(S, *acc, name);
     *acc = vec_conj1(S, *acc, expr);
 }
 
-static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
-                                mino_val_t *rhs, mino_val_t **acc)
+static int destructure_vec_pair(mino_state *S, mino_val *lhs,
+                                mino_val *rhs, mino_val **acc)
 {
-    mino_val_t *gen  = destr_gensym(S, "vec__");
+    mino_val *gen  = destr_gensym(S, "vec__");
     size_t      plen = lhs->as.vec.len;
     size_t      i;
     long long   idx  = 0;
     emit_pair(S, acc, gen, rhs);
     for (i = 0; i < plen; i++) {
-        mino_val_t *p = vec_nth(lhs, i);
+        mino_val *p = vec_nth(lhs, i);
         if (sym_eq(p, "&")) {
-            mino_val_t *expr;
+            mino_val *expr;
             i++;
             if (i >= plen) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003",
@@ -1148,7 +1148,7 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
             }
             expr = call_form2(S, "nthnext", gen, mino_int(S, idx));
             {
-                mino_val_t *rest = vec_nth(lhs, i);
+                mino_val *rest = vec_nth(lhs, i);
                 if (rest != NULL && mino_type_of(rest) == MINO_SYMBOL) {
                     emit_pair(S, acc, rest, expr);
                 } else {
@@ -1178,7 +1178,7 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
             continue;
         }
         {
-            mino_val_t *expr = call_form3(S, "nth", gen, mino_int(S, idx),
+            mino_val *expr = call_form3(S, "nth", gen, mino_int(S, idx),
                                           mino_nil(S));
             if (p != NULL && mino_type_of(p) == MINO_SYMBOL) {
                 emit_pair(S, acc, p, expr);
@@ -1191,22 +1191,22 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
     return 1;
 }
 
-static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
-                                mino_val_t *rhs, mino_val_t **acc)
+static int destructure_map_pair(mino_state *S, mino_val *lhs,
+                                mino_val *rhs, mino_val **acc)
 {
-    mino_val_t *gen      = destr_gensym(S, "map__");
-    mino_val_t *or_map   = NULL;
-    mino_val_t *as_sym   = NULL;
-    mino_val_t *keys_vec = NULL;
-    mino_val_t *strs_vec = NULL;
-    mino_val_t *syms_vec = NULL;
+    mino_val *gen      = destr_gensym(S, "map__");
+    mino_val *or_map   = NULL;
+    mino_val *as_sym   = NULL;
+    mino_val *keys_vec = NULL;
+    mino_val *strs_vec = NULL;
+    mino_val *syms_vec = NULL;
     size_t      i;
 
     emit_pair(S, acc, gen, rhs);
 
     for (i = 0; i < lhs->as.map.len; i++) {
-        mino_val_t *pk = vec_nth(lhs->as.map.key_order, i);
-        mino_val_t *pv = map_get_val(lhs, pk);
+        mino_val *pk = vec_nth(lhs->as.map.key_order, i);
+        mino_val *pv = map_get_val(lhs, pk);
         if      (kw_eq(pk, "keys")) keys_vec = pv;
         else if (kw_eq(pk, "strs")) strs_vec = pv;
         else if (kw_eq(pk, "syms")) syms_vec = pv;
@@ -1216,9 +1216,9 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
 
     if (keys_vec != NULL && mino_type_of(keys_vec) == MINO_VECTOR) {
         for (i = 0; i < keys_vec->as.vec.len; i++) {
-            mino_val_t *ksym  = vec_nth(keys_vec, i);
-            mino_val_t *kkw;
-            mino_val_t *deflt = NULL;
+            mino_val *ksym  = vec_nth(keys_vec, i);
+            mino_val *kkw;
+            mino_val *deflt = NULL;
             if (ksym == NULL || mino_type_of(ksym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003",
                               "destructure: :keys elements must be symbols");
@@ -1235,9 +1235,9 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
 
     if (strs_vec != NULL && mino_type_of(strs_vec) == MINO_VECTOR) {
         for (i = 0; i < strs_vec->as.vec.len; i++) {
-            mino_val_t *ssym  = vec_nth(strs_vec, i);
-            mino_val_t *kstr;
-            mino_val_t *deflt = NULL;
+            mino_val *ssym  = vec_nth(strs_vec, i);
+            mino_val *kstr;
+            mino_val *deflt = NULL;
             if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003",
                               "destructure: :strs elements must be symbols");
@@ -1254,9 +1254,9 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
 
     if (syms_vec != NULL && mino_type_of(syms_vec) == MINO_VECTOR) {
         for (i = 0; i < syms_vec->as.vec.len; i++) {
-            mino_val_t *ssym = vec_nth(syms_vec, i);
-            mino_val_t *quoted;
-            mino_val_t *deflt = NULL;
+            mino_val *ssym = vec_nth(syms_vec, i);
+            mino_val *quoted;
+            mino_val *deflt = NULL;
             if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003",
                               "destructure: :syms elements must be symbols");
@@ -1274,19 +1274,19 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
 
     /* Explicit {sym key} or nested-pattern keys. */
     for (i = 0; i < lhs->as.map.len; i++) {
-        mino_val_t *pk = vec_nth(lhs->as.map.key_order, i);
-        mino_val_t *pv;
+        mino_val *pk = vec_nth(lhs->as.map.key_order, i);
+        mino_val *pv;
         if (pk == NULL || mino_type_of(pk) == MINO_KEYWORD) continue;
         pv = map_get_val(lhs, pk);
         if (mino_type_of(pk) == MINO_SYMBOL) {
-            mino_val_t *deflt = NULL;
+            mino_val *deflt = NULL;
             if (or_map != NULL && mino_type_of(or_map) == MINO_MAP) {
                 deflt = map_get_val(or_map, pk);
             }
             if (deflt == NULL) deflt = mino_nil(S);
             emit_pair(S, acc, pk, call_form3(S, "get", gen, pv, deflt));
         } else if (mino_type_of(pk) == MINO_VECTOR || mino_type_of(pk) == MINO_MAP) {
-            mino_val_t *expr = call_form3(S, "get", gen, pv, mino_nil(S));
+            mino_val *expr = call_form3(S, "get", gen, pv, mino_nil(S));
             if (!destructure_pair(S, pk, expr, acc)) return 0;
         }
     }
@@ -1297,8 +1297,8 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
     return 1;
 }
 
-static int destructure_pair(mino_state_t *S, mino_val_t *lhs, mino_val_t *rhs,
-                            mino_val_t **acc)
+static int destructure_pair(mino_state *S, mino_val *lhs, mino_val *rhs,
+                            mino_val **acc)
 {
     if (lhs == NULL || mino_type_of(lhs) == MINO_SYMBOL) {
         emit_pair(S, acc, lhs, rhs);
@@ -1315,11 +1315,11 @@ static int destructure_pair(mino_state_t *S, mino_val_t *lhs, mino_val_t *rhs,
     return 0;
 }
 
-mino_val_t *prim_destructure(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_destructure(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *bindings;
-    mino_val_t *acc;
+    mino_val *bindings;
+    mino_val *acc;
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1340,8 +1340,8 @@ mino_val_t *prim_destructure(mino_state_t *S, mino_val_t *args,
     }
     acc = mino_vector(S, NULL, 0);
     for (i = 0; i < bindings->as.vec.len; i += 2) {
-        mino_val_t *lhs = vec_nth(bindings, i);
-        mino_val_t *rhs = vec_nth(bindings, i + 1);
+        mino_val *lhs = vec_nth(bindings, i);
+        mino_val *rhs = vec_nth(bindings, i + 1);
         if (!destructure_pair(S, lhs, rhs, &acc)) return NULL;
     }
     return acc;

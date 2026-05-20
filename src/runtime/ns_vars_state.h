@@ -36,7 +36,7 @@ typedef struct ns_vars_state {
     ns_env_entry_t *ns_env_table;
     size_t          ns_env_len;
     size_t          ns_env_cap;
-    mino_env_t     *mino_core_env;    /* clojure.core root env; parent NULL */
+    mino_env     *mino_core_env;    /* clojure.core root env; parent NULL */
 
     /* Ambient namespace for free-var resolution inside the active fn body. */
     const char     *fn_ambient_ns;
@@ -49,9 +49,9 @@ typedef struct ns_vars_state {
     /* Monomorphic inline call cache. Var redefinition bumps ic_gen,
      * invalidating every slot in one shot. */
     struct ic_slot {
-        mino_val_t *form;          /* call form pointer, NULL = empty */
+        mino_val *form;          /* call form pointer, NULL = empty */
         const char *head_data;     /* sym->as.s.data, interned */
-        mino_val_t *callable;
+        mino_val *callable;
         unsigned    gen_at_fill;
     } *ic_table;
     size_t          ic_cap;

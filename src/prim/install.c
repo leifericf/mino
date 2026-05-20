@@ -15,13 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
+void prim_install_table(mino_state *S, mino_env *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count)
 {
     prim_install_table_with_capability(S, env, ns_name, defs, count, NULL);
 }
 
-void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
+void prim_install_table_with_capability(mino_state *S, mino_env *env,
                                         const char *ns_name,
                                         const mino_prim_def *defs,
                                         size_t count,
@@ -34,7 +34,7 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
          * precedence when set; fn is the fallback cons-spine
          * dispatch path. Identity checks against a prim use its
          * stable registered name rather than these pointers. */
-        mino_val_t *pv = (defs[i].fn2 != NULL)
+        mino_val *pv = (defs[i].fn2 != NULL)
                          ? mino_prim_argv(S, defs[i].name, defs[i].fn2)
                          : mino_prim(S, defs[i].name, defs[i].fn);
         if (defs[i].fn2 != NULL && defs[i].fn != NULL) {
@@ -42,7 +42,7 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
         }
         mino_env_set(S, env, defs[i].name, pv);
         if (ns_name != NULL) {
-            mino_val_t *var = var_intern(S, ns_name, defs[i].name);
+            mino_val *var = var_intern(S, ns_name, defs[i].name);
             if (var != NULL) var_set_root(S, var, pv);
         }
         if (defs[i].doc != NULL) {
@@ -80,7 +80,7 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
  *
  * Runs with current_ns set to "clojure.core" by the caller, so every def
  * in core.clj lands in the clojure.core ns env. */
-static void install_core_mino(mino_state_t *S, mino_env_t *env)
+static void install_core_mino(mino_state *S, mino_env *env)
 {
     size_t i;
 
@@ -90,7 +90,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
         int          saved_line = S->reader.reader_line;
         size_t       cap        = 256;
 
-        S->core_forms     = malloc(cap * sizeof(mino_val_t *));
+        S->core_forms     = malloc(cap * sizeof(mino_val *));
         S->core_forms_len = 0;
         if (!S->core_forms) {
             /* Class I: init-time; no try-frame to recover through */
@@ -101,7 +101,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
         S->reader.reader_line = 1;
         while (*src != '\0') {
             const char *end  = NULL;
-            mino_val_t *form = mino_read(S, src, &end);
+            mino_val *form = mino_read(S, src, &end);
             if (form == NULL) {
                 if (mino_last_error(S) != NULL) {
                     fprintf(stderr, "core.clj parse error: %s\n",
@@ -118,7 +118,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             if (S->core_forms_len >= cap) {
                 cap *= 2;
                 S->core_forms = realloc(S->core_forms,
-                                        cap * sizeof(mino_val_t *));
+                                        cap * sizeof(mino_val *));
                 if (!S->core_forms) {
                     fprintf(stderr, "core.clj: out of memory\n");
                     /* Class I: init-time OOM; no try-frame to recover through */
@@ -179,7 +179,7 @@ static const mino_prim_domain k_core_domains[] = {
 /* Capability registry                                                       */
 /* ------------------------------------------------------------------------- */
 
-static const mino_capability_info_t k_capability_info[] = {
+static const mino_capability_info k_capability_info[] = {
     { "floor",        MINO_CAP_FLOOR,
       "Numeric, collections, sequences, printing, foundational macros." },
     { "regex",        MINO_CAP_REGEX,
@@ -235,17 +235,17 @@ static const mino_capability_info_t k_capability_info[] = {
     { NULL,           0u,                                                NULL },
 };
 
-const mino_capability_info_t *mino_capability_list(void)
+const mino_capability_info *mino_capability_list(void)
 {
     return k_capability_info;
 }
 
-unsigned int mino_capabilities(const mino_state_t *S)
+unsigned int mino_capabilities(const mino_state *S)
 {
     return (S != NULL) ? S->caps_installed : 0u;
 }
 
-int mino_capability_installed(const mino_state_t *S, unsigned int cap)
+int mino_capability_installed(const mino_state *S, unsigned int cap)
 {
     if (S == NULL || cap == 0u) return 0;
     return (S->caps_installed & cap) == cap;
@@ -333,16 +333,16 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
 #define K_CAP_PRIM_TABLE_COUNT \
     (sizeof(k_cap_prim_tables) / sizeof(k_cap_prim_tables[0]))
 
-static const mino_capability_info_t *capability_info_for_bit(unsigned int bit)
+static const mino_capability_info *capability_info_for_bit(unsigned int bit)
 {
-    const mino_capability_info_t *p;
+    const mino_capability_info *p;
     for (p = k_capability_info; p->name != NULL; p++) {
         if (p->bit == bit) return p;
     }
     return NULL;
 }
 
-const mino_capability_info_t *mino_capability_for_symbol(const char *name)
+const mino_capability_info *mino_capability_for_symbol(const char *name)
 {
     size_t i, j;
     const clj_name_capability_t *cn;
@@ -378,12 +378,12 @@ const mino_capability_info_t *mino_capability_for_symbol(const char *name)
  * ("io", "regex", ...). Returns true / false. The floor always reports
  * true. Used by core.clj `(when (mino-installed? :cap) ...)` gates so
  * optional sections skip cleanly when their capability is off. */
-static mino_val_t *prim_mino_installed_p(mino_state_t *S, mino_val_t *args,
-                                          mino_env_t *env)
+static mino_val *prim_mino_installed_p(mino_state *S, mino_val *args,
+                                          mino_env *env)
 {
-    mino_val_t *arg;
+    mino_val *arg;
     const char *label = NULL;
-    const mino_capability_info_t *p;
+    const mino_capability_info *p;
     (void)env;
 
     if (mino_args_parse(S, "mino-installed?", args, "v", &arg) != 0) {
@@ -430,10 +430,10 @@ static const size_t k_prims_capability_count =
  * Clojure-core install needs. Used by both mino_install_minimal (where
  * core.clj is NOT evaluated) and the higher-tier installers so vars
  * like *ns* / *out* / *in* / *data-readers* are always available. */
-static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
+static void install_floor_vars(mino_state *S, mino_env *core_env)
 {
     {
-        mino_val_t *var = var_intern(S, "clojure.core", "*ns*");
+        mino_val *var = var_intern(S, "clojure.core", "*ns*");
         if (var != NULL) {
             var->as.var.dynamic = 1;
             if (S->ns_vars.current_ns == NULL) {
@@ -444,9 +444,9 @@ static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
         }
     }
     {
-        mino_val_t *out_var = var_intern(S, "clojure.core", "*out*");
-        mino_val_t *err_var = var_intern(S, "clojure.core", "*err*");
-        mino_val_t *in_var  = var_intern(S, "clojure.core", "*in*");
+        mino_val *out_var = var_intern(S, "clojure.core", "*out*");
+        mino_val *err_var = var_intern(S, "clojure.core", "*err*");
+        mino_val *in_var  = var_intern(S, "clojure.core", "*in*");
         if (out_var != NULL) {
             out_var->as.var.dynamic = 1;
             var_set_root(S, out_var, mino_keyword(S, "mino/stdout"));
@@ -464,8 +464,8 @@ static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
         }
     }
     {
-        mino_val_t *dr_var  = var_intern(S, "clojure.core", "*data-readers*");
-        mino_val_t *def_var = var_intern(S, "clojure.core",
+        mino_val *dr_var  = var_intern(S, "clojure.core", "*data-readers*");
+        mino_val *def_var = var_intern(S, "clojure.core",
                                           "*default-data-reader-fn*");
         if (dr_var != NULL) {
             dr_var->as.var.dynamic = 1;
@@ -481,10 +481,10 @@ static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
     }
 }
 
-static mino_env_t *floor_install_prim_tables(mino_state_t *S)
+static mino_env *floor_install_prim_tables(mino_state *S)
 {
     size_t      i;
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
 
     mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
 
@@ -502,7 +502,7 @@ static mino_env_t *floor_install_prim_tables(mino_state_t *S)
     /* clojure.string namespace (the wrappers in lib_clojure_string layer
      * over these). Always in the floor -- they're string ops, not I/O. */
     {
-        mino_env_t *cs_env = ns_env_ensure(S, "clojure.string");
+        mino_env *cs_env = ns_env_ensure(S, "clojure.string");
         if (cs_env != NULL) {
             prim_install_table(S, cs_env, "clojure.string",
                                k_prims_clojure_string,
@@ -511,7 +511,7 @@ static mino_env_t *floor_install_prim_tables(mino_state_t *S)
     }
     /* clojure.repl namespace -- doc, source, apropos. */
     {
-        mino_env_t *cr_env = ns_env_ensure(S, "clojure.repl");
+        mino_env *cr_env = ns_env_ensure(S, "clojure.repl");
         if (cr_env != NULL) {
             prim_install_table(S, cr_env, "clojure.repl",
                                k_prims_clojure_repl,
@@ -525,10 +525,10 @@ static mino_env_t *floor_install_prim_tables(mino_state_t *S)
 /* Public install API                                                        */
 /* ------------------------------------------------------------------------- */
 
-void mino_install_minimal(mino_state_t *S, mino_env_t *env)
+void mino_install_minimal(mino_state *S, mino_env *env)
 {
     volatile char probe = 0;
-    mino_env_t   *core_env;
+    mino_env   *core_env;
 
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
@@ -539,7 +539,7 @@ void mino_install_minimal(mino_state_t *S, mino_env_t *env)
     S->caps_installed |= MINO_CAP_FLOOR;
 }
 
-void mino_install_multimethods(mino_state_t *S, mino_env_t *env)
+void mino_install_multimethods(mino_state *S, mino_env *env)
 {
     (void)env;
     /* No C-prim surface; capability is implemented in core.clj sections
@@ -549,22 +549,22 @@ void mino_install_multimethods(mino_state_t *S, mino_env_t *env)
     S->caps_installed |= MINO_CAP_MULTIMETHODS;
 }
 
-void mino_install_protocols(mino_state_t *S, mino_env_t *env)
+void mino_install_protocols(mino_state *S, mino_env *env)
 {
     (void)env;
     S->caps_installed |= MINO_CAP_PROTOCOLS;
 }
 
-void mino_install_transducers(mino_state_t *S, mino_env_t *env)
+void mino_install_transducers(mino_state *S, mino_env *env)
 {
     (void)env;
     S->caps_installed |= MINO_CAP_TRANSDUCERS;
 }
 
-void mino_install_clojure_core(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_core(mino_state *S, mino_env *env)
 {
     volatile char probe = 0;
-    mino_env_t   *core_env;
+    mino_env   *core_env;
     const char   *saved_ns;
 
     gc_note_host_frame(S, (void *)&probe);

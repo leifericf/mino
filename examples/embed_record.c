@@ -22,17 +22,17 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int read_long(const mino_val_t *v, long long *out)
+static int read_long(const mino_val *v, long long *out)
 {
     return mino_to_int(v, out);
 }
 
 int main(void)
 {
-    mino_state_t *S;
-    mino_env_t   *env;
-    mino_val_t   *Vec3, *v, *x, *y, *z, *result;
-    mino_val_t   *vals[3];
+    mino_state *S;
+    mino_env   *env;
+    mino_val   *Vec3, *v, *x, *y, *z, *result;
+    mino_val   *vals[3];
     const char   *fields[3] = {"x", "y", "z"};
     long long     lx, ly, lz;
 
@@ -112,7 +112,7 @@ int main(void)
 
     /* Round-trip identity: idempotent intern. */
     {
-        mino_val_t *Vec3b = mino_defrecord(S, "user", "Vec3", fields, 3);
+        mino_val *Vec3b = mino_defrecord(S, "user", "Vec3", fields, 3);
         if (Vec3b != Vec3) {
             fprintf(stderr, "mino_defrecord not idempotent\n");
             return 1;

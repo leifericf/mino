@@ -77,9 +77,11 @@ tests/transient_test_ubsan
 tests/multimethod_test
 tests/multimethod_test_asan
 tests/multimethod_test_ubsan
+examples/embed_gc
 examples/embed_gc_stress
 examples/embed_gc_stress_asan
 examples/embed_multi_tenant_threads
+examples/embed_record
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test

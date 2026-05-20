@@ -22,7 +22,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
 #endif
-void gc_note_host_frame(mino_state_t *S, void *addr)
+void gc_note_host_frame(mino_state *S, void *addr)
 {
     if (mino_current_ctx(S)->gc_stack_bottom == NULL
         || (char *)addr > (char *)mino_current_ctx(S)->gc_stack_bottom) {
@@ -40,15 +40,15 @@ int gc_freelist_class(size_t size)
     switch (size) {
     case sizeof(hamt_entry_t):    return 0;  /* 16 bytes */
     case sizeof(mino_hamt_node_t): return 1; /* 24 bytes */
-    case sizeof(mino_env_t):      return 2;  /* 32 bytes */
-    case sizeof(mino_val_t):      return 3;  /* 64 bytes */
+    case sizeof(mino_env):      return 2;  /* 32 bytes */
+    case sizeof(mino_val):      return 3;  /* 64 bytes */
     default:                      return -1;
     }
 }
 
 /* Record one STW pause sample. Saturates the ring slot at UINT32_MAX
  * ns; bucket-clamps the log2 histogram at index 23 ([8.4ms, ...)). */
-void gc_record_pause(mino_state_t *S, size_t ns)
+void gc_record_pause(mino_state *S, size_t ns)
 {
     unsigned idx;
     unsigned bucket;
@@ -79,7 +79,7 @@ void gc_record_pause(mino_state_t *S, size_t ns)
  * must pass between adjustments. Bounds: [256, 65536] headers.
  * Stress mode bypasses adaptive entirely (full STW per alloc means
  * the budget is irrelevant). */
-static void gc_adapt_major_budget(mino_state_t *S)
+static void gc_adapt_major_budget(mino_state *S)
 {
     unsigned count, take, i;
     uint32_t samples[8];
@@ -135,7 +135,7 @@ static void gc_adapt_major_budget(mino_state_t *S)
  * lets the default 1.5x multiplier be expressed without float. The
  * gc_threshold floor keeps the very first major from firing the
  * instant the first byte is promoted. */
-static int gc_should_start_major(const mino_state_t *S)
+static int gc_should_start_major(const mino_state *S)
 {
     size_t trigger = S->gc.old_baseline * S->gc.major_growth_tenths / 10u;
     if (trigger < S->gc.threshold) {
@@ -148,7 +148,7 @@ static int gc_should_start_major(const mino_state_t *S)
  * gc_major_work_budget headers, and if the mark stack is empty after
  * that, close the cycle with remark + sweep. Times itself so the
  * mutator sees one pause per slice. */
-static void gc_major_slice(mino_state_t *S)
+static void gc_major_slice(mino_state *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
@@ -175,7 +175,7 @@ static void gc_major_slice(mino_state_t *S)
  * Used on OOM fallback so the fallback STW major can start from a
  * clean IDLE state, and at points where the caller cannot afford to
  * leave marking partway done. */
-void gc_force_finish_major(mino_state_t *S)
+void gc_force_finish_major(mino_state *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
@@ -198,7 +198,7 @@ void gc_force_finish_major(mino_state_t *S)
  * the world (no other host threads alive, no recursive alloc), and the
  * conservative scan needs gc_stack_bottom recorded for the running
  * frame. Memory normalizes again after mino_quiesce_threads. */
-static int gc_tick_should_suppress(mino_state_t *S)
+static int gc_tick_should_suppress(mino_state *S)
 {
     /* Relaxed-atomic read: workers mutate thread_count under
      * worker_list_lock, but this fast-path consults it without
@@ -212,7 +212,7 @@ static int gc_tick_should_suppress(mino_state_t *S)
  * collector aggressively for finalizer / barrier tests. Any in-flight
  * incremental major is driven to completion first so the stress major
  * starts from IDLE. */
-static void gc_tick_stress(mino_state_t *S)
+static void gc_tick_stress(mino_state *S)
 {
     if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
         gc_force_finish_major(S);
@@ -233,7 +233,7 @@ static void gc_tick_stress(mino_state_t *S)
  * is bounded by the remaining major work; the alternative would require
  * transitively tracing every pending mark-stack entry on every nested
  * minor, which is strictly more work in the common case. */
-static void gc_tick_during_major(mino_state_t *S, size_t alloc_size)
+static void gc_tick_during_major(mino_state *S, size_t alloc_size)
 {
     S->gc.major_step_alloc += alloc_size;
     if (S->gc.bytes_young > S->gc.nursery_bytes) {
@@ -248,7 +248,7 @@ static void gc_tick_during_major(mino_state_t *S, size_t alloc_size)
 
 /* IDLE phase: minor on nursery overflow; if the heap has grown enough
  * past the post-major baseline, kick off a fresh incremental major. */
-static void gc_tick_idle(mino_state_t *S)
+static void gc_tick_idle(mino_state *S)
 {
     if (S->gc.bytes_young > S->gc.nursery_bytes) {
         gc_minor_collect(S);
@@ -261,7 +261,7 @@ static void gc_tick_idle(mino_state_t *S)
 
 /* Driver: called from gc_alloc_typed before each allocation. Dispatches
  * to the right tick handler based on stress mode and current phase. */
-static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
+static void gc_driver_tick(mino_state *S, size_t alloc_size)
 {
     if (gc_tick_should_suppress(S)) return;
     if (S->gc.stress) {
@@ -281,7 +281,7 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
  * memset). Links the slab onto S->gc_bump_slabs and parks the cursor
  * pair at the start of the usable payload region. Returns 0 on calloc
  * failure (caller falls back to plain calloc per allocation). */
-static int gc_bump_slab_refill(mino_state_t *S)
+static int gc_bump_slab_refill(mino_state *S)
 {
     gc_bump_slab_t *slab;
     slab = (gc_bump_slab_t *)calloc(1, MINO_BUMP_SLAB_BYTES);
@@ -301,7 +301,7 @@ static int gc_bump_slab_refill(mino_state_t *S)
  * the range index, and emit the alloc event. Returns NULL on alloc
  * failure; no GC, no fault-injection, no OOM recovery here -- those
  * are the policy wrapper's job. */
-static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
+static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
                               size_t size)
 {
     gc_hdr_t *h = NULL;
@@ -366,7 +366,7 @@ static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
  * into the active try frame, or abort if no try frame exists. Non-static
  * so checked-size paths in env/module/etc. can reach the same throw when
  * they detect overflow before the GC allocator gets a chance. */
-void gc_oom_throw(mino_state_t *S, const char *msg)
+void gc_oom_throw(mino_state *S, const char *msg)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -381,7 +381,7 @@ void gc_oom_throw(mino_state_t *S, const char *msg)
  * (default 4096), record (return address, tag, size_bucket) for this
  * alloc into the small ring. Env-gated. The return address is the
  * immediate caller -- one frame up from gc_alloc_typed_inner. */
-static void mino_alloc_sampler_fire(mino_state_t *S, unsigned char tag,
+static void mino_alloc_sampler_fire(mino_state *S, unsigned char tag,
                                     size_t size, void *site_ra)
 {
     unsigned     idx;
@@ -425,7 +425,7 @@ static void mino_alloc_sampler_fire(mino_state_t *S, unsigned char tag,
     }
 }
 
-void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
+void *gc_alloc_typed_inner(mino_state *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
     /* Capture the immediate caller's return address for the alloc-site
@@ -483,16 +483,16 @@ void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
     }
 }
 
-mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type)
+mino_val *alloc_val_inner(mino_state *S, mino_type type)
 {
-    mino_val_t *v = (mino_val_t *)gc_alloc_typed_inner(S, GC_T_VAL, sizeof(*v));
+    mino_val *v = (mino_val *)gc_alloc_typed_inner(S, GC_T_VAL, sizeof(*v));
     MINO_ASSERT_ALIGNED(v);
     v->type = type;
     v->meta = NULL;
     return v;
 }
 
-char *dup_n_inner(mino_state_t *S, const char *s, size_t len)
+char *dup_n_inner(mino_state *S, const char *s, size_t len)
 {
     char *out = (char *)gc_alloc_typed_inner(S, GC_T_RAW, len + 1);
     if (len > 0) {
@@ -516,7 +516,7 @@ char *dup_n_inner(mino_state_t *S, const char *s, size_t len)
  * the stack on overflow is best-effort: if realloc fails, the push
  * silently drops and the collector is forced to rely on conservative
  * scan as a backstop. */
-static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
+static void gc_mark_stack_push_raw(mino_state *S, gc_hdr_t *h)
 {
     if (S->gc.mark_stack_len == S->gc.mark_stack_cap) {
         size_t     new_cap;
@@ -544,7 +544,7 @@ static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
+void gc_mark_push(mino_state *S, gc_hdr_t *h)
 {
     if (h == NULL || h->mark) return;
     /* Generational filter: during minor marking we never trace into or
@@ -560,7 +560,7 @@ void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
  * OLD filter. Used by the minor collector when it promotes YOUNG to
  * OLD during a MAJOR_MARK cycle: the newly-OLD object needs to be
  * traced by major even though the current phase is MINOR. */
-void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h)
+void gc_major_enqueue_promoted(mino_state *S, gc_hdr_t *h)
 {
     if (h == NULL || h->mark) return;
     h->mark = 1;
@@ -570,7 +570,7 @@ void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h)
 /* Resolve an interior pointer and push its header onto the mark stack.
  * Used by the conservative stack scan and by root enumeration, where
  * the pointer may be misaligned or not the payload start. */
-static void gc_mark_interior_push(mino_state_t *S, const void *p)
+static void gc_mark_interior_push(mino_state *S, const void *p)
 {
     gc_hdr_t *h;
     if (p == NULL) return;
@@ -584,7 +584,7 @@ static void gc_mark_interior_push(mino_state_t *S, const void *p)
 }
 
 /* Public entry point for conservative scanning and root marking. */
-void gc_mark_interior(mino_state_t *S, const void *p)
+void gc_mark_interior(mino_state *S, const void *p)
 {
     gc_mark_interior_push(S, p);
 }
@@ -599,14 +599,14 @@ void gc_mark_interior(mino_state_t *S, const void *p)
  * Tracers in component-owned files (collections/gc_handlers.c,
  * eval/bc/gc_handlers.c, values/val.c) call through this entry
  * point via gc_mark_child_push_exported. */
-static void gc_mark_child_push(mino_state_t *S, const void *p);
+static void gc_mark_child_push(mino_state *S, const void *p);
 
-void gc_mark_child_push_exported(mino_state_t *S, const void *p)
+void gc_mark_child_push_exported(mino_state *S, const void *p)
 {
     gc_mark_child_push(S, p);
 }
 
-static void gc_mark_child_push(mino_state_t *S, const void *p)
+static void gc_mark_child_push(mino_state *S, const void *p)
 {
     gc_hdr_t *h;
     uintptr_t u, lo, hi;
@@ -646,9 +646,9 @@ static void gc_mark_child_push(mino_state_t *S, const void *p)
 /* arrays). GC_T_RAW intentionally has no tracer.                            */
 /* ------------------------------------------------------------------------- */
 
-static void trace_env(mino_state_t *S, gc_hdr_t *h)
+static void trace_env(mino_state *S, gc_hdr_t *h)
 {
-    mino_env_t *env = (mino_env_t *)(h + 1);
+    mino_env *env = (mino_env *)(h + 1);
     size_t i;
     gc_mark_child_push(S, env->parent);
     if (env->bindings != NULL) {
@@ -667,7 +667,7 @@ static void trace_env(mino_state_t *S, gc_hdr_t *h)
 
 /* Walks GC_T_VALARR and GC_T_PTRARR alike: both layouts are a flat
  * array of void *. */
-static void trace_pointer_array(mino_state_t *S, gc_hdr_t *h)
+static void trace_pointer_array(mino_state *S, gc_hdr_t *h)
 {
     void **arr = (void **)(h + 1);
     size_t n = h->size / sizeof(*arr);
@@ -680,7 +680,7 @@ static void trace_pointer_array(mino_state_t *S, gc_hdr_t *h)
 /* trace_bc lives in src/eval/bc/gc_handlers.c and registers itself
  * via mino_bc_register_gc_handlers(S). */
 
-void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
+void gc_trace_children(mino_state *S, gc_hdr_t *h)
 {
     gc_tracer_fn fn;
     unsigned tag = h->type_tag;
@@ -693,12 +693,12 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
 /* Tracer + finalizer registration                                           */
 /* ------------------------------------------------------------------------- */
 
-void gc_register_tracer(mino_state_t *S, unsigned char tag, gc_tracer_fn fn)
+void gc_register_tracer(mino_state *S, unsigned char tag, gc_tracer_fn fn)
 {
     if (tag < GC_T__COUNT) S->gc_tracers[tag] = fn;
 }
 
-void gc_register_finalizer(mino_state_t *S, unsigned char tag,
+void gc_register_finalizer(mino_state *S, unsigned char tag,
                            gc_finalizer_fn fn)
 {
     if (tag < GC_T__COUNT) S->gc_finalizers[tag] = fn;
@@ -709,7 +709,7 @@ void gc_register_finalizer(mino_state_t *S, unsigned char tag,
  * them out to their owning components and the component-side hook
  * (mino_collections_register_gc_handlers etc.) calls
  * gc_register_tracer. */
-void gc_register_default_tracers(mino_state_t *S)
+void gc_register_default_tracers(mino_state *S)
 {
     /* GC_T_RAW intentionally stays NULL: a POD buffer has nothing to
      * trace; gc_trace_children no-ops on NULL slots.
@@ -727,7 +727,7 @@ void gc_register_default_tracers(mino_state_t *S)
  * lets a minor nested inside a MAJOR_MARK cycle process only the
  * entries it added on top, leaving major's pending OLD entries
  * untouched beneath. Callers that want a full drain pass 0. */
-void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len)
+void gc_drain_mark_stack_to(mino_state *S, size_t floor_len)
 {
     while (S->gc.mark_stack_len > floor_len) {
         gc_hdr_t *h = S->gc.mark_stack[--S->gc.mark_stack_len];
@@ -735,7 +735,7 @@ void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len)
     }
 }
 
-void gc_drain_mark_stack(mino_state_t *S)
+void gc_drain_mark_stack(mino_state *S)
 {
     gc_drain_mark_stack_to(S, 0);
 }
@@ -753,7 +753,7 @@ void gc_drain_mark_stack(mino_state_t *S)
  * pieces individually, which charges each slice to its own event.
  */
 
-void gc_major_collect(mino_state_t *S)
+void gc_major_collect(mino_state *S)
 {
     long long start_ns;
     size_t    elapsed_ns;

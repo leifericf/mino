@@ -302,7 +302,7 @@ typedef struct mino_bc_source_map {
 /* Compiled function record. Owned by its parent MINO_FN value. Lifetime
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
- * GC_T_PTRARR of mino_val_t pointers. */
+ * GC_T_PTRARR of mino_val pointers. */
 /* Inline-cache slot for OP_GETGLOBAL_CACHED / OP_CALL_CACHED, repurposed
  * for OP_PROTOCOL_CALL_CACHED through a `kind` discriminator. Per-fn
  * array indexed by the Bx field of the cached opcode. For the GLOBAL
@@ -368,8 +368,8 @@ enum {
 };
 
 typedef struct mino_bc_ic_slot {
-    mino_val_t   *sym;
-    mino_val_t   *cached;
+    mino_val   *sym;
+    mino_val   *cached;
     unsigned      gen;
     unsigned char kind;
     /* GLOBAL-kind callable-shape fields. Populated lazily by
@@ -382,9 +382,9 @@ typedef struct mino_bc_ic_slot {
     unsigned char cached_fn_has_rest;
     unsigned char _pad_ic0;
     /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
-    mino_val_t   *atom;
-    mino_val_t   *cached_map;
-    mino_val_t   *cached_type;
+    mino_val   *atom;
+    mino_val   *cached_map;
+    mino_val   *cached_type;
     unsigned short cached_fn_n_params;
     unsigned short _pad_ic1;
     unsigned       _pad_ic2;
@@ -418,7 +418,7 @@ typedef struct mino_bc_clause {
     int          n_params;        /* fixed args this clause accepts */
     int          has_rest;        /* 1 iff trailing `& rest` binding */
     int          entry_pc;        /* code offset to start running from */
-    mino_val_t  *params_vec;      /* MINO_VECTOR of param syms (incl. & and
+    mino_val  *params_vec;      /* MINO_VECTOR of param syms (incl. & and
                                    * the rest sym when has_rest); used by
                                    * the runtime to env_bind names when the
                                    * clause's fn captures */
@@ -427,7 +427,7 @@ typedef struct mino_bc_clause {
 typedef struct mino_bc_fn {
     mino_bc_insn_t  *code;        /* instruction stream */
     size_t           code_len;
-    mino_val_t     **consts;      /* const pool: nil/true/false/symbols/literals/child fns */
+    mino_val     **consts;      /* const pool: nil/true/false/symbols/literals/child fns */
     size_t           consts_len;
     int              n_regs;      /* number of register slots the body needs */
     int              n_params;    /* fixed param count of clauses[0]; the
@@ -595,9 +595,9 @@ typedef enum {
 } mino_bc_status_t;
 
 /* Public entry points. */
-int mino_bc_compile_fn(struct mino_state *S, mino_val_t *fn);
-mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
-                        mino_val_t **argv, int argc, mino_env_t *env);
+int mino_bc_compile_fn(struct mino_state *S, mino_val *fn);
+mino_val *mino_bc_run(struct mino_state *S, mino_val *fn,
+                        mino_val **argv, int argc, mino_env *env);
 
 /* JIT-call fast lane: enters mino_jit_invoke directly with the
  * minimum window + cursor + dyn / try snapshot work that
@@ -610,10 +610,10 @@ mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
  *   - bc->captures == 0
  * Any precondition miss tail-calls mino_bc_run with the same args,
  * so a misclassified IC slot still produces correct output. */
-mino_val_t *mino_bc_run_known_native(struct mino_state *S,
-                                      mino_val_t *fn,
-                                      mino_val_t **argv, int argc,
-                                      mino_env_t *env);
+mino_val *mino_bc_run_known_native(struct mino_state *S,
+                                      mino_val *fn,
+                                      mino_val **argv, int argc,
+                                      mino_env *env);
 
 /* Side-exit resume entry. Drives the dispatch loop from `pc` over a
  * register window the caller (typically mino_jit_invoke on JIT deopt)
@@ -624,8 +624,8 @@ mino_val_t *mino_bc_run_known_native(struct mino_state *S,
  * pre-fn anchor. The struct dyn_frame is opaque here; its layout lives
  * in runtime/internal.h. */
 struct dyn_frame;
-mino_val_t *mino_bc_run_resume(struct mino_state *S, struct mino_bc_fn *bc,
-                                size_t base, mino_env_t *env, size_t pc,
+mino_val *mino_bc_run_resume(struct mino_state *S, struct mino_bc_fn *bc,
+                                size_t base, mino_env *env, size_t pc,
                                 int saved_try_depth,
                                 int saved_bc_catch_depth,
                                 struct dyn_frame *saved_dyn_stack);
@@ -635,11 +635,11 @@ mino_val_t *mino_bc_run_resume(struct mino_state *S, struct mino_bc_fn *bc,
  * NULL on a tag miss or arithmetic overflow; the caller falls back to
  * the cons-spine prim with the same operands". tag_or_box_int encodes
  * a checked 61-bit signed long into a tagged or boxed mino_int. */
-mino_val_t *binop_int_fast(struct mino_state *S, mino_val_t *lhs,
-                           mino_val_t *rhs, unsigned subop);
-mino_val_t *unop_int_fast(struct mino_state *S, mino_val_t *v,
+mino_val *binop_int_fast(struct mino_state *S, mino_val *lhs,
+                           mino_val *rhs, unsigned subop);
+mino_val *unop_int_fast(struct mino_state *S, mino_val *v,
                           unsigned subop);
-mino_val_t *tag_or_box_int(struct mino_state *S, long long r);
+mino_val *tag_or_box_int(struct mino_state *S, long long r);
 
 /* GC hook: walk a single mino_bc_fn_t's consts and child fns. Called from
  * gc_mark_runtime_globals (indirectly via the MINO_FN walker) and from
@@ -662,10 +662,10 @@ const char *mino_bc_op_name(unsigned op);
  * only if the throw path's setup itself fails. Caller is responsible
  * for slot-bounds + argn-non-zero + slot->atom-shape validation. */
 struct mino_bc_ic_slot;
-mino_val_t *mino_bc_ic_resolve_protocol(struct mino_state *S,
+mino_val *mino_bc_ic_resolve_protocol(struct mino_state *S,
                                          const mino_bc_fn_t *bc,
                                          struct mino_bc_ic_slot *slot,
-                                         mino_val_t *first_arg);
+                                         mino_val *first_arg);
 
 /* Look up the source position recorded for a given pc. Returns 1 with
  * the position filled in if available, 0 if no source info is recorded
@@ -698,10 +698,10 @@ int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
  * a Clojure-shaped read expects. Native code can either call this
  * directly (one C call per resolved global) or, once stencils are
  * available, inline its body via a per-kind stencil. */
-mino_val_t *mino_bc_ic_global_load(mino_state_t *S,
+mino_val *mino_bc_ic_global_load(mino_state *S,
                                    mino_bc_fn_t *bc,
                                    int slot_idx,
-                                   mino_env_t *env,
+                                   mino_env *env,
                                    int dyn_active);
 
 /* Sentinel placed in MINO_FN.bc after a failed compile attempt so the
@@ -717,7 +717,7 @@ extern mino_bc_fn_t mino_bc_declined;
  * Useful for VM development: an unintended decline is loud instead of
  * silently degrading. Defaults to 0; production builds leave it off. */
 extern int mino_bc_require_flag;
-void mino_bc_check_require(struct mino_state *S, mino_val_t *fn);
+void mino_bc_check_require(struct mino_state *S, mino_val *fn);
 
 /* True iff the val's bc slot was populated with a real compiled program
  * (as opposed to NULL = not yet tried, or &mino_bc_declined = declined).
@@ -731,11 +731,11 @@ void mino_bc_check_require(struct mino_state *S, mino_val_t *fn);
  * mino_bc_trace_ic_slots helper is exported so the values-side
  * MINO_FN tracer can walk a bc record's IC slots without
  * re-implementing the slot-kind dispatch. */
-void mino_bc_register_gc_handlers(mino_state_t *S);
-void mino_bc_trace_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc);
+void mino_bc_register_gc_handlers(mino_state *S);
+void mino_bc_trace_ic_slots(mino_state *S, const struct mino_bc_fn *bc);
 /* Walk a MINO_FN.bc field (and its sub-buffers) when present. The
  * argument is typed `const void *` so callers in upstream components
  * (values/gc_handlers.c) don't need struct mino_bc_fn in scope. */
-void mino_bc_trace_fn_bc(mino_state_t *S, const void *bc_ptr);
+void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr);
 
 #endif /* MINO_EVAL_BC_INTERNAL_H */

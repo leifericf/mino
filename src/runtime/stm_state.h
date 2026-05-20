@@ -25,18 +25,18 @@ typedef enum {
 } tx_ref_state_kind_t;
 
 typedef struct tx_ref_state {
-    mino_val_t          *ref;              /* MINO_TX_REF this state tracks */
+    mino_val          *ref;              /* MINO_TX_REF this state tracks */
     uint64_t             snapshot_version; /* version at first read */
     int                  read;             /* 1 if this tx read the ref */
     tx_ref_state_kind_t  kind;
-    mino_val_t          *tentative;        /* in-tx value; NULL if no write */
-    mino_val_t          *commute_log;      /* MINO_CONS of (fn args...); or NULL */
+    mino_val          *tentative;        /* in-tx value; NULL if no write */
+    mino_val          *commute_log;      /* MINO_CONS of (fn args...); or NULL */
     /* Populated by tx_commit when a write is applied: the ref's value
      * before the commit (for watch dispatch's `old` arg) and the new
      * committed value (`new` arg). Both NULL if no write happened on
      * this ref. */
-    mino_val_t          *committed_old;
-    mino_val_t          *committed_new;
+    mino_val          *committed_old;
+    mino_val          *committed_new;
     struct tx_ref_state *next;
 } tx_ref_state_t;
 
@@ -56,14 +56,14 @@ typedef struct tx_state {
      * so dosync_run can re-throw the original payload instead of a
      * generic MCT001 message. NULL when the validator returned falsy
      * without throwing or when no validator ran. */
-    mino_val_t          *validator_thrown_ex;
+    mino_val          *validator_thrown_ex;
     /* (send / send-off) called from inside the transaction body
      * appends (agent fn extra) triples to this cons list (LIFO --
      * head holds the most recent send) instead of dispatching
      * synchronously. JVM canon: pending sends fire only on
      * successful commit, are silently discarded on retry or abort
      * so a body that's run multiple times sends the action once. */
-    mino_val_t          *pending_sends;
+    mino_val          *pending_sends;
 } tx_state_t;
 
 #endif /* RUNTIME_STM_STATE_H */

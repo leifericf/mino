@@ -13,7 +13,7 @@
 
 #include "runtime/internal.h"
 
-static void ns_env_register_root(mino_state_t *S, mino_env_t *env)
+static void ns_env_register_root(mino_state *S, mino_env *env)
 {
     root_env_t *r = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
@@ -26,7 +26,7 @@ static void ns_env_register_root(mino_state_t *S, mino_env_t *env)
     S->gc.root_envs = r;
 }
 
-static void ns_env_table_grow(mino_state_t *S)
+static void ns_env_table_grow(mino_state *S)
 {
     size_t new_cap = S->ns_vars.ns_env_cap == 0 ? 8 : S->ns_vars.ns_env_cap * 2;
     ns_env_entry_t *nb = (ns_env_entry_t *)realloc(
@@ -40,7 +40,7 @@ static void ns_env_table_grow(mino_state_t *S)
     S->ns_vars.ns_env_cap   = new_cap;
 }
 
-mino_env_t *ns_env_lookup(mino_state_t *S, const char *name)
+mino_env *ns_env_lookup(mino_state *S, const char *name)
 {
     size_t i;
     if (name == NULL) return NULL;
@@ -53,9 +53,9 @@ mino_env_t *ns_env_lookup(mino_state_t *S, const char *name)
     return NULL;
 }
 
-mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
+mino_env *ns_env_ensure(mino_state *S, const char *name)
 {
-    mino_env_t *e;
+    mino_env *e;
     const char *iname;
     if (name == NULL) name = "user";
 
@@ -87,7 +87,7 @@ mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
     return e;
 }
 
-mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name)
+mino_val *ns_env_get_meta(mino_state *S, const char *name)
 {
     size_t i;
     if (name == NULL) return NULL;
@@ -98,7 +98,7 @@ mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name)
     return NULL;
 }
 
-void ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta)
+void ns_env_set_meta(mino_state *S, const char *name, mino_val *meta)
 {
     size_t i;
     if (name == NULL) return;
@@ -110,19 +110,19 @@ void ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta)
     }
 }
 
-mino_env_t *current_ns_env(mino_state_t *S)
+mino_env *current_ns_env(mino_state *S)
 {
     return ns_env_ensure(S, S->ns_vars.current_ns);
 }
 
 /* Return a symbol naming NAME, carrying the namespace's metadata
  * (if any) so callers can read it back via `meta`. */
-mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
+mino_val *ns_symbol_with_meta(mino_state *S, const char *name)
 {
-    mino_val_t *sym  = mino_symbol(S, name);
-    mino_val_t *meta = ns_env_get_meta(S, name);
+    mino_val *sym  = mino_symbol(S, name);
+    mino_val *meta = ns_env_get_meta(S, name);
     if (meta != NULL && sym != NULL) {
-        mino_val_t *copy = alloc_val(S, mino_type_of(sym));
+        mino_val *copy = alloc_val(S, mino_type_of(sym));
         copy->as   = sym->as;
         copy->meta = meta;
         return copy;
@@ -135,9 +135,9 @@ mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
  * name tracks user-visible namespace switches. No-op when the var has
  * not yet been interned (init order: install.c interns it after the
  * primitives are registered). */
-void mino_publish_current_ns(mino_state_t *S)
+void mino_publish_current_ns(mino_state *S)
 {
-    mino_val_t *var;
+    mino_val *var;
     if (S->ns_vars.current_ns == NULL) return;
     var = var_find(S, "clojure.core", "*ns*");
     if (var == NULL) return;

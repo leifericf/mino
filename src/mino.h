@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 382
+#define MINO_VERSION_MINOR 383
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -180,7 +180,7 @@ typedef enum {
                      * Equality is identity, matching atoms.
                      * Constructed via `(ref v)`. The MINO_REF symbol
                      * was already taken by the embedder rooting handle
-                     * (mino_ref_t), so the enum tag is MINO_TX_REF; the
+                     * (mino_ref), so the enum tag is MINO_TX_REF; the
                      * Clojure-level type keyword is `:ref`. */
     MINO_AGENT      /* Asynchronous mutable cell with a per-state
                      * action run-queue. send / send-off enqueue
@@ -195,54 +195,54 @@ typedef enum {
                      * thread_limit, so send / send-off throw MTH001
                      * if the host hasn't granted a thread budget
                      * (default thread_limit == 1 means no agents). */
-} mino_type_t;
+} mino_type;
 
-typedef struct mino_val    mino_val_t;   /* opaque */
-typedef struct mino_env    mino_env_t;   /* opaque */
-typedef struct mino_future mino_future_t;/* opaque */
-typedef struct mino_state  mino_state_t; /* opaque */
-typedef struct mino_ref    mino_ref_t;   /* opaque */
+typedef struct mino_val    mino_val;   /* opaque */
+typedef struct mino_env    mino_env;   /* opaque */
+typedef struct mino_future mino_future;/* opaque */
+typedef struct mino_state  mino_state; /* opaque */
+typedef struct mino_ref    mino_ref;   /* opaque */
 
 /* Return the effective type of a value. Works for both heap-allocated
  * cells and tagged scalars (int, bool, nil, char). NULL is treated as
  * MINO_NIL. Use this to dispatch on type from C without reaching into
  * the value's internal layout. */
-mino_type_t mino_typeof(const mino_val_t *v);
+mino_type mino_typeof(const mino_val *v);
 
-typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env);
+typedef mino_val *(*mino_prim_fn)(mino_state *S, mino_val *args,
+                                    mino_env *env);
 /* argv ABI: receives evaluated args as a flat C array instead of a
  * cons spine. Skips eval_args' per-call cons allocation for prims
  * registered with mino_prim_argv. argv slots are GC-rooted by the
  * conservative stack scan for the duration of the call. */
-typedef mino_val_t *(*mino_prim_fn2)(mino_state_t *S,
-                                     mino_val_t **argv, int argc,
-                                     mino_env_t *env);
+typedef mino_val *(*mino_prim_fn2)(mino_state *S,
+                                     mino_val **argv, int argc,
+                                     mino_env *env);
 typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
 /* Host interop callback. target is the handle (NULL for ctor/static),
  * args is a cons list of evaluated arguments. */
-typedef mino_val_t *(*mino_host_fn)(mino_state_t *S, mino_val_t *target,
-                                    mino_val_t *args, void *ctx);
+typedef mino_val *(*mino_host_fn)(mino_state *S, mino_val *target,
+                                    mino_val *args, void *ctx);
 
 /* ------------------------------------------------------------------------- */
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
 
 /* Return the singleton nil value. */
-mino_val_t *mino_nil(mino_state_t *S);
+mino_val *mino_nil(mino_state *S);
 
 /* Return the singleton true value. */
-mino_val_t *mino_true(mino_state_t *S);
+mino_val *mino_true(mino_state *S);
 
 /* Return the singleton false value. */
-mino_val_t *mino_false(mino_state_t *S);
+mino_val *mino_false(mino_state *S);
 
 /* Return the singleton empty-list value `()`. Distinct from nil:
  * `seq?` is true, `nil?` is false, `empty?` is true, and `=` against
  * nil is false. Walkers using `mino_is_cons` terminate on it because
  * the type tag is MINO_EMPTY_LIST, not MINO_CONS. */
-mino_val_t *mino_empty_list(mino_state_t *S);
+mino_val *mino_empty_list(mino_state *S);
 
 /* Create an integer value from a signed long long. Total over the full
  * long long range. Values in [-2^60, 2^60 - 1] return a tag-encoded
@@ -257,55 +257,55 @@ mino_val_t *mino_empty_list(mino_state_t *S);
  * bitwise primitives, and the unchecked-* family never auto-promote;
  * they keep producing MINO_INT (boxed when outside the tag range) so
  * Clojure-style "long stays long" semantics are preserved. */
-mino_val_t *mino_int(mino_state_t *S, long long n);
+mino_val *mino_int(mino_state *S, long long n);
 
 /* Create a floating-point value. */
-mino_val_t *mino_float(mino_state_t *S, double f);
+mino_val *mino_float(mino_state *S, double f);
 
 /* Create a 32-bit single-precision floating-point value. The double
  * argument is narrowed to float and stored back as a double so
  * equality / print see the rounded value; the type tag distinguishes
  * it from `MINO_FLOAT` so `double?` returns false on the result. */
-mino_val_t *mino_float32(mino_state_t *S, double f);
+mino_val *mino_float32(mino_state *S, double f);
 
 /* Create a bigint from a signed long long. */
-mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n);
+mino_val *mino_bigint_from_ll(mino_state *S, long long n);
 
 /* Create a bigint by parsing a base-10 numeric string (optional leading
  * '+' or '-'). Returns NULL on parse failure. */
-mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s);
+mino_val *mino_bigint_from_string(mino_state *S, const char *s);
 
 /* Create a rational from numerator and denominator long longs. The result
  * is reduced (gcd = 1) and normalised so the denominator is positive.
  * If denom is zero, throws division-by-zero. If the result is integer,
  * returns a MINO_INT or MINO_BIGINT instead of a MINO_RATIO. */
-mino_val_t *mino_ratio_from_ll(mino_state_t *S, long long num, long long denom);
+mino_val *mino_ratio_from_ll(mino_state *S, long long num, long long denom);
 
 /* Create a bigdec from a base-10 numeric string. Returns NULL on parse
  * failure. Recognises optional sign, fractional part, and 'e'-prefixed
  * exponent; the trailing 'M' suffix is optional in this entry point. */
-mino_val_t *mino_bigdec_from_string(mino_state_t *S, const char *s);
+mino_val *mino_bigdec_from_string(mino_state *S, const char *s);
 
 /* Create a character value from a Unicode codepoint (0..0x10FFFF). */
-mino_val_t *mino_char(mino_state_t *S, int codepoint);
+mino_val *mino_char(mino_state *S, int codepoint);
 
 /* Create a string from a NUL-terminated C string. The data is copied. */
-mino_val_t *mino_string(mino_state_t *S, const char *s);
+mino_val *mino_string(mino_state *S, const char *s);
 
 /* Create a string from a buffer of length len. The data is copied. */
-mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len);
+mino_val *mino_string_n(mino_state *S, const char *s, size_t len);
 
 /* Intern a symbol from a NUL-terminated C string. */
-mino_val_t *mino_symbol(mino_state_t *S, const char *s);
+mino_val *mino_symbol(mino_state *S, const char *s);
 
 /* Intern a symbol from a buffer of length len. */
-mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len);
+mino_val *mino_symbol_n(mino_state *S, const char *s, size_t len);
 
 /* Intern a keyword from a NUL-terminated C string (without the leading :). */
-mino_val_t *mino_keyword(mino_state_t *S, const char *s);
+mino_val *mino_keyword(mino_state *S, const char *s);
 
 /* Intern a keyword from a buffer of length len (without the leading :). */
-mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len);
+mino_val *mino_keyword_n(mino_state *S, const char *s, size_t len);
 
 /* Intern a keyword from explicit (ns, name) buffers. The resulting
  * keyword carries `ns_len` so `name` / `namespace` round-trip the
@@ -313,27 +313,27 @@ mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len);
  * "a" "b/c")` produce DISTINCT vals even though their printed flat
  * form is identical. ns may be NULL or ns_len == 0 for an unqualified
  * keyword. */
-mino_val_t *mino_keyword_ns_n(mino_state_t *S,
+mino_val *mino_keyword_ns_n(mino_state *S,
                               const char *ns, size_t ns_len,
                               const char *name, size_t name_len);
 
 /* Same shape for symbols. */
-mino_val_t *mino_symbol_ns_n(mino_state_t *S,
+mino_val *mino_symbol_ns_n(mino_state *S,
                              const char *ns, size_t ns_len,
                              const char *name, size_t name_len);
 
 /* Create a cons cell (list node) with the given car and cdr. */
-mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr);
+mino_val *mino_cons(mino_state *S, mino_val *car, mino_val *cdr);
 
 /* Create a persistent vector from a C array of values. */
-mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len);
+mino_val *mino_vector(mino_state *S, mino_val **items, size_t len);
 
 /* Create a persistent hash map from parallel key and value arrays. */
-mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals,
+mino_val *mino_map(mino_state *S, mino_val **keys, mino_val **vals,
                      size_t len);
 
 /* Create a persistent hash set from a C array of values. */
-mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
+mino_val *mino_set(mino_state *S, mino_val **items, size_t len);
 
 /* ------------------------------------------------------------------------- */
 /* Collection builders                                                       */
@@ -344,33 +344,33 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
  * when you produce elements one at a time from C: open a builder,
  * push/put/add each element, finish to get the persistent value.
  *
- *   mino_vec_builder_t *b = mino_vector_builder_new(S);
+ *   mino_vec_builder *b = mino_vector_builder_new(S);
  *   for (size_t i = 0; i < n; i++) {
  *       mino_vector_builder_push(b, mino_int(S, items[i]));
  *   }
- *   mino_val_t *v = mino_vector_builder_finish(b);
+ *   mino_val *v = mino_vector_builder_finish(b);
  *
  * The builder roots the in-flight collection across GC; _finish hands
  * back the persistent result and releases the builder.
  */
-typedef struct mino_vec_builder mino_vec_builder_t;
-typedef struct mino_map_builder mino_map_builder_t;
-typedef struct mino_set_builder mino_set_builder_t;
+typedef struct mino_vec_builder mino_vec_builder;
+typedef struct mino_map_builder mino_map_builder;
+typedef struct mino_set_builder mino_set_builder;
 
-mino_vec_builder_t *mino_vector_builder_new   (mino_state_t *S);
-void                mino_vector_builder_push  (mino_vec_builder_t *b,
-                                               mino_val_t *v);
-mino_val_t         *mino_vector_builder_finish(mino_vec_builder_t *b);
+mino_vec_builder *mino_vector_builder_new   (mino_state *S);
+void                mino_vector_builder_push  (mino_vec_builder *b,
+                                               mino_val *v);
+mino_val         *mino_vector_builder_finish(mino_vec_builder *b);
 
-mino_map_builder_t *mino_map_builder_new      (mino_state_t *S);
-void                mino_map_builder_put      (mino_map_builder_t *b,
-                                               mino_val_t *k, mino_val_t *v);
-mino_val_t         *mino_map_builder_finish   (mino_map_builder_t *b);
+mino_map_builder *mino_map_builder_new      (mino_state *S);
+void                mino_map_builder_put      (mino_map_builder *b,
+                                               mino_val *k, mino_val *v);
+mino_val         *mino_map_builder_finish   (mino_map_builder *b);
 
-mino_set_builder_t *mino_set_builder_new      (mino_state_t *S);
-void                mino_set_builder_add      (mino_set_builder_t *b,
-                                               mino_val_t *v);
-mino_val_t         *mino_set_builder_finish   (mino_set_builder_t *b);
+mino_set_builder *mino_set_builder_new      (mino_state *S);
+void                mino_set_builder_add      (mino_set_builder *b,
+                                               mino_val *v);
+mino_val         *mino_set_builder_finish   (mino_set_builder *b);
 
 /* ------------------------------------------------------------------------- */
 /* Collection iterator                                                       */
@@ -388,9 +388,9 @@ mino_val_t         *mino_set_builder_finish   (mino_set_builder_t *b);
  *
  * Usage:
  *
- *   mino_iter_t *it = alloca(mino_iter_sizeof());
+ *   mino_iter *it = alloca(mino_iter_sizeof());
  *   mino_iter_init(S, it, coll);
- *   mino_val_t *k, *v;
+ *   mino_val *k, *v;
  *   while (mino_iter_next(it, &k, &v)) {
  *       // for vectors / sets / lists: k is the element, v is NULL
  *       // for maps: k is the key, v is the value
@@ -404,82 +404,82 @@ mino_val_t         *mino_set_builder_finish   (mino_set_builder_t *b);
  * 0 keeps returning 0; calling `_next` or `_done` on a NULL iterator
  * is harmless.
  */
-typedef struct mino_iter mino_iter_t;
+typedef struct mino_iter mino_iter;
 
 size_t       mino_iter_sizeof(void);
-void         mino_iter_init  (mino_state_t *S, mino_iter_t *it,
-                              mino_val_t *coll);
-int          mino_iter_next  (mino_iter_t *it,
-                              mino_val_t **out_k, mino_val_t **out_v);
-void         mino_iter_done  (mino_iter_t *it);
+void         mino_iter_init  (mino_state *S, mino_iter *it,
+                              mino_val *coll);
+int          mino_iter_next  (mino_iter *it,
+                              mino_val **out_k, mino_val **out_v);
+void         mino_iter_done  (mino_iter *it);
 
 /* Create a primitive function value from a C function pointer. */
-mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
+mino_val *mino_prim(mino_state *S, const char *name, mino_prim_fn fn);
 /* Create a primitive value backed by an argv-style C function. */
-mino_val_t *mino_prim_argv(mino_state_t *S, const char *name, mino_prim_fn2 fn);
+mino_val *mino_prim_argv(mino_state *S, const char *name, mino_prim_fn2 fn);
 
 /* Wrap a host pointer as an opaque handle with a type tag. */
-mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag);
+mino_val *mino_handle(mino_state *S, void *ptr, const char *tag);
 
 /* Wrap a host pointer with a type tag and a finalizer called on GC. */
-mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
+mino_val *mino_handle_ex(mino_state *S, void *ptr, const char *tag,
                            mino_finalizer_fn finalizer);
 
 /* Create a mutable atom initialized with val. */
-mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val);
+mino_val *mino_atom(mino_state *S, mino_val *val);
 
 /* Return 1 if v is a handle, 0 otherwise. */
-int         mino_is_handle(const mino_val_t *v);
+int         mino_is_handle(const mino_val *v);
 
 /* Return the host pointer from a handle, or NULL if v is not a handle. */
-void       *mino_handle_ptr(const mino_val_t *v);
+void       *mino_handle_ptr(const mino_val *v);
 
 /* Return the type tag from a handle, or NULL if v is not a handle. */
-const char *mino_handle_tag(const mino_val_t *v);
+const char *mino_handle_tag(const mino_val *v);
 
 /* Return 1 if v is an atom, 0 otherwise. */
-int         mino_is_atom(const mino_val_t *v);
+int         mino_is_atom(const mino_val *v);
 
 /* Return the current value of an atom. */
-mino_val_t *mino_atom_deref(const mino_val_t *a);
+mino_val *mino_atom_deref(const mino_val *a);
 
 /* Create a volatile cell initialized with val. */
-mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val);
+mino_val *mino_volatile(mino_state *S, mino_val *val);
 
 /* Return 1 if v is a volatile, 0 otherwise. */
-int         mino_is_volatile(const mino_val_t *v);
+int         mino_is_volatile(const mino_val *v);
 
 /* Return the current value of a volatile, or NULL if v is not a volatile. */
-mino_val_t *mino_volatile_deref(const mino_val_t *v);
+mino_val *mino_volatile_deref(const mino_val *v);
 
 /* Set the value of an atom. */
-void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+void        mino_atom_reset(mino_val *a, mino_val *val);
 
 /* Construct a map entry holding (k, v). Used by first / seq of a map
  * to publish entries with the right type identity (so key / val can
  * type-check), and by `clojure.lang.MapEntry/create`. */
-mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
+mino_val *mino_map_entry(mino_state *S, mino_val *k, mino_val *v);
 
 /* Construct an STM ref holding the given committed value. The watches
  * map and validator slots start NULL; install them via add-watch /
  * set-validator! on the returned cell. The ref's identity (returned
  * monotonic ID) is unique within S. */
-mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val);
+mino_val *mino_tx_ref(mino_state *S, mino_val *val);
 
 /* Construct an asynchronous agent holding the given initial state.
  * Watches, validator, and error handler all start NULL; install them
  * via add-watch / set-validator! / set-error-handler! on the returned
  * cell. The agent's action queue is heap-allocated and freed via the
  * GC sweep finalizer when the agent becomes unreachable. */
-mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial);
+mino_val *mino_agent(mino_state *S, mino_val *initial);
 
 /* Return 1 if v is an agent, 0 otherwise. NULL-safe. */
-int         mino_is_agent(const mino_val_t *v);
+int         mino_is_agent(const mino_val *v);
 
 /* Return the agent's current state value (the most-recently committed
  * action result, or the initial value if no action has applied). Returns
  * NULL if v is not an agent. Mirrors mino_atom_deref / mino_tx_ref_deref. */
-mino_val_t *mino_agent_deref(const mino_val_t *a);
+mino_val *mino_agent_deref(const mino_val *a);
 
 /* Enqueue (fn current-value arg1 arg2 ...) onto the agent's POOLED
  * run-queue and return the agent immediately. `extra_args` is a cons
@@ -500,14 +500,14 @@ mino_val_t *mino_agent_deref(const mino_val_t *a);
  *
  * Inside a transaction, the action is queued and only fires after a
  * successful commit, matching JVM canon. */
-mino_val_t *mino_send(mino_state_t *S, mino_val_t *agent,
-                      mino_val_t *fn, mino_val_t *extra_args);
+mino_val *mino_send(mino_state *S, mino_val *agent,
+                      mino_val *fn, mino_val *extra_args);
 
 /* Like mino_send but routes the action onto the SOLO pool. Same
  * error semantics. mino's per-state eval lock means actions across
  * the two pools still serialize, but the queues are independent. */
-mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
-                          mino_val_t *fn, mino_val_t *extra_args);
+mino_val *mino_send_off(mino_state *S, mino_val *agent,
+                          mino_val *fn, mino_val *extra_args);
 
 /* Block the calling thread until each named agent's in-flight count
  * reaches zero. `agents` is a NULL-terminated array of MINO_AGENT
@@ -515,19 +515,19 @@ mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
  * called from inside an agent action (MST002, would self-deadlock)
  * or if any agent is from a foreign state (MST007). Returns nil on
  * success. */
-mino_val_t *mino_await(mino_state_t *S, mino_val_t **agents);
+mino_val *mino_await(mino_state *S, mino_val **agents);
 
 /* Like mino_await with a millisecond timeout. Returns 1 if every
  * named agent reached zero in-flight before the deadline, 0 on
  * timeout. Throws on cross-state misuse or self-await (returns 0
  * after the throw is published). */
-int         mino_await_for(mino_state_t *S, long long timeout_ms,
-                            mino_val_t **agents);
+int         mino_await_for(mino_state *S, long long timeout_ms,
+                            mino_val **agents);
 
 /* Return the agent's most recent captured exception value, or NULL
  * if the agent is in a clean state. Throws on cross-state misuse
  * (returns NULL). */
-mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent);
+mino_val *mino_agent_error(mino_state *S, mino_val *agent);
 
 /* Restart a failed agent: clears its captured error and resets its
  * value to `new_state`. With clear_actions=1, drops every queued
@@ -537,12 +537,12 @@ mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent);
  *   - agent is from a foreign state (MST007),
  *   - agent is not failed (MST002),
  *   - the validator (if any) rejects new_state (MCT001). */
-mino_val_t *mino_restart_agent(mino_state_t *S, mino_val_t *agent,
-                                mino_val_t *new_state,
+mino_val *mino_restart_agent(mino_state *S, mino_val *agent,
+                                mino_val *new_state,
                                 int clear_actions);
 
 /* Return 1 if v is an STM ref (MINO_TX_REF), 0 otherwise. NULL-safe. */
-int         mino_is_tx_ref(const mino_val_t *v);
+int         mino_is_tx_ref(const mino_val *v);
 
 /* Read a ref. Outside any transaction: atomic load of the ref's
  * committed value. Inside a transaction on the calling thread: the
@@ -552,7 +552,7 @@ int         mino_is_tx_ref(const mino_val_t *v);
  * either entered an outer mino_tx_run or is executing inside a Clojure
  * dosync; outside both, the committed value is returned without any
  * tx bookkeeping. Returns NULL if v is not a ref. */
-mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *v);
+mino_val *mino_tx_ref_deref(mino_state *S, mino_val *v);
 
 /* Set the ref's in-transaction tentative value to val. Must be called
  * from inside a transaction (started either by a Clojure dosync or by
@@ -560,7 +560,7 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *v);
  * "Can't set after commute" if commute was called on this ref earlier
  * in the same tx. Throws eval/type MTY001 if v is not a ref. Returns
  * val on success. Equivalent to Clojure's `(ref-set ref val)`. */
-mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *v, mino_val_t *val);
+mino_val *mino_tx_ref_set(mino_state *S, mino_val *v, mino_val *val);
 
 /* C-callable transformer used by mino_tx_alter_c / mino_tx_commute_c.
  * `cur` is the in-tx effective value at call time; `user` is the
@@ -570,16 +570,16 @@ mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *v, mino_val_t *val);
  * runner. The function pointer must remain valid for the lifetime of
  * the transaction (in particular: across retries and through commit-
  * time replay for commute). */
-typedef mino_val_t *(*mino_tx_xform_fn)(mino_state_t *S, mino_val_t *cur,
-                                         void *user, mino_env_t *env);
+typedef mino_val *(*mino_tx_xform_fn)(mino_state *S, mino_val *cur,
+                                         void *user, mino_env *env);
 
 /* Apply (fn cur user) to ref's current in-tx value and store the
  * result. Records a read for read-set validation. Must be called from
  * inside a transaction. Returns the new value, or NULL if the
  * transformer threw. Equivalent to (alter ref #(fn % user)). */
-mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *v,
+mino_val *mino_tx_alter_c(mino_state *S, mino_val *v,
                             mino_tx_xform_fn fn, void *user,
-                            mino_env_t *env);
+                            mino_env *env);
 
 /* Like mino_tx_alter_c but does NOT record a read (commute semantics).
  * The fn is invoked once eagerly to produce the call-site value; if
@@ -589,15 +589,15 @@ mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *v,
  * what gets committed (matching JVM, which skips commute-log replay
  * for refs in the write set). Returns the call-site value, or NULL if
  * the transformer threw. */
-mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *v,
+mino_val *mino_tx_commute_c(mino_state *S, mino_val *v,
                               mino_tx_xform_fn fn, void *user,
-                              mino_env_t *env);
+                              mino_env *env);
 
 /* Pin the ref against any concurrent committer until this transaction
  * commits or aborts. Returns the in-tx effective value. Must be in a
  * transaction. Equivalent to (ensure ref). */
-mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *v,
-                           mino_env_t *env);
+mino_val *mino_tx_ensure(mino_state *S, mino_val *v,
+                           mino_env *env);
 
 /* C-callable transaction body, used by mino_tx_run. Returns the
  * body's last value. The body may invoke any in-tx accessor
@@ -608,11 +608,11 @@ mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *v,
  * before throwing eval/state MST004. Any user state mutated through
  * `user` survives across retries; if clean retry semantics matter,
  * snapshot mutable state into a retry-local buffer at the top of the
- * body. mino_val_t * pointers captured in user state should not be
+ * body. mino_val * pointers captured in user state should not be
  * relied on across retries (the GC may relocate or finalize between
  * iterations); re-derive them from the ref / world on each call. */
-typedef mino_val_t *(*mino_tx_body_fn)(mino_state_t *S, void *user,
-                                        mino_env_t *env);
+typedef mino_val *(*mino_tx_body_fn)(mino_state *S, void *user,
+                                        mino_env *env);
 
 /* Run body inside a transaction. Returns body's result on commit,
  * or NULL if the body threw an unhandled exception or the retry cap
@@ -621,8 +621,8 @@ typedef mino_val_t *(*mino_tx_body_fn)(mino_state_t *S, void *user,
  * the inner call is absorbed into the outer's tx and runs once
  * without its own setjmp / retry frame. Equivalent to the host-level
  * (dosync (body)). */
-mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body,
-                        void *user, mino_env_t *env);
+mino_val *mino_tx_run(mino_state *S, mino_tx_body_fn body,
+                        void *user, mino_env *env);
 
 /* ------------------------------------------------------------------------- */
 /* Record types                                                              */
@@ -645,14 +645,14 @@ mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body,
  * Mirrors the Clojure `defrecord` macro name to make the C/script
  * analogy obvious to a C/C++/Rust embedder.
  */
-mino_val_t *mino_defrecord(mino_state_t *S,
+mino_val *mino_defrecord(mino_state *S,
                            const char *ns,
                            const char *name,
                            const char *const *field_names,
                            size_t n_fields);
 
 /* Return 1 if v is a record type (MINO_TYPE), 0 otherwise. */
-int mino_is_record_type(const mino_val_t *v);
+int mino_is_record_type(const mino_val *v);
 
 /*
  * Build a record. type must be a MINO_TYPE returned by
@@ -665,8 +665,8 @@ int mino_is_record_type(const mino_val_t *v);
  * The new record has no extension keys; assoc with an undeclared key
  * lazily allocates the ext map.
  */
-mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
-                        mino_val_t **vals, size_t n_vals);
+mino_val *mino_record(mino_state *S, mino_val *type,
+                        mino_val **vals, size_t n_vals);
 
 /*
  * Read a declared field by name. Returns the field value (borrowed)
@@ -674,10 +674,10 @@ mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
  * Extension keys are not read by this entry point; embedders can
  * reach them via the script-level (get r :ext-key) path.
  */
-mino_val_t *mino_record_field(const mino_val_t *record, const char *name);
+mino_val *mino_record_field(const mino_val *record, const char *name);
 
 /* Return 1 if v is a record (MINO_RECORD), 0 otherwise. */
-int mino_is_record(const mino_val_t *v);
+int mino_is_record(const mino_val *v);
 
 /* ------------------------------------------------------------------------- */
 /* Transient (batch-mutation) API                                            */
@@ -699,29 +699,29 @@ int mino_is_record(const mino_val_t *v);
 /* Wrap a persistent vector, map, or set in a new transient. Throws
  * on other types. The returned value is reusable until
  * mino_persistent is called on it. */
-mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll);
+mino_val *mino_transient(mino_state *S, mino_val *coll);
 
 /* Extract the current persistent value and invalidate the transient.
  * Further *_bang calls on t will throw. */
-mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t);
+mino_val *mino_persistent(mino_state *S, mino_val *t);
 
 /* Transient mutators. Each returns t on success (after updating its
  * inner persistent value) and NULL on a classified error. The caller
  * must use the returned value instead of retaining its own handle to
  * the transient across the call, matching Clojure's convention. */
-mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
-                            mino_val_t *key, mino_val_t *val);
-mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
-                           mino_val_t *val);
-mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
-                             mino_val_t *key);
-mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
-                           mino_val_t *key);
-mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t);
+mino_val *mino_assoc_bang(mino_state *S, mino_val *t,
+                            mino_val *key, mino_val *val);
+mino_val *mino_conj_bang(mino_state *S, mino_val *t,
+                           mino_val *val);
+mino_val *mino_dissoc_bang(mino_state *S, mino_val *t,
+                             mino_val *key);
+mino_val *mino_disj_bang(mino_state *S, mino_val *t,
+                           mino_val *key);
+mino_val *mino_pop_bang(mino_state *S, mino_val *t);
 
 /* Transient predicates and accessors. */
-int         mino_is_transient(const mino_val_t *v);
-size_t      mino_transient_count(const mino_val_t *t);
+int         mino_is_transient(const mino_val *v);
+size_t      mino_transient_count(const mino_val *t);
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
@@ -733,54 +733,54 @@ size_t      mino_transient_count(const mino_val_t *t);
  * char, nil) and boxed cells. mino_is_float matches both MINO_FLOAT
  * (double) and MINO_FLOAT32; mino_is_map / mino_is_set match the
  * sorted and unsorted variants. */
-int mino_is_nil       (const mino_val_t *v);
-int mino_is_truthy    (const mino_val_t *v);
-int mino_is_bool      (const mino_val_t *v);
-int mino_is_int       (const mino_val_t *v);
-int mino_is_float     (const mino_val_t *v);
-int mino_is_char      (const mino_val_t *v);
-int mino_is_string    (const mino_val_t *v);
-int mino_is_symbol    (const mino_val_t *v);
-int mino_is_keyword   (const mino_val_t *v);
-int mino_is_cons      (const mino_val_t *v);
-int mino_is_empty_list(const mino_val_t *v);
-int mino_is_vector    (const mino_val_t *v);
-int mino_is_map       (const mino_val_t *v);
-int mino_is_set       (const mino_val_t *v);
-int mino_is_fn        (const mino_val_t *v);
-int mino_is_macro     (const mino_val_t *v);
-int mino_is_prim      (const mino_val_t *v);
-int mino_is_lazy      (const mino_val_t *v);
-int mino_is_var       (const mino_val_t *v);
-int mino_is_bigint    (const mino_val_t *v);
-int mino_is_ratio     (const mino_val_t *v);
-int mino_is_bigdec    (const mino_val_t *v);
-int mino_is_uuid      (const mino_val_t *v);
-int mino_is_regex     (const mino_val_t *v);
+int mino_is_nil       (const mino_val *v);
+int mino_is_truthy    (const mino_val *v);
+int mino_is_bool      (const mino_val *v);
+int mino_is_int       (const mino_val *v);
+int mino_is_float     (const mino_val *v);
+int mino_is_char      (const mino_val *v);
+int mino_is_string    (const mino_val *v);
+int mino_is_symbol    (const mino_val *v);
+int mino_is_keyword   (const mino_val *v);
+int mino_is_cons      (const mino_val *v);
+int mino_is_empty_list(const mino_val *v);
+int mino_is_vector    (const mino_val *v);
+int mino_is_map       (const mino_val *v);
+int mino_is_set       (const mino_val *v);
+int mino_is_fn        (const mino_val *v);
+int mino_is_macro     (const mino_val *v);
+int mino_is_prim      (const mino_val *v);
+int mino_is_lazy      (const mino_val *v);
+int mino_is_var       (const mino_val *v);
+int mino_is_bigint    (const mino_val *v);
+int mino_is_ratio     (const mino_val *v);
+int mino_is_bigdec    (const mino_val *v);
+int mino_is_uuid      (const mino_val *v);
+int mino_is_regex     (const mino_val *v);
 
 /* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
-int mino_eq(const mino_val_t *a, const mino_val_t *b);
+int mino_eq(const mino_val *a, const mino_val *b);
 
 /* Return the first element of a cons cell, or NULL. */
-mino_val_t *mino_car(const mino_val_t *v);
+mino_val *mino_car(const mino_val *v);
 
 /* Return the rest of a cons cell, or NULL. */
-mino_val_t *mino_cdr(const mino_val_t *v);
+mino_val *mino_cdr(const mino_val *v);
 
 /* Return the number of cons cells in a list. */
-size_t mino_length(const mino_val_t *list);
+size_t mino_length(const mino_val *list);
 
 /* Type-safe C extraction. Each returns 1 on success, 0 on type mismatch.
  * mino_to_bool uses truthiness (only nil and false are falsey). String,
  * keyword, and symbol extractors write the interned byte pointer through
  * `out` (NUL-terminated, mino-owned) and the byte length through `len`. */
-int mino_to_int    (const mino_val_t *v, long long *out);
-int mino_to_float  (const mino_val_t *v, double *out);
-int mino_to_bool   (const mino_val_t *v);
-int mino_to_char   (const mino_val_t *v, int *cp);
-int mino_to_string (const mino_val_t *v, const char **out, size_t *len);
-int mino_to_keyword(const mino_val_t *v, const char **out, size_t *len);
-int mino_to_symbol (const mino_val_t *v, const char **out, size_t *len);
+int mino_to_int    (const mino_val *v, long long *out);
+int mino_to_float  (const mino_val *v, double *out);
+int mino_to_bool   (const mino_val *v);
+int mino_to_char   (const mino_val *v, int *cp);
+int mino_to_string (const mino_val *v, const char **out, size_t *len);
+int mino_to_keyword(const mino_val *v, const char **out, size_t *len);
+int mino_to_symbol (const mino_val *v, const char **out, size_t *len);
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */
@@ -789,13 +789,13 @@ int mino_to_symbol (const mino_val_t *v, const char **out, size_t *len);
 #include <stdio.h>
 
 /* Print a value to stdout in readable form. */
-void mino_print(mino_state_t *S, const mino_val_t *v);
+void mino_print(mino_state *S, const mino_val *v);
 
 /* Print a value to stdout followed by a newline. */
-void mino_println(mino_state_t *S, const mino_val_t *v);
+void mino_println(mino_state *S, const mino_val *v);
 
 /* Print a value to the given FILE stream. */
-void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
+void mino_print_to(mino_state *S, FILE *out, const mino_val *v);
 
 /* Print a value's readable form into a sized buffer (NUL-terminated).
  * Returns the number of bytes written excluding the trailing NUL, or
@@ -804,7 +804,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
  * fit and the function still returns the truncated byte count. Use
  * this when the embedder routes output elsewhere than a FILE *
  * (server response buffer, plugin host, IDE panel). */
-int  mino_print_to_buf(mino_state_t *S, const mino_val_t *v,
+int  mino_print_to_buf(mino_state *S, const mino_val *v,
                        char *buf, size_t n);
 
 /* ------------------------------------------------------------------------- */
@@ -818,34 +818,34 @@ int  mino_print_to_buf(mino_state_t *S, const mino_val_t *v,
  * past the trailing whitespace. On parse error returns NULL and writes a
  * human-readable message via `mino_last_error()`.
  */
-mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end);
+mino_val *mino_read(mino_state *S, const char *src, const char **end);
 
 /* Return the last error message, or NULL if no error occurred. */
-const char *mino_last_error(mino_state_t *S);
+const char *mino_last_error(mino_state *S);
 
 /* Opaque structured diagnostic type. Use mino_last_diag() to retrieve. */
-typedef struct mino_diag mino_diag_t;
+typedef struct mino_diag mino_diag;
 
 /* Return the last structured diagnostic, or NULL if no error occurred.
  * The returned pointer is valid until the next error or clear_error. */
-const mino_diag_t *mino_last_diag(mino_state_t *S);
+const mino_diag *mino_last_diag(mino_state *S);
 
 /* Return the last error as a mino map with :mino/kind, :mino/code, etc.
  * Returns nil if no error occurred. The value is GC-owned and cached. */
-mino_val_t *mino_last_error_map(mino_state_t *S);
+mino_val *mino_last_error_map(mino_state *S);
 
 /* Return the last error's classified kind (e.g. "eval/type", "eval/arity",
  * "name", "reader") or NULL when no error is current. The returned
  * pointer is valid until the next error or mino_clear_error call. */
-const char *mino_error_kind(mino_state_t *S);
+const char *mino_error_kind(mino_state *S);
 
 /* Return the last error's stable code (e.g. "MTY001", "MNS002") or NULL
  * when no error is current. Lifetimes match mino_error_kind. */
-const char *mino_error_code(mino_state_t *S);
+const char *mino_error_code(mino_state *S);
 
 /* Clear the last error and diagnostic. After this call mino_last_error,
  * mino_error_kind, and mino_error_code all return NULL. */
-void mino_clear_error(mino_state_t *S);
+void mino_clear_error(mino_state *S);
 
 /* Diagnostic rendering modes. */
 #define MINO_DIAG_RENDER_COMPACT 0
@@ -853,7 +853,7 @@ void mino_clear_error(mino_state_t *S);
 
 /* Render a diagnostic into buf. Returns bytes written (excl NUL).
  * mode is one of MINO_DIAG_RENDER_COMPACT or _PRETTY. */
-int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
+int mino_render_diag(mino_state *S, const mino_diag *d,
                      int mode, char *buf, size_t n);
 
 /* ------------------------------------------------------------------------- */
@@ -867,14 +867,14 @@ int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
  *
  * Fatal: aborts on allocation failure (no state exists to report through).
  */
-mino_state_t *mino_state_new(void);
+mino_state *mino_state_new(void);
 
 /*
  * Free a runtime state and all resources owned by it. All GC-managed objects,
  * intern tables, module caches, and metadata are released. Environments
  * created within this state become invalid.
  */
-void mino_state_free(mino_state_t *S);
+void mino_state_free(mino_state *S);
 
 /*
  * JIT mode control (per-state).
@@ -902,10 +902,10 @@ typedef enum {
     MINO_JIT_MODE_AUTO = 0,
     MINO_JIT_MODE_OFF  = 1,
     MINO_JIT_MODE_ON   = 2
-} mino_jit_mode_t;
+} mino_jit_mode;
 
-void            mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode);
-mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S);
+void            mino_state_set_jit_mode(mino_state *S, mino_jit_mode mode);
+mino_jit_mode mino_state_jit_mode(const mino_state *S);
 
 /*
  * JIT hot threshold (call count before AUTO mode triggers a compile).
@@ -929,8 +929,8 @@ mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S);
  * integer); unparseable / non-positive values fall back to the
  * default. NULL state is a no-op.
  */
-void     mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold);
-unsigned mino_state_jit_hot_threshold(const mino_state_t *S);
+void     mino_state_set_jit_hot_threshold(mino_state *S, unsigned threshold);
+unsigned mino_state_jit_hot_threshold(const mino_state *S);
 
 /*
  * JIT capability query. Returns a snapshot of the runtime's JIT
@@ -941,7 +941,7 @@ unsigned mino_state_jit_hot_threshold(const mino_state_t *S);
  *   available  -- non-zero when this build was compiled with JIT
  *                 support AND the host arch / OS is one of the
  *                 supported targets. Always 0 on mino-lean.
- *   mode       -- the state's current mino_jit_mode_t.
+ *   mode       -- the state's current mino_jit_mode.
  *   threshold  -- the state's current hot threshold.
  *   host_arch  -- "arm64" / "x86_64" / "unknown".
  *   host_os    -- "darwin" / "linux" / "windows" / "unknown".
@@ -951,13 +951,13 @@ unsigned mino_state_jit_hot_threshold(const mino_state_t *S);
  */
 typedef struct {
     int             available;
-    mino_jit_mode_t mode;
+    mino_jit_mode mode;
     unsigned        threshold;
     const char     *host_arch;
     const char     *host_os;
-} mino_jit_capability_t;
+} mino_jit_capability;
 
-mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S);
+mino_jit_capability mino_state_jit_capability(const mino_state *S);
 
 /* ------------------------------------------------------------------------- */
 /* Environment and evaluator                                                 */
@@ -972,9 +972,9 @@ mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S);
  *
  * Returns NULL on allocation failure (check mino_last_error).
  */
-mino_env_t *mino_env_new(mino_state_t *S);
+mino_env *mino_env_new(mino_state *S);
 /* Free an environment and unregister it from the collector. */
-void        mino_env_free(mino_state_t *S, mino_env_t *env);
+void        mino_env_free(mino_state *S, mino_env *env);
 
 /*
  * Clone an environment: allocate a new root environment and copy all
@@ -982,26 +982,26 @@ void        mino_env_free(mino_state_t *S, mino_env_t *env);
  * the clone is only meaningful within the same state. Useful for
  * snapshotting a session before independent evaluation in each copy.
  */
-mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env);
+mino_env *mino_env_clone(mino_state *S, mino_env *env);
 
 /*
  * Convenience: allocate a new env and install the sandbox preset.
  * Equivalent to:
  *
- *   mino_env_t *env = mino_env_new(S);
+ *   mino_env *env = mino_env_new(S);
  *   mino_install_sandbox(S, env);
  *
  * Use this when getting a runnable env in one line matters and the
  * sandbox surface is the right contract. For a custom tier, build the
  * env explicitly and pass a MINO_CAP_* bitmask to mino_install.
  */
-mino_env_t *mino_env_new_default(mino_state_t *S);
+mino_env *mino_env_new_default(mino_state *S);
 
 /* Define or replace a binding in `env`. */
-void        mino_env_set(mino_state_t *S, mino_env_t *env, const char *name,
-                         mino_val_t *val);
+void        mino_env_set(mino_state *S, mino_env *env, const char *name,
+                         mino_val *val);
 /* Look up `name`. Returns NULL if unbound. */
-mino_val_t *mino_env_get(mino_env_t *env, const char *name);
+mino_val *mino_env_get(mino_env *env, const char *name);
 
 /*
  * Evaluate one form. Returns NULL on error and writes a message via
@@ -1012,7 +1012,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  * rather than aborting the process. The state remains usable after an
  * OOM return.
  */
-mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
+mino_val *mino_eval(mino_state *S, mino_val *form, mino_env *env);
 
 /*
  * Read and evaluate all forms in `src`. Returns the value of the last
@@ -1021,15 +1021,15 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
  * Installs its own try frame: OOM during read or eval returns NULL
  * with an error message rather than aborting.
  */
-mino_val_t *mino_eval_string(mino_state_t *S, const char *src,
-                             mino_env_t *env);
+mino_val *mino_eval_string(mino_state *S, const char *src,
+                             mino_env *env);
 
 /*
  * Read a file at `path` and evaluate all forms. Returns the value of the
  * last form, or NULL on error (file I/O failures and parse/eval errors).
  */
-mino_val_t *mino_load_file(mino_state_t *S, const char *path,
-                           mino_env_t *env);
+mino_val *mino_load_file(mino_state *S, const char *path,
+                           mino_env *env);
 
 /*
  * Protected variants of mino_eval / mino_eval_string / mino_load_file.
@@ -1046,26 +1046,26 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path,
  * embedders that want a diagnostic must inspect *out_ex or call
  * mino_last_error explicitly.
  */
-int mino_eval_ex       (mino_state_t *S, mino_val_t *form, mino_env_t *env,
-                        mino_val_t **out, mino_val_t **out_ex);
-int mino_eval_string_ex(mino_state_t *S, const char *src, mino_env_t *env,
-                        mino_val_t **out, mino_val_t **out_ex);
-int mino_load_file_ex  (mino_state_t *S, const char *path, mino_env_t *env,
-                        mino_val_t **out, mino_val_t **out_ex);
+int mino_eval_ex       (mino_state *S, mino_val *form, mino_env *env,
+                        mino_val **out, mino_val **out_ex);
+int mino_eval_string_ex(mino_state *S, const char *src, mino_env *env,
+                        mino_val **out, mino_val **out_ex);
+int mino_load_file_ex  (mino_state *S, const char *path, mino_env *env,
+                        mino_val **out, mino_val **out_ex);
 
 /*
  * Shorthand: bind a C function as a primitive in `env`.
  * Equivalent to mino_env_set(S, env, name, mino_prim(S, name, fn)).
  */
-void mino_register_fn(mino_state_t *S, mino_env_t *env, const char *name,
+void mino_register_fn(mino_state *S, mino_env *env, const char *name,
                       mino_prim_fn fn);
 
 /*
  * Call a callable value (fn, macro, prim) with an argument list.
  * Returns the result, or NULL on error (via mino_last_error).
  */
-mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-                      mino_env_t *env);
+mino_val *mino_call(mino_state *S, mino_val *fn, mino_val *args,
+                      mino_env *env);
 
 /*
  * Protected call: same as mino_call but returns 0 on success (writing
@@ -1079,8 +1079,8 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
  * handling that want to surface the user's ex-info / map / etc.
  * unchanged. *out_ex is set to NULL on success or if out_ex is NULL.
  */
-int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-               mino_env_t *env, mino_val_t **out, mino_val_t **out_ex);
+int mino_pcall(mino_state *S, mino_val *fn, mino_val *args,
+               mino_env *env, mino_val **out, mino_val **out_ex);
 
 /* ------------------------------------------------------------------------- */
 /* Exceptions                                                                */
@@ -1104,7 +1104,7 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
  * information-carrying map built via mino_map(). This is the C-side
  * analogue of the (throw ex) mino primitive.
  */
-mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex);
+mino_val *mino_throw(mino_state *S, mino_val *ex);
 
 /* ------------------------------------------------------------------------- */
 /* Argument parsing                                                          */
@@ -1124,12 +1124,12 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex);
  *   "y"  const char **      -- MINO_SYMBOL name
  *   "b"  int *              -- MINO_BOOL (0 or 1)
  *   "c"  int *              -- MINO_CHAR codepoint (0..0x10FFFF)
- *   "v"  mino_val_t **      -- any value (no type check)
- *   "V"  mino_val_t **      -- MINO_VECTOR
- *   "M"  mino_val_t **      -- MINO_MAP
- *   "L"  mino_val_t **      -- MINO_CONS or MINO_NIL (a list)
- *   "H"  mino_val_t **      -- MINO_HANDLE
- *   "A"  mino_val_t **      -- MINO_ATOM
+ *   "v"  mino_val **      -- any value (no type check)
+ *   "V"  mino_val **      -- MINO_VECTOR
+ *   "M"  mino_val **      -- MINO_MAP
+ *   "L"  mino_val **      -- MINO_CONS or MINO_NIL (a list)
+ *   "H"  mino_val **      -- MINO_HANDLE
+ *   "A"  mino_val **      -- MINO_ATOM
  *
  * Returns 0 on success, -1 on arity or type error. On failure the current
  * error is set via mino_last_error with kind "eval/arity" or "eval/type"
@@ -1139,7 +1139,7 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex);
  * Extra arguments beyond the format string cause an arity error; missing
  * arguments do the same.
  */
-int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
+int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                     const char *fmt, ...);
 
 /* ------------------------------------------------------------------------- */
@@ -1150,7 +1150,7 @@ int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
  * Enable interop dispatch. By default all host primitives return
  * "interop disabled". Call this after registration to activate them.
  */
-void mino_host_enable(mino_state_t *S);
+void mino_host_enable(mino_state *S);
 
 /*
  * Register host capabilities. String arguments must outlive the state.
@@ -1158,15 +1158,15 @@ void mino_host_enable(mino_state_t *S);
  *
  * arity: expected argument count, or -1 for variadic.
  */
-void mino_host_register_ctor(mino_state_t *S, const char *type_key,
+void mino_host_register_ctor(mino_state *S, const char *type_key,
                               int arity, mino_host_fn fn, void *ctx);
-void mino_host_register_method(mino_state_t *S, const char *type_key,
+void mino_host_register_method(mino_state *S, const char *type_key,
                                 const char *method_key, int arity,
                                 mino_host_fn fn, void *ctx);
-void mino_host_register_static(mino_state_t *S, const char *type_key,
+void mino_host_register_static(mino_state *S, const char *type_key,
                                 const char *method_key, int arity,
                                 mino_host_fn fn, void *ctx);
-void mino_host_register_getter(mino_state_t *S, const char *type_key,
+void mino_host_register_getter(mino_state *S, const char *type_key,
                                 const char *field_key, mino_host_fn fn,
                                 void *ctx);
 
@@ -1187,7 +1187,7 @@ typedef const char *(*mino_resolve_fn)(const char *name, void *ctx);
  * once; subsequent requires of the same name return the cached value.
  * Pass NULL to remove the resolver.
  */
-void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx);
+void mino_set_resolver(mino_state *S, mino_resolve_fn fn, void *ctx);
 
 /*
  * Register a bundled-stdlib source under `name`. Subsequent calls to
@@ -1205,7 +1205,7 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx);
  * embedders that bundle their own non-clojure namespaces (mirroring
  * mino_set_resolver for the disk path).
  */
-void mino_register_bundled_lib(mino_state_t *S, const char *name,
+void mino_register_bundled_lib(mino_state *S, const char *name,
                                 const char *source);
 
 /* ------------------------------------------------------------------------- */
@@ -1286,7 +1286,7 @@ void mino_register_bundled_lib(mino_state_t *S, const char *name,
  * matching mino_install_minimal. Idempotent: bits already installed are
  * skipped silently.
  */
-void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps);
+void mino_install(mino_state *S, mino_env *env, unsigned int caps);
 
 /*
  * Floor-only convenience. Installs the foundational C primitives plus
@@ -1295,25 +1295,25 @@ void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps);
  * NOT evaluate core.clj. Use when targeting Lua-class cold start in
  * embedded mode.
  */
-void mino_install_minimal(mino_state_t *S, mino_env_t *env);
+void mino_install_minimal(mino_state *S, mino_env *env);
 
 /*
  * Sandbox preset: equivalent to mino_install(S, env, MINO_CAP_DEFAULT).
  * Names the recipe for "safe untrusted-script env" so embedders don't
  * reinvent the threat model.
  */
-void mino_install_sandbox(mino_state_t *S, mino_env_t *env);
+void mino_install_sandbox(mino_state *S, mino_env *env);
 
 /*
  * Install every capability and every bundled stdlib namespace the
  * standalone binary ships with. Equivalent to
  * mino_install(S, env, MINO_CAP_ALL).
  */
-void mino_install_all(mino_state_t *S, mino_env_t *env);
+void mino_install_all(mino_state *S, mino_env *env);
 
 /* Inspect installed capabilities. Bit set per MINO_CAP_*. */
-unsigned int mino_capabilities(const mino_state_t *S);
-int          mino_capability_installed(const mino_state_t *S, unsigned int cap);
+unsigned int mino_capabilities(const mino_state *S);
+int          mino_capability_installed(const mino_state *S, unsigned int cap);
 
 /*
  * Enumerate the full capability registry. The returned array is static,
@@ -1325,9 +1325,9 @@ typedef struct {
     const char  *name;     /* canonical label ("io", "regex", ...) */
     unsigned int bit;      /* MINO_CAP_* */
     const char  *summary;  /* one-line UX description */
-} mino_capability_info_t;
+} mino_capability_info;
 
-const mino_capability_info_t *mino_capability_list(void);
+const mino_capability_info *mino_capability_list(void);
 
 /*
  * Look up the capability that owns a given symbol name, if any. Returns
@@ -1335,7 +1335,7 @@ const mino_capability_info_t *mino_capability_list(void);
  * gateable primitive or canonical core.clj definition. Used by the
  * eval_symbol MNS002 diagnostic to enrich "unbound symbol" errors.
  */
-const mino_capability_info_t *mino_capability_for_symbol(const char *name);
+const mino_capability_info *mino_capability_for_symbol(const char *name);
 
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */
@@ -1350,14 +1350,14 @@ const mino_capability_info_t *mino_capability_for_symbol(const char *name);
  * When a limit is exceeded, the current eval returns NULL and
  * mino_last_error() reports the cause.
  */
-void mino_set_limit(mino_state_t *S, int kind, size_t value);
+void mino_set_limit(mino_state *S, int kind, size_t value);
 
 /*
  * Request interruption of a running eval. Sets a flag that the eval loop
  * checks on each step. Safe to call from a different thread than the one
  * running eval. The flag is cleared at the start of the next eval call.
  */
-void mino_interrupt(mino_state_t *S);
+void mino_interrupt(mino_state *S);
 
 /* ------------------------------------------------------------------------- */
 /* Host thread grant                                                         */
@@ -1365,7 +1365,7 @@ void mino_interrupt(mino_state_t *S);
 
 /*
  * Threading is a per-state runtime capability, not a build-time toggle.
- * Each `mino_state_t` starts with `thread_limit = 1`; while the limit is
+ * Each `mino_state` starts with `thread_limit = 1`; while the limit is
  * <= 1, `(future ...)`, `(promise)` / `deliver` / `realized?`,
  * `(thread ...)`, and the blocking core.async ops `<!!` / `>!!` /
  * `alts!!` throw `:mino/unsupported` with a message that names the policy
@@ -1386,19 +1386,19 @@ void mino_interrupt(mino_state_t *S);
  * supported sequence; lowering the limit while threads are running
  * does not interrupt them, but new spawns will respect the new ceiling.
  */
-void mino_set_thread_limit(mino_state_t *S, int n);
+void mino_set_thread_limit(mino_state *S, int n);
 
 /*
  * Read the current thread limit. Returns 1 by default (single-threaded).
  */
-int  mino_get_thread_limit(mino_state_t *S);
+int  mino_get_thread_limit(mino_state *S);
 
 /*
  * Return the count of host threads currently spawned by this state.
  * Decremented as threads complete and join. Returns 0 in single-
  * threaded mode.
  */
-int  mino_thread_count(mino_state_t *S);
+int  mino_thread_count(mino_state *S);
 
 /*
  * Wait for all in-flight host threads to finish. Intended to be called
@@ -1406,7 +1406,7 @@ int  mino_thread_count(mino_state_t *S);
  * thread that this state spawned is undefined behaviour. Safe to call
  * when no threads are in flight (returns immediately).
  */
-void mino_quiesce_threads(mino_state_t *S);
+void mino_quiesce_threads(mino_state *S);
 
 /* ------------------------------------------------------------------------- */
 /* Host thread pool, factory, stack-size knobs [MINO_UNSTABLE_THREADPOOL]    */
@@ -1425,7 +1425,7 @@ void mino_quiesce_threads(mino_state_t *S);
  *      pool (Tokio runtime, libuv, ASIO, custom pthread pool). Mino
  *      submits work items via the pool's submit_fn; the pool decides
  *      scheduling, threading, and recycling. The same pool may be
- *      bound to multiple `mino_state_t` for multi-tenant patterns
+ *      bound to multiple `mino_state` for multi-tenant patterns
  *      (game-engine-per-NPC, chat-bot-fleet, IDE-per-buffer-linter):
  *      the pool's N workers fan out across all of them.
  *
@@ -1454,7 +1454,7 @@ typedef struct mino_thread_pool {
                      void (*work)(void *), void *ctx);
     /* User data for the pool implementation; mino doesn't touch. */
     void *user_data;
-} mino_thread_pool_t;
+} mino_thread_pool;
 
 /*
  * Register a host thread pool for this state. Pass NULL to revert
@@ -1463,7 +1463,7 @@ typedef struct mino_thread_pool {
  * does not enforce single-state ownership. The thread_limit still
  * applies — submission is rejected when the per-state count is full.
  */
-void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool);
+void mino_set_thread_pool(mino_state *S, mino_thread_pool *pool);
 
 /*
  * Per-thread factory hooks for the spawn-per-future path. start_fn
@@ -1472,9 +1472,9 @@ void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool);
  * ctx is opaque to mino. Pass NULL fns to clear. Ignored entirely
  * when a pool is registered (the pool owns thread lifecycle).
  */
-typedef void (*mino_thread_lifecycle_fn)(mino_state_t *S, void *ctx);
+typedef void (*mino_thread_lifecycle_fn)(mino_state *S, void *ctx);
 
-void mino_set_thread_factory(mino_state_t *S,
+void mino_set_thread_factory(mino_state *S,
                              mino_thread_lifecycle_fn start_fn,
                              mino_thread_lifecycle_fn end_fn,
                              void *ctx);
@@ -1483,7 +1483,7 @@ void mino_set_thread_factory(mino_state_t *S,
  * Per-worker stack size for the spawn-per-future path. n=0 means
  * platform default. Ignored when a pool is registered.
  */
-void mino_set_thread_stack_size(mino_state_t *S, size_t n);
+void mino_set_thread_stack_size(mino_state *S, size_t n);
 
 /* ------------------------------------------------------------------------- */
 /* Garbage collector control [MINO_UNSTABLE_GC]                              */
@@ -1512,9 +1512,9 @@ typedef enum {
     MINO_GC_MINOR = 1,
     MINO_GC_MAJOR = 2,
     MINO_GC_FULL  = 3
-} mino_gc_kind_t;
+} mino_gc_kind;
 
-void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind);
+void mino_gc_collect(mino_state *S, mino_gc_kind kind);
 
 /*
  * Tunable parameters. Values out of range are rejected; mino_gc_set_param
@@ -1537,11 +1537,11 @@ typedef enum {
     MINO_GC_PROMOTION_AGE       = 3,
     MINO_GC_INCREMENTAL_BUDGET  = 4,
     MINO_GC_STEP_ALLOC_BYTES    = 5
-} mino_gc_param_t;
+} mino_gc_param;
 
-int mino_gc_set_param(mino_state_t *S, mino_gc_param_t p, size_t value);
+int mino_gc_set_param(mino_state *S, mino_gc_param p, size_t value);
 
-/* Phase tag returned in mino_gc_stats_t.phase. */
+/* Phase tag returned in mino_gc_stats_out.phase. */
 #define MINO_GC_PHASE_IDLE        0
 #define MINO_GC_PHASE_MINOR       1
 #define MINO_GC_PHASE_MAJOR_MARK  2
@@ -1614,9 +1614,9 @@ typedef struct {
     size_t mark_stack_cap;     /* mark-stack capacity */
     size_t mark_stack_high_water; /* peak mark-stack depth this state */
     int    phase;              /* MINO_GC_PHASE_* */
-} mino_gc_stats_t;
+} mino_gc_stats_out;
 
-void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
+void mino_gc_stats(mino_state *S, mino_gc_stats_out *out);
 
 /*
  * Pause-time distribution accessors. The GC keeps a circular buffer
@@ -1633,12 +1633,12 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
  * the host-owned out array. `out_count` returns the number of valid
  * entries currently in the ring (0..256).
  */
-void mino_gc_stats_pauses(mino_state_t *S,
+void mino_gc_stats_pauses(mino_state *S,
                           uint64_t *out_p50_ns,
                           uint64_t *out_p95_ns,
                           uint64_t *out_p99_ns,
                           uint64_t *out_max_ns);
-void mino_gc_pause_hist(mino_state_t *S,
+void mino_gc_pause_hist(mino_state *S,
                         uint32_t out_buckets[24],
                         unsigned *out_count);
 
@@ -1667,7 +1667,7 @@ int  mino_alloc_profile_enabled(void);
 /*
  * Reset the profile counters to zero. No-op in non-profile builds.
  */
-void mino_alloc_profile_reset(mino_state_t *S);
+void mino_alloc_profile_reset(mino_state *S);
 
 /*
  * Dump the top `top_n` call sites by allocation count to `out` (stderr
@@ -1675,7 +1675,7 @@ void mino_alloc_profile_reset(mino_state_t *S);
  * fixed-width table: rank, count, bytes, tag, file:line. In non-profile
  * builds emits a single "rebuild with MINO_ALLOC_PROFILE=1" line.
  */
-void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n);
+void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n);
 
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
@@ -1688,7 +1688,7 @@ void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n);
 #define MINO_REPL_MORE   1   /* line accepted; more input needed            */
 #define MINO_REPL_ERROR  2   /* parse or eval error; see mino_last_error()  */
 
-typedef struct mino_repl mino_repl_t;
+typedef struct mino_repl mino_repl;
 
 /*
  * Create a REPL handle that evaluates forms in `env`. The handle owns
@@ -1698,7 +1698,7 @@ typedef struct mino_repl mino_repl_t;
  *
  * `env` must outlive the REPL handle.
  */
-mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env);
+mino_repl *mino_repl_new(mino_state *S, mino_env *env);
 
 /*
  * Feed one line of input to the REPL. Returns:
@@ -1714,12 +1714,12 @@ mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env);
  * call. Feed an empty line (or call again with "") to drain remaining
  * buffered forms.
  */
-int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out);
+int mino_repl_feed(mino_repl *repl, const char *line, mino_val **out);
 
 /*
  * Free the REPL handle and its internal buffer. Does not free `env`.
  */
-void mino_repl_free(mino_repl_t *repl);
+void mino_repl_free(mino_repl *repl);
 
 /* ------------------------------------------------------------------------- */
 /* Value retention (refs)                                                     */
@@ -1731,17 +1731,17 @@ void mino_repl_free(mino_repl_t *repl);
  * collection indefinitely. The host must call mino_unref when the value is
  * no longer needed.
  *
- *   mino_ref_t *r = mino_ref(S, val);   // root val
- *   mino_val_t *v = mino_deref(r);      // get the value
+ *   mino_ref *r = mino_ref_new(S, val);   // root val
+ *   mino_val *v = mino_deref(r);      // get the value
  *   mino_unref(S, r);                   // release the root
  *
  * Refs are owned by the state that created them and freed when the state
  * is freed, but the host should unref explicitly to avoid holding objects
  * longer than necessary.
  */
-mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val);
-mino_val_t *mino_deref(const mino_ref_t *ref);
-void        mino_unref(mino_state_t *S, mino_ref_t *ref);
+mino_ref *mino_ref_new(mino_state *S, mino_val *val);
+mino_val *mino_deref(const mino_ref *ref);
+void        mino_unref(mino_state *S, mino_ref *ref);
 
 /* ------------------------------------------------------------------------- */
 /* Value cloning (cross-state transfer)                                      */
@@ -1756,7 +1756,7 @@ void        mino_unref(mino_state_t *S, mino_ref_t *ref);
  * Nested collections are cloned recursively; a non-transferable element
  * anywhere in the tree causes the entire clone to fail.
  */
-mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val);
+mino_val *mino_clone(mino_state *dst, mino_state *src, mino_val *val);
 
 #ifdef __cplusplus
 }

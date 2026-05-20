@@ -27,10 +27,10 @@
 #include <string.h>
 
 /* (file-exists? path) -- return true if path exists (file or directory). */
-mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -48,10 +48,10 @@ mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args,
 }
 
 /* (directory? path) -- return true if path is a directory. */
-mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_directory_p(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -100,9 +100,9 @@ static int mkdirp(const char *path)
 }
 
 /* (mkdir-p path) -- create directory and parents. Returns nil. */
-mino_val_t *prim_mkdir_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -151,9 +151,9 @@ static int rmrf(const char *path)
 }
 
 /* (rm-rf path) -- recursively remove path. Returns nil. */
-mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -174,10 +174,10 @@ mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (file-mtime path) -- return modification time as milliseconds, or nil. */
-mino_val_t *prim_file_mtime(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_file_mtime(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *path_val;
+    mino_val *path_val;
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -212,9 +212,9 @@ const mino_prim_def k_prims_fs[] = {
 const size_t k_prims_fs_count =
     sizeof(k_prims_fs) / sizeof(k_prims_fs[0]);
 
-void mino_install_fs(mino_state_t *S, mino_env_t *env)
+void mino_install_fs(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_fs, k_prims_fs_count, "fs");

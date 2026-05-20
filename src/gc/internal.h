@@ -84,7 +84,7 @@ typedef struct {
  * with a ~60-clause case form expands to deeply-nested cond, each
  * level pins fn through eval_apply_regular_call, and the standard
  * -O2 build (no -DNDEBUG) used to abort the embedder there.
- * Require a local variable named `S` of type mino_state_t *. */
+ * Require a local variable named `S` of type mino_state *. */
 #define GC_SAVE_MAX 64
 /* Gate the overflow assert on whether we're in a sanitizer build.
  * Sanitizer builds want loud failure to flag liveness regressions;
@@ -134,9 +134,9 @@ typedef struct {
  * All gc_alloc/alloc_val returns are GC-owned. The three _inner names
  * are the real functions; the public macros below add per-callsite
  * profiler recording when the binary is built with -DMINO_ALLOC_PROFILE=1. */
-void  *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size);
-mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type);
-char  *dup_n_inner(mino_state_t *S, const char *s, size_t len);
+void  *gc_alloc_typed_inner(mino_state *S, unsigned char tag, size_t size);
+mino_val *alloc_val_inner(mino_state *S, mino_type type);
+char  *dup_n_inner(mino_state *S, const char *s, size_t len);
 
 /* Raise the standard OOM mino diagnostic by longjmp'ing into the active
  * try frame (or abort if none). The same throw the GC allocator uses on
@@ -144,7 +144,7 @@ char  *dup_n_inner(mino_state_t *S, const char *s, size_t len);
  * the GC path -- e.g. checked-size overflow before a raw malloc/realloc,
  * or a non-GC heap returning NULL -- route through here so the failure
  * shape is uniform. */
-void gc_oom_throw(mino_state_t *S, const char *msg);
+void gc_oom_throw(mino_state *S, const char *msg);
 
 #ifdef MINO_ALLOC_PROFILE
 void mino_alloc_profile_record(const char *file, int line,
@@ -156,7 +156,7 @@ void mino_alloc_profile_record(const char *file, int line,
 #define alloc_val(S, T)                                                   \
     (mino_alloc_profile_record(__FILE__, __LINE__,                        \
                                (unsigned char)2 /* GC_T_VAL */,           \
-                               sizeof(mino_val_t)),                       \
+                               sizeof(mino_val)),                       \
      alloc_val_inner((S), (T)))
 #define dup_n(S, P, N)                                                    \
     (mino_alloc_profile_record(__FILE__, __LINE__,                        \
@@ -168,8 +168,8 @@ void mino_alloc_profile_record(const char *file, int line,
 #define alloc_val(S, T)          alloc_val_inner((S), (T))
 #define dup_n(S, P, N)           dup_n_inner((S), (P), (N))
 #endif
-void   gc_major_collect(mino_state_t *S);
-void   gc_minor_collect(mino_state_t *S);
+void   gc_major_collect(mino_state *S);
+void   gc_minor_collect(mino_state *S);
 /* Incremental major state machine. gc_major_begin seeds the mark stack
  * from roots and transitions IDLE -> MAJOR_MARK. gc_major_step drains
  * up to budget_words headers (pass SIZE_MAX for an unbounded drain).
@@ -178,15 +178,15 @@ void   gc_minor_collect(mino_state_t *S);
  * transitions MAJOR_MARK -> MAJOR_SWEEP, sweeps dead OLD, and returns
  * to IDLE. gc_major_collect chains all four back-to-back for a fully
  * STW major cycle. */
-void   gc_major_begin(mino_state_t *S);
-void   gc_major_step(mino_state_t *S, size_t budget_words);
-void   gc_major_remark(mino_state_t *S);
-void   gc_major_sweep_phase(mino_state_t *S);
+void   gc_major_begin(mino_state *S);
+void   gc_major_step(mino_state *S, size_t budget_words);
+void   gc_major_remark(mino_state *S);
+void   gc_major_sweep_phase(mino_state *S);
 /* Drive any in-flight major to IDLE with the mutator paused. No-op
  * when the phase is not MAJOR_MARK. Used by the OOM fallback and by
  * the public mino_gc_collect(MAJOR|FULL) entry point. */
-void   gc_force_finish_major(mino_state_t *S);
-void   gc_note_host_frame(mino_state_t *S, void *addr);
+void   gc_force_finish_major(mino_state *S);
+void   gc_note_host_frame(mino_state *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations
  * that cannot be recycled. Shared between alloc (driver.c) and sweep
@@ -202,34 +202,34 @@ int    gc_freelist_class(size_t size);
  * gc_trace_children unconditionally pushes every child pointer held in
  * h into the mark stack; minor uses it to trace remembered-set
  * entries even though their header is OLD. */
-void gc_mark_push(mino_state_t *S, gc_hdr_t *h);
-void gc_drain_mark_stack(mino_state_t *S);
+void gc_mark_push(mino_state *S, gc_hdr_t *h);
+void gc_drain_mark_stack(mino_state *S);
 /* Drain the mark stack until its length drops to floor_len. Minor
  * uses this with the saved major-in-flight length so its drain only
  * processes entries it added on top; major's pending OLD entries
  * beneath the floor are preserved for the next gc_major_step. */
-void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len);
-void gc_trace_children(mino_state_t *S, gc_hdr_t *h);
+void gc_drain_mark_stack_to(mino_state *S, size_t floor_len);
+void gc_trace_children(mino_state *S, gc_hdr_t *h);
 
 /* Per-tag tracer + finalizer registration. Called from each
  * component's mino_<component>_register_gc_handlers(S) hook during
  * state init, before any allocation. Registering NULL is the same
  * as leaving the slot untouched; gc_trace_children skips empty
  * slots, so unhandled tags are no-ops. */
-void gc_register_tracer(mino_state_t *S, unsigned char tag,
+void gc_register_tracer(mino_state *S, unsigned char tag,
                         gc_tracer_fn fn);
-void gc_register_finalizer(mino_state_t *S, unsigned char tag,
+void gc_register_finalizer(mino_state *S, unsigned char tag,
                            gc_finalizer_fn fn);
 
 /* Wire every built-in tracer. Called from runtime/state.c::state_init
  * before the first allocation; component-owned tracers register
  * themselves alongside. */
-void gc_register_default_tracers(mino_state_t *S);
+void gc_register_default_tracers(mino_state *S);
 /* Enqueue a header onto the mark stack with mark=1, bypassing the
  * minor-phase OLD filter. Used by minor's promotion hook to hand
  * newly-promoted OLD objects to major's mark frontier when a minor
  * runs nested inside MAJOR_MARK. */
-void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h);
+void gc_major_enqueue_promoted(mino_state *S, gc_hdr_t *h);
 
 /* runtime_gc_roots.c: range index over live headers plus root enumeration.
  * The range index backs gc_find_header_for_ptr, which resolves a raw
@@ -241,18 +241,18 @@ void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h);
  * minor sweep so the index stays valid across cycles without a
  * rebuild-from-gc_all. gc_build_range_index is the fallback used when
  * the mutator hits OOM on pending growth. */
-void      gc_build_range_index(mino_state_t *S);
-void      gc_range_insert(mino_state_t *S, gc_hdr_t *h);
-void      gc_range_merge_pending(mino_state_t *S);
-void      gc_range_compact_after_minor_mark(mino_state_t *S);
-gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p);
-void      gc_mark_roots(mino_state_t *S);
-void      gc_scan_stack(mino_state_t *S);
+void      gc_build_range_index(mino_state *S);
+void      gc_range_insert(mino_state *S, gc_hdr_t *h);
+void      gc_range_merge_pending(mino_state *S);
+void      gc_range_compact_after_minor_mark(mino_state *S);
+gc_hdr_t *gc_find_header_for_ptr(mino_state *S, const void *p);
+void      gc_mark_roots(mino_state *S);
+void      gc_scan_stack(mino_state *S);
 
 /* runtime_gc_major.c: full-heap sweep driven by gc_major_collect. Frees every
  * allocation whose mark bit is clear and resets the mark bit on
  * survivors; updates gc_bytes_live and gc_threshold. */
-void gc_sweep(mino_state_t *S);
+void gc_sweep(mino_state *S);
 
 /* runtime_gc_barrier.c: write barrier and remembered-set machinery.
  * Call BEFORE storing new_value into a field owned by container. The
@@ -266,12 +266,12 @@ void gc_sweep(mino_state_t *S);
  *     the mutator unlinks it before mark reaches container. Pass NULL
  *     for old_value when the slot was empty.
  * Pointer arguments are the PAYLOAD start of a GC-allocated object
- * (mino_val_t*, mino_env_t*, raw buffer from gc_alloc_typed) or a
- * singleton inside mino_state_t (nil, true, false, small-int cache,
+ * (mino_val*, mino_env*, raw buffer from gc_alloc_typed) or a
+ * singleton inside mino_state (nil, true, false, small-int cache,
  * sentinels). Singletons are recognised by their address being
  * embedded in the state struct and are treated as no-ops. NULL is
  * always a no-op. */
-void gc_write_barrier(mino_state_t *S, void *container,
+void gc_write_barrier(mino_state *S, void *container,
                       const void *old_value, const void *new_value);
 
 /* runtime_gc_trace.c: GC event ring buffer + classifier (both opt-in
@@ -283,12 +283,12 @@ void gc_write_barrier(mino_state_t *S, void *container,
  * gc_classify_offender runs two reachability passes (precise-only,
  * then precise+conservative) to answer whether an offender header is
  * really reachable or only kept alive by conservative stack scan. */
-void gc_evt_init(mino_state_t *S);
-void gc_evt_free(mino_state_t *S);
-void gc_evt_record_impl(mino_state_t *S, uint8_t kind, const void *a,
+void gc_evt_init(mino_state *S);
+void gc_evt_free(mino_state *S);
+void gc_evt_record_impl(mino_state *S, uint8_t kind, const void *a,
                         const void *b, const void *c, uintptr_t aux,
                         uint16_t extra);
-void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
+void gc_evt_dump_around(mino_state *S, const void *p1, const void *p2,
                         const void *p3);
 
 /* Macro wrapper: when MINO_GC_EVT=0 (the default), gc_evt_ring is
@@ -306,7 +306,7 @@ void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
  * conservative stack, 2 if reachable only via conservative stack, 0
  * if not reachable at all (bookkeeping corruption). Non-destructive:
  * saves and restores h->mark on every tracked header. */
-int  gc_classify_offender(mino_state_t *S, gc_hdr_t *offender);
+int  gc_classify_offender(mino_state *S, gc_hdr_t *offender);
 
 /* Tail-append helper used by every list-building loop. Barriers the
  * store first -- critical because mid-loop minor GC can promote tail
@@ -314,7 +314,7 @@ int  gc_classify_offender(mino_state_t *S, gc_hdr_t *offender);
  * and an unbarriered OLD-to-YOUNG edge loses the cell at the next
  * minor. Also drives SATB when a major mark is in flight. Caller must
  * guarantee tail is non-NULL. */
-void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell);
+void mino_cons_cdr_set(mino_state *S, mino_val *tail, mino_val *cell);
 
 /* VALARR slot store: barriers the write, then updates arr[i]. Use at
  * every site that fills a GC_T_VALARR scratch buffer in a loop whose
@@ -322,35 +322,35 @@ void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell);
  * -- the scratch array may be promoted mid-loop and later stores of
  * fresh YOUNG values need remset coverage. Inline-friendly; a single
  * call replaces the raw `arr[i] = v;` assignment. */
-void gc_valarr_set(mino_state_t *S, mino_val_t **arr, size_t i,
-                   mino_val_t *v);
+void gc_valarr_set(mino_state *S, mino_val **arr, size_t i,
+                   mino_val *v);
 
 /* Clear every dirty bit and empty the remembered set. Called at the
  * end of every full cycle -- after a complete trace, the old-to-young
  * reference set is rebuilt by future barriers, not inherited. */
-void gc_remset_reset(mino_state_t *S);
+void gc_remset_reset(mino_state *S);
 
 /* Append container to the remembered set if not already dirty. Used by
  * the minor collector to enqueue every just-promoted header -- a
  * one-cycle safety net that covers alloc-then-populate patterns where
  * the mutator sets pointers on a container after the minor that
  * promoted it. */
-void gc_remset_add(mino_state_t *S, gc_hdr_t *container);
+void gc_remset_add(mino_state *S, gc_hdr_t *container);
 
 /* Used by major sweep to remove entries whose container is about to
  * be freed, while leaving remset entries for containers that survive
  * (their dirty bit intact) so the next minor still finds the YOUNG
  * edges the mutator installed during this major cycle. */
-void gc_remset_purge_dead(mino_state_t *S);
+void gc_remset_purge_dead(mino_state *S);
 
 /* GC marking (used by gc_major_collect and by root enumeration). */
-void gc_mark_interior(mino_state_t *S, const void *p);
+void gc_mark_interior(mino_state *S, const void *p);
 
 /* Append one pause sample to the 256-ring (saturating at UINT32_MAX
  * ns) and tick the log2 histogram bucket [2^i, 2^(i+1)) ns clamped to
  * bucket 23. Called from each collection / slice site that already
  * computed elapsed_ns. Lifetime histogram + recent-window ring
  * together support both percentile + distribution queries. */
-void gc_record_pause(mino_state_t *S, size_t ns);
+void gc_record_pause(mino_state *S, size_t ns);
 
 #endif /* GC_INTERNAL_H */

@@ -9,19 +9,19 @@
 /* Build the clause list for a multi-arity fn or defmacro.
  * `arity_list` is the cons list of arity clauses: (([p] b...) ([p q] b...) ...).
  * Returns the clause list on success, NULL on error. */
-mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
-                                      mino_val_t *arity_list,
+mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
+                                      mino_val *arity_list,
                                       const char *diag_code,
                                       const char *label)
 {
-    mino_val_t *clauses     = mino_nil(S);
-    mino_val_t *clause_tail = NULL;
-    mino_val_t *rest        = arity_list;
+    mino_val *clauses     = mino_nil(S);
+    mino_val *clause_tail = NULL;
+    mino_val *rest        = arity_list;
     while (mino_is_cons(rest)) {
-        mino_val_t *clause = rest->as.cons.car;
-        mino_val_t *cparams;
-        mino_val_t *cbody;
-        mino_val_t *cell;
+        mino_val *clause = rest->as.cons.car;
+        mino_val *cparams;
+        mino_val *cbody;
+        mino_val *cell;
         char        msg[128];
         if (!mino_is_cons(clause)) {
             snprintf(msg, sizeof(msg),
@@ -53,14 +53,14 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
     return clauses;
 }
 
-mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_fn(mino_state *S, mino_val *form,
+                    mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *fn_name = NULL;
-    mino_val_t *params;
-    mino_val_t *body;
-    mino_val_t *p;
-    mino_val_t *fn_val;
+    mino_val *fn_name = NULL;
+    mino_val *params;
+    mino_val *body;
+    mino_val *p;
+    mino_val *fn_val;
     (void)tail;
     int         multi_arity = 0;
     if (!mino_is_cons(args)) {
@@ -71,7 +71,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     if (args->as.cons.car != NULL
         && mino_type_of(args->as.cons.car) == MINO_SYMBOL
         && mino_is_cons(args->as.cons.cdr)) {
-        mino_val_t *after = args->as.cons.cdr->as.cons.car;
+        mino_val *after = args->as.cons.cdr->as.cons.car;
         if (after != NULL
             && (mino_is_cons(after) || mino_is_nil(after)
                 || mino_type_of(after) == MINO_VECTOR)) {
@@ -97,7 +97,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         }
     }
     if (multi_arity) {
-        mino_val_t *clauses = build_multi_arity_clauses(
+        mino_val *clauses = build_multi_arity_clauses(
             S, form, args, "MSY002", "fn");
         if (clauses == NULL) { return NULL; }
         params = NULL;
@@ -111,7 +111,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         /* Validate params when given as a cons list. */
         if (mino_is_cons(params) || mino_is_nil(params)) {
             for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
-                mino_val_t *name = p->as.cons.car;
+                mino_val *name = p->as.cons.car;
                 if (name == NULL || mino_type_of(name) != MINO_SYMBOL) {
                     set_eval_diag(S, form, "syntax", "MSY002", "fn parameter must be a symbol");
                     return NULL;
@@ -122,7 +122,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     if (fn_name != NULL) {
         char nbuf[256];
         size_t nlen = fn_name->as.s.len;
-        mino_env_t *fn_env;
+        mino_env *fn_env;
         if (nlen >= sizeof(nbuf)) {
             set_eval_diag(S, form, "syntax", "MSY002", "fn name too long");
             return NULL;
@@ -141,7 +141,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
 /* --- Arity dispatch helpers ---------------------------------------------- */
 
 /* Count elements in a cons list. */
-static int list_len(const mino_val_t *lst)
+static int list_len(const mino_val *lst)
 {
     int n = 0;
     while (mino_is_cons(lst)) {
@@ -153,7 +153,7 @@ static int list_len(const mino_val_t *lst)
 
 /* Count required params (excluding & rest) in a param form. Returns the
  * fixed arity count and sets *has_rest if & is present. */
-static int param_arity(const mino_val_t *params, int *has_rest)
+static int param_arity(const mino_val *params, int *has_rest)
 {
     int n = 0;
     *has_rest = 0;
@@ -161,7 +161,7 @@ static int param_arity(const mino_val_t *params, int *has_rest)
     if (mino_type_of(params) == MINO_VECTOR) {
         size_t i;
         for (i = 0; i < params->as.vec.len; i++) {
-            mino_val_t *p = vec_nth(params, i);
+            mino_val *p = vec_nth(params, i);
             if (sym_eq(p, "&")) {
                 *has_rest = 1;
                 return n;
@@ -176,7 +176,7 @@ static int param_arity(const mino_val_t *params, int *has_rest)
     }
     /* Cons list params. */
     while (mino_is_cons(params)) {
-        mino_val_t *p = params->as.cons.car;
+        mino_val *p = params->as.cons.car;
         if (sym_eq(p, "&")) {
             *has_rest = 1;
             return n;
@@ -187,7 +187,7 @@ static int param_arity(const mino_val_t *params, int *has_rest)
     return n;
 }
 
-int fn_lazy_safe_rest(mino_val_t *fn)
+int fn_lazy_safe_rest(mino_val *fn)
 {
     int has_rest = 0;
     if (fn == NULL) return 0;
@@ -207,15 +207,15 @@ int fn_lazy_safe_rest(mino_val_t *fn)
 
 /* For a multi-arity fn (params == NULL, body = list of (params . body)
  * clauses), find the clause matching the given arg count. */
-static mino_val_t *find_arity_clause(mino_state_t *S, mino_val_t *clauses,
+static mino_val *find_arity_clause(mino_state *S, mino_val *clauses,
                                      int argc)
 {
     (void)S;
-    mino_val_t *rest = clauses;
-    mino_val_t *variadic_match = NULL;
+    mino_val *rest = clauses;
+    mino_val *variadic_match = NULL;
     while (mino_is_cons(rest)) {
-        mino_val_t *clause  = rest->as.cons.car;
-        mino_val_t *cparams = clause->as.cons.car;
+        mino_val *clause  = rest->as.cons.car;
+        mino_val *cparams = clause->as.cons.car;
         int has_rest;
         int fixed = param_arity(cparams, &has_rest);
         if (!has_rest && argc == fixed) return clause;
@@ -237,21 +237,21 @@ static mino_val_t *find_arity_clause(mino_state_t *S, mino_val_t *clauses,
  * *body to the chosen clause's pair, and return 0. On no-match, set the
  * diagnostic with the supplied context tag (e.g. "" for the call entry,
  * " in recur" for a recur backward branch) and return -1. */
-static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
-                                mino_val_t *call_args, const char *ctx_suffix,
-                                mino_val_t **out_params,
-                                mino_val_t **out_body)
+static int dispatch_multi_arity(mino_state *S, mino_val *clauses,
+                                mino_val *call_args, const char *ctx_suffix,
+                                mino_val **out_params,
+                                mino_val **out_body)
 {
     int         argc   = list_len(call_args);
-    mino_val_t *clause = find_arity_clause(S, clauses, argc);
+    mino_val *clause = find_arity_clause(S, clauses, argc);
     if (clause == NULL) {
         char              msg[256];
         char              name_buf[128] = {0};
-        const mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+        const mino_val *cur = mino_current_ctx(S)->eval_current_form;
         /* Name the callee from the in-progress (callee args...) cons
          * so the user sees which fn / macro mismatched. */
         if (cur != NULL && mino_is_cons(cur)) {
-            mino_val_t *head = cur->as.cons.car;
+            mino_val *head = cur->as.cons.car;
             if (head != NULL && mino_type_of(head) == MINO_SYMBOL
                 && head->as.s.len > 0
                 && head->as.s.len < sizeof(name_buf) - 4) {
@@ -274,10 +274,10 @@ static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
 /* Look up the current source location for the call frame. Returns
  * NULL file pointer and zero line/col when the eval-current-form is
  * not a CONS with location info. */
-static void current_call_location(mino_state_t *S, const char **file_out,
+static void current_call_location(mino_state *S, const char **file_out,
                                   int *line_out, int *col_out)
 {
-    const mino_val_t *f = mino_current_ctx(S)->eval_current_form;
+    const mino_val *f = mino_current_ctx(S)->eval_current_form;
     if (f != NULL && mino_type_of(f) == MINO_CONS) {
         *file_out = f->as.cons.file;
         *line_out = f->as.cons.line;
@@ -296,12 +296,12 @@ static void current_call_location(mino_state_t *S, const char **file_out,
  * call so any throw inside has a stack frame attributable to the
  * prim; pop_frame fires only on success so an error leaves the frame
  * for the trace formatter. */
-static mino_val_t *apply_prim_cons(mino_state_t *S, mino_val_t *fn,
-                                   mino_val_t *args, mino_env_t *env)
+static mino_val *apply_prim_cons(mino_state *S, mino_val *fn,
+                                   mino_val *args, mino_env *env)
 {
     const char *file;
     int         line, col;
-    mino_val_t *result;
+    mino_val *result;
     current_call_location(S, &file, &line, &col);
     push_frame(S, fn->as.prim.name, file, line, col);
     if (fn->as.prim.fn2 != NULL) {
@@ -311,16 +311,16 @@ static mino_val_t *apply_prim_cons(mino_state_t *S, mino_val_t *fn,
          * capacity falls through to a heap VALARR so variadic
          * argv-prims still work; the common 1-3 arg case never
          * touches the heap. */
-        mino_val_t  *scratch[16];
-        mino_val_t **argv = scratch;
+        mino_val  *scratch[16];
+        mino_val **argv = scratch;
         int          argc = 0;
         int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
-        mino_val_t  *cur  = args;
-        mino_val_t **heap = NULL;
+        mino_val  *cur  = args;
+        mino_val **heap = NULL;
         while (mino_is_cons(cur)) {
             if (argc == cap) {
                 int new_cap = cap * 2;
-                mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                mino_val **grown = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
                 memcpy(grown, argv, (size_t)argc * sizeof(*argv));
                 argv = grown;
@@ -347,8 +347,8 @@ static mino_val_t *apply_prim_cons(mino_state_t *S, mino_val_t *fn,
     return result;
 }
 
-mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-                           mino_env_t *env)
+mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
+                           mino_env *env)
 {
     if (fn == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002", "cannot apply null");
@@ -384,8 +384,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
          * chain the bc path would walk anyway. */
         int args_lazy_tail;
         {
-            mino_val_t *probe = args;
-            mino_type_t tt;
+            mino_val *probe = args;
+            mino_type tt;
             while (mino_is_cons(probe)) probe = probe->as.cons.cdr;
             tt = probe != NULL ? mino_type_of(probe) : MINO_NIL;
             args_lazy_tail = (tt == MINO_LAZY
@@ -467,21 +467,21 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
              * because the conservative stack scan covers this frame
              * AND the bc register stack is a GC root once mino_bc_run
              * copies the values in. */
-            mino_val_t  *scratch[16];
-            mino_val_t **argv = scratch;
+            mino_val  *scratch[16];
+            mino_val **argv = scratch;
             int          argc = 0;
             int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
-            mino_val_t  *cur  = args;
+            mino_val  *cur  = args;
             const char  *file = NULL;
             int          line = 0;
             int          col  = 0;
             const char  *saved_ns      = S->ns_vars.current_ns;
             const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
-            mino_val_t  *result;
+            mino_val  *result;
             while (mino_is_cons(cur)) {
                 if (argc == cap) {
                     int new_cap = cap * 2;
-                    mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                    mino_val **grown = (mino_val **)gc_alloc_typed(
                         S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
                     if (grown == NULL) return NULL;
                     memcpy(grown, argv, (size_t)argc * sizeof(*argv));
@@ -522,8 +522,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     return NULL;
                 }
                 if (mino_type_of(result) != MINO_TAIL_CALL) break;
-                mino_val_t *next_fn   = result->as.tail_call.fn;
-                mino_val_t *next_args = result->as.tail_call.args;
+                mino_val *next_fn   = result->as.tail_call.fn;
+                mino_val *next_args = result->as.tail_call.args;
                 /* Lazy compile the new target if it's a fresh MINO_FN. */
                 if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
                     && next_fn->as.fn.bc == NULL) {
@@ -536,8 +536,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                  * apply_callable route to the tree-walker. */
                 int next_args_lazy_tail = 0;
                 {
-                    mino_val_t *np = next_args;
-                    mino_type_t ntt;
+                    mino_val *np = next_args;
+                    mino_type ntt;
                     while (mino_is_cons(np)) np = np->as.cons.cdr;
                     ntt = np != NULL ? mino_type_of(np) : MINO_NIL;
                     next_args_lazy_tail = (ntt == MINO_LAZY
@@ -554,7 +554,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     while (mino_is_cons(cur)) {
                         if (argc == cap) {
                             int new_cap = cap * 2;
-                            mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                            mino_val **grown = (mino_val **)gc_alloc_typed(
                                 S, GC_T_VALARR,
                                 (size_t)new_cap * sizeof(*grown));
                             if (grown == NULL) {
@@ -594,16 +594,16 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             S->ns_vars.fn_ambient_ns = saved_ambient;
             return result;
         }
-        mino_val_t *cur_params = fn->as.fn.params;
-        mino_val_t *cur_body   = fn->as.fn.body;
-        mino_env_t *local     = env_child(S, fn->as.fn.env);
-        mino_val_t *call_args = args;
+        mino_val *cur_params = fn->as.fn.params;
+        mino_val *cur_body   = fn->as.fn.body;
+        mino_env *local     = env_child(S, fn->as.fn.env);
+        mino_val *call_args = args;
         const char *file      = NULL;
         int         line      = 0;
         int         col       = 0;
         const char *saved_ns      = S->ns_vars.current_ns;
         const char *saved_ambient = S->ns_vars.fn_ambient_ns;
-        mino_val_t *result;
+        mino_val *result;
         if (mino_type_of(fn) == MINO_MACRO) {
             /* &env is a map of {sym <opaque-info>} for every local
              * in scope at the call site. JVM Clojure binds the values
@@ -615,32 +615,32 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
              * &form is the entire macro-call form (head + tail). It
              * comes from the evaluator's "currently expanding" form
              * pointer set by eval_value before any macro invocation. */
-            mino_env_t *e;
+            mino_env *e;
             size_t      n_locals = 0;
-            mino_val_t *form_for_env = NULL;
+            mino_val *form_for_env = NULL;
             if (mino_current_ctx(S)->eval_current_form != NULL) {
-                form_for_env = (mino_val_t *)mino_current_ctx(S)->eval_current_form;
+                form_for_env = (mino_val *)mino_current_ctx(S)->eval_current_form;
             }
             /* Walk lexical frames; stop at the namespace root env so
              * we don't enumerate the (large) set of Vars. The ns root
              * lives in current_ns_env(S). */
             {
-                mino_env_t *ns_root = current_ns_env(S);
+                mino_env *ns_root = current_ns_env(S);
                 for (e = env; e != NULL && e != ns_root; e = e->parent) {
                     size_t i;
                     for (i = 0; i < e->len; i++) n_locals++;
                 }
             }
             {
-                mino_val_t **keys = NULL;
-                mino_val_t **vals = NULL;
+                mino_val **keys = NULL;
+                mino_val **vals = NULL;
                 if (n_locals > 0) {
-                    keys = (mino_val_t **)gc_alloc_typed(
+                    keys = (mino_val **)gc_alloc_typed(
                         S, GC_T_VALARR, n_locals * sizeof(*keys));
-                    vals = (mino_val_t **)gc_alloc_typed(
+                    vals = (mino_val **)gc_alloc_typed(
                         S, GC_T_VALARR, n_locals * sizeof(*vals));
                     if (keys != NULL && vals != NULL) {
-                        mino_env_t *ns_root = current_ns_env(S);
+                        mino_env *ns_root = current_ns_env(S);
                         size_t out = 0;
                         for (e = env; e != NULL && e != ns_root; e = e->parent) {
                             size_t i;
@@ -729,7 +729,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                  * For multi-arity, re-dispatch on new arg count. */
                 call_args = result->as.recur.args;
                 if (fn->as.fn.params == NULL) {
-                    mino_val_t *prev_params = cur_params;
+                    mino_val *prev_params = cur_params;
                     if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
                                              " in recur",
                                              &cur_params, &cur_body) != 0) {
@@ -765,7 +765,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             }
             if (mino_type_of(result) == MINO_TAIL_CALL) {
                 /* Proper tail call: switch to the target function. */
-                mino_val_t *new_fn = result->as.tail_call.fn;
+                mino_val *new_fn = result->as.tail_call.fn;
                 call_args = result->as.tail_call.args;
                 if (new_fn == fn && fn->as.fn.params != NULL) {
                     /* Self tail call, single-arity: allocate a fresh
@@ -811,12 +811,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
  * paths of apply_callable_argv that need to delegate back to
  * apply_callable's cons-list-based dispatch. Returns NULL on alloc
  * failure. */
-static mino_val_t *argv_to_cons(mino_state_t *S, mino_val_t **argv, int argc)
+static mino_val *argv_to_cons(mino_state *S, mino_val **argv, int argc)
 {
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     for (int i = argc - 1; i >= 0; i--) {
-        mino_val_t *cell = mino_cons(S, argv[i], list);
+        mino_val *cell = mino_cons(S, argv[i], list);
         if (cell == NULL) return NULL;
         list = cell;
     }
@@ -835,9 +835,9 @@ static mino_val_t *argv_to_cons(mino_state_t *S, mino_val_t **argv, int argc)
  * layer to either caller — apply_callable_argv's MINO_FN branch and
  * mino_apply_known_bc_fn_argv both inline the body. */
 __attribute__((always_inline))
-static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
-                                            mino_val_t **argv, int argc,
-                                            mino_env_t *env)
+static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
+                                            mino_val **argv, int argc,
+                                            mino_env *env)
 {
     /* The two staleness checks (NULL bc + fold-staleness recompile)
      * still run because the JIT path's IC slot can predate a fold
@@ -855,7 +855,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
          * sibling closure inherits the fresh bc through the back-
          * pointer. Without this, every closure with stale folds would
          * rebuild its own bc per call, defeating dedup. */
-        mino_val_t *tmpl = fn->as.fn.template_fn;
+        mino_val *tmpl = fn->as.fn.template_fn;
         if (tmpl != NULL && tmpl->as.fn.bc == fn->as.fn.bc) {
             tmpl->as.fn.bc = NULL;
             (void)mino_bc_compile_fn(S, tmpl);
@@ -869,7 +869,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
     if (!MINO_BC_RUNNABLE(fn)) {
         /* Compile declined post-recompile: fall back to cons-form
          * apply_callable for full multi-arity dispatch. */
-        mino_val_t *args = argv_to_cons(S, argv, argc);
+        mino_val *args = argv_to_cons(S, argv, argc);
         if (args == NULL) return NULL;
         return apply_callable(S, fn, args, env);
     }
@@ -901,7 +901,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
             }
         }
     }
-    mino_val_t **call_argv = argv;
+    mino_val **call_argv = argv;
     int          call_argc = argc;
     int          cap       = argc;
     int          heap      = 0;
@@ -910,7 +910,7 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
     int          col       = 0;
     const char  *saved_ns      = S->ns_vars.current_ns;
     const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
-    mino_val_t  *result;
+    mino_val  *result;
     if (fn->as.fn.defining_ns != NULL) {
         S->ns_vars.current_ns    = fn->as.fn.defining_ns;
         S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
@@ -931,8 +931,8 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         if (mino_type_of(result) != MINO_TAIL_CALL) break;
-        mino_val_t *next_fn   = result->as.tail_call.fn;
-        mino_val_t *next_args = result->as.tail_call.args;
+        mino_val *next_fn   = result->as.tail_call.fn;
+        mino_val *next_args = result->as.tail_call.args;
         if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
             && next_fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, next_fn);
@@ -941,12 +941,12 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
             && MINO_BC_RUNNABLE(next_fn)
             && next_fn->as.fn.params != NULL) {
             int new_argc = 0;
-            mino_val_t *cur = next_args;
+            mino_val *cur = next_args;
             while (mino_is_cons(cur)) {
                 if (new_argc >= cap || !heap) {
                     int new_cap = (new_argc + 1) < (cap * 2)
                         ? (cap * 2) : (new_argc + 8);
-                    mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                    mino_val **grown = (mino_val **)gc_alloc_typed(
                         S, GC_T_VALARR,
                         (size_t)new_cap * sizeof(*grown));
                     if (grown == NULL) {
@@ -995,9 +995,9 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
  * and a basic arity match held. Defensive: re-resolves a stale Var
  * pointer and falls back to apply_callable_argv if the callee's shape
  * drifted out from under the cache. */
-mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
-                                        mino_val_t **argv, int argc,
-                                        mino_env_t *env)
+mino_val *mino_apply_known_bc_fn_argv(mino_state *S, mino_val *fn,
+                                        mino_val **argv, int argc,
+                                        mino_env *env)
 {
     if (fn != NULL && mino_type_of(fn) == MINO_VAR) {
         if (!fn->as.var.bound || fn->as.var.root == NULL) {
@@ -1011,9 +1011,9 @@ mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
     return invoke_bc_fn_argv(S, fn, argv, argc, env);
 }
 
-mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
-                                mino_val_t **argv, int argc,
-                                mino_env_t *env)
+mino_val *apply_callable_argv(mino_state *S, mino_val *fn,
+                                mino_val **argv, int argc,
+                                mino_env *env)
 {
     if (fn == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -1047,7 +1047,7 @@ mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
         const char *file = NULL;
         int         line = 0;
         int         col  = 0;
-        mino_val_t *result;
+        mino_val *result;
         if (mino_current_ctx(S)->eval_current_form != NULL
             && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
             file = mino_current_ctx(S)->eval_current_form->as.cons.file;
@@ -1071,17 +1071,17 @@ mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
     /* Slow paths: PRIM with fn1 ABI, MINO_MACRO, non-fn callables.
      * Build the cons-spine and delegate. */
     {
-        mino_val_t *args = argv_to_cons(S, argv, argc);
+        mino_val *args = argv_to_cons(S, argv, argc);
         if (args == NULL) return NULL;
         return apply_callable(S, fn, args, env);
     }
 }
 
-mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
-                                  mino_val_t *args, const mino_val_t *form)
+mino_val *apply_non_fn_callable(mino_state *S, mino_val *fn,
+                                  mino_val *args, const mino_val *form)
 {
     int         nargs = 0;
-    mino_val_t *tmp;
+    mino_val *tmp;
     for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
         nargs++;
 
@@ -1111,8 +1111,8 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *coll    = args->as.cons.car;
-            mino_val_t *def_val = nargs == 2
+            mino_val *coll    = args->as.cons.car;
+            mino_val *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
             if (coll != NULL && mino_type_of(coll) == MINO_TRANSIENT) {
@@ -1125,11 +1125,11 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 if (coll == NULL || mino_type_of(coll) == MINO_NIL) return def_val;
             }
             if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-                mino_val_t *v = map_get_val(coll, fn);
+                mino_val *v = map_get_val(coll, fn);
                 return v == NULL ? def_val : v;
             }
             if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
-                mino_val_t *v = rb_get(S, coll->as.sorted.root, fn,
+                mino_val *v = rb_get(S, coll->as.sorted.root, fn,
                                         coll->as.sorted.comparator);
                 return v == NULL ? def_val : v;
             }
@@ -1137,7 +1137,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 int idx = record_field_index(coll, fn);
                 if (idx >= 0) return coll->as.record.vals[idx];
                 if (coll->as.record.ext != NULL) {
-                    mino_val_t *v = map_get_val(coll->as.record.ext, fn);
+                    mino_val *v = map_get_val(coll->as.record.ext, fn);
                     if (v != NULL) return v;
                 }
                 return def_val;
@@ -1171,16 +1171,16 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *coll    = args->as.cons.car;
-            mino_val_t *def_val = nargs == 2
+            mino_val *coll    = args->as.cons.car;
+            mino_val *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
             if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-                mino_val_t *v = map_get_val(coll, fn);
+                mino_val *v = map_get_val(coll, fn);
                 return v == NULL ? def_val : v;
             }
             if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
-                mino_val_t *v = rb_get(S, coll->as.sorted.root, fn,
+                mino_val *v = rb_get(S, coll->as.sorted.root, fn,
                                         coll->as.sorted.comparator);
                 return v == NULL ? def_val : v;
             }
@@ -1188,7 +1188,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 int idx = record_field_index(coll, fn);
                 if (idx >= 0) return coll->as.record.vals[idx];
                 if (coll->as.record.ext != NULL) {
-                    mino_val_t *v = map_get_val(coll->as.record.ext, fn);
+                    mino_val *v = map_get_val(coll->as.record.ext, fn);
                     if (v != NULL) return v;
                 }
                 return def_val;
@@ -1204,11 +1204,11 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *key     = args->as.cons.car;
-            mino_val_t *def_val = nargs == 2
+            mino_val *key     = args->as.cons.car;
+            mino_val *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
-            mino_val_t *v = map_get_val(fn, key);
+            mino_val *v = map_get_val(fn, key);
             return v == NULL ? def_val : v;
         }
     }
@@ -1223,14 +1223,14 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *key     = args->as.cons.car;
-            mino_val_t *def_val = nargs == 2
+            mino_val *key     = args->as.cons.car;
+            mino_val *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
             int idx = record_field_index(fn, key);
             if (idx >= 0) return fn->as.record.vals[idx];
             if (fn->as.record.ext != NULL) {
-                mino_val_t *v = map_get_val(fn->as.record.ext, key);
+                mino_val *v = map_get_val(fn->as.record.ext, key);
                 if (v != NULL) return v;
             }
             return def_val;
@@ -1244,7 +1244,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *idx = args->as.cons.car;
+            mino_val *idx = args->as.cons.car;
             long long i;
             if (idx == NULL || !mino_val_int_p(idx)) {
                 set_eval_diag(S, form, "eval/type", "MTY001",
@@ -1268,7 +1268,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *key = args->as.cons.car;
+            mino_val *key = args->as.cons.car;
             uint32_t h = hash_val(key);
             return hamt_get(fn->as.set.root, key, h, 0u) != NULL
                 ? key : mino_nil(S);
@@ -1281,11 +1281,11 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *key     = args->as.cons.car;
-            mino_val_t *def_val = nargs == 2
+            mino_val *key     = args->as.cons.car;
+            mino_val *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
-            mino_val_t *v = rb_get(S, fn->as.sorted.root, key,
+            mino_val *v = rb_get(S, fn->as.sorted.root, key,
                                     fn->as.sorted.comparator);
             return v == NULL ? def_val : v;
         }
@@ -1297,7 +1297,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return NULL;
         }
         {
-            mino_val_t *key = args->as.cons.car;
+            mino_val *key = args->as.cons.car;
             return rb_contains(S, fn->as.sorted.root, key,
                                 fn->as.sorted.comparator)
                 ? key : mino_nil(S);

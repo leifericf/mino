@@ -16,11 +16,11 @@
 
 /* Validate new_val against atom's validator.  Returns 0 on success,
  * -1 if the validator rejects (throws a catchable error). */
-static int atom_validate(mino_state_t *S, mino_val_t *atom,
-                         mino_val_t *new_val, mino_env_t *env)
+static int atom_validate(mino_state *S, mino_val *atom,
+                         mino_val *new_val, mino_env *env)
 {
-    mino_val_t *vfn = atom->as.atom.validator;
-    mino_val_t *vargs, *result;
+    mino_val *vfn = atom->as.atom.validator;
+    mino_val *vargs, *result;
     if (vfn == NULL) return 0;
     vargs = mino_cons(S, new_val, mino_nil(S));
     result = mino_call(S, vfn, vargs, env);
@@ -35,19 +35,19 @@ static int atom_validate(mino_state_t *S, mino_val_t *atom,
 /* Notify all watches after a state change.  Callback signature:
  * (fn key atom old-state new-state).  Returns -1 if any watch threw
  * (the exception propagates per Clojure JVM semantics), 0 otherwise. */
-static int atom_notify_watches(mino_state_t *S, mino_val_t *atom,
-                               mino_val_t *old_val, mino_val_t *new_val,
-                               mino_env_t *env)
+static int atom_notify_watches(mino_state *S, mino_val *atom,
+                               mino_val *old_val, mino_val *new_val,
+                               mino_env *env)
 {
-    mino_val_t *watches = atom->as.atom.watches;
+    mino_val *watches = atom->as.atom.watches;
     size_t i, len;
     if (watches == NULL || mino_type_of(watches) != MINO_MAP || watches->as.map.len == 0)
         return 0;
     len = watches->as.map.len;
     for (i = 0; i < len; i++) {
-        mino_val_t *key = vec_nth(watches->as.map.key_order, i);
-        mino_val_t *fn  = map_get_val(watches, key);
-        mino_val_t *wargs;
+        mino_val *key = vec_nth(watches->as.map.key_order, i);
+        mino_val *fn  = map_get_val(watches, key);
+        mino_val *wargs;
         if (fn == NULL) continue;
         wargs = mino_cons(S, key,
                   mino_cons(S, atom,
@@ -60,9 +60,9 @@ static int atom_notify_watches(mino_state_t *S, mino_val_t *atom,
 
 /* Validate, commit, and notify.  Returns 0 on success, -1 if validator
  * rejects.  On success the atom's val is set to new_val and watches fire. */
-static int atom_set(mino_state_t *S, mino_val_t *atom,
-                    mino_val_t *old_val, mino_val_t *new_val,
-                    mino_env_t *env)
+static int atom_set(mino_state *S, mino_val *atom,
+                    mino_val *old_val, mino_val *new_val,
+                    mino_env *env)
 {
     if (atom_validate(S, atom, new_val, env) != 0) return -1;
     gc_write_barrier(S, atom, atom->as.atom.val, new_val);
@@ -74,7 +74,7 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
  * is a plain pointer read; once S->threading.multi_threaded flips the read goes
  * through __atomic_load_n with acquire ordering so swap! sees a
  * coherent snapshot of writes from other workers. */
-static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
+static mino_val *atom_load(mino_state *S, mino_val *atom)
 {
     if (S->threading.multi_threaded) {
         return __atomic_load_n(&atom->as.atom.val, __ATOMIC_ACQUIRE);
@@ -90,8 +90,8 @@ static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
  * before any other worker can observe it. The GC write barrier and watch
  * notification are the caller's responsibility — atom_cas is the raw
  * publish step only. */
-static int atom_cas_ptr(mino_state_t *S, mino_val_t *atom,
-                        mino_val_t *expected, mino_val_t *new_val)
+static int atom_cas_ptr(mino_state *S, mino_val *atom,
+                        mino_val *expected, mino_val *new_val)
 {
     if (S->threading.multi_threaded) {
         return __atomic_compare_exchange_n(&atom->as.atom.val,
@@ -106,12 +106,12 @@ static int atom_cas_ptr(mino_state_t *S, mino_val_t *atom,
 }
 
 /* Build the call-args list for swap: (cur extra1 extra2 ...). */
-static mino_val_t *swap_build_args(mino_state_t *S, mino_val_t *cur,
-                                   mino_val_t *extra)
+static mino_val *swap_build_args(mino_state *S, mino_val *cur,
+                                   mino_val *extra)
 {
-    mino_val_t *call_args = mino_nil(S);
+    mino_val *call_args = mino_nil(S);
     if (extra != NULL && mino_type_of(extra) == MINO_CONS) {
-        mino_val_t *tail = mino_nil(S);
+        mino_val *tail = mino_nil(S);
         while (extra != NULL && mino_type_of(extra) == MINO_CONS) {
             tail = mino_cons(S, extra->as.cons.car, tail);
             extra = extra->as.cons.cdr;
@@ -127,18 +127,18 @@ static mino_val_t *swap_build_args(mino_state_t *S, mino_val_t *cur,
 
 /* ---- primitives -------------------------------------------------------- */
 
-mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
 {
     /* (atom x) or (atom x & {:keys [:meta :validator]}) -- options
      * may be supplied as flat keyword args (:meta m :validator f) or
      * via apply'd nil pairs. Unknown keys are tolerated to match
      * Clojure (it accepts any keys, only :meta and :validator have
      * effect). */
-    mino_val_t *initial;
-    mino_val_t *meta      = NULL;
-    mino_val_t *validator = NULL;
-    mino_val_t *atom;
-    mino_val_t *rest;
+    mino_val *initial;
+    mino_val *meta      = NULL;
+    mino_val *validator = NULL;
+    mino_val *atom;
+    mino_val *rest;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "atom requires one argument");
@@ -146,8 +146,8 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     initial = args->as.cons.car;
     rest    = args->as.cons.cdr;
     while (mino_is_cons(rest)) {
-        mino_val_t *k;
-        mino_val_t *v;
+        mino_val *k;
+        mino_val *v;
         k = rest->as.cons.car;
         if (!mino_is_cons(rest->as.cons.cdr)) {
             return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -180,8 +180,8 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Run the validator against the initial value before installing
          * it so a bad initial value is rejected at construction time --
          * mirrors Clojure's contract for atom + :validator. */
-        mino_val_t *vargs  = mino_cons(S, initial, mino_nil(S));
-        mino_val_t *result = mino_call(S, validator, vargs, env);
+        mino_val *vargs  = mino_cons(S, initial, mino_nil(S));
+        mino_val *result = mino_call(S, validator, vargs, env);
         if (result == NULL) return NULL;
         if (!mino_is_truthy(result)) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
@@ -196,12 +196,12 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return atom;
 }
 
-mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a;
+    mino_val *a;
     int         argc;
-    mino_val_t *ms_v        = NULL;
-    mino_val_t *timeout_val = NULL;
+    mino_val *ms_v        = NULL;
+    mino_val *timeout_val = NULL;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
@@ -230,8 +230,8 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * check, saving ~300ns/call on hot atom/var derefs that
      * never touch a delay. */
     if (a != NULL && mino_type_of(a) == MINO_MAP) {
-        mino_val_t *delay_fn_kw = mino_keyword(S, "delay/fn");
-        mino_val_t *delay_fn    = map_get_val(a, delay_fn_kw);
+        mino_val *delay_fn_kw = mino_keyword(S, "delay/fn");
+        mino_val *delay_fn    = map_get_val(a, delay_fn_kw);
         if (delay_fn != NULL) {
             /* Same semantics whether argc is 1 or 3: the 3-arg
              * timeout form on a delay was a no-op in the previous
@@ -286,9 +286,9 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
 }
 
-mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a, *val, *old;
+    mino_val *a, *val, *old;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reset! requires two arguments");
@@ -309,9 +309,9 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * path runs the canonical retry loop: load, compute, CAS, retry on loss.
  * The retry path lights up once S->threading.multi_threaded flips after host
  * threads enter the picture. */
-mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a, *fn, *cur, *call_args, *result, *extra;
+    mino_val *a, *fn, *cur, *call_args, *result, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "swap! requires at least 2 arguments: atom and function");
     }
@@ -362,9 +362,9 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * which is value-equality and surprised users hitting the multi-threaded
  * path; aligning with canon both fixes that and matches what the CAS
  * primitive can deliver. */
-mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a, *expected, *new_val;
+    mino_val *a, *expected, *new_val;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
@@ -387,7 +387,7 @@ mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_en
     return mino_true(S);
 }
 
-mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -400,8 +400,8 @@ mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Accessor helpers so the watch / validator primitives can target
  * either MINO_ATOM or MINO_TX_REF without duplicating per-field
  * dispatch through every code path. Returns 0 for invalid input. */
-static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
-                          mino_val_t ***out_validator)
+static int watchable_get(mino_val *v, mino_val ***out_watches,
+                          mino_val ***out_validator)
 {
     if (v == NULL) return 0;
     if (mino_type_of(v) == MINO_ATOM) {
@@ -433,9 +433,9 @@ static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
  * types this returns 0 without checking. Returns 0 on success
  * (host owns the value, or no check applies), 1 on mismatch
  * (caller must propagate NULL after the throw). */
-static int watchable_check_state(mino_state_t *S, mino_val_t *v)
+static int watchable_check_state(mino_state *S, mino_val *v)
 {
-    mino_state_t *owner = NULL;
+    mino_state *owner = NULL;
     if (v == NULL) return 0;
     if (mino_type_of(v) == MINO_TX_REF) owner = v->as.tx_ref.owning_state;
     else if (mino_type_of(v) == MINO_AGENT) owner = v->as.agent.owning_state;
@@ -447,11 +447,11 @@ static int watchable_check_state(mino_state_t *S, mino_val_t *v)
     return 0;
 }
 
-mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t       *a, *key, *fn, *watches, *new_map;
-    mino_val_t      **watches_slot;
-    mino_val_t      **validator_slot;
+    mino_val       *a, *key, *fn, *watches, *new_map;
+    mino_val      **watches_slot;
+    mino_val      **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
@@ -477,7 +477,7 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     watches = *watches_slot;
     if (watches == NULL || mino_type_of(watches) != MINO_MAP) {
-        mino_val_t **noargs = NULL;
+        mino_val **noargs = NULL;
         watches = mino_map(S, noargs, noargs, 0);
         if (watches == NULL) return NULL;
     }
@@ -489,12 +489,12 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (remove-watch ref key) -- unregister a watch callback. */
-mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+mino_val *prim_remove_watch(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
-    mino_val_t  *a, *key, *watches;
-    mino_val_t **watches_slot;
-    mino_val_t **validator_slot;
+    mino_val  *a, *key, *watches;
+    mino_val **watches_slot;
+    mino_val **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -509,7 +509,7 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     watches = *watches_slot;
     if (watches == NULL || mino_type_of(watches) != MINO_MAP) return a;
     if (mino_map_lookup(watches, key) != NULL) {
-        mino_val_t *new_map = mino_map_dissoc1(S, watches, key);
+        mino_val *new_map = mino_map_dissoc1(S, watches, key);
         if (new_map == NULL) return NULL;
         gc_write_barrier(S, a, *watches_slot, new_map);
         *watches_slot = new_map;
@@ -518,12 +518,12 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
 }
 
 /* (set-validator! ref fn) -- set or remove a validator on an atom or ref. */
-mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_set_validator(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
-    mino_val_t  *a, *fn;
-    mino_val_t **watches_slot;
-    mino_val_t **validator_slot;
+    mino_val  *a, *fn;
+    mino_val **watches_slot;
+    mino_val **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -560,12 +560,12 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
 }
 
 /* (get-validator ref) -- return the current validator fn or nil. */
-mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_get_validator(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
-    mino_val_t  *a;
-    mino_val_t **watches_slot;
-    mino_val_t **validator_slot;
+    mino_val  *a;
+    mino_val **watches_slot;
+    mino_val **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "get-validator requires one argument");
@@ -579,10 +579,10 @@ mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args,
 }
 
 /* (reset-vals! atom val) -- like reset! but returns [old new]. */
-mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a, *val, *old;
-    mino_val_t *pair[2];
+    mino_val *a, *val, *old;
+    mino_val *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reset-vals! requires two arguments");
@@ -600,10 +600,10 @@ mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (swap-vals! atom f & args) -- like swap! but returns [old new]. */
-mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *a, *fn, *cur, *call_args, *result;
-    mino_val_t *pair[2];
+    mino_val *a, *fn, *cur, *call_args, *result;
+    mino_val *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "swap-vals! requires at least 2 arguments: atom and function");
     }
@@ -625,13 +625,13 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Snapshot the current thread's dyn_stack into a map keyed by binding-
  * name symbols. Inner frames shadow outer frames; the first occurrence
  * walking newest-first wins. Returns nil when the stack is empty. */
-mino_val_t *mino_snapshot_thread_bindings(mino_state_t *S)
+mino_val *mino_snapshot_thread_bindings(mino_state *S)
 {
     dyn_frame_t   *f;
     dyn_binding_t *b;
     size_t         cap = 0, len = 0;
-    mino_val_t   **keys = NULL;
-    mino_val_t   **vals = NULL;
+    mino_val   **keys = NULL;
+    mino_val   **vals = NULL;
     if (mino_current_ctx(S)->dyn_stack == NULL) return mino_nil(S);
 
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
@@ -647,9 +647,9 @@ mino_val_t *mino_snapshot_thread_bindings(mino_state_t *S)
             if (dup) continue;
             if (len == cap) {
                 size_t       new_cap = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(
+                mino_val **nk      = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, new_cap * sizeof(*nk));
-                mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(
+                mino_val **nv      = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, new_cap * sizeof(*nv));
                 size_t       j;
                 for (j = 0; j < len; j++) {
@@ -671,8 +671,8 @@ mino_val_t *mino_snapshot_thread_bindings(mino_state_t *S)
 
 /* (get-thread-bindings) -- snapshot the current dyn_stack into a map
  * suitable as input to with-bindings*. */
-mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
-                                     mino_env_t *env)
+mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
+                                     mino_env *env)
 {
     (void)args;
     (void)env;
@@ -686,11 +686,11 @@ mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
  * raises "Can't change/establish root binding"). Used by the
  * (set! *var* expr) macro to back the JVM-Clojure dynamic-var mutation
  * shape. */
-mino_val_t *prim_set_dyn_binding(mino_state_t *S, mino_val_t *args,
-                                 mino_env_t *env)
+mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
+                                 mino_env *env)
 {
-    mino_val_t    *name_sym;
-    mino_val_t    *new_val;
+    mino_val    *name_sym;
+    mino_val    *new_val;
     const char    *name;
     dyn_frame_t   *f;
     dyn_binding_t *b;
@@ -730,12 +730,12 @@ mino_val_t *prim_set_dyn_binding(mino_state_t *S, mino_val_t *args,
  * malloc'd binding chain is freed on both the success and the
  * error/longjmp path because this primitive runs inside any active
  * try frame's setjmp window the caller already established. */
-mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env)
+mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
+                                    mino_env *env)
 {
-    mino_val_t    *map_arg;
-    mino_val_t    *fn;
-    mino_val_t    *result;
+    mino_val    *map_arg;
+    mino_val    *fn;
+    mino_val    *result;
     /* Heap-allocated so the pointer remains valid if a throw inside
      * fn unwinds past the cleanup. control.c's longjmp handler walks
      * mino_current_ctx(S)->dyn_stack to free each frame; a stack-local frame would
@@ -764,8 +764,8 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
     }
 
     for (i = 0; i < map_arg->as.map.len; i++) {
-        mino_val_t *key = vec_nth(map_arg->as.map.key_order, i);
-        mino_val_t *val = map_get_val(map_arg, key);
+        mino_val *key = vec_nth(map_arg->as.map.key_order, i);
+        mino_val *val = map_get_val(map_arg, key);
         const char *name_str;
         if (key == NULL
             || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
@@ -806,10 +806,10 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
 
 /* Fault injection: make the n-th GC allocation fail (simulated OOM).
  * Testing only. Pass 0 to disable. */
-mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env)
+mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
+                                    mino_env *env)
 {
-    mino_val_t *n;
+    mino_val *n;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -830,8 +830,8 @@ mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
  * mino_install_all. The script-side future/promise/thread stubs in
  * core.clj consult this to distinguish "host has not granted threads"
  * from "host granted, runtime impl in flight." */
-mino_val_t *prim_mino_thread_limit(mino_state_t *S, mino_val_t *args,
-                                   mino_env_t *env)
+mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
+                                   mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -842,8 +842,8 @@ mino_val_t *prim_mino_thread_limit(mino_state_t *S, mino_val_t *args,
 }
 
 /* (mino-thread-count) — return the live worker count for this state. */
-mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
-                                   mino_env_t *env)
+mino_val *prim_mino_thread_count(mino_state *S, mino_val *args,
+                                   mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -859,10 +859,10 @@ mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
 
 /* (future-call thunk) — spawn a worker thread that evaluates (thunk)
  * and returns a future. */
-static mino_val_t *prim_future_call(mino_state_t *S, mino_val_t *args,
-                                    mino_env_t *env)
+static mino_val *prim_future_call(mino_state *S, mino_val *args,
+                                    mino_env *env)
 {
-    mino_val_t *thunk;
+    mino_val *thunk;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "future-call expects exactly one argument");
@@ -878,8 +878,8 @@ static mino_val_t *prim_future_call(mino_state_t *S, mino_val_t *args,
 }
 
 /* (promise) — return a fresh promise. */
-static mino_val_t *prim_promise(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+static mino_val *prim_promise(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -891,10 +891,10 @@ static mino_val_t *prim_promise(mino_state_t *S, mino_val_t *args,
 
 /* (deliver promise value) — deliver value to the promise. Returns the
  * promise on success, nil if the promise was already realized. */
-static mino_val_t *prim_deliver(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+static mino_val *prim_deliver(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
-    mino_val_t *promise, *value;
+    mino_val *promise, *value;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -911,10 +911,10 @@ static mino_val_t *prim_deliver(mino_state_t *S, mino_val_t *args,
 }
 
 /* (future-cancel f) — cancel a future. Returns true if newly cancelled. */
-static mino_val_t *prim_future_cancel(mino_state_t *S, mino_val_t *args,
-                                      mino_env_t *env)
+static mino_val *prim_future_cancel(mino_state *S, mino_val *args,
+                                      mino_env *env)
 {
-    mino_val_t *fut;
+    mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -925,10 +925,10 @@ static mino_val_t *prim_future_cancel(mino_state_t *S, mino_val_t *args,
 }
 
 /* (future-done? f) — true if the future has reached a terminal state. */
-static mino_val_t *prim_future_done_q(mino_state_t *S, mino_val_t *args,
-                                      mino_env_t *env)
+static mino_val *prim_future_done_q(mino_state *S, mino_val *args,
+                                      mino_env *env)
 {
-    mino_val_t *fut;
+    mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -939,10 +939,10 @@ static mino_val_t *prim_future_done_q(mino_state_t *S, mino_val_t *args,
 }
 
 /* (future-cancelled? f) — true if the future was cancelled. */
-static mino_val_t *prim_future_cancelled_q(mino_state_t *S, mino_val_t *args,
-                                           mino_env_t *env)
+static mino_val *prim_future_cancelled_q(mino_state *S, mino_val *args,
+                                           mino_env *env)
 {
-    mino_val_t *fut;
+    mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -953,10 +953,10 @@ static mino_val_t *prim_future_cancelled_q(mino_state_t *S, mino_val_t *args,
 }
 
 /* (future? x) — true if x is a future or promise. */
-static mino_val_t *prim_future_q(mino_state_t *S, mino_val_t *args,
-                                 mino_env_t *env)
+static mino_val *prim_future_q(mino_state *S, mino_val *args,
+                                 mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -969,10 +969,10 @@ static mino_val_t *prim_future_q(mino_state_t *S, mino_val_t *args,
 /* (future-deref f) — block until the future is realized; return result
  * (or rethrow exception, or throw :mino/cancelled). The user-facing
  * `deref` in core.clj routes futures to this primitive. */
-static mino_val_t *prim_future_deref(mino_state_t *S, mino_val_t *args,
-                                     mino_env_t *env)
+static mino_val *prim_future_deref(mino_state *S, mino_val *args,
+                                     mino_env *env)
 {
-    mino_val_t *fut;
+    mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -988,8 +988,8 @@ static mino_val_t *prim_future_deref(mino_state_t *S, mino_val_t *args,
 
 /* ---- volatile primitives ----------------------------------------------- */
 
-mino_val_t *prim_volatile_bang(mino_state_t *S, mino_val_t *args,
-                               mino_env_t *env)
+mino_val *prim_volatile_bang(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -999,8 +999,8 @@ mino_val_t *prim_volatile_bang(mino_state_t *S, mino_val_t *args,
     return mino_volatile(S, args->as.cons.car);
 }
 
-mino_val_t *prim_volatile_p(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_volatile_p(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1010,10 +1010,10 @@ mino_val_t *prim_volatile_p(mino_state_t *S, mino_val_t *args,
     return mino_is_volatile(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-mino_val_t *prim_vreset_bang(mino_state_t *S, mino_val_t *args,
-                             mino_env_t *env)
+mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
+                             mino_env *env)
 {
-    mino_val_t *v, *val;
+    mino_val *v, *val;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1031,10 +1031,10 @@ mino_val_t *prim_vreset_bang(mino_state_t *S, mino_val_t *args,
     return val;
 }
 
-mino_val_t *prim_vswap_bang(mino_state_t *S, mino_val_t *args,
-                            mino_env_t *env)
+mino_val *prim_vswap_bang(mino_state *S, mino_val *args,
+                            mino_env *env)
 {
-    mino_val_t *v, *fn, *cur, *call_args, *result, *extra;
+    mino_val *v, *fn, *cur, *call_args, *result, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "vswap! requires at least 2 arguments: volatile and function");

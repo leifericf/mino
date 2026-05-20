@@ -13,12 +13,12 @@
 
 #include <stdlib.h>
 
-mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap)
+mino_val *mino_chunk_buffer(mino_state *S, unsigned cap)
 {
-    mino_val_t   *v;
-    mino_val_t  **slots;
+    mino_val   *v;
+    mino_val  **slots;
     if (cap == 0) cap = 1;
-    slots = (mino_val_t **)malloc((size_t)cap * sizeof(*slots));
+    slots = (mino_val **)malloc((size_t)cap * sizeof(*slots));
     if (slots == NULL) return NULL;
     {
         unsigned i;
@@ -36,7 +36,7 @@ mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap)
     return v;
 }
 
-int mino_chunk_append(mino_val_t *buf, mino_val_t *elem)
+int mino_chunk_append(mino_val *buf, mino_val *elem)
 {
     if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) return 0;
     if (buf->as.chunk.sealed) return 0;
@@ -45,17 +45,17 @@ int mino_chunk_append(mino_val_t *buf, mino_val_t *elem)
     return 1;
 }
 
-mino_val_t *mino_chunk_seal(mino_val_t *buf)
+mino_val *mino_chunk_seal(mino_val *buf)
 {
     if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) return NULL;
     buf->as.chunk.sealed = 1;
     return buf;
 }
 
-mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
-                              mino_val_t *more)
+mino_val *mino_chunked_cons(mino_state *S, mino_val *chunk,
+                              mino_val *more)
 {
-    mino_val_t *cell;
+    mino_val *cell;
     if (chunk == NULL || mino_type_of(chunk) != MINO_CHUNK) return NULL;
     if (chunk->as.chunk.len == 0) {
         /* Empty chunk degenerates to its tail. */
@@ -72,10 +72,10 @@ mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
 /* Build a new chunked-cons cell with the same chunk/more but the off
  * advanced by one. Returns the more pointer if the offset would
  * exceed chunk.len. */
-mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs)
+mino_val *mino_chunked_cons_advance(mino_state *S, const mino_val *cs)
 {
-    const mino_val_t *ch;
-    mino_val_t       *cell;
+    const mino_val *ch;
+    mino_val       *cell;
     unsigned          next;
     if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) return NULL;
     ch   = cs->as.chunked_cons.chunk;
@@ -83,7 +83,7 @@ mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs)
     if (next >= ch->as.chunk.len) return cs->as.chunked_cons.more;
     cell = alloc_val(S, MINO_CHUNKED_CONS);
     if (cell == NULL) return NULL;
-    cell->as.chunked_cons.chunk = (mino_val_t *)ch;
+    cell->as.chunked_cons.chunk = (mino_val *)ch;
     cell->as.chunked_cons.more  = cs->as.chunked_cons.more;
     cell->as.chunked_cons.off   = next;
     return cell;

@@ -50,7 +50,7 @@ static void rstep_counts_dump(void)
 #undef ROW
 }
 
-static void rstep_count(mino_val_t *fn)
+static void rstep_count(mino_val *fn)
 {
     if (!g_rstep_atexit_done) {
         atexit(rstep_counts_dump);
@@ -77,11 +77,11 @@ static void rstep_count(mino_val_t *fn)
 /* Sequence iterator                                                         */
 /* ------------------------------------------------------------------------- */
 
-void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
+void seq_iter_init(mino_state *S, seq_iter_t *it, const mino_val *coll)
 {
     /* Force lazy seqs so they behave as cons lists. */
     if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
-        coll = lazy_force(S, (mino_val_t *)coll);
+        coll = lazy_force(S, (mino_val *)coll);
     }
     /* Sorted collections: flatten to cons list for uniform iteration. */
     if (coll != NULL &&
@@ -94,10 +94,10 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
      * (default case), so `(into {} record)` returned `{}` and any
      * other seq-based aggregate over a record came back empty. */
     if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
-        mino_val_t *args = mino_cons(S, (mino_val_t *)coll, mino_nil(S));
+        mino_val *args = mino_cons(S, (mino_val *)coll, mino_nil(S));
         coll = prim_seq(S, args, NULL);
         if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
-            coll = lazy_force(S, (mino_val_t *)coll);
+            coll = lazy_force(S, (mino_val *)coll);
         }
     }
     it->coll  = coll;
@@ -111,7 +111,7 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
 
 int seq_iter_done(const seq_iter_t *it)
 {
-    const mino_val_t *c = it->coll;
+    const mino_val *c = it->coll;
     if (c == NULL || mino_type_of(c) == MINO_NIL) return 1;
     switch (mino_type_of(c)) {
     case MINO_CONS:   return it->cons_p == NULL || mino_type_of(it->cons_p) != MINO_CONS;
@@ -158,14 +158,14 @@ static void utf8_step(const unsigned char *data, size_t len, size_t pos,
     *step_out = n;
 }
 
-mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
+mino_val *seq_iter_val(mino_state *S, const seq_iter_t *it)
 {
-    const mino_val_t *c = it->coll;
+    const mino_val *c = it->coll;
     switch (mino_type_of(c)) {
     case MINO_CONS:   return it->cons_p->as.cons.car;
     case MINO_CHUNKED_CONS: {
-        const mino_val_t *cell = it->cons_p;
-        const mino_val_t *ch   = cell->as.chunked_cons.chunk;
+        const mino_val *cell = it->cons_p;
+        const mino_val *ch   = cell->as.chunked_cons.chunk;
         return ch->as.chunk.vals[it->idx];
     }
     case MINO_VECTOR: return vec_nth(c, it->idx);
@@ -178,8 +178,8 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
          * across mino_eq's cross-type sequential path, prints as
          * `[k v]`, and `vector?` is true -- the same contract
          * prim_seq's seq_kv_pair already uses for maps. */
-        mino_val_t *key = vec_nth(c->as.map.key_order, it->idx);
-        mino_val_t *val = c->as.map.val_order != NULL
+        mino_val *key = vec_nth(c->as.map.key_order, it->idx);
+        mino_val *val = c->as.map.val_order != NULL
                               ? vec_nth(c->as.map.val_order, it->idx)
                               : map_get_val(c, key);
         return mino_map_entry(S, key, val);
@@ -198,30 +198,30 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
     }
 }
 
-void seq_iter_next(mino_state_t *S, seq_iter_t *it)
+void seq_iter_next(mino_state *S, seq_iter_t *it)
 {
     if (it->coll != NULL && mino_type_of(it->coll) == MINO_CONS) {
         if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CONS) {
-            const mino_val_t *next = it->cons_p->as.cons.cdr;
+            const mino_val *next = it->cons_p->as.cons.cdr;
             /* Force lazy tail if present. */
             if (next != NULL && mino_type_of(next) == MINO_LAZY) {
-                next = lazy_force(S, (mino_val_t *)next);
+                next = lazy_force(S, (mino_val *)next);
             }
             it->cons_p = next;
         }
     } else if (it->coll != NULL && mino_type_of(it->coll) == MINO_CHUNKED_CONS) {
         if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CHUNKED_CONS) {
-            const mino_val_t *cell = it->cons_p;
-            const mino_val_t *ch   = cell->as.chunked_cons.chunk;
+            const mino_val *cell = it->cons_p;
+            const mino_val *ch   = cell->as.chunked_cons.chunk;
             unsigned          next_idx = (unsigned)(it->idx + 1);
             if (next_idx < ch->as.chunk.len) {
                 it->idx = next_idx;
                 return;
             }
             {
-                const mino_val_t *more = cell->as.chunked_cons.more;
+                const mino_val *more = cell->as.chunked_cons.more;
                 if (more != NULL && mino_type_of(more) == MINO_LAZY) {
-                    more = lazy_force(S, (mino_val_t *)more);
+                    more = lazy_force(S, (mino_val *)more);
                 }
                 if (more != NULL && mino_type_of(more) == MINO_CONS) {
                     /* Switch dispatch to cons-mode for the rest of the
@@ -257,9 +257,9 @@ void seq_iter_next(mino_state_t *S, seq_iter_t *it)
 /* ------------------------------------------------------------------------- */
 
 /* (reduced val) — wrap val to signal early termination in reduce. */
-mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reduced(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *v;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduced requires exactly 1 argument");
@@ -270,7 +270,7 @@ mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (reduced? x) — true if x is a reduced wrapper. */
-mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reduced_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -294,7 +294,7 @@ typedef enum {
     REDUCE_KIND_BXOR
 } reduce_int_kind_t;
 
-static reduce_int_kind_t reduce_int_kind_from_fn(mino_val_t *fn)
+static reduce_int_kind_t reduce_int_kind_from_fn(mino_val *fn)
 {
     if (fn == NULL || mino_type_of(fn) != MINO_PRIM) return REDUCE_KIND_NONE;
     const char *name = fn->as.prim.name;
@@ -481,8 +481,8 @@ static int reduce_int_range_bxor(long long start, long long end,
  * or boxing intermediates. Returns NULL on miss (overflow / unsupported
  * reducer / non-int init); the caller falls through to the generic
  * path. */
-static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
-                                     mino_val_t *init, int has_init,
+static mino_val *reduce_int_range(mino_state *S, mino_val *fn,
+                                     mino_val *init, int has_init,
                                      long long start, long long end,
                                      long long step)
 {
@@ -519,11 +519,11 @@ static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
  * the caller-classified arithmetic reducer kind (or REDUCE_KIND_NONE
  * to skip the fast lane). Returns 0 = continue, 1 = stop (acc holds
  * the final), -1 = error. */
-static int reduce_step(mino_state_t *S, mino_val_t *fn,
-                       reduce_int_kind_t kind, mino_val_t **acc_io,
-                       mino_val_t *elem, mino_env_t *env)
+static int reduce_step(mino_state *S, mino_val *fn,
+                       reduce_int_kind_t kind, mino_val **acc_io,
+                       mino_val *elem, mino_env *env)
 {
-    mino_val_t *acc = *acc_io;
+    mino_val *acc = *acc_io;
 #ifdef MINO_REDUCE_STEP_COUNTS
     rstep_count(fn);
 #endif
@@ -571,7 +571,7 @@ static int reduce_step(mino_state_t *S, mino_val_t *fn,
         if (handled) return 0;
     }
     {
-        mino_val_t *argv2[2];
+        mino_val *argv2[2];
         argv2[0] = acc;
         argv2[1] = elem;
         *acc_io = apply_callable_argv(S, fn, argv2, 2, env);
@@ -592,16 +592,16 @@ static int reduce_step(mino_state_t *S, mino_val_t *fn,
  * rest of the walk runs in boxed mode. Shared across the pipeline,
  * vec/set/seq_iter reducer entry points. */
 typedef struct {
-    mino_val_t        *fn;
+    mino_val        *fn;
     reduce_int_kind_t  kind;
     long long          acc_int;
     int                has_int_acc;
-    mino_val_t        *acc;
+    mino_val        *acc;
     int                has_init;
 } reduce_ctx_t;
 
-static void reduce_ctx_init(reduce_ctx_t *ctx, mino_val_t *fn,
-                            mino_val_t *acc, int has_init)
+static void reduce_ctx_init(reduce_ctx_t *ctx, mino_val *fn,
+                            mino_val *acc, int has_init)
 {
     ctx->fn          = fn;
     ctx->kind        = reduce_int_kind_from_fn(fn);
@@ -621,8 +621,8 @@ static void reduce_ctx_init(reduce_ctx_t *ctx, mino_val_t *fn,
  * 1=stop (Reduced), -1=error. Stays on the unboxed fast lane until
  * the first non-int element or arithmetic overflow boxes acc and
  * falls through to reduce_step's generic path. */
-static int reduce_ctx_step(mino_state_t *S, reduce_ctx_t *ctx,
-                           mino_val_t *elem, mino_env_t *env)
+static int reduce_ctx_step(mino_state *S, reduce_ctx_t *ctx,
+                           mino_val *elem, mino_env *env)
 {
     if (!ctx->has_init) {
         ctx->has_init = 1;
@@ -649,9 +649,9 @@ static int reduce_ctx_step(mino_state_t *S, reduce_ctx_t *ctx,
     return reduce_step(S, ctx->fn, ctx->kind, &ctx->acc, elem, env);
 }
 
-static mino_val_t *reduce_ctx_finalize(mino_state_t *S,
+static mino_val *reduce_ctx_finalize(mino_state *S,
                                        reduce_ctx_t *ctx,
-                                       mino_env_t *env)
+                                       mino_env *env)
 {
     if (!ctx->has_init) {
         return apply_callable(S, ctx->fn, mino_nil(S), env);
@@ -666,14 +666,14 @@ static mino_val_t *reduce_ctx_finalize(mino_state_t *S,
  * dispatch. Iteration order matches key_order (insertion order),
  * which is the order seq_iter walks. For flatmaps we read val_order
  * in parallel; for HAMT we resolve via map_get_val. */
-static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
-                                     mino_val_t *acc, int has_init,
-                                     mino_val_t *m, mino_env_t *env)
+static mino_val *reduce_map_direct(mino_state *S, mino_val *fn,
+                                     mino_val *acc, int has_init,
+                                     mino_val *m, mino_env *env)
 {
     size_t      i, n = m->as.map.len;
     int         is_flat = (m->as.map.val_order != NULL);
     reduce_int_kind_t kind = reduce_int_kind_from_fn(fn);
-    mino_val_t *ko, *vo;
+    mino_val *ko, *vo;
     if (n == 0) {
         if (has_init) return acc;
         return apply_callable(S, fn, mino_nil(S), env);
@@ -681,17 +681,17 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
     ko = m->as.map.key_order;
     vo = m->as.map.val_order;
     if (!has_init) {
-        mino_val_t *k0 = vec_nth(ko, 0);
-        mino_val_t *v0 = is_flat ? vec_nth(vo, 0) : map_get_val(m, k0);
+        mino_val *k0 = vec_nth(ko, 0);
+        mino_val *v0 = is_flat ? vec_nth(vo, 0) : map_get_val(m, k0);
         acc = mino_map_entry(S, k0, v0);
         i   = 1;
     } else {
         i = 0;
     }
     for (; i < n; i++) {
-        mino_val_t *k = vec_nth(ko, i);
-        mino_val_t *v = is_flat ? vec_nth(vo, i) : map_get_val(m, k);
-        mino_val_t *entry = mino_map_entry(S, k, v);
+        mino_val *k = vec_nth(ko, i);
+        mino_val *v = is_flat ? vec_nth(vo, i) : map_get_val(m, k);
+        mino_val *entry = mino_map_entry(S, k, v);
         int rc = reduce_step(S, fn, kind, &acc, entry, env);
         if (rc == -1) return NULL;
         if (rc == 1)  return acc;
@@ -704,8 +704,8 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
  * windows can be honored without a separate offset-aware codepath.
  * The `ctx` carries the unboxed-acc fast lane plus the boxed
  * fallback. Returns 0 = continue, 1 = stop (Reduced fired), -1 = error. */
-static int reduce_vec_trie_walk(mino_state_t *S, reduce_ctx_t *ctx,
-                                mino_env_t *env,
+static int reduce_vec_trie_walk(mino_state *S, reduce_ctx_t *ctx,
+                                mino_env *env,
                                 const mino_vec_node_t *node, unsigned shift,
                                 size_t *pos_io, size_t start, size_t end)
 {
@@ -722,7 +722,7 @@ static int reduce_vec_trie_walk(mino_state_t *S, reduce_ctx_t *ctx,
             if (p < start) continue;
             {
                 int rc = reduce_ctx_step(S, ctx,
-                                         (mino_val_t *)node->slots[i], env);
+                                         (mino_val *)node->slots[i], env);
                 if (rc != 0) return rc;
             }
         }
@@ -745,9 +745,9 @@ static int reduce_vec_trie_walk(mino_state_t *S, reduce_ctx_t *ctx,
  * per-element vec_nth's O(log32) trie navigation; one leaf pass visits
  * each element with a tight 32-slot inner loop. Honors offset (subvec)
  * by passing absolute backing positions into the walker. */
-static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
-                                    mino_val_t *acc, int has_init,
-                                    const mino_val_t *v, mino_env_t *env)
+static mino_val *reduce_vec_apply(mino_state *S, mino_val *fn,
+                                    mino_val *acc, int has_init,
+                                    const mino_val *v, mino_env *env)
 {
     size_t n          = v->as.vec.len;
     size_t offset     = v->as.vec.offset;
@@ -779,7 +779,7 @@ static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
             if (p < start) continue;
             {
                 int rc = reduce_ctx_step(S, &ctx,
-                                         (mino_val_t *)v->as.vec.tail->slots[i],
+                                         (mino_val *)v->as.vec.tail->slots[i],
                                          env);
                 if (rc == -1) return NULL;
                 if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
@@ -790,9 +790,9 @@ static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
 }
 
 /* Direct-walk fast path for (reduce fn vec [init]). */
-static mino_val_t *reduce_vec_direct(mino_state_t *S, mino_val_t *fn,
-                                     mino_val_t *acc, int has_init,
-                                     mino_val_t *v, mino_env_t *env)
+static mino_val *reduce_vec_direct(mino_state *S, mino_val *fn,
+                                     mino_val *acc, int has_init,
+                                     mino_val *v, mino_env *env)
 {
     return reduce_vec_apply(S, fn, acc, has_init, v, env);
 }
@@ -800,9 +800,9 @@ static mino_val_t *reduce_vec_direct(mino_state_t *S, mino_val_t *fn,
 /* Direct-walk fast path for (reduce fn set [init]). Routes through
  * reduce_vec_apply since the set's insertion-order key_order is
  * itself a vector. */
-static mino_val_t *reduce_set_direct(mino_state_t *S, mino_val_t *fn,
-                                     mino_val_t *acc, int has_init,
-                                     mino_val_t *s, mino_env_t *env)
+static mino_val *reduce_set_direct(mino_state *S, mino_val *fn,
+                                     mino_val *acc, int has_init,
+                                     mino_val *s, mino_env *env)
 {
     if (s->as.set.len == 0) {
         if (has_init) return acc;
@@ -839,7 +839,7 @@ typedef enum {
 
 typedef struct {
     pipeline_stage_kind_t kind;
-    mino_val_t           *callable;   /* MAP/FILTER: stage fn. TAKE: NULL. */
+    mino_val           *callable;   /* MAP/FILTER: stage fn. TAKE: NULL. */
     long long             counter;    /* TAKE: remaining countdown. */
 } pipeline_stage_t;
 
@@ -847,16 +847,16 @@ typedef struct {
  * filling stages[] in outermost-first order. Returns the number of
  * stages unwound; sets *src_out to the bottom non-stage value. Returns
  * 0 (with *src_out == coll) when coll isn't a recognised pipeline. */
-static int try_unwind_pipeline(mino_val_t *coll,
+static int try_unwind_pipeline(mino_val *coll,
                                pipeline_stage_t *stages,
                                int max_stages,
-                               mino_val_t **src_out)
+                               mino_val **src_out)
 {
     int n = 0;
     while (n < max_stages && coll != NULL
            && mino_type_of(coll) == MINO_LAZY
            && !coll->as.lazy.realized) {
-        mino_val_t *body = coll->as.lazy.body;
+        mino_val *body = coll->as.lazy.body;
         if (body == NULL || !mino_is_cons(body)
             || !mino_is_cons(body->as.cons.cdr)) {
             break;
@@ -893,8 +893,8 @@ static int try_unwind_pipeline(mino_val_t *coll,
  * Return 0 to continue, 1 to stop early (success), -1 to abort with
  * the diag already set. The walker drives elements through the
  * unwound stages and invokes step() with each surviving element. */
-typedef int (*pipeline_step_fn)(mino_state_t *S, void *ctx,
-                                mino_val_t *elem, mino_env_t *env);
+typedef int (*pipeline_step_fn)(mino_state *S, void *ctx,
+                                mino_val *elem, mino_env *env);
 
 /* Per-stage canonical-callable recognizer. The pipeline walker
  * compares a MAP / FILTER stage's callable's argv-ABI fn pointer
@@ -916,7 +916,7 @@ typedef enum {
     PIPELINE_FAST_KW       /* keyword-as-fn: inline (get coll kw) per elem */
 } pipeline_fast_kind_t;
 
-static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
+static pipeline_fast_kind_t pipeline_fast_callable(mino_val *callable)
 {
     /* Var deref: the callable might be a MINO_VAR pointing to the
      * canonical prim (e.g., when defprotocol's expanded body or
@@ -952,11 +952,11 @@ static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
  * non-int and overflow paths bail to the slow apply_callable_argv
  * path so Clojure's promotion semantics stay correct. Returns NULL on
  * error (with the diag set by apply_callable_argv). */
-static mino_val_t *pipeline_apply_fast_map(mino_state_t *S,
+static mino_val *pipeline_apply_fast_map(mino_state *S,
                                            pipeline_fast_kind_t k,
-                                           mino_val_t *callable,
-                                           mino_val_t *elem,
-                                           mino_env_t *env)
+                                           mino_val *callable,
+                                           mino_val *elem,
+                                           mino_env *env)
 {
     if (MINO_IS_INT(elem)) {
         long long v = MINO_INT_VAL(elem);
@@ -980,20 +980,20 @@ static mino_val_t *pipeline_apply_fast_map(mino_state_t *S,
             int idx = record_field_index(elem, callable);
             if (idx >= 0) return elem->as.record.vals[idx];
             if (elem->as.record.ext != NULL) {
-                mino_val_t *v = map_get_val(elem->as.record.ext, callable);
+                mino_val *v = map_get_val(elem->as.record.ext, callable);
                 return v == NULL ? mino_nil(S) : v;
             }
             return mino_nil(S);
         }
         if (t == MINO_MAP) {
-            mino_val_t *v = map_get_val(elem, callable);
+            mino_val *v = map_get_val(elem, callable);
             return v == NULL ? mino_nil(S) : v;
         }
         if (t == MINO_NIL) return mino_nil(S);
         /* sorted-map / transient / other: fall through to keyword-as-
          * fn dispatch in apply_callable_argv. */
     }
-    mino_val_t *argv1[1];
+    mino_val *argv1[1];
     argv1[0] = elem;
     return apply_callable_argv(S, callable, argv1, 1, env);
 }
@@ -1002,11 +1002,11 @@ static mino_val_t *pipeline_apply_fast_map(mino_state_t *S,
  * Returns 1 = truthy (passed), 0 = falsy (rejected), -1 = error +
  * out_err set so the caller can propagate. Falls back to
  * apply_callable_argv on non-int. */
-static int pipeline_test_fast_filter(mino_state_t *S,
+static int pipeline_test_fast_filter(mino_state *S,
                                      pipeline_fast_kind_t k,
-                                     mino_val_t *callable,
-                                     mino_val_t *elem,
-                                     mino_env_t *env,
+                                     mino_val *callable,
+                                     mino_val *elem,
+                                     mino_env *env,
                                      int *out_err)
 {
     *out_err = 0;
@@ -1033,21 +1033,21 @@ static int pipeline_test_fast_filter(mino_state_t *S,
                     ? 1 : 0;
             }
             if (elem->as.record.ext != NULL) {
-                mino_val_t *v = map_get_val(elem->as.record.ext, callable);
+                mino_val *v = map_get_val(elem->as.record.ext, callable);
                 return v != NULL && mino_is_truthy_inline(v) ? 1 : 0;
             }
             return 0;
         }
         if (t == MINO_MAP) {
-            mino_val_t *v = map_get_val(elem, callable);
+            mino_val *v = map_get_val(elem, callable);
             return v != NULL && mino_is_truthy_inline(v) ? 1 : 0;
         }
         if (t == MINO_NIL) return 0;
         /* sorted-map / transient / other: fall through. */
     }
-    mino_val_t *argv1[1];
+    mino_val *argv1[1];
     argv1[0] = elem;
-    mino_val_t *r = apply_callable_argv(S, callable, argv1, 1, env);
+    mino_val *r = apply_callable_argv(S, callable, argv1, 1, env);
     if (r == NULL) { *out_err = 1; return -1; }
     return mino_is_truthy_inline(r) ? 1 : 0;
 }
@@ -1060,14 +1060,14 @@ static int pipeline_test_fast_filter(mino_state_t *S,
  *   1 = skip element (filter rejected)
  *   2 = take counter exhausted, return done after this element
  *  -1 = error (diag set) */
-static int pipeline_apply_stages(mino_state_t *S,
+static int pipeline_apply_stages(mino_state *S,
                                  pipeline_stage_t *stages,
                                  pipeline_fast_kind_t *fast_kinds,
                                  int n_stages,
-                                 mino_val_t **elem_io,
-                                 mino_env_t *env)
+                                 mino_val **elem_io,
+                                 mino_env *env)
 {
-    mino_val_t *elem = *elem_io;
+    mino_val *elem = *elem_io;
     int take_exhausted = 0;
     for (int i = n_stages - 1; i >= 0; i--) {
         pipeline_stage_t *st = &stages[i];
@@ -1077,7 +1077,7 @@ static int pipeline_apply_stages(mino_state_t *S,
                 elem = pipeline_apply_fast_map(S, k, st->callable,
                                                elem, env);
             } else {
-                mino_val_t *argv1[1];
+                mino_val *argv1[1];
                 argv1[0] = elem;
                 elem = apply_callable_argv(S, st->callable, argv1,
                                            1, env);
@@ -1091,9 +1091,9 @@ static int pipeline_apply_stages(mino_state_t *S,
                 pass = pipeline_test_fast_filter(S, k, st->callable,
                                                  elem, env, &err);
             } else {
-                mino_val_t *argv1[1];
+                mino_val *argv1[1];
                 argv1[0] = elem;
-                mino_val_t *r = apply_callable_argv(S, st->callable,
+                mino_val *r = apply_callable_argv(S, st->callable,
                                                     argv1, 1, env);
                 if (r == NULL) return -1;
                 pass = mino_is_truthy_inline(r) ? 1 : 0;
@@ -1123,13 +1123,13 @@ static int pipeline_apply_stages(mino_state_t *S,
  * (map inc ...) / (filter odd? ...) / (map dec ...) shapes on a
  * (range N) source run with one tagged-int op per element instead
  * of an apply_callable_argv per stage per element. */
-static int pipeline_walk(mino_state_t *S,
-                         mino_val_t *src,
+static int pipeline_walk(mino_state *S,
+                         mino_val *src,
                          pipeline_stage_t *stages,
                          int n_stages,
                          pipeline_step_fn step,
                          void *ctx,
-                         mino_env_t *env)
+                         mino_env *env)
 {
     if (src == NULL || mino_type_of(src) == MINO_NIL
         || mino_type_of(src) == MINO_EMPTY_LIST) {
@@ -1158,7 +1158,7 @@ static int pipeline_walk(mino_state_t *S,
             && !infinite && range_step != 0) {
             long long cur = start;
             while ((range_step > 0) ? cur < end : cur > end) {
-                mino_val_t *elem = MINO_MAKE_INT(cur);
+                mino_val *elem = MINO_MAKE_INT(cur);
                 int rc = pipeline_apply_stages(S, stages, fast_kinds,
                                                n_stages, &elem, env);
                 if (rc < 0) return -1;
@@ -1185,11 +1185,11 @@ static int pipeline_walk(mino_state_t *S,
      * the chunked chain transitions to a plain cons / vector / etc.
      * suffix. */
     while (src != NULL && mino_type_of(src) == MINO_CHUNKED_CONS) {
-        const mino_val_t *ch = src->as.chunked_cons.chunk;
+        const mino_val *ch = src->as.chunked_cons.chunk;
         unsigned          start = src->as.chunked_cons.off;
         unsigned          end   = ch->as.chunk.len;
         for (unsigned k = start; k < end; k++) {
-            mino_val_t *elem = ch->as.chunk.vals[k];
+            mino_val *elem = ch->as.chunk.vals[k];
             int rc = pipeline_apply_stages(S, stages, fast_kinds,
                                            n_stages, &elem, env);
             if (rc < 0) return -1;
@@ -1199,7 +1199,7 @@ static int pipeline_walk(mino_state_t *S,
             if (srcc > 0) return 1;
             if (rc == 2) return 1;            /* take exhausted */
         }
-        mino_val_t *more = src->as.chunked_cons.more;
+        mino_val *more = src->as.chunked_cons.more;
         if (more != NULL && mino_type_of(more) == MINO_LAZY) {
             more = lazy_force(S, more);
             if (more == NULL) return -1;
@@ -1214,7 +1214,7 @@ static int pipeline_walk(mino_state_t *S,
     seq_iter_t it;
     seq_iter_init(S, &it, src);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val *elem = seq_iter_val(S, &it);
         int rc = pipeline_apply_stages(S, stages, fast_kinds,
                                        n_stages, &elem, env);
         if (rc < 0) return -1;
@@ -1230,20 +1230,20 @@ static int pipeline_walk(mino_state_t *S,
 }
 
 /* pipeline_walk's per-element callback shim around reduce_ctx_step. */
-static int reduce_pipeline_step(mino_state_t *S, void *ctx_,
-                                mino_val_t *elem, mino_env_t *env)
+static int reduce_pipeline_step(mino_state *S, void *ctx_,
+                                mino_val *elem, mino_env *env)
 {
     return reduce_ctx_step(S, (reduce_ctx_t *)ctx_, elem, env);
 }
 
-static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
-                                        mino_val_t *fn,
-                                        mino_val_t *acc,
+static mino_val *reduce_pipeline_walk(mino_state *S,
+                                        mino_val *fn,
+                                        mino_val *acc,
                                         int has_init,
-                                        mino_val_t *src,
+                                        mino_val *src,
                                         pipeline_stage_t *stages,
                                         int n_stages,
-                                        mino_env_t *env)
+                                        mino_env *env)
 {
     reduce_ctx_t ctx;
     int          rc;
@@ -1256,18 +1256,18 @@ static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
 
 /* True iff coll's outer LAZY is one of the recognised pipeline stages.
  * Cheap pre-check to gate the unwinder allocation-free. */
-static int coll_is_pipeline_head(const mino_val_t *coll)
+static int coll_is_pipeline_head(const mino_val *coll)
 {
     return lazy_thunk_is_map1(coll)
         || lazy_thunk_is_filter(coll)
         || lazy_thunk_is_take(coll);
 }
 
-mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn;
-    mino_val_t *acc;
-    mino_val_t *coll;
+    mino_val *fn;
+    mino_val *acc;
+    mino_val *coll;
     seq_iter_t  it;
     size_t      n;
     long long   r_start = 0, r_end = 0, r_step = 1;
@@ -1283,7 +1283,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (coll_is_pipeline_head(coll)) {
             pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-            mino_val_t *src = NULL;
+            mino_val *src = NULL;
             int ns = try_unwind_pipeline(
                 coll, stages, PIPELINE_MAX_STAGES, &src);
             if (ns > 0) {
@@ -1293,7 +1293,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
             && !r_inf) {
-            mino_val_t *fast = reduce_int_range(
+            mino_val *fast = reduce_int_range(
                 S, fn, NULL, 0, r_start, r_end, r_step);
             if (fast != NULL) return fast;
         }
@@ -1311,7 +1311,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             reduce_ctx_t ctx;
             reduce_ctx_init(&ctx, fn, NULL, 0);
             while (!seq_iter_done(&it)) {
-                mino_val_t *elem = seq_iter_val(S, &it);
+                mino_val *elem = seq_iter_val(S, &it);
                 int rc = reduce_ctx_step(S, &ctx, elem, env);
                 if (rc == -1) return NULL;
                 if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
@@ -1329,7 +1329,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (coll_is_pipeline_head(coll)) {
             pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-            mino_val_t *src = NULL;
+            mino_val *src = NULL;
             int ns = try_unwind_pipeline(
                 coll, stages, PIPELINE_MAX_STAGES, &src);
             if (ns > 0) {
@@ -1339,7 +1339,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
             && !r_inf) {
-            mino_val_t *fast = reduce_int_range(
+            mino_val *fast = reduce_int_range(
                 S, fn, acc, 1, r_start, r_end, r_step);
             if (fast != NULL) return fast;
         }
@@ -1362,7 +1362,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         reduce_ctx_t ctx;
         reduce_ctx_init(&ctx, fn, acc, 1);
         while (!seq_iter_done(&it)) {
-            mino_val_t *elem = seq_iter_val(S, &it);
+            mino_val *elem = seq_iter_val(S, &it);
             int rc = reduce_ctx_step(S, &ctx, elem, env);
             if (rc == -1) return NULL;
             if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
@@ -1373,10 +1373,10 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (set coll) — create a set from a collection. */
-mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_set(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *result;
+    mino_val *coll;
+    mino_val *result;
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1388,8 +1388,8 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* Validate seqability eagerly. */
     {
-        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return mino_set(S, NULL, 0);
         coll = seqd;
@@ -1410,7 +1410,7 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (doall coll) -- walks coll forcing every lazy cell, returns coll.
  * (dorun coll) -- same but returns nil. Both iterate in C so each step
  * avoids the fn-call + env frame that a mino-level walk would pay. */
-static mino_val_t *realize_seq(mino_state_t *S, mino_val_t *coll)
+static mino_val *realize_seq(mino_state *S, mino_val *coll)
 {
     while (coll != NULL) {
         if (mino_type_of(coll) == MINO_LAZY) {
@@ -1429,9 +1429,9 @@ static mino_val_t *realize_seq(mino_state_t *S, mino_val_t *coll)
     return mino_nil(S);
 }
 
-mino_val_t *prim_doall(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_doall(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1445,16 +1445,16 @@ mino_val_t *prim_doall(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Step fn for the no-accumulator consumers (dorun / doseq). The
  * walker drives elements through stages; this step does nothing
  * per element except propagate the continue signal. */
-static int discard_step(mino_state_t *S, void *ctx, mino_val_t *elem,
-                        mino_env_t *env)
+static int discard_step(mino_state *S, void *ctx, mino_val *elem,
+                        mino_env *env)
 {
     (void)S; (void)ctx; (void)elem; (void)env;
     return 0;
 }
 
-mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "dorun requires 1 argument");
@@ -1462,7 +1462,7 @@ mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     if (coll_is_pipeline_head(coll)) {
         pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-        mino_val_t      *src = NULL;
+        mino_val      *src = NULL;
         int ns = try_unwind_pipeline(
             coll, stages, PIPELINE_MAX_STAGES, &src);
         if (ns > 0) {
@@ -1479,12 +1479,12 @@ mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
  * (rangev end) or (rangev start end) or (rangev start end step). */
-mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rangev(mino_state *S, mino_val *args, mino_env *env)
 {
     long long start = 0, end = 0, step = 1, i;
     size_t n, len;
-    mino_val_t **items;
-    mino_val_t *result;
+    mino_val **items;
+    mino_val *result;
     (void)env;
     arg_count(S, args, &n);
     if (n == 1) {
@@ -1514,7 +1514,7 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     } else {
         len = (start > end) ? (size_t)((start - end + (-step) - 1) / (-step)) : 0;
     }
-    items = malloc(len * sizeof(mino_val_t *));
+    items = malloc(len * sizeof(mino_val *));
     if (!items && len > 0) { return prim_throw_classified(S, "eval/bounds", "MBD001", "rangev: out of memory"); }
     /* C-heap items[] is invisible to the precise GC; suppress collection
      * so freshly minted ints cannot be swept before mino_vector rehomes
@@ -1533,17 +1533,17 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * The new block replaces the old on the pin slot and becomes the
  * returned buffer; the old is left for the sweep. Returns NULL on
  * OOM (diag already set by gc_alloc_typed). */
-static mino_val_t **ptrarr_grow(mino_state_t *S, mino_val_t **old,
+static mino_val **ptrarr_grow(mino_state *S, mino_val **old,
                                 size_t old_len, size_t new_cap, int pin_slot)
 {
-    mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
-        S, GC_T_PTRARR, new_cap * sizeof(mino_val_t *));
+    mino_val **nb = (mino_val **)gc_alloc_typed(
+        S, GC_T_PTRARR, new_cap * sizeof(mino_val *));
     size_t i;
     if (nb == NULL) return NULL;
     for (i = 0; i < old_len; i++) {
         nb[i] = old[i];
     }
-    mino_current_ctx(S)->gc_save[pin_slot] = (mino_val_t *)nb;
+    mino_current_ctx(S)->gc_save[pin_slot] = (mino_val *)nb;
     return nb;
 }
 
@@ -1560,15 +1560,15 @@ static mino_val_t **ptrarr_grow(mino_state_t *S, mino_val_t **old,
  * conj-bangs each element and updates the slot to the returned
  * transient (transients may relocate). */
 typedef struct {
-    mino_val_t *t;
+    mino_val *t;
 } tvec_ctx_t;
 
-static int tvec_conj_step(mino_state_t *S, void *ctx_,
-                          mino_val_t *elem, mino_env_t *env)
+static int tvec_conj_step(mino_state *S, void *ctx_,
+                          mino_val *elem, mino_env *env)
 {
     tvec_ctx_t *ctx = (tvec_ctx_t *)ctx_;
     (void)env;
-    mino_val_t *nt = mino_conj_bang(S, ctx->t, elem);
+    mino_val *nt = mino_conj_bang(S, ctx->t, elem);
     if (nt == NULL) return -1;
     ctx->t = nt;
     return 0;
@@ -1576,13 +1576,13 @@ static int tvec_conj_step(mino_state_t *S, void *ctx_,
 
 #define MAPV_MAX_COLLS 32
 
-mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn, *coll;
+    mino_val *fn, *coll;
     seq_iter_t  it;
     size_t      cap = 64, len = 0;
-    mino_val_t **items;
-    mino_val_t *result;
+    mino_val **items;
+    mino_val *result;
     int         pin_slot;
     size_t n;
     arg_count(S, args, &n);
@@ -1595,17 +1595,17 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (n > 2) {
         size_t n_colls = n - 1;
         seq_iter_t   iters[MAPV_MAX_COLLS];
-        mino_val_t  *argv[MAPV_MAX_COLLS];
+        mino_val  *argv[MAPV_MAX_COLLS];
         if (n_colls > MAPV_MAX_COLLS) {
             return prim_throw_classified(
                 S, "eval/arity", "MAR001",
                 "mapv: too many collections (max 32)");
         }
         {
-            mino_val_t *p = args->as.cons.cdr;
+            mino_val *p = args->as.cons.cdr;
             size_t i;
             for (i = 0; i < n_colls; i++) {
-                mino_val_t *c = p->as.cons.car;
+                mino_val *c = p->as.cons.car;
                 if (c == NULL || mino_is_nil(c)) {
                     return mino_vector(S, NULL, 0);
                 }
@@ -1613,11 +1613,11 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 p = p->as.cons.cdr;
             }
         }
-        items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
-                                              cap * sizeof(mino_val_t *));
+        items = (mino_val **)gc_alloc_typed(S, GC_T_PTRARR,
+                                              cap * sizeof(mino_val *));
         if (items == NULL) return NULL;
         pin_slot = mino_current_ctx(S)->gc_save_len;
-        gc_pin((mino_val_t *)items);
+        gc_pin((mino_val *)items);
         for (;;) {
             size_t i;
             for (i = 0; i < n_colls; i++) {
@@ -1627,7 +1627,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 argv[i] = seq_iter_val(S, &iters[i]);
             }
             {
-                mino_val_t *val = apply_callable_argv(
+                mino_val *val = apply_callable_argv(
                     S, fn, argv, (int)n_colls, env);
                 if (val == NULL) { gc_unpin(1); return NULL; }
                 if (len >= cap) {
@@ -1658,7 +1658,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * entirely. */
     if (coll_is_pipeline_head(coll)) {
         pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-        mino_val_t      *src = NULL;
+        mino_val      *src = NULL;
         int ns = try_unwind_pipeline(
             coll, stages + 1, PIPELINE_MAX_STAGES - 1, &src);
         if (ns > 0) {
@@ -1673,16 +1673,16 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_persistent(S, ctx.t);
         }
     }
-    items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
-                                          cap * sizeof(mino_val_t *));
+    items = (mino_val **)gc_alloc_typed(S, GC_T_PTRARR,
+                                          cap * sizeof(mino_val *));
     if (items == NULL) return NULL;
     pin_slot = mino_current_ctx(S)->gc_save_len;
-    gc_pin((mino_val_t *)items);
+    gc_pin((mino_val *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
-        mino_val_t *val = apply_callable(S, fn, call_args, env);
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val *val = apply_callable(S, fn, call_args, env);
         if (val == NULL) { gc_unpin(1); return NULL; }
         if (len >= cap) {
             cap *= 2;
@@ -1700,13 +1700,13 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Eager filter returning a vector. (filterv pred coll). Same precise-GC
  * caveat as prim_mapv: pin a GC-tracked accumulator on the save stack. */
-mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pred, *coll;
+    mino_val *pred, *coll;
     seq_iter_t  it;
     size_t      cap = 64, len = 0;
-    mino_val_t **items;
-    mino_val_t *result;
+    mino_val **items;
+    mino_val *result;
     int         pin_slot;
     size_t n;
     arg_count(S, args, &n);
@@ -1722,7 +1722,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * filterv's predicate as the outermost filter stage. */
     if (coll_is_pipeline_head(coll)) {
         pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-        mino_val_t      *src = NULL;
+        mino_val      *src = NULL;
         int ns = try_unwind_pipeline(
             coll, stages + 1, PIPELINE_MAX_STAGES - 1, &src);
         if (ns > 0) {
@@ -1737,16 +1737,16 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_persistent(S, ctx.t);
         }
     }
-    items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
-                                          cap * sizeof(mino_val_t *));
+    items = (mino_val **)gc_alloc_typed(S, GC_T_PTRARR,
+                                          cap * sizeof(mino_val *));
     if (items == NULL) return NULL;
     pin_slot = mino_current_ctx(S)->gc_save_len;
-    gc_pin((mino_val_t *)items);
+    gc_pin((mino_val *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
-        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val *test = apply_callable(S, pred, call_args, env);
         if (test == NULL) { gc_unpin(1); return NULL; }
         if (mino_is_truthy_inline(test)) {
             if (len >= cap) {
@@ -1764,10 +1764,10 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *to;
-    mino_val_t *from;
+    mino_val *to;
+    mino_val *from;
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -1782,7 +1782,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * the conj semantics (vector appends, list prepends, map/set merges). */
     if (to == NULL || mino_type_of(to) == MINO_NIL || mino_type_of(to) == MINO_EMPTY_LIST) {
         /* Into nil or empty-list: build a list (prepend each element). */
-        mino_val_t *out = mino_nil(S);
+        mino_val *out = mino_nil(S);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             out = mino_cons(S, seq_iter_val(S, &it), out);
@@ -1798,7 +1798,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * lazy-seq cells never get realized. */
         if (coll_is_pipeline_head(from)) {
             pipeline_stage_t stages[PIPELINE_MAX_STAGES];
-            mino_val_t      *src = NULL;
+            mino_val      *src = NULL;
             int ns = try_unwind_pipeline(
                 from, stages, PIPELINE_MAX_STAGES, &src);
             if (ns > 0) {
@@ -1817,8 +1817,8 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * single slot + bump the count with no allocation. Pinning is
          * the same -O2 register-scan defense as the map / set branches
          * below. */
-        mino_val_t *t = mino_transient(S, to);
-        mino_val_t *acc;
+        mino_val *t = mino_transient(S, to);
+        mino_val *acc;
         if (t == NULL) return NULL;
         gc_pin(t);
         seq_iter_init(S, &it, from);
@@ -1842,14 +1842,14 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * callee-saved register, invisible to the conservative C-stack
          * scan, so a long batch's mid-stride minor GC could otherwise
          * sweep the wrapping transient. */
-        mino_val_t *t   = mino_transient(S, to);
-        mino_val_t *acc;
+        mino_val *t   = mino_transient(S, to);
+        mino_val *acc;
         if (t == NULL) return NULL;
         gc_pin(t);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
-            mino_val_t *item = seq_iter_val(S, &it);
-            mino_val_t *ek, *ev;
+            mino_val *item = seq_iter_val(S, &it);
+            mino_val *ek, *ev;
             if (item != NULL && mino_type_of(item) == MINO_VECTOR
                 && item->as.vec.len == 2) {
                 ek = vec_nth(item, 0);
@@ -1876,8 +1876,8 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Transient fast path: conj! each element onto an owner-tagged
          * HAMT, then seal. The transient is pinned for the same -O2
          * register-scan reason as the map branch above. */
-        mino_val_t *t = mino_transient(S, to);
-        mino_val_t *acc;
+        mino_val *t = mino_transient(S, to);
+        mino_val *acc;
         if (t == NULL) return NULL;
         gc_pin(t);
         seq_iter_init(S, &it, from);
@@ -1893,11 +1893,11 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (mino_type_of(to) == MINO_SORTED_MAP) {
-        mino_val_t *acc = to;
+        mino_val *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
-            mino_val_t *item = seq_iter_val(S, &it);
-            mino_val_t *ek, *ev;
+            mino_val *item = seq_iter_val(S, &it);
+            mino_val *ek, *ev;
             if (item != NULL && mino_type_of(item) == MINO_VECTOR
                 && item->as.vec.len == 2) {
                 ek = vec_nth(item, 0);
@@ -1915,7 +1915,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (mino_type_of(to) == MINO_SORTED_SET) {
-        mino_val_t *acc = to;
+        mino_val *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             acc = sorted_set_conj1(S, acc, seq_iter_val(S, &it));
@@ -1924,7 +1924,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (mino_type_of(to) == MINO_CONS) {
-        mino_val_t *out = to;
+        mino_val *out = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             out = mino_cons(S, seq_iter_val(S, &it), out);
@@ -1941,12 +1941,12 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn;
-    mino_val_t *last;
-    mino_val_t *call_args;
-    mino_val_t *p;
+    mino_val *fn;
+    mino_val *last;
+    mino_val *call_args;
+    mino_val *p;
     size_t      n;
     int         lazy_safe;
     arg_count(S, args, &n);
@@ -1973,12 +1973,12 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         last = args->as.cons.cdr->as.cons.car;
     } else {
         /* (apply f a b ... coll) — prepend individual args, then spread coll. */
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail2 = NULL;
+        mino_val *head = mino_nil(S);
+        mino_val *tail2 = NULL;
         p = args->as.cons.cdr;
         /* Collect all but the last arg as individual args. */
         while (mino_is_cons(p) && mino_is_cons(p->as.cons.cdr)) {
-            mino_val_t *cell = mino_cons(S, p->as.cons.car, mino_nil(S));
+            mino_val *cell = mino_cons(S, p->as.cons.car, mino_nil(S));
             if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
             tail2 = cell;
             p = p->as.cons.cdr;
@@ -2005,7 +2005,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             seq_iter_t it;
             seq_iter_init(S, &it, last);
             while (!seq_iter_done(&it)) {
-                mino_val_t *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
+                mino_val *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
                 if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
                 tail2 = cell;
                 seq_iter_next(S, &it);
@@ -2030,12 +2030,12 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* Convert non-list collection to cons list. */
     {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail2 = NULL;
+        mino_val *head = mino_nil(S);
+        mino_val *tail2 = NULL;
         seq_iter_t it;
         seq_iter_init(S, &it, last);
         while (!seq_iter_done(&it)) {
-            mino_val_t *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
+            mino_val *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
             if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
             tail2 = cell;
             seq_iter_next(S, &it);
@@ -2045,7 +2045,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return apply_callable(S, fn, call_args, env);
 }
 
-mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_reverse(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Per Clojure, (reverse nil) and (reverse <empty>) return the
      * empty list (), not nil. Otherwise iterate the collection and
@@ -2054,10 +2054,10 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * (numbers, keywords, symbols, ...) throw via `prim_seq`'s
      * coercion check; the silent "treat as empty" path was wrong
      * because it suppressed the type error Clojure raises. */
-    mino_val_t *coll;
-    mino_val_t *seqd;
-    mino_val_t *out = mino_empty_list(S);
-    mino_val_t *seq_args;
+    mino_val *coll;
+    mino_val *seqd;
+    mino_val *out = mino_empty_list(S);
+    mino_val *seq_args;
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -2083,12 +2083,12 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * Sort comparator state: when sort_comp_fn is non-NULL, the merge sort
  * calls the user-supplied comparison function instead of val_compare. */
 
-static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
+static int sort_compare(mino_state *S, const mino_val *a, const mino_val *b)
 {
     if (S->sort_comp_fn != NULL) {
-        mino_val_t *call_args = mino_cons(S, (mino_val_t *)a,
-                                  mino_cons(S, (mino_val_t *)b, mino_nil(S)));
-        mino_val_t *result = mino_call(S, S->sort_comp_fn, call_args, S->sort_comp_env);
+        mino_val *call_args = mino_cons(S, (mino_val *)a,
+                                  mino_cons(S, (mino_val *)b, mino_nil(S)));
+        mino_val *result = mino_call(S, S->sort_comp_fn, call_args, S->sort_comp_env);
         if (result == NULL) return 0;
         /* Numeric result: use sign directly (compare-style) */
         if (mino_val_int_p(result)) {
@@ -2104,9 +2104,9 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
      * pairs throw a typed error instead of silently ordering by tag.
      * (sort [1 []]) -> ClassCastException-shaped error matches Clojure. */
     {
-        mino_val_t *args = mino_cons(S, (mino_val_t *)a,
-                              mino_cons(S, (mino_val_t *)b, mino_nil(S)));
-        mino_val_t *r = prim_compare(S, args, NULL);
+        mino_val *args = mino_cons(S, (mino_val *)a,
+                              mino_cons(S, (mino_val *)b, mino_nil(S)));
+        mino_val *r = prim_compare(S, args, NULL);
         if (r == NULL) return 0;
         if (mino_val_int_p(r)) {
             return mino_val_int_get(r) < 0 ? -1 : mino_val_int_get(r) > 0 ? 1 : 0;
@@ -2118,8 +2118,8 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
     }
 }
 
-/* Merge sort for mino_val_t* arrays. */
-static void merge_sort_vals(mino_state_t *S, mino_val_t **arr, mino_val_t **tmp, size_t len)
+/* Merge sort for mino_val* arrays. */
+static void merge_sort_vals(mino_state *S, mino_val **arr, mino_val **tmp, size_t len)
 {
     size_t mid, i, j, k;
     if (len <= 1) return;
@@ -2139,14 +2139,14 @@ static void merge_sort_vals(mino_state_t *S, mino_val_t **arr, mino_val_t **tmp,
 }
 
 /* (sort coll) or (sort comp coll) */
-mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *comp = NULL;
-    mino_val_t **arr;
-    mino_val_t **tmp;
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *coll;
+    mino_val *comp = NULL;
+    mino_val **arr;
+    mino_val **tmp;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     size_t      n_items, i;
     seq_iter_t  it;
     if (!mino_is_cons(args)) {
@@ -2170,8 +2170,8 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * silently produce an empty result. Routes through prim_seq for the
      * shared coercion check. */
     {
-        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return mino_empty_list(S);
         coll = seqd;
@@ -2181,8 +2181,8 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { n_items++; seq_iter_next(S, &it); }
     if (n_items == 0) return mino_empty_list(S);
-    arr = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*arr));
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*tmp));
+    arr = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*arr));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*tmp));
     i = 0;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { arr[i++] = seq_iter_val(S, &it); seq_iter_next(S, &it); }
@@ -2192,16 +2192,16 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     S->sort_comp_fn  = NULL;
     S->sort_comp_env = NULL;
     for (i = 0; i < n_items; i++) {
-        mino_val_t *cell = mino_cons(S, arr[i], mino_nil(S));
+        mino_val *cell = mino_cons(S, arr[i], mino_nil(S));
         if (tail == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail, cell); }
         tail = cell;
     }
     return head;
 }
 
-mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_peek(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "peek requires one argument");
@@ -2226,9 +2226,9 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "pop requires one argument");
@@ -2253,11 +2253,11 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_find(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *m;
-    mino_val_t *k;
-    mino_val_t *v;
+    mino_val *m;
+    mino_val *k;
+    mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -2291,7 +2291,7 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(m) == MINO_RECORD) {
         int idx = record_field_index(m, k);
         if (idx >= 0) {
-            mino_val_t *fields = m->as.record.type->as.record_type.fields;
+            mino_val *fields = m->as.record.type->as.record_type.fields;
             return mino_map_entry(S, vec_nth(fields, idx),
                                      m->as.record.vals[idx]);
         }
@@ -2309,9 +2309,9 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_map_entry(S, k, v);
 }
 
-mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
+    mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "empty requires one argument");
@@ -2319,7 +2319,7 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_nil(S);
     {
-        mino_val_t *r;
+        mino_val *r;
         switch (mino_type_of(coll)) {
         case MINO_VECTOR:
             r = mino_vector(S, NULL, 0);
@@ -2353,10 +2353,10 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *out;
+    mino_val *coll;
+    mino_val *out;
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -2369,16 +2369,16 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET) {
         /* Reverse of sorted collection — build reverse cons list from
          * the in-order key list. */
-        mino_val_t *keys = mino_nil(S);
-        mino_val_t *kt   = NULL;
+        mino_val *keys = mino_nil(S);
+        mino_val *kt   = NULL;
         rb_to_list(S, coll->as.sorted.root, &keys, &kt);
         out = mino_nil(S);
         if (mino_type_of(coll) == MINO_SORTED_MAP) {
             while (mino_is_cons(keys)) {
-                mino_val_t *k = keys->as.cons.car;
-                mino_val_t *v = rb_get(S, coll->as.sorted.root, k,
+                mino_val *k = keys->as.cons.car;
+                mino_val *v = rb_get(S, coll->as.sorted.root, k,
                                        coll->as.sorted.comparator);
-                mino_val_t *kv[2]; kv[0] = k; kv[1] = v;
+                mino_val *kv[2]; kv[0] = k; kv[1] = v;
                 out = mino_cons(S, mino_vector(S, kv, 2), out);
                 keys = keys->as.cons.cdr;
             }
@@ -2401,10 +2401,10 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return out;
 }
 
-mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, pairs, i;
-    mino_val_t **ks, **vs, *p;
+    mino_val **ks, **vs, *p;
     (void)env;
     arg_count(S, args, &n);
     if (n % 2 != 0) {
@@ -2412,8 +2412,8 @@ mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     pairs = n / 2;
     if (pairs == 0) return mino_sorted_map(S, NULL, NULL, 0);
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
     p = args;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car; p = p->as.cons.cdr;
@@ -2422,14 +2422,14 @@ mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_sorted_map(S, ks, vs, pairs);
 }
 
-mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sorted_set(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, i;
-    mino_val_t **tmp, *p;
+    mino_val **tmp, *p;
     (void)env;
     arg_count(S, args, &n);
     if (n == 0) return mino_sorted_set(S, NULL, 0);
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
     p = args;
     for (i = 0; i < n; i++) {
         tmp[i] = p->as.cons.car;
@@ -2438,10 +2438,10 @@ mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_sorted_set(S, tmp, n);
 }
 
-mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, pairs, i;
-    mino_val_t *comparator, **ks, **vs, *p;
+    mino_val *comparator, **ks, **vs, *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 1 || (n - 1) % 2 != 0) {
@@ -2456,8 +2456,8 @@ mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
     pairs = (n - 1) / 2;
     if (pairs == 0) return mino_sorted_map_by(S, comparator, NULL, NULL, 0);
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
     p = args->as.cons.cdr;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car; p = p->as.cons.cdr;
@@ -2466,10 +2466,10 @@ mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     return mino_sorted_map_by(S, comparator, ks, vs, pairs);
 }
 
-mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_sorted_set_by(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, items, i;
-    mino_val_t *comparator, **tmp, *p;
+    mino_val *comparator, **tmp, *p;
     (void)env;
     arg_count(S, args, &n);
     if (n < 1) {
@@ -2484,7 +2484,7 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
     items = n - 1;
     if (items == 0) return mino_sorted_set_by(S, comparator, NULL, 0);
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, items * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, items * sizeof(*tmp));
     p = args->as.cons.cdr;
     for (i = 0; i < items; i++) {
         tmp[i] = p->as.cons.car;
@@ -2497,7 +2497,7 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
  * registered name. On success, *is_gt tells whether the test is a >
  * family test and *inclusive tells whether the boundary value itself
  * is included. Returns 0 if v is not one of the four accepted tests. */
-static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
+static int classify_subseq_test(const mino_val *v, int *is_gt, int *inclusive)
 {
     if (v == NULL || mino_type_of(v) != MINO_PRIM) return 0;
     const char *name = v->as.prim.name;
@@ -2521,12 +2521,12 @@ static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
  *   end-test. For rsubseq, scan descending from end-key, drop the
  *   first element if end-test fails, then takeWhile start-test.
  *   start-test/end-test must each be one of <, <=, >, >=. */
-static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
+static mino_val *subseq_impl(mino_state *S, mino_val *args, int reverse)
 {
     size_t n;
-    mino_val_t *sc;
-    mino_val_t *head = mino_nil(S);
-    mino_val_t *tail = NULL;
+    mino_val *sc;
+    mino_val *head = mino_nil(S);
+    mino_val *tail = NULL;
     int is_map;
     arg_count(S, args, &n);
     if (n != 3 && n != 5) {
@@ -2545,13 +2545,13 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
     }
     is_map = mino_type_of(sc) == MINO_SORTED_MAP;
     if (n == 3) {
-        mino_val_t *test = args->as.cons.cdr->as.cons.car;
-        mino_val_t *key  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        mino_val *test = args->as.cons.cdr->as.cons.car;
+        mino_val *key  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         int is_gt, inclusive;
         int has_lo = 0, lo_inclusive = 0;
         int has_hi = 0, hi_inclusive = 0;
-        mino_val_t *lo_key = NULL;
-        mino_val_t *hi_key = NULL;
+        mino_val *lo_key = NULL;
+        mino_val *hi_key = NULL;
         if (!classify_subseq_test(test, &is_gt, &inclusive)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 reverse
@@ -2572,22 +2572,22 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
         return head;
     }
     {
-        mino_val_t *p = args->as.cons.cdr;
-        mino_val_t *start_test = p->as.cons.car; p = p->as.cons.cdr;
-        mino_val_t *start_key  = p->as.cons.car; p = p->as.cons.cdr;
-        mino_val_t *end_test   = p->as.cons.car; p = p->as.cons.cdr;
-        mino_val_t *end_key    = p->as.cons.car;
+        mino_val *p = args->as.cons.cdr;
+        mino_val *start_test = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val *start_key  = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val *end_test   = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val *end_key    = p->as.cons.car;
         int start_is_gt, start_inclusive;
         int end_is_gt, end_inclusive;
-        mino_val_t *raw_head = mino_nil(S);
-        mino_val_t *raw_tail = NULL;
-        mino_val_t *result_head = mino_nil(S);
-        mino_val_t *result_tail = NULL;
-        mino_val_t *pivot_key;
+        mino_val *raw_head = mino_nil(S);
+        mino_val *raw_tail = NULL;
+        mino_val *result_head = mino_nil(S);
+        mino_val *result_tail = NULL;
+        mino_val *pivot_key;
         int pivot_inclusive;
         int filter_is_gt, filter_inclusive;
-        mino_val_t *filter_key;
-        mino_val_t *cur;
+        mino_val *filter_key;
+        mino_val *cur;
         if (!classify_subseq_test(start_test, &start_is_gt, &start_inclusive)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 reverse
@@ -2633,8 +2633,8 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
          * Only happens when first-key equals pivot-key and the pivot-test
          * is exclusive (> or <). */
         if (cur != NULL && mino_type_of(cur) == MINO_CONS && !pivot_inclusive) {
-            mino_val_t *first_entry = cur->as.cons.car;
-            mino_val_t *first_key   = is_map
+            mino_val *first_entry = cur->as.cons.car;
+            mino_val *first_key   = is_map
                 ? vec_nth(first_entry, 0)
                 : first_entry;
             int cmp = rb_compare(S, first_key, pivot_key,
@@ -2643,8 +2643,8 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
         }
         /* Step 3: takeWhile the other filter. */
         while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
-            mino_val_t *entry = cur->as.cons.car;
-            mino_val_t *key   = is_map ? vec_nth(entry, 0) : entry;
+            mino_val *entry = cur->as.cons.car;
+            mino_val *key   = is_map ? vec_nth(entry, 0) : entry;
             int cmp = rb_compare(S, key, filter_key,
                                  sc->as.sorted.comparator);
             int keep;
@@ -2655,7 +2655,7 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
             }
             if (!keep) break;
             {
-                mino_val_t *cell = mino_cons(S, entry, mino_nil(S));
+                mino_val *cell = mino_cons(S, entry, mino_nil(S));
                 if (result_tail == NULL) result_head = cell;
                 else mino_cons_cdr_set(S, result_tail, cell);
                 result_tail = cell;
@@ -2676,13 +2676,13 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
     }
 }
 
-mino_val_t *prim_subseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_subseq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return subseq_impl(S, args, 0);
 }
 
-mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rsubseq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return subseq_impl(S, args, 1);
@@ -2690,9 +2690,9 @@ mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (every? pred coll) — true iff (pred x) is truthy for every x in coll.
  * Empty / nil coll → true. Short-circuits on the first falsy result. */
-mino_val_t *prim_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_every_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pred, *coll;
+    mino_val *pred, *coll;
     seq_iter_t  it;
     size_t      n;
     arg_count(S, args, &n);
@@ -2706,17 +2706,17 @@ mino_val_t *prim_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Validate seqability eagerly so non-seqable inputs throw rather
      * than vacuously returning true. */
     {
-        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return mino_true(S);
         coll = seqd;
     }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
-        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val *test = apply_callable(S, pred, call_args, env);
         if (test == NULL) return NULL;
         if (!mino_is_truthy_inline(test)) return mino_false(S);
         seq_iter_next(S, &it);
@@ -2726,9 +2726,9 @@ mino_val_t *prim_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (some pred coll) — first truthy value of (pred x) for any x in coll,
  * else nil. Short-circuits on the first truthy result. */
-mino_val_t *prim_some(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_some(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *pred, *coll;
+    mino_val *pred, *coll;
     seq_iter_t  it;
     size_t      n;
     arg_count(S, args, &n);
@@ -2742,17 +2742,17 @@ mino_val_t *prim_some(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Validate seqability eagerly so non-seqable inputs throw rather
      * than silently returning nil. */
     {
-        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return mino_nil(S);
         coll = seqd;
     }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
-        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val *test = apply_callable(S, pred, call_args, env);
         if (test == NULL) return NULL;
         if (mino_is_truthy_inline(test)) return test;
         seq_iter_next(S, &it);
@@ -2761,36 +2761,36 @@ mino_val_t *prim_some(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (not-any? pred coll) — true iff (pred x) is falsy for every x in coll. */
-mino_val_t *prim_not_any_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_not_any_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *r = prim_some(S, args, env);
+    mino_val *r = prim_some(S, args, env);
     if (r == NULL) return NULL;
     return mino_is_truthy_inline(r) ? mino_false(S) : mino_true(S);
 }
 
 /* (not-every? pred coll) — true iff (pred x) is falsy for at least one x. */
-mino_val_t *prim_not_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_not_every_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *r = prim_every_p(S, args, env);
+    mino_val *r = prim_every_p(S, args, env);
     if (r == NULL) return NULL;
     return mino_is_truthy_inline(r) ? mino_false(S) : mino_true(S);
 }
 
 /* Helper: build a [& args] params vector. */
-static mino_val_t *params_amp_args(mino_state_t *S)
+static mino_val *params_amp_args(mino_state *S)
 {
-    mino_val_t *items[2];
+    mino_val *items[2];
     items[0] = mino_symbol(S, "&");
     items[1] = mino_symbol(S, "args");
     return mino_vector(S, items, 2);
 }
 
 /* (complement f) — returns a fn whose result is (not (apply f args)). */
-mino_val_t *prim_complement(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_complement(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *f;
-    mino_env_t *fn_env;
-    mino_val_t *body;
+    mino_val *f;
+    mino_env *fn_env;
+    mino_val *body;
     size_t n;
     arg_count(S, args, &n);
     if (n != 1) {
@@ -2802,10 +2802,10 @@ mino_val_t *prim_complement(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     env_bind(S, fn_env, "f", f);
     /* body forms: ((not (apply f args))) */
     {
-        mino_val_t *apply_form = mino_cons(S, mino_symbol(S, "apply"),
+        mino_val *apply_form = mino_cons(S, mino_symbol(S, "apply"),
             mino_cons(S, mino_symbol(S, "f"),
                 mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
-        mino_val_t *not_form = mino_cons(S, mino_symbol(S, "not"),
+        mino_val *not_form = mino_cons(S, mino_symbol(S, "not"),
             mino_cons(S, apply_form, mino_nil(S)));
         body = mino_cons(S, not_form, mino_nil(S));
     }
@@ -2814,15 +2814,15 @@ mino_val_t *prim_complement(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (comp) -> identity; (comp f) -> f; (comp f g ...) -> applied right to left.
  * Result is (fn [& args] (f (g (... (apply h args))))). */
-mino_val_t *prim_comp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
-    mino_val_t *fs_vec;
-    mino_env_t *fn_env;
-    mino_val_t *body;
+    mino_val *fs_vec;
+    mino_env *fn_env;
+    mino_val *body;
     arg_count(S, args, &n);
     if (n == 0) {
-        mino_val_t *identity = var_find(S, "clojure.core", "identity");
+        mino_val *identity = var_find(S, "clojure.core", "identity");
         if (identity != NULL && mino_type_of(identity) == MINO_VAR) {
             return identity->as.var.root;
         }
@@ -2839,8 +2839,8 @@ mino_val_t *prim_comp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * Most compact: use a Clojure form that reads fs from the env at
      * each call. */
     {
-        mino_val_t **items = (mino_val_t **)malloc(n * sizeof(mino_val_t *));
-        mino_val_t *cur;
+        mino_val **items = (mino_val **)malloc(n * sizeof(mino_val *));
+        mino_val *cur;
         size_t i;
         if (items == NULL) {
             return prim_throw_classified(S, "eval/oom", "MOM001",
@@ -2860,34 +2860,34 @@ mino_val_t *prim_comp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      *                (apply (peek fs) args)
      *                (rseq (pop fs)))) */
     {
-        mino_val_t *sym_acc   = mino_symbol(S, "acc");
-        mino_val_t *sym_f     = mino_symbol(S, "f");
-        mino_val_t *sym_args  = mino_symbol(S, "args");
-        mino_val_t *sym_fs    = mino_symbol(S, "fs");
+        mino_val *sym_acc   = mino_symbol(S, "acc");
+        mino_val *sym_f     = mino_symbol(S, "f");
+        mino_val *sym_args  = mino_symbol(S, "args");
+        mino_val *sym_fs    = mino_symbol(S, "fs");
         /* inner-fn params: [acc f] */
-        mino_val_t *inner_params_items[2] = {sym_acc, sym_f};
-        mino_val_t *inner_params = mino_vector(S, inner_params_items, 2);
+        mino_val *inner_params_items[2] = {sym_acc, sym_f};
+        mino_val *inner_params = mino_vector(S, inner_params_items, 2);
         /* inner-fn body: ((f acc)) */
-        mino_val_t *inner_call = mino_cons(S, sym_f,
+        mino_val *inner_call = mino_cons(S, sym_f,
             mino_cons(S, sym_acc, mino_nil(S)));
-        mino_val_t *inner_body = mino_cons(S, inner_call, mino_nil(S));
-        mino_val_t *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
+        mino_val *inner_body = mino_cons(S, inner_call, mino_nil(S));
+        mino_val *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
             mino_cons(S, inner_params,
                 mino_cons(S, inner_call, mino_nil(S))));
         (void)inner_body;
         /* init form: (apply (peek fs) args) */
-        mino_val_t *peek_call = mino_cons(S, mino_symbol(S, "peek"),
+        mino_val *peek_call = mino_cons(S, mino_symbol(S, "peek"),
             mino_cons(S, sym_fs, mino_nil(S)));
-        mino_val_t *init_form = mino_cons(S, mino_symbol(S, "apply"),
+        mino_val *init_form = mino_cons(S, mino_symbol(S, "apply"),
             mino_cons(S, peek_call,
                 mino_cons(S, sym_args, mino_nil(S))));
         /* (rseq (pop fs)) */
-        mino_val_t *pop_call = mino_cons(S, mino_symbol(S, "pop"),
+        mino_val *pop_call = mino_cons(S, mino_symbol(S, "pop"),
             mino_cons(S, sym_fs, mino_nil(S)));
-        mino_val_t *rseq_call = mino_cons(S, mino_symbol(S, "rseq"),
+        mino_val *rseq_call = mino_cons(S, mino_symbol(S, "rseq"),
             mino_cons(S, pop_call, mino_nil(S)));
         /* (reduce inner-fn init-form rseq-call) */
-        mino_val_t *reduce_form = mino_cons(S, mino_symbol(S, "reduce"),
+        mino_val *reduce_form = mino_cons(S, mino_symbol(S, "reduce"),
             mino_cons(S, inner_fn,
                 mino_cons(S, init_form,
                     mino_cons(S, rseq_call, mino_nil(S)))));
@@ -2897,12 +2897,12 @@ mino_val_t *prim_comp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (partial f) -> f; (partial f & args) -> fn that calls f with args prepended. */
-mino_val_t *prim_partial(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_partial(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *f;
-    mino_val_t *bound_args;
-    mino_env_t *fn_env;
-    mino_val_t *body;
+    mino_val *f;
+    mino_val *bound_args;
+    mino_env *fn_env;
+    mino_val *body;
     size_t n;
     arg_count(S, args, &n);
     if (n == 0) {
@@ -2917,10 +2917,10 @@ mino_val_t *prim_partial(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     env_bind(S, fn_env, "bound", bound_args);
     /* body: ((apply f (concat bound args))) */
     {
-        mino_val_t *concat_call = mino_cons(S, mino_symbol(S, "concat"),
+        mino_val *concat_call = mino_cons(S, mino_symbol(S, "concat"),
             mino_cons(S, mino_symbol(S, "bound"),
                 mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
-        mino_val_t *apply_form = mino_cons(S, mino_symbol(S, "apply"),
+        mino_val *apply_form = mino_cons(S, mino_symbol(S, "apply"),
             mino_cons(S, mino_symbol(S, "f"),
                 mino_cons(S, concat_call, mino_nil(S))));
         body = mino_cons(S, apply_form, mino_nil(S));
@@ -2929,11 +2929,11 @@ mino_val_t *prim_partial(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (juxt f g ...) — returns a fn that returns [(f a..) (g a..) ...] for its args. */
-mino_val_t *prim_juxt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_juxt(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fs;
-    mino_env_t *fn_env;
-    mino_val_t *body;
+    mino_val *fs;
+    mino_env *fn_env;
+    mino_val *body;
     size_t n;
     arg_count(S, args, &n);
     if (n == 0) {
@@ -2945,15 +2945,15 @@ mino_val_t *prim_juxt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     env_bind(S, fn_env, "fs", fs);
     /* body: ((mapv (fn [f] (apply f args)) fs)) */
     {
-        mino_val_t *inner_params_items[1] = {mino_symbol(S, "f")};
-        mino_val_t *inner_params = mino_vector(S, inner_params_items, 1);
-        mino_val_t *apply_call = mino_cons(S, mino_symbol(S, "apply"),
+        mino_val *inner_params_items[1] = {mino_symbol(S, "f")};
+        mino_val *inner_params = mino_vector(S, inner_params_items, 1);
+        mino_val *apply_call = mino_cons(S, mino_symbol(S, "apply"),
             mino_cons(S, mino_symbol(S, "f"),
                 mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
-        mino_val_t *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
+        mino_val *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
             mino_cons(S, inner_params,
                 mino_cons(S, apply_call, mino_nil(S))));
-        mino_val_t *mapv_call = mino_cons(S, mino_symbol(S, "mapv"),
+        mino_val *mapv_call = mino_cons(S, mino_symbol(S, "mapv"),
             mino_cons(S, inner_fn,
                 mino_cons(S, mino_symbol(S, "fs"), mino_nil(S))));
         body = mino_cons(S, mapv_call, mino_nil(S));
@@ -2962,10 +2962,10 @@ mino_val_t *prim_juxt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (distinct? x ...) — true iff no two args are equal. Empty arglist → true. */
-mino_val_t *prim_distinct_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_distinct_p(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *cur = args;
-    mino_val_t *seen;
+    mino_val *cur = args;
+    mino_val *seen;
     size_t n_args = 0;
     (void)env;
     if (cur == NULL || mino_is_nil(cur) || !mino_is_cons(cur)) {
@@ -2973,7 +2973,7 @@ mino_val_t *prim_distinct_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     seen = mino_set(S, NULL, 0);
     while (mino_is_cons(cur)) {
-        mino_val_t *x = cur->as.cons.car;
+        mino_val *x = cur->as.cons.car;
         seen = set_conj1(S, seen, x);
         if (seen == NULL) return NULL;
         n_args++;
@@ -2984,11 +2984,11 @@ mino_val_t *prim_distinct_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (merge-with f m1 m2 ...) — merge maps, calling (f a b) to combine
  * values at shared keys. Returns nil if every map is nil. */
-mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_merge_with(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn;
-    mino_val_t *cur;
-    mino_val_t *result = NULL;
+    mino_val *fn;
+    mino_val *cur;
+    mino_val *result = NULL;
     int any_non_nil = 0;
     size_t n_inputs = 0;
     if (!mino_is_cons(args)) {
@@ -2998,14 +2998,14 @@ mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     fn  = args->as.cons.car;
     cur = args->as.cons.cdr;
     {
-        mino_val_t *p = cur;
+        mino_val *p = cur;
         while (mino_is_cons(p)) {
             n_inputs++;
             p = p->as.cons.cdr;
         }
     }
     while (mino_is_cons(cur)) {
-        mino_val_t *m = cur->as.cons.car;
+        mino_val *m = cur->as.cons.car;
         cur = cur->as.cons.cdr;
         if (m == NULL || mino_is_nil(m)) continue;
         if (mino_type_of(m) != MINO_MAP) {
@@ -3027,8 +3027,8 @@ mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             seq_iter_t it;
             seq_iter_init(S, &it, m);
             while (!seq_iter_done(&it)) {
-                mino_val_t *kv = seq_iter_val(S, &it);
-                mino_val_t *k, *v;
+                mino_val *kv = seq_iter_val(S, &it);
+                mino_val *k, *v;
                 if (kv != NULL && mino_type_of(kv) == MINO_MAP_ENTRY) {
                     k = kv->as.map_entry.k;
                     v = kv->as.map_entry.v;
@@ -3041,14 +3041,14 @@ mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     continue;
                 }
                 {
-                    mino_val_t *existing = mino_map_lookup(result, k);
+                    mino_val *existing = mino_map_lookup(result, k);
                     if (existing == NULL) {
                         result = mino_map_assoc1(S, result, k, v);
                     } else {
-                        mino_val_t *call_args =
+                        mino_val *call_args =
                             mino_cons(S, existing,
                                 mino_cons(S, v, mino_nil(S)));
-                        mino_val_t *combined =
+                        mino_val *combined =
                             apply_callable(S, fn, call_args, env);
                         if (combined == NULL) return NULL;
                         result = mino_map_assoc1(S, result, k, combined);
@@ -3064,10 +3064,10 @@ mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (group-by f coll) — map of (f x) -> vector of items in coll where
  * f's result is the key. Preserves encounter order within each bucket. */
-mino_val_t *prim_group_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_group_by(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *fn, *coll;
-    mino_val_t *result;
+    mino_val *fn, *coll;
+    mino_val *result;
     seq_iter_t  it;
     size_t      n;
     arg_count(S, args, &n);
@@ -3081,10 +3081,10 @@ mino_val_t *prim_group_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || mino_is_nil(coll)) return result;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
-        mino_val_t *k = apply_callable(S, fn, call_args, env);
-        mino_val_t *bucket;
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val *k = apply_callable(S, fn, call_args, env);
+        mino_val *bucket;
         if (k == NULL) return NULL;
         bucket = mino_map_lookup(result, k);
         if (bucket == NULL || mino_is_nil(bucket)) {
@@ -3101,10 +3101,10 @@ mino_val_t *prim_group_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (frequencies coll) — map of distinct items in coll to their count. */
-mino_val_t *prim_frequencies(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_frequencies(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *coll;
-    mino_val_t *result;
+    mino_val *coll;
+    mino_val *result;
     seq_iter_t  it;
     size_t      n;
     (void)env;
@@ -3118,8 +3118,8 @@ mino_val_t *prim_frequencies(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || mino_is_nil(coll)) return result;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        mino_val_t *cur  = mino_map_lookup(result, elem);
+        mino_val *elem = seq_iter_val(S, &it);
+        mino_val *cur  = mino_map_lookup(result, elem);
         long long   prev = 0;
         if (cur != NULL && !mino_is_nil(cur)) {
             (void)mino_to_int(cur, &prev);
@@ -3133,10 +3133,10 @@ mino_val_t *prim_frequencies(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (zipmap ks vs) — map with keys ks paired with vals vs. Stops at the
  * shorter of the two collections. nil/empty pair returns {}. */
-mino_val_t *prim_zipmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_zipmap(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *ks, *vs;
-    mino_val_t *result;
+    mino_val *ks, *vs;
+    mino_val *result;
     seq_iter_t  k_it, v_it;
     size_t      n;
     (void)env;
@@ -3153,15 +3153,15 @@ mino_val_t *prim_zipmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Validate seqability of both inputs eagerly so non-seqable keys or
      * vals throw rather than silently producing an empty map. */
     {
-        mino_val_t *seq_args = mino_cons(S, ks, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, ks, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return result;
         ks = seqd;
     }
     {
-        mino_val_t *seq_args = mino_cons(S, vs, mino_nil(S));
-        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        mino_val *seq_args = mino_cons(S, vs, mino_nil(S));
+        mino_val *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
         if (mino_type_of(seqd) == MINO_NIL) return result;
         vs = seqd;
@@ -3169,8 +3169,8 @@ mino_val_t *prim_zipmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     seq_iter_init(S, &k_it, ks);
     seq_iter_init(S, &v_it, vs);
     while (!seq_iter_done(&k_it) && !seq_iter_done(&v_it)) {
-        mino_val_t *k = seq_iter_val(S, &k_it);
-        mino_val_t *v = seq_iter_val(S, &v_it);
+        mino_val *k = seq_iter_val(S, &k_it);
+        mino_val *v = seq_iter_val(S, &v_it);
         result = mino_map_assoc1(S, result, k, v);
         if (result == NULL) return NULL;
         seq_iter_next(S, &k_it);

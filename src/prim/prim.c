@@ -19,10 +19,10 @@
  * Otherwise integer arithmetic is used end-to-end.
  */
 
-int args_have_float(mino_val_t *args)
+int args_have_float(mino_val *args)
 {
     while (mino_is_cons(args)) {
-        mino_val_t *a = args->as.cons.car;
+        mino_val *a = args->as.cons.car;
         if (a != NULL && mino_type_of(a) == MINO_FLOAT) {
             return 1;
         }
@@ -34,7 +34,7 @@ int args_have_float(mino_val_t *args)
 /* Throw a classified catchable exception from a primitive.  If inside a
  * try block, this longjmps to the catch handler.  Otherwise it sets a
  * fatal error and the caller returns NULL to propagate to the host. */
-mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
+mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                   const char *code, const char *msg)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
@@ -43,8 +43,8 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
          * Attach :mino/location when a source span can be derived from
          * either the call form or the bc cursor; the catch handler
          * surfaces it as part of (ex-data). */
-        mino_val_t *keys[6], *vals[6];
-        mino_val_t *ex;
+        mino_val *keys[6], *vals[6];
+        mino_val *ex;
         const char *loc_file = NULL;
         int         loc_line = 0;
         int         loc_col  = 0;
@@ -60,7 +60,7 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
                                         &loc_file, &loc_line, &loc_col);
         }
         if (loc_file == NULL || loc_line <= 0) {
-            const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+            const mino_val *form = mino_current_ctx(S)->eval_current_form;
             if (form != NULL && mino_is_cons(form)
                 && form->as.cons.file != NULL && form->as.cons.line > 0) {
                 loc_file = form->as.cons.file;
@@ -85,7 +85,7 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
         vals[n] = mino_nil(S);
         n++;
         if (loc_file != NULL && loc_line > 0) {
-            mino_val_t *lkeys[3], *lvals[3];
+            mino_val *lkeys[3], *lvals[3];
             lkeys[0] = mino_keyword(S, "file");
             lvals[0] = mino_string(S, loc_file);
             lkeys[1] = mino_keyword(S, "line");
@@ -108,12 +108,12 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
 /* Throws with internal/MIN001 classification.  Used by call sites that
  * predate the explicit-classification API; new sites should call
  * prim_throw_classified directly. */
-mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
+mino_val *prim_throw_error(mino_state *S, const char *msg)
 {
     return prim_throw_classified(S, "internal", "MIN001", msg);
 }
 
-int as_double(const mino_val_t *v, double *out)
+int as_double(const mino_val *v, double *out)
 {
     if (v == NULL) {
         return 0;
@@ -129,7 +129,7 @@ int as_double(const mino_val_t *v, double *out)
     return 0;
 }
 
-int as_long(const mino_val_t *v, long long *out)
+int as_long(const mino_val *v, long long *out)
 {
     if (v == NULL || !mino_val_int_p(v)) {
         return 0;
@@ -143,12 +143,12 @@ int as_long(const mino_val_t *v, long long *out)
  * Helper: print a value to a string buffer using the standard printer.
  * Returns a mino string. Uses tmpfile() for ANSI C portability.
  */
-mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
+mino_val *print_to_string(mino_state *S, const mino_val *v)
 {
     FILE  *f = tmpfile();
     long   n;
     char  *buf;
-    mino_val_t *result;
+    mino_val *result;
     if (f == NULL) {
         return prim_throw_classified(S, "host", "MHO001", "pr-str: tmpfile failed");
     }

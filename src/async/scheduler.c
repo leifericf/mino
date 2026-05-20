@@ -6,8 +6,8 @@
 #include "async/timer.h"
 #include "runtime/internal.h"
 
-void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
-                         mino_val_t *value)
+void async_sched_enqueue(mino_state *S, mino_val *callback,
+                         mino_val *value)
 {
     sched_entry_t *e = calloc(1, sizeof(*e));
     if (e == NULL) {
@@ -16,8 +16,8 @@ void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
     }
     e->callback = callback;
     e->value    = value;
-    e->cb_ref   = callback ? mino_ref(S, callback) : NULL;
-    e->val_ref  = value ? mino_ref(S, value) : NULL;
+    e->cb_ref   = callback ? mino_ref_new(S, callback) : NULL;
+    e->val_ref  = value ? mino_ref_new(S, value) : NULL;
     e->next     = NULL;
 
     if (S->async.run_tail) {
@@ -28,7 +28,7 @@ void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
     S->async.run_tail = e;
 }
 
-int async_sched_drain(mino_state_t *S, mino_env_t *env)
+int async_sched_drain(mino_state *S, mino_env *env)
 {
     int ran = 0;
 
@@ -37,15 +37,15 @@ int async_sched_drain(mino_state_t *S, mino_env_t *env)
 
     while (S->async.run_head != NULL) {
         sched_entry_t *e = S->async.run_head;
-        mino_val_t *cb  = e->callback;
-        mino_val_t *val = e->value;
+        mino_val *cb  = e->callback;
+        mino_val *val = e->value;
 
         S->async.run_head = e->next;
         if (S->async.run_head == NULL)
             S->async.run_tail = NULL;
 
         if (cb != NULL) {
-            mino_val_t *args;
+            mino_val *args;
             /* Pin cb and val: once dequeued they may only be in registers,
              * invisible to the conservative stack scanner when mino_cons
              * or mino_call trigger a GC collection. */
@@ -65,7 +65,7 @@ int async_sched_drain(mino_state_t *S, mino_env_t *env)
     return ran;
 }
 
-void async_sched_free(mino_state_t *S)
+void async_sched_free(mino_state *S)
 {
     sched_entry_t *e = S->async.run_head;
     while (e != NULL) {
@@ -79,7 +79,7 @@ void async_sched_free(mino_state_t *S)
     S->async.run_tail = NULL;
 }
 
-void async_sched_mark(mino_state_t *S)
+void async_sched_mark(mino_state *S)
 {
     sched_entry_t *e;
     for (e = S->async.run_head; e != NULL; e = e->next) {

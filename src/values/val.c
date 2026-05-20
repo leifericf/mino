@@ -8,25 +8,25 @@
 /* Singletons                                                                */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_nil(mino_state_t *S)
+mino_val *mino_nil(mino_state *S)
 {
     (void)S;
     return MINO_MAKE_NIL;
 }
 
-mino_val_t *mino_true(mino_state_t *S)
+mino_val *mino_true(mino_state *S)
 {
     (void)S;
     return MINO_MAKE_BOOL(1);
 }
 
-mino_val_t *mino_false(mino_state_t *S)
+mino_val *mino_false(mino_state *S)
 {
     (void)S;
     return MINO_MAKE_BOOL(0);
 }
 
-mino_val_t *mino_empty_list(mino_state_t *S)
+mino_val *mino_empty_list(mino_state *S)
 {
     return &S->empty_list_singleton;
 }
@@ -35,9 +35,9 @@ mino_val_t *mino_empty_list(mino_state_t *S)
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_int(mino_state_t *S, long long n)
+mino_val *mino_int(mino_state *S, long long n)
 {
-    mino_val_t *v;
+    mino_val *v;
 #ifdef MINO_BC_PROFILE_COUNTS
     S->bc.bc_int_make_count++;
 #endif
@@ -61,7 +61,7 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
     return v;
 }
 
-mino_val_t *mino_int_wrap(mino_state_t *S, long long n)
+mino_val *mino_int_wrap(mino_state *S, long long n)
 {
 #ifdef MINO_BC_PROFILE_COUNTS
     S->bc.bc_int_make_count++;
@@ -73,22 +73,22 @@ mino_val_t *mino_int_wrap(mino_state_t *S, long long n)
         return MINO_MAKE_INT(n);
     }
     {
-        mino_val_t *v = alloc_val(S, MINO_INT);
+        mino_val *v = alloc_val(S, MINO_INT);
         v->as.i = n;
         return v;
     }
 }
 
-mino_val_t *mino_float(mino_state_t *S, double f)
+mino_val *mino_float(mino_state *S, double f)
 {
-    mino_val_t *v = alloc_val(S, MINO_FLOAT);
+    mino_val *v = alloc_val(S, MINO_FLOAT);
     v->as.f = f;
     return v;
 }
 
-mino_val_t *mino_float32(mino_state_t *S, double f)
+mino_val *mino_float32(mino_state *S, double f)
 {
-    mino_val_t *v = alloc_val(S, MINO_FLOAT32);
+    mino_val *v = alloc_val(S, MINO_FLOAT32);
     /* Narrow precision via the hardware float cast so the stored
      * double sees the rounding -- equality with another float32 then
      * compares values bit-equivalent to a Java float. NaN passes
@@ -97,25 +97,25 @@ mino_val_t *mino_float32(mino_state_t *S, double f)
     return v;
 }
 
-mino_val_t *mino_char(mino_state_t *S, int codepoint)
+mino_val *mino_char(mino_state *S, int codepoint)
 {
     (void)S;
     return MINO_MAKE_CHAR(codepoint);
 }
 
-mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
+mino_val *mino_string_n(mino_state *S, const char *s, size_t len)
 {
     /* Allocate the data buffer first so alloc_val runs last; if a
      * minor collection fires between the two allocations, v is the
      * younger of the two and the store is a safe YOUNG->anything. */
     char       *data = dup_n(S, s, len);
-    mino_val_t *v    = alloc_val(S, MINO_STRING);
+    mino_val *v    = alloc_val(S, MINO_STRING);
     v->as.s.data = data;
     v->as.s.len  = len;
     return v;
 }
 
-mino_val_t *mino_string(mino_state_t *S, const char *s)
+mino_val *mino_string(mino_state *S, const char *s)
 {
     return mino_string_n(S, s, strlen(s));
 }
@@ -145,7 +145,7 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
      * sym/keyword header was swept). The rebuild compacts away the
      * tombstones; subsequent inserts append at tbl->len. */
     for (i = 0; i < tbl->len; i++) {
-        mino_val_t *e = tbl->entries[i];
+        mino_val *e = tbl->entries[i];
         uint32_t h;
         size_t idx;
         if (e == NULL) continue;
@@ -160,26 +160,26 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
 }
 
 /* Forward decl; defined below. */
-mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
-                                              mino_type_t type,
+mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
+                                              mino_type type,
                                               const char *s, size_t len,
                                               size_t ns_len_hint);
 
-mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
-                                           mino_type_t type,
+mino_val *intern_lookup_or_create(mino_state *S, intern_table_t *tbl,
+                                           mino_type type,
                                            const char *s, size_t len)
 {
     return intern_lookup_or_create_ns(S, tbl, type, s, len, (size_t)-1);
 }
 
-mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
-                                              mino_type_t type,
+mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
+                                              mino_type type,
                                               const char *s, size_t len,
                                               size_t ns_len_hint)
 {
     uint32_t h;
     size_t mask, idx;
-    mino_val_t *v;
+    mino_val *v;
     size_t ns_len;
 
     /* ns_len resolution: callers that constructed via 2-arg (keyword
@@ -225,7 +225,7 @@ mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
             idx = (idx + 1) & mask;
             continue;
         }
-        mino_val_t *e = tbl->entries[tbl->ht_buckets[idx]];
+        mino_val *e = tbl->entries[tbl->ht_buckets[idx]];
         if (e != NULL
             && e->as.s.len == len
             && e->as.s.ns_len == ns_len
@@ -238,7 +238,7 @@ mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
     /* Not found — grow entries array if needed. */
     if (tbl->len == tbl->cap) {
         size_t new_cap = tbl->cap == 0 ? 64 : tbl->cap * 2;
-        mino_val_t **ne = (mino_val_t **)realloc(
+        mino_val **ne = (mino_val **)realloc(
             tbl->entries, new_cap * sizeof(*ne));
         if (ne == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
@@ -290,22 +290,22 @@ mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
     return v;
 }
 
-mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len)
+mino_val *mino_symbol_n(mino_state *S, const char *s, size_t len)
 {
     return intern_lookup_or_create(S, &S->sym_intern, MINO_SYMBOL, s, len);
 }
 
-mino_val_t *mino_symbol(mino_state_t *S, const char *s)
+mino_val *mino_symbol(mino_state *S, const char *s)
 {
     return mino_symbol_n(S, s, strlen(s));
 }
 
-mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len)
+mino_val *mino_keyword_n(mino_state *S, const char *s, size_t len)
 {
     return intern_lookup_or_create(S, &S->kw_intern, MINO_KEYWORD, s, len);
 }
 
-mino_val_t *mino_keyword(mino_state_t *S, const char *s)
+mino_val *mino_keyword(mino_state *S, const char *s)
 {
     return mino_keyword_n(S, s, strlen(s));
 }
@@ -317,7 +317,7 @@ mino_val_t *mino_keyword(mino_state_t *S, const char *s)
  * (which would also give ns_len=3 here — but for (keyword "a" "b/c")
  * the explicit boundary preserves ns_len=1 and distinguishes the two
  * keywords). */
-mino_val_t *mino_keyword_ns_n(mino_state_t *S,
+mino_val *mino_keyword_ns_n(mino_state *S,
                               const char *ns, size_t ns_len,
                               const char *name, size_t name_len)
 {
@@ -328,7 +328,7 @@ mino_val_t *mino_keyword_ns_n(mino_state_t *S,
     {
         size_t total = ns_len + 1 + name_len;
         char  *buf;
-        mino_val_t *v;
+        mino_val *v;
         if (total < 256) {
             char stack_buf[256];
             buf = stack_buf;
@@ -350,7 +350,7 @@ mino_val_t *mino_keyword_ns_n(mino_state_t *S,
     }
 }
 
-mino_val_t *mino_symbol_ns_n(mino_state_t *S,
+mino_val *mino_symbol_ns_n(mino_state *S,
                              const char *ns, size_t ns_len,
                              const char *name, size_t name_len)
 {
@@ -361,7 +361,7 @@ mino_val_t *mino_symbol_ns_n(mino_state_t *S,
     {
         size_t total = ns_len + 1 + name_len;
         char  *buf;
-        mino_val_t *v;
+        mino_val *v;
         if (total < 256) {
             char stack_buf[256];
             buf = stack_buf;
@@ -383,10 +383,10 @@ mino_val_t *mino_symbol_ns_n(mino_state_t *S,
     }
 }
 
-mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
-                        mino_val_t *root)
+mino_val *mino_mk_var(mino_state *S, const char *ns, const char *name,
+                        mino_val *root)
 {
-    mino_val_t *v = alloc_val(S, MINO_VAR);
+    mino_val *v = alloc_val(S, MINO_VAR);
     v->as.var.ns      = ns;
     v->as.var.sym     = name;
     v->as.var.root    = root;
@@ -398,9 +398,9 @@ mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
     return v;
 }
 
-mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
+mino_val *mino_cons(mino_state *S, mino_val *car, mino_val *cdr)
 {
-    mino_val_t *v = alloc_val(S, MINO_CONS);
+    mino_val *v = alloc_val(S, MINO_CONS);
     v->as.cons.car      = car;
     v->as.cons.cdr      = cdr;
     v->as.cons.file     = NULL;
@@ -410,9 +410,9 @@ mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
     return v;
 }
 
-mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v)
+mino_val *mino_map_entry(mino_state *S, mino_val *k, mino_val *v)
 {
-    mino_val_t *e = alloc_val(S, MINO_MAP_ENTRY);
+    mino_val *e = alloc_val(S, MINO_MAP_ENTRY);
     e->as.map_entry.k = k;
     e->as.map_entry.v = v;
     return e;
@@ -421,9 +421,9 @@ mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v)
 /* Construct an STM ref holding the given committed value. The watches
  * map and validator slots start empty; install them via add-watch /
  * set-validator! on the returned cell. */
-mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val)
+mino_val *mino_tx_ref(mino_state *S, mino_val *val)
 {
-    mino_val_t *v = alloc_val(S, MINO_TX_REF);
+    mino_val *v = alloc_val(S, MINO_TX_REF);
     v->as.tx_ref.val          = val;
     v->as.tx_ref.watches      = NULL;
     v->as.tx_ref.validator    = NULL;
@@ -437,15 +437,15 @@ mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val)
 /* Host arrays                                                               */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
+mino_val *mino_host_array_new(mino_state *S, size_t len,
                                 host_array_kind_t kind)
 {
-    mino_val_t  *v;
-    mino_val_t **vals = NULL;
-    mino_val_t  *fill;
+    mino_val  *v;
+    mino_val **vals = NULL;
+    mino_val  *fill;
     size_t       i;
     if (len > 0) {
-        vals = (mino_val_t **)malloc(len * sizeof(*vals));
+        vals = (mino_val **)malloc(len * sizeof(*vals));
         if (vals == NULL) return NULL;
     }
     /* Object arrays nil-fill; numeric primitive variants 0-fill;
@@ -474,17 +474,17 @@ mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
     return v;
 }
 
-mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
+mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                                       host_array_kind_t kind)
 {
-    mino_val_t  *v;
-    mino_val_t **vals = NULL;
+    mino_val  *v;
+    mino_val **vals = NULL;
     size_t       len = 0, i;
     /* Vector fast path. */
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
         len = coll->as.vec.len;
         if (len > 0) {
-            vals = (mino_val_t **)malloc(len * sizeof(*vals));
+            vals = (mino_val **)malloc(len * sizeof(*vals));
             if (vals == NULL) return NULL;
             for (i = 0; i < len; i++) vals[i] = vec_nth(coll, i);
         }
@@ -498,10 +498,10 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
     /* Generic seq path: walk the seq into a temp dynamic buffer. */
     {
         size_t cap = 0;
-        mino_val_t *s = coll;
+        mino_val *s = coll;
         while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
         while (mino_is_cons(s) || (s != NULL && mino_type_of(s) == MINO_CHUNKED_CONS)) {
-            mino_val_t *head;
+            mino_val *head;
             if (mino_is_cons(s)) {
                 head = s->as.cons.car;
                 s    = s->as.cons.cdr;
@@ -513,7 +513,7 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
             while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
             if (len >= cap) {
                 size_t ncap = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nvals = (mino_val_t **)realloc(vals,
+                mino_val **nvals = (mino_val **)realloc(vals,
                     ncap * sizeof(*nvals));
                 if (nvals == NULL) { free(vals); return NULL; }
                 vals = nvals;
@@ -545,19 +545,19 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
  * cache misses a hash table introduces at this scale. If a host
  * registers thousands of types, we revisit.
  */
-mino_val_t *mino_defrecord(mino_state_t *S,
+mino_val *mino_defrecord(mino_state *S,
                            const char *ns,
                            const char *name,
                            const char *const *field_names,
                            size_t n_fields)
 {
     record_type_entry_t *e;
-    mino_val_t          *fields_vec;
-    mino_val_t          *type_val;
+    mino_val          *fields_vec;
+    mino_val          *type_val;
     const char          *ns_interned;
     const char          *name_interned;
-    mino_val_t          *ns_sym;
-    mino_val_t          *name_sym;
+    mino_val          *ns_sym;
+    mino_val          *name_sym;
 
     if (S == NULL || ns == NULL || name == NULL) {
         return NULL;
@@ -583,10 +583,10 @@ mino_val_t *mino_defrecord(mino_state_t *S,
      * collection mid-build cannot drop the fields vector before the
      * type points at it. */
     {
-        mino_val_t **field_kws = NULL;
+        mino_val **field_kws = NULL;
         size_t       i;
         if (n_fields > 0) {
-            field_kws = (mino_val_t **)malloc(n_fields * sizeof(*field_kws));
+            field_kws = (mino_val **)malloc(n_fields * sizeof(*field_kws));
             if (field_kws == NULL) return NULL;
             for (i = 0; i < n_fields; i++) {
                 field_kws[i] = mino_keyword(S, field_names[i]);
@@ -618,16 +618,16 @@ mino_val_t *mino_defrecord(mino_state_t *S,
     return type_val;
 }
 
-int mino_is_record_type(const mino_val_t *v)
+int mino_is_record_type(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_TYPE;
 }
 
-mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
-                        mino_val_t **vals, size_t n_vals)
+mino_val *mino_record(mino_state *S, mino_val *type,
+                        mino_val **vals, size_t n_vals)
 {
-    mino_val_t  *v;
-    mino_val_t **slots;
+    mino_val  *v;
+    mino_val **slots;
     size_t       expected;
     size_t       i;
 
@@ -642,7 +642,7 @@ mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
 
     slots = NULL;
     if (n_vals > 0) {
-        slots = (mino_val_t **)malloc(n_vals * sizeof(*slots));
+        slots = (mino_val **)malloc(n_vals * sizeof(*slots));
         if (slots == NULL) return NULL;
         for (i = 0; i < n_vals; i++) slots[i] = vals[i];
     }
@@ -663,9 +663,9 @@ mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
  * path; the byte comparison stays as a defensive fallback for any
  * not-yet-interned shape that reaches here. Returns the index in
  * [0, n) or -1 if not found. */
-int record_field_index(const mino_val_t *r, const mino_val_t *key)
+int record_field_index(const mino_val *r, const mino_val *key)
 {
-    mino_val_t *fields;
+    mino_val *fields;
     size_t      i, n;
     if (r == NULL || mino_type_of(r) != MINO_RECORD) return -1;
     if (key == NULL || mino_type_of(key) != MINO_KEYWORD) return -1;
@@ -673,11 +673,11 @@ int record_field_index(const mino_val_t *r, const mino_val_t *key)
     if (fields == NULL) return -1;
     n = fields->as.vec.len;
     for (i = 0; i < n; i++) {
-        mino_val_t *fk = vec_nth(fields, i);
+        mino_val *fk = vec_nth(fields, i);
         if (fk == key) return (int)i;
     }
     for (i = 0; i < n; i++) {
-        mino_val_t *fk = vec_nth(fields, i);
+        mino_val *fk = vec_nth(fields, i);
         if (fk == NULL) continue;
         if (mino_type_of(fk) == mino_type_of(key)
             && fk->as.s.len == key->as.s.len
@@ -688,9 +688,9 @@ int record_field_index(const mino_val_t *r, const mino_val_t *key)
     return -1;
 }
 
-mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
+mino_val *mino_record_field(const mino_val *record, const char *name)
 {
-    mino_val_t *fields;
+    mino_val *fields;
     size_t      i, n, name_len;
     if (record == NULL || mino_type_of(record) != MINO_RECORD || name == NULL) {
         return NULL;
@@ -700,7 +700,7 @@ mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
     n = fields->as.vec.len;
     name_len = strlen(name);
     for (i = 0; i < n; i++) {
-        mino_val_t *fk = vec_nth(fields, i);
+        mino_val *fk = vec_nth(fields, i);
         if (fk == NULL) continue;
         if (fk->as.s.len == name_len
             && memcmp(fk->as.s.data, name, name_len) == 0) {
@@ -710,7 +710,7 @@ mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
     return NULL;
 }
 
-int mino_is_record(const mino_val_t *v)
+int mino_is_record(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_RECORD;
 }
@@ -720,12 +720,12 @@ int mino_is_record(const mino_val_t *v)
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
 
-int mino_is_nil(const mino_val_t *v)
+int mino_is_nil(const mino_val *v)
 {
     return v == NULL || mino_type_of(v) == MINO_NIL;
 }
 
-int mino_is_truthy(const mino_val_t *v)
+int mino_is_truthy(const mino_val *v)
 {
     if (v == NULL) {
         return 0;
@@ -739,17 +739,17 @@ int mino_is_truthy(const mino_val_t *v)
     return 1;
 }
 
-int mino_is_cons(const mino_val_t *v)
+int mino_is_cons(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_CONS;
 }
 
-int mino_is_empty_list(const mino_val_t *v)
+int mino_is_empty_list(const mino_val *v)
 {
     return v != NULL && mino_type_of(v) == MINO_EMPTY_LIST;
 }
 
-mino_val_t *mino_car(const mino_val_t *v)
+mino_val *mino_car(const mino_val *v)
 {
     if (!mino_is_cons(v)) {
         return NULL;
@@ -757,7 +757,7 @@ mino_val_t *mino_car(const mino_val_t *v)
     return v->as.cons.car;
 }
 
-mino_val_t *mino_cdr(const mino_val_t *v)
+mino_val *mino_cdr(const mino_val *v)
 {
     if (!mino_is_cons(v)) {
         return NULL;
@@ -765,7 +765,7 @@ mino_val_t *mino_cdr(const mino_val_t *v)
     return v->as.cons.cdr;
 }
 
-size_t mino_length(const mino_val_t *list)
+size_t mino_length(const mino_val *list)
 {
     size_t n = 0;
     while (mino_is_cons(list)) {
@@ -775,7 +775,7 @@ size_t mino_length(const mino_val_t *list)
     return n;
 }
 
-int mino_to_int(const mino_val_t *v, long long *out)
+int mino_to_int(const mino_val *v, long long *out)
 {
     if (v == NULL) return 0;
     if (mino_val_int_p(v)) {
@@ -793,7 +793,7 @@ int mino_to_int(const mino_val_t *v, long long *out)
     return 0;
 }
 
-int mino_to_float(const mino_val_t *v, double *out)
+int mino_to_float(const mino_val *v, double *out)
 {
     if (v == NULL || mino_type_of(v) != MINO_FLOAT) {
         return 0;
@@ -804,7 +804,7 @@ int mino_to_float(const mino_val_t *v, double *out)
     return 1;
 }
 
-int mino_to_string(const mino_val_t *v, const char **out, size_t *len)
+int mino_to_string(const mino_val *v, const char **out, size_t *len)
 {
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
         return 0;
@@ -818,12 +818,12 @@ int mino_to_string(const mino_val_t *v, const char **out, size_t *len)
     return 1;
 }
 
-int mino_to_bool(const mino_val_t *v)
+int mino_to_bool(const mino_val *v)
 {
     return mino_is_truthy(v);
 }
 
-int mino_to_char(const mino_val_t *v, int *cp)
+int mino_to_char(const mino_val *v, int *cp)
 {
     if (v == NULL || !mino_val_char_p(v)) {
         return 0;
@@ -834,7 +834,7 @@ int mino_to_char(const mino_val_t *v, int *cp)
     return 1;
 }
 
-int mino_to_keyword(const mino_val_t *v, const char **out, size_t *len)
+int mino_to_keyword(const mino_val *v, const char **out, size_t *len)
 {
     if (v == NULL || mino_type_of(v) != MINO_KEYWORD) {
         return 0;
@@ -848,7 +848,7 @@ int mino_to_keyword(const mino_val_t *v, const char **out, size_t *len)
     return 1;
 }
 
-int mino_to_symbol(const mino_val_t *v, const char **out, size_t *len)
+int mino_to_symbol(const mino_val *v, const char **out, size_t *len)
 {
     if (v == NULL || mino_type_of(v) != MINO_SYMBOL) {
         return 0;
@@ -862,7 +862,7 @@ int mino_to_symbol(const mino_val_t *v, const char **out, size_t *len)
     return 1;
 }
 
-mino_type_t mino_typeof(const mino_val_t *v)
+mino_type mino_typeof(const mino_val *v)
 {
     return mino_type_of(v);
 }
@@ -871,38 +871,38 @@ mino_type_t mino_typeof(const mino_val_t *v)
  * type. Tag-aware: works for inline scalars (int, bool, char, nil)
  * as well as boxed cells. NULL is treated as MINO_NIL. */
 
-int mino_is_bool(const mino_val_t *v)    { return mino_type_of(v) == MINO_BOOL; }
-int mino_is_int(const mino_val_t *v)     { return mino_type_of(v) == MINO_INT; }
-int mino_is_float(const mino_val_t *v)
+int mino_is_bool(const mino_val *v)    { return mino_type_of(v) == MINO_BOOL; }
+int mino_is_int(const mino_val *v)     { return mino_type_of(v) == MINO_INT; }
+int mino_is_float(const mino_val *v)
 {
-    mino_type_t t = mino_type_of(v);
+    mino_type t = mino_type_of(v);
     return t == MINO_FLOAT || t == MINO_FLOAT32;
 }
-int mino_is_char(const mino_val_t *v)    { return mino_type_of(v) == MINO_CHAR; }
-int mino_is_string(const mino_val_t *v)  { return mino_type_of(v) == MINO_STRING; }
-int mino_is_symbol(const mino_val_t *v)  { return mino_type_of(v) == MINO_SYMBOL; }
-int mino_is_keyword(const mino_val_t *v) { return mino_type_of(v) == MINO_KEYWORD; }
-int mino_is_vector(const mino_val_t *v)  { return mino_type_of(v) == MINO_VECTOR; }
-int mino_is_map(const mino_val_t *v)
+int mino_is_char(const mino_val *v)    { return mino_type_of(v) == MINO_CHAR; }
+int mino_is_string(const mino_val *v)  { return mino_type_of(v) == MINO_STRING; }
+int mino_is_symbol(const mino_val *v)  { return mino_type_of(v) == MINO_SYMBOL; }
+int mino_is_keyword(const mino_val *v) { return mino_type_of(v) == MINO_KEYWORD; }
+int mino_is_vector(const mino_val *v)  { return mino_type_of(v) == MINO_VECTOR; }
+int mino_is_map(const mino_val *v)
 {
-    mino_type_t t = mino_type_of(v);
+    mino_type t = mino_type_of(v);
     return t == MINO_MAP || t == MINO_SORTED_MAP;
 }
-int mino_is_set(const mino_val_t *v)
+int mino_is_set(const mino_val *v)
 {
-    mino_type_t t = mino_type_of(v);
+    mino_type t = mino_type_of(v);
     return t == MINO_SET || t == MINO_SORTED_SET;
 }
-int mino_is_fn(const mino_val_t *v)      { return mino_type_of(v) == MINO_FN; }
-int mino_is_macro(const mino_val_t *v)   { return mino_type_of(v) == MINO_MACRO; }
-int mino_is_prim(const mino_val_t *v)    { return mino_type_of(v) == MINO_PRIM; }
-int mino_is_lazy(const mino_val_t *v)    { return mino_type_of(v) == MINO_LAZY; }
-int mino_is_var(const mino_val_t *v)     { return mino_type_of(v) == MINO_VAR; }
-int mino_is_bigint(const mino_val_t *v)  { return mino_type_of(v) == MINO_BIGINT; }
-int mino_is_ratio(const mino_val_t *v)   { return mino_type_of(v) == MINO_RATIO; }
-int mino_is_bigdec(const mino_val_t *v)  { return mino_type_of(v) == MINO_BIGDEC; }
-int mino_is_uuid(const mino_val_t *v)    { return mino_type_of(v) == MINO_UUID; }
-int mino_is_regex(const mino_val_t *v)   { return mino_type_of(v) == MINO_REGEX; }
+int mino_is_fn(const mino_val *v)      { return mino_type_of(v) == MINO_FN; }
+int mino_is_macro(const mino_val *v)   { return mino_type_of(v) == MINO_MACRO; }
+int mino_is_prim(const mino_val *v)    { return mino_type_of(v) == MINO_PRIM; }
+int mino_is_lazy(const mino_val *v)    { return mino_type_of(v) == MINO_LAZY; }
+int mino_is_var(const mino_val *v)     { return mino_type_of(v) == MINO_VAR; }
+int mino_is_bigint(const mino_val *v)  { return mino_type_of(v) == MINO_BIGINT; }
+int mino_is_ratio(const mino_val *v)   { return mino_type_of(v) == MINO_RATIO; }
+int mino_is_bigdec(const mino_val *v)  { return mino_type_of(v) == MINO_BIGDEC; }
+int mino_is_uuid(const mino_val *v)    { return mino_type_of(v) == MINO_UUID; }
+int mino_is_regex(const mino_val *v)   { return mino_type_of(v) == MINO_REGEX; }
 
 
 /* ------------------------------------------------------------------------- */
@@ -910,10 +910,10 @@ int mino_is_regex(const mino_val_t *v)   { return mino_type_of(v) == MINO_REGEX;
 /* ------------------------------------------------------------------------- */
 
 /* Forward declarations. */
-int mino_eq(const mino_val_t *a, const mino_val_t *b);
-int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
-static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b);
+int mino_eq(const mino_val *a, const mino_val *b);
+int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b);
+static int eq_seq_like_force(mino_state *S, const mino_val *a,
+                           const mino_val *b);
 
 /*
  * Check whether a type is sequential (list, vector, empty-list, or
@@ -922,7 +922,7 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
  * singleton is the canonical zero-length sequence; nil is its own
  * thing.
  */
-static int is_sequential(mino_type_t t)
+static int is_sequential(mino_type t)
 {
     return (t == MINO_CONS || t == MINO_VECTOR || t == MINO_EMPTY_LIST
             || t == MINO_LAZY || t == MINO_CHUNKED_CONS
@@ -933,7 +933,7 @@ static int is_sequential(mino_type_t t)
  * Resolve a value: if it is a realized lazy seq, return the cached form.
  * Does NOT force unrealized lazy seqs (that requires the state).
  */
-static const mino_val_t *resolve_lazy(const mino_val_t *v)
+static const mino_val *resolve_lazy(const mino_val *v)
 {
     while (v != NULL && mino_type_of(v) == MINO_LAZY && v->as.lazy.realized) {
         v = v->as.lazy.cached;
@@ -950,13 +950,13 @@ static const mino_val_t *resolve_lazy(const mino_val_t *v)
  * For chunked-cons, ia is the offset within the current chunk: the
  * next element is at chunk.vals[ia], and ia transitions to .more once
  * ia == chunk.len. */
-static void eq_seq_step(const mino_val_t **cur, size_t *idx)
+static void eq_seq_step(const mino_val **cur, size_t *idx)
 {
-    const mino_val_t *c = *cur;
+    const mino_val *c = *cur;
     if (c == NULL) return;
     if (mino_type_of(c) == MINO_CONS) { *cur = c->as.cons.cdr; return; }
     if (mino_type_of(c) == MINO_CHUNKED_CONS) {
-        const mino_val_t *ch = c->as.chunked_cons.chunk;
+        const mino_val *ch = c->as.chunked_cons.chunk;
         size_t next = (*idx) + 1;
         if (next < ch->as.chunk.len) { *idx = next; return; }
         *cur = c->as.chunked_cons.more;
@@ -970,18 +970,18 @@ static void eq_seq_step(const mino_val_t **cur, size_t *idx)
     (*idx)++;
 }
 
-static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
+static int eq_seq_like(const mino_val *a, const mino_val *b)
 {
-    const mino_val_t *ca = resolve_lazy(a);
-    const mino_val_t *cb = resolve_lazy(b);
+    const mino_val *ca = resolve_lazy(a);
+    const mino_val *cb = resolve_lazy(b);
     size_t ia = (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
                     ? ca->as.chunked_cons.off : 0;
     size_t ib = (cb != NULL && mino_type_of(cb) == MINO_CHUNKED_CONS)
                     ? cb->as.chunked_cons.off : 0;
 
     for (;;) {
-        const mino_val_t *ea;
-        const mino_val_t *eb;
+        const mino_val *ea;
+        const mino_val *eb;
         int a_end;
         int b_end;
 
@@ -1027,9 +1027,9 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
  * Cross-type map equality: compare MINO_MAP with MINO_SORTED_MAP.
  * Both must have the same length and identical key-value pairs.
  */
-static int eq_map_like_cross(const mino_val_t *a, const mino_val_t *b)
+static int eq_map_like_cross(const mino_val *a, const mino_val *b)
 {
-    const mino_val_t *hmap, *smap;
+    const mino_val *hmap, *smap;
     size_t i;
 
     /* Normalize: hmap is the HAMT map, smap is the sorted map. */
@@ -1043,9 +1043,9 @@ static int eq_map_like_cross(const mino_val_t *a, const mino_val_t *b)
 
     /* Iterate HAMT entries, look each up in the sorted map. */
     for (i = 0; i < hmap->as.map.len; i++) {
-        mino_val_t *key = vec_nth(hmap->as.map.key_order, i);
-        mino_val_t *hv  = map_get_val(hmap, key);
-        mino_val_t *sv  = rb_get(NULL, smap->as.sorted.root, key, NULL);
+        mino_val *key = vec_nth(hmap->as.map.key_order, i);
+        mino_val *hv  = map_get_val(hmap, key);
+        mino_val *sv  = rb_get(NULL, smap->as.sorted.root, key, NULL);
         if (sv == NULL || !mino_eq(hv, sv)) return 0;
     }
     return 1;
@@ -1054,9 +1054,9 @@ static int eq_map_like_cross(const mino_val_t *a, const mino_val_t *b)
 /*
  * Cross-type set equality: compare MINO_SET with MINO_SORTED_SET.
  */
-static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
+static int eq_set_like_cross(const mino_val *a, const mino_val *b)
 {
-    const mino_val_t *hset, *sset;
+    const mino_val *hset, *sset;
     size_t i;
 
     if (mino_type_of(a) == MINO_SET) { hset = a; sset = b; }
@@ -1067,7 +1067,7 @@ static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
     if (sset->as.sorted.comparator != NULL) return 0;
 
     for (i = 0; i < hset->as.set.len; i++) {
-        mino_val_t *elem = vec_nth(hset->as.set.key_order, i);
+        mino_val *elem = vec_nth(hset->as.set.key_order, i);
         if (!rb_contains(NULL, sset->as.sorted.root, elem, NULL)) {
             return 0;
         }
@@ -1093,7 +1093,7 @@ static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
  * cons/vector/etc compare as seqs; map/sorted-map compare by entry
  * pairs; set/sorted-set compare by element membership). Everything
  * else with mismatched tags is unequal. */
-static int eq_cross_type(const mino_val_t *a, const mino_val_t *b)
+static int eq_cross_type(const mino_val *a, const mino_val *b)
 {
     /* Cross-tier integer equality: int and bigint represent the same
      * arbitrary-precision integer kind, and Clojure treats them as
@@ -1132,7 +1132,7 @@ static int eq_cross_type(const mino_val_t *a, const mino_val_t *b)
     return 0;
 }
 
-int mino_eq(const mino_val_t *a, const mino_val_t *b)
+int mino_eq(const mino_val *a, const mino_val *b)
 {
     if (a == b) {
         return 1;
@@ -1145,14 +1145,14 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
      * an empty seq; preserve the LAZY tag so cross-type seq equality
      * routes through eq_seq_like instead of degenerating to nil. */
     if (mino_type_of(a) == MINO_LAZY && a->as.lazy.realized) {
-        mino_val_t *cached = a->as.lazy.cached;
+        mino_val *cached = a->as.lazy.cached;
         if (cached != NULL && mino_type_of(cached) != MINO_NIL
             && mino_type_of(cached) != MINO_EMPTY_LIST) {
             a = cached;
         }
     }
     if (mino_type_of(b) == MINO_LAZY && b->as.lazy.realized) {
-        mino_val_t *cached = b->as.lazy.cached;
+        mino_val *cached = b->as.lazy.cached;
         if (cached != NULL && mino_type_of(cached) != MINO_NIL
             && mino_type_of(cached) != MINO_EMPTY_LIST) {
             b = cached;
@@ -1243,9 +1243,9 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             return 0;
         }
         for (i = 0; i < a->as.map.len; i++) {
-            mino_val_t *key = vec_nth(a->as.map.key_order, i);
-            mino_val_t *bv  = map_get_val(b, key);
-            mino_val_t *av  = map_get_val(a, key);
+            mino_val *key = vec_nth(a->as.map.key_order, i);
+            mino_val *bv  = map_get_val(b, key);
+            mino_val *av  = map_get_val(a, key);
             if (bv == NULL) {
                 return 0;
             }
@@ -1262,7 +1262,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             return 0;
         }
         for (i = 0; i < a->as.set.len; i++) {
-            mino_val_t *elem = vec_nth(a->as.set.key_order, i);
+            mino_val *elem = vec_nth(a->as.set.key_order, i);
             uint32_t    h    = hash_val(elem);
             if (hamt_get(b->as.set.root, elem, h, 0u) == NULL) {
                 return 0;
@@ -1369,11 +1369,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
 /*
  * Compare two sequential values element-by-element, forcing lazy seqs.
  */
-static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b)
+static int eq_seq_like_force(mino_state *S, const mino_val *a,
+                           const mino_val *b)
 {
-    const mino_val_t *ca = a;
-    const mino_val_t *cb = b;
+    const mino_val *ca = a;
+    const mino_val *cb = b;
     size_t ia = 0, ib = 0;
 
     if (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
@@ -1382,16 +1382,16 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
         ib = cb->as.chunked_cons.off;
 
     for (;;) {
-        const mino_val_t *ea;
-        const mino_val_t *eb;
+        const mino_val *ea;
+        const mino_val *eb;
         int a_end;
         int b_end;
 
         /* Force lazy seqs */
         if (ca != NULL && mino_type_of(ca) == MINO_LAZY)
-            ca = lazy_force(S, (mino_val_t *)ca);
+            ca = lazy_force(S, (mino_val *)ca);
         if (cb != NULL && mino_type_of(cb) == MINO_LAZY)
-            cb = lazy_force(S, (mino_val_t *)cb);
+            cb = lazy_force(S, (mino_val *)cb);
 
         a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
                  || mino_type_of(ca) == MINO_EMPTY_LIST
@@ -1426,21 +1426,21 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
     }
 }
 
-int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
+int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
 {
     /* Force lazy seqs, but preserve the LAZY tag when the forced
      * result is nil/empty-list. A lazy seq that resolves to nothing is
      * still semantically an empty seq; collapsing it to nil here would
      * make `(= [] (lazy-seq nil))` false, contradicting canon. */
     if (a != NULL && mino_type_of(a) == MINO_LAZY) {
-        mino_val_t *forced = lazy_force(S, (mino_val_t *)a);
+        mino_val *forced = lazy_force(S, (mino_val *)a);
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             a = forced;
         }
     }
     if (b != NULL && mino_type_of(b) == MINO_LAZY) {
-        mino_val_t *forced = lazy_force(S, (mino_val_t *)b);
+        mino_val *forced = lazy_force(S, (mino_val *)b);
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             b = forced;
@@ -1490,9 +1490,9 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         size_t i;
         if (a->as.map.len != b->as.map.len) return 0;
         for (i = 0; i < a->as.map.len; i++) {
-            mino_val_t *key = vec_nth(a->as.map.key_order, i);
-            mino_val_t *av  = map_get_val(a, key);
-            mino_val_t *bv  = map_get_val(b, key);
+            mino_val *key = vec_nth(a->as.map.key_order, i);
+            mino_val *av  = map_get_val(a, key);
+            mino_val *bv  = map_get_val(b, key);
             if (bv == NULL) return 0;
             if (!mino_eq_force(S, av, bv)) return 0;
         }
@@ -1502,13 +1502,13 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         size_t i;
         if (a->as.set.len != b->as.set.len) return 0;
         for (i = 0; i < a->as.set.len; i++) {
-            mino_val_t *elem = vec_nth(a->as.set.key_order, i);
+            mino_val *elem = vec_nth(a->as.set.key_order, i);
             /* Set membership is keyed by mino_eq (=> hashed). For
              * lazy elements, force before looking up so the
              * structural compare in hamt_get sees the forced shape. */
-            mino_val_t *e_forced = elem;
+            mino_val *e_forced = elem;
             if (e_forced != NULL && mino_type_of(e_forced) == MINO_LAZY) {
-                mino_val_t *f = lazy_force(S, (mino_val_t *)e_forced);
+                mino_val *f = lazy_force(S, (mino_val *)e_forced);
                 if (f != NULL) e_forced = f;
             }
             if (hamt_get(b->as.set.root, e_forced,

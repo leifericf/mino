@@ -105,7 +105,7 @@ static long jit_region_page_size(void)
 
 /* ----- region book-keeping ------------------------------------------------ */
 
-static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
+static int region_track(mino_state *S, void *ptr, size_t size, void *aux_ptr)
 {
     struct mino_jit_region *node =
         (struct mino_jit_region *)malloc(sizeof(*node));
@@ -133,7 +133,7 @@ static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
  * pool layout already assumes inside a single fn. */
 #define MINO_JIT_SLAB_SLOT_ALIGN  ((size_t)16)
 
-static struct mino_jit_slab *jit_slab_alloc_new(mino_state_t *S, size_t need)
+static struct mino_jit_slab *jit_slab_alloc_new(mino_state *S, size_t need)
 {
     struct mino_jit_slab *slab;
     long                  page_l;
@@ -166,7 +166,7 @@ static struct mino_jit_slab *jit_slab_alloc_new(mino_state_t *S, size_t need)
  * slab when no fit. Returns the slab whose `page` + current
  * `bump_offset` is the slot start. Caller is responsible for the
  * RW/RX cycle around the fill. */
-static struct mino_jit_slab *jit_slab_acquire(mino_state_t *S, size_t need)
+static struct mino_jit_slab *jit_slab_acquire(mino_state *S, size_t need)
 {
     struct mino_jit_slab *slab;
     size_t                aligned;
@@ -225,7 +225,7 @@ static void jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
  * The bump cursor inside the slab is never rewound -- slots are
  * append-only within a slab, and reclamation happens at slab
  * granularity, not slot granularity. */
-void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
+void mino_jit_slab_release(mino_state *S, struct mino_jit_slab *slab)
 {
     struct mino_jit_slab **pp;
     if (slab == NULL) return;
@@ -241,7 +241,7 @@ void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
     free(slab);
 }
 
-void mino_jit_free_all(mino_state_t *S)
+void mino_jit_free_all(mino_state *S)
 {
     struct mino_jit_region *node = S->jit.jit_regions;
     while (node != NULL) {
@@ -505,7 +505,7 @@ typedef struct {
     const stencil_desc_t *st;
 } inst_t;
 
-int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
+int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                             size_t deopt_at_pc)
 {
     mino_bc_fn_t *bc = fn_val->as.fn.bc;

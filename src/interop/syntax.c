@@ -9,7 +9,7 @@
 #include "runtime/internal.h"
 
 /* Find or create a host_type_t entry for the given type key. */
-static host_type_t *type_ensure(mino_state_t *S, const char *type_key)
+static host_type_t *type_ensure(mino_state *S, const char *type_key)
 {
     size_t i;
     for (i = 0; i < S->host_types_len; i++) {
@@ -57,19 +57,19 @@ static void member_add(host_type_t *t, const char *name, int arity,
     }
 }
 
-void mino_host_enable(mino_state_t *S)
+void mino_host_enable(mino_state *S)
 {
     S->interop_enabled = 1;
 }
 
-void mino_host_register_ctor(mino_state_t *S, const char *type_key,
+void mino_host_register_ctor(mino_state *S, const char *type_key,
                               int arity, mino_host_fn fn, void *ctx)
 {
     host_type_t *t = type_ensure(S, type_key);
     if (t != NULL) member_add(t, NULL, arity, HOST_CTOR, fn, ctx);
 }
 
-void mino_host_register_method(mino_state_t *S, const char *type_key,
+void mino_host_register_method(mino_state *S, const char *type_key,
                                 const char *method_key, int arity,
                                 mino_host_fn fn, void *ctx)
 {
@@ -77,7 +77,7 @@ void mino_host_register_method(mino_state_t *S, const char *type_key,
     if (t != NULL) member_add(t, method_key, arity, HOST_METHOD, fn, ctx);
 }
 
-void mino_host_register_static(mino_state_t *S, const char *type_key,
+void mino_host_register_static(mino_state *S, const char *type_key,
                                 const char *method_key, int arity,
                                 mino_host_fn fn, void *ctx)
 {
@@ -85,7 +85,7 @@ void mino_host_register_static(mino_state_t *S, const char *type_key,
     if (t != NULL) member_add(t, method_key, arity, HOST_STATIC, fn, ctx);
 }
 
-void mino_host_register_getter(mino_state_t *S, const char *type_key,
+void mino_host_register_getter(mino_state *S, const char *type_key,
                                 const char *field_key, mino_host_fn fn,
                                 void *ctx)
 {
@@ -95,7 +95,7 @@ void mino_host_register_getter(mino_state_t *S, const char *type_key,
 
 /* Lookup helpers used by prim/host.c. */
 
-host_type_t *host_type_find(mino_state_t *S, const char *type_key)
+host_type_t *host_type_find(mino_state *S, const char *type_key)
 {
     size_t i;
     for (i = 0; i < S->host_types_len; i++) {

@@ -25,7 +25,7 @@ void *stencil_op_return_arg0(void **arg0)
     return arg0[0];
 }
 
-void *stencil_op_return_imm(mino_val_t **regs)
+void *stencil_op_return_imm(mino_val **regs)
 {
     return regs[IMM_A];
 }

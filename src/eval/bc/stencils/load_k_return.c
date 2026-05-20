@@ -24,7 +24,7 @@
 
 #include "abi.h"
 
-void *stencil_op_load_k_return(mino_val_t **regs, mino_val_t **consts)
+void *stencil_op_load_k_return(mino_val **regs, mino_val **consts)
 {
     (void)regs;
     return consts[IMM_BX];

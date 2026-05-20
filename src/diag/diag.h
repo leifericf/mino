@@ -2,7 +2,7 @@
  * diag.h -- structured diagnostic types for error reporting.
  *
  * Internal header included by runtime_internal.h. Not part of the public API.
- * The public API exposes mino_diag_t as an opaque struct through mino.h.
+ * The public API exposes mino_diag as an opaque struct through mino.h.
  */
 
 #ifndef MINO_DIAG_H
@@ -11,7 +11,7 @@
 #include <stddef.h>
 
 /* This header is included from runtime_internal.h, after mino.h.
- * mino_val_t, mino_state_t, and mino_diag_t are typedef'd in mino.h. */
+ * mino_val, mino_state, and mino_diag are typedef'd in mino.h. */
 
 /* ------------------------------------------------------------------------- */
 /* Source span                                                               */
@@ -75,9 +75,9 @@ struct mino_diag {
     size_t              frames_len;
     size_t              frames_cap;
 
-    mino_val_t         *data;           /* GC-owned payload (may be NULL) */
+    mino_val         *data;           /* GC-owned payload (may be NULL) */
     struct mino_diag   *cause;          /* malloc-owned chained cause */
-    mino_val_t         *cached_map;     /* GC-owned lazily-built map */
+    mino_val         *cached_map;     /* GC-owned lazily-built map */
 };
 
 /* ------------------------------------------------------------------------- */
@@ -85,27 +85,27 @@ struct mino_diag {
 /* ------------------------------------------------------------------------- */
 
 /* Create a new diagnostic. All strings are copied. Returns NULL on OOM. */
-mino_diag_t *diag_new(const char *kind, const char *code,
+mino_diag *diag_new(const char *kind, const char *code,
                       const char *phase, const char *message);
 
 /* Free a diagnostic and all owned memory (recurses into cause). */
-void diag_free(mino_diag_t *d);
+void diag_free(mino_diag *d);
 
 /* ------------------------------------------------------------------------- */
 /* Mutators                                                                  */
 /* ------------------------------------------------------------------------- */
 
 /* Set the primary source span. */
-void diag_set_span(mino_diag_t *d, mino_span_t span);
+void diag_set_span(mino_diag *d, mino_span_t span);
 
 /* Append a note. message is copied. */
-void diag_add_note(mino_diag_t *d, const char *message);
+void diag_add_note(mino_diag *d, const char *message);
 
 /* Set the user data payload (GC-owned, caller must ensure it is pinned). */
-void diag_set_data(mino_diag_t *d, mino_val_t *data);
+void diag_set_data(mino_diag *d, mino_val *data);
 
 /* Copy call stack frames from the runtime state into the diagnostic. */
-void diag_capture_frames(mino_state_t *S, mino_diag_t *d);
+void diag_capture_frames(mino_state *S, mino_diag *d);
 
 /* ------------------------------------------------------------------------- */
 /* Rendering                                                                 */
@@ -113,10 +113,10 @@ void diag_capture_frames(mino_state_t *S, mino_diag_t *d);
 
 /* Render a compact one-line form into buf. Returns bytes written (excl NUL).
  * Output is truncated if it exceeds n-1 bytes. */
-int diag_render_compact(const mino_diag_t *d, char *buf, size_t n);
+int diag_render_compact(const mino_diag *d, char *buf, size_t n);
 
 /* Render a pretty multi-line diagnostic with source snippet and caret. */
-int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
+int diag_render_pretty(mino_state *S, const mino_diag *d,
                        char *buf, size_t n);
 
 /* ------------------------------------------------------------------------- */
@@ -125,6 +125,6 @@ int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
 
 /* Convert a diagnostic to a mino map with canonical :mino/kind etc. keys.
  * The result is GC-owned and cached on d->cached_map. */
-mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d);
+mino_val *diag_to_map(mino_state *S, mino_diag *d);
 
 #endif /* MINO_DIAG_H */

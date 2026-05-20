@@ -33,7 +33,7 @@
 /* prim_throw_classified is the runtime's catchable-throw entry point;
  * declared in src/prim/internal.h. We declare it here to avoid pulling
  * the prim layer into the runtime header. */
-extern mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
+extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                          const char *code, const char *msg);
 
 /* ------------------------------------------------------------------------- */
@@ -93,12 +93,12 @@ static int cv_timedwait_ms(pthread_cond_t *c, pthread_mutex_t *m, long ms)
 /* state init/destroy                                                        */
 /* ------------------------------------------------------------------------- */
 
-void mino_host_threads_state_init(mino_state_t *S)
+void mino_host_threads_state_init(mino_state *S)
 {
     S->threading.future_list_head = NULL;
 }
 
-void mino_host_threads_state_destroy(mino_state_t *S)
+void mino_host_threads_state_destroy(mino_state *S)
 {
     /* Quiesce drains worker threads first so the impl free below is
      * safe. Note: state_free already calls quiesce explicitly via
@@ -111,12 +111,12 @@ void mino_host_threads_state_destroy(mino_state_t *S)
 /* Future allocation                                                          */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *future_alloc(mino_state_t *S)
+static mino_val *future_alloc(mino_state *S)
 {
-    mino_val_t      *v;
-    mino_future_t   *impl;
+    mino_val      *v;
+    mino_future   *impl;
 
-    impl = (mino_future_t *)calloc(1, sizeof(*impl));
+    impl = (mino_future *)calloc(1, sizeof(*impl));
     if (impl == NULL) { return NULL; }
     impl->state = S;
     mu_init(&impl->mu);
@@ -149,7 +149,7 @@ static mino_val_t *future_alloc(mino_state_t *S)
 /* Public construction                                                        */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_promise_new(mino_state_t *S)
+mino_val *mino_promise_new(mino_state *S)
 {
     return future_alloc(S);
     /* No worker spawned; thread_started stays 0. */
@@ -157,12 +157,12 @@ mino_val_t *mino_promise_new(mino_state_t *S)
 
 /* Lock invariant: takes only impl->mu (the per-future mutex). State_lock
  * is not required and may be held or not by the caller; deliver never
- * touches mino_state_t fields. Idempotent — second deliver on a non-pending
+ * touches mino_state fields. Idempotent — second deliver on a non-pending
  * promise is a no-op. */
-int mino_promise_deliver(mino_state_t *S, mino_val_t *promise,
-                         mino_val_t *value)
+int mino_promise_deliver(mino_state *S, mino_val *promise,
+                         mino_val *value)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     int delivered = 0;
 
     (void)S;
@@ -185,9 +185,9 @@ int mino_promise_deliver(mino_state_t *S, mino_val_t *promise,
 /* Predicates                                                                 */
 /* ------------------------------------------------------------------------- */
 
-int mino_future_realized_p(mino_val_t *fut)
+int mino_future_realized_p(mino_val *fut)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     int realized;
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return 0; }
     impl = fut->as.future.impl;
@@ -198,14 +198,14 @@ int mino_future_realized_p(mino_val_t *fut)
     return realized;
 }
 
-int mino_future_done_p(mino_val_t *fut)
+int mino_future_done_p(mino_val *fut)
 {
     return mino_future_realized_p(fut);
 }
 
-int mino_future_cancelled_p(mino_val_t *fut)
+int mino_future_cancelled_p(mino_val *fut)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     int cancelled;
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return 0; }
     impl = fut->as.future.impl;
@@ -221,9 +221,9 @@ int mino_future_cancelled_p(mino_val_t *fut)
  * worker_run may publish a result that races with the cancel — that's
  * fine, worker_run notices state_tag != PENDING under impl->mu and drops
  * its result. */
-int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
+int mino_future_cancel(mino_state *S, mino_val *fut)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     int newly_set = 0;
 
     (void)S;
@@ -259,11 +259,11 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
  * the worker at link/unlink, which (a) leaves the worker invisible
  * to the GC root walker for the duration of the loop and (b) keeps
  * thread_count inflated even after the worker's body has finished. */
-static void worker_run(mino_future_t *impl, char *stack_anchor)
+static void worker_run(mino_future *impl, char *stack_anchor)
 {
-    mino_state_t       *S    = impl->state;
+    mino_state       *S    = impl->state;
     mino_thread_ctx_t  *ctx;
-    mino_val_t         *result;
+    mino_val         *result;
 
     /* Each worker has its own ctx. Allocate it on the heap (not on
      * the worker's stack) so it survives any sub-call boundary; the
@@ -310,15 +310,15 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
      * chain and push as a single dyn_frame so the thunk sees the same
      * dynamic-binding context active at spawn time. */
     {
-        mino_val_t  *snap = impl->dyn_snapshot;
+        mino_val  *snap = impl->dyn_snapshot;
         dyn_frame_t *conveyed = NULL;
         if (snap != NULL && mino_type_of(snap) == MINO_MAP && snap->as.map.len > 0) {
             dyn_binding_t *bhead = NULL;
             size_t i;
             int    oom = 0;
             for (i = 0; i < snap->as.map.len; i++) {
-                mino_val_t    *key = vec_nth(snap->as.map.key_order, i);
-                mino_val_t    *val = map_get_val(snap, key);
+                mino_val    *key = vec_nth(snap->as.map.key_order, i);
+                mino_val    *val = map_get_val(snap, key);
                 dyn_binding_t *b;
                 if (key == NULL
                     || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
@@ -360,7 +360,7 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
      * generic "future failed". If state_tag was already CANCELLED,
      * leave it as CANCELLED and drop the result. */
     {
-        mino_val_t *captured = NULL;
+        mino_val *captured = NULL;
         if (result == NULL) {
             mino_lock(S);
             if (mino_last_error(S) != NULL) {
@@ -433,14 +433,14 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
 static unsigned __stdcall worker_entry(void *arg)
 {
     char anchor;
-    worker_run((mino_future_t *)arg, &anchor);
+    worker_run((mino_future *)arg, &anchor);
     return 0;
 }
 #else
 static void *worker_entry(void *arg)
 {
     char anchor;
-    worker_run((mino_future_t *)arg, &anchor);
+    worker_run((mino_future *)arg, &anchor);
     return NULL;
 }
 #endif
@@ -451,7 +451,7 @@ static void *worker_entry(void *arg)
 static void worker_pool_entry(void *arg)
 {
     char anchor;
-    worker_run((mino_future_t *)arg, &anchor);
+    worker_run((mino_future *)arg, &anchor);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -465,11 +465,11 @@ static void worker_pool_entry(void *arg)
  * worker_list_lock inner). The lock is not released before this
  * function returns; the worker thread takes its own lock acquisitions
  * later. */
-mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
-                              mino_env_t *env)
+mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
+                              mino_env *env)
 {
-    mino_val_t *fut;
-    mino_future_t *impl;
+    mino_val *fut;
+    mino_future *impl;
 
     /* Enforce the host-thread grant. The gate-and-increment is one
      * critical section under worker_list_lock so a parallel spawn
@@ -501,7 +501,7 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     }
     impl = fut->as.future.impl;
     impl->thunk    = thunk;
-    impl->body_env = (mino_val_t *)env; /* env is gc-rooted via thunk closure */
+    impl->body_env = (mino_val *)env; /* env is gc-rooted via thunk closure */
     /* Convey the caller's dynamic bindings to the worker. The worker
      * unpacks this map into a dyn_frame before invoking the thunk so
      * `(future ...)` sees the binding context active at spawn time --
@@ -576,10 +576,10 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
 /* Deref                                                                     */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
+mino_val *mino_future_deref(mino_state *S, mino_val *fut)
 {
-    mino_future_t *impl;
-    mino_val_t    *out;
+    mino_future *impl;
+    mino_val    *out;
 
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
         return mino_nil(S);
@@ -624,7 +624,7 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
      * receive the full map anyway. */
     if (impl->exception != NULL
         && mino_type_of(impl->exception) == MINO_MAP) {
-        mino_val_t *ex = impl->exception;
+        mino_val *ex = impl->exception;
         if (mino_current_ctx(S)->try_depth > 0) {
             int tdepth = mino_current_ctx(S)->try_depth;
             mino_current_ctx(S)->try_stack[tdepth - 1].exception = ex;
@@ -634,12 +634,12 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
          * top-level diag path so the user still sees the original
          * kind/code/message in stderr. */
         {
-            mino_val_t *k_kind  = mino_keyword(S, "mino/kind");
-            mino_val_t *k_code  = mino_keyword(S, "mino/code");
-            mino_val_t *k_msg   = mino_keyword(S, "mino/message");
-            mino_val_t *v_kind  = map_get_val(ex, k_kind);
-            mino_val_t *v_code  = map_get_val(ex, k_code);
-            mino_val_t *v_msg   = map_get_val(ex, k_msg);
+            mino_val *k_kind  = mino_keyword(S, "mino/kind");
+            mino_val *k_code  = mino_keyword(S, "mino/code");
+            mino_val *k_msg   = mino_keyword(S, "mino/message");
+            mino_val *v_kind  = map_get_val(ex, k_kind);
+            mino_val *v_code  = map_get_val(ex, k_code);
+            mino_val *v_msg   = map_get_val(ex, k_msg);
             char        kbuf[64];
             char        cbuf[32];
             char        mbuf[512];
@@ -672,11 +672,11 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
                                  "future failed");
 }
 
-mino_val_t *mino_future_deref_timed(mino_state_t *S, mino_val_t *fut,
-                                    long ms, mino_val_t *timeout_val)
+mino_val *mino_future_deref_timed(mino_state *S, mino_val *fut,
+                                    long ms, mino_val *timeout_val)
 {
-    mino_future_t *impl;
-    mino_val_t    *out;
+    mino_future *impl;
+    mino_val    *out;
     int            timed_out = 0;
 
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
@@ -749,9 +749,9 @@ mino_val_t *mino_future_deref_timed(mino_state_t *S, mino_val_t *fut,
  * their body, so holding it here would deadlock. resume_lock restores
  * the original depth before returning so the caller's invariants still
  * hold. */
-void mino_host_threads_quiesce(mino_state_t *S)
+void mino_host_threads_quiesce(mino_state *S)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     int saved_depth;
 
     /* If the caller is mid-eval (e.g. prim_exit), we hold state_lock
@@ -828,7 +828,7 @@ void mino_host_threads_quiesce(mino_state_t *S)
 /* GC                                                                        */
 /* ------------------------------------------------------------------------- */
 
-void mino_future_gc_trace(mino_val_t *fut)
+void mino_future_gc_trace(mino_val *fut)
 {
     /* Trace-only: mark the impl's referenced values. The caller in
      * gc/trace.c handles the actual mark-and-push. We expose the
@@ -845,11 +845,11 @@ void mino_future_gc_trace(mino_val_t *fut)
  * decremented thread_count and is past its last lock acquire, so a
  * pthread_join here is safe and never blocks indefinitely. impl->mu is
  * destroyed only after the join. */
-void gc_mark_child_push_exported(mino_state_t *S, const void *p);
+void gc_mark_child_push_exported(mino_state *S, const void *p);
 
-void mino_future_trace_impl(mino_state_t *S, const mino_val_t *fut)
+void mino_future_trace_impl(mino_state *S, const mino_val *fut)
 {
-    mino_future_t *impl;
+    mino_future *impl;
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) return;
     impl = fut->as.future.impl;
     if (impl == NULL) return;
@@ -860,10 +860,10 @@ void mino_future_trace_impl(mino_state_t *S, const mino_val_t *fut)
     gc_mark_child_push_exported(S, impl->dyn_snapshot);
 }
 
-void mino_future_gc_sweep(mino_val_t *fut)
+void mino_future_gc_sweep(mino_val *fut)
 {
-    mino_future_t *impl;
-    mino_state_t *S;
+    mino_future *impl;
+    mino_state *S;
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return; }
@@ -906,7 +906,7 @@ void mino_future_gc_sweep(mino_val_t *fut)
     /* Detach from S->threading.future_list_head before freeing so quiesce
      * never walks into a dangling impl. */
     if (S != NULL) {
-        mino_future_t **pp = &S->threading.future_list_head;
+        mino_future **pp = &S->threading.future_list_head;
         while (*pp != NULL && *pp != impl) { pp = &(*pp)->next_in_state; }
         if (*pp == impl) { *pp = impl->next_in_state; }
     }

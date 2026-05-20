@@ -2,7 +2,7 @@
  * thread_ctx.h -- per-thread runtime context and TLS pointers.
  *
  * Every field that mutates with eval progress lives in mino_thread_ctx_t,
- * separately from the shared mino_state_t. Each OS thread that enters
+ * separately from the shared mino_state. Each OS thread that enters
  * eval has its own ctx; the state pointer is shared. The embedder
  * thread reads main_ctx via mino_current_ctx() (defined in
  * runtime/internal.h alongside struct mino_state); spawned host worker
@@ -34,7 +34,7 @@
 
 typedef struct {
     jmp_buf     buf;
-    mino_val_t *exception;
+    mino_val *exception;
     const char *saved_ns;       /* current_ns at try-frame entry; restored on catch */
     const char *saved_ambient;  /* fn_ambient_ns at try-frame entry */
     size_t      saved_load_len; /* require load-stack depth at frame entry */
@@ -48,7 +48,7 @@ typedef struct mino_thread_ctx {
     /* Eval progress + step limit + interrupt poll. */
     size_t          eval_steps;
     int             limit_exceeded;
-    const mino_val_t *eval_current_form;
+    const mino_val *eval_current_form;
     volatile int    interrupted;
 
     /* Safepoint-cooperative-yield flag.
@@ -78,7 +78,7 @@ typedef struct mino_thread_ctx {
      * as a string), but stashes the original payload here so the outer
      * pcall can surface it through `*out_ex` per the documented contract.
      * Cleared at the entry of every pcall-style frame and after consume. */
-    mino_val_t     *pending_user_ex;
+    mino_val     *pending_user_ex;
 
     /* Bytecode-VM catch frames. Parallel to try_stack, recording the
      * BC-side state (handler pc, register window base, env at entry,
@@ -109,7 +109,7 @@ typedef struct mino_thread_ctx {
 
     /* Error reporting: text buffer + structured diagnostic + frame stack. */
     char            error_buf[2048];
-    mino_diag_t    *last_diag;
+    mino_diag    *last_diag;
     call_frame_t    call_stack[MAX_CALL_DEPTH];
     int             call_depth;
     int             trace_added;
@@ -127,7 +127,7 @@ typedef struct mino_thread_ctx {
     size_t                   bc_current_pc;
 
     /* GC save stack: transient roots pinned across allocations. */
-    mino_val_t     *gc_save[64];
+    mino_val     *gc_save[64];
     int             gc_save_len;
 
     /* Conservative stack scan anchor + GC re-entrancy depth. */
@@ -187,7 +187,7 @@ typedef struct mino_thread_ctx {
      *
      * Placed at struct tail so existing JIT-pinned offsets
      * (dyn_stack, jit_invoke_env) stay byte-stable. */
-    mino_val_t    **bc_regs_storage;     /* this ctx's own array */
+    mino_val    **bc_regs_storage;     /* this ctx's own array */
     size_t          bc_regs_storage_cap; /* capacity of bc_regs_storage */
     size_t          bc_top_snapshot;     /* this ctx's bc_top at yield */
     int             bc_snapshot_valid;   /* 1 once first run installs */

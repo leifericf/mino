@@ -31,7 +31,7 @@
 
 /* Coerce a value to a fresh GC-owned MINO_BIGINT. Accepts MINO_INT and
  * MINO_BIGINT; returns NULL with a thrown error on any other type. */
-mino_val_t *to_bigint(mino_state_t *S, const mino_val_t *v)
+mino_val *to_bigint(mino_state *S, const mino_val *v)
 {
     if (v == NULL) return NULL;
     if (mino_type_of(v) == MINO_BIGINT) {
@@ -55,15 +55,15 @@ mino_val_t *to_bigint(mino_state_t *S, const mino_val_t *v)
 
 /* Try to narrow a bigint cell back to a long long. Returns 1 on success
  * with *out set; 0 if the bigint doesn't fit. */
-static int bigint_fits_ll(const mino_val_t *v, long long *out)
+static int bigint_fits_ll(const mino_val *v, long long *out)
 {
     return mino_as_ll(v, out);
 }
 
-mino_val_t *mino_ratio_make_unchecked(mino_state_t *S, mino_val_t *num,
-                                      mino_val_t *denom)
+mino_val *mino_ratio_make_unchecked(mino_state *S, mino_val *num,
+                                      mino_val *denom)
 {
-    mino_val_t *v;
+    mino_val *v;
     if (num == NULL || denom == NULL ||
         mino_type_of(num) != MINO_BIGINT || mino_type_of(denom) != MINO_BIGINT) {
         return prim_throw_classified(S, "internal", "MIN001",
@@ -78,10 +78,10 @@ mino_val_t *mino_ratio_make_unchecked(mino_state_t *S, mino_val_t *num,
 /* Build a canonical ratio from two arbitrary numeric (int or bigint)
  * values. Returns int / bigint when the result is integer, otherwise a
  * MINO_RATIO. Throws on division-by-zero. */
-mino_val_t *mino_ratio_make(mino_state_t *S, mino_val_t *num,
-                            mino_val_t *denom)
+mino_val *mino_ratio_make(mino_state *S, mino_val *num,
+                            mino_val *denom)
 {
-    mino_val_t *bnum, *bdenom;
+    mino_val *bnum, *bdenom;
     mp_int      g;
     mpz_t       g_buf;
     bnum   = to_bigint(S, num);
@@ -140,17 +140,17 @@ mino_val_t *mino_ratio_make(mino_state_t *S, mino_val_t *num,
     return mino_ratio_make_unchecked(S, bnum, bdenom);
 }
 
-mino_val_t *mino_ratio_from_ll(mino_state_t *S, long long num, long long denom)
+mino_val *mino_ratio_from_ll(mino_state *S, long long num, long long denom)
 {
-    mino_val_t *bn = mino_bigint_from_ll(S, num);
-    mino_val_t *bd;
+    mino_val *bn = mino_bigint_from_ll(S, num);
+    mino_val *bd;
     if (bn == NULL) return NULL;
     bd = mino_bigint_from_ll(S, denom);
     if (bd == NULL) return NULL;
     return mino_ratio_make(S, bn, bd);
 }
 
-void mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out)
+void mino_ratio_print(mino_state *S, const mino_val *v, FILE *out)
 {
     if (v == NULL || mino_type_of(v) != MINO_RATIO) {
         fputs("0/1", out);
@@ -174,7 +174,7 @@ void mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out)
     (void)S;
 }
 
-int mino_ratio_equals(const mino_val_t *a, const mino_val_t *b)
+int mino_ratio_equals(const mino_val *a, const mino_val *b)
 {
     if (a == NULL || b == NULL) return 0;
     if (mino_type_of(a) != MINO_RATIO || mino_type_of(b) != MINO_RATIO) return 0;
@@ -184,7 +184,7 @@ int mino_ratio_equals(const mino_val_t *a, const mino_val_t *b)
 
 /* Compare two ratios. Sign of (a.num * b.denom - b.num * a.denom).
  * Both denominators are positive so cross-multiplication is safe. */
-int mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b)
+int mino_ratio_cmp(const mino_val *a, const mino_val *b)
 {
     mpz_t lhs, rhs;
     int   r;
@@ -202,7 +202,7 @@ int mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b)
     return r;
 }
 
-uint32_t mino_ratio_hash(const mino_val_t *v)
+uint32_t mino_ratio_hash(const mino_val *v)
 {
     uint32_t h;
     if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0;
@@ -213,7 +213,7 @@ uint32_t mino_ratio_hash(const mino_val_t *v)
     return h ^ 0x5bd1e995u;
 }
 
-double mino_ratio_to_double(const mino_val_t *v)
+double mino_ratio_to_double(const mino_val *v)
 {
     double n, d;
     if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0.0;
@@ -225,9 +225,9 @@ double mino_ratio_to_double(const mino_val_t *v)
 
 /* (numerator r) — accepts ratio (returns its numerator) or integer
  * (returns the integer; integers act as r/1). */
-mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -248,9 +248,9 @@ mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                  "numerator: argument must be a ratio");
 }
 
-mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_denominator(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -270,7 +270,7 @@ mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (ratio? x) */
-mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_ratio_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -278,7 +278,7 @@ mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "ratio? requires one argument");
     }
     {
-        mino_val_t *x = args->as.cons.car;
+        mino_val *x = args->as.cons.car;
         return (x != NULL && mino_type_of(x) == MINO_RATIO)
             ? mino_true(S) : mino_false(S);
     }
@@ -287,7 +287,7 @@ mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (rational? x) — true for int / bigint / ratio / bigdec. Per Clojure
  * BigDecimal is rational since its value `unscaled * 10^-scale` is an
  * exact rational number; only floats (IEEE-754) sit outside. */
-mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rational_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -295,7 +295,7 @@ mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "rational? requires one argument");
     }
     {
-        mino_val_t *x = args->as.cons.car;
+        mino_val *x = args->as.cons.car;
         if (x == NULL) return mino_false(S);
         return (mino_val_int_p(x)
              || mino_type_of(x) == MINO_BIGINT
@@ -308,9 +308,9 @@ mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * For numeric kinds that already exact (int, bigint, ratio), returns
  * the value unchanged. For floats, decomposes the IEEE-754 value into
  * mantissa * 2^exp and reduces. */
-mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -327,12 +327,12 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(x) == MINO_BIGDEC) {
         /* unscaled / 10^scale, reduced. Negative scale means
          * unscaled * 10^|scale| / 1 (an integer multiple). */
-        mino_val_t *unscaled = x->as.bigdec.unscaled;
+        mino_val *unscaled = x->as.bigdec.unscaled;
         int         scale    = x->as.bigdec.scale;
         if (scale == 0) return unscaled;
         if (scale < 0) {
             mpz_t pw;
-            mino_val_t *out;
+            mino_val *out;
             if (mp_int_init(&pw) != MP_OK) {
                 return prim_throw_classified(S, "eval/out-of-memory",
                     "MOM001", "out of memory");
@@ -351,7 +351,7 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return out;
         }
         {
-            mino_val_t *bd;
+            mino_val *bd;
             mpz_t pw;
             if (mp_int_init(&pw) != MP_OK) {
                 return prim_throw_classified(S, "eval/out-of-memory",
@@ -379,8 +379,8 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * shortest-decimal-double -> bigdec -> ratio. */
         double      d = x->as.f;
         char        buf[64];
-        mino_val_t *bd;
-        mino_val_t *unscaled;
+        mino_val *bd;
+        mino_val *unscaled;
         int         scale;
         if (d != d) /* NaN */
             return prim_throw_classified(S, "eval/type", "MTY001",
@@ -398,7 +398,7 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         {
             /* (numerator unscaled, denominator 10^scale) reduced. */
             mpz_t       pw;
-            mino_val_t *denom;
+            mino_val *denom;
             if (mp_int_init(&pw) != MP_OK) {
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
@@ -424,17 +424,17 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * (a, b) where at least one operand is a ratio (or both are) and
  * returns a canonicalised ratio / integer. */
 
-static mino_val_t *as_ratio_pair(mino_state_t *S, const mino_val_t *v,
-                                 mino_val_t **out_num, mino_val_t **out_denom)
+static mino_val *as_ratio_pair(mino_state *S, const mino_val *v,
+                                 mino_val **out_num, mino_val **out_denom)
 {
     if (v == NULL) return NULL;
     if (mino_type_of(v) == MINO_RATIO) {
         *out_num   = v->as.ratio.num;
         *out_denom = v->as.ratio.denom;
-        return (mino_val_t *)v;
+        return (mino_val *)v;
     }
     if (mino_val_int_p(v) || mino_type_of(v) == MINO_BIGINT) {
-        mino_val_t *bn = to_bigint(S, v);
+        mino_val *bn = to_bigint(S, v);
         if (bn == NULL) return NULL;
         *out_num   = bn;
         *out_denom = mino_bigint_from_ll(S, 1);
@@ -443,11 +443,11 @@ static mino_val_t *as_ratio_pair(mino_state_t *S, const mino_val_t *v,
     return NULL;
 }
 
-mino_val_t *mino_ratio_add(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b)
+mino_val *mino_ratio_add(mino_state *S, const mino_val *a,
+                           const mino_val *b)
 {
-    mino_val_t *an, *ad, *bn, *bd;
-    mino_val_t *cross1, *cross2, *new_num, *new_den;
+    mino_val *an, *ad, *bn, *bd;
+    mino_val *cross1, *cross2, *new_num, *new_den;
     if (as_ratio_pair(S, a, &an, &ad) == NULL ||
         as_ratio_pair(S, b, &bn, &bd) == NULL) {
         return NULL;
@@ -460,11 +460,11 @@ mino_val_t *mino_ratio_add(mino_state_t *S, const mino_val_t *a,
     return mino_ratio_make(S, new_num, new_den);
 }
 
-mino_val_t *mino_ratio_sub(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b)
+mino_val *mino_ratio_sub(mino_state *S, const mino_val *a,
+                           const mino_val *b)
 {
-    mino_val_t *an, *ad, *bn, *bd;
-    mino_val_t *cross1, *cross2, *new_num, *new_den;
+    mino_val *an, *ad, *bn, *bd;
+    mino_val *cross1, *cross2, *new_num, *new_den;
     if (as_ratio_pair(S, a, &an, &ad) == NULL ||
         as_ratio_pair(S, b, &bn, &bd) == NULL) {
         return NULL;
@@ -476,11 +476,11 @@ mino_val_t *mino_ratio_sub(mino_state_t *S, const mino_val_t *a,
     return mino_ratio_make(S, new_num, new_den);
 }
 
-mino_val_t *mino_ratio_mul(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b)
+mino_val *mino_ratio_mul(mino_state *S, const mino_val *a,
+                           const mino_val *b)
 {
-    mino_val_t *an, *ad, *bn, *bd;
-    mino_val_t *new_num, *new_den;
+    mino_val *an, *ad, *bn, *bd;
+    mino_val *new_num, *new_den;
     if (as_ratio_pair(S, a, &an, &ad) == NULL ||
         as_ratio_pair(S, b, &bn, &bd) == NULL) {
         return NULL;
@@ -490,11 +490,11 @@ mino_val_t *mino_ratio_mul(mino_state_t *S, const mino_val_t *a,
     return mino_ratio_make(S, new_num, new_den);
 }
 
-mino_val_t *mino_ratio_div(mino_state_t *S, const mino_val_t *a,
-                           const mino_val_t *b)
+mino_val *mino_ratio_div(mino_state *S, const mino_val *a,
+                           const mino_val *b)
 {
-    mino_val_t *an, *ad, *bn, *bd;
-    mino_val_t *new_num, *new_den;
+    mino_val *an, *ad, *bn, *bd;
+    mino_val *new_num, *new_den;
     if (as_ratio_pair(S, a, &an, &ad) == NULL ||
         as_ratio_pair(S, b, &bn, &bd) == NULL) {
         return NULL;

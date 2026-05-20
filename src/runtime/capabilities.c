@@ -24,7 +24,7 @@
  * function used by mino_install_minimal is exposed only as
  * mino_install_minimal — we delegate. */
 
-typedef void (*mino_install_fn)(mino_state_t *S, mino_env_t *env);
+typedef void (*mino_install_fn)(mino_state *S, mino_env *env);
 
 /* Registry of capability bits paired with their install function. The
  * order here determines the order in which capabilities install when
@@ -77,7 +77,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
 #define K_CAP_DISPATCH_COUNT \
     (sizeof(k_cap_dispatch) / sizeof(k_cap_dispatch[0]))
 
-void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps)
+void mino_install(mino_state *S, mino_env *env, unsigned int caps)
 {
     size_t i;
     unsigned int wanted;
@@ -136,7 +136,7 @@ void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps)
     }
 }
 
-void mino_install_sandbox(mino_state_t *S, mino_env_t *env)
+void mino_install_sandbox(mino_state *S, mino_env *env)
 {
     mino_install(S, env, MINO_CAP_DEFAULT);
 }

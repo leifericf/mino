@@ -93,7 +93,7 @@ typedef struct {
 /* Slab for the bump allocator. payload[] starts at the byte after the
  * header and runs to MINO_BUMP_SLAB_BYTES total. Slabs are malloc'd
  * page-aligned and never freed during the state's lifetime; bump
- * cursor / end on mino_state_t advance through the head slab and
+ * cursor / end on mino_state advance through the head slab and
  * a refill links a fresh slab onto the list.
  *
  * The bump path bypasses the per-size-class freelist arm of
@@ -119,13 +119,13 @@ typedef struct gc_bump_slab {
  * owned by the values component (its tracer fn lives there).
  * Component-owned tracers register themselves during state init,
  * before the first allocation. */
-typedef void (*gc_tracer_fn)(mino_state_t *S, gc_hdr_t *h);
+typedef void (*gc_tracer_fn)(mino_state *S, gc_hdr_t *h);
 
 /* gc_finalizer_fn frees per-tag external resources owned by a
  * dying header (e.g. mpz allocation behind a MINO_BIGINT). Called
  * from gc_minor_sweep + gc_major_sweep_phase before the header
  * itself is freed. NULL slot means "nothing external to release"
  * and the sweep is a plain free(). */
-typedef void (*gc_finalizer_fn)(mino_state_t *S, gc_hdr_t *h);
+typedef void (*gc_finalizer_fn)(mino_state *S, gc_hdr_t *h);
 
 #endif /* GC_LAYOUT_H */

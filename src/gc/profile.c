@@ -92,7 +92,7 @@ void mino_alloc_profile_record(const char *file, int line,
      * practice, raise the cap. */
 }
 
-void mino_alloc_profile_reset(mino_state_t *S)
+void mino_alloc_profile_reset(mino_state *S)
 {
     (void)S;
     memset(g_sites, 0, sizeof(g_sites));
@@ -123,7 +123,7 @@ static const char *tag_name(unsigned char tag)
     }
 }
 
-void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n)
+void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
 {
     static alloc_site_t copy[ALLOC_PROFILE_CAP];
     int            i, kept = 0;
@@ -156,12 +156,12 @@ void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n)
 
 #else /* !MINO_ALLOC_PROFILE */
 
-void mino_alloc_profile_reset(mino_state_t *S)
+void mino_alloc_profile_reset(mino_state *S)
 {
     (void)S;
 }
 
-void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n)
+void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
 {
     (void)S; (void)top_n;
     if (out == NULL) out = stderr;

@@ -15,9 +15,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static void report(mino_state_t *S, const char *label)
+static void report(mino_state *S, const char *label)
 {
-    mino_gc_stats_t st;
+    mino_gc_stats_out st;
     mino_gc_stats(S, &st);
     printf("%-18s minor=%zu major=%zu live=%zu young=%zu old=%zu rem=%zu phase=%d\n",
            label,
@@ -28,9 +28,9 @@ static void report(mino_state_t *S, const char *label)
 
 int main(void)
 {
-    mino_state_t *S;
-    mino_env_t   *env;
-    mino_val_t   *result;
+    mino_state *S;
+    mino_env   *env;
+    mino_val   *result;
 
     S = mino_state_new();
     if (S == NULL) {

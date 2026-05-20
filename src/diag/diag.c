@@ -24,7 +24,7 @@
 /* Source cache                                                              */
 /* ------------------------------------------------------------------------- */
 
-void source_cache_store(mino_state_t *S, const char *file,
+void source_cache_store(mino_state *S, const char *file,
                         const char *text, size_t len)
 {
     int slot = -1;
@@ -66,7 +66,7 @@ void source_cache_store(mino_state_t *S, const char *file,
     }
 }
 
-const char *source_cache_get_line(mino_state_t *S, const char *file,
+const char *source_cache_get_line(mino_state *S, const char *file,
                                   int line, size_t *out_len)
 {
     int i;
@@ -112,10 +112,10 @@ static char *safe_strdup(const char *s)
 /* Lifecycle                                                                 */
 /* ------------------------------------------------------------------------- */
 
-mino_diag_t *diag_new(const char *kind, const char *code,
+mino_diag *diag_new(const char *kind, const char *code,
                       const char *phase, const char *message)
 {
-    mino_diag_t *d = (mino_diag_t *)calloc(1, sizeof(*d));
+    mino_diag *d = (mino_diag *)calloc(1, sizeof(*d));
     if (d == NULL) return NULL;
     d->kind    = safe_strdup(kind);
     d->code    = safe_strdup(code);
@@ -131,7 +131,7 @@ static void note_free(mino_diag_note_t *n)
     free(n->kind);
 }
 
-void diag_free(mino_diag_t *d)
+void diag_free(mino_diag *d)
 {
     size_t i;
     if (d == NULL) return;
@@ -156,13 +156,13 @@ void diag_free(mino_diag_t *d)
 /* Mutators                                                                  */
 /* ------------------------------------------------------------------------- */
 
-void diag_set_span(mino_diag_t *d, mino_span_t span)
+void diag_set_span(mino_diag *d, mino_span_t span)
 {
     d->has_primary_span = 1;
     d->primary_span     = span;
 }
 
-void diag_add_note(mino_diag_t *d, const char *message)
+void diag_add_note(mino_diag *d, const char *message)
 {
     if (d->notes_len >= d->notes_cap) {
         size_t new_cap = d->notes_cap == 0 ? 4 : d->notes_cap * 2;
@@ -179,12 +179,12 @@ void diag_add_note(mino_diag_t *d, const char *message)
     d->notes_len++;
 }
 
-void diag_set_data(mino_diag_t *d, mino_val_t *data)
+void diag_set_data(mino_diag *d, mino_val *data)
 {
     d->data = data;
 }
 
-void diag_capture_frames(mino_state_t *S, mino_diag_t *d)
+void diag_capture_frames(mino_state *S, mino_diag *d)
 {
     int i;
     if (mino_current_ctx(S)->call_depth <= 0) return;
@@ -213,7 +213,7 @@ void diag_capture_frames(mino_state_t *S, mino_diag_t *d)
 /* Rendering                                                                 */
 /* ------------------------------------------------------------------------- */
 
-int diag_render_compact(const mino_diag_t *d, char *buf, size_t n)
+int diag_render_compact(const mino_diag *d, char *buf, size_t n)
 {
     int written;
     if (d == NULL || buf == NULL || n == 0) return 0;
@@ -231,7 +231,7 @@ int diag_render_compact(const mino_diag_t *d, char *buf, size_t n)
     return written < 0 ? 0 : written;
 }
 
-int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
+int diag_render_pretty(mino_state *S, const mino_diag *d,
                        char *buf, size_t n)
 {
     size_t pos = 0;
@@ -314,7 +314,7 @@ int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
 }
 
 /* Public rendering dispatcher. */
-int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
+int mino_render_diag(mino_state *S, const mino_diag *d,
                      int mode, char *buf, size_t n)
 {
     if (mode == MINO_DIAG_RENDER_PRETTY)
@@ -327,9 +327,9 @@ int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
 /* ------------------------------------------------------------------------- */
 
 /* Build a location map from a span. */
-static mino_val_t *span_to_map(mino_state_t *S, const mino_span_t *sp)
+static mino_val *span_to_map(mino_state *S, const mino_span_t *sp)
 {
-    mino_val_t *keys[5], *vals[5];
+    mino_val *keys[5], *vals[5];
     size_t n = 0;
     keys[n] = mino_keyword(S, "file");
     vals[n] = sp->file ? mino_string(S, sp->file) : mino_nil(S);
@@ -350,9 +350,9 @@ static mino_val_t *span_to_map(mino_state_t *S, const mino_span_t *sp)
 }
 
 /* Build a frame map. */
-static mino_val_t *frame_to_map(mino_state_t *S, const mino_diag_frame_t *f)
+static mino_val *frame_to_map(mino_state *S, const mino_diag_frame_t *f)
 {
-    mino_val_t *keys[4], *vals[4];
+    mino_val *keys[4], *vals[4];
     size_t n = 0;
     keys[n] = mino_keyword(S, "fn");
     vals[n] = f->fn_name ? mino_string(S, f->fn_name) : mino_nil(S);
@@ -369,9 +369,9 @@ static mino_val_t *frame_to_map(mino_state_t *S, const mino_diag_frame_t *f)
     return mino_map(S, keys, vals, n);
 }
 
-mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d)
+mino_val *diag_to_map(mino_state *S, mino_diag *d)
 {
-    mino_val_t *keys[11], *vals[11];
+    mino_val *keys[11], *vals[11];
     size_t n = 0;
 
     if (d == NULL) return mino_nil(S);
@@ -421,10 +421,10 @@ mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d)
     /* :mino/notes */
     keys[n] = mino_keyword(S, "mino/notes");
     {
-        mino_val_t **note_items = NULL;
+        mino_val **note_items = NULL;
         size_t i;
         if (d->notes_len > 0) {
-            note_items = (mino_val_t **)gc_alloc_typed(
+            note_items = (mino_val **)gc_alloc_typed(
                 S, GC_T_VALARR, d->notes_len * sizeof(*note_items));
             for (i = 0; i < d->notes_len; i++) {
                 note_items[i] = d->notes[i].message
@@ -440,10 +440,10 @@ mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d)
     /* :mino/trace */
     keys[n] = mino_keyword(S, "mino/trace");
     {
-        mino_val_t **frame_items = NULL;
+        mino_val **frame_items = NULL;
         size_t i;
         if (d->frames_len > 0) {
-            frame_items = (mino_val_t **)gc_alloc_typed(
+            frame_items = (mino_val **)gc_alloc_typed(
                 S, GC_T_VALARR, d->frames_len * sizeof(*frame_items));
             for (i = 0; i < d->frames_len; i++) {
                 frame_items[i] = frame_to_map(S, &d->frames[i]);

@@ -29,9 +29,9 @@
 #define MINO_ITER_RB_STACK_DEPTH 64
 
 struct mino_iter {
-    mino_state_t *S;
-    mino_ref_t   *ref;        /* roots the collection across GC */
-    mino_val_t   *cursor;     /* the cell currently being walked */
+    mino_state *S;
+    mino_ref   *ref;        /* roots the collection across GC */
+    mino_val   *cursor;     /* the cell currently being walked */
     size_t        idx;        /* index into vector / chunk */
     int           rb_top;     /* depth of rb_stack (0 = empty/uninit) */
     int           rb_started; /* 1 once rb walk has been seeded */
@@ -43,18 +43,18 @@ size_t mino_iter_sizeof(void)
     return sizeof(struct mino_iter);
 }
 
-void mino_iter_init(mino_state_t *S, mino_iter_t *it, mino_val_t *coll)
+void mino_iter_init(mino_state *S, mino_iter *it, mino_val *coll)
 {
     if (it == NULL) return;
     it->S          = S;
-    it->ref        = (S != NULL) ? mino_ref(S, coll) : NULL;
+    it->ref        = (S != NULL) ? mino_ref_new(S, coll) : NULL;
     it->cursor     = coll;
     it->idx        = 0;
     it->rb_top     = 0;
     it->rb_started = 0;
 }
 
-void mino_iter_done(mino_iter_t *it)
+void mino_iter_done(mino_iter *it)
 {
     if (it == NULL) return;
     if (it->ref != NULL) {
@@ -68,22 +68,22 @@ void mino_iter_done(mino_iter_t *it)
  * *out_k / *out_v on a successful step; returns 0 (and typically
  * clears it->cursor) when the walk is exhausted. The dispatcher
  * resolves lazies and looks up the handler via k_iter_dispatch[]. */
-typedef int (*iter_step_fn)(mino_iter_t *it, mino_val_t *cur,
-                            mino_type_t kind,
-                            mino_val_t **out_k, mino_val_t **out_v);
+typedef int (*iter_step_fn)(mino_iter *it, mino_val *cur,
+                            mino_type kind,
+                            mino_val **out_k, mino_val **out_v);
 
-static int iter_step_finish(mino_iter_t *it, mino_val_t *cur,
-                            mino_type_t kind,
-                            mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_finish(mino_iter *it, mino_val *cur,
+                            mino_type kind,
+                            mino_val **out_k, mino_val **out_v)
 {
     (void)cur; (void)kind; (void)out_k; (void)out_v;
     it->cursor = NULL;
     return 0;
 }
 
-static int iter_step_cons(mino_iter_t *it, mino_val_t *cur,
-                          mino_type_t kind,
-                          mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_cons(mino_iter *it, mino_val *cur,
+                          mino_type kind,
+                          mino_val **out_k, mino_val **out_v)
 {
     (void)kind; (void)out_v;
     if (out_k != NULL) *out_k = cur->as.cons.car;
@@ -91,9 +91,9 @@ static int iter_step_cons(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_vector(mino_iter_t *it, mino_val_t *cur,
-                            mino_type_t kind,
-                            mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_vector(mino_iter *it, mino_val *cur,
+                            mino_type kind,
+                            mino_val **out_k, mino_val **out_v)
 {
     (void)kind; (void)out_v;
     if (it->idx >= cur->as.vec.len) { it->cursor = NULL; return 0; }
@@ -102,12 +102,12 @@ static int iter_step_vector(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_map(mino_iter_t *it, mino_val_t *cur,
-                         mino_type_t kind,
-                         mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_map(mino_iter *it, mino_val *cur,
+                         mino_type kind,
+                         mino_val **out_k, mino_val **out_v)
 {
-    mino_val_t *ko = cur->as.map.key_order;
-    mino_val_t *k;
+    mino_val *ko = cur->as.map.key_order;
+    mino_val *k;
     (void)kind;
     if (ko == NULL || it->idx >= cur->as.map.len) {
         it->cursor = NULL; return 0;
@@ -119,11 +119,11 @@ static int iter_step_map(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_set(mino_iter_t *it, mino_val_t *cur,
-                         mino_type_t kind,
-                         mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_set(mino_iter *it, mino_val *cur,
+                         mino_type kind,
+                         mino_val **out_k, mino_val **out_v)
 {
-    mino_val_t *ko = cur->as.set.key_order;
+    mino_val *ko = cur->as.set.key_order;
     (void)kind; (void)out_v;
     if (ko == NULL || it->idx >= cur->as.set.len) {
         it->cursor = NULL; return 0;
@@ -133,9 +133,9 @@ static int iter_step_set(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_sorted(mino_iter_t *it, mino_val_t *cur,
-                            mino_type_t kind,
-                            mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_sorted(mino_iter *it, mino_val *cur,
+                            mino_type kind,
+                            mino_val **out_k, mino_val **out_v)
 {
     const mino_rb_node_t *node;
     /* Seed the in-order walk on the first call: push the leftmost
@@ -164,9 +164,9 @@ static int iter_step_sorted(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_chunk(mino_iter_t *it, mino_val_t *cur,
-                           mino_type_t kind,
-                           mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_chunk(mino_iter *it, mino_val *cur,
+                           mino_type kind,
+                           mino_val **out_k, mino_val **out_v)
 {
     (void)kind; (void)out_v;
     if (it->idx >= cur->as.chunk.len) { it->cursor = NULL; return 0; }
@@ -175,11 +175,11 @@ static int iter_step_chunk(mino_iter_t *it, mino_val_t *cur,
     return 1;
 }
 
-static int iter_step_chunked_cons(mino_iter_t *it, mino_val_t *cur,
-                                  mino_type_t kind,
-                                  mino_val_t **out_k, mino_val_t **out_v)
+static int iter_step_chunked_cons(mino_iter *it, mino_val *cur,
+                                  mino_type kind,
+                                  mino_val **out_k, mino_val **out_v)
 {
-    mino_val_t *chunk = cur->as.chunked_cons.chunk;
+    mino_val *chunk = cur->as.chunked_cons.chunk;
     unsigned    off   = cur->as.chunked_cons.off + (unsigned)it->idx;
     (void)kind;
     if (chunk == NULL || off >= chunk->as.chunk.len) {
@@ -195,7 +195,7 @@ static int iter_step_chunked_cons(mino_iter_t *it, mino_val_t *cur,
 }
 
 static const struct {
-    mino_type_t  kind;
+    mino_type  kind;
     iter_step_fn fn;
 } k_iter_dispatch[] = {
     {MINO_NIL,          iter_step_finish},
@@ -210,10 +210,10 @@ static const struct {
     {MINO_CHUNKED_CONS, iter_step_chunked_cons},
 };
 
-int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)
+int mino_iter_next(mino_iter *it, mino_val **out_k, mino_val **out_v)
 {
-    mino_val_t *cur;
-    mino_type_t kind;
+    mino_val *cur;
+    mino_type kind;
     size_t      i;
 
     if (out_k != NULL) *out_k = NULL;

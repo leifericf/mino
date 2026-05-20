@@ -36,12 +36,12 @@
  * itself returns NULL -- in practice prims raise through longjmp on
  * type errors, so the NULL return is the defensive case the stencil's
  * caller propagates back up the JIT region. */
-mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_binop_slow(mino_state *S, mino_val **regs,
                                  unsigned a, unsigned b, unsigned c,
                                  unsigned subop)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     /* Read regs[b] / regs[c] through the freshly-rebased pointer at
      * every step: a GC inside mino_cons can reallocate bc_regs and
@@ -50,7 +50,7 @@ mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
-    mino_val_t *r;
+    mino_val *r;
     switch (subop) {
     case BINOP_ADD:  r = prim_add (S, list, NULL); break;
     case BINOP_SUB:  r = prim_sub (S, list, NULL); break;
@@ -82,18 +82,18 @@ mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
  * directly onto the spine -- there is no register-window read for it.
  * The lhs still comes through regs[b]; the result lands in regs[a]
  * after any GC-driven base relocation. */
-mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_binop_k_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b,
-                                   mino_val_t *kimm, unsigned subop)
+                                   mino_val *kimm, unsigned subop)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, kimm, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
-    mino_val_t *r;
+    mino_val *r;
     switch (subop) {
     case BINOP_ADD: r = prim_add(S, list, NULL); break;
     case BINOP_SUB: r = prim_sub(S, list, NULL); break;
@@ -113,12 +113,12 @@ mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
  * vec_nth(coll, idx) into regs[a] without consing. Otherwise build a
  * two-element cons spine and dispatch through prim_nth. The cons
  * fallback handles lazy seqs, lists, maps-with-int-key, etc. */
-mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_nth_vec_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base  = regs - S->bc.bc_regs;
-    mino_val_t *coll  = S->bc.bc_regs[base + b];
-    mino_val_t *idx_v = S->bc.bc_regs[base + c];
+    mino_val *coll  = S->bc.bc_regs[base + b];
+    mino_val *idx_v = S->bc.bc_regs[base + c];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR
         && idx_v != NULL && MINO_IS_INT(idx_v)) {
         long long idx = MINO_INT_VAL(idx_v);
@@ -128,13 +128,13 @@ mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
             return regs;
         }
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, idx_v, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_nth(S, list, NULL);
+    mino_val *r = prim_nth(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -145,21 +145,21 @@ mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
  * if regs[b] is a vector, regs[a] := nil (empty) | vec_nth(coll, 0)
  * (non-empty). Otherwise cons-and-prim_first for lazy seqs, lists,
  * strings, maps, etc. */
-mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_first_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
+    mino_val *coll = S->bc.bc_regs[base + b];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
         regs    = S->bc.bc_regs + base;
         regs[a] = coll->as.vec.len == 0 ? mino_nil(S) : vec_nth(coll, 0);
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_first(S, list, NULL);
+    mino_val *r = prim_first(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -172,19 +172,19 @@ mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
  * append) routes to vec_assoc1; MINO_MAP k routes to mino_map_assoc1.
  * Other shapes (sorted-map, record, transient, non-int vec key, idx
  * out of range, variadic forms) fall through to prim_assoc. */
-mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_assoc_slow(mino_state *S, mino_val **regs,
                                  unsigned a, unsigned b)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *k    = S->bc.bc_regs[base + b + 1];
-    mino_val_t *v    = S->bc.bc_regs[base + b + 2];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *k    = S->bc.bc_regs[base + b + 1];
+    mino_val *v    = S->bc.bc_regs[base + b + 2];
     if (coll != NULL && k != NULL) {
         int t = mino_type_of(coll);
         if (t == MINO_VECTOR && MINO_IS_INT(k)) {
             long long idx = MINO_INT_VAL(k);
             if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
-                mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
+                mino_val *r = vec_assoc1(S, coll, (size_t)idx, v);
                 if (r == NULL) return NULL;
                 regs    = S->bc.bc_regs + base;
                 regs[a] = r;
@@ -192,14 +192,14 @@ mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
             }
         }
         if (t == MINO_MAP) {
-            mino_val_t *r = mino_map_assoc1(S, coll, k, v);
+            mino_val *r = mino_map_assoc1(S, coll, k, v);
             if (r == NULL) return NULL;
             regs    = S->bc.bc_regs + base;
             regs[a] = r;
             return regs;
         }
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, v, list);
     if (list == NULL) return NULL;
@@ -207,7 +207,7 @@ mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_assoc(S, list, NULL);
+    mino_val *r = prim_assoc(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -219,23 +219,23 @@ mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
  * directly; anything else (invalidated transient, persistent coll,
  * variadic arity through a forced-rewrite path) falls through to
  * prim_assoc_bang for the Clojure-canonical diagnostic. */
-mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_assoc_bang_slow(mino_state *S, mino_val **regs,
                                       unsigned a, unsigned b)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *k    = S->bc.bc_regs[base + b + 1];
-    mino_val_t *v    = S->bc.bc_regs[base + b + 2];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *k    = S->bc.bc_regs[base + b + 1];
+    mino_val *v    = S->bc.bc_regs[base + b + 2];
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
-        mino_val_t *r = mino_assoc_bang(S, coll, k, v);
+        mino_val *r = mino_assoc_bang(S, coll, k, v);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, v, list);
     if (list == NULL) return NULL;
@@ -243,7 +243,7 @@ mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_assoc_bang(S, list, NULL);
+    mino_val *r = prim_assoc_bang(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -253,28 +253,28 @@ mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
 /* Slow path for OP_CONJ_BANG. Mirrors the interpreter's transient fast
  * lane: valid MINO_TRANSIENT routes to mino_conj_bang; anything else
  * falls through to prim_conj_bang. */
-mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_conj_bang_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *item = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *item = S->bc.bc_regs[base + c];
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
-        mino_val_t *r = mino_conj_bang(S, coll, item);
+        mino_val *r = mino_conj_bang(S, coll, item);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, item, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_conj_bang(S, list, NULL);
+    mino_val *r = prim_conj_bang(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -282,28 +282,28 @@ mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S, mino_val_t **regs,
 }
 
 /* Slow path for OP_DISSOC_BANG. */
-mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_dissoc_bang_slow(mino_state *S, mino_val **regs,
                                        unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *key  = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *key  = S->bc.bc_regs[base + c];
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
-        mino_val_t *r = mino_dissoc_bang(S, coll, key);
+        mino_val *r = mino_dissoc_bang(S, coll, key);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, key, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_dissoc_bang(S, list, NULL);
+    mino_val *r = prim_dissoc_bang(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -311,28 +311,28 @@ mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S, mino_val_t **regs,
 }
 
 /* Slow path for OP_DISJ_BANG. */
-mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_disj_bang_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *item = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *item = S->bc.bc_regs[base + c];
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
-        mino_val_t *r = mino_disj_bang(S, coll, item);
+        mino_val *r = mino_disj_bang(S, coll, item);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, item, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_disj_bang(S, list, NULL);
+    mino_val *r = prim_disj_bang(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -343,26 +343,26 @@ mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S, mino_val_t **regs,
  * (allocates -- regs base may relocate); other coll types fall through
  * to prim_dissoc which raises a type diagnostic. Mirrors the
  * interpreter's OP_DISSOC cold-op handler. */
-mino_val_t **mino_jit_dissoc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_dissoc_slow(mino_state *S, mino_val **regs,
                                    unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *key  = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *key  = S->bc.bc_regs[base + c];
     if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-        mino_val_t *r = mino_map_dissoc1(S, coll, key);
+        mino_val *r = mino_map_dissoc1(S, coll, key);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, key, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_dissoc(S, list, NULL);
+    mino_val *r = prim_dissoc(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -373,26 +373,26 @@ mino_val_t **mino_jit_dissoc_slow(mino_state_t *S, mino_val_t **regs,
  * (allocates -- regs base may relocate); other coll types fall
  * through to prim_conj which handles lists, sorted-colls, sets,
  * maps, transients, etc. */
-mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_conj_vec_slow(mino_state *S, mino_val **regs,
                                     unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *item = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *item = S->bc.bc_regs[base + c];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-        mino_val_t *r = vec_conj1(S, coll, item);
+        mino_val *r = vec_conj1(S, coll, item);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, item, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_conj(S, list, NULL);
+    mino_val *r = prim_conj(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -404,20 +404,20 @@ mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
  * fast lane via record_field_index; MINO_TRANSIENT unwraps to its
  * backing collection and reuses the MAP / VECTOR inline path;
  * everything else falls through to prim_get's full semantics. */
-mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_get_kw_map_slow(mino_state *S, mino_val **regs,
                                       unsigned a, unsigned b, unsigned c)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
-    mino_val_t *key  = S->bc.bc_regs[base + c];
+    mino_val *coll = S->bc.bc_regs[base + b];
+    mino_val *key  = S->bc.bc_regs[base + c];
     if (coll != NULL && key != NULL) {
         int t = mino_type_of(coll);
         if (t == MINO_TRANSIENT && coll->as.transient.valid) {
-            mino_val_t *inner = coll->as.transient.current;
+            mino_val *inner = coll->as.transient.current;
             if (inner != NULL) {
                 int it = mino_type_of(inner);
                 if (it == MINO_MAP) {
-                    mino_val_t *v = map_get_val(inner, key);
+                    mino_val *v = map_get_val(inner, key);
                     regs    = S->bc.bc_regs + base;
                     regs[a] = v == NULL ? mino_nil(S) : v;
                     return regs;
@@ -435,7 +435,7 @@ mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
             }
         }
         if (t == MINO_MAP) {
-            mino_val_t *v = map_get_val(coll, key);
+            mino_val *v = map_get_val(coll, key);
             regs    = S->bc.bc_regs + base;
             regs[a] = v == NULL ? mino_nil(S) : v;
             return regs;
@@ -452,13 +452,13 @@ mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
              * an absent key. */
         }
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, key, list);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_get(S, list, NULL);
+    mino_val *r = prim_get(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -468,23 +468,23 @@ mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
 /* Slow path for OP_COUNT_VEC. Vector fast lane returns vec.len as a
  * tagged int (or boxed for the rare overflow). Any other coll type
  * (lazy seq, string, map, set, ...) falls through to prim_count. */
-mino_val_t **mino_jit_count_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_count_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
+    mino_val *coll = S->bc.bc_regs[base + b];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-        mino_val_t *r = tag_or_box_int(S, (long long)coll->as.vec.len);
+        mino_val *r = tag_or_box_int(S, (long long)coll->as.vec.len);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_count(S, list, NULL);
+    mino_val *r = prim_count(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -493,21 +493,21 @@ mino_val_t **mino_jit_count_vec_slow(mino_state_t *S, mino_val_t **regs,
 
 /* Slow path for OP_EMPTY_VEC. Vector fast lane returns true iff
  * vec.len == 0. Other coll types fall through to prim_empty_p. */
-mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_empty_vec_slow(mino_state *S, mino_val **regs,
                                      unsigned a, unsigned b)
 {
     ptrdiff_t   base = regs - S->bc.bc_regs;
-    mino_val_t *coll = S->bc.bc_regs[base + b];
+    mino_val *coll = S->bc.bc_regs[base + b];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
         regs    = S->bc.bc_regs + base;
         regs[a] = coll->as.vec.len == 0 ? mino_true(S) : mino_false(S);
         return regs;
     }
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, coll, list);
     if (list == NULL) return NULL;
-    mino_val_t *r = prim_empty_p(S, list, NULL);
+    mino_val *r = prim_empty_p(S, list, NULL);
     if (r == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
     regs[a] = r;
@@ -535,9 +535,9 @@ mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
  * the linker emits for the no-op body just satisfy the symbol
  * definition requirement. */
 void mino_jit_loop_continue_marker(void) { /* never called */ }
-void mino_jit_chain_continue_marker(mino_val_t **regs,
-                                    mino_val_t **consts,
-                                    mino_state_t *S)
+void mino_jit_chain_continue_marker(mino_val **regs,
+                                    mino_val **consts,
+                                    mino_state *S)
 {
     (void)regs; (void)consts; (void)S;
 }
@@ -545,15 +545,15 @@ void mino_jit_chain_continue_marker(mino_val_t **regs,
 /* Slow path for the unary OP_INC_I / OP_DEC_I / OP_ZERO_INT_P stencils.
  * Builds a one-element cons spine and dispatches to the matching
  * prim; mirrors the interpreter's unary handler. */
-mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_unop_slow(mino_state *S, mino_val **regs,
                                 unsigned a, unsigned b, unsigned subop)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
-    mino_val_t *r;
+    mino_val *r;
     switch (subop) {
     case UNOP_INC:    r = prim_inc    (S, list, NULL); break;
     case UNOP_DEC:    r = prim_dec    (S, list, NULL); break;
@@ -583,8 +583,8 @@ mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
  *
  * GC-safe regs base refresh: bc_regs may relocate if the resolve path
  * triggers an allocation (cons / write-barrier / map_get cascade). */
-mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
-                                            mino_val_t **regs,
+mino_val **mino_jit_getglobal_cached_slow(mino_state *S,
+                                            mino_val **regs,
                                             unsigned a,
                                             mino_bc_fn_t *bc,
                                             unsigned slot_idx)
@@ -597,8 +597,8 @@ mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
      * OP_GETGLOBAL_CACHED slots whose resolution path runs through
      * env first; without env, those slots would fail to resolve and
      * surface as spurious "unbound symbol" diagnostics. */
-    mino_env_t *env = ctx->jit_invoke_env;
-    mino_val_t *v   = mino_bc_ic_global_load(S, bc, (int)slot_idx,
+    mino_env *env = ctx->jit_invoke_env;
+    mino_val *v   = mino_bc_ic_global_load(S, bc, (int)slot_idx,
                                              env, dyn_active);
     if (v == NULL) return NULL;
     regs    = S->bc.bc_regs + base;
@@ -622,14 +622,14 @@ mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
  * for the targeted callback workloads (user fns passed to map /
  * reduce / filter / sort comparators) the MINO_FN lane fires
  * every iteration. */
-mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_call_slow(mino_state *S, mino_val **regs,
                                 unsigned fn_reg, unsigned argc, unsigned dst)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
-    mino_val_t        *callee = S->bc.bc_regs[base + fn_reg];
-    mino_val_t        *r = mino_apply_known_bc_fn_argv(
+    mino_env        *env  = ctx->jit_invoke_env;
+    mino_val        *callee = S->bc.bc_regs[base + fn_reg];
+    mino_val        *r = mino_apply_known_bc_fn_argv(
         S, callee, S->bc.bc_regs + base + fn_reg + 1, (int)argc, env);
     if (r == NULL) return NULL;
     regs      = S->bc.bc_regs + base;
@@ -641,15 +641,15 @@ mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
  * builds a fresh closure value over the current jit_invoke_env, and
  * stores it at regs[a]. Mirrors the interpreter's OP_CLOSURE
  * handler. */
-mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_closure_slow(mino_state *S, mino_val **regs,
                                     unsigned a, mino_bc_fn_t *bc, unsigned bx)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     if (bx >= bc->consts_len) return NULL;
-    mino_val_t *child = bc->consts[bx];
+    mino_val *child = bc->consts[bx];
     if (child == NULL || mino_type_of(child) != MINO_FN) return NULL;
-    mino_val_t *closure = make_fn(S, child->as.fn.params,
+    mino_val *closure = make_fn(S, child->as.fn.params,
                                    child->as.fn.body,
                                    ctx->jit_invoke_env);
     if (closure == NULL) return NULL;
@@ -666,10 +666,10 @@ mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
  * child frame; subsequent OP_ENV_BIND helpers bind into it and
  * resolve-cascade lookups walk through it before reaching the
  * caller-supplied env. */
-mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs)
+mino_val **mino_jit_push_env_slow(mino_state *S, mino_val **regs)
 {
     mino_thread_ctx_t *ctx   = mino_current_ctx(S);
-    mino_env_t        *child = env_child(S, ctx->jit_invoke_env);
+    mino_env        *child = env_child(S, ctx->jit_invoke_env);
     if (child == NULL) return NULL;
     ctx->jit_invoke_env = child;
     return regs;
@@ -678,10 +678,10 @@ mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs)
 /* OP_POP_ENV slow helper. Walks the JIT-invoke env up one frame.
  * NULL parent (already at the root) is a malformed bc; surface as a
  * slow-path failure rather than corrupting the chain. */
-mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs)
+mino_val **mino_jit_pop_env_slow(mino_state *S, mino_val **regs)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    mino_env_t        *env = ctx->jit_invoke_env;
+    mino_env        *env = ctx->jit_invoke_env;
     if (env == NULL || env->parent == NULL) return NULL;
     ctx->jit_invoke_env = env->parent;
     return regs;
@@ -691,14 +691,14 @@ mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs)
  * bc->consts[bx] into the current JIT-invoke env. Mirrors the
  * interpreter's OP_ENV_BIND so inner fn literals captured at
  * OP_CLOSURE time pick up the same names the interpreter would. */
-mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_env_bind_slow(mino_state *S, mino_val **regs,
                                      unsigned a, mino_bc_fn_t *bc,
                                      unsigned bx)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     if (bx >= bc->consts_len) return NULL;
-    mino_val_t *sym = bc->consts[bx];
+    mino_val *sym = bc->consts[bx];
     if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) return NULL;
     env_bind_sym(S, ctx->jit_invoke_env, sym, S->bc.bc_regs[base + a]);
     return regs;
@@ -710,15 +710,15 @@ mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,
  * stencil's natural ret hands it back as the JIT region's return
  * value; the trampoline in apply_callable picks up the new
  * (fn, args) without growing the C stack. */
-mino_val_t *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
+mino_val *mino_jit_tailcall_slow(mino_state *S, mino_val **regs,
                                     unsigned fn_reg, unsigned argc)
 {
     ptrdiff_t   base   = regs - S->bc.bc_regs;
-    mino_val_t *callee = S->bc.bc_regs[base + fn_reg];
-    mino_val_t *args   = mino_nil(S);
+    mino_val *callee = S->bc.bc_regs[base + fn_reg];
+    mino_val *args   = mino_nil(S);
     if (args == NULL) return NULL;
     for (int i = (int)argc - 1; i >= 0; i--) {
-        mino_val_t *cell = mino_cons(S,
+        mino_val *cell = mino_cons(S,
                                      S->bc.bc_regs[base + fn_reg + 1 + i],
                                      args);
         if (cell == NULL) return NULL;
@@ -739,7 +739,7 @@ mino_val_t *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
  * so the live regs base is stable for the duration of the call's
  * argv reads (any GC inside the callee may relocate the window
  * afterwards, which is why the helper refreshes from S on return). */
-mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_call_cached_slow(mino_state *S, mino_val **regs,
                                        unsigned arg_base, unsigned argc,
                                        unsigned dst,
                                        mino_bc_fn_t *bc, unsigned slot_idx)
@@ -747,12 +747,12 @@ mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
     ptrdiff_t          base       = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx        = mino_current_ctx(S);
     int                dyn_active = (ctx->dyn_stack != NULL);
-    mino_env_t        *env        = ctx->jit_invoke_env;
-    mino_val_t        *callee     = mino_bc_ic_global_load(S, bc,
+    mino_env        *env        = ctx->jit_invoke_env;
+    mino_val        *callee     = mino_bc_ic_global_load(S, bc,
                                                             (int)slot_idx,
                                                             env, dyn_active);
     if (callee == NULL) return NULL;
-    mino_val_t *r = apply_callable_argv(S, callee,
+    mino_val *r = apply_callable_argv(S, callee,
                                         S->bc.bc_regs + base + arg_base,
                                         (int)argc, env);
     if (r == NULL) return NULL;
@@ -766,15 +766,15 @@ mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
  * gen match, no dyn binding active), so it hands the resolved callee
  * to this helper directly and skips the second IC lookup. Same
  * dispatch + regs-refresh contract as the cached_slow path. */
-mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
-                                          mino_val_t *callee,
+mino_val **mino_jit_call_resolved_slow(mino_state *S, mino_val **regs,
+                                          mino_val *callee,
                                           unsigned arg_base, unsigned argc,
                                           unsigned dst)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
-    mino_val_t *r = apply_callable_argv(S, callee,
+    mino_env        *env  = ctx->jit_invoke_env;
+    mino_val *r = apply_callable_argv(S, callee,
                                         S->bc.bc_regs + base + arg_base,
                                         (int)argc, env);
     if (r == NULL) return NULL;
@@ -790,15 +790,15 @@ mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
  * apply_callable_argv's var-unwrap / type-of dispatch switch entirely
  * by entering at mino_apply_known_bc_fn_argv. Same dispatch +
  * regs-refresh contract as call_resolved_slow. */
-mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
-                                         mino_val_t *callee,
+mino_val **mino_jit_call_known_fn_slow(mino_state *S, mino_val **regs,
+                                         mino_val *callee,
                                          unsigned arg_base, unsigned argc,
                                          unsigned dst)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
-    mino_val_t *r = mino_apply_known_bc_fn_argv(S, callee,
+    mino_env        *env  = ctx->jit_invoke_env;
+    mino_val *r = mino_apply_known_bc_fn_argv(S, callee,
                                                 S->bc.bc_regs + base + arg_base,
                                                 (int)argc, env);
     if (r == NULL) return NULL;
@@ -817,16 +817,16 @@ mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
  * has drifted (slot caches a stale Var, or the sym was redefined
  * between resolves), the slot's gen check would already have fired;
  * the type-of check here is the second line of defence. */
-mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
-                                           mino_val_t **regs,
-                                           mino_val_t *callee,
+mino_val **mino_jit_call_known_prim_slow(mino_state *S,
+                                           mino_val **regs,
+                                           mino_val *callee,
                                            unsigned arg_base,
                                            unsigned argc,
                                            unsigned dst)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_env        *env  = ctx->jit_invoke_env;
     if (callee != NULL && mino_type_of(callee) == MINO_VAR) {
         if (!callee->as.var.bound || callee->as.var.root == NULL) {
             goto fallback;
@@ -838,18 +838,18 @@ mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
         goto fallback;
     }
     {
-        const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+        const mino_val *form = mino_current_ctx(S)->eval_current_form;
         const char *file = NULL;
         int         line = 0;
         int         col  = 0;
-        if (form != NULL && mino_type_of((mino_val_t *)form) == MINO_CONS) {
+        if (form != NULL && mino_type_of((mino_val *)form) == MINO_CONS) {
             file = form->as.cons.file;
             line = form->as.cons.line;
             col  = form->as.cons.column;
         }
         push_frame(S, callee->as.prim.name, file, line, col);
         {
-            mino_val_t *r = callee->as.prim.fn2(S,
+            mino_val *r = callee->as.prim.fn2(S,
                 S->bc.bc_regs + base + arg_base, (int)argc, env);
             if (r == NULL) return NULL; /* leave frame for trace */
             pop_frame(S);
@@ -860,7 +860,7 @@ mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
     }
 fallback:
     {
-        mino_val_t *r = apply_callable_argv(S, callee,
+        mino_val *r = apply_callable_argv(S, callee,
             S->bc.bc_regs + base + arg_base, (int)argc, env);
         if (r == NULL) return NULL;
         regs      = S->bc.bc_regs + base;
@@ -886,9 +886,9 @@ fallback:
  * branch is rarely-taken. Falls back to apply_callable_argv on any
  * unexpected shape so the slow path remains correct even when the
  * cached slot drifts. */
-mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
-                                             mino_val_t **regs,
-                                             mino_val_t *fn,
+mino_val **mino_jit_call_known_native_slow(mino_state *S,
+                                             mino_val **regs,
+                                             mino_val *fn,
                                              mino_bc_fn_t *bc,
                                              unsigned arg_base,
                                              unsigned argc,
@@ -896,7 +896,7 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_env        *env  = ctx->jit_invoke_env;
     /* Defensive: if the cached fn pointer has drifted to something
      * that is no longer an FN, bail to the generic path. The IC's
      * gen check normally screens this, but a fold-driven recompile
@@ -912,11 +912,11 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
         S->ns_vars.current_ns    = fn->as.fn.defining_ns;
         S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
     }
-    const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+    const mino_val *form = mino_current_ctx(S)->eval_current_form;
     const char *file = NULL;
     int         line = 0;
     int         col  = 0;
-    if (form != NULL && mino_type_of((mino_val_t *)form) == MINO_CONS) {
+    if (form != NULL && mino_type_of((mino_val *)form) == MINO_CONS) {
         file = form->as.cons.file;
         line = form->as.cons.line;
         col  = form->as.cons.column;
@@ -927,7 +927,7 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
      * preconditions all hold. mino_bc_run_known_native falls back to
      * mino_bc_run automatically when any precondition has drifted,
      * so the helper stays correct against a stale IC slot. */
-    mino_val_t *r = mino_bc_run_known_native(S, fn,
+    mino_val *r = mino_bc_run_known_native(S, fn,
                                               S->bc.bc_regs + base + arg_base,
                                               (int)argc, fn->as.fn.env);
     /* TAIL_CALL sentinel: rare in the hot path. Delegate to
@@ -935,8 +935,8 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
      * dispatch with full correctness. Frame + ns scope are dropped
      * before delegation so the trampoline owns its own attribution. */
     if (r != NULL && mino_type_of(r) == MINO_TAIL_CALL) {
-        mino_val_t *next_fn   = r->as.tail_call.fn;
-        mino_val_t *next_args = r->as.tail_call.args;
+        mino_val *next_fn   = r->as.tail_call.fn;
+        mino_val *next_args = r->as.tail_call.args;
         pop_frame(S);
         S->ns_vars.current_ns    = saved_ns;
         S->ns_vars.fn_ambient_ns = saved_ambient;
@@ -952,7 +952,7 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
     return regs;
 fallback:
     {
-        mino_val_t *r = apply_callable_argv(S, fn,
+        mino_val *r = apply_callable_argv(S, fn,
             S->bc.bc_regs + base + arg_base, (int)argc, env);
         if (r == NULL) return NULL;
         regs      = S->bc.bc_regs + base;
@@ -964,9 +964,9 @@ fallback:
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
-static mino_val_t **loop_tag_exit(mino_val_t **regs)
+static mino_val **loop_tag_exit(mino_val **regs)
 {
-    return (mino_val_t **)((uintptr_t)regs | (uintptr_t)1);
+    return (mino_val **)((uintptr_t)regs | (uintptr_t)1);
 }
 
 /* Slow path for OP_LOOP_INT_LT. Mirrors the interpreter's
@@ -976,27 +976,27 @@ static mino_val_t **loop_tag_exit(mino_val_t **regs)
  *     the counter has been incremented through prim_inc and written
  *     back to regs[a].
  *   - regs | 1 if the loop should exit (fall through to next stencil). */
-mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_slow(mino_state *S, mino_val **regs,
                                        unsigned a, unsigned b)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *ltv = prim_lt(S, list, NULL);
+    mino_val *ltv = prim_lt(S, list, NULL);
     if (ltv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (!mino_is_truthy_inline(ltv)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *incv = prim_inc(S, list2, NULL);
+    mino_val *incv = prim_inc(S, list2, NULL);
     if (incv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = incv;
@@ -1006,25 +1006,25 @@ mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S, mino_val_t **regs,
 /* Slow path for OP_LOOP_INT_DEC. Mirrors the interpreter's
  * cons + prim_zero_p + prim_dec dance. Same exit-signal convention as
  * mino_jit_loop_int_lt_slow. */
-mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_slow(mino_state *S, mino_val **regs,
                                         unsigned a)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    mino_val *zp = prim_zero_p(S, list, NULL);
     if (zp == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (mino_is_truthy_inline(zp)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *decv = prim_dec(S, list2, NULL);
+    mino_val *decv = prim_dec(S, list2, NULL);
     if (decv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = decv;
@@ -1035,35 +1035,35 @@ mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S, mino_val_t **regs,
  * cons + prim_lt + prim_inc + prim_inc dance for the two-binding
  * counted-loop shape. Returns the same low-bit-tagged signal as the
  * single-binding LT helper. */
-mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_inc_slow(mino_state *S, mino_val **regs,
                                             unsigned a, unsigned b,
                                             unsigned c)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *ltv = prim_lt(S, list, NULL);
+    mino_val *ltv = prim_lt(S, list, NULL);
     if (ltv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (!mino_is_truthy_inline(ltv)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *incv = prim_inc(S, list2, NULL);
+    mino_val *incv = prim_inc(S, list2, NULL);
     if (incv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
-    mino_val_t *list3 = mino_nil(S);
+    mino_val *list3 = mino_nil(S);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[c], list3);
     if (list3 == NULL) return NULL;
-    mino_val_t *incv2 = prim_inc(S, list3, NULL);
+    mino_val *incv2 = prim_inc(S, list3, NULL);
     if (incv2 == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = incv;
@@ -1079,8 +1079,8 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
  * (note: regs[a] IS the first arg -- protocol dispatch uses the
  * leading positional argument as the type-discriminator source).
  * Stores the return at regs[ret]. */
-mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
-                                                 mino_val_t **regs,
+mino_val **mino_jit_protocol_call_cached_slow(mino_state *S,
+                                                 mino_val **regs,
                                                  unsigned a,
                                                  unsigned argn,
                                                  unsigned ret,
@@ -1089,17 +1089,17 @@ mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_env        *env  = ctx->jit_invoke_env;
     if ((int)slot_idx >= bc->ic_slots_len) return NULL;
     mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
     if (argn < 1 || slot->atom == NULL
         || mino_type_of(slot->atom) != MINO_ATOM) {
         return NULL;
     }
-    mino_val_t *first_arg = S->bc.bc_regs[base + a];
-    mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    mino_val *first_arg = S->bc.bc_regs[base + a];
+    mino_val *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
     if (impl == NULL) return NULL;
-    mino_val_t *r = apply_callable_argv(S, impl,
+    mino_val *r = apply_callable_argv(S, impl,
                                          S->bc.bc_regs + base + a,
                                          (int)argn, env);
     if (r == NULL) return NULL;
@@ -1112,8 +1112,8 @@ mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
  * way as the non-tail variant, but exits the JIT region by returning
  * the impl's result directly (no register write-back). The owning
  * stencil is FINAL: its return value is the fn's return value. */
-mino_val_t *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
-                                                    mino_val_t **regs,
+mino_val *mino_jit_protocol_tailcall_cached_slow(mino_state *S,
+                                                    mino_val **regs,
                                                     unsigned a,
                                                     unsigned argn,
                                                     mino_bc_fn_t *bc,
@@ -1121,15 +1121,15 @@ mino_val_t *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_env        *env  = ctx->jit_invoke_env;
     if ((int)slot_idx >= bc->ic_slots_len) return NULL;
     mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
     if (argn < 1 || slot->atom == NULL
         || mino_type_of(slot->atom) != MINO_ATOM) {
         return NULL;
     }
-    mino_val_t *first_arg = S->bc.bc_regs[base + a];
-    mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    mino_val *first_arg = S->bc.bc_regs[base + a];
+    mino_val *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
     if (impl == NULL) return NULL;
     return apply_callable_argv(S, impl,
                                 S->bc.bc_regs + base + a,
@@ -1143,15 +1143,15 @@ mino_val_t *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
  * suffix is borrowed from the arith stencils for naming consistency
  * even though there's no fast-path counterpart -- every OP_MAKE_LAZY
  * routes through this helper. */
-mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S, mino_val_t **regs,
+mino_val **mino_jit_make_lazy_slow(mino_state *S, mino_val **regs,
                                       unsigned a, mino_bc_fn_t *bc,
                                       unsigned bx)
 {
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     if (bx >= bc->consts_len) return NULL;
-    mino_val_t *body = bc->consts[bx];
-    mino_val_t *lz   = alloc_val(S, MINO_LAZY);
+    mino_val *body = bc->consts[bx];
+    mino_val *lz   = alloc_val(S, MINO_LAZY);
     if (lz == NULL) return NULL;
     lz->as.lazy.body     = body;
     lz->as.lazy.env      = ctx->jit_invoke_env;
@@ -1167,33 +1167,33 @@ mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S, mino_val_t **regs,
  * reverse-counted loop shape. Returns the same low-bit-tagged signal
  * as the other loop helpers: NULL on OOM, regs|1 on exit, regs on
  * continue. */
-mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_inc_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned b)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    mino_val *zp = prim_zero_p(S, list, NULL);
     if (zp == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (mino_is_truthy_inline(zp)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *decv = prim_dec(S, list2, NULL);
+    mino_val *decv = prim_dec(S, list2, NULL);
     if (decv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
-    mino_val_t *list3 = mino_nil(S);
+    mino_val *list3 = mino_nil(S);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[b], list3);
     if (list3 == NULL) return NULL;
-    mino_val_t *incv = prim_inc(S, list3, NULL);
+    mino_val *incv = prim_inc(S, list3, NULL);
     if (incv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = decv;
@@ -1205,38 +1205,38 @@ mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
  * accumulator's step is (+ acc <reg-d>). Mirrors the interpreter's
  * cons + prim_lt + prim_inc + prim_add dance. Returns the same
  * low-bit-tagged signal as the other loop helpers. */
-mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S,
-                                            mino_val_t **regs,
+mino_val **mino_jit_loop_int_lt_acc_slow(mino_state *S,
+                                            mino_val **regs,
                                             unsigned a, unsigned b,
                                             unsigned c, unsigned d)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + b], list);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *ltv = prim_lt(S, list, NULL);
+    mino_val *ltv = prim_lt(S, list, NULL);
     if (ltv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (!mino_is_truthy_inline(ltv)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *incv = prim_inc(S, list2, NULL);
+    mino_val *incv = prim_inc(S, list2, NULL);
     if (incv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
-    mino_val_t *list3 = mino_nil(S);
+    mino_val *list3 = mino_nil(S);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[d], list3);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[c], list3);
     if (list3 == NULL) return NULL;
-    mino_val_t *addv = prim_add(S, list3, NULL);
+    mino_val *addv = prim_add(S, list3, NULL);
     if (addv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = incv;
@@ -1247,36 +1247,36 @@ mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S,
 /* Slow path for OP_LOOP_INT_DEC_ACC: reverse-counted loop where the
  * accumulator's step is (+ acc <reg-d>). Mirrors the interpreter's
  * cons + prim_zero_p + prim_dec + prim_add dance. */
-mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S,
-                                             mino_val_t **regs,
+mino_val **mino_jit_loop_int_dec_acc_slow(mino_state *S,
+                                             mino_val **regs,
                                              unsigned a, unsigned c,
                                              unsigned d)
 {
     ptrdiff_t base = regs - S->bc.bc_regs;
-    mino_val_t *list = mino_nil(S);
+    mino_val *list = mino_nil(S);
     if (list == NULL) return NULL;
     list = mino_cons(S, S->bc.bc_regs[base + a], list);
     if (list == NULL) return NULL;
-    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    mino_val *zp = prim_zero_p(S, list, NULL);
     if (zp == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     if (mino_is_truthy_inline(zp)) {
         return loop_tag_exit(regs);
     }
-    mino_val_t *list2 = mino_nil(S);
+    mino_val *list2 = mino_nil(S);
     if (list2 == NULL) return NULL;
     list2 = mino_cons(S, regs[a], list2);
     if (list2 == NULL) return NULL;
-    mino_val_t *decv = prim_dec(S, list2, NULL);
+    mino_val *decv = prim_dec(S, list2, NULL);
     if (decv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
-    mino_val_t *list3 = mino_nil(S);
+    mino_val *list3 = mino_nil(S);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[d], list3);
     if (list3 == NULL) return NULL;
     list3 = mino_cons(S, regs[c], list3);
     if (list3 == NULL) return NULL;
-    mino_val_t *addv = prim_add(S, list3, NULL);
+    mino_val *addv = prim_add(S, list3, NULL);
     if (addv == NULL) return NULL;
     regs = S->bc.bc_regs + base;
     regs[a] = decv;
@@ -1290,7 +1290,7 @@ mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S,
  * region's final ret carries the deopt-sentinel value back to
  * mino_jit_invoke, which then continues dispatch through the
  * interpreter at S->jit_deopt_pc. */
-mino_val_t *mino_jit_deopt_exit(mino_state_t *S, size_t resume_pc)
+mino_val *mino_jit_deopt_exit(mino_state *S, size_t resume_pc)
 {
     S->jit_deopt_pc      = resume_pc;
     S->jit_deopt_pending = 1;

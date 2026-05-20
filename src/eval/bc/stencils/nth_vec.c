@@ -6,7 +6,7 @@
  * The interpreter handler inlines a tagged-int + MINO_VECTOR fast
  * lane and falls back to prim_nth when either operand misses. The
  * stencil source can't see the MINO_VECTOR layout (stencils are
- * compiled hermetically against opaque mino_val_t), so the inline
+ * compiled hermetically against opaque mino_val), so the inline
  * fast lane lives inside mino_jit_nth_vec_slow; the stencil itself
  * is a trampoline.
  *
@@ -23,9 +23,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_nth_vec(mino_val_t **regs,
-                         mino_val_t **consts,
-                         mino_state_t *S)
+void stencil_op_nth_vec(mino_val **regs,
+                         mino_val **consts,
+                         mino_state *S)
 {
     regs = mino_jit_nth_vec_slow(S, regs,
                                  (unsigned)IMM_A,

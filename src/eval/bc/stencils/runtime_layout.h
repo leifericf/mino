@@ -17,8 +17,8 @@
  * This header is the curated bridge:
  *
  *   - Mirrors the field set the stencils need (currently the IC slot
- *     full layout plus offset anchors for `mino_state_t::ic_gen`,
- *     `mino_state_t::bc_regs`, `mino_state_t::main_ctx`,
+ *     full layout plus offset anchors for `mino_state::ic_gen`,
+ *     `mino_state::bc_regs`, `mino_state::main_ctx`,
  *     `mino_thread_ctx_t::dyn_stack`, and `mino_bc_fn_t::ic_slots`).
  *   - Re-exports the tagged-int encoding macros from
  *     `src/mino_internal.h`.
@@ -54,8 +54,8 @@ extern "C" {
  * below; the matching typedefs are introduced selectively so callers
  * that already see the canonical typedefs don't get a duplicate
  * declaration. The MINO_BC_STENCIL_ABI_H guard catches the stencil-
- * layer case (where abi.h has already typedef'd `mino_val_t`,
- * `mino_state_t`, and `mino_bc_fn_t`) without dragging in the full
+ * layer case (where abi.h has already typedef'd `mino_val`,
+ * `mino_state`, and `mino_bc_fn_t`) without dragging in the full
  * runtime headers. */
 struct mino_val;
 struct mino_state;
@@ -68,9 +68,9 @@ struct mino_bc_ic_slot;
 /* === Public typedefs (mino.h-equivalent) ============================ */
 
 #if !defined(MINO_H) && !defined(MINO_BC_STENCIL_ABI_H)
-typedef struct mino_val   mino_val_t;
-typedef struct mino_state mino_state_t;
-typedef struct mino_env   mino_env_t;
+typedef struct mino_val   mino_val;
+typedef struct mino_state mino_state;
+typedef struct mino_env   mino_env;
 #endif
 
 /* === Runtime-internal typedefs (runtime/internal.h-equivalent) ===== */
@@ -98,8 +98,8 @@ typedef enum {
 } mino_bc_ic_kind_t;
 
 typedef struct mino_bc_ic_slot {
-    mino_val_t   *sym;
-    mino_val_t   *cached;
+    mino_val   *sym;
+    mino_val   *cached;
     unsigned      gen;
     unsigned char kind;
     /* GLOBAL-kind callable-shape fields (see internal.h for the
@@ -108,9 +108,9 @@ typedef struct mino_bc_ic_slot {
     unsigned char cached_fn_has_rest;
     unsigned char _pad_ic0;
     /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
-    mino_val_t   *atom;
-    mino_val_t   *cached_map;
-    mino_val_t   *cached_type;
+    mino_val   *atom;
+    mino_val   *cached_map;
+    mino_val   *cached_type;
     unsigned short cached_fn_n_params;
     unsigned short _pad_ic1;
     unsigned       _pad_ic2;
@@ -132,7 +132,7 @@ typedef struct mino_bc_ic_slot {
 
 /* Bit-identical to src/mino_internal.h. Gated so the canonical
  * definitions win when both headers are reachable. The MINO_MAKE_INT
- * production cast uses `struct mino_val *` rather than `mino_val_t *`
+ * production cast uses `struct mino_val *` rather than `mino_val *`
  * so it stays valid in stencil compilation units that don't typedef
  * the latter through mino.h. */
 #ifndef MINO_INTERNAL_H

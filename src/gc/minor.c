@@ -29,7 +29,7 @@
  * remembered-set container. gc_trace_children pushes each child into
  * the mark stack unconditionally; gc_mark_push's minor filter then
  * drops OLD children and marks YOUNG children for later tracing. */
-static void gc_mark_remset(mino_state_t *S)
+static void gc_mark_remset(mino_state *S)
 {
     size_t i;
     for (i = 0; i < S->gc.remset_len; i++) {
@@ -44,7 +44,7 @@ static void gc_mark_remset(mino_state_t *S)
  * entirely so minor never touches them. When saved_phase is
  * MAJOR_MARK, every promoted header is also enqueued on major's mark
  * stack so major traces it before sweep. */
-static void gc_minor_sweep(mino_state_t *S, int saved_phase)
+static void gc_minor_sweep(mino_state *S, int saved_phase)
 {
     gc_hdr_t **pp          = &S->gc.all_young;
     size_t     freed_bytes = 0;
@@ -147,7 +147,7 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
  * live YOUNG target while its containing OLD header `h` is not in
  * the remembered set, dump diagnostic context and abort -- the only
  * call path is the verify pass and `MINO_GC_VERIFY=1` opts in. */
-static inline void gc_verify_check(mino_state_t *S, gc_hdr_t *h, void *p)
+static inline void gc_verify_check(mino_state *S, gc_hdr_t *h, void *p)
 {
     gc_hdr_t *child;
     int       vt, cvt;
@@ -155,9 +155,9 @@ static inline void gc_verify_check(mino_state_t *S, gc_hdr_t *h, void *p)
     child = gc_find_header_for_ptr(S, p);
     if (child == NULL || child->gen != GC_GEN_YOUNG) return;
     vt  = (h->type_tag == GC_T_VAL)
-          ? (int)((mino_val_t *)(h + 1))->type : -1;
+          ? (int)((mino_val *)(h + 1))->type : -1;
     cvt = (child->type_tag == GC_T_VAL)
-          ? (int)((mino_val_t *)(child + 1))->type : -1;
+          ? (int)((mino_val *)(child + 1))->type : -1;
     fprintf(stderr,
             "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d vtype=%d\n",
             (void *)h, (int)h->type_tag, vt,
@@ -191,7 +191,7 @@ static inline void gc_verify_check(mino_state_t *S, gc_hdr_t *h, void *p)
  * walk only marked OLD, then restore the original mark bits so the
  * subsequent real mark pass starts from the expected zero state.
  * Paid only when the env var is set; returns immediately otherwise. */
-static void gc_verify_remset_complete(mino_state_t *S)
+static void gc_verify_remset_complete(mino_state *S)
 {
     gc_hdr_t      *h;
     gc_hdr_t     **saved_hdrs;
@@ -243,7 +243,7 @@ static void gc_verify_remset_complete(mino_state_t *S)
         if (!h->mark) continue; /* dead OLD zombie; skip (see comment above) */
         switch (h->type_tag) {
         case GC_T_VAL: {
-            mino_val_t *v = (mino_val_t *)(h + 1);
+            mino_val *v = (mino_val *)(h + 1);
             gc_verify_check(S, h, v->meta);
             switch (mino_type_of(v)) {
             case MINO_STRING: case MINO_SYMBOL: case MINO_KEYWORD:
@@ -356,7 +356,7 @@ static void gc_verify_remset_complete(mino_state_t *S)
             break;
         }
         case GC_T_ENV: {
-            mino_env_t *e = (mino_env_t *)(h + 1);
+            mino_env *e = (mino_env *)(h + 1);
             gc_verify_check(S, h, e->parent);
             if (e->bindings != NULL) {
                 size_t k;
@@ -423,7 +423,7 @@ static void gc_verify_remset_complete(mino_state_t *S)
     free(saved_marks);
 }
 
-void gc_minor_collect(mino_state_t *S)
+void gc_minor_collect(mino_state *S)
 {
     jmp_buf   jb;
     long long start_ns;

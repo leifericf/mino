@@ -9,7 +9,7 @@
  * becomes unreachable.
  *
  * Constructors return GC-owned cells. The cell's mpz_t is allocated
- * and initialised BEFORE the mino_val_t so that, once alloc_val
+ * and initialised BEFORE the mino_val so that, once alloc_val
  * returns, the pointer store is unconditional and no partially-typed
  * cell can be observed by a subsequent collector.
  */
@@ -62,16 +62,16 @@ mp_int bigint_alloc_zeroed(void)
     return z;
 }
 
-mino_val_t *bigint_wrap(mino_state_t *S, mp_int z)
+mino_val *bigint_wrap(mino_state *S, mp_int z)
 {
-    mino_val_t *v = alloc_val(S, MINO_BIGINT);
+    mino_val *v = alloc_val(S, MINO_BIGINT);
     v->as.bigint.mpz = z;
     return v;
 }
 
 /* Public: free the mpz_t owned by a MINO_BIGINT cell. Called from the
  * GC sweep paths. Safe to call with NULL mpz (defensive). */
-void mino_bigint_free(mino_val_t *v)
+void mino_bigint_free(mino_val *v)
 {
     mp_int z;
     if (v == NULL || mino_type_of(v) != MINO_BIGINT) return;
@@ -86,7 +86,7 @@ void mino_bigint_free(mino_val_t *v)
 /* Public constructors (mino.h)                                              */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n)
+mino_val *mino_bigint_from_ll(mino_state *S, long long n)
 {
     mp_int z = bigint_alloc_zeroed();
     if (z == NULL) {
@@ -117,7 +117,7 @@ mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n)
     return bigint_wrap(S, z);
 }
 
-mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len)
+mino_val *mino_bigint_from_string_n(mino_state *S, const char *s, size_t len)
 {
     mp_int z;
     char  *buf;
@@ -145,7 +145,7 @@ mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len
     return bigint_wrap(S, z);
 }
 
-mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s)
+mino_val *mino_bigint_from_string(mino_state *S, const char *s)
 {
     if (s == NULL) return NULL;
     return mino_bigint_from_string_n(S, s, strlen(s));
@@ -155,7 +155,7 @@ mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s)
 /* Equality, hashing, comparison, printing                                    */
 /* ------------------------------------------------------------------------- */
 
-int mino_bigint_equals(const mino_val_t *a, const mino_val_t *b)
+int mino_bigint_equals(const mino_val *a, const mino_val *b)
 {
     if (a == NULL || b == NULL) return 0;
     if (mino_type_of(a) != MINO_BIGINT || mino_type_of(b) != MINO_BIGINT) return 0;
@@ -163,7 +163,7 @@ int mino_bigint_equals(const mino_val_t *a, const mino_val_t *b)
                           (mp_int)b->as.bigint.mpz) == 0;
 }
 
-int mino_bigint_equals_ll(const mino_val_t *a, long long n)
+int mino_bigint_equals_ll(const mino_val *a, long long n)
 {
     if (a == NULL || mino_type_of(a) != MINO_BIGINT) return 0;
     if (n >= LONG_MIN && n <= LONG_MAX) {
@@ -187,7 +187,7 @@ int mino_bigint_equals_ll(const mino_val_t *a, long long n)
     }
 }
 
-int mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b)
+int mino_bigint_cmp(const mino_val *a, const mino_val *b)
 {
     if (a == NULL || b == NULL) return 0;
     if (mino_type_of(a) != MINO_BIGINT || mino_type_of(b) != MINO_BIGINT) return 0;
@@ -200,7 +200,7 @@ int mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b)
  * long-long path is short-circuited in hash_val before reaching here
  * so that (= 1 1N) ⇒ matching hashes via hash_long_long_bytes; this
  * function only fires when the bigint is genuinely larger than ll. */
-uint32_t mino_bigint_hash(const mino_val_t *v)
+uint32_t mino_bigint_hash(const mino_val *v)
 {
     mp_small r = 0;
     uint32_t h;
@@ -220,7 +220,7 @@ uint32_t mino_bigint_hash(const mino_val_t *v)
  * MINO_INT or a MINO_BIGINT whose magnitude fits in long long, with
  * *out set to the value. Returns 0 otherwise (including nil / non-
  * numeric types); *out is left unchanged on failure. */
-int mino_as_ll(const mino_val_t *v, long long *out)
+int mino_as_ll(const mino_val *v, long long *out)
 {
     if (v == NULL || out == NULL) return 0;
     if (mino_val_int_p(v)) {
@@ -243,7 +243,7 @@ int mino_as_ll(const mino_val_t *v, long long *out)
  * takes ownership of the returned buffer and must free() it. Returns
  * NULL on allocation failure or if v is not a bigint. Used by clone.c
  * for cross-state transfer without sharing imath allocations. */
-char *mino_bigint_to_cstr(const mino_val_t *v)
+char *mino_bigint_to_cstr(const mino_val *v)
 {
     mp_result lenr;
     int  len;
@@ -263,7 +263,7 @@ char *mino_bigint_to_cstr(const mino_val_t *v)
     return buf;
 }
 
-void mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out)
+void mino_bigint_print(mino_state *S, const mino_val *v, FILE *out)
 {
     mp_int z;
     mp_result lenr;
@@ -295,9 +295,9 @@ void mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out)
 /* ------------------------------------------------------------------------- */
 
 /* (bigint x) -- coerce int, bigint, or numeric string to a bigint. */
-mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val_t *x;
+    mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -332,7 +332,7 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * full 309-digit integer rather than saturating through long. */
         double      f = x->as.f;
         char        buf[64];
-        mino_val_t *bd, *unscaled;
+        mino_val *bd, *unscaled;
         int         scale;
         if (f != f || f == (double)(1.0 / 0.0) || f == -(double)(1.0 / 0.0)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
@@ -354,7 +354,7 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* scale > 0: truncate fractional part via integer division. */
         {
             mpz_t       pw;
-            mino_val_t *out;
+            mino_val *out;
             if (mp_int_init(&pw) != MP_OK) {
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
@@ -378,7 +378,7 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
     }
     case MINO_STRING: {
-        mino_val_t *r = mino_bigint_from_string_n(S, x->as.s.data, x->as.s.len);
+        mino_val *r = mino_bigint_from_string_n(S, x->as.s.data, x->as.s.len);
         if (r == NULL) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "bigint: invalid numeric string");
@@ -394,13 +394,13 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (biginteger x) -- alias for (bigint x). In Clojure both exist and
  * return the same underlying arbitrary-precision representation. */
-mino_val_t *prim_biginteger(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_biginteger(mino_state *S, mino_val *args, mino_env *env)
 {
     return prim_bigint(S, args, env);
 }
 
 /* (bigint? x) */
-mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -408,7 +408,7 @@ mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "bigint? requires one argument");
     }
     {
-        mino_val_t *x = args->as.cons.car;
+        mino_val *x = args->as.cons.car;
         return (x != NULL && mino_type_of(x) == MINO_BIGINT)
             ? mino_true(S) : mino_false(S);
     }
@@ -431,7 +431,7 @@ mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * the existing mp_int is returned. If it's a long, a scratch mp_int is
  * initialised in *scratch and returned. Caller tracks ownership via
  * `owns_scratch` and must mp_int_clear / nothing based on it. */
-static int bigint_view(const mino_val_t *v, mpz_t *scratch, mp_int *out,
+static int bigint_view(const mino_val *v, mpz_t *scratch, mp_int *out,
                        int *owns_scratch)
 {
     if (v == NULL) return 0;
@@ -464,15 +464,15 @@ static int bigint_view(const mino_val_t *v, mpz_t *scratch, mp_int *out,
 
 typedef mp_result (*bigint_binop_fn)(mp_int, mp_int, mp_int);
 
-static mino_val_t *bigint_binop(mino_state_t *S, const mino_val_t *a,
-                                const mino_val_t *b, bigint_binop_fn op,
+static mino_val *bigint_binop(mino_state *S, const mino_val *a,
+                                const mino_val *b, bigint_binop_fn op,
                                 const char *opname)
 {
     mpz_t  as_buf, bs_buf;
     mp_int av = NULL, bv = NULL;
     int    owns_a = 0, owns_b = 0;
     mp_int rz;
-    mino_val_t *out;
+    mino_val *out;
     (void)opname;
     if (!bigint_view(a, &as_buf, &av, &owns_a) ||
         !bigint_view(b, &bs_buf, &bv, &owns_b)) {
@@ -500,20 +500,20 @@ static mino_val_t *bigint_binop(mino_state_t *S, const mino_val_t *a,
     return out;
 }
 
-mino_val_t *mino_bigint_add(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigint_add(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     return bigint_binop(S, a, b, mp_int_add, "+'");
 }
 
-mino_val_t *mino_bigint_sub(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigint_sub(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     return bigint_binop(S, a, b, mp_int_sub, "-'");
 }
 
-mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigint_mul(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     return bigint_binop(S, a, b, mp_int_mul, "*'");
 }
@@ -523,9 +523,9 @@ mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
  * usual product-of-signs. Either q_out or r_out may be NULL when only
  * one half is wanted. Returns -1 on b == 0 (with diag set) or
  * allocation failure; 0 on success. */
-int mino_bigint_quotrem(mino_state_t *S, const mino_val_t *a,
-                        const mino_val_t *b, mino_val_t **q_out,
-                        mino_val_t **r_out)
+int mino_bigint_quotrem(mino_state *S, const mino_val *a,
+                        const mino_val *b, mino_val **q_out,
+                        mino_val **r_out)
 {
     mpz_t  as_buf, bs_buf;
     mp_int av = NULL, bv = NULL;
@@ -573,18 +573,18 @@ oom:
 }
 
 /* mino_bigint_quot / _rem -- thin wrappers, return only one half. */
-mino_val_t *mino_bigint_quot(mino_state_t *S, const mino_val_t *a,
-                             const mino_val_t *b)
+mino_val *mino_bigint_quot(mino_state *S, const mino_val *a,
+                             const mino_val *b)
 {
-    mino_val_t *q = NULL;
+    mino_val *q = NULL;
     if (mino_bigint_quotrem(S, a, b, &q, NULL) != 0) return NULL;
     return q;
 }
 
-mino_val_t *mino_bigint_rem(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigint_rem(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
-    mino_val_t *r = NULL;
+    mino_val *r = NULL;
     if (mino_bigint_quotrem(S, a, b, NULL, &r) != 0) return NULL;
     return r;
 }
@@ -592,10 +592,10 @@ mino_val_t *mino_bigint_rem(mino_state_t *S, const mino_val_t *a,
 /* mino_bigint_mod -- floored division remainder. Sign of result matches
  * the sign of the divisor (`b`). Computed as: r = trunc-rem; if r != 0
  * and (r and b have opposite signs) then r += b. */
-mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
-                            const mino_val_t *b)
+mino_val *mino_bigint_mod(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
-    mino_val_t *r = NULL;
+    mino_val *r = NULL;
     int sr, sb;
     if (mino_bigint_quotrem(S, a, b, NULL, &r) != 0) return NULL;
     sr = mp_int_compare_zero((mp_int)r->as.bigint.mpz);
@@ -610,7 +610,7 @@ mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
     return r;
 }
 
-mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a)
+mino_val *mino_bigint_neg(mino_state *S, const mino_val *a)
 {
     mpz_t  as_buf;
     mp_int av = NULL;
@@ -640,7 +640,7 @@ mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a)
  * arithmetic operand sequence mixes bigints with floats; the bigint tier
  * then collapses to the double tier for the remainder of the computation
  * (matching Clojure's tower fallback). */
-double mino_bigint_to_double(const mino_val_t *v)
+double mino_bigint_to_double(const mino_val *v)
 {
     mp_result lenr;
     int  len;
@@ -691,9 +691,9 @@ const mino_prim_def k_prims_bignum[] = {
 const size_t k_prims_bignum_count =
     sizeof(k_prims_bignum) / sizeof(k_prims_bignum[0]);
 
-void mino_install_bignum(mino_state_t *S, mino_env_t *env)
+void mino_install_bignum(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_bignum, k_prims_bignum_count,

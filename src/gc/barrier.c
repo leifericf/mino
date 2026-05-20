@@ -24,7 +24,7 @@
  *     is free when the value was already in the snapshot.
  *
  * Singletons -- nil, true, false, small-int cache, recur/tail-call
- * sentinels -- live inside mino_state_t and are not GC-managed. The
+ * sentinels -- live inside mino_state and are not GC-managed. The
  * state-embedded check drops them on both paths so header arithmetic
  * on a singleton cannot corrupt neighbouring state fields.
  *
@@ -48,7 +48,7 @@
  *   MINO_ATOM    val/watches/validator     gc_write_barrier (prim/stateful.c)
  *   MINO_LAZY    cached/body/env           gc_write_barrier (eval/eval.c force path)
  *   MINO_TRANSIENT current                 transient_set_current (collections/transient.c)
- *   mino_env_t   bindings / ht_buckets /
+ *   mino_env   bindings / ht_buckets /
  *                per-binding val / per-
  *                binding name              gc_write_barrier (runtime/env.c)
  *   valarr_t     slot[i]                   gc_valarr_set (helper)
@@ -77,9 +77,9 @@
 
 #include "runtime/internal.h"
 
-/* True iff p lies inside the mino_state_t struct, i.e. p is a
+/* True iff p lies inside the mino_state struct, i.e. p is a
  * singleton or small-int cache entry rather than a GC allocation. */
-static int gc_ptr_is_state_embedded(const mino_state_t *S, const void *p)
+static int gc_ptr_is_state_embedded(const mino_state *S, const void *p)
 {
     uintptr_t u  = (uintptr_t)p;
     uintptr_t lo = (uintptr_t)S;
@@ -89,7 +89,7 @@ static int gc_ptr_is_state_embedded(const mino_state_t *S, const void *p)
 
 /* Ownership: caller retains container. The remset array is owned by S
  * (allocated with realloc, freed from state teardown). */
-void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
+void gc_remset_add(mino_state *S, gc_hdr_t *container)
 {
     if (S->gc.remset_len == S->gc.remset_cap) {
         size_t      new_cap;
@@ -117,7 +117,7 @@ void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
                   (uintptr_t)container->gen, 0);
 }
 
-void gc_write_barrier(mino_state_t *S, void *container,
+void gc_write_barrier(mino_state *S, void *container,
                       const void *old_value, const void *new_value)
 {
     gc_hdr_t *h_container;
@@ -207,7 +207,7 @@ void gc_write_barrier(mino_state_t *S, void *container,
  * keeps the invariant "every OLD container with potential YOUNG
  * slots is in the remset" intact while costing one remset entry per
  * worker. */
-static void gc_remset_pin_bc_regs(mino_state_t *S)
+static void gc_remset_pin_bc_regs(mino_state *S)
 {
     mino_thread_ctx_t *w;
     if (S->bc.bc_regs != NULL) {
@@ -228,7 +228,7 @@ static void gc_remset_pin_bc_regs(mino_state_t *S)
     mino_worker_list_lock_release(S);
 }
 
-void gc_remset_reset(mino_state_t *S)
+void gc_remset_reset(mino_state *S)
 {
     size_t i;
     gc_evt_record(S, GC_EVT_REMSET_RESET, NULL, NULL, NULL,
@@ -246,7 +246,7 @@ void gc_remset_reset(mino_state_t *S)
  * the next minor can reach the YOUNG targets. Containers are removed
  * from the remset purely to avoid dangling pointers after sweep;
  * their dirty bits would get zeroed on freelist reuse anyway. */
-void gc_remset_purge_dead(mino_state_t *S)
+void gc_remset_purge_dead(mino_state *S)
 {
     size_t i, dst = 0;
     size_t before = S->gc.remset_len;
@@ -266,7 +266,7 @@ void gc_remset_purge_dead(mino_state_t *S)
  * the remset sees any old->young edge the append creates. Used by
  * every in-place list extension loop; caller must guarantee tail is
  * non-NULL and a cons cell. */
-void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell)
+void mino_cons_cdr_set(mino_state *S, mino_val *tail, mino_val *cell)
 {
     gc_write_barrier(S, tail, tail->as.cons.cdr, cell);
     tail->as.cons.cdr = cell;
@@ -279,8 +279,8 @@ void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell)
  * only the cycle after promotion; a loop that spans two minors needs
  * the barrier on every slot. Payload-start is the array pointer
  * itself, which matches gc_write_barrier's container convention. */
-void gc_valarr_set(mino_state_t *S, mino_val_t **arr, size_t i,
-                   mino_val_t *v)
+void gc_valarr_set(mino_state *S, mino_val **arr, size_t i,
+                   mino_val *v)
 {
     gc_write_barrier(S, arr, arr[i], v);
     arr[i] = v;

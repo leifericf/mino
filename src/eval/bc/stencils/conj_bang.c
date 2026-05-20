@@ -11,9 +11,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_conj_bang(mino_val_t **regs,
-                          mino_val_t **consts,
-                          mino_state_t *S)
+void stencil_op_conj_bang(mino_val **regs,
+                          mino_val **consts,
+                          mino_state *S)
 {
     regs = mino_jit_conj_bang_slow(S, regs,
                                    (unsigned)IMM_A,

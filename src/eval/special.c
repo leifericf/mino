@@ -19,7 +19,7 @@
  * full module name or NULL if not found. Aliases are scoped per-ns:
  * the same alias name can resolve to different targets in different
  * namespaces. */
-static const char *alias_resolve(mino_state_t *S, const char *alias)
+static const char *alias_resolve(mino_state *S, const char *alias)
 {
     size_t i;
     const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
@@ -38,7 +38,7 @@ static const char *alias_resolve(mino_state_t *S, const char *alias)
  * resolution, var lookup with private-access check, and the ns-env
  * fallback for primitives. On a miss it sets a diagnostic that names
  * the most likely cause (missing var, missing ns, missing alias). */
-static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
+static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
                                          const char *data, size_t n,
                                          const char *slash)
 {
@@ -46,9 +46,9 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
     const char *sym_name    = slash + 1;
     size_t      ns_len      = (size_t)(slash - data);
     const char *resolved_ns;
-    mino_env_t *target_env;
-    mino_val_t *var;
-    mino_val_t *v;
+    mino_env *target_env;
+    mino_val *var;
+    mino_val *v;
     char        msg[300];
     int         is_alias;
     (void)n;
@@ -64,7 +64,7 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
      * finding them. Probe clojure.core directly for the literal name
      * before falling through to alias resolution. */
     {
-        mino_env_t *core_env = ns_env_lookup(S, "clojure.core");
+        mino_env *core_env = ns_env_lookup(S, "clojure.core");
         if (core_env != NULL) {
             env_binding_t *b = env_find_here(core_env, data);
             if (b != NULL) return b->val;
@@ -130,11 +130,11 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
     return NULL;
 }
 
-static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
 {
     size_t n = form->as.s.len;
     const char *data = form->as.s.data;  /* null-terminated (dup_n adds \0) */
-    mino_val_t *v;
+    mino_val *v;
     const char *slash;
 
     /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
@@ -154,10 +154,10 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     if (n == 4 && memcmp(data, "*ns*", 4) == 0) {
         if (mino_env_get(env, data) == NULL) {
             const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
-            mino_val_t *sym = mino_symbol(S, cur);
-            mino_val_t *meta = ns_env_get_meta(S, cur);
+            mino_val *sym = mino_symbol(S, cur);
+            mino_val *meta = ns_env_get_meta(S, cur);
             if (meta != NULL && sym != NULL) {
-                mino_val_t *copy = alloc_val(S, mino_type_of(sym));
+                mino_val *copy = alloc_val(S, mino_type_of(sym));
                 copy->as   = sym->as;
                 copy->meta = meta;
                 return copy;
@@ -178,7 +178,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     v = (mino_current_ctx(S)->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get_sym(env, form);
     if (v == NULL) {
-        mino_env_t *ns_env = current_ns_env(S);
+        mino_env *ns_env = current_ns_env(S);
         if (ns_env != NULL) {
             v = mino_env_get_sym(ns_env, form);
             if (v != NULL) from_ns_env = 1;
@@ -188,7 +188,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
         && (S->ns_vars.current_ns == NULL
             || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
-        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
+        mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         if (amb != NULL) {
             v = mino_env_get_sym(amb, form);
             if (v != NULL) from_ns_env = 1;
@@ -223,13 +223,13 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         v = v->as.var.root;
     }
     if (v == NULL) {
-        const mino_capability_info_t *cap = mino_capability_for_symbol(data);
+        const mino_capability_info *cap = mino_capability_for_symbol(data);
         if (cap != NULL) {
             char  msg[400];
             char  note[200];
-            mino_val_t *keys[4];
-            mino_val_t *vals[4];
-            mino_val_t *data_map;
+            mino_val *keys[4];
+            mino_val *vals[4];
+            mino_val *data_map;
 
             snprintf(msg, sizeof(msg),
                 "%s is not installed in this runtime "
@@ -290,7 +290,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
  * vectors/maps/sets/lazies only when they contain no symbols or calls. For
  * these, collection literals can return the AST form directly instead of
  * rebuilding it, since mino's data structures are immutable. */
-static int is_eval_constant(mino_val_t *v)
+static int is_eval_constant(mino_val *v)
 {
     if (v == NULL) return 1;
     switch (mino_type_of(v)) {
@@ -302,12 +302,12 @@ static int is_eval_constant(mino_val_t *v)
     }
 }
 
-static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
-                                       mino_env_t *env)
+static mino_val *eval_vector_literal(mino_state *S, mino_val *form,
+                                       mino_env *env)
 {
     size_t i;
     size_t n = form->as.vec.len;
-    mino_val_t **tmp;
+    mino_val **tmp;
     if (n == 0) {
         return form;
     }
@@ -319,16 +319,16 @@ static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
     if (i == n) {
         return form;
     }
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
     for (i = 0; i < n; i++) {
-        mino_val_t *ev = eval_value(S, vec_nth(form, i), env);
+        mino_val *ev = eval_value(S, vec_nth(form, i), env);
         if (ev == NULL) {
             return NULL;
         }
         gc_valarr_set(S, tmp, i, ev);
     }
     {
-        mino_val_t *result = mino_vector(S, tmp, n);
+        mino_val *result = mino_vector(S, tmp, n);
         if (form->meta != NULL) {
             result->meta = form->meta;
         }
@@ -336,32 +336,32 @@ static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
     }
 }
 
-static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
-                                    mino_env_t *env)
+static mino_val *eval_map_literal(mino_state *S, mino_val *form,
+                                    mino_env *env)
 {
     size_t i;
     size_t n = form->as.map.len;
-    mino_val_t **ks;
-    mino_val_t **vs;
+    mino_val **ks;
+    mino_val **vs;
     if (n == 0) {
         return form;
     }
     /* Fast path: every key and value is self-evaluating. */
     for (i = 0; i < n; i++) {
-        mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
+        mino_val *form_key = vec_nth(form->as.map.key_order, i);
         if (!is_eval_constant(form_key)) break;
         if (!is_eval_constant(map_get_val(form, form_key))) break;
     }
     if (i == n) {
         return form;
     }
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
     for (i = 0; i < n; i++) {
-        mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
-        mino_val_t *form_val = map_get_val(form, form_key);
-        mino_val_t *k = eval_value(S, form_key, env);
-        mino_val_t *v;
+        mino_val *form_key = vec_nth(form->as.map.key_order, i);
+        mino_val *form_val = map_get_val(form, form_key);
+        mino_val *k = eval_value(S, form_key, env);
+        mino_val *v;
         if (k == NULL) { return NULL; }
         v = eval_value(S, form_val, env);
         if (v == NULL) { return NULL; }
@@ -369,7 +369,7 @@ static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
         gc_valarr_set(S, vs, i, v);
     }
     {
-        mino_val_t *result = mino_map(S, ks, vs, n);
+        mino_val *result = mino_map(S, ks, vs, n);
         if (form->meta != NULL) {
             result->meta = form->meta;
         }
@@ -377,12 +377,12 @@ static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
     }
 }
 
-static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
-                                    mino_env_t *env)
+static mino_val *eval_set_literal(mino_state *S, mino_val *form,
+                                    mino_env *env)
 {
     size_t i;
     size_t n = form->as.set.len;
-    mino_val_t **tmp;
+    mino_val **tmp;
     if (n == 0) {
         return form;
     }
@@ -393,16 +393,16 @@ static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
     if (i == n) {
         return form;
     }
-    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
     for (i = 0; i < n; i++) {
-        mino_val_t *ev = eval_value(S, vec_nth(form->as.set.key_order, i), env);
+        mino_val *ev = eval_value(S, vec_nth(form->as.set.key_order, i), env);
         if (ev == NULL) {
             return NULL;
         }
         gc_valarr_set(S, tmp, i, ev);
     }
     {
-        mino_val_t *result = mino_set(S, tmp, n);
+        mino_val *result = mino_set(S, tmp, n);
         if (form->meta != NULL) {
             result->meta = form->meta;
         }
@@ -410,7 +410,7 @@ static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
     }
 }
 
-static void sf_init(mino_state_t *S)
+static void sf_init(mino_state *S)
 {
     S->sf_quote            = mino_symbol(S, "quote");
     S->sf_quasiquote       = mino_symbol(S, "quasiquote");
@@ -456,9 +456,9 @@ static void sf_init(mino_state_t *S)
  * or error path; *out reflects the call result, NULL on diag).
  * Returns 0 when the form is not a host shape, leaving *out untouched.
  */
-static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
-                                mino_val_t *head, mino_val_t *args,
-                                mino_env_t *env, mino_val_t **out)
+static int eval_try_host_syntax(mino_state *S, mino_val *form,
+                                mino_val *head, mino_val *args,
+                                mino_env *env, mino_val **out)
 {
     const char *hname;
     size_t      hlen;
@@ -474,7 +474,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
      * straight to clojure.core rather than walking the alias table.
      */
 #define HOST_PRIM_LOOKUP(_var, _name) do {                                    \
-        mino_env_t *_core = ns_env_lookup(S, "clojure.core");                 \
+        mino_env *_core = ns_env_lookup(S, "clojure.core");                 \
         env_binding_t *_b =                                                   \
             (_core != NULL) ? env_find_here(_core, (_name)) : NULL;           \
         (_var) = (_b != NULL) ? _b->val : NULL;                               \
@@ -485,12 +485,12 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
     if (hname[0] == '.' && hlen > 1) {
         int         is_getter = (hlen > 2 && hname[1] == '-');
         const char *member    = hname + (is_getter ? 2 : 1);
-        mino_val_t *kw        = mino_keyword(S, member);
+        mino_val *kw        = mino_keyword(S, member);
         gc_pin(kw);
         if (is_getter) {
-            mino_val_t *target_form;
-            mino_val_t *target_val;
-            mino_val_t *prim;
+            mino_val *target_form;
+            mino_val *target_val;
+            mino_val *prim;
             if (!mino_is_cons(args)) {
                 gc_unpin(1);
                 set_eval_diag(S, form, "syntax", "MSY001",
@@ -510,7 +510,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 return 1;
             }
             {
-                mino_val_t *a = mino_cons(S, kw, mino_nil(S));
+                mino_val *a = mino_cons(S, kw, mino_nil(S));
                 gc_pin(a);
                 a = mino_cons(S, target_val, a);
                 gc_unpin(3);
@@ -518,11 +518,11 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 return 1;
             }
         } else {
-            mino_val_t *target_form;
-            mino_val_t *target_val;
-            mino_val_t *prim;
-            mino_val_t *rest;
-            mino_val_t *evaled_rest;
+            mino_val *target_form;
+            mino_val *target_val;
+            mino_val *prim;
+            mino_val *rest;
+            mino_val *evaled_rest;
             if (!mino_is_cons(args)) {
                 gc_unpin(1);
                 set_eval_diag(S, form, "syntax", "MSY001",
@@ -549,7 +549,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 return 1;
             }
             {
-                mino_val_t *a = mino_cons(S, kw, evaled_rest);
+                mino_val *a = mino_cons(S, kw, evaled_rest);
                 gc_pin(a);
                 a = mino_cons(S, target_val, a);
                 gc_unpin(4);
@@ -561,12 +561,12 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
 
     /* (new TypeName args...) -> (host/new :TypeName args...) */
     if (hlen == 3 && memcmp(hname, "new", 3) == 0 && mino_is_cons(args)) {
-        mino_val_t *type_sym = args->as.cons.car;
+        mino_val *type_sym = args->as.cons.car;
         if (type_sym != NULL && mino_type_of(type_sym) == MINO_SYMBOL) {
-            mino_val_t *kw   = mino_keyword(S, type_sym->as.s.data);
-            mino_val_t *rest = args->as.cons.cdr;
-            mino_val_t *evaled_rest;
-            mino_val_t *prim;
+            mino_val *kw   = mino_keyword(S, type_sym->as.s.data);
+            mino_val *rest = args->as.cons.cdr;
+            mino_val *evaled_rest;
+            mino_val *prim;
             gc_pin(kw);
             evaled_rest = eval_args(S, rest, env);
             if (evaled_rest == NULL && mino_is_cons(rest)) {
@@ -582,7 +582,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 return 1;
             }
             {
-                mino_val_t *a = mino_cons(S, kw, evaled_rest);
+                mino_val *a = mino_cons(S, kw, evaled_rest);
                 gc_unpin(2);
                 *out = apply_callable(S, prim, a, env);
                 return 1;
@@ -601,8 +601,8 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
         char       stem_buf[256];
         size_t     stem_len = hlen - 1;
         if (stem_len < sizeof(stem_buf)) {
-            mino_val_t *type_val = NULL;
-            mino_env_t *ns_env;
+            mino_val *type_val = NULL;
+            mino_env *ns_env;
             memcpy(stem_buf, hname, stem_len);
             stem_buf[stem_len] = '\0';
             type_val = mino_env_get(env, stem_buf);
@@ -613,12 +613,12 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
             if (type_val == NULL && S->ns_vars.fn_ambient_ns != NULL
                 && (S->ns_vars.current_ns == NULL
                     || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
-                mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
+                mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
                 if (amb != NULL) type_val = mino_env_get(amb, stem_buf);
             }
             if (type_val != NULL && mino_type_of(type_val) == MINO_TYPE) {
                 char        ctor_buf[256 + 2];
-                mino_val_t *ctor = NULL;
+                mino_val *ctor = NULL;
                 size_t      cn = stem_len + 2;
                 if (cn < sizeof(ctor_buf)) {
                     ctor_buf[0] = '-'; ctor_buf[1] = '>';
@@ -632,11 +632,11 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                     if (ctor == NULL && S->ns_vars.fn_ambient_ns != NULL
                         && (S->ns_vars.current_ns == NULL
                             || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
-                        mino_env_t *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
+                        mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
                         if (amb != NULL) ctor = mino_env_get(amb, ctor_buf);
                     }
                     if (ctor != NULL) {
-                        mino_val_t *evaled_rest = eval_args(S, args, env);
+                        mino_val *evaled_rest = eval_args(S, args, env);
                         if (evaled_rest == NULL && mino_is_cons(args)) {
                             *out = NULL; return 1;
                         }
@@ -665,10 +665,10 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 tbuf[tlen] = '\0';
                 ht = host_type_find(S, tbuf);
                 if (ht != NULL) {
-                    mino_val_t *tkw = mino_keyword(S, tbuf);
-                    mino_val_t *mkw = mino_keyword(S, mname);
-                    mino_val_t *evaled_rest;
-                    mino_val_t *prim;
+                    mino_val *tkw = mino_keyword(S, tbuf);
+                    mino_val *mkw = mino_keyword(S, mname);
+                    mino_val *evaled_rest;
+                    mino_val *prim;
                     gc_pin(tkw);
                     gc_pin(mkw);
                     evaled_rest = eval_args(S, args, env);
@@ -685,7 +685,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                         return 1;
                     }
                     {
-                        mino_val_t *a = mino_cons(S, mkw, evaled_rest);
+                        mino_val *a = mino_cons(S, mkw, evaled_rest);
                         gc_pin(a);
                         a = mino_cons(S, tkw, a);
                         gc_unpin(4);
@@ -713,10 +713,10 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
  * (i.e. lexical, not in the ns env)? Walks until env hits a known ns
  * root. Used by the inline call cache to skip filling on calls whose
  * head is locally shadowed. */
-static int local_lexical_shadow(mino_state_t *S, mino_env_t *env,
+static int local_lexical_shadow(mino_state *S, mino_env *env,
                                 const char *name, size_t nlen)
 {
-    mino_env_t *cur = env;
+    mino_env *cur = env;
     size_t      i;
     while (cur != NULL) {
         for (i = 0; i < S->ns_vars.ns_env_len; i++) {
@@ -728,12 +728,12 @@ static int local_lexical_shadow(mino_state_t *S, mino_env_t *env,
     return 0;
 }
 
-static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
-                                           mino_val_t *head, mino_val_t *args,
-                                           mino_env_t *env, int tail)
+static mino_val *eval_apply_regular_call(mino_state *S, mino_val *form,
+                                           mino_val *head, mino_val *args,
+                                           mino_env *env, int tail)
 {
-    mino_val_t *fn = NULL;
-    mino_val_t *evaled;
+    mino_val *fn = NULL;
+    mino_val *evaled;
     /* IC lookup. Conservative: only consult the cache when head is an
      * unqualified symbol and no dynamic binding context is active.
      * Slots are GC-pinned in gc_mark_runtime_globals so a freed form
@@ -801,9 +801,9 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
             || p == prim_eq
             || p == prim_lt || p == prim_lte
             || p == prim_gt || p == prim_gte) {
-            mino_val_t *a = eval_value(S, args->as.cons.car, env);
-            mino_val_t *b;
-            mino_val_t *spine;
+            mino_val *a = eval_value(S, args->as.cons.car, env);
+            mino_val *b;
+            mino_val *spine;
             if (a == NULL) {
                 gc_unpin(1);
                 return NULL;
@@ -868,12 +868,12 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
      * slot, GC-rooted by the conservative stack scan. Spillover
      * beyond 16 args falls through to the cons path below. */
     if (mino_type_of(fn) == MINO_PRIM && fn->as.prim.fn2 != NULL) {
-        mino_val_t  *scratch[16];
+        mino_val  *scratch[16];
         int          scratch_cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
         int          argc        = 0;
         int          spilled     = 0;
-        mino_val_t  *cur         = args;
-        mino_val_t  *result;
+        mino_val  *cur         = args;
+        mino_val  *result;
         const char  *file        = NULL;
         int          line        = 0;
         int          col         = 0;
@@ -883,7 +883,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
                 break;
             }
             {
-                mino_val_t *v = eval_value(S, cur->as.cons.car, env);
+                mino_val *v = eval_value(S, cur->as.cons.car, env);
                 if (v == NULL) {
                     gc_unpin(1);
                     return NULL;
@@ -956,7 +956,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
     if (mino_type_of(fn) == MINO_MACRO) {
         /* Expand with unevaluated args; re-eval the resulting form in
          * the caller's environment. */
-        mino_val_t *expanded = apply_callable(S, fn, args, env);
+        mino_val *expanded = apply_callable(S, fn, args, env);
         gc_unpin(1);
         if (expanded == NULL) {
             return NULL;
@@ -991,7 +991,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
  * poll is a single predictably-not-taken read on the single-threaded
  * fast path.
  */
-static int eval_check_limits(mino_state_t *S)
+static int eval_check_limits(mino_state *S)
 {
     if (mino_current_ctx(S)->limit_exceeded) {
         return 0;
@@ -1018,7 +1018,7 @@ static int eval_check_limits(mino_state_t *S)
     return 1;
 }
 
-mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int tail)
+mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
 {
     if (!S->sf_initialized) {
         sf_init(S);
@@ -1080,7 +1080,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
          * call-form path below handles it the same way a literal
          * list would. JVM Clojure's eval treats any ISeq as a call
          * form when the head is callable. */
-        mino_val_t *forced = lazy_force(S, form);
+        mino_val *forced = lazy_force(S, form);
         if (forced == NULL || mino_type_of(forced) == MINO_NIL
             || mino_type_of(forced) == MINO_EMPTY_LIST) {
             return forced;
@@ -1096,7 +1096,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     }
     /* fallthrough */
     case MINO_CHUNKED_CONS: {
-        mino_val_t *as_cons = val_to_seq(S, form);
+        mino_val *as_cons = val_to_seq(S, form);
         if (as_cons == NULL) return NULL;
         if (mino_type_of(as_cons) != MINO_CONS) return as_cons;
         form = as_cons;
@@ -1105,8 +1105,8 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     /* fallthrough */
     case MINO_CONS:
     eval_cons_label: {
-        mino_val_t *head = form->as.cons.car;
-        mino_val_t *args = form->as.cons.cdr;
+        mino_val *head = form->as.cons.car;
+        mino_val *args = form->as.cons.cdr;
         /* Macros that build call forms via concat / sequence often
          * leave a lazy seq as the cdr; special forms (`quote`, `if`,
          * etc.) probe args with mino_is_cons and would treat a lazy
@@ -1123,8 +1123,8 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         if (args != NULL && mino_type_of(args) == MINO_EMPTY_LIST) {
             args = mino_nil(S);
         }
-        mino_val_t *host_result;
-        mino_val_t *result;
+        mino_val *host_result;
+        mino_val *result;
         /* Save and restore eval_current_form around the recursive
          * descent so a parent form's source span doesn't get clobbered
          * by a child sub-eval. Without this, eval_current_form lingers
@@ -1133,7 +1133,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
          * mino_future_spawn, after eval_args has finished walking the
          * argument list) blames the wrong source location -- often a
          * form from a previously-loaded test file. */
-        const mino_val_t *prev_form = mino_current_ctx(S)->eval_current_form;
+        const mino_val *prev_form = mino_current_ctx(S)->eval_current_form;
         mino_current_ctx(S)->eval_current_form = form;
 
         if (eval_try_host_syntax(S, form, head, args, env, &host_result)) {
@@ -1144,7 +1144,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         /* Special forms run through the data-table dispatch in
          * eval/special_registry.c. */
         {
-            mino_val_t *sf_result;
+            mino_val *sf_result;
             if (eval_try_special_form(S, form, head, args, env, tail,
                                       &sf_result)) {
                 mino_current_ctx(S)->eval_current_form = prev_form;
@@ -1162,7 +1162,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     return NULL;
 }
 
-mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+mino_val *eval(mino_state *S, mino_val *form, mino_env *env)
 {
     return eval_impl(S, form, env, 0);
 }

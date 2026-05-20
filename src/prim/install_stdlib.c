@@ -55,49 +55,49 @@
 #  pragma GCC diagnostic pop
 #endif
 
-void mino_install_clojure_string(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_string(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.string", lib_clojure_string_src);
 }
 
-void mino_install_clojure_set(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_set(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.set", lib_clojure_set_src);
 }
 
-void mino_install_clojure_math(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_math(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.math", lib_clojure_math_src);
 }
 
-void mino_install_clojure_walk(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_walk(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.walk", lib_clojure_walk_src);
 }
 
-void mino_install_clojure_edn(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_edn(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.edn", lib_clojure_edn_src);
 }
 
-void mino_install_clojure_pprint(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_pprint(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.pprint", lib_clojure_pprint_src);
 }
 
-void mino_install_clojure_zip(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_zip(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.zip", lib_clojure_zip_src);
 }
 
-void mino_install_clojure_data(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_data(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.data", lib_clojure_data_src);
@@ -107,7 +107,7 @@ void mino_install_clojure_data(mino_state_t *S, mino_env_t *env)
  * is the substitution primitive historically used by `are`; mino's
  * own `are` is self-contained but user code that references
  * clojure.template directly expects it alongside clojure.test. */
-void mino_install_clojure_test(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_test(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.test",     lib_clojure_test_src);
@@ -117,7 +117,7 @@ void mino_install_clojure_test(mino_state_t *S, mino_env_t *env)
 /* clojure.repl + clojure.stacktrace install together: the REPL pair
  * stays as a single embedder opt-in since one references the other
  * (clojure.repl/pst delegates to clojure.stacktrace's printer). */
-void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_repl(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.repl",       lib_clojure_repl_src);
@@ -126,14 +126,14 @@ void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env)
 
 /* clojure.datafy + clojure.core.protocols: datafy depends on the
  * protocols, so the pair installs together. */
-void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_datafy(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.datafy",          lib_clojure_datafy_src);
     mino_register_bundled_lib(S, "clojure.core.protocols",  lib_clojure_core_protocols_src);
 }
 
-void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_instant(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.instant", lib_clojure_instant_src);
@@ -143,7 +143,7 @@ void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env)
  * predicate-and-data spec engine; core.specs.alpha holds the specs
  * for core macro forms (defn-args, binding-form). The latter requires
  * spec.alpha at load time, so the pair ships together. */
-void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_spec(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.spec.alpha",
@@ -156,7 +156,7 @@ void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env)
  * runner used by clojure.spec.alpha's s/gen and s/exercise. The
  * three files install together so a single (require
  * '[clojure.test.check :as tc]) brings the full surface online. */
-void mino_install_clojure_test_check(mino_state_t *S, mino_env_t *env)
+void mino_install_clojure_test_check(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.test.check.generators",
@@ -170,7 +170,7 @@ void mino_install_clojure_test_check(mino_state_t *S, mino_env_t *env)
 /* mino.deps + mino.tasks + mino.tasks.builtin: the standalone-binary
  * tooling that backs the `mino deps` and `mino task` subcommands.
  * Bundled so brew/scoop installs without a lib/ on cwd still work. */
-void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env)
+void mino_install_mino_tooling(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.deps",          lib_mino_deps_src);
@@ -178,7 +178,7 @@ void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env)
     mino_register_bundled_lib(S, "mino.tasks.builtin", lib_mino_tasks_builtin_src);
 }
 
-void mino_install_all(mino_state_t *S, mino_env_t *env)
+void mino_install_all(mino_state *S, mino_env *env)
 {
     mino_install(S, env, MINO_CAP_ALL);
 }

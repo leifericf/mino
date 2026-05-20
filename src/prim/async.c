@@ -22,10 +22,10 @@
 #include "async/scheduler.h"
 #include "async/timer.h"
 
-static mino_val_t *prim_sched_enqueue(mino_state_t *S, mino_val_t *args,
-                                      mino_env_t *env)
+static mino_val *prim_sched_enqueue(mino_state *S, mino_val *args,
+                                      mino_env *env)
 {
-    mino_val_t *cb, *val;
+    mino_val *cb, *val;
     (void)env;
 
     if (args == NULL || mino_type_of(args) != MINO_CONS ||
@@ -42,11 +42,11 @@ static mino_val_t *prim_sched_enqueue(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-static mino_val_t *prim_timer_schedule(mino_state_t *S, mino_val_t *args,
-                                       mino_env_t *env)
+static mino_val *prim_timer_schedule(mino_state *S, mino_val *args,
+                                       mino_env *env)
 {
     double ms;
-    mino_val_t *cb;
+    mino_val *cb;
     (void)env;
 
     if (args == NULL || mino_type_of(args) != MINO_CONS ||
@@ -68,8 +68,8 @@ static mino_val_t *prim_timer_schedule(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
-static mino_val_t *prim_drain(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+static mino_val *prim_drain(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
     (void)args;
     async_sched_drain(S, env);
@@ -82,10 +82,10 @@ static mino_val_t *prim_drain(mino_state_t *S, mino_val_t *args,
  *   (b) a full pass produces no progress (no callbacks ran, no timers
  *       fired) -- meaning further draining cannot help.
  * Returns true if done-thunk returned truthy, false if no progress. */
-static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
-                                   mino_env_t *env)
+static mino_val *prim_drain_loop(mino_state *S, mino_val *args,
+                                   mino_env *env)
 {
-    mino_val_t *done_thunk, *result;
+    mino_val *done_thunk, *result;
 
     if (args == NULL || mino_type_of(args) != MINO_CONS) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001",
@@ -126,9 +126,9 @@ const mino_prim_def k_prims_async[] = {
 const size_t k_prims_async_count =
     sizeof(k_prims_async) / sizeof(k_prims_async[0]);
 
-void mino_install_async(mino_state_t *S, mino_env_t *env)
+void mino_install_async(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_async, k_prims_async_count,

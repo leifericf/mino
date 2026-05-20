@@ -12,29 +12,29 @@
 
 /* Merge two metadata maps. Returns NEW (or B) if A is nil/non-map.
  * Otherwise rebuilds the union with later writes winning. */
-static mino_val_t *ns_meta_merge(mino_state_t *S,
-                                 mino_val_t *a, mino_val_t *b)
+static mino_val *ns_meta_merge(mino_state *S,
+                                 mino_val *a, mino_val *b)
 {
     if (a == NULL || mino_type_of(a) != MINO_MAP) return b;
     if (b == NULL || mino_type_of(b) != MINO_MAP) return a;
     {
         size_t       len = a->as.map.len + b->as.map.len;
-        mino_val_t **ks  = (mino_val_t **)gc_alloc_typed(
+        mino_val **ks  = (mino_val **)gc_alloc_typed(
             S, GC_T_VALARR, len * sizeof(*ks));
-        mino_val_t **vs  = (mino_val_t **)gc_alloc_typed(
+        mino_val **vs  = (mino_val **)gc_alloc_typed(
             S, GC_T_VALARR, len * sizeof(*vs));
         size_t       i, n = 0;
         /* Start with a's entries. */
         for (i = 0; i < a->as.map.len; i++) {
-            mino_val_t *k = vec_nth(a->as.map.key_order, i);
+            mino_val *k = vec_nth(a->as.map.key_order, i);
             gc_valarr_set(S, ks, n, k);
             gc_valarr_set(S, vs, n, map_get_val(a, k));
             n++;
         }
         /* Overlay b's entries; replace duplicates. */
         for (i = 0; i < b->as.map.len; i++) {
-            mino_val_t *k = vec_nth(b->as.map.key_order, i);
-            mino_val_t *v = map_get_val(b, k);
+            mino_val *k = vec_nth(b->as.map.key_order, i);
+            mino_val *v = map_get_val(b, k);
             size_t      j;
             int         replaced = 0;
             for (j = 0; j < n; j++) {
@@ -59,10 +59,10 @@ static mino_val_t *ns_meta_merge(mino_state_t *S,
  * def/declare/defmacro to surface a "already refers to" collision before
  * silently shadowing. Names that already have a var entry for the current
  * namespace are normal redefs and pass through. */
-static int refer_collision_check(mino_state_t *S, mino_val_t *form,
+static int refer_collision_check(mino_state *S, mino_val *form,
                                  const char *name)
 {
-    mino_env_t    *ns_env;
+    mino_env    *ns_env;
     env_binding_t *b;
     if (S->ns_vars.current_ns == NULL) return 0;
     /* clojure.core itself "owns" its primitives via env_bind at install
@@ -96,12 +96,12 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
  * When use_mode is true, default to refer-all (:use semantics).
  * Returns 0 on success, -1 on failure (with a diagnostic set). */
 /* True if vec contains a symbol with the given byte name. */
-static int sym_vec_contains(mino_val_t *vec, const char *name, size_t namelen)
+static int sym_vec_contains(mino_val *vec, const char *name, size_t namelen)
 {
     size_t i;
     if (vec == NULL || mino_type_of(vec) != MINO_VECTOR) return 0;
     for (i = 0; i < vec->as.vec.len; i++) {
-        mino_val_t *e = vec_nth(vec, i);
+        mino_val *e = vec_nth(vec, i);
         if (e != NULL && mino_type_of(e) == MINO_SYMBOL
             && e->as.s.len == namelen
             && memcmp(e->as.s.data, name, namelen) == 0) {
@@ -112,14 +112,14 @@ static int sym_vec_contains(mino_val_t *vec, const char *name, size_t namelen)
 }
 
 /* Look up a rename target in a rename map: { old-sym new-sym }. */
-static mino_val_t *rename_map_lookup(mino_val_t *m, const char *name,
+static mino_val *rename_map_lookup(mino_val *m, const char *name,
                                      size_t namelen)
 {
     if (m == NULL || mino_type_of(m) != MINO_MAP) return NULL;
     {
         size_t i;
         for (i = 0; i < m->as.map.len; i++) {
-            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            mino_val *k = vec_nth(m->as.map.key_order, i);
             if (k != NULL && mino_type_of(k) == MINO_SYMBOL
                 && k->as.s.len == namelen
                 && memcmp(k->as.s.data, name, namelen) == 0) {
@@ -130,17 +130,17 @@ static mino_val_t *rename_map_lookup(mino_val_t *m, const char *name,
     return NULL;
 }
 
-static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
-                                      mino_env_t *env, int use_mode)
+static int ns_process_require_spec_ex(mino_state *S, mino_val *spec,
+                                      mino_env *env, int use_mode)
 {
     char pathbuf[256];
     const char *modname;
     size_t      modlen;
     const char *alias_name = NULL;
     size_t       alias_len  = 0;
-    mino_val_t  *refer_vec   = NULL;
-    mino_val_t  *exclude_vec = NULL;
-    mino_val_t  *rename_map  = NULL;
+    mino_val  *refer_vec   = NULL;
+    mino_val  *exclude_vec = NULL;
+    mino_val  *rename_map  = NULL;
     int          refer_all   = use_mode; /* :use defaults to refer-all */
     int          as_alias_only = 0;
 
@@ -148,15 +148,15 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
         modname = spec->as.s.data;
         modlen  = spec->as.s.len;
     } else if (mino_type_of(spec) == MINO_VECTOR && spec->as.vec.len >= 1) {
-        mino_val_t *first = vec_nth(spec, 0);
+        mino_val *first = vec_nth(spec, 0);
         size_t i;
         if (first == NULL || mino_type_of(first) != MINO_SYMBOL) return 0;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
         /* Parse keyword args: :as, :refer, :only, :exclude, :rename */
         for (i = 1; i + 1 < spec->as.vec.len; i += 2) {
-            mino_val_t *k = vec_nth(spec, i);
-            mino_val_t *v = vec_nth(spec, i + 1);
+            mino_val *k = vec_nth(spec, i);
+            mino_val *v = vec_nth(spec, i + 1);
             if (kw_eq(k, "as") && mino_type_of(v) == MINO_SYMBOL) {
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
@@ -181,7 +181,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             }
             /* :only with a list form — build a vector from it */
             if (kw_eq(k, "only") && mino_is_cons(v)) {
-                mino_val_t *tmp;
+                mino_val *tmp;
                 refer_vec = mino_vector(S, NULL, 0);
                 for (tmp = v; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     refer_vec = vec_conj1(S, refer_vec, tmp->as.cons.car);
@@ -208,9 +208,9 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     if (!as_alias_only
         && runtime_module_dotted_to_path(modname, modlen,
                                          pathbuf, sizeof(pathbuf)) == 0) {
-        mino_val_t *path_str = mino_string(S, pathbuf);
-        mino_val_t *req_args = mino_cons(S, path_str, mino_nil(S));
-        mino_val_t *req_res;
+        mino_val *path_str = mino_string(S, pathbuf);
+        mino_val *req_args = mino_cons(S, path_str, mino_nil(S));
+        mino_val *req_res;
         gc_pin(req_args);
         req_res = prim_require(S, req_args, env);
         gc_unpin(1);
@@ -245,8 +245,8 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
      * Iterate the source ns env so macros come through too. */
     {
         char modbuf[256];
-        mino_env_t *target;
-        mino_env_t *src;
+        mino_env *target;
+        mino_env *src;
         if (modlen >= sizeof(modbuf)) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                           "syntax", "MSY001",
@@ -260,12 +260,12 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
         if (refer_vec != NULL) {
             size_t ri;
             for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
-                mino_val_t *rsym = vec_nth(refer_vec, ri);
+                mino_val *rsym = vec_nth(refer_vec, ri);
                 if (rsym != NULL && mino_type_of(rsym) == MINO_SYMBOL) {
                     char rbuf[256];
                     size_t rn = rsym->as.s.len;
-                    mino_val_t *val = NULL;
-                    mino_val_t *renamed;
+                    mino_val *val = NULL;
+                    mino_val *renamed;
                     const char *bind_name;
                     size_t bind_len;
                     if (rn >= sizeof(rbuf)) {
@@ -285,7 +285,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                         if (b != NULL) val = b->val;
                     }
                     if (val == NULL) {
-                        mino_val_t *var = var_find(S, modbuf, rbuf);
+                        mino_val *var = var_find(S, modbuf, rbuf);
                         if (var != NULL) val = var->as.var.root;
                     }
                     if (val == NULL) continue;
@@ -318,14 +318,14 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             for (vi = 0; vi < src->len; vi++) {
                 const char *nm  = src->bindings[vi].name;
                 size_t      nl  = strlen(nm);
-                mino_val_t *renamed;
+                mino_val *renamed;
                 /* Bring in only the source ns's own interned publics, the
                  * way canon (ns-publics 'src) does. Bindings without an
                  * owning var in this ns are transitive refers (e.g.,
                  * clojure.core names that were referred into src) and
                  * must not drag across — otherwise they shadow the
                  * consumer's own clojure.core refers. */
-                mino_val_t *var = var_find(S, modbuf, nm);
+                mino_val *var = var_find(S, modbuf, nm);
                 if (var == NULL) continue;
                 if (mino_type_of(var) == MINO_VAR && var->as.var.is_private) continue;
                 if (sym_vec_contains(exclude_vec, nm, nl)) continue;
@@ -345,22 +345,22 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     return 0;
 }
 
-static int ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
-                                   mino_env_t *env)
+static int ns_process_require_spec(mino_state *S, mino_val *spec,
+                                   mino_env *env)
 {
     return ns_process_require_spec_ex(S, spec, env, 0);
 }
 
-static int ns_process_use_spec(mino_state_t *S, mino_val_t *spec,
-                               mino_env_t *env)
+static int ns_process_use_spec(mino_state *S, mino_val *spec,
+                               mino_env *env)
 {
     return ns_process_require_spec_ex(S, spec, env, 1);
 }
 
-mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_ns(mino_state *S, mino_val *form,
+                    mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *rest;
+    mino_val *rest;
     (void)form;
     (void)tail;
     if (!mino_is_cons(args)) {
@@ -369,7 +369,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
     }
     /* First arg: namespace name symbol. */
     {
-        mino_val_t *name_form = args->as.cons.car;
+        mino_val *name_form = args->as.cons.car;
         char buf[256];
         size_t n;
         if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
@@ -391,20 +391,20 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
          * docstring as the second arg, and an optional attr-map as the
          * third (or second when no docstring). */
         {
-            mino_val_t *meta = name_form->meta;
-            mino_val_t *cur  = args->as.cons.cdr;
-            mino_val_t *next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
+            mino_val *meta = name_form->meta;
+            mino_val *cur  = args->as.cons.cdr;
+            mino_val *next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
             if (next != NULL && mino_type_of(next) == MINO_STRING) {
                 /* Docstring -> {:doc "..."}. Merge with existing meta. */
-                mino_val_t *kk = mino_keyword(S, "doc");
-                mino_val_t **ks = (mino_val_t **)gc_alloc_typed(
+                mino_val *kk = mino_keyword(S, "doc");
+                mino_val **ks = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, sizeof(*ks));
-                mino_val_t **vs = (mino_val_t **)gc_alloc_typed(
+                mino_val **vs = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, sizeof(*vs));
                 gc_valarr_set(S, ks, 0, kk);
                 gc_valarr_set(S, vs, 0, next);
                 {
-                    mino_val_t *doc_map = mino_map(S, ks, vs, 1);
+                    mino_val *doc_map = mino_map(S, ks, vs, 1);
                     meta = ns_meta_merge(S, meta, doc_map);
                 }
                 cur  = cur->as.cons.cdr;
@@ -425,12 +425,12 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
     /* Walk remaining args for (:require ...) and other clauses. */
     rest = args->as.cons.cdr;
     while (mino_is_cons(rest)) {
-        mino_val_t *clause = rest->as.cons.car;
+        mino_val *clause = rest->as.cons.car;
         if (mino_is_cons(clause)) {
-            mino_val_t *head = clause->as.cons.car;
+            mino_val *head = clause->as.cons.car;
             if (kw_eq(head, "require")) {
                 /* Process each require spec in the clause. */
-                mino_val_t *specs = clause->as.cons.cdr;
+                mino_val *specs = clause->as.cons.cdr;
                 while (mino_is_cons(specs)) {
                     if (ns_process_require_spec(S, specs->as.cons.car, env) != 0) {
                         return NULL;
@@ -440,7 +440,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
             }
             if (kw_eq(head, "use")) {
                 /* :use is like :require but with implicit :refer :all. */
-                mino_val_t *specs = clause->as.cons.cdr;
+                mino_val *specs = clause->as.cons.cdr;
                 while (mino_is_cons(specs)) {
                     if (ns_process_use_spec(S, specs->as.cons.car, env) != 0) {
                         return NULL;
@@ -453,13 +453,13 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                  * (which is clojure.core) and explicitly bring in the
                  * filtered subset, so excluded names are actually hidden
                  * rather than served by the parent chain. */
-                mino_val_t *opts = clause->as.cons.cdr;
-                mino_val_t *only_vec    = NULL;
-                mino_val_t *exclude_vec = NULL;
-                mino_val_t *rename_map  = NULL;
+                mino_val *opts = clause->as.cons.cdr;
+                mino_val *only_vec    = NULL;
+                mino_val *exclude_vec = NULL;
+                mino_val *rename_map  = NULL;
                 while (mino_is_cons(opts)) {
-                    mino_val_t *k = opts->as.cons.car;
-                    mino_val_t *v;
+                    mino_val *k = opts->as.cons.car;
+                    mino_val *v;
                     if (!mino_is_cons(opts->as.cons.cdr)) break;
                     v = opts->as.cons.cdr->as.cons.car;
                     if (kw_eq(k, "only") && v != NULL
@@ -475,8 +475,8 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     opts = opts->as.cons.cdr->as.cons.cdr;
                 }
                 {
-                    mino_env_t *target = current_ns_env(S);
-                    mino_env_t *core   = S->ns_vars.mino_core_env;
+                    mino_env *target = current_ns_env(S);
+                    mino_env *core   = S->ns_vars.mino_core_env;
                     size_t      i;
                     if (target == NULL || core == NULL) {
                         set_eval_diag(S, form, "internal", "MIN001",
@@ -487,8 +487,8 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     for (i = 0; i < core->len; i++) {
                         const char *nm = core->bindings[i].name;
                         size_t      nl = strlen(nm);
-                        mino_val_t *renamed;
-                        mino_val_t *src_var;
+                        mino_val *renamed;
+                        mino_val *src_var;
                         if (only_vec != NULL
                             && !sym_vec_contains(only_vec, nm, nl)) {
                             continue;
@@ -542,13 +542,13 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
 
 /* --- def, defmacro, declare --- */
 
-mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_defmacro(mino_state *S, mino_val *form,
+                          mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *name_form;
-    mino_val_t *params;
-    mino_val_t *body;
-    mino_val_t *mac;
+    mino_val *name_form;
+    mino_val *params;
+    mino_val *body;
+    mino_val *mac;
     const char *doc     = NULL;
     size_t      doc_len = 0;
     (void)tail;
@@ -571,8 +571,8 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
      *   (defmacro name ([p1] b1) ([p2] b2))     -- multi-arity
      */
     {
-        mino_val_t *rest = args->as.cons.cdr;
-        mino_val_t *cur  = rest->as.cons.car;
+        mino_val *rest = args->as.cons.cdr;
+        mino_val *cur  = rest->as.cons.car;
         /* Optional docstring. */
         if (cur != NULL && mino_type_of(cur) == MINO_STRING
             && mino_is_cons(rest->as.cons.cdr)) {
@@ -592,7 +592,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         /* Detect multi-arity: params is a list whose car is a vector. */
         if (mino_is_cons(params) && params->as.cons.car != NULL
             && mino_type_of(params->as.cons.car) == MINO_VECTOR) {
-            mino_val_t *clauses = build_multi_arity_clauses(
+            mino_val *clauses = build_multi_arity_clauses(
                 S, form, rest, "MSY001", "defmacro");
             if (clauses == NULL) { return NULL; }
             params = NULL; /* sentinel for multi-arity */
@@ -620,15 +620,15 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     if (refer_collision_check(S, form, buf)) return NULL;
     {
         int is_priv = 0;
-        mino_val_t *m = name_form->meta;
+        mino_val *m = name_form->meta;
         if (m != NULL && mino_type_of(m) == MINO_MAP) {
-            mino_val_t *pk = mino_keyword(S, "private");
-            mino_val_t *pv = map_get_val(m, pk);
+            mino_val *pk = mino_keyword(S, "private");
+            mino_val *pv = map_get_val(m, pk);
             if (pv != NULL && mino_is_truthy(pv)) is_priv = 1;
         }
         gc_pin(mac);
         {
-            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
+            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 var_set_root(S, var, mac);
                 if (is_priv) var->as.var.is_private = 1;
@@ -641,14 +641,14 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     return mac;
 }
 
-mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_declare(mino_state *S, mino_val *form,
+                         mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *rest = args;
+    mino_val *rest = args;
     (void)env;
     (void)tail;
     while (mino_is_cons(rest)) {
-        mino_val_t *sym = rest->as.cons.car;
+        mino_val *sym = rest->as.cons.car;
         char buf[256];
         size_t n;
         if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
@@ -671,7 +671,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
          * root. Binding nil here would silently resolve to nil and
          * mask the reference-before-def bug. */
         {
-            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
+            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
             env_bind(S, current_ns_env(S), buf,
                      var != NULL ? var : mino_nil(S));
         }
@@ -680,12 +680,12 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
     return mino_nil(S);
 }
 
-mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env, int tail)
+mino_val *eval_def(mino_state *S, mino_val *form,
+                     mino_val *args, mino_env *env, int tail)
 {
-    mino_val_t *name_form;
-    mino_val_t *value_form;
-    mino_val_t *value;
+    mino_val *name_form;
+    mino_val *value_form;
+    mino_val *value;
     const char *doc     = NULL;
     size_t      doc_len = 0;
     char buf[256];
@@ -712,19 +712,19 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     {
         int is_dynamic = 0;
         int is_priv    = 0;
-        mino_val_t *m = name_form->meta;
+        mino_val *m = name_form->meta;
         if (m != NULL && mino_type_of(m) == MINO_MAP) {
-            mino_val_t *dk = mino_keyword(S, "dynamic");
-            mino_val_t *dv = map_get_val(m, dk);
-            mino_val_t *pk = mino_keyword(S, "private");
-            mino_val_t *pv = map_get_val(m, pk);
+            mino_val *dk = mino_keyword(S, "dynamic");
+            mino_val *dv = map_get_val(m, dk);
+            mino_val *pk = mino_keyword(S, "private");
+            mino_val *pv = map_get_val(m, pk);
             if (dv != NULL && mino_is_truthy(dv)) is_dynamic = 1;
             if (pv != NULL && mino_is_truthy(pv)) is_priv    = 1;
         }
         /* (def name) -- declaration only. Var stays unbound unless previously
          * defined; returns the var. */
         if (!mino_is_cons(args->as.cons.cdr)) {
-            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
+            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
@@ -734,7 +734,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         }
         /* Optional docstring: (def name "doc" value) */
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
+            mino_val *maybe_doc = args->as.cons.cdr->as.cons.car;
             if (maybe_doc != NULL && mino_type_of(maybe_doc) == MINO_STRING) {
                 doc       = maybe_doc->as.s.data;
                 doc_len   = maybe_doc->as.s.len;
@@ -751,7 +751,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         }
         gc_pin(value);
         {
-            mino_val_t *var = var_intern(S, S->ns_vars.current_ns, buf);
+            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;

@@ -34,9 +34,9 @@ static int failures = 0;
         }                                                          \
     } while (0)
 
-static mino_val_t *eval(mino_state_t *S, mino_env_t *env, const char *src)
+static mino_val *eval(mino_state *S, mino_env *env, const char *src)
 {
-    mino_val_t *r = mino_eval_string(S, src, env);
+    mino_val *r = mino_eval_string(S, src, env);
     if (r == NULL) {
         fprintf(stderr, "eval failed: %s\n  src: %s\n",
                 mino_last_error(S), src);
@@ -44,10 +44,10 @@ static mino_val_t *eval(mino_state_t *S, mino_env_t *env, const char *src)
     return r;
 }
 
-static int expect_int(mino_state_t *S, mino_env_t *env,
+static int expect_int(mino_state *S, mino_env *env,
                       const char *src, long long want, const char *label)
 {
-    mino_val_t *r = eval(S, env, src);
+    mino_val *r = eval(S, env, src);
     long long    n = 0;
     if (r == NULL) { REQUIRE(0, label); return 0; }
     if (!mino_to_int(r, &n)) { REQUIRE(0, label); return 0; }
@@ -60,11 +60,11 @@ static int expect_int(mino_state_t *S, mino_env_t *env,
     return 1;
 }
 
-static int expect_string(mino_state_t *S, mino_env_t *env,
+static int expect_string(mino_state *S, mino_env *env,
                          const char *src, const char *want,
                          const char *label)
 {
-    mino_val_t *r = eval(S, env, src);
+    mino_val *r = eval(S, env, src);
     const char *s  = NULL;
     size_t      len = 0;
     if (r == NULL) { REQUIRE(0, label); return 0; }
@@ -85,7 +85,7 @@ static int expect_string(mino_state_t *S, mino_env_t *env,
     return 1;
 }
 
-static void test_dispatch_by_keyword(mino_state_t *S, mino_env_t *env)
+static void test_dispatch_by_keyword(mino_state *S, mino_env *env)
 {
     eval(S, env,
          "(defmulti area :shape)"
@@ -100,7 +100,7 @@ static void test_dispatch_by_keyword(mino_state_t *S, mino_env_t *env)
                   "dispatch: :default fallback");
 }
 
-static void test_methods_api(mino_state_t *S, mino_env_t *env)
+static void test_methods_api(mino_state *S, mino_env *env)
 {
     expect_int(S, env, "(count (methods area))", 3,
                "methods: registered count including :default");
@@ -111,7 +111,7 @@ static void test_methods_api(mino_state_t *S, mino_env_t *env)
                   "remove-method: rect now falls through to :default");
 }
 
-static void test_hierarchy_dispatch(mino_state_t *S, mino_env_t *env)
+static void test_hierarchy_dispatch(mino_state *S, mino_env *env)
 {
     eval(S, env,
          "(derive :child :parent)"
@@ -127,7 +127,7 @@ static void test_hierarchy_dispatch(mino_state_t *S, mino_env_t *env)
                   "hierarchy: exact match on ancestor");
 }
 
-static void test_prefer_method(mino_state_t *S, mino_env_t *env)
+static void test_prefer_method(mino_state *S, mino_env *env)
 {
     /* Ambiguous dispatch: :triangle is both :has-sides and :flat.
      * Without a preference, dispatch throws. With prefer-method we
@@ -149,8 +149,8 @@ static void test_prefer_method(mino_state_t *S, mino_env_t *env)
 
 int main(void)
 {
-    mino_state_t *S   = mino_state_new();
-    mino_env_t   *env = mino_env_new(S);
+    mino_state *S   = mino_state_new();
+    mino_env   *env = mino_env_new(S);
     if (S == NULL || env == NULL) {
         fprintf(stderr, "setup failed\n");
         return 1;

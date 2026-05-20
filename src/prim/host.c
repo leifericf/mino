@@ -10,7 +10,7 @@
 #include <stdarg.h>
 
 /* Count args in a cons list. */
-static int count_args(mino_val_t *args)
+static int count_args(mino_val *args)
 {
     int n = 0;
     while (mino_is_cons(args)) {
@@ -21,14 +21,14 @@ static int count_args(mino_val_t *args)
 }
 
 /* Extract keyword name as C string. Returns NULL if not a keyword. */
-static const char *kw_name(const mino_val_t *v)
+static const char *kw_name(const mino_val *v)
 {
     if (v == NULL || mino_type_of(v) != MINO_KEYWORD) return NULL;
     return v->as.s.data;
 }
 
 /* Throw a formatted interop error. Never returns. */
-static mino_val_t *interop_error(mino_state_t *S, const char *fmt, ...)
+static mino_val *interop_error(mino_state *S, const char *fmt, ...)
 {
     char msg[256];
     va_list ap;
@@ -39,15 +39,15 @@ static mino_val_t *interop_error(mino_state_t *S, const char *fmt, ...)
 }
 
 /* (host/new :Type arg1 arg2 ...) */
-static mino_val_t *prim_host_new(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+static mino_val *prim_host_new(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
-    mino_val_t    *type_val;
+    mino_val    *type_val;
     const char    *type_key;
     host_type_t   *ht;
     host_member_t *hm;
     int            nargs;
-    mino_val_t    *ctor_args;
+    mino_val    *ctor_args;
     (void)env;
 
     if (!S->interop_enabled)
@@ -74,7 +74,7 @@ static mino_val_t *prim_host_new(mino_state_t *S, mino_val_t *args,
             "arity mismatch: :%s constructor, got %d", type_key, nargs);
 
     {
-        mino_val_t *result = hm->fn(S, NULL, ctor_args, hm->fn_ctx);
+        mino_val *result = hm->fn(S, NULL, ctor_args, hm->fn_ctx);
         if (result == NULL)
             return interop_error(S, "host callback failed: :%s constructor",
                                  type_key);
@@ -83,17 +83,17 @@ static mino_val_t *prim_host_new(mino_state_t *S, mino_val_t *args,
 }
 
 /* (host/call target :method arg1 arg2 ...) */
-static mino_val_t *prim_host_call(mino_state_t *S, mino_val_t *args,
-                                   mino_env_t *env)
+static mino_val *prim_host_call(mino_state *S, mino_val *args,
+                                   mino_env *env)
 {
-    mino_val_t    *target;
-    mino_val_t    *method_val;
+    mino_val    *target;
+    mino_val    *method_val;
     const char    *method_key;
     const char    *type_key;
     host_type_t   *ht;
     host_member_t *hm;
     int            nargs;
-    mino_val_t    *call_args;
+    mino_val    *call_args;
     (void)env;
 
     if (!S->interop_enabled)
@@ -128,7 +128,7 @@ static mino_val_t *prim_host_call(mino_state_t *S, mino_val_t *args,
                              type_key, method_key);
 
     {
-        mino_val_t *result = hm->fn(S, target, call_args, hm->fn_ctx);
+        mino_val *result = hm->fn(S, target, call_args, hm->fn_ctx);
         if (result == NULL)
             return interop_error(S, "host callback failed: :%s/:%s",
                                  type_key, method_key);
@@ -137,17 +137,17 @@ static mino_val_t *prim_host_call(mino_state_t *S, mino_val_t *args,
 }
 
 /* (host/static-call :Type :method arg1 arg2 ...) */
-static mino_val_t *prim_host_static_call(mino_state_t *S, mino_val_t *args,
-                                          mino_env_t *env)
+static mino_val *prim_host_static_call(mino_state *S, mino_val *args,
+                                          mino_env *env)
 {
-    mino_val_t    *type_val;
-    mino_val_t    *method_val;
+    mino_val    *type_val;
+    mino_val    *method_val;
     const char    *type_key;
     const char    *method_key;
     host_type_t   *ht;
     host_member_t *hm;
     int            nargs;
-    mino_val_t    *call_args;
+    mino_val    *call_args;
     (void)env;
 
     if (!S->interop_enabled)
@@ -179,7 +179,7 @@ static mino_val_t *prim_host_static_call(mino_state_t *S, mino_val_t *args,
                              type_key, method_key);
 
     {
-        mino_val_t *result = hm->fn(S, NULL, call_args, hm->fn_ctx);
+        mino_val *result = hm->fn(S, NULL, call_args, hm->fn_ctx);
         if (result == NULL)
             return interop_error(S, "host callback failed: :%s/:%s",
                                  type_key, method_key);
@@ -188,11 +188,11 @@ static mino_val_t *prim_host_static_call(mino_state_t *S, mino_val_t *args,
 }
 
 /* (host/get target :field) */
-static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+static mino_val *prim_host_get(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
-    mino_val_t    *target;
-    mino_val_t    *field_val;
+    mino_val    *target;
+    mino_val    *field_val;
     const char    *field_key;
     const char    *type_key;
     host_type_t   *ht;
@@ -232,7 +232,7 @@ static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
                              type_key, field_key);
 
     {
-        mino_val_t *result = hm->fn(S, target, NULL, hm->fn_ctx);
+        mino_val *result = hm->fn(S, target, NULL, hm->fn_ctx);
         if (result == NULL)
             return interop_error(S, "host callback failed: :%s/:%s",
                                  type_key, field_key);
@@ -254,9 +254,9 @@ const mino_prim_def k_prims_host[] = {
 const size_t k_prims_host_count =
     sizeof(k_prims_host) / sizeof(k_prims_host[0]);
 
-void mino_install_host(mino_state_t *S, mino_env_t *env)
+void mino_install_host(mino_state *S, mino_env *env)
 {
-    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_host, k_prims_host_count,
