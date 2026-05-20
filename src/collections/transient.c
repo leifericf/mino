@@ -88,15 +88,42 @@ mino_val *mino_transient(mino_state *S, mino_val *coll)
     t->as.transient.valid    = 1;
     /* Mint a fresh monotonic owner ID. The pre-increment skips 0
      * (reserved for "not owned by any transient"). On the rare
-     * 32-bit wraparound we leave owner_id at 0 so vec_*_owned's
+     * 32-bit wraparound the counter sticks at 0xFFFFFFFFu and every
+     * subsequent mint takes owner_id = 0 so vec_*_owned's
      * `node->owner == owner_id` check stays false-on-NULL and the
      * transient falls back to a path-copy wrapper instead of
      * spuriously claiming nodes whose IDs collided with a long-dead
-     * transient. */
-    if (S->ns_vars.transient_owner_next == 0xFFFFFFFFu) {
-        t->as.transient.owner_id = 0;
-    } else {
-        t->as.transient.owner_id = (uintptr_t)(++S->ns_vars.transient_owner_next);
+     * transient.
+     *
+     * The mint is a CAS loop so a state shared by host worker
+     * threads -- (future ...) bodies, embedder threads holding their
+     * own state_lock window, future refactors that elide the global
+     * state_lock around a transient site -- never publishes the same
+     * owner_id to two transients. Without that, hnode_ensure_owned
+     * would see a stale `node->owner == owner_id` match and edit a
+     * persistent subtree in place, silently breaking immutability
+     * for the original collection. RELAXED ordering is sufficient:
+     * the owner_id is opaque except to the owner check, which
+     * compares for identity, not happens-before. */
+    {
+        uint32_t prev = __atomic_load_n(&S->ns_vars.transient_owner_next,
+                                        __ATOMIC_RELAXED);
+        for (;;) {
+            uint32_t next;
+            if (prev == 0xFFFFFFFFu) {
+                t->as.transient.owner_id = 0;
+                break;
+            }
+            next = prev + 1u;
+            if (__atomic_compare_exchange_n(&S->ns_vars.transient_owner_next,
+                                            &prev, next, 0,
+                                            __ATOMIC_RELAXED,
+                                            __ATOMIC_RELAXED)) {
+                t->as.transient.owner_id = (uintptr_t)next;
+                break;
+            }
+            /* CAS failed: prev now holds the observed counter; retry. */
+        }
     }
     return t;
 }

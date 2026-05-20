@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.389.1 — Atomic Transient Owner Mint
+
+`mino_transient` now mints the per-batch owner ID through an atomic
+CAS loop instead of a plain pre-increment of
+`S->ns_vars.transient_owner_next`. The previous read-modify-write
+sequence was technically a data race on any code path that called
+`mino_transient` from multiple host threads against the same state
+without serializing through `state_lock`. If two concurrent mints had
+ever observed the same counter snapshot they would have published the
+same owner ID, causing the owner-tagged in-place edits inside
+`hnode_ensure_owned` to mutate a persistent subtree that the older
+collection still referenced — silently breaking immutability for the
+parent.
+
+The sticky-on-wrap behaviour is unchanged: once the 32-bit counter
+reaches `0xFFFFFFFFu` every subsequent transient takes
+`owner_id = 0` and falls back to the path-copy wrapper, so a 32-bit
+wraparound never publishes a colliding ID either.
+
 ## v0.389.0 — Native Channels
 
 `clojure.core.async` channels are now a C primitive (`MINO_CHAN`)
