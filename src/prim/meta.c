@@ -177,7 +177,7 @@ mino_val *prim_vary_meta(mino_state *S, mino_val *args,
 mino_val *prim_alter_meta(mino_state *S, mino_val *args,
                              mino_env *env)
 {
-    mino_val *obj, *f, *old_meta, *extra, *call_args, *new_meta;
+    mino_val *obj, *f, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "alter-meta! requires at least 2 arguments");
     }
@@ -190,21 +190,60 @@ mino_val *prim_alter_meta(mino_state *S, mino_val *args,
     if (obj == NULL || !meta_readable(mino_type_of(obj))) {
         return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: type does not support metadata");
     }
-    old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
-    call_args = mino_cons(S, old_meta, extra);
-    new_meta = mino_call(S, f, call_args, env);
-    if (new_meta == NULL) {
-        return NULL;
-    }
-    if (mino_type_of(new_meta) != MINO_NIL && mino_type_of(new_meta) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: f must return a map or nil");
-    }
-    {
-        mino_val *next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
+    /* Single-threaded fast path: no other writer, so a load + apply +
+     * store is trivially atomic. */
+    if (!S->threading.multi_threaded) {
+        mino_val *old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
+        mino_val *call_args = mino_cons(S, old_meta, extra);
+        mino_val *new_meta = mino_call(S, f, call_args, env);
+        mino_val *next;
+        if (new_meta == NULL) return NULL;
+        if (mino_type_of(new_meta) != MINO_NIL
+            && mino_type_of(new_meta) != MINO_MAP) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "alter-meta!: f must return a map or nil");
+        }
+        next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
         gc_write_barrier(S, obj, obj->meta, next);
         obj->meta = next;
+        return obj->meta != NULL ? obj->meta : mino_nil(S);
     }
-    return obj->meta != NULL ? obj->meta : mino_nil(S);
+    /* Multi-threaded retry loop. Mirrors prim_swap_bang: load, apply,
+     * CAS, retry on loss. The docstring promises atomicity; the user
+     * fn may run more than once across retries, again mirroring
+     * swap! and matching Clojure's clojure.lang.IReference#alterMeta
+     * contract on the JVM. The barrier fires only after a successful
+     * CAS so a losing retry does not pollute the remset with an edge
+     * that was never published. */
+    for (;;) {
+        mino_val *snap = __atomic_load_n(&obj->meta, __ATOMIC_ACQUIRE);
+        mino_val *old_meta = (snap != NULL) ? snap : mino_nil(S);
+        mino_val *call_args = mino_cons(S, old_meta, extra);
+        mino_val *new_meta = mino_call(S, f, call_args, env);
+        mino_val *next;
+        if (new_meta == NULL) return NULL;
+        if (mino_type_of(new_meta) != MINO_NIL
+            && mino_type_of(new_meta) != MINO_MAP) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "alter-meta!: f must return a map or nil");
+        }
+        next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
+        if (__atomic_compare_exchange_n(&obj->meta, &snap, next, 0,
+                                        __ATOMIC_RELEASE,
+                                        __ATOMIC_RELAXED)) {
+            /* Barrier only on a successful publish: state_lock is held
+             * across the CAS-and-barrier pair so no other thread can
+             * advance the GC phase between them, and the major-mark
+             * Dijkstra push still observes `next` while phase is
+             * MAJOR_MARK. A lost CAS would otherwise leave a stale
+             * OLD->YOUNG entry on the remset and a Dijkstra push for
+             * a value the slot never actually held. */
+            gc_write_barrier(S, obj, snap, next);
+            return obj->meta != NULL ? obj->meta : mino_nil(S);
+        }
+        /* Lost the race; the other writer's value is now in
+         * obj->meta. Try again with the new snapshot. */
+    }
 }
 
 const mino_prim_def k_prims_meta[] = {

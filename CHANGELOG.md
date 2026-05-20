@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.389.4 — `alter-meta!` Actually Atomic
+
+`alter-meta!` advertised atomic mutation of a reference's metadata
+but did a plain load + apply + store. Concurrent callers could
+both observe the same `old_meta`, both compute a `new_meta` from
+it, and the last writer would silently overwrite the first. The
+docstring promised exactly the contract the implementation did not
+provide.
+
+The multi-threaded path now runs a CAS retry loop matching
+`prim_swap_bang`: load the snapshot, apply `f`, CAS the slot; on
+loss, retry with the new snapshot. The barrier fires only after a
+successful publish so a losing retry no longer leaves stale
+OLD->YOUNG entries on the remset. The single-threaded path keeps
+the straight read-compute-write because no other writer can
+interpose.
+
 ## v0.389.3 — `aset` Barrier on Host Arrays
 
 `aset` is the only mutator path that writes a slot of a long-lived
