@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.389.12 — Agent Spawn-Rollback Hands Off Concurrent Producer's Queue
+
+When `pthread_create` (or `_beginthreadex`) refuses the agent
+worker, the rollback path used to pop our own node, set
+`worker_alive = 0`, and decrement `thread_count`. If a concurrent
+producer had already enqueued an action into the same pool (they
+saw `worker_alive = 1` and skipped spawning during our brief
+unlock-then-spawn window), their node was left in the runq with
+no worker to drain it — `(await its-agent)` would hang forever
+unless another send arrived to re-spawn.
+
+The rollback now checks the runq after removing our own node and,
+if a concurrent producer's node is still queued, retries the
+spawn once. On retry success the new worker takes over the
+queue, `worker_alive` stays armed, and only OUR send reports
+failure to its caller. On retry failure the rollback proceeds as
+before (`worker_alive = 0`, `thread_count--`), surfacing the
+host's resource exhaustion.
+
 ## v0.389.11 — Restore `bc_top` on Catch Unwind
 
 A throw from a deeply-nested fn longjmps to the catching try

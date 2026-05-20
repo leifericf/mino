@@ -677,10 +677,17 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
                                        : agent_worker_entry_solo,
             S, 0, NULL);
         if (h == 0) {
-            /* pthread create refused. Roll back the in_flight bump
-             * and pop the node we just pushed so await is not
-             * stranded on a permanently-pending action. The runq
-             * head is what we pushed; pop it back. */
+            /* Spawn refused. Pop our own node + decrement in_flight
+             * for this agent so the failed send doesn't strand its
+             * own await. A concurrent producer may have enqueued
+             * their own node into this pool during the spawn window
+             * (they saw worker_alive=1 and skipped spawning); if
+             * the runq is non-empty after we pop ours, retry the
+             * spawn so their action still runs. Only reset
+             * worker_alive=0 + decrement thread_count when the
+             * runq has nothing left to drain OR the retry also
+             * fails. */
+            int retry_ok = 0;
             agent_mu_lock(&S->agent.mu);
             if (S->agent.pool[kind].run_tail == n) {
                 S->agent.pool[kind].run_tail = NULL;
@@ -688,6 +695,35 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
             S->agent.pool[kind].run_head = n->next;
             if (agent->as.agent.in_flight > 0) {
                 agent->as.agent.in_flight--;
+            }
+            if (S->agent.pool[kind].run_head != NULL) {
+                /* Concurrent producer's node is still queued.
+                 * Drop the agent mu around the syscall so we don't
+                 * stall pop attempts; reacquire to commit the
+                 * outcome. */
+                agent_mu_unlock(&S->agent.mu);
+                {
+                    uintptr_t h2 = _beginthreadex(NULL, stack,
+                        kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
+                                                   : agent_worker_entry_solo,
+                        S, 0, NULL);
+                    if (h2 != 0) {
+                        S->agent.pool[kind].worker = (HANDLE)h2;
+                        retry_ok = 1;
+                    }
+                }
+                agent_mu_lock(&S->agent.mu);
+            }
+            if (retry_ok) {
+                S->agent.pool[kind].worker_pending_join = 1;
+                agent_cv_broadcast(&S->agent.cv);
+                agent_mu_unlock(&S->agent.mu);
+                free(n);
+                prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                    "host refused agent worker thread for this send; "
+                    "a concurrent producer's queued action is being "
+                    "drained by a retried worker");
+                return 1;
             }
             S->agent.pool[kind].worker_alive = 0;
             agent_cv_broadcast(&S->agent.cv);
@@ -717,7 +753,12 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
             S);
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
-            /* Same rollback as the Windows arm above. */
+            /* Mirror the Windows-arm rollback: pop our own node,
+             * decrement in_flight, and retry the spawn once if a
+             * concurrent producer has already queued an action that
+             * would otherwise be stranded behind a worker that never
+             * starts. */
+            int retry_ok = 0;
             agent_mu_lock(&S->agent.mu);
             if (S->agent.pool[kind].run_tail == n) {
                 S->agent.pool[kind].run_tail = NULL;
@@ -725,6 +766,39 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
             S->agent.pool[kind].run_head = n->next;
             if (agent->as.agent.in_flight > 0) {
                 agent->as.agent.in_flight--;
+            }
+            if (S->agent.pool[kind].run_head != NULL) {
+                agent_mu_unlock(&S->agent.mu);
+                {
+                    pthread_attr_t attr2;
+                    pthread_attr_t *attrp2 = NULL;
+                    int rc2;
+                    if (S->threading.thread_stack_size > 0
+                        && pthread_attr_init(&attr2) == 0) {
+                        pthread_attr_setstacksize(&attr2,
+                            S->threading.thread_stack_size);
+                        attrp2 = &attr2;
+                    }
+                    rc2 = pthread_create(&S->agent.pool[kind].worker,
+                        attrp2,
+                        kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
+                                                   : agent_worker_entry_solo,
+                        S);
+                    if (attrp2 != NULL) { pthread_attr_destroy(attrp2); }
+                    if (rc2 == 0) retry_ok = 1;
+                }
+                agent_mu_lock(&S->agent.mu);
+            }
+            if (retry_ok) {
+                S->agent.pool[kind].worker_pending_join = 1;
+                agent_cv_broadcast(&S->agent.cv);
+                agent_mu_unlock(&S->agent.mu);
+                free(n);
+                prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                    "host refused agent worker thread for this send; "
+                    "a concurrent producer's queued action is being "
+                    "drained by a retried worker");
+                return 1;
             }
             S->agent.pool[kind].worker_alive = 0;
             agent_cv_broadcast(&S->agent.cv);
