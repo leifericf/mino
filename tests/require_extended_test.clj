@@ -20,6 +20,22 @@
   (is (thrown? (ns test.require.missing2
                  (:require tests.module.does.not.exist)))))
 
+(deftest refer-accepts-list-and-vector
+  ;; JVM Clojure accepts any sequential collection for :refer; the
+  ;; canonical idiom is a vector but portable code (and several
+  ;; widely-used libraries) uses a parenthesised list:
+  ;;   [clojure.string :refer (blank? join)]
+  ;; mino used to reject the list form with
+  ;;   ":refer requires a vector of symbols or :all"
+  ;; even though canon treats list and vector identically here.
+  (ns test.refer.list-form
+    (:require [clojure.string :refer (blank? join)]))
+  (is (true?  (blank? "")))
+  (is (= "a,b" (join "," ["a" "b"])))
+  ;; Same shape from the top-level (require) form path.
+  (require '[clojure.string :refer (trim)])
+  (is (= "abc" (trim "  abc  "))))
+
 (deftest refer-macros-imports-like-refer
   ;; mino has no JVM-compile-time vs runtime split, so :refer-macros
   ;; carries the same meaning as :refer -- the listed names are bound

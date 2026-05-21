@@ -64,6 +64,15 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- `:refer` now accepts a parenthesised list as well as a vector
+  (`[clojure.string :refer (blank? join)]` is treated the same as
+  `[... :refer [blank? join]]`). JVM Clojure treats `:refer`'s arg
+  as any sequential collection, and the list shape is common in
+  portable libraries; mino used to reject it with `":refer requires
+  a vector of symbols or :all"`. The error message for genuinely
+  malformed args (a string, a map, a scalar) is now `"sequence of
+  symbols or :all"`.
+
 - Bare JVM class symbols now resolve to mino's corresponding
   type-marker keyword so that portable Clojure code using class
   names as extend targets or `instance?` arguments doesn't need a

@@ -3,6 +3,7 @@
  */
 
 #include "prim/internal.h"
+#include "collections/internal.h"  /* vec_conj1 */
 
 static const char *bundled_lib_lookup(mino_state *S, const char *name);
 
@@ -326,13 +327,24 @@ static int parse_libspec_opts(mino_state *S, mino_val *spec_vec,
             out->needs_load = 1;
             if (v != NULL && mino_type_of(v) == MINO_VECTOR) {
                 out->refer_vec = v;
+            } else if (v != NULL && mino_is_cons(v)) {
+                /* JVM Clojure accepts any sequential collection for
+                 * :refer -- (... :refer (a b c)) is as valid as the
+                 * vectored form. Build a vector from the list so the
+                 * downstream apply_refer_options sees uniform shape. */
+                mino_val *tmp;
+                out->refer_vec = mino_vector(S, NULL, 0);
+                for (tmp = v; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    out->refer_vec = vec_conj1(S, out->refer_vec,
+                                               tmp->as.cons.car);
             } else if (v != NULL && mino_type_of(v) == MINO_KEYWORD
                        && kw_match(v, "all")) {
                 out->refer_all = 1;
             } else {
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                     "eval/type", "MTY001",
-                    "require: :refer requires a vector of symbols or :all");
+                    "require: :refer requires a sequence of symbols "
+                    "or :all");
                 return -1;
             }
         } else if (kw_match(k, "exclude")
