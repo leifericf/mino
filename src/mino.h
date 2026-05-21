@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 414
+#define MINO_VERSION_MINOR 415
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -206,7 +206,7 @@ typedef enum {
                      * allocation. Equality is identity. Constructed
                      * via `(chan)` / `(chan n)` / `(chan n xform)` /
                      * `(promise-chan)`. */
-    MINO_QUEUE      /* clojure.lang.PersistentQueue equivalent: a
+    MINO_QUEUE,     /* clojure.lang.PersistentQueue equivalent: a
                      * persistent FIFO with amortised O(1) enqueue
                      * (conj) and dequeue (pop). Backed by two cons
                      * lists: a front list (the next-to-pop side, in
@@ -219,6 +219,23 @@ typedef enum {
                      * Constructed via clojure.lang.PersistentQueue/
                      * EMPTY plus conj, or the mino-native EMPTY-QUEUE
                      * binding. */
+    MINO_BYTES      /* Immutable binary-data value. Carries a heap-
+                     * allocated buffer plus byte length plus a
+                     * `bit_tail` field (0 for byte-aligned values,
+                     * 1..7 for bit-aligned bitstrings). bytes? is
+                     * true when bit_tail == 0; bitstring? is true
+                     * for any MINO_BYTES regardless of bit_tail.
+                     * Print form is `#bytes "HEX..."` (hex-encoded
+                     * bytes, optional `/N` trailing-bit-count suffix
+                     * for non-byte-aligned values). Constructed via
+                     * (byte-array ...). aget reads a byte as int;
+                     * aset! throws :mino/immutable -- the persistent-
+                     * value model excludes in-place writes here.
+                     * seq yields unsigned 0..255 ints, codepoint
+                     * by codepoint. The bit_tail layout is forward-
+                     * compatible with the bit-syntax surface (bits
+                     * constructor + destructure) that ships in a
+                     * follow-on cycle. */
 } mino_type;
 
 typedef struct mino_val    mino_val;   /* opaque */
@@ -512,6 +529,34 @@ mino_val *mino_queue_conj (mino_state *S, mino_val *q, mino_val *v);
 mino_val *mino_queue_peek (const mino_val *q);
 mino_val *mino_queue_pop  (mino_state *S, mino_val *q);
 mino_val *mino_queue_seq  (mino_state *S, const mino_val *q);
+
+/* MINO_BYTES constructors and accessors.
+ *
+ * mino_bytes(S, src, n) copies n bytes from `src` into a fresh
+ * GC-managed MINO_BYTES value with bit_tail == 0. If src is NULL the
+ * buffer is zero-filled.
+ *
+ * mino_bytes_from_array(S, src, n) is the JVM `byte-array`-shape
+ * peer: same as mino_bytes() but accepts a `signed char *` so embed
+ * code that already holds Java-shaped `jbyte`-style buffers can pass
+ * them straight through.
+ *
+ * mino_bytes_len returns the byte count (NOT bit count); use
+ * mino_bytes_bit_len for the total bit count (byte_len*8 + bit_tail).
+ *
+ * mino_bytes_data returns a pointer into the GC-managed buffer; the
+ * pointer is valid until the bytes value becomes unreachable.
+ *
+ * mino_bytes_get(v, i) reads a single byte as an unsigned int
+ * (0..255) and returns -1 if i is out of range. */
+mino_val *mino_bytes              (mino_state *S, const unsigned char *src, size_t n);
+mino_val *mino_bytes_from_array   (mino_state *S, const signed char  *src, size_t n);
+int         mino_is_bytes           (const mino_val *v);
+int         mino_is_bitstring       (const mino_val *v);
+size_t      mino_bytes_len          (const mino_val *v);
+size_t      mino_bytes_bit_len      (const mino_val *v);
+const unsigned char *mino_bytes_data(const mino_val *v);
+int         mino_bytes_get          (const mino_val *v, size_t i);
 
 /* Construct an STM ref holding the given committed value. The watches
  * map and validator slots start NULL; install them via add-watch /
@@ -817,6 +862,8 @@ int mino_is_map_entry (const mino_val *v);
 int mino_is_host_array(const mino_val *v);
 int mino_is_record    (const mino_val *v);  /* also at mino_defrecord */
 int mino_is_queue     (const mino_val *v);  /* also at mino_queue_empty */
+int mino_is_bytes     (const mino_val *v);  /* declared above near mino_bytes */
+int mino_is_bitstring (const mino_val *v);  /* declared above near mino_bytes */
 int mino_is_record_type(const mino_val *v); /* also at mino_defrecord */
 int mino_is_handle    (const mino_val *v);  /* also near mino_handle */
 int mino_is_atom      (const mino_val *v);  /* also near mino_atom */

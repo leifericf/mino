@@ -104,6 +104,10 @@ mino_val *val_to_seq(mino_state *S, mino_val *v)
     if (mino_type_of(v) == MINO_SORTED_MAP || mino_type_of(v) == MINO_SORTED_SET) {
         return sorted_seq(S, v);
     }
+    if (mino_type_of(v) == MINO_BYTES) {
+        /* MINO_BYTES seqs as unsigned 0..255 integers, one per byte. */
+        return mino_bytes_seq(S, v);
+    }
     if (mino_type_of(v) == MINO_STRING) {
         /* Per Clojure, sequencing a string yields chars, not
          * substrings. Walk UTF-8 codepoint by codepoint. */
@@ -186,10 +190,90 @@ mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
     return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, "short-array");
 }
 
+/* byte-array constructs an immutable MINO_BYTES value. JVM Clojure's
+ * byte-array returns a host-mutable java byte[]; mino's persistent-
+ * value model excludes in-place writes, so we ship the immutable
+ * binary-data tier instead. bytes? on the result is true; aset!
+ * throws :mino/immutable. */
 mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
 {
+    mino_val *arg;
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_BYTE, "byte-array");
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "byte-array requires one argument");
+    }
+    arg = args->as.cons.car;
+    if (arg != NULL && mino_val_int_p(arg)) {
+        long long n = mino_val_int_get(arg);
+        if (n < 0) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "byte-array: negative array size");
+        }
+        return mino_bytes(S, NULL, (size_t)n);
+    }
+    /* Treat as a collection: read each element as an unsigned-byte
+     * value (0..255). Anything else throws. */
+    {
+        size_t len = 0;
+        unsigned char *buf;
+        mino_val *result;
+        mino_val *seqv;
+        mino_val *p;
+        /* Pre-count via prim_count's helper to size the buffer. */
+        switch (mino_type_of(arg)) {
+        case MINO_VECTOR:     len = arg->as.vec.len; break;
+        case MINO_MAP:        len = arg->as.map.len; break;
+        case MINO_SET:        len = arg->as.set.len; break;
+        case MINO_HOST_ARRAY: len = arg->as.host_array.len; break;
+        case MINO_STRING:
+            len = utf8_codepoint_count(arg->as.s.data, arg->as.s.len);
+            break;
+        case MINO_CONS:       len = list_length(S, arg); break;
+        case MINO_EMPTY_LIST: len = 0; break;
+        case MINO_NIL:        len = 0; break;
+        default: {
+            mino_val *as_seq = val_to_seq(S, arg);
+            if (as_seq == NULL) return NULL;
+            len = list_length(S, as_seq);
+            break;
+        }
+        }
+        if (len == 0) return mino_bytes(S, NULL, 0);
+        buf = (unsigned char *)calloc(1, len);
+        if (buf == NULL) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                "byte-array: out of memory");
+        }
+        seqv = val_to_seq(S, arg);
+        if (seqv == NULL) { free(buf); return NULL; }
+        p = seqv;
+        {
+            size_t idx = 0;
+            while (idx < len && p != NULL && mino_is_cons(p)) {
+                mino_val *elem = p->as.cons.car;
+                long long bv;
+                if (elem == NULL || !mino_val_int_p(elem)) {
+                    free(buf);
+                    return prim_throw_classified(S, "eval/type", "MTY001",
+                        "byte-array: element must be an integer in 0..255");
+                }
+                bv = mino_val_int_get(elem);
+                /* Signed-byte (-128..127) and unsigned-byte (0..255)
+                 * both lower to the same 8-bit storage. */
+                if (bv < -128 || bv > 255) {
+                    free(buf);
+                    return prim_throw_classified(S, "eval/bounds", "MBD001",
+                        "byte-array: integer out of byte range (-128..255)");
+                }
+                buf[idx++] = (unsigned char)(bv & 0xff);
+                p = p->as.cons.cdr;
+            }
+        }
+        result = mino_bytes(S, buf, len);
+        free(buf);
+        return result;
+    }
 }
 
 mino_val *prim_float_array(mino_state *S, mino_val *args, mino_env *env)
@@ -244,6 +328,11 @@ mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
     arr     = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     new_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (arr != NULL && mino_type_of(arr) == MINO_BYTES) {
+        return prim_throw_classified(S, "eval/state", "MST005",
+            "aset: mino bytes values are immutable; build a new "
+            "bytes value via byte-array instead");
+    }
     if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "aset: first argument must be a host array");
@@ -267,6 +356,72 @@ mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
     gc_write_barrier(S, arr, arr->as.host_array.vals[(size_t)idx], new_val);
     arr->as.host_array.vals[(size_t)idx] = new_val;
     return new_val;
+}
+
+/* aget: read a slot from a host array OR a MINO_BYTES value at an
+ * integer index. Mirrors JVM Clojure's aget on byte[]: returns the
+ * byte as an unsigned int (0..255). For MINO_HOST_ARRAY this is a
+ * straight slot read; for MINO_BYTES the byte at the index is widened
+ * to long. */
+mino_val *prim_aget(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *arr;
+    mino_val *idx_val;
+    long long   idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "aget requires two arguments (array, index)");
+    }
+    arr     = args->as.cons.car;
+    idx_val = args->as.cons.cdr->as.cons.car;
+    if (idx_val == NULL || !mino_val_int_p(idx_val)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "aget: index must be an integer");
+    }
+    idx = mino_val_int_get(idx_val);
+    if (idx < 0) {
+        return prim_throw_classified(S, "eval/bounds", "MBD001",
+            "aget: index out of range");
+    }
+    if (arr != NULL && mino_type_of(arr) == MINO_BYTES) {
+        if ((size_t)idx >= arr->as.bytes.byte_len) {
+            return prim_throw_classified(S, "eval/bounds", "MBD001",
+                "aget: index out of range");
+        }
+        return mino_int(S,
+            (long long)(unsigned)arr->as.bytes.data[(size_t)idx]);
+    }
+    if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "aget: first argument must be a host array or bytes value");
+    }
+    if ((size_t)idx >= arr->as.host_array.len) {
+        return prim_throw_classified(S, "eval/bounds", "MBD001",
+            "aget: index out of range");
+    }
+    return arr->as.host_array.vals[(size_t)idx];
+}
+
+/* alength: count of elements in a host array OR bytes value. */
+mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *arr;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "alength requires one argument");
+    }
+    arr = args->as.cons.car;
+    if (arr != NULL && mino_type_of(arr) == MINO_BYTES) {
+        return mino_int(S, (long long)arr->as.bytes.byte_len);
+    }
+    if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "alength: argument must be a host array or bytes value");
+    }
+    return mino_int(S, (long long)arr->as.host_array.len);
 }
 
 mino_val *prim_map_entry(mino_state *S, mino_val *args, mino_env *env)
@@ -406,6 +561,8 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
         return mino_int(S, 2);
     case MINO_QUEUE:
         return mino_int(S, (long long)mino_queue_count(coll));
+    case MINO_BYTES:
+        return mino_int(S, (long long)mino_bytes_len(coll));
     case MINO_CHUNKED_CONS: {
         long long          n = 0;
         const mino_val  *cur = coll;
@@ -595,6 +752,14 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
             return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return coll->as.host_array.vals[(size_t)idx];
+    }
+    if (mino_type_of(coll) == MINO_BYTES) {
+        if ((size_t)idx >= coll->as.bytes.byte_len) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        }
+        return mino_int(S,
+            (long long)(unsigned)coll->as.bytes.data[(size_t)idx]);
     }
     if (mino_type_of(coll) == MINO_MAP_ENTRY) {
         if (idx == 0) return coll->as.map_entry.k;
@@ -2228,7 +2393,16 @@ const mino_prim_def k_prims_collections[] = {
     {"aset",       prim_aset,
      "Mutates the host array at index, storing val. Returns val. The "
      "host-array tier is the only path that exposes in-place mutation "
-     "outside MINO_ATOM / MINO_VOLATILE."},
+     "outside MINO_ATOM / MINO_VOLATILE. Throws :mino/state on a "
+     "MINO_BYTES value -- the immutable bytes tier rejects in-place "
+     "writes."},
+    {"aget",       prim_aget,
+     "Reads slot `index` from a host array or a bytes value. On a "
+     "bytes value, returns the byte at that index as an unsigned int "
+     "(0..255)."},
+    {"alength",    prim_alength,
+     "Returns the slot count of a host array or the byte length of a "
+     "bytes value."},
 };
 
 const size_t k_prims_collections_count =

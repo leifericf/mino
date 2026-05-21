@@ -178,6 +178,10 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
     case MINO_CHAN:
         mino_chan_trace(S, v);
         break;
+    case MINO_BYTES:
+        /* The data buffer is malloc-owned raw bytes -- no internal
+         * pointers to follow. Nothing to push. */
+        break;
     default:
         break;
     }
@@ -221,6 +225,10 @@ static void finalize_val(mino_state *S, gc_hdr_t *h)
         break;
     case MINO_CHAN:
         mino_chan_finalize(S, v);
+        break;
+    case MINO_BYTES:
+        free(v->as.bytes.data);
+        v->as.bytes.data = NULL;
         break;
     default:
         break;

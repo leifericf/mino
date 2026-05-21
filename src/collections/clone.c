@@ -222,6 +222,9 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
          * appears; non-transferable for now alongside identity-bearing
          * types. */
         return NULL;
+    case MINO_BYTES:
+        /* Bytes are pure data -- a fresh copy in dst's heap. */
+        return mino_bytes(dst, v->as.bytes.data, v->as.bytes.byte_len);
     case MINO_UUID:
         return mino_uuid_from_bytes(dst, v->as.uuid.bytes);
     case MINO_REGEX: {
@@ -339,6 +342,7 @@ static int can_clone_walk(const mino_val *v, const char **reason)
     case MINO_UUID:
     case MINO_BIGINT:
     case MINO_BIGDEC:
+    case MINO_BYTES:
         return 1;
     case MINO_RATIO:
         return can_clone_walk(v->as.ratio.num, reason)

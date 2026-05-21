@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.415.0 — MINO_BYTES Value Type
+
+New first-class value tag for immutable binary data.
+`(byte-array ...)` now returns a `MINO_BYTES` value (was a
+host-mutable `MINO_HOST_ARRAY` of byte kind). `aset` on the result
+throws `:eval/state` -- mino's persistent-value model excludes
+in-place writes here. The bit-syntax surface that builds on the
+forward-compatible layout ships in a follow-on release.
+
+- `bytes?` — true for byte-aligned `MINO_BYTES` values. Replaces
+  the always-false stub previously in `core.clj`.
+- `bitstring?` — true for any `MINO_BYTES` regardless of trailing-
+  bit count; `bytes?` is the byte-aligned subset.
+- `byte-array` — constructs a `MINO_BYTES` from a size (zero-fill)
+  or a collection (each element coerced to a byte in -128..255).
+- `aget` / `alength` — read a byte as an unsigned int and report
+  total byte length. `aset` on a bytes value throws.
+- `count`, `seq`, `empty?`, `=`, `hash`, `type`, and the cross-
+  state `clone` path all dispatch on `MINO_BYTES`.
+- Print form: `#bytes "HEX..."` (lowercase hex pairs, no
+  separators). An optional `/N` trailing-bit-count suffix on the
+  printed form is reserved for bit-aligned values.
+- Reader literal: `#bytes "..."` accepts whitespace between hex
+  pairs and the optional `/0..7` trailing-bit suffix.
+
+Cross-state `clone` deep-copies the byte buffer so the destination
+state owns its own storage.
+
 ## v0.414.0 — inst? / inst-ms / #inst Reader Literal
 
 `#inst "..."` literals now read into the canonical component map

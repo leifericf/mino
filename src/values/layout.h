@@ -367,6 +367,30 @@ struct mino_val {
             mino_val *back;   /* cons-list in REVERSE-deque order, possibly nil */
             size_t      len;    /* total element count (cached) */
         } queue;
+        struct {          /* MINO_BYTES: immutable binary-data value.
+                           *
+                           * The buffer is malloc-owned (not GC-traced;
+                           * raw bytes have no internal pointers). The
+                           * finalizer for MINO_BYTES on GC sweep frees
+                           * `data`.
+                           *
+                           * `bit_tail` reserves 1..7 bits at the end of
+                           * the value for bit-aligned bitstrings. v0.415
+                           * constructors always set bit_tail = 0 (every
+                           * MINO_BYTES is byte-aligned). The bit-syntax
+                           * surface that ships in a follow-on cycle is
+                           * the only producer of bit_tail > 0; the field
+                           * exists now so the layout stays ABI-stable
+                           * across cycles. Total bit count for a value
+                           * is `byte_len * 8 + bit_tail` (or
+                           * `byte_len * 8` when bit_tail == 0, since
+                           * bit_tail is only set on values whose last
+                           * byte holds fewer than 8 valid bits). */
+            unsigned char *data;
+            size_t         byte_len;
+            uint8_t        bit_tail;
+            uint32_t       cached_hash; /* hash_val of this bytes; 0 = uncomputed. */
+        } bytes;
     } as;
 };
 

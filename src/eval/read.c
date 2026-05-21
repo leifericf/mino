@@ -2042,6 +2042,99 @@ static mino_val *read_dispatch_tagged(mino_state *S, const char **p)
         return mino_uuid_from_bytes(S, bytes);
     }
 
+    /* (0b) Built-in #bytes "HEX..." literal. Hex-decode the string
+     * body into a MINO_BYTES value. Accepts optional whitespace
+     * between hex pairs (matching `(byte-array #bytes "AB CD EF")`-
+     * shape Erlang-inspired sources). The optional `/N` trailing-
+     * bit-count suffix lets bit-aligned values round-trip; v0.415
+     * emits and accepts only the byte-aligned form, but the reader
+     * already accepts /N so the layout stays forward-compatible. */
+    if (tag_len == 5 && memcmp(tag_start, "bytes", 5) == 0
+        && body != NULL && mino_type_of(body) == MINO_STRING) {
+        size_t bn = body->as.s.len;
+        const char *bd = body->as.s.data;
+        size_t end = bn;
+        unsigned bit_tail = 0;
+        unsigned char *buf;
+        size_t pos = 0, out_n = 0;
+        mino_val *result;
+        /* Strip optional trailing /N suffix. */
+        {
+            size_t k = bn;
+            while (k > 0 && bd[k - 1] >= '0' && bd[k - 1] <= '9') k--;
+            if (k < bn && k > 0 && bd[k - 1] == '/') {
+                size_t j;
+                unsigned val = 0;
+                for (j = k; j < bn; j++) {
+                    val = val * 10 + (unsigned)(bd[j] - '0');
+                }
+                if (val > 7) {
+                    set_reader_diag(S, MRE008,
+                        "#bytes: trailing-bit count must be 0..7",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+                bit_tail = val;
+                end = k - 1;
+            }
+        }
+        /* Hex-decode the payload. Whitespace between pairs is OK. */
+        buf = (unsigned char *)calloc(1, end / 2 + 1);
+        if (buf == NULL) {
+            set_reader_diag(S, MRE008,
+                "#bytes: out of memory",
+                S->reader.reader_line, S->reader.reader_col);
+            return NULL;
+        }
+        while (pos < end) {
+            int hi, lo;
+            char c1 = bd[pos];
+            char c2;
+            if (c1 == ' ' || c1 == '\t' || c1 == '\n' || c1 == '\r') {
+                pos++;
+                continue;
+            }
+            if (pos + 1 >= end) {
+                free(buf);
+                set_reader_diag(S, MRE008,
+                    "#bytes: odd number of hex digits",
+                    S->reader.reader_line, S->reader.reader_col);
+                return NULL;
+            }
+            c2 = bd[pos + 1];
+            hi = (c1 >= '0' && c1 <= '9') ? c1 - '0'
+               : (c1 >= 'a' && c1 <= 'f') ? c1 - 'a' + 10
+               : (c1 >= 'A' && c1 <= 'F') ? c1 - 'A' + 10
+               : -1;
+            lo = (c2 >= '0' && c2 <= '9') ? c2 - '0'
+               : (c2 >= 'a' && c2 <= 'f') ? c2 - 'a' + 10
+               : (c2 >= 'A' && c2 <= 'F') ? c2 - 'A' + 10
+               : -1;
+            if (hi < 0 || lo < 0) {
+                free(buf);
+                set_reader_diag(S, MRE008,
+                    "#bytes: malformed hex digit",
+                    S->reader.reader_line, S->reader.reader_col);
+                return NULL;
+            }
+            buf[out_n++] = (unsigned char)((hi << 4) | lo);
+            pos += 2;
+        }
+        if (bit_tail != 0 && out_n == 0) {
+            free(buf);
+            set_reader_diag(S, MRE008,
+                "#bytes: trailing bits without payload bytes",
+                S->reader.reader_line, S->reader.reader_col);
+            return NULL;
+        }
+        result = mino_bytes(S, buf, out_n);
+        free(buf);
+        if (result != NULL && bit_tail != 0) {
+            result->as.bytes.bit_tail = (uint8_t)bit_tail;
+        }
+        return result;
+    }
+
     /* (1) per-tag reader from *data-readers*. */
     readers = (mino_current_ctx(S)->dyn_stack != NULL)
                 ? dyn_lookup(S, "*data-readers*") : NULL;

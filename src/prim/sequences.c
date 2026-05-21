@@ -109,6 +109,15 @@ void seq_iter_init(mino_state *S, seq_iter_t *it, const mino_val *coll)
             coll = mino_queue_seq(S, coll);
         }
     }
+    /* Bytes: flatten to a cons list of unsigned 0..255 ints. The
+     * seq_iter switches don't handle MINO_BYTES directly. */
+    if (coll != NULL && mino_type_of(coll) == MINO_BYTES) {
+        if (mino_bytes_len(coll) == 0) {
+            coll = NULL;
+        } else {
+            coll = mino_bytes_seq(S, coll);
+        }
+    }
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && mino_type_of(coll) == MINO_CONS) ? coll : NULL;

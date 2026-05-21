@@ -1003,6 +1003,22 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         fputc(']', out);
         return;
     }
+    case MINO_BYTES: {
+        /* `#bytes "HEX..."` -- a tagged-literal-shaped form that
+         * round-trips through read. Hex pairs match the bytes in
+         * order; when bit_tail != 0, append `/N` to the printed
+         * form to denote the trailing bit count. */
+        size_t i;
+        fputs("#bytes \"", out);
+        for (i = 0; i < v->as.bytes.byte_len; i++) {
+            fprintf(out, "%02x", (unsigned)v->as.bytes.data[i]);
+        }
+        if (v->as.bytes.bit_tail != 0) {
+            fprintf(out, "/%u", (unsigned)v->as.bytes.bit_tail);
+        }
+        fputc('"', out);
+        return;
+    }
     }
 }
 

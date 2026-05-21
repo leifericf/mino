@@ -404,6 +404,9 @@ uint32_t hash_val(const mino_val *v)
     case MINO_QUEUE:
         h = fnv_mix(h, 0x17);
         return hash_uint32_bytes(h, mino_queue_hash(v));
+    case MINO_BYTES:
+        h = fnv_mix(h, 0x18);
+        return hash_uint32_bytes(h, mino_bytes_hash(v));
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);

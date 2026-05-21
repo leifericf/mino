@@ -374,6 +374,7 @@ mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
     case MINO_AGENT:     return mino_keyword(S, "agent");
     case MINO_CHAN:      return mino_keyword(S, "chan");
     case MINO_QUEUE:     return mino_keyword(S, "queue");
+    case MINO_BYTES:     return mino_keyword(S, "bytes");
     }
     return mino_keyword(S, "unknown");
 }
@@ -429,6 +430,8 @@ DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && mino_type_of(v) == MINO_TYPE)
 DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && mino_type_of(v) == MINO_RECORD), "record?")
 DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && mino_type_of(v) == MINO_UUID),    "uuid?")
 DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && mino_type_of(v) == MINO_REGEX),   "regex?")
+DEFINE_TYPE_PRED(prim_bytes_p,       (v != NULL && mino_type_of(v) == MINO_BYTES && v->as.bytes.bit_tail == 0), "bytes?")
+DEFINE_TYPE_PRED(prim_bitstring_p,   (v != NULL && mino_type_of(v) == MINO_BYTES),   "bitstring?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -485,6 +488,7 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     case MINO_HOST_ARRAY:   return v->as.host_array.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_MAP_ENTRY:    return mino_false(S);
     case MINO_QUEUE:        return mino_queue_count(v) == 0 ? mino_true(S) : mino_false(S);
+    case MINO_BYTES:        return mino_bytes_len(v) == 0 ? mino_true(S) : mino_false(S);
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");
@@ -1575,6 +1579,12 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns true if x is a UUID value."},
     {"regex?",     prim_regex_p,
      "Returns true if x is a regex value."},
+    {"bytes?",     prim_bytes_p,
+     "Returns true if x is a byte-aligned mino bytes value (the "
+     "immutable binary-data type returned by byte-array)."},
+    {"bitstring?", prim_bitstring_p,
+     "Returns true if x is any mino bytes value -- byte-aligned or "
+     "bit-aligned. bytes? is the byte-aligned subset."},
     {"alloc-profile-enabled?", prim_alloc_profile_enabled_p,
      "Returns true if this binary was built with -DMINO_ALLOC_PROFILE=1."},
     {"alloc-profile-reset!",   prim_alloc_profile_reset_bang,

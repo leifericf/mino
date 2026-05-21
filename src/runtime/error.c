@@ -272,6 +272,7 @@ const char *type_tag_str(const mino_val *v)
     case MINO_AGENT:     return "agent";
     case MINO_CHAN:      return "chan";
     case MINO_QUEUE:     return "queue";
+    case MINO_BYTES:     return "bytes";
     }
     return "unknown";
 }

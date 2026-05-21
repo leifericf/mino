@@ -3091,11 +3091,12 @@
    2-vectors)."
   [x] (and (vector? x) (= 2 (count x))))
 
-;; Mino has no host byte-arrays or URI type; the predicates return
-;; false for portability with portable-Clojure code. `inst?` does the
-;; real check against the `:mino/instant` meta marker that
-;; clojure.instant attaches to its parsed maps.
-(defn bytes? [_] false)
+;; bytes? / bitstring? predicates are installed as C primitives -- the
+;; real checks against MINO_BYTES live in src/prim/reflection.c so they
+;; integrate with the type-dispatch fast path. `inst?` does the real
+;; check against the `:mino/instant` meta marker that clojure.instant
+;; attaches to its parsed maps. mino has no URI type, so uri? stays
+;; false.
 (defn inst?  [v]
   (boolean (and (map? v) (:mino/instant (meta v)))))
 (defn uri?   [_] false)

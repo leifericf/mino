@@ -1458,6 +1458,8 @@ int mino_eq(const mino_val *a, const mino_val *b)
             && mino_eq(a->as.map_entry.v, b->as.map_entry.v);
     case MINO_QUEUE:
         return mino_queue_eq(a, b);
+    case MINO_BYTES:
+        return mino_bytes_eq(a, b);
     }
     return 0;
 }
