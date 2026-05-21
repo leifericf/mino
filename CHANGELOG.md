@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.422.1 — Amalgamate Symbol Collision Fix
+
+Renames the static `kw_match` helper in `src/prim/bits.c` to
+`bits_kw_match`. The amalgamate pipeline concatenates every `.c`
+file into a single `dist/mino.c` translation unit, where the
+identically-named static in `src/prim/module.c` collided. Per-file
+TUs in the standalone build link cleanly without the rename, so
+local tests passed but `release-gate` (which exercises amalgamate)
+caught it post-push.
+
 ## v0.422.0 — Post-Canon-Gaps Close-Out
 
 No runtime change. Three sections of the C API stay UNSTABLE

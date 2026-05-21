@@ -141,7 +141,7 @@ typedef struct {
     long long     size;       /* in bits */
 } seg_opts_t;
 
-static int kw_match(const mino_val *k, const char *name)
+static int bits_kw_match(const mino_val *k, const char *name)
 {
     if (k == NULL || mino_type_of(k) != MINO_KEYWORD) return 0;
     return strcmp(k->as.s.data, name) == 0;
@@ -172,7 +172,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
     for (i = start; i + 1 < vec_len; i += 2) {
         mino_val *k = vec_nth(vec, i);
         mino_val *v = vec_nth(vec, i + 1);
-        if (kw_match(k, "size")) {
+        if (bits_kw_match(k, "size")) {
             if (v == NULL || !mino_val_int_p(v)
                 || mino_val_int_get(v) < 0) {
                 char buf[96];
@@ -183,11 +183,11 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
             }
             out->size     = mino_val_int_get(v);
             out->size_set = 1;
-        } else if (kw_match(k, "type")) {
-            if (kw_match(v, "int"))        out->type = BITS_TYPE_INT;
-            else if (kw_match(v, "uint"))  out->type = BITS_TYPE_UINT;
-            else if (kw_match(v, "float")) out->type = BITS_TYPE_FLOAT;
-            else if (kw_match(v, "bytes")) out->type = BITS_TYPE_BYTES;
+        } else if (bits_kw_match(k, "type")) {
+            if (bits_kw_match(v, "int"))        out->type = BITS_TYPE_INT;
+            else if (bits_kw_match(v, "uint"))  out->type = BITS_TYPE_UINT;
+            else if (bits_kw_match(v, "float")) out->type = BITS_TYPE_FLOAT;
+            else if (bits_kw_match(v, "bytes")) out->type = BITS_TYPE_BYTES;
             else {
                 char buf[120];
                 snprintf(buf, sizeof(buf),
@@ -196,9 +196,9 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
                 prim_throw_classified(S, "eval/type", "MTY001", buf);
                 return -1;
             }
-        } else if (kw_match(k, "endian")) {
-            if (kw_match(v, "big"))         out->endian = BITS_BIG;
-            else if (kw_match(v, "little")) out->endian = BITS_LITTLE;
+        } else if (bits_kw_match(k, "endian")) {
+            if (bits_kw_match(v, "big"))         out->endian = BITS_BIG;
+            else if (bits_kw_match(v, "little")) out->endian = BITS_LITTLE;
             else {
                 char buf[120];
                 snprintf(buf, sizeof(buf),
@@ -206,7 +206,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
                 prim_throw_classified(S, "eval/type", "MTY001", buf);
                 return -1;
             }
-        } else if (kw_match(k, "signed?")) {
+        } else if (bits_kw_match(k, "signed?")) {
             out->signed_ = mino_is_truthy_inline(v) ? 1 : 0;
         } else {
             char buf[120];
@@ -434,32 +434,32 @@ mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
         p = p->as.cons.cdr;
         {
             mino_val *v = p->as.cons.car;
-            if (kw_match(k, "offset")) {
+            if (bits_kw_match(k, "offset")) {
                 if (v == NULL || !mino_val_int_p(v) || mino_val_int_get(v) < 0) {
                     return prim_throw_classified(S, "eval/type", "MTY001",
                         "bits-get: :offset must be a non-negative integer");
                 }
                 offset = mino_val_int_get(v);
-            } else if (kw_match(k, "size")) {
+            } else if (bits_kw_match(k, "size")) {
                 if (v == NULL || !mino_val_int_p(v) || mino_val_int_get(v) < 0) {
                     return prim_throw_classified(S, "eval/type", "MTY001",
                         "bits-get: :size must be a non-negative integer");
                 }
                 size = mino_val_int_get(v);
                 size_set = 1;
-            } else if (kw_match(k, "type")) {
-                if      (kw_match(v, "int"))   type = BITS_TYPE_INT;
-                else if (kw_match(v, "uint"))  type = BITS_TYPE_UINT;
-                else if (kw_match(v, "float")) type = BITS_TYPE_FLOAT;
-                else if (kw_match(v, "bytes")) type = BITS_TYPE_BYTES;
+            } else if (bits_kw_match(k, "type")) {
+                if      (bits_kw_match(v, "int"))   type = BITS_TYPE_INT;
+                else if (bits_kw_match(v, "uint"))  type = BITS_TYPE_UINT;
+                else if (bits_kw_match(v, "float")) type = BITS_TYPE_FLOAT;
+                else if (bits_kw_match(v, "bytes")) type = BITS_TYPE_BYTES;
                 else return prim_throw_classified(S, "eval/type", "MTY001",
                     "bits-get: :type must be :int, :uint, :float, or :bytes");
-            } else if (kw_match(k, "endian")) {
-                if      (kw_match(v, "big"))    endian = BITS_BIG;
-                else if (kw_match(v, "little")) endian = BITS_LITTLE;
+            } else if (bits_kw_match(k, "endian")) {
+                if      (bits_kw_match(v, "big"))    endian = BITS_BIG;
+                else if (bits_kw_match(v, "little")) endian = BITS_LITTLE;
                 else return prim_throw_classified(S, "eval/type", "MTY001",
                     "bits-get: :endian must be :big or :little");
-            } else if (kw_match(k, "signed?")) {
+            } else if (bits_kw_match(k, "signed?")) {
                 signed_ = mino_is_truthy_inline(v) ? 1 : 0;
             } else {
                 return prim_throw_classified(S, "eval/type", "MTY001",
