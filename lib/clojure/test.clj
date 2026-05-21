@@ -51,6 +51,17 @@
     (swap! *report-counters* update :fail inc)
     (swap! *report-counters* update :failures conj entry)))
 
+(defn assert-error! [form msg thrown]
+  (let [ctx   (reverse *testing-contexts*)
+        tname *current-test*
+        entry {:test tname
+               :form form
+               :message msg
+               :error (str thrown)
+               :context ctx}]
+    (swap! *report-counters* update :error inc)
+    (swap! *report-counters* update :failures conj entry)))
+
 (defn- thrown?-form? [sym]
   (and (symbol? sym) (= "thrown?" (name sym))))
 
@@ -125,20 +136,24 @@
   (let [gs-exp (gensym) gs-act (gensym)
         a (first (rest expr))
         b (first (rest (rest expr)))]
-    `(let [~gs-exp ~a
-           ~gs-act ~b]
-       (if (= ~gs-exp ~gs-act)
-         (assert-pass!)
-         (assert-fail! (pr-str '~expr) ~msg
-           (str "expected: " (pr-str ~gs-exp) "\n    actual: " (pr-str ~gs-act)))))))
+    `(try
+       (let [~gs-exp ~a
+             ~gs-act ~b]
+         (if (= ~gs-exp ~gs-act)
+           (assert-pass!)
+           (assert-fail! (pr-str '~expr) ~msg
+             (str "expected: " (pr-str ~gs-exp) "\n    actual: " (pr-str ~gs-act)))))
+       (catch __e (assert-error! (pr-str '~expr) ~msg __e)))))
 
 (defmacro is-truthy [expr msg]
   (let [gs (gensym)]
-    `(let [~gs ~expr]
-       (if ~gs
-         (assert-pass!)
-         (assert-fail! (pr-str '~expr) ~msg
-           (str "expected truthy, got: " (pr-str ~gs)))))))
+    `(try
+       (let [~gs ~expr]
+         (if ~gs
+           (assert-pass!)
+           (assert-fail! (pr-str '~expr) ~msg
+             (str "expected truthy, got: " (pr-str ~gs)))))
+       (catch __e (assert-error! (pr-str '~expr) ~msg __e)))))
 
 ;; --- Public API ---
 

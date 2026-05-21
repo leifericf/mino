@@ -43,6 +43,17 @@
   `:refer` and `:refer-macros` appear in the same spec, their
   vectors are concatenated so neither import side is dropped.
 
+- `clojure.test/is` now isolates per-assertion errors. An unexpected
+  exception thrown inside the value-extraction part of an `is` form
+  (e.g. `(is (= 0 (bit-and nil 1)))` where `bit-and` throws on
+  `nil`) used to propagate out of the assertion macro and halt the
+  entire surrounding `deftest`. Subsequent `is` forms never ran. The
+  expanded `is-eq` and `is-truthy` macros now wrap evaluation in a
+  `try`/`catch` that records the throw via a new `assert-error!`
+  helper and lets the deftest proceed to the next assertion —
+  matching JVM `clojure.test`'s long-standing per-assertion isolation
+  contract.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and
