@@ -127,6 +127,25 @@
   ;; classified) so user typos surface immediately.
   (is (thrown? (with-precision 5 :rounding :bogus-mode (/ 1M 3M)))))
 
+(deftest with-precision-jvm-symbol-modes
+  ;; ClojureDocs / canonical JVM examples pass the rounding mode as a
+  ;; bare java.math.RoundingMode enum symbol (UP, HALF_UP, ...). mino
+  ;; accepts these in addition to its native keyword surface so canon
+  ;; examples paste through unchanged. Verification goes through /
+  ;; since bigdec division is the path that consumes *math-context*.
+  (is (= 0.3M (with-precision 1 :rounding HALF_UP   (/ 25M 100M))))
+  (is (= 0.2M (with-precision 1 :rounding HALF_DOWN (/ 25M 100M))))
+  (is (= 0.2M (with-precision 1 :rounding DOWN      (/ 25M 100M))))
+  (is (= 0.3M (with-precision 1 :rounding UP        (/ 25M 100M))))
+  (is (= 0.2M (with-precision 1 :rounding FLOOR     (/ 25M 100M))))
+  (is (= 0.3M (with-precision 1 :rounding CEILING   (/ 25M 100M))))
+  (is (= 0.12M (with-precision 2 :rounding HALF_EVEN (/ 125M 1000M))))
+  (is (thrown? (with-precision 5 :rounding UNNECESSARY (/ 1M 3M))))
+  (is (= 0.5M  (with-precision 5 :rounding UNNECESSARY (/ 1M 2M))))
+  ;; A symbol that isn't a RoundingMode enum constant is rejected at
+  ;; macroexpansion, not deferred to a runtime "unbound symbol".
+  (is (thrown? (eval '(with-precision 5 :rounding NOT_A_MODE (/ 1M 3M))))))
+
 (deftest no-math-context-still-exact-or-throws
   ;; Outside with-precision, the historical exact-or-throw behavior is
   ;; preserved. (/ 1M 3M) is non-terminating → throws.

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.422.3 — `with-precision` Accepts JVM Rounding Symbols
+
+The `with-precision` macro now accepts the JVM `RoundingMode` enum
+constants (`UP`, `DOWN`, `CEILING`, `FLOOR`, `HALF_UP`, `HALF_DOWN`,
+`HALF_EVEN`, `UNNECESSARY`) as bare symbols, in addition to mino's
+native keyword surface (`:up`, `:down`, ...). The macro folds the
+symbol form to the corresponding keyword at expand time. Unknown
+symbols surface a clear macro-time error rather than the misleading
+runtime "unbound symbol" message. Canon `(with-precision N :rounding
+HALF_UP ...)` examples from clojuredocs.org now paste through unchanged.
+
+Caught by the external `clojure-test-suite` driver: `with_precision.cljc`
+errored on load because every assertion writes the JVM symbol form.
+
 ## v0.422.2 — `long` Coercion Stays Fixnum
 
 Fixes `(long x)` silently promoting to `:bigint` when the coerced

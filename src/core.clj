@@ -3049,14 +3049,37 @@
    call."
   nil)
 
+(def ^:private rounding-symbol->keyword
+  ;; JVM RoundingMode enum constants → mino's :keyword surface. Lets
+  ;; canonical clojuredocs-shaped examples (which write the mode as a
+  ;; bare symbol, e.g. (with-precision 1 :rounding HALF_UP ...)) paste
+  ;; through without translation.
+  '{UP          :up
+    DOWN        :down
+    CEILING     :ceiling
+    FLOOR       :floor
+    HALF_UP     :half-up
+    HALF_DOWN   :half-down
+    HALF_EVEN   :half-even
+    UNNECESSARY :unnecessary})
+
 (defmacro with-precision
   "Sets *math-context* to {:precision precision :rounding-mode mode}
   around body. The keyword :rounding takes the next form as a
   rounding-mode keyword (e.g. (with-precision 5 :rounding :half-up
-  (/ 1M 3M))). Without :rounding, the mode defaults to :half-up."
+  (/ 1M 3M))) or as a JVM RoundingMode enum symbol (e.g. HALF_UP,
+  CEILING). Without :rounding, the mode defaults to :half-up."
   [precision & body]
   (let [has-rounding? (and (seq body) (= :rounding (first body)))
-        mode          (if has-rounding? (second body) :half-up)
+        raw-mode      (if has-rounding? (second body) :half-up)
+        mode          (if (symbol? raw-mode)
+                        (or (rounding-symbol->keyword raw-mode)
+                            (throw (str "with-precision: unknown rounding mode "
+                                        raw-mode
+                                        " (expected UP, DOWN, CEILING, FLOOR, "
+                                        "HALF_UP, HALF_DOWN, HALF_EVEN, "
+                                        "or UNNECESSARY)")))
+                        raw-mode)
         actual-body   (if has-rounding? (drop 2 body) body)]
     `(binding [*math-context* {:precision ~precision
                                :rounding-mode ~mode}]
