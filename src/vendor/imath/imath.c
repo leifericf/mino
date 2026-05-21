@@ -1404,14 +1404,26 @@ mp_result mp_int_to_int(mp_int z, mp_small *out) {
 
   mp_usmall uz = MP_USED(z);
   mp_digit *dz = MP_DIGITS(z) + uz - 1;
-  mp_small uv = 0;
+  /* Use unsigned accumulation to assemble the magnitude. Signed
+   * left-shift past the high bit is UB in C; doing the assembly in
+   * mp_usmall (unsigned long) lets the shifts wrap cleanly and the
+   * final cast carries the bit pattern back into mp_small. The range
+   * gate above already rejected values that would overflow the
+   * signed range, so the magnitude fits in MP_SMALL_MAX + 1. */
+  mp_usmall uv = 0;
   while (uz > 0) {
     uv <<= MP_DIGIT_BIT / 2;
     uv = (uv << (MP_DIGIT_BIT / 2)) | *dz--;
     --uz;
   }
 
-  if (out) *out = (mp_small)((sz == MP_NEG) ? -uv : uv);
+  /* Negate in unsigned space so |MP_SMALL_MIN| (one past the signed
+   * range, the only value uv may hit for in-range negative inputs)
+   * doesn't trip a -fsanitize=undefined "negation cannot be
+   * represented" diagnostic. */
+  if (out) {
+    *out = (sz == MP_NEG) ? (mp_small)(0 - uv) : (mp_small)uv;
+  }
 
   return MP_OK;
 }
