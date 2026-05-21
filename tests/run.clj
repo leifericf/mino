@@ -97,6 +97,7 @@
 (require "tests/reducers_test")
 (require "tests/capability_metadata_test")
 (require "tests/async_smoke_test")
+(require "tests/parallel_calls_test")
 (require "tests/fs_test")
 (require "tests/proc_test")
 (require "tests/deps_test")

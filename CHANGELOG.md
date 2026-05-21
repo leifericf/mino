@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.404.0 — `pcalls`, `pvalues`, and `alt!` Macro
+
+`pcalls` and `pvalues` round out the parallel-evaluation surface
+alongside the existing `pmap`. Both fall through `pmap`, so the
+`mino-thread-limit <= 1` sequential fallback also applies here.
+
+`clojure.core.async/alt!` ships as a macro over `alts!` with the
+canonical clause shape:
+
+```clojure
+(alt!
+  ch           ([v] (str "got " v))
+  [out-ch val] ([_] :put-ok)
+  :priority    true
+  :default     :nothing)
+```
+
+Plain-expression clauses, single-binding `([v] ...)`, and two-binding
+`([v c] ...)` are all supported. mino doesn't gate `alt!` to a
+surrounding `(go ...)` block — like `alts!`, it works on the calling
+thread.
+
+`tests/parallel_calls_test.clj` covers pcalls, pvalues (including
+lazy realization), and every alt! clause shape.
+
 ## v0.403.0 — `*print-length*` / `*print-level*` Dynvars
 
 `pr`, `prn`, `print`, `println`, and `pr-str` now consult two new

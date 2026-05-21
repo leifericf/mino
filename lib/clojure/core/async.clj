@@ -292,6 +292,73 @@
   (alts-start ops opts cb)
   1)
 
+;; --- alt! macro ---
+;;
+;; Sugar over alts! with clause-shaped operands. Each clause is a pair:
+;;
+;;   port          expr            -- take from port, run expr
+;;   port          ([v] body...)   -- take from port, bind value to v
+;;   port          ([v c] body...) -- bind value AND completion port
+;;   [ch val]      expr            -- put val on ch, run expr on success
+;;   [ch val]      ([v c] body...) -- bind put-ack and channel
+;;   :default      expr            -- run when no port is ready
+;;   :priority     bool            -- option pair (no result clause)
+;;
+;; The macro builds the ops vector, threads :priority / :default options
+;; through to alts!, and dispatches the result through cond on which port
+;; (or :default) completed. mino doesn't gate alt! to (go ...) — alts!
+;; works on the calling thread.
+
+(defmacro alt!
+  "Sugar for alts! plus a cond over which clause completed. See the
+  alts! docstring for the underlying contract.
+
+  Each pair: `(channel-or-vec result)` or `:default expr` or
+  `:priority bool`. Result may be:
+    - a plain expression
+    - `([v] body...)` to bind the value
+    - `([v c] body...)` to bind value and channel
+
+  Returns the result expression for the winning clause, or the
+  :default expression when no port was ready (and :default was given)."
+  [& clauses]
+  (let [pairs       (partition 2 clauses)
+        priority?   (some (fn [[k _]] (= k :priority)) pairs)
+        priority-v  (when priority? (second (first (filter #(= :priority (first %)) pairs))))
+        default?    (some (fn [[k _]] (= k :default)) pairs)
+        default-expr (when default? (second (first (filter #(= :default (first %)) pairs))))
+        port-pairs  (remove (fn [[k _]] (or (= k :priority) (= k :default))) pairs)
+        port-vec    (vec (map first port-pairs))
+        rsym (gensym "alt-result-")
+        vsym (gensym "alt-val-")
+        csym (gensym "alt-ch-")
+        bind-result (fn [clause]
+                      (if (and (seq? clause) (vector? (first clause)))
+                        (let [bvec (first clause)
+                              body (rest clause)]
+                          (cond
+                            (= 1 (count bvec))
+                            `(let [~(first bvec) ~vsym] ~@body)
+                            (= 2 (count bvec))
+                            `(let [~(first bvec) ~vsym
+                                   ~(second bvec) ~csym] ~@body)
+                            :else clause))
+                        clause))
+        cond-clauses
+        (mapcat (fn [[op result]]
+                  (let [port (if (vector? op) (first op) op)]
+                    [`(identical? ~csym ~port) (bind-result result)]))
+                port-pairs)
+        opts (concat (when priority? [:priority priority-v])
+                     (when default? [:default :alt!-default-fired]))]
+    `(let [~rsym (alts! ~port-vec ~@opts)
+           ~vsym (first ~rsym)
+           ~csym (second ~rsym)]
+       (cond ~@cond-clauses
+             ~@(when default?
+                 [`(identical? ~csym :default) default-expr])
+             :else nil))))
+
 ;; ---------------------------------------------------------------------
 ;; Compatibility aliases
 ;;

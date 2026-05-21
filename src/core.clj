@@ -2126,6 +2126,20 @@
                         (map deref realized-chunk)))))]
        (step coll)))))
 
+(defn pcalls
+  "Executes the no-arg fns in parallel, returning a lazy sequence of
+   their values. Mirrors clojure.core/pcalls. When host threads aren't
+   granted (mino-thread-limit <= 1), falls back to sequential map so
+   the surface is portable across embedded and CLI runs."
+  [& fns]
+  (pmap (fn [f] (f)) fns))
+
+(defmacro pvalues
+  "Returns a lazy sequence of the values of the exprs, which are
+   evaluated in parallel via pcalls. Mirrors clojure.core/pvalues."
+  [& exprs]
+  `(pcalls ~@(map (fn [e] `(fn [] ~e)) exprs)))
+
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
 ;; Gated on the :protocols capability -- defprotocol / extend-protocol /
