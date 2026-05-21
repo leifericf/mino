@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `Long/MAX_VALUE` and `Long/MIN_VALUE` are now bound as `:int`
+  rather than `:bigint`. The previous binding used the tower-aware
+  `mino_int` constructor, which auto-promotes values outside the
+  61-bit inline-tag range to `MINO_BIGINT` so plain literals can
+  use the numeric tower transparently. For these two constants
+  that promotion was wrong: `(inc Long/MAX_VALUE)` produced a
+  wider bigint instead of throwing `MCT001` (integer overflow),
+  and `(dec Long/MIN_VALUE)` did the same. The fix mirrors v0.422.2:
+  switch to `mino_int_wrap`, the fixnum-preserving constructor.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and

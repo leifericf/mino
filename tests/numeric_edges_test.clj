@@ -58,6 +58,15 @@
   (is (thrown? (* (long (/ -9223372036854775808 2)) 3)))
   (is (thrown? (* 3 (long (/ -9223372036854775808 2))))))
 
+(deftest long-boundary-statics-are-fixnums
+  ;; Long/MAX_VALUE and Long/MIN_VALUE are the long-tier boundary
+  ;; constants; they must be :int so checked-arithmetic overflow
+  ;; applies when callers do `(inc Long/MAX_VALUE)` etc.
+  (is (= :int (type Long/MAX_VALUE)))
+  (is (= :int (type Long/MIN_VALUE)))
+  (is (thrown? (inc Long/MAX_VALUE)))
+  (is (thrown? (dec Long/MIN_VALUE))))
+
 (deftest with-precision-basic
   (is (= 0.33333M (with-precision 5 (/ 1M 3M))))
   (is (= 0.667M (with-precision 3 (/ 2M 3M))))

@@ -474,8 +474,13 @@ void mino_install_jvm_statics(mino_state *S, mino_env *env)
     /* Value-shaped statics: literal slash-name bindings to a fresh
      * value cell; the env's literal-binding probe in
      * eval_qualified_symbol finds them on lookup. */
-    env_bind(S, core_env, "Long/MAX_VALUE",    mino_int(S, 9223372036854775807LL));
-    env_bind(S, core_env, "Long/MIN_VALUE",    mino_int(S, (long long)(-9223372036854775807LL - 1)));
+    /* Both boundary values exceed the 61-bit inline-tag range, so
+     * mino_int would auto-promote them to MINO_BIGINT. mino_int_wrap
+     * keeps the MINO_INT type (boxed when the value won't fit a tagged
+     * cell) so checked-arithmetic overflow still applies on the
+     * downstream (inc Long/MAX_VALUE) / (dec Long/MIN_VALUE). */
+    env_bind(S, core_env, "Long/MAX_VALUE",    mino_int_wrap(S, 9223372036854775807LL));
+    env_bind(S, core_env, "Long/MIN_VALUE",    mino_int_wrap(S, (long long)(-9223372036854775807LL - 1)));
     env_bind(S, core_env, "Integer/MAX_VALUE", mino_int(S, 2147483647LL));
     env_bind(S, core_env, "Integer/MIN_VALUE", mino_int(S, -2147483648LL));
     env_bind(S, core_env, "Short/MAX_VALUE",   mino_int(S, 32767));
