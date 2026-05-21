@@ -2,10 +2,11 @@
 
 (require '[clojure.test.check.generators :as gen])
 
-;; Minimal clojure.test.check.properties port for mino. A property
-;; is a map {:test.check/property true :gen-vec args-gen :pred pred}
-;; where args-gen produces a vector of generated args and pred is
-;; called with those args (apply pred args).
+;; clojure.test.check.properties port for mino. A property is a map
+;;   {:test.check/property true :gen-args args-gen :pred pred}
+;; where args-gen is a generator producing a vector of args (with rose
+;; tree shrinking) and pred is called via (apply pred args). The
+;; predicate's result is wrapped as {:result <truthy?>}.
 
 (defn property?
   [x]
@@ -28,14 +29,22 @@
        (apply gen/tuple ~gens)
        (fn ~names ~@body))))
 
+(defn pred-passes?
+  "Apply the property's predicate to args; return true on truthy
+   result, false on falsy or thrown."
+  [pred args]
+  (try (boolean (apply pred args))
+       (catch __e false)))
+
 (defn run-property
-  "Generate one args vector and run the predicate. Returns
-   {:result true} on pass, {:result false :args args} on fail."
+  "Generate one args rose tree at the given size and run the
+   predicate against the root. Returns
+   {:result true} or {:result false :args args :rose rose}.
+  The rose tree is included on failure so quick-check can shrink."
   [prop size]
-  (let [args (gen/call-gen (:gen-args prop) size)
-        pred (:pred prop)
-        ok   (try (boolean (apply pred args))
-                  (catch __e false))]
-    (if ok
+  (let [rose (gen/call-gen (:gen-args prop) size)
+        args (gen/rose-val rose)
+        pred (:pred prop)]
+    (if (pred-passes? pred args)
       {:result true :args args}
-      {:result false :args args})))
+      {:result false :args args :rose rose})))

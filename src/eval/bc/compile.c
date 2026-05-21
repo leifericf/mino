@@ -4200,12 +4200,17 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
                 return 0;
             }
             /* Constructor lane: lower `[a b c]` with non-const
-             * elements to `(vector a b c)` so the enclosing fn keeps
-             * compiling to BC. Without this every `[a b c]` literal
-             * in a defn body forces tree-walk eval. */
+             * elements to `(clojure.core/vector a b c)` so the
+             * enclosing fn keeps compiling to BC. The qualified head
+             * avoids breakage when a user namespace declares
+             * `:refer-clojure :exclude [vector]`; the literal must
+             * still build a vector regardless of the local `vector`
+             * binding (matches JVM Clojure's reader-time literal
+             * semantics). Without this lowering, every `[a b c]`
+             * literal in a defn body forces tree-walk eval. */
             {
                 mino_state *S = c->S;
-                mino_val *head = mino_symbol(S, "vector");
+                mino_val *head = mino_symbol(S, "clojure.core/vector");
                 mino_val *args = mino_nil(S);
                 if (head == NULL) return -1;
                 for (size_t i = form->as.vec.len; i > 0; i--) {
@@ -4235,7 +4240,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
              * doesn't cross for typical source literals). */
             {
                 mino_state *S = c->S;
-                mino_val *head = mino_symbol(S, "hash-map");
+                mino_val *head = mino_symbol(S, "clojure.core/hash-map");
                 mino_val *call_args = mino_nil(S);
                 size_t      i;
                 if (head == NULL) return -1;
@@ -4265,7 +4270,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
              * iteration follows insertion order via key_order. */
             {
                 mino_state *S = c->S;
-                mino_val *head = mino_symbol(S, "hash-set");
+                mino_val *head = mino_symbol(S, "clojure.core/hash-set");
                 mino_val *call_args = mino_nil(S);
                 size_t      i;
                 if (head == NULL) return -1;

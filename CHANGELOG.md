@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.406.0 — `test.check` Rose-Tree Shrinking
+
+`clojure.test.check` now produces rose-tree-backed generators and a
+walker in `quick-check` that descends greedily into the first failing
+child at each level. The first node whose children all pass is the
+minimal-counterexample tip; `quick-check`'s result map now carries a
+`:shrunk` sub-map with `:smallest`, `:depth`, and
+`:total-nodes-visited`.
+
+Shrinkers implemented:
+- `int` / `nat` / `s-pos-int` / `neg-int`: halve toward zero, then
+  n-step-closer.
+- `vector` / `list` / `set` / `map`: drop each element, then shrink
+  each element using its own rose tree.
+- `tuple`: shrink one position at a time using each position's rose.
+- `string`: drop one character at a time.
+- `boolean`: true shrinks to false.
+- `such-that`: shrink-tree is filtered to keep only smaller values
+  that still satisfy the predicate.
+- `bind`: shrink-tree comes from the second-stage generator.
+- `fmap`: shrink-tree preserves structure under f.
+- `keyword` / `symbol` / `char`: no shrinks (the simplest valid name
+  is rarely meaningfully shorter).
+
+`bc/compile.c` constructor-lane lowering now uses
+`clojure.core/vector`, `clojure.core/hash-map`, `clojure.core/hash-set`
+rather than bare symbols, so a user namespace that declares
+`:refer-clojure :exclude [vector]` still gets functioning vector
+literals.
+
+mino's lazy-seq currently resolves ns-level symbol references in the
+body against the REALIZER'S `*ns*`, not the defining ns. This is a
+real runtime bug logged in `.local/BUGS.md`; the generators.clj
+shipper-side workaround is closure-capture of every helper fn before
+the lazy body. The bug fix (capture defining_ns on MINO_LAZY) is
+queued for a separate cycle.
+
 ## v0.405.0 — `hash-combine`, `*math-context*`, `unchecked-long` Wrap
 
 Three numeric / bigdec edges close at once:
