@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.412.0 — JVM Statics + Embedded-Host Remap
+
+Two complementary layers ship under one file
+(`src/prim/jvm_statics.c`) so JVM-Clojure preambles work in ported
+mino code without touching the rest of the runtime:
+
+**Layer 1 — pure value & math statics.** Bindings like
+`Long/MAX_VALUE`, `Math/PI`, `Math/sqrt`, `Integer/parseInt`,
+`Double/parseDouble`, `Double/isNaN`, `Boolean/parseBoolean`,
+`java.util.List/of` / `Set/of` / `Map/of`, `String/valueOf`,
+`Character/toString`. Math methods that already exist as
+`clojure.math/*` C primitives are aliased there so `Math/sqrt` and
+`clojure.math/sqrt` have identical behavior. Math/round, Math/abs,
+Math/min, Math/max are JVM-shape variants (return-type contract
+differs from clojure.math's float-returning round) and live in this
+module.
+
+**Layer 2 — embedded-host semantic remap.** JVM Class/Member
+references that mino has a real native equivalent for are routed to
+the existing mino primitive: `System/currentTimeMillis`,
+`System/nanoTime`, `System/getenv`, `System/exit`, `Thread/sleep`,
+`java.util.UUID/randomUUID`, `java.util.UUID/fromString`. The
+Clojure-level UX matches JVM; the implementation underneath is
+mino-native.
+
+`System/currentTimeMillis` returns a long-typed epoch millis count
+sourced directly from the host wall clock (`clock_gettime`
+CLOCK_REALTIME on POSIX, `GetSystemTimeAsFileTime` on Windows). The
+return type matches the JVM contract (`(integer? ...)` succeeds).
+
+`System/getProperty` throws a clearly classified `MHO001` because
+mino has no JVM system-properties table; the message points the
+caller at `System/getenv` or the embedder's capability surface.
+
+`(str uuid)` was fixed in passing: it now emits the bare 36-char
+canonical form (matching JVM's `UUID.toString`) instead of the
+`#uuid "..."` reader-literal form. That makes
+`(java.util.UUID/fromString (str u))` round-trip and aligns mino's
+`str` semantics with JVM Clojure's. The `random-uuid-basic` test in
+`compat_test.clj` was updated to assert the version digit at the
+new (canonical) position 14.
+
 ## v0.411.0 — math-context Rounding Modes
 
 `*math-context*` now accepts the full JVM Clojure set of

@@ -310,8 +310,10 @@
   (testing "returns a UUID value"
     (is (uuid? (random-uuid))))
 
-  (testing "version 4 nibble (printed form)"
-    (is (= "4" (subs (str (random-uuid)) 21 22))))
+  (testing "version 4 nibble (JVM-canon str form: bare 36-char layout)"
+    ;; (str u) matches JVM UUID.toString: 8-4-4-4-12 hex. Position 14
+    ;; is the version digit, always '4' for v4 UUIDs.
+    (is (= "4" (subs (str (random-uuid)) 14 15))))
 
   (testing "unique on each call"
     (is (not= (random-uuid) (random-uuid)))))

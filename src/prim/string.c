@@ -1347,6 +1347,18 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
                 tmp[n] = '\0';
                 break;
             }
+            case MINO_UUID: {
+                /* JVM Clojure's `(str uuid)` returns the bare 36-char
+                 * canonical form (no #uuid prefix). Match that, so
+                 * (java.util.UUID/fromString (str u)) round-trips. */
+                const unsigned char *b = a->as.uuid.bytes;
+                n = snprintf(tmp, sizeof(tmp),
+                    "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+                    "%02x%02x%02x%02x%02x%02x",
+                    b[0],  b[1],  b[2],  b[3],  b[4],  b[5],  b[6],  b[7],
+                    b[8],  b[9],  b[10], b[11], b[12], b[13], b[14], b[15]);
+                break;
+            }
             default: {
                 /* Collections (vector, map, set, cons, lazy, atom) and
                  * opaque types: print via the standard printer so str

@@ -21,6 +21,7 @@
 (require "tests/sequence_test")
 (require "tests/lazy_test")
 (require "tests/lazy_seq_ns_scope_test")
+(require "tests/jvm_statics_test")
 (require "tests/macro_test")
 (require "tests/error_test")
 (require "tests/atom_test")

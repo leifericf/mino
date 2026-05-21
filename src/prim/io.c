@@ -116,15 +116,18 @@ static int io_emit(mino_state *S, const char *out_var_name,
             fallback = stderr;
         }
     }
-    fwrite(buf, 1, len, fallback);
+    if (len > 0) fwrite(buf, 1, len, fallback);
     /* *flush-on-newline*: when true (the JVM default), flush the
      * stream if the buffer contains a newline. When false, leave the
      * stream buffered so the OS write coalesces. The cached flag is
      * -1 (unresolved) outside a pr/print call; treat as the JVM
-     * default in that boundary case. */
+     * default in that boundary case. Guard the memchr scan against
+     * buf == NULL (UBSan flags applying any offset to a null pointer
+     * even for a zero-length read). */
     if (S->flush_on_newline_flag != 0) {
         if (S->flush_on_newline_flag == -1
-            || memchr(buf, '\n', len) != NULL) {
+            || (len > 0 && buf != NULL
+                && memchr(buf, '\n', len) != NULL)) {
             fflush(fallback);
         }
     }

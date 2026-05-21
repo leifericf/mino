@@ -584,6 +584,12 @@ void mino_install_clojure_core(mino_state *S, mino_env *env)
     }
     core_env = ns_env_ensure(S, "clojure.core");
 
+    /* JVM-static literal slash-name bindings (Long/MAX_VALUE,
+     * Math/sqrt, java.util.UUID/randomUUID, ...). Installed before
+     * core.clj runs so any future core.mino code that references them
+     * resolves cleanly. */
+    mino_install_jvm_statics(S, core_env);
+
     saved_ns      = S->ns_vars.current_ns;
     S->ns_vars.current_ns = "clojure.core";
     install_core_mino(S, core_env);

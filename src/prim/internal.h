@@ -361,6 +361,7 @@ mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_getenv(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env);
@@ -549,6 +550,9 @@ void mino_install_host(mino_state *S, mino_env *env);
 
 /* async.c */
 void mino_install_async(mino_state *S, mino_env *env);
+
+/* jvm_statics.c -- JVM Clojure surface-parity statics. */
+void mino_install_jvm_statics(mino_state *S, mino_env *env);
 
 /* Per-domain primitive tables.  Each prim_*.c exports the table and
  * its element count; prim/install.c composes them into k_core_domains[]
