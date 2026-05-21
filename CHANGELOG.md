@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.420.0 — Documentation Refresh
+
+Companion-repo refresh covering the v0.409-v0.419 series:
+
+- mino-site "Recent additions" on /documentation/coming-from-
+  clojure/ documents lazy-seq ns scoping, the five new print
+  dynvars, full math-context rounding modes, JVM Class/Member
+  statics + embedded-host remap, inst? / inst-ms / #inst, the
+  MINO_BYTES + bit-syntax surface, and the AOT-compiler
+  dynvars.
+- /documentation/compatibility-matrix/ updates the
+  with-precision rounding-mode row, adds rows for byte-array
+  (immutable), bits / bits-get / subbits / let-bits
+  (extension), inst? / inst-ms / #inst, and *clojure-version*.
+- /documentation/ adds a "Bytes and Bit Syntax" card.
+- About-page Inspirations gains a second BEAM borrowing
+  alongside message passing: Erlang's bit syntax.
+- mino-tests/tests/adv/fixtures/clojuredocs_allowlist.edn
+  drops every entry now closed (inst?, inst-ms, uuid?, bytes?,
+  the JVM static preambles, the Math/sqrt blockers).
+
+No runtime change.
+
 ## v0.419.0 — Bit-Syntax Cycle Close
 
 Companion-repo refresh for the MINO_BYTES + bit-syntax surface
