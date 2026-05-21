@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.422.2 — `long` Coercion Stays Fixnum
+
+Fixes `(long x)` silently promoting to `:bigint` when the coerced
+value fell outside the inline-tagged 61-bit range (roughly
+`|x| > 2^60`). The primitive was calling the tower-aware
+`mino_int` constructor, which auto-promotes large fixnums to
+`MINO_BIGINT` so plain literals can keep using the numeric tower
+transparently. For `long` that promotion is wrong: a coerced long
+should observe checked-arithmetic overflow downstream, and a
+`MINO_BIGINT` silently disables that check. `prim_long` now uses
+`mino_int_wrap`, the same fixnum-preserving constructor that
+backs `unchecked-multiply`, `inc`, `dec`, and the bit
+primitives.
+
+Caught by the external `clojure-test-suite` driver
+(`tests/clojure_test_suite.clj`): `star.cljc` was failing two
+overflow assertions of the form
+`(thrown? (* (long (/ Long/MIN_VALUE 2)) 3))` because the inner
+`long` was returning a bigint, so the outer `*` happily produced
+a wider bigint instead of throwing.
+
 ## v0.422.1 — Amalgamate Symbol Collision Fix
 
 Renames the static `kw_match` helper in `src/prim/bits.c` to

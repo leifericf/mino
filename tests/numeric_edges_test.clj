@@ -41,6 +41,23 @@
   (is (= 9223372036854775807 (unchecked-long 9223372036854775807N)))
   (is (= -9223372036854775808 (unchecked-long -9223372036854775808N))))
 
+(deftest long-stays-fixnum-across-tag-boundary
+  ;; long must always produce a fixnum (:int), even when the value
+  ;; falls outside the inline-tagged 61-bit range. Promoting to bigint
+  ;; here would silently disable checked-arithmetic overflow on the
+  ;; result.
+  (is (= :int (type (long 5))))
+  (is (= :int (type (long 4611686018427387904))))
+  (is (= :int (type (long -4611686018427387904))))
+  (is (= :int (type (long 9223372036854775807))))
+  (is (= :int (type (long -9223372036854775808))))
+  ;; Bigint-shaped input that fits the long range coerces back to :int.
+  (is (= :int (type (long 4611686018427387904N))))
+  ;; Once coerced, downstream checked arithmetic must observe overflow
+  ;; rather than auto-promote.
+  (is (thrown? (* (long (/ -9223372036854775808 2)) 3)))
+  (is (thrown? (* 3 (long (/ -9223372036854775808 2))))))
+
 (deftest with-precision-basic
   (is (= 0.33333M (with-precision 5 (/ 1M 3M))))
   (is (= 0.667M (with-precision 3 (/ 2M 3M))))

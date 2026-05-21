@@ -150,9 +150,11 @@ mino_val *prim_long(mino_state *S, mino_val *args, mino_env *env)
         snprintf(buf, sizeof(buf), "long: %s", err ? err : "expected a number");
         return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
-    /* mino's MINO_INT is int64 already, so the range check is the same
-     * one extract_integer_for_cast already did against long range. */
-    return mino_int(S, ll);
+    /* Keep the MINO_INT type even when the value falls outside the
+     * inline-tagged 61-bit range. mino_int would auto-promote to
+     * MINO_BIGINT in that band, which would then silently disable
+     * checked-arithmetic overflow on the coerced value. */
+    return mino_int_wrap(S, ll);
 }
 
 mino_val *prim_short(mino_state *S, mino_val *args, mino_env *env)
