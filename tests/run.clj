@@ -15,6 +15,7 @@
 (require "tests/binding_test")
 (require "tests/control_test")
 (require "tests/function_test")
+(require "tests/arity_strict_test")
 (require "tests/collection_test")
 (require "tests/string_test")
 (require "tests/sequence_test")

@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.401.0 — Strict Arity Verified and Locked In
+
+mino has been strict on function arity for a long time — both the
+tree-walker (`bind_simple_params` / `bind_params`) and the bytecode
+VM (`mino_bc_run`) throw `MAR001` / `MAR002` on missing or extra args,
+matching JVM Clojure's `ArityException` contract. This release ships
+a new `tests/arity_strict_test.clj` that locks the guarantee across
+every call shape: fixed-arity, variadic-with-rest, multi-arity
+dispatch, `defn`, `apply`, macros, map/vector destructuring, and the
+BC hot-loop path. The diagnostic carries `:mino/kind = :eval/arity`
+and one of `MAR001` / `MAR002` so port-from-JVM code can dispatch on
+the structured form.
+
+No behavioral change. The opening tag of the close-the-gaps cycle.
+
 ## v0.400.0 — `unchecked-*` Family Coerces the Full Numeric Tower
 
 The diff probe surfaced `(unchecked-byte 1N)` and `(unchecked-int -5/3)`
