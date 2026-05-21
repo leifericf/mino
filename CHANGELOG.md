@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
+
+`with-precision` now affects bigdec multiplication, addition, and
+subtraction as well as division. The mino primitives previously
+applied the configured precision / rounding mode only inside
+`mino_bigdec_div`; the other three operations produced exact
+results that ignored `*math-context*` entirely. This made canonical
+examples of the form `(with-precision N :rounding MODE (* x y))`
+return the unrounded product instead of the JVM-canon rounded
+result.
+
+Two changes:
+
+- `tower_apply_bigdec` (cons-spine) and `tower_seeded_step`
+  (seeded reduce) now route the result of `*`, `+`, and `-` through
+  a new `mino_bigdec_apply_math_context` helper. Division still
+  rounds internally inside `mino_bigdec_div` because it interleaves
+  rounding with the iterative quotient loop.
+- `tower_reduce` and `tower_reduce_argv` seed the accumulator with
+  the first operand for `+`, `*`, and multi-arg `-` (matching JVM
+  Clojure's `(reduce + (+ x y) more)` fold-from-first). The
+  previous synthetic-zero / synthetic-one seed introduced an extra
+  `0 + a` / `1 * a` step that, under `*math-context*`, applied
+  rounding one time too many. `(+ x)` and `(* x)` are now identity
+  (no rounding of a single operand); `(- x)` still negates with
+  rounding (matching JVM's `Numbers/minus(x)` under `MathContext`).
+
+Caught by `with_precision.cljc` in the external clojure-test-suite,
+which exercises `(with-precision N :rounding MODE (* x y))` across
+all eight rounding modes; the file now passes 18/18 (was 0/18).
+
 ## v0.422.3 — `with-precision` Accepts JVM Rounding Symbols
 
 The `with-precision` macro now accepts the JVM `RoundingMode` enum

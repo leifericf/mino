@@ -131,8 +131,7 @@
   ;; ClojureDocs / canonical JVM examples pass the rounding mode as a
   ;; bare java.math.RoundingMode enum symbol (UP, HALF_UP, ...). mino
   ;; accepts these in addition to its native keyword surface so canon
-  ;; examples paste through unchanged. Verification goes through /
-  ;; since bigdec division is the path that consumes *math-context*.
+  ;; examples paste through unchanged.
   (is (= 0.3M (with-precision 1 :rounding HALF_UP   (/ 25M 100M))))
   (is (= 0.2M (with-precision 1 :rounding HALF_DOWN (/ 25M 100M))))
   (is (= 0.2M (with-precision 1 :rounding DOWN      (/ 25M 100M))))
@@ -145,6 +144,37 @@
   ;; A symbol that isn't a RoundingMode enum constant is rejected at
   ;; macroexpansion, not deferred to a runtime "unbound symbol".
   (is (thrown? (eval '(with-precision 5 :rounding NOT_A_MODE (/ 1M 3M))))))
+
+(deftest with-precision-rounds-bigdec-mul
+  ;; bigdec * under *math-context* rounds its product to the configured
+  ;; precision using the configured mode. The mino primitive previously
+  ;; ignored *math-context* on multiplication; only / consumed it.
+  (is (= 2M  (with-precision 1 :rounding UP        (* 1.1M 1M))))
+  (is (= 2M  (with-precision 1 :rounding CEILING   (* 1.1M 1M))))
+  (is (= -2M (with-precision 1 :rounding UP        (* -1.1M 1M))))
+  (is (= -1M (with-precision 1 :rounding CEILING   (* -1.1M 1M))))
+  (is (= 1M  (with-precision 1 :rounding DOWN      (* 1.9M 1M))))
+  (is (= 1M  (with-precision 1 :rounding FLOOR     (* 1.9M 1M))))
+  (is (= -1M (with-precision 1 :rounding DOWN      (* -1.9M 1M))))
+  (is (= -2M (with-precision 1 :rounding FLOOR     (* -1.9M 1M))))
+  (is (= 2M  (with-precision 1 :rounding HALF_EVEN (* 1.5M 1M))))
+  (is (= 2M  (with-precision 1 :rounding HALF_EVEN (* 2.5M 1M))))
+  (is (= 2M  (with-precision 1 :rounding HALF_UP   (* 1.5M 1M))))
+  (is (= 1M  (with-precision 1 :rounding HALF_DOWN (* 1.5M 1M))))
+  (is (thrown? (with-precision 1 :rounding UNNECESSARY (* 1.5M 1M))))
+  (is (= 2M  (with-precision 1 :rounding UNNECESSARY (* 2M 1M))))
+  ;; Without a context, the historical exact-product semantics hold.
+  (is (= 1.21M (* 1.1M 1.1M))))
+
+(deftest with-precision-rounds-bigdec-add-sub
+  ;; + and - apply *math-context* the same way * does.
+  (is (= 2M (with-precision 1 :rounding HALF_UP (+ 1.5M 0M))))
+  (is (= 3M (with-precision 1 :rounding HALF_UP (+ 1.2M 1.3M))))
+  (is (= 1M (with-precision 1 :rounding DOWN    (- 1.9M 0M))))
+  (is (= 2M (with-precision 1 :rounding UP      (- 1.1M 0M))))
+  ;; Without a context, full precision is preserved.
+  (is (= 2.5M (+ 1.2M 1.3M)))
+  (is (= 1.9M (- 1.9M 0M))))
 
 (deftest no-math-context-still-exact-or-throws
   ;; Outside with-precision, the historical exact-or-throw behavior is

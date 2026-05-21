@@ -358,5 +358,6 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                             const mino_val *b);
 mino_val *mino_bigdec_neg(mino_state *S, const mino_val *a);
 mino_val *mino_to_bigdec(mino_state *S, const mino_val *v);
+mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd);
 
 #endif /* COLLECTIONS_INTERNAL_H */

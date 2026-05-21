@@ -467,7 +467,11 @@ static int tower_apply_ratio(mino_state *S, tower_acc_t *acc,
     return 0;
 }
 
-/* tower_apply_bigdec -- BIGDEC-tier step. */
+/* tower_apply_bigdec -- BIGDEC-tier step. Applies *math-context* to
+ * the result of +, -, * (matches JVM Clojure's
+ * Numbers/{add,minus,multiply}(BigDecimal, MathContext)). Division is
+ * left to mino_bigdec_div, which has to interleave rounding with the
+ * iterative quotient loop and handles MC internally. */
 static int tower_apply_bigdec(mino_state *S, tower_acc_t *acc,
                               const mino_val *a, tower_op_t op,
                               const char *opname)
@@ -475,7 +479,12 @@ static int tower_apply_bigdec(mino_state *S, tower_acc_t *acc,
     mino_val *operand = coerce_at_tier(S, (mino_val *)a, TT_BIGDEC, opname);
     if (operand == NULL) return -1;
     acc->vacc = tower_op_at_tier(S, op, TT_BIGDEC, acc->vacc, operand, opname);
-    return acc->vacc == NULL ? -1 : 0;
+    if (acc->vacc == NULL) return -1;
+    if (op != OP_DIV) {
+        acc->vacc = mino_bigdec_apply_math_context(S, acc->vacc);
+        if (acc->vacc == NULL) return -1;
+    }
+    return 0;
 }
 
 /* tower_apply_float -- FLOAT-tier step. The four ops are inlined since
@@ -550,6 +559,36 @@ static void tower_acc_init(tower_acc_t *acc, tower_op_t op)
 /* Driver. Walks args, classifies each, promotes accumulator on tier
  * increase, and dispatches to the per-tier step. Returns the final
  * value, or NULL on error with diag already set. */
+/* For ADD/MUL and for SUB with 2+ args, the accumulator should start
+ * at the first operand (matching JVM Clojure's
+ * Numbers/{add,minus,multiply} fold-from-first semantics). The
+ * synthetic 0/1 init that the loop below otherwise uses introduces
+ * an extra operation that, under *math-context*, would apply rounding
+ * one time too many on bigdec chains. SUB with a single arg still
+ * uses the 0 - x synthetic path so (- x) negates under MC.
+ * Division always seeds with the first operand. */
+static int tower_seed_from_first(mino_state *S, tower_acc_t *acc,
+                                 mino_val *a, const char *opname)
+{
+    int at;
+    if (!classify_or_throw(S, a, opname, &at)) return -1;
+    switch (at) {
+    case TT_INT:    acc->iacc = mino_val_int_get(a); acc->tier = TT_INT;    break;
+    case TT_FLOAT:  acc->dacc = a->as.f;             acc->tier = TT_FLOAT;  break;
+    case TT_BIGINT: acc->vacc = a;                   acc->tier = TT_BIGINT; break;
+    case TT_RATIO:  acc->vacc = a;                   acc->tier = TT_RATIO;  break;
+    case TT_BIGDEC: acc->vacc = a;                   acc->tier = TT_BIGDEC; break;
+    }
+    return 0;
+}
+
+static int tower_should_seed_from_first(tower_op_t op, int argc_has_two_plus)
+{
+    if (op == OP_ADD || op == OP_MUL) return 1;
+    if (op == OP_SUB && argc_has_two_plus) return 1;
+    return 0;
+}
+
 static mino_val *tower_reduce(mino_state *S, mino_val *args,
                                 tower_op_t op, const char *opname,
                                 int strict)
@@ -557,6 +596,15 @@ static mino_val *tower_reduce(mino_state *S, mino_val *args,
     tower_acc_t acc;
     int         seeded = 0;
     tower_acc_init(&acc, op);
+    if (mino_is_cons(args)) {
+        int has_two_plus = mino_is_cons(args->as.cons.cdr);
+        if (tower_should_seed_from_first(op, has_two_plus)) {
+            if (tower_seed_from_first(S, &acc, args->as.cons.car, opname) != 0)
+                return NULL;
+            args = args->as.cons.cdr;
+            seeded = 1;
+        }
+    }
     while (mino_is_cons(args)) {
         mino_val *a = args->as.cons.car;
         if (op == OP_DIV && !seeded) {
@@ -582,7 +630,10 @@ static mino_val *tower_reduce_argv(mino_state *S, mino_val **argv,
     tower_acc_t acc;
     int         i = 0;
     tower_acc_init(&acc, op);
-    if (op == OP_DIV && argc > 0) {
+    if (argc > 0 && tower_should_seed_from_first(op, argc >= 2)) {
+        if (tower_seed_from_first(S, &acc, argv[0], opname) != 0) return NULL;
+        i = 1;
+    } else if (op == OP_DIV && argc > 0) {
         int at;
         if (!classify_or_throw(S, argv[0], opname, &at)) return NULL;
         tower_seed_div(&acc, argv[0], at);
@@ -884,6 +935,8 @@ static int tower_seeded_step(mino_state *S, tower_acc_t *a, mino_val *x,
             if (opd == NULL) return -1;
             if (op == OP_SUB) {
                 a->vacc = mino_bigdec_sub(S, a->vacc, opd);
+                if (a->vacc == NULL) return -1;
+                a->vacc = mino_bigdec_apply_math_context(S, a->vacc);
             } else {
                 a->vacc = mino_bigdec_div(S, a->vacc, opd);
             }
@@ -976,7 +1029,11 @@ static mino_val *prim_sub_negate(mino_state *S, mino_val *first,
         if (zero == NULL) return NULL;
         return mino_ratio_sub(S, zero, first);
     }
-    if (mino_type_of(first) == MINO_BIGDEC) return mino_bigdec_neg(S, first);
+    if (mino_type_of(first) == MINO_BIGDEC) {
+        mino_val *negated = mino_bigdec_neg(S, first);
+        if (negated == NULL) return NULL;
+        return mino_bigdec_apply_math_context(S, negated);
+    }
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s expects numbers", opname);

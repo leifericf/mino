@@ -747,6 +747,115 @@ static int apply_rounding_mode(int rmode, const mpz_t *r,
     }
 }
 
+/* Round a bigdec to *math-context*'s precision / rounding mode if a
+ * context is active and the value carries more sig digits than the
+ * configured precision. Returns the input unchanged when no context is
+ * active, when the context's mode is unknown (callers below get the
+ * existing MHO002 path), or when the value already fits. Returns NULL
+ * after throwing on :unnecessary-with-non-zero-remainder or OOM.
+ *
+ * mino_bigdec_div has its own inline rounding because it interleaves
+ * with the iterative quotient loop; this helper covers the simpler
+ * post-operation rounding path used by *, +, and - via tower_apply_bigdec. */
+mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
+{
+    int       mc_precision = 0;
+    int       mc_rmode     = 0;
+    int       mc_active;
+    int       sig;
+    int       excess;
+    int       new_scale;
+    int       carry;
+    int       q_neg;
+    int       k;
+    mpz_t     divisor;
+    mpz_t     q_rounded;
+    mpz_t     r_rounded;
+    mpz_t     qabs;
+    mpz_t     pw;
+    mpz_t    *qz_heap;
+    mino_val *q_wrapped;
+    mp_int    unscaled_mpz;
+
+    if (bd == NULL || mino_type_of(bd) != MINO_BIGDEC) return bd;
+    mc_active = resolve_math_context(S, &mc_precision, &mc_rmode);
+    if (!mc_active) return bd;
+    if (mc_rmode == MC_RMODE_UNKNOWN) {
+        return prim_throw_classified(S, "host", "MHO002",
+            "with-precision: unknown :rounding-mode keyword "
+            "(supported: :down :up :floor :ceiling :half-up "
+            ":half-down :half-even :unnecessary)");
+    }
+    unscaled_mpz = (mp_int)bd->as.bigdec.unscaled->as.bigint.mpz;
+    sig = bigdec_sig_digits(unscaled_mpz);
+    if (sig <= mc_precision) return bd;
+    excess = sig - mc_precision;
+
+    if (mp_int_init(&divisor)   != MP_OK) goto oom_pre;
+    if (mp_int_init(&q_rounded) != MP_OK) { mp_int_clear(&divisor); goto oom_pre; }
+    if (mp_int_init(&r_rounded) != MP_OK) {
+        mp_int_clear(&divisor); mp_int_clear(&q_rounded); goto oom_pre;
+    }
+    if (mp_int_init(&qabs) != MP_OK) {
+        mp_int_clear(&divisor); mp_int_clear(&q_rounded);
+        mp_int_clear(&r_rounded); goto oom_pre;
+    }
+    if (mp_int_init(&pw) != MP_OK) {
+        mp_int_clear(&divisor); mp_int_clear(&q_rounded);
+        mp_int_clear(&r_rounded); mp_int_clear(&qabs); goto oom_pre;
+    }
+
+    mp_int_set_value(&divisor, 1);
+    mp_int_set_value(&pw, 10);
+    for (k = 0; k < excess; k++) {
+        if (mp_int_mul(&divisor, &pw, &divisor) != MP_OK) goto oom;
+    }
+
+    mp_int_abs(unscaled_mpz, &qabs);
+    q_neg = mp_int_compare_zero(unscaled_mpz) < 0;
+    if (mp_int_div(&qabs, &divisor, &q_rounded, &r_rounded) != MP_OK) goto oom;
+
+    carry = apply_rounding_mode(mc_rmode, &r_rounded, &divisor,
+                                &q_rounded, q_neg, &pw);
+    if (carry == -1) {
+        mp_int_clear(&divisor); mp_int_clear(&q_rounded);
+        mp_int_clear(&r_rounded); mp_int_clear(&qabs);
+        mp_int_clear(&pw);
+        return prim_throw_classified(S, "host", "MHO002",
+            "with-precision :unnecessary: rounding required");
+    }
+    if (carry) {
+        mp_int_set_value(&pw, 1);
+        mp_int_add(&q_rounded, &pw, &q_rounded);
+    }
+    if (q_neg) {
+        mp_int_neg(&q_rounded, &q_rounded);
+    }
+    new_scale = bd->as.bigdec.scale - excess;
+
+    qz_heap = bigint_alloc_zeroed();
+    if (qz_heap == NULL) goto oom;
+    mp_int_copy(&q_rounded, qz_heap);
+    mp_int_clear(&divisor); mp_int_clear(&q_rounded);
+    mp_int_clear(&r_rounded); mp_int_clear(&qabs);
+    mp_int_clear(&pw);
+
+    q_wrapped = bigint_wrap(S, qz_heap);
+    if (q_wrapped == NULL) {
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigdec rounding");
+    }
+    return mino_bigdec_make(S, q_wrapped, new_scale);
+
+oom:
+    mp_int_clear(&divisor); mp_int_clear(&q_rounded);
+    mp_int_clear(&r_rounded); mp_int_clear(&qabs);
+    mp_int_clear(&pw);
+oom_pre:
+    return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                 "out of memory in bigdec rounding");
+}
+
 /* mino_bigdec_div -- exact bigdec division. Mirrors Java's
  * BigDecimal.divide(BigDecimal): preferred scale is sa - sb, but the
  * quotient is computed at whatever scale makes it exact. If the
