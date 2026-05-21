@@ -124,32 +124,50 @@ uint32_t mino_bytes_hash(const mino_val *v)
     return h;
 }
 
-/* Build a seq view of the bytes value: a cons spine of unsigned 0..255
- * integers, one per byte. Returns the empty-list singleton for an
- * empty value. The bit_tail of a bit-aligned value is included as a
- * final byte where the unused low bits are zero-padded; this matches
- * Erlang's binary-to-list semantics for the byte-aligned subset and
- * keeps the seq deterministic for bit-aligned values without throwing.
- */
+/* Build a chunked-seq view of the bytes value: a MINO_CHUNKED_CONS
+ * spine of 32-element MINO_CHUNK leaves, each holding the byte values
+ * as unsigned 0..255 ints. Returns nil for an empty value. Chunked-
+ * cons matches the shape mino's vector seq produces, so consumers
+ * that propagate chunkedness (map/filter/take/keep) walk bytes with
+ * the same per-chunk pipeline they use for vectors.
+ *
+ * Bit-aligned values currently surface their full byte_len here; the
+ * trailing-bit padding is part of the printed form but does not show
+ * up in seq elements. Consumers that need bit-by-bit access should
+ * use the bit-syntax surface (bits-get / subbits) on the bytes value
+ * directly. */
 mino_val *mino_bytes_seq(mino_state *S, const mino_val *v)
 {
-    mino_val *head;
-    mino_val *tail;
-    size_t i, n;
+    size_t total;
+    size_t n_chunks;
+    size_t c, i;
+    mino_val **chunks;
+    mino_val  *more;
     if (v == NULL || mino_type_of(v) != MINO_BYTES) {
         return mino_empty_list(S);
     }
-    n = v->as.bytes.byte_len;
-    if (n == 0) return mino_empty_list(S);
-    head = mino_nil(S);
-    tail = NULL;
-    for (i = 0; i < n; i++) {
-        mino_val *cell = mino_cons(S,
-            mino_int(S, (long long)(unsigned)v->as.bytes.data[i]),
-            mino_nil(S));
-        if (tail == NULL) head = cell;
-        else mino_cons_cdr_set(S, tail, cell);
-        tail = cell;
+    total = v->as.bytes.byte_len;
+    if (total == 0) return mino_nil(S);
+    n_chunks = (total + 31u) / 32u;
+    chunks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
+        n_chunks * sizeof(*chunks));
+    for (c = 0; c < n_chunks; c++) {
+        size_t base = c * 32u;
+        unsigned cap = (unsigned)(total - base < 32u ? total - base : 32u);
+        mino_val *buf = mino_chunk_buffer(S, cap);
+        if (buf == NULL) return NULL;
+        for (i = 0; i < cap; i++) {
+            mino_val *iv = mino_int(S,
+                (long long)(unsigned)v->as.bytes.data[base + i]);
+            if (!mino_chunk_append(buf, iv)) return NULL;
+        }
+        mino_chunk_seal(buf);
+        chunks[c] = buf;
     }
-    return head;
+    more = mino_nil(S);
+    for (c = n_chunks; c-- > 0; ) {
+        more = mino_chunked_cons(S, chunks[c], more);
+        if (more == NULL) return NULL;
+    }
+    return more;
 }

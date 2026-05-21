@@ -212,65 +212,98 @@ mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
         }
         return mino_bytes(S, NULL, (size_t)n);
     }
-    /* Treat as a collection: read each element as an unsigned-byte
-     * value (0..255). Anything else throws. */
+    /* Treat as a collection: walk the seq into a growable buffer so
+     * lazy seqs (e.g. (range N)) materialize on the fly. Each element
+     * is coerced to a byte in -128..255. */
     {
-        size_t len = 0;
-        unsigned char *buf;
-        mino_val *result;
+        unsigned char *buf = NULL;
+        size_t cap = 0;
+        size_t idx = 0;
         mino_val *seqv;
         mino_val *p;
-        /* Pre-count via prim_count's helper to size the buffer. */
-        switch (mino_type_of(arg)) {
-        case MINO_VECTOR:     len = arg->as.vec.len; break;
-        case MINO_MAP:        len = arg->as.map.len; break;
-        case MINO_SET:        len = arg->as.set.len; break;
-        case MINO_HOST_ARRAY: len = arg->as.host_array.len; break;
-        case MINO_STRING:
-            len = utf8_codepoint_count(arg->as.s.data, arg->as.s.len);
-            break;
-        case MINO_CONS:       len = list_length(S, arg); break;
-        case MINO_EMPTY_LIST: len = 0; break;
-        case MINO_NIL:        len = 0; break;
-        default: {
-            mino_val *as_seq = val_to_seq(S, arg);
-            if (as_seq == NULL) return NULL;
-            len = list_length(S, as_seq);
-            break;
-        }
-        }
-        if (len == 0) return mino_bytes(S, NULL, 0);
-        buf = (unsigned char *)calloc(1, len);
-        if (buf == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
-                "byte-array: out of memory");
-        }
+        mino_val *result;
         seqv = val_to_seq(S, arg);
-        if (seqv == NULL) { free(buf); return NULL; }
-        p = seqv;
-        {
-            size_t idx = 0;
-            while (idx < len && p != NULL && mino_is_cons(p)) {
-                mino_val *elem = p->as.cons.car;
-                long long bv;
-                if (elem == NULL || !mino_val_int_p(elem)) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/type", "MTY001",
-                        "byte-array: element must be an integer in 0..255");
-                }
-                bv = mino_val_int_get(elem);
-                /* Signed-byte (-128..127) and unsigned-byte (0..255)
-                 * both lower to the same 8-bit storage. */
-                if (bv < -128 || bv > 255) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/bounds", "MBD001",
-                        "byte-array: integer out of byte range (-128..255)");
-                }
-                buf[idx++] = (unsigned char)(bv & 0xff);
-                p = p->as.cons.cdr;
-            }
+        if (seqv == NULL && mino_last_error(S) != NULL) return NULL;
+        if (seqv == NULL || mino_type_of(seqv) == MINO_NIL
+            || mino_type_of(seqv) == MINO_EMPTY_LIST) {
+            return mino_bytes(S, NULL, 0);
         }
-        result = mino_bytes(S, buf, len);
+        p = seqv;
+        for (;;) {
+            mino_val *elem;
+            long long bv;
+            /* Force any lazy seam. */
+            while (p != NULL && mino_type_of(p) == MINO_LAZY) {
+                p = lazy_force(S, p);
+                if (p == NULL) { free(buf); return NULL; }
+            }
+            if (p == NULL || mino_type_of(p) == MINO_NIL
+                || mino_type_of(p) == MINO_EMPTY_LIST) break;
+            if (mino_type_of(p) == MINO_CHUNKED_CONS) {
+                /* Bulk-copy whole chunks. */
+                const mino_val *ch = p->as.chunked_cons.chunk;
+                unsigned off = p->as.chunked_cons.off;
+                unsigned len = ch->as.chunk.len;
+                unsigned i;
+                if (idx + (len - off) > cap) {
+                    size_t need = idx + (len - off);
+                    size_t new_cap = cap ? cap : 16;
+                    while (new_cap < need) new_cap *= 2;
+                    buf = (unsigned char *)realloc(buf, new_cap);
+                    if (buf == NULL) {
+                        return prim_throw_classified(S, "internal", "MIN001",
+                            "byte-array: out of memory");
+                    }
+                    cap = new_cap;
+                }
+                for (i = off; i < len; i++) {
+                    elem = ch->as.chunk.vals[i];
+                    if (elem == NULL || !mino_val_int_p(elem)) {
+                        free(buf);
+                        return prim_throw_classified(S, "eval/type", "MTY001",
+                            "byte-array: element must be an integer in -128..255");
+                    }
+                    bv = mino_val_int_get(elem);
+                    if (bv < -128 || bv > 255) {
+                        free(buf);
+                        return prim_throw_classified(S, "eval/bounds", "MBD001",
+                            "byte-array: integer out of byte range (-128..255)");
+                    }
+                    buf[idx++] = (unsigned char)(bv & 0xff);
+                }
+                p = p->as.chunked_cons.more;
+                continue;
+            }
+            if (!mino_is_cons(p)) break;
+            elem = p->as.cons.car;
+            if (elem == NULL || !mino_val_int_p(elem)) {
+                free(buf);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "byte-array: element must be an integer in -128..255");
+            }
+            bv = mino_val_int_get(elem);
+            if (bv < -128 || bv > 255) {
+                free(buf);
+                return prim_throw_classified(S, "eval/bounds", "MBD001",
+                    "byte-array: integer out of byte range (-128..255)");
+            }
+            if (idx >= cap) {
+                size_t new_cap = cap ? cap * 2 : 16;
+                buf = (unsigned char *)realloc(buf, new_cap);
+                if (buf == NULL) {
+                    return prim_throw_classified(S, "internal", "MIN001",
+                        "byte-array: out of memory");
+                }
+                cap = new_cap;
+            }
+            buf[idx++] = (unsigned char)(bv & 0xff);
+            p = p->as.cons.cdr;
+        }
+        if (idx == 0) {
+            free(buf);
+            return mino_bytes(S, NULL, 0);
+        }
+        result = mino_bytes(S, buf, idx);
         free(buf);
         return result;
     }
@@ -1156,12 +1189,20 @@ static mino_val *prim_rest_step(mino_state *S, mino_val *coll,
         }
     }
     if (mino_type_of(coll) == MINO_BYTES) {
+        /* mino_bytes_seq returns a chunked-cons spine for non-empty
+         * values. Advance the chunked-cons one step to get the rest. */
+        mino_val *seqv;
         if (coll->as.bytes.byte_len <= 1) return mino_empty_list(S);
-        {
-            mino_val *seqv = mino_bytes_seq(S, coll);
-            if (seqv == NULL || !mino_is_cons(seqv)) return mino_empty_list(S);
-            return seqv->as.cons.cdr;
+        seqv = mino_bytes_seq(S, coll);
+        if (seqv == NULL) return NULL;
+        if (mino_type_of(seqv) == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(seqv) == MINO_CHUNKED_CONS) {
+            mino_val *r = mino_chunked_cons_advance(S, seqv);
+            if (r == NULL || mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
+            return r;
         }
+        if (mino_is_cons(seqv)) return seqv->as.cons.cdr;
+        return mino_empty_list(S);
     }
     {
         char msg[96];

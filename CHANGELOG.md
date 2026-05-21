@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.417.0 — Bit Syntax + Chunked Bytes Seq
+
+Erlang-inspired bit-syntax surface for binary-data construction and
+field-level read access. All three new operations live on top of
+MINO_BYTES so anything that satisfies `bytes?` or `bitstring?`
+works through them.
+
+- `(bits [v :size N :type T :endian E :signed? B] ...)` — pack a
+  sequence of `[value & options]` segments into a `MINO_BYTES`
+  value. Defaults: `:size 8`, `:type :int`, `:endian :big`,
+  `:signed? false`. Supported types: `:int`, `:uint`, `:float`
+  (size 32 or 64), `:bytes`. Bit-aligned segment totals leave a
+  1..7-bit tail; the result satisfies `bitstring?` but not
+  necessarily `bytes?`.
+- `(bits-get bs :offset O :size N :type T :endian E :signed? B)`
+  — read a bit field. Returns an int for `:int` / `:uint`, a
+  double for `:float`, a fresh `MINO_BYTES` slice for `:bytes`.
+- `(subbits bs start end)` — half-open bit-range slice.
+
+Internally `mino_bytes_seq` now produces a `MINO_CHUNKED_CONS`
+spine of 32-element chunks matching how vector seq works, so
+`map`/`filter`/`take`/`drop`/`reduce` propagate chunkedness end-
+to-end on bytes values. `(chunked-seq? (seq bytes))` is true.
+
+`(byte-array ...)` accepts a lazy seq (e.g. `(byte-array (range
+10))`) and materializes the bytes on the fly.
+
 ## v0.416.0 — MINO_BYTES Sequence Surface
 
 Follow-on to v0.415's core MINO_BYTES type: dispatch sites that

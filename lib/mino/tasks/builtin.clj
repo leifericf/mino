@@ -55,6 +55,7 @@
    "src/prim/numeric.c" "src/prim/numeric_math.c"
    "src/prim/numeric_bit.c" "src/prim/numeric_coerce.c"
    "src/prim/collections.c" "src/prim/collections_transient.c"
+   "src/prim/bits.c"
    "src/prim/sequences.c" "src/prim/sequences_seq.c"
    "src/prim/lazy.c"
    "src/prim/string.c" "src/prim/io.c"

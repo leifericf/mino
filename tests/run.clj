@@ -25,6 +25,7 @@
 (require "tests/clojure_version_test")
 (require "tests/inst_test")
 (require "tests/bytes_test")
+(require "tests/bits_test")
 (require "tests/macro_test")
 (require "tests/error_test")
 (require "tests/atom_test")

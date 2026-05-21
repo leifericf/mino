@@ -569,6 +569,9 @@ extern const size_t        k_prims_meta_count;
 extern const mino_prim_def k_prims_collections[];
 extern const size_t        k_prims_collections_count;
 
+extern const mino_prim_def k_prims_bits[];
+extern const size_t        k_prims_bits_count;
+
 extern const mino_prim_def k_prims_sequences[];
 extern const size_t        k_prims_sequences_count;
 
