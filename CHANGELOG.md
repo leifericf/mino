@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.410.0 — Print Dynvars Completion
+
+Wires the remaining JVM Clojure print-side dynamic vars into mino's
+per-state print cache. `*print-readably*`, `*print-meta*`,
+`*print-dup*`, `*print-namespace-maps*`, and `*flush-on-newline*` all
+have their JVM-canon defaults (true, false, false, false, true) and
+respond to `(binding [...] ...)` at the boundary of any top-level
+`pr` / `print` / `pr-str` call.
+
+- `*print-readably*` overrides the entry-point's readable/unreadable
+  choice at binding time. A `(binding [*print-readably* false]
+  (pr-str "x"))` prints `"x"` as `x` and `\a` as `a`; nested strings
+  and chars inside collections honor the binding too.
+- `*print-meta*` emits a `^meta` prefix before any heap-allocated
+  value carrying non-nil metadata. Tagged primitives (inline ints,
+  bools, nil, chars) can't carry meta and are skipped.
+- `*print-dup*` is bindable; mino's existing pr forms for built-in
+  types are already reader-roundtrip-compatible, so the flag is an
+  information channel for user-installed `print-method` extensions
+  rather than a content switch on the C side.
+- `*print-namespace-maps*` causes a map whose keys are keywords (or
+  symbols) sharing one non-empty namespace to print as
+  `#:ns{:k1 v1, :k2 v2}` instead of `{:ns/k1 v1, :ns/k2 v2}`. Mixed-
+  ns maps and maps with un-namespaced keys fall through to the long
+  form. Honored by both hash and sorted maps.
+- `*flush-on-newline*` gates the implicit `fflush` in `io_emit`: when
+  true (default), the stream is flushed after any buffer containing a
+  newline; when false, the OS write coalesces consecutive prints.
+
+All five share the resolve-once-per-call cache pattern introduced for
+`*print-length*` / `*print-level*`: a `print_dynvars_saved_t` struct
+holds the prior cached values across the call so nested invocations
+nest cleanly.
+
 ## v0.409.0 — Lazy-Seq Namespace Scoping Fix
 
 Fixes a long-standing P0 runtime bug where the body of a

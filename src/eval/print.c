@@ -6,19 +6,16 @@
 #include "runtime/host_threads.h"
 #include "prim/internal.h"
 
-/* Resolve *print-length* / *print-level* into the state's cached
- * limit fields. The lookup checks the dynamic binding stack first
- * (where (binding [*print-length* N] ...) lands) then falls back to
- * the var root in clojure.core. Non-integer values silently become
- * "unset" (-1) so a misconfigured dynvar doesn't crash the printer.
- *
- * Mirrors the resolve_io_sink pattern in prim/io.c. */
-static int resolve_print_int_dynvar(mino_state *S, mino_env *env,
-                                    const char *name)
+/* Resolve a print-side dynvar by name. Checks the dynamic binding
+ * stack first (where (binding [*print-length* N] ...) lands), then
+ * the lexical env, then the var root in clojure.core. Returns the
+ * raw mino_val* (NULL when truly unset). The integer / boolean
+ * adapters below interpret the result. */
+static mino_val *resolve_print_dynvar(mino_state *S, mino_env *env,
+                                       const char *name)
 {
     mino_val *v = NULL;
     mino_val *var;
-    long long n;
     if (mino_current_ctx(S)->dyn_stack != NULL) {
         v = dyn_lookup(S, name);
         if (v == NULL) {
@@ -40,6 +37,17 @@ static int resolve_print_int_dynvar(mino_state *S, mino_env *env,
             v = var->as.var.root;
         }
     }
+    return v;
+}
+
+/* Mirrors the resolve_io_sink pattern in prim/io.c. Non-integer
+ * values silently become "unset" (-1) so a misconfigured dynvar
+ * doesn't crash the printer. */
+static int resolve_print_int_dynvar(mino_state *S, mino_env *env,
+                                    const char *name)
+{
+    mino_val *v = resolve_print_dynvar(S, env, name);
+    long long n;
     if (v == NULL || mino_type_of(v) == MINO_NIL) return -1;
     if (!as_long(v, &n)) return -1;
     if (n < 0) return -1;
@@ -47,19 +55,53 @@ static int resolve_print_int_dynvar(mino_state *S, mino_env *env,
     return (int)n;
 }
 
-void print_dynvars_resolve(mino_state *S, mino_env *env,
-                           int *saved_length, int *saved_level)
+/* Resolve a boolean print-side dynvar. Returns 1 for truthy
+ * (anything but nil / false), 0 for falsy, fallback when truly
+ * unset. mino doesn't conflate nil with "unset" here -- a binding
+ * to nil explicitly means "treat as false" per JVM Clojure. */
+static int resolve_print_bool_dynvar(mino_state *S, mino_env *env,
+                                     const char *name, int fallback)
 {
-    *saved_length = S->print_length_limit;
-    *saved_level  = S->print_level_limit;
-    S->print_length_limit = resolve_print_int_dynvar(S, env, "*print-length*");
-    S->print_level_limit  = resolve_print_int_dynvar(S, env, "*print-level*");
+    mino_val *v = resolve_print_dynvar(S, env, name);
+    if (v == NULL) return fallback;
+    if (mino_type_of(v) == MINO_NIL) return 0;
+    if (mino_type_of(v) == MINO_BOOL) return mino_val_bool_get(v) ? 1 : 0;
+    /* Any non-nil, non-false value is truthy in Clojure semantics. */
+    return 1;
 }
 
-void print_dynvars_restore(mino_state *S, int saved_length, int saved_level)
+void print_dynvars_resolve(mino_state *S, mino_env *env,
+                           print_dynvars_saved_t *saved)
 {
-    S->print_length_limit = saved_length;
-    S->print_level_limit  = saved_level;
+    saved->length   = S->print_length_limit;
+    saved->level    = S->print_level_limit;
+    saved->readably = S->print_readably_flag;
+    saved->meta     = S->print_meta_flag;
+    saved->dup      = S->print_dup_flag;
+    saved->ns_maps  = S->print_namespace_maps_flag;
+    saved->flush_nl = S->flush_on_newline_flag;
+    S->print_length_limit = resolve_print_int_dynvar(S, env, "*print-length*");
+    S->print_level_limit  = resolve_print_int_dynvar(S, env, "*print-level*");
+    /* Defaults match JVM Clojure: *print-readably* true (pr/prn
+     * default; print/println sites pass readably=0 explicitly),
+     * *print-meta* false, *print-dup* false,
+     * *print-namespace-maps* false, *flush-on-newline* true. */
+    S->print_readably_flag       = resolve_print_bool_dynvar(S, env, "*print-readably*", 1);
+    S->print_meta_flag           = resolve_print_bool_dynvar(S, env, "*print-meta*", 0);
+    S->print_dup_flag            = resolve_print_bool_dynvar(S, env, "*print-dup*", 0);
+    S->print_namespace_maps_flag = resolve_print_bool_dynvar(S, env, "*print-namespace-maps*", 0);
+    S->flush_on_newline_flag     = resolve_print_bool_dynvar(S, env, "*flush-on-newline*", 1);
+}
+
+void print_dynvars_restore(mino_state *S, const print_dynvars_saved_t *saved)
+{
+    S->print_length_limit        = saved->length;
+    S->print_level_limit         = saved->level;
+    S->print_readably_flag       = saved->readably;
+    S->print_meta_flag           = saved->meta;
+    S->print_dup_flag            = saved->dup;
+    S->print_namespace_maps_flag = saved->ns_maps;
+    S->flush_on_newline_flag     = saved->flush_nl;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -93,6 +135,11 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  */
 #define MINO_PRINT_DEPTH_MAX 128
 
+/* Forward declaration: defined alongside print_map below; used by the
+ * rb-tree namespace-stripped walker introduced for sorted maps. */
+static void print_map_key_stripped(FILE *out, const mino_val *key,
+                                   size_t ns_len);
+
 static void print_rb_inorder(mino_state *S, FILE *out,
                              const mino_rb_node_t *n, int is_map, int *first)
 {
@@ -103,6 +150,49 @@ static void print_rb_inorder(mino_state *S, FILE *out,
     mino_print_to(S, out, n->key);
     if (is_map) { fputc(' ', out); mino_print_to(S, out, n->val); }
     print_rb_inorder(S, out, n->right, is_map, first);
+}
+
+/* Walk an rb-tree in-order, accumulating the shared key namespace
+ * (or detecting that one isn't possible). Mirrors map_common_key_ns
+ * but works on the rb representation used by sorted maps. Sets
+ * *out_ok = 0 the moment a key disqualifies; the caller checks that
+ * before reading *out_ns / *out_ns_len. */
+static void rb_collect_common_ns(const mino_rb_node_t *n,
+                                 const char **out_ns,
+                                 size_t *out_ns_len,
+                                 int *out_ok)
+{
+    int t;
+    size_t key_ns_len;
+    if (n == NULL || !*out_ok) return;
+    rb_collect_common_ns(n->left, out_ns, out_ns_len, out_ok);
+    if (!*out_ok) return;
+    t = mino_type_of(n->key);
+    if (t != MINO_KEYWORD && t != MINO_SYMBOL) { *out_ok = 0; return; }
+    key_ns_len = n->key->as.s.ns_len;
+    if (key_ns_len == 0) { *out_ok = 0; return; }
+    if (*out_ns == NULL) {
+        *out_ns     = n->key->as.s.data;
+        *out_ns_len = key_ns_len;
+    } else if (key_ns_len != *out_ns_len
+               || memcmp(n->key->as.s.data, *out_ns, *out_ns_len) != 0) {
+        *out_ok = 0; return;
+    }
+    rb_collect_common_ns(n->right, out_ns, out_ns_len, out_ok);
+}
+
+static void print_rb_inorder_ns_stripped(mino_state *S, FILE *out,
+                                          const mino_rb_node_t *n,
+                                          size_t ns_len, int *first)
+{
+    if (n == NULL) return;
+    print_rb_inorder_ns_stripped(S, out, n->left, ns_len, first);
+    if (!*first) fputs(", ", out);
+    *first = 0;
+    print_map_key_stripped(out, n->key, ns_len);
+    fputc(' ', out);
+    mino_print_to(S, out, n->val);
+    print_rb_inorder_ns_stripped(S, out, n->right, ns_len, first);
 }
 
 /* Per-tag printers. Each handles its case in isolation; the
@@ -307,11 +397,69 @@ static int print_map_meta_special(mino_state *S, FILE *out, const mino_val *v)
     return 0;
 }
 
+/* When *print-namespace-maps* is true and every key in the map is a
+ * keyword (or symbol) sharing one non-empty namespace, return a
+ * pointer to that shared namespace string (interned, owned by the
+ * symbol/keyword intern table; do not free). Length is written into
+ * *out_len. Returns NULL when the map doesn't qualify. */
+static const char *map_common_key_ns(const mino_val *v, size_t *out_len)
+{
+    size_t        i;
+    const char   *ns      = NULL;
+    size_t        ns_len  = 0;
+    if (v->as.map.len == 0) return NULL;
+    for (i = 0; i < v->as.map.len; i++) {
+        mino_val *key = vec_nth(v->as.map.key_order, i);
+        const char *key_data;
+        size_t      key_full_len;
+        size_t      key_ns_len;
+        int         t = mino_type_of(key);
+        if (t != MINO_KEYWORD && t != MINO_SYMBOL) return NULL;
+        key_ns_len = key->as.s.ns_len;
+        if (key_ns_len == 0) return NULL;
+        key_data     = key->as.s.data;
+        key_full_len = key->as.s.len;
+        (void)key_full_len;
+        if (ns == NULL) {
+            ns     = key_data;
+            ns_len = key_ns_len;
+        } else if (key_ns_len != ns_len
+                   || memcmp(key_data, ns, ns_len) != 0) {
+            return NULL;
+        }
+    }
+    *out_len = ns_len;
+    return ns;
+}
+
+/* Print one key inside a #:ns{...} body. The key is a keyword or
+ * symbol whose namespace prefix has already been stripped from the
+ * emitted form. */
+static void print_map_key_stripped(FILE *out, const mino_val *key,
+                                   size_t ns_len)
+{
+    size_t skip = ns_len + 1; /* +1 for the '/' separator */
+    int    t    = mino_type_of(key);
+    if (t == MINO_KEYWORD) fputc(':', out);
+    if (key->as.s.len > skip) {
+        fwrite(key->as.s.data + skip, 1, key->as.s.len - skip, out);
+    }
+}
+
 static void print_map(mino_state *S, FILE *out, const mino_val *v)
 {
-    size_t i;
+    size_t      i;
+    const char *common_ns = NULL;
+    size_t      common_ns_len = 0;
     if (print_map_meta_special(S, out, v)) return;
     if (print_level_collapse(S)) { fputc('#', out); return; }
+    if (S->print_namespace_maps_flag == 1) {
+        common_ns = map_common_key_ns(v, &common_ns_len);
+    }
+    if (common_ns != NULL) {
+        fputs("#:", out);
+        fwrite(common_ns, 1, common_ns_len, out);
+    }
     fputc('{', out);
     S->print_depth++;
     for (i = 0; i < v->as.map.len; i++) {
@@ -321,7 +469,11 @@ static void print_map(mino_state *S, FILE *out, const mino_val *v)
             fputs("...", out);
             break;
         }
-        mino_print_to(S, out, key);
+        if (common_ns != NULL) {
+            print_map_key_stripped(out, key, common_ns_len);
+        } else {
+            mino_print_to(S, out, key);
+        }
         fputc(' ', out);
         mino_print_to(S, out, map_get_val(v, key));
     }
@@ -351,7 +503,23 @@ static void print_sorted(mino_state *S, FILE *out, const mino_val *v,
                          int is_map)
 {
     int first = 1;
+    const char *common_ns     = NULL;
+    size_t      common_ns_len = 0;
+    int         ns_ok         = 1;
     if (print_level_collapse(S)) { fputc('#', out); return; }
+    /* *print-namespace-maps* applies to sorted maps too. The detector
+     * is a single in-order walk that short-circuits on the first
+     * disqualifying key; non-maps and empty trees skip entirely. */
+    if (is_map && S->print_namespace_maps_flag == 1
+        && v->as.sorted.root != NULL) {
+        rb_collect_common_ns(v->as.sorted.root, &common_ns,
+                             &common_ns_len, &ns_ok);
+        if (!ns_ok || common_ns == NULL) common_ns = NULL;
+    }
+    if (common_ns != NULL) {
+        fputs("#:", out);
+        fwrite(common_ns, 1, common_ns_len, out);
+    }
     fputs(is_map ? "{" : "#{", out);
     S->print_depth++;
     /* Note: print-length isn't applied here -- print_rb_inorder is a
@@ -359,7 +527,12 @@ static void print_sorted(mino_state *S, FILE *out, const mino_val *v,
      * collections are uncommon in user-facing prints; deferring the
      * length-limit on sorted to a follow-on if it surfaces in the
      * corpus. */
-    print_rb_inorder(S, out, v->as.sorted.root, is_map, &first);
+    if (common_ns != NULL) {
+        print_rb_inorder_ns_stripped(S, out, v->as.sorted.root,
+                                     common_ns_len, &first);
+    } else {
+        print_rb_inorder(S, out, v->as.sorted.root, is_map, &first);
+    }
     S->print_depth--;
     fputc('}', out);
 }
@@ -565,6 +738,23 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         fputs("#<...>", out);
         return;
     }
+    /* *print-meta* prelude: when the dynvar is bound truthy and the
+     * value carries non-nil meta, emit ^meta then a space before the
+     * value's normal print form. The check requires MINO_IS_PTR(v):
+     * inline-int / bool / nil / char values are tagged pointers, not
+     * heap-allocated mino_val cells, so v->meta would be a garbage
+     * deref. Tagged primitives can't carry meta in any case. The flag
+     * is cleared around the meta print so the meta map's own meta
+     * (if any) doesn't recurse on itself. */
+    if (S->print_meta_flag == 1 && MINO_IS_PTR(v) && v->meta != NULL
+        && mino_type_of(v->meta) != MINO_NIL) {
+        int saved_meta = S->print_meta_flag;
+        S->print_meta_flag = 0;
+        fputc('^', out);
+        mino_print_to(S, out, v->meta);
+        fputc(' ', out);
+        S->print_meta_flag = saved_meta;
+    }
     switch (mino_type_of(v)) {
     case MINO_NIL:
         fputs("nil", out);
@@ -592,10 +782,37 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         print_float(out, v->as.f);
         return;
     case MINO_CHAR:
-        print_char(out, mino_val_char_get(v));
+        if (S->print_readably_flag == 0) {
+            /* Unreadable form: emit the UTF-8 bytes of the codepoint. */
+            int cp = mino_val_char_get(v);
+            unsigned char buf[4];
+            int n = 0;
+            if (cp < 0x80) {
+                buf[n++] = (unsigned char)cp;
+            } else if (cp < 0x800) {
+                buf[n++] = (unsigned char)(0xC0u | (unsigned)(cp >> 6));
+                buf[n++] = (unsigned char)(0x80u | ((unsigned)cp & 0x3Fu));
+            } else if (cp < 0x10000) {
+                buf[n++] = (unsigned char)(0xE0u | (unsigned)(cp >> 12));
+                buf[n++] = (unsigned char)(0x80u | (((unsigned)cp >> 6) & 0x3Fu));
+                buf[n++] = (unsigned char)(0x80u | ((unsigned)cp & 0x3Fu));
+            } else {
+                buf[n++] = (unsigned char)(0xF0u | (unsigned)(cp >> 18));
+                buf[n++] = (unsigned char)(0x80u | (((unsigned)cp >> 12) & 0x3Fu));
+                buf[n++] = (unsigned char)(0x80u | (((unsigned)cp >> 6) & 0x3Fu));
+                buf[n++] = (unsigned char)(0x80u | ((unsigned)cp & 0x3Fu));
+            }
+            fwrite(buf, 1, (size_t)n, out);
+        } else {
+            print_char(out, mino_val_char_get(v));
+        }
         return;
     case MINO_STRING:
-        print_string_escaped(out, v->as.s.data, v->as.s.len);
+        if (S->print_readably_flag == 0) {
+            fwrite(v->as.s.data, 1, v->as.s.len, out);
+        } else {
+            print_string_escaped(out, v->as.s.data, v->as.s.len);
+        }
         return;
     case MINO_SYMBOL:
         fwrite(v->as.s.data, 1, v->as.s.len, out);

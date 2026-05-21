@@ -523,6 +523,38 @@ struct mino_state {
      * dynvar lookup costs once per call, not per value walked. */
     int                      print_length_limit;
     int                      print_level_limit;
+    /* Cached print-side dynvar flags resolved once per top-level
+     * pr / print / pr-str call. -1 = unresolved (consult var root on
+     * demand or fall through to the default). All five mirror the
+     * JVM Clojure dynvars of the same name:
+     *
+     *   print_readably_flag       : *print-readably*
+     *     1 = readable (pr/prn behavior; strings quoted, chars escaped)
+     *     0 = unreadable (print/println behavior)
+     *
+     *   print_meta_flag           : *print-meta*
+     *     1 = emit ^{...} before every value that carries non-nil meta
+     *
+     *   print_dup_flag            : *print-dup*
+     *     1 = print so the reader can reconstruct EXACTLY. mino's
+     *         record print form (#ns.Name{...}) and built-in collection
+     *         forms are already dup-compatible, so the flag is honest
+     *         as an information channel for user-installed print-dup
+     *         methods rather than a content switch on the C side.
+     *
+     *   print_namespace_maps_flag : *print-namespace-maps*
+     *     1 = emit a map with all keys sharing one namespace as
+     *         #:ns{:k v ...} instead of {:ns/k v ...}.
+     *
+     *   flush_on_newline_flag     : *flush-on-newline*
+     *     1 = io_emit flushes the stream after any chunk containing a
+     *         newline; 0 = no implicit flush.
+     */
+    int                      print_readably_flag;
+    int                      print_meta_flag;
+    int                      print_dup_flag;
+    int                      print_namespace_maps_flag;
+    int                      flush_on_newline_flag;
 };
 
 /* Resolve the active per-thread ctx for state S.

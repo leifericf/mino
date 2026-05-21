@@ -42,16 +42,27 @@ mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
 /* Print dynvar plumbing. Top-level print entrypoints (pr / prn / print
  * / println / pr-str) call resolve to snapshot *print-length* and
- * *print-level* from the current binding stack into the state's
- * cached print_length_limit / print_level_limit fields, do the print,
- * then call restore with the saved values. Both helpers are no-ops
- * when env is NULL or the dynvars are unset.
+ * *print-level* / *print-readably* / *print-meta* / *print-dup* /
+ * *print-namespace-maps* / *flush-on-newline* from the current
+ * binding stack into the state's cached fields, do the print, then
+ * call restore with the saved values. Both helpers are no-ops when
+ * env is NULL or the dynvars are unset.
  *
  * The cached values mean the per-collection printers read a single
  * int field instead of walking the binding stack per nested value. */
+typedef struct {
+    int length;
+    int level;
+    int readably;
+    int meta;
+    int dup;
+    int ns_maps;
+    int flush_nl;
+} print_dynvars_saved_t;
+
 void print_dynvars_resolve(mino_state *S, mino_env *env,
-                           int *saved_length, int *saved_level);
-void print_dynvars_restore(mino_state *S, int saved_length, int saved_level);
+                           print_dynvars_saved_t *saved);
+void print_dynvars_restore(mino_state *S, const print_dynvars_saved_t *saved);
 
 /* Sequence iterator: borrows the collection being iterated.
  * seq_iter_val returns a borrowed pointer into the collection's storage;

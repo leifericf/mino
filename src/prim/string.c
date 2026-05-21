@@ -286,14 +286,14 @@ mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
     size_t len = 0;
     size_t cap = 0;
     int    first = 1;
-    int    saved_print_length, saved_print_level;
-    print_dynvars_resolve(S, env, &saved_print_length, &saved_print_level);
+    print_dynvars_saved_t saved_dynvars;
+    print_dynvars_resolve(S, env, &saved_dynvars);
     while (mino_is_cons(args)) {
         mino_val *printed = print_to_string(S, args->as.cons.car);
         size_t      need;
         if (printed == NULL) {
             free(buf);
-            print_dynvars_restore(S, saved_print_length, saved_print_level);
+            print_dynvars_restore(S, &saved_dynvars);
             return NULL;
         }
         need = len + (!first ? 1 : 0) + printed->as.s.len + 1;
@@ -302,7 +302,7 @@ mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
             cap = cap == 0 ? 128 : cap;
             while (cap < need) cap *= 2;
             newbuf = (char *)realloc(buf, cap);
-            if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); print_dynvars_restore(S, saved_print_length, saved_print_level); return NULL; }
+            if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); print_dynvars_restore(S, &saved_dynvars); return NULL; }
             buf = newbuf;
         }
         if (!first) buf[len++] = ' ';
@@ -314,7 +314,7 @@ mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
     {
         mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
-        print_dynvars_restore(S, saved_print_length, saved_print_level);
+        print_dynvars_restore(S, &saved_dynvars);
         return result;
     }
 }

@@ -78,6 +78,14 @@ static void state_init(mino_state *S)
      * costs once per pr call, not per value walked. */
     S->print_length_limit = -1;
     S->print_level_limit  = -1;
+    /* Print-dynvar caches start unresolved. resolve_print_bool_dynvar
+     * fills the slot at top-level pr / print entry; -1 means "consult
+     * the binding stack / var root the next time we look". */
+    S->print_readably_flag       = -1;
+    S->print_meta_flag           = -1;
+    S->print_dup_flag            = -1;
+    S->print_namespace_maps_flag = -1;
+    S->flush_on_newline_flag     = -1;
     /* main_ctx is the embedder thread's view; spawned worker threads
      * install their own ctx via TLS at thread entry. */
     /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /

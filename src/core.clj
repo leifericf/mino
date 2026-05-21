@@ -2994,6 +2994,40 @@
    Resolved once per top-level pr / print call."
   nil)
 
+(def ^:dynamic *print-readably*
+  "When true (the default), strings are emitted with their quote
+   characters and characters with their escape form so the printed
+   output round-trips through the reader. When false, strings and
+   characters print their underlying bytes — pr/prn behave like
+   print/println. Resolved once per top-level pr / print call."
+  true)
+
+(def ^:dynamic *print-meta*
+  "When true, every value carrying non-nil metadata is printed with
+   its meta map prefixed as `^{...} `. When false (the default), meta
+   is silent. Resolved once per top-level pr / print call."
+  false)
+
+(def ^:dynamic *print-dup*
+  "When true, the printer emits forms a reader can reconstruct
+   exactly. mino's built-in record / collection / scalar prints are
+   already reader-roundtrip-compatible, so the flag is currently an
+   information channel for user-installed print-method implementations
+   that branch on dup vs. non-dup output. Default false."
+  false)
+
+(def ^:dynamic *print-namespace-maps*
+  "When true, a map whose keys are keywords (or symbols) sharing a
+   common non-empty namespace is printed as `#:ns{:k1 v1, :k2 v2}`
+   instead of `{:ns/k1 v1, :ns/k2 v2}`. Default false."
+  false)
+
+(def ^:dynamic *flush-on-newline*
+  "When true (the default), the I/O sink behind `*out*` is flushed
+   automatically after any write that contains a newline. When false,
+   the sink stays buffered so consecutive writes coalesce."
+  true)
+
 (def ^:dynamic *math-context*
   "Precision/rounding-mode for bigdec division. nil means exact-or-
    throw (mirrors java.math.BigDecimal.divide without MathContext).

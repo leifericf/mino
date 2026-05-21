@@ -117,7 +117,17 @@ static int io_emit(mino_state *S, const char *out_var_name,
         }
     }
     fwrite(buf, 1, len, fallback);
-    fflush(fallback);
+    /* *flush-on-newline*: when true (the JVM default), flush the
+     * stream if the buffer contains a newline. When false, leave the
+     * stream buffered so the OS write coalesces. The cached flag is
+     * -1 (unresolved) outside a pr/print call; treat as the JVM
+     * default in that boundary case. */
+    if (S->flush_on_newline_flag != 0) {
+        if (S->flush_on_newline_flag == -1
+            || memchr(buf, '\n', len) != NULL) {
+            fflush(fallback);
+        }
+    }
     return 0;
 }
 
@@ -272,8 +282,15 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
     size_t  len   = 0;
     size_t  cap   = 0;
     int     first = 1;
-    int     saved_print_length, saved_print_level;
-    print_dynvars_resolve(S, env, &saved_print_length, &saved_print_level);
+    print_dynvars_saved_t saved_dynvars;
+    print_dynvars_resolve(S, env, &saved_dynvars);
+    /* *print-readably* is a binding-time override of the entry-point's
+     * choice: when the user binds *print-readably* to false, pr/prn
+     * fall through to the print/println chunk path. The reverse (a
+     * print/println call inside (binding [*print-readably* true] ...))
+     * still emits print-style chunks per JVM Clojure (only readable
+     * forms set the flag). */
+    if (readably && !S->print_readably_flag) readably = 0;
     while (mino_is_cons(args)) {
         mino_val *v = args->as.cons.car;
         if (!first) {
@@ -332,17 +349,17 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
     if (newline) {
         if (append_byte(S, &buf, &len, &cap, '\n') < 0) {
             free(buf);
-            print_dynvars_restore(S, saved_print_length, saved_print_level);
+            print_dynvars_restore(S, &saved_dynvars);
             return NULL;
         }
     }
     if (io_emit(S, "*out*", buf == NULL ? "" : buf, len) < 0) {
         free(buf);
-        print_dynvars_restore(S, saved_print_length, saved_print_level);
+        print_dynvars_restore(S, &saved_dynvars);
         return NULL;
     }
     free(buf);
-    print_dynvars_restore(S, saved_print_length, saved_print_level);
+    print_dynvars_restore(S, &saved_dynvars);
     return mino_nil(S);
 }
 
