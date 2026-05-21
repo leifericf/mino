@@ -138,6 +138,52 @@
     (is (thrown? (subbits bs 0 9)))
     (is (thrown? (subbits bs 4 2)))))
 
+(deftest let-bits-two-field-extraction
+  (let-bits [(bits [0xAB :size 8] [0xCD :size 8])
+             [a :size 8]
+             [b :size 8]]
+    (is (= 0xAB a))
+    (is (= 0xCD b))))
+
+(deftest let-bits-mixed-sizes
+  (let-bits [(bits [0xAB :size 8] [0xCD :size 8])
+             [hi :size 4]
+             [mi :size 8]
+             [lo :size 4]]
+    ;; bytes 0xAB 0xCD -> 10101011 11001101
+    ;; hi = bits 0..3  = 1010 = 0xA
+    ;; mi = bits 4..11 = 10111100 = 0xBC
+    ;; lo = bits 12..15 = 1101 = 0xD
+    (is (= 0xA hi))
+    (is (= 0xBC mi))
+    (is (= 0xD lo))))
+
+(deftest let-bits-little-endian-segment
+  (let-bits [(bits [0xCA :size 8] [0xFE :size 8])
+             [v :size 16 :endian :little]]
+    (is (= 0xFECA v))))
+
+(deftest let-bits-rest-as-bytes
+  (let-bits [(bits [0xCA :size 8] [0xFE :size 8] [0xBA :size 8] [0xBE :size 8])
+             [head :size 16]
+             [tail :type :bytes]]
+    (is (= 0xCAFE head))
+    (is (true? (bytes? tail)))
+    (is (= 2 (count tail)))
+    (is (= 0xBA (aget tail 0)))
+    (is (= 0xBE (aget tail 1)))))
+
+(deftest let-bits-signed-int
+  (let-bits [(byte-array [0xFF])
+             [v :size 8 :signed? true]]
+    (is (= -1 v))))
+
+(deftest let-bits-rejects-non-vector-segments
+  ;; A segment must be a vector. The macro should throw at expand
+  ;; time, surfacing as a runtime exception when the form is
+  ;; evaluated.
+  (is (thrown? (eval '(let-bits [bs :not-a-vector] :body)))))
+
 (deftest bits-rejects-bad-options
   (is (thrown? (bits [1 :unknown :something])))
   (is (thrown? (bits [1.0 :size 16 :type :float])))   ;; 16-bit float not supported

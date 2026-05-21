@@ -3101,6 +3101,87 @@
   (boolean (and (map? v) (:mino/instant (meta v)))))
 (defn uri?   [_] false)
 
+;; ---------------------------------------------------------------------------
+;; Bit-syntax destructure macro.
+;;
+;; let-bits binds a sequence of segments from a bytes value at running
+;; bit offsets. Each segment is a vector starting with a symbol and
+;; followed by keyword/value option pairs matching the bits-get
+;; surface (:size, :type, :endian, :signed?). The final segment with
+;; :type :bytes and no explicit :size binds the bit-aligned remainder.
+;;
+;; Example:
+;;
+;;   (let-bits [packet
+;;              [a :size 16]
+;;              [b :size 32 :endian :little]
+;;              [tail :type :bytes]]
+;;     (println a b (count tail)))
+;;
+;; The macro expands into a (let ...) form whose body is the macro
+;; arguments after the binding vector.
+;; ---------------------------------------------------------------------------
+
+(defn- bits-let-seg-size
+  "Compute the static bit count of one segment from its option map.
+   Returns :rest when the segment has :type :bytes without :size,
+   otherwise an integer. Throws on a malformed segment."
+  [opts-map]
+  (let [type (or (:type opts-map) :int)
+        explicit-size (:size opts-map)]
+    (cond
+      explicit-size explicit-size
+      (= type :float) 64
+      (= type :bytes) :rest
+      :else 8)))
+
+(defmacro let-bits
+  "Destructure-shaped binding over a bytes value.
+   (let-bits [bytes-val [sym & opts] ...] body...)
+   See documentation in core.clj just above this definition."
+  [bindings & body]
+  (when-not (vector? bindings)
+    (throw (ex-info "let-bits: first form must be a binding vector"
+                    {:got bindings})))
+  (let [packet-form (first bindings)
+        segments    (rest bindings)
+        packet-sym  (gensym "packet__")
+        total-sym   (gensym "totalbits__")]
+    (loop [segs   segments
+           offset 0
+           pairs  []]
+      (if (empty? segs)
+        `(let [~packet-sym ~packet-form
+               ~total-sym  (* 8 (count ~packet-sym))
+               ~@(mapcat identity pairs)]
+           ~@body)
+        (let [seg (first segs)]
+          (when-not (vector? seg)
+            (throw (ex-info "let-bits: each segment must be a vector"
+                            {:got seg})))
+          (let [sym         (first seg)
+                opts        (rest seg)
+                opts-map    (apply hash-map opts)
+                seg-size    (bits-let-seg-size opts-map)
+                type        (or (:type opts-map) :int)
+                endian      (:endian opts-map)
+                signed?     (:signed? opts-map)
+                size-form   (if (= seg-size :rest)
+                              `(- ~total-sym ~offset)
+                              seg-size)
+                next-offset (if (= seg-size :rest)
+                              total-sym
+                              (+ offset seg-size))
+                bg          `(bits-get ~packet-sym
+                                       :offset ~offset
+                                       :size   ~size-form
+                                       :type   ~type
+                                       ~@(when endian [:endian endian])
+                                       ~@(when (some? signed?) [:signed? signed?]))]
+            (recur (rest segs)
+                   next-offset
+                   (conj pairs [sym bg]))))))))
+
 (def ^:private uuid-hex-pattern #"[0-9a-fA-F]+")
 
 (defn- uuid-string?

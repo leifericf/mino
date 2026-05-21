@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.418.0 — let-bits Destructuring Macro
+
+`let-bits` binds a sequence of named fields from a bytes value at
+running bit offsets. Each segment is a vector `[symbol & options]`
+matching the bits-get surface (`:size`, `:type`, `:endian`,
+`:signed?`). The terminating `:type :bytes` segment without an
+explicit `:size` binds the remaining bit-aligned tail.
+
+  (let-bits [packet
+             [a :size 16]
+             [b :size 32 :endian :little]
+             [tail :type :bytes]]
+    (do-stuff a b tail))
+
+Also fixed a pre-existing bug surfaced while wiring let-bits:
+`(apply hash-map (rest some-vec))` produced `{:first-key nil}`
+because the prim walker did not force the lazy tail that
+`prim_rest_step` returns for vector seqs. The walker now forces.
+
 ## v0.417.0 — Bit Syntax + Chunked Bytes Seq
 
 Erlang-inspired bit-syntax surface for binary-data construction and

@@ -707,8 +707,28 @@ mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
     p = args;
     for (i = 0; i < pairs; i++) {
+        /* Force lazy seam: callers like `(apply hash-map (rest vec))`
+         * thread a CONS whose cdr is a LAZY continuation. Walking the
+         * cdr without forcing reads through the LAZY tag and lands in
+         * the wrong union slot. */
+        while (p != NULL && mino_type_of(p) == MINO_LAZY) {
+            p = lazy_force(S, p);
+            if (p == NULL) return NULL;
+        }
+        if (!mino_is_cons(p)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "hash-map: argument walk produced a non-cons");
+        }
         ks[i] = p->as.cons.car;
         p = p->as.cons.cdr;
+        while (p != NULL && mino_type_of(p) == MINO_LAZY) {
+            p = lazy_force(S, p);
+            if (p == NULL) return NULL;
+        }
+        if (!mino_is_cons(p)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "hash-map: argument walk produced a non-cons");
+        }
         vs[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
