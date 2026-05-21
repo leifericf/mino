@@ -272,6 +272,8 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
     size_t  len   = 0;
     size_t  cap   = 0;
     int     first = 1;
+    int     saved_print_length, saved_print_level;
+    print_dynvars_resolve(S, env, &saved_print_length, &saved_print_level);
     while (mino_is_cons(args)) {
         mino_val *v = args->as.cons.car;
         if (!first) {
@@ -330,14 +332,17 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
     if (newline) {
         if (append_byte(S, &buf, &len, &cap, '\n') < 0) {
             free(buf);
+            print_dynvars_restore(S, saved_print_length, saved_print_level);
             return NULL;
         }
     }
     if (io_emit(S, "*out*", buf == NULL ? "" : buf, len) < 0) {
         free(buf);
+        print_dynvars_restore(S, saved_print_length, saved_print_level);
         return NULL;
     }
     free(buf);
+    print_dynvars_restore(S, saved_print_length, saved_print_level);
     return mino_nil(S);
 }
 

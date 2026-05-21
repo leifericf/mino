@@ -514,6 +514,15 @@ struct mino_state {
      * during state init, before the first allocation. */
     gc_tracer_fn             gc_tracers[GC_T__COUNT];
     gc_finalizer_fn          gc_finalizers[GC_T__COUNT];
+
+    /* Cached *print-length* / *print-level* resolved values. Tail-
+     * placed so the JIT-pinned offsets (ic_gen, bc_regs,
+     * jit_invoke_ctx) earlier in the struct stay byte-stable across
+     * this addition. -1 = unset (no limit). Resolved once per top-
+     * level pr / print / pr-str call; helpers consult these inline so
+     * dynvar lookup costs once per call, not per value walked. */
+    int                      print_length_limit;
+    int                      print_level_limit;
 };
 
 /* Resolve the active per-thread ctx for state S.

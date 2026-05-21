@@ -72,6 +72,12 @@ mino_thread_ctx_t *mino_tls_ctx = NULL;
 static void state_init(mino_state *S)
 {
     memset(S, 0, sizeof(*S));
+    /* Print dynvar caches: -1 = unset (no limit). Resolved per
+     * top-level pr / print / pr-str call from *print-length* /
+     * *print-level*; helpers consult these inline so dynvar lookup
+     * costs once per pr call, not per value walked. */
+    S->print_length_limit = -1;
+    S->print_level_limit  = -1;
     /* main_ctx is the embedder thread's view; spawned worker threads
      * install their own ctx via TLS at thread entry. */
     /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /

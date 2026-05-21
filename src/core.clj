@@ -2966,6 +2966,20 @@
    Defaults to true."
   true)
 
+(def ^:dynamic *print-length*
+  "Maximum number of items printed in a single collection (vector,
+   list, map, set, chunk, chunked-cons). nil means no limit (the
+   default). The remainder is replaced with `...`. Resolved once per
+   top-level pr / prn / print / println / pr-str call; nested
+   collections share the same limit."
+  nil)
+
+(def ^:dynamic *print-level*
+  "Maximum nesting depth printed. A collection found at depth >= this
+   limit is replaced with `#`. nil means no limit (the default).
+   Resolved once per top-level pr / print call."
+  nil)
+
 ;; --- Pure-Clojure surface ---
 
 ;; Identifier predicates.

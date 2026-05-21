@@ -40,6 +40,19 @@ size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
 int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
 mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
+/* Print dynvar plumbing. Top-level print entrypoints (pr / prn / print
+ * / println / pr-str) call resolve to snapshot *print-length* and
+ * *print-level* from the current binding stack into the state's
+ * cached print_length_limit / print_level_limit fields, do the print,
+ * then call restore with the saved values. Both helpers are no-ops
+ * when env is NULL or the dynvars are unset.
+ *
+ * The cached values mean the per-collection printers read a single
+ * int field instead of walking the binding stack per nested value. */
+void print_dynvars_resolve(mino_state *S, mino_env *env,
+                           int *saved_length, int *saved_level);
+void print_dynvars_restore(mino_state *S, int saved_length, int saved_level);
+
 /* Sequence iterator: borrows the collection being iterated.
  * seq_iter_val returns a borrowed pointer into the collection's storage;
  * do not retain it across allocations without gc_pin. */

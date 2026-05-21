@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.403.0 — `*print-length*` / `*print-level*` Dynvars
+
+`pr`, `prn`, `print`, `println`, and `pr-str` now consult two new
+^:dynamic vars when walking collections: `*print-length*` truncates
+each collection (vector, list, map, set, chunk, chunked-cons) to N
+items with `...` filling the rest, and `*print-level*` replaces
+collections nested deeper than the limit with `#`. Both default to
+nil (no limit). Cached on the state at the top of each call so the
+dynvar lookup cost is paid once per pr, not per value walked.
+
+Late-placement in the `mino_state` struct so the stencil-pinned
+offsets for `ic_gen`, `bc_regs`, and `jit_invoke_ctx` stay
+byte-stable.
+
+New `tests/print_dynvars_test.clj` covers vector, list, map, set
+truncation; nested collapse; combined length+level; post-binding
+restore; and locks in the `print-method` multimethod extension
+shape that was already present from prior cycles.
+
+`*print-readably*`, `*print-meta*`, `*print-dup*`,
+`*print-namespace-maps*`, and `*flush-on-newline*` remain
+unimplemented. Each requires structural printer changes (alt-form
+emission, ^meta prefix, alt routing, key-namespace analysis, sink
+flush gating); they're queued for a follow-on cycle rather than
+shipped as no-op declarations.
+
 ## v0.402.0 — `thrown-with-msg?` Assertion
 
 `clojure.test` learns to dispatch on `(is (thrown-with-msg? <re> body))`

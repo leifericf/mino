@@ -4,6 +4,63 @@
 
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"
+#include "prim/internal.h"
+
+/* Resolve *print-length* / *print-level* into the state's cached
+ * limit fields. The lookup checks the dynamic binding stack first
+ * (where (binding [*print-length* N] ...) lands) then falls back to
+ * the var root in clojure.core. Non-integer values silently become
+ * "unset" (-1) so a misconfigured dynvar doesn't crash the printer.
+ *
+ * Mirrors the resolve_io_sink pattern in prim/io.c. */
+static int resolve_print_int_dynvar(mino_state *S, mino_env *env,
+                                    const char *name)
+{
+    mino_val *v = NULL;
+    mino_val *var;
+    long long n;
+    if (mino_current_ctx(S)->dyn_stack != NULL) {
+        v = dyn_lookup(S, name);
+        if (v == NULL) {
+            char qualified[64];
+            int  qn = snprintf(qualified, sizeof(qualified),
+                               "clojure.core/%s", name);
+            if (qn > 0 && (size_t)qn < sizeof(qualified)) {
+                v = dyn_lookup(S, qualified);
+            }
+        }
+    }
+    if (v == NULL && env != NULL) {
+        v = mino_env_get(env, name);
+    }
+    if (v == NULL) {
+        var = var_find(S, "clojure.core", name);
+        if (var != NULL && mino_type_of(var) == MINO_VAR
+            && var->as.var.bound) {
+            v = var->as.var.root;
+        }
+    }
+    if (v == NULL || mino_type_of(v) == MINO_NIL) return -1;
+    if (!as_long(v, &n)) return -1;
+    if (n < 0) return -1;
+    if (n > 0x7fffffff) return 0x7fffffff;
+    return (int)n;
+}
+
+void print_dynvars_resolve(mino_state *S, mino_env *env,
+                           int *saved_length, int *saved_level)
+{
+    *saved_length = S->print_length_limit;
+    *saved_level  = S->print_level_limit;
+    S->print_length_limit = resolve_print_int_dynvar(S, env, "*print-length*");
+    S->print_level_limit  = resolve_print_int_dynvar(S, env, "*print-level*");
+}
+
+void print_dynvars_restore(mino_state *S, int saved_length, int saved_level)
+{
+    S->print_length_limit = saved_length;
+    S->print_level_limit  = saved_level;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */
@@ -130,22 +187,38 @@ static void print_char(FILE *out, int cp)
     }
 }
 
+/* True when *print-level* has been resolved (>=0) and the current
+ * print_depth is at or beyond the limit. Callers replace the open
+ * collection with `#` per JVM Clojure's semantics. */
+static int print_level_collapse(const mino_state *S)
+{
+    return S->print_level_limit >= 0
+        && S->print_depth >= S->print_level_limit;
+}
+
 static void print_cons(mino_state *S, FILE *out, const mino_val *v)
 {
     const mino_val *p = v;
+    int printed = 0;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputc('(', out);
     S->print_depth++;
     while (p != NULL && mino_type_of(p) == MINO_CONS) {
+        if (printed > 0) fputc(' ', out);
+        if (S->print_length_limit >= 0 && printed >= S->print_length_limit) {
+            fputs("...", out);
+            break;
+        }
         mino_print_to(S, out, p->as.cons.car);
+        printed++;
         p = p->as.cons.cdr;
         /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
         if (p != NULL && mino_type_of(p) == MINO_LAZY) {
             p = lazy_force(S, (mino_val *)p);
         }
-        if (p != NULL && mino_type_of(p) == MINO_CONS) {
-            fputc(' ', out);
-        } else if (p != NULL && mino_type_of(p) != MINO_NIL
-                   && mino_type_of(p) != MINO_EMPTY_LIST) {
+        if (p != NULL && mino_type_of(p) != MINO_CONS
+                      && mino_type_of(p) != MINO_NIL
+                      && mino_type_of(p) != MINO_EMPTY_LIST) {
             fputs(" . ", out);
             mino_print_to(S, out, p);
             break;
@@ -158,10 +231,15 @@ static void print_cons(mino_state *S, FILE *out, const mino_val *v)
 static void print_vector(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputc('[', out);
     S->print_depth++;
     for (i = 0; i < v->as.vec.len; i++) {
         if (i > 0) fputc(' ', out);
+        if (S->print_length_limit >= 0 && (int)i >= S->print_length_limit) {
+            fputs("...", out);
+            break;
+        }
         mino_print_to(S, out, vec_nth(v, i));
     }
     S->print_depth--;
@@ -233,11 +311,16 @@ static void print_map(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
     if (print_map_meta_special(S, out, v)) return;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputc('{', out);
     S->print_depth++;
     for (i = 0; i < v->as.map.len; i++) {
         mino_val *key = vec_nth(v->as.map.key_order, i);
         if (i > 0) fputs(", ", out);
+        if (S->print_length_limit >= 0 && (int)i >= S->print_length_limit) {
+            fputs("...", out);
+            break;
+        }
         mino_print_to(S, out, key);
         fputc(' ', out);
         mino_print_to(S, out, map_get_val(v, key));
@@ -249,10 +332,15 @@ static void print_map(mino_state *S, FILE *out, const mino_val *v)
 static void print_set(mino_state *S, FILE *out, const mino_val *v)
 {
     size_t i;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputs("#{", out);
     S->print_depth++;
     for (i = 0; i < v->as.set.len; i++) {
         if (i > 0) fputc(' ', out);
+        if (S->print_length_limit >= 0 && (int)i >= S->print_length_limit) {
+            fputs("...", out);
+            break;
+        }
         mino_print_to(S, out, vec_nth(v->as.set.key_order, i));
     }
     S->print_depth--;
@@ -263,8 +351,14 @@ static void print_sorted(mino_state *S, FILE *out, const mino_val *v,
                          int is_map)
 {
     int first = 1;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputs(is_map ? "{" : "#{", out);
     S->print_depth++;
+    /* Note: print-length isn't applied here -- print_rb_inorder is a
+     * recursive in-order walk that doesn't carry a count. Sorted
+     * collections are uncommon in user-facing prints; deferring the
+     * length-limit on sorted to a follow-on if it surfaces in the
+     * corpus. */
     print_rb_inorder(S, out, v->as.sorted.root, is_map, &first);
     S->print_depth--;
     fputc('}', out);
@@ -275,10 +369,15 @@ static void print_chunk(mino_state *S, FILE *out, const mino_val *v)
     /* Internal seq leaf; surface as `#chunk[…]` rather than
      * pretending to be a vector. */
     unsigned k;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputs("#chunk[", out);
     S->print_depth++;
     for (k = 0; k < v->as.chunk.len; k++) {
         if (k > 0) fputc(' ', out);
+        if (S->print_length_limit >= 0 && (int)k >= S->print_length_limit) {
+            fputs("...", out);
+            break;
+        }
         mino_print_to(S, out, v->as.chunk.vals[k]);
     }
     S->print_depth--;
@@ -291,30 +390,46 @@ static void print_chunked_cons(mino_state *S, FILE *out, const mino_val *v)
      * into the more pointer (which may be cons / lazy / another
      * chunked-cons). */
     const mino_val *cur = v;
+    int printed = 0;
+    int truncated = 0;
+    if (print_level_collapse(S)) { fputc('#', out); return; }
     fputc('(', out);
     S->print_depth++;
     while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
         const mino_val *ch = cur->as.chunked_cons.chunk;
         unsigned k;
         for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
-            if (k > cur->as.chunked_cons.off || cur != v) fputc(' ', out);
+            if (printed > 0) fputc(' ', out);
+            if (S->print_length_limit >= 0
+                && printed >= S->print_length_limit) {
+                fputs("...", out);
+                truncated = 1;
+                break;
+            }
             mino_print_to(S, out, ch->as.chunk.vals[k]);
+            printed++;
         }
+        if (truncated) break;
         cur = cur->as.chunked_cons.more;
         if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
             cur = lazy_force(S, (mino_val *)cur);
         }
     }
-    if (cur != NULL && mino_type_of(cur) == MINO_CONS) {
-        fputc(' ', out);
+    if (!truncated && cur != NULL && mino_type_of(cur) == MINO_CONS) {
         /* Reuse the cons walker by printing the tail inline. */
         while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
+            if (printed > 0) fputc(' ', out);
+            if (S->print_length_limit >= 0
+                && printed >= S->print_length_limit) {
+                fputs("...", out);
+                break;
+            }
             mino_print_to(S, out, cur->as.cons.car);
+            printed++;
             cur = cur->as.cons.cdr;
             if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
                 cur = lazy_force(S, (mino_val *)cur);
             }
-            if (cur != NULL && mino_type_of(cur) == MINO_CONS) fputc(' ', out);
         }
     }
     S->print_depth--;

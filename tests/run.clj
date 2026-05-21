@@ -69,6 +69,7 @@
 (require "tests/sorted_test")
 (require "tests/transient_test")
 (require "tests/print_method_test")
+(require "tests/print_dynvars_test")
 (require "tests/conformance_test")
 (require "tests/var_quote_test")
 (require "tests/reader_cond_test")
