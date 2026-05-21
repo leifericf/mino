@@ -2971,6 +2971,16 @@
        "." (:minor *clojure-version*)
        "." (:incremental *clojure-version*)))
 
+;; JVM Clojure AOT-compiler dynvars. mino has no AOT compiler; these
+;; are defined so user code that binds them around `load` /
+;; `compile` calls doesn't throw, matching the JVM-canon surface.
+;; They have no observable effect in mino — purely shape-parity.
+(def ^:dynamic *compile-path* nil)
+(def ^:dynamic *source-path*  "NO_SOURCE_PATH")
+(def ^:dynamic *compile-files* false)
+(def ^:dynamic *warn-on-reflection* false)
+(def ^:dynamic *unchecked-math* false)
+
 (defmacro assert
   ([x] (list 'when-not x (list 'throw "Assert failed")))
   ([x msg] (list 'when-not x (list 'throw msg))))

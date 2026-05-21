@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.413.0 — clojure-version + AOT-Compiler Dynvars
+
+`*clojure-version*` and `(clojure-version)` were already wired; this
+release adds the JVM AOT-compiler dynvars so user code that binds
+them around `load` / `compile` calls no longer throws:
+
+- `*compile-path*`     — default `nil`
+- `*source-path*`      — default `"NO_SOURCE_PATH"`
+- `*compile-files*`    — default `false`
+- `*warn-on-reflection*` — default `false`
+- `*unchecked-math*`   — default `false`
+
+mino has no AOT compiler, so the dynvars have no observable effect
+beyond being bindable. The naming and defaults match JVM Clojure
+exactly so audit-shaped tests like `clojure_coverage_test.clj` see
+the surface they expect.
+
 ## v0.412.0 — JVM Statics + Embedded-Host Remap
 
 Two complementary layers ship under one file
