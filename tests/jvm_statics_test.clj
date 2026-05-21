@@ -87,6 +87,42 @@
   ;; Should return without error after a near-zero sleep.
   (is (= nil (Thread/sleep 1))))
 
+;; Bare JVM class symbols resolve to mino's corresponding type-marker
+;; keyword so that portable Clojure code using class names as extend
+;; targets or instance? arguments doesn't need a :cljs/:mino branch.
+
+(deftest jvm-class-symbols-as-type-markers
+  (is (= :string (eval 'String)))
+  (is (= :char (eval 'Character)))
+  (is (= :bool (eval 'Boolean)))
+  (is (= :int (eval 'Long)))
+  (is (= :float (eval 'Double)))
+  (is (= :default (eval 'Object))))
+
+(deftest jvm-class-symbols-work-with-instance?
+  (is (instance? String "hi"))
+  (is (instance? Character \a))
+  (is (instance? Boolean true))
+  (is (instance? Boolean false))
+  (is (instance? Long 1))
+  (is (instance? Double 1.0))
+  (is (not (instance? String 1)))
+  (is (not (instance? Long "1")))
+  (is (not (instance? Double 1))))
+
+(defprotocol JvmClassMarkerProto (jcmp-fn [_]))
+
+(deftest jvm-class-symbols-work-with-extend-protocol
+  (eval '(extend-protocol JvmClassMarkerProto
+           String  (jcmp-fn [_] :got-string)
+           Long    (jcmp-fn [_] :got-int)
+           Object  (jcmp-fn [_] :got-default)))
+  (is (= :got-string  (jcmp-fn "hi")))
+  (is (= :got-int     (jcmp-fn 42)))
+  ;; Anything not explicitly extended falls through to the Object arm.
+  (is (= :got-default (jcmp-fn [1 2])))
+  (is (= :got-default (jcmp-fn :a))))
+
 (deftest jvm-host-remap-get-property-throws
   ;; No JVM properties table in mino; surface :mino/unsupported.
   (is (thrown? (System/getProperty "user.home"))))

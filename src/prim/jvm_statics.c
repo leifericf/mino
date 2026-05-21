@@ -501,4 +501,18 @@ void mino_install_jvm_statics(mino_state *S, mino_env *env)
     env_bind(S, core_env, "Math/E",            mino_float(S, 2.718281828459045));
     env_bind(S, core_env, "Boolean/TRUE",      mino_true(S));
     env_bind(S, core_env, "Boolean/FALSE",     mino_false(S));
+
+    /* Bare JVM class symbols resolve to mino's corresponding type-marker
+     * keyword so that portable Clojure code using class names as the
+     * extend target -- (extend-protocol P String ...) -- or as the
+     * instance? argument works without a :cljs/:mino branch. Object maps
+     * to the protocol-dispatch fallback (:default), giving the standard
+     * "default impl" idiom. Number is intentionally omitted: mino has no
+     * single type marker covering ints, ratios, and floats. */
+    env_bind(S, core_env, "String",    mino_keyword(S, "string"));
+    env_bind(S, core_env, "Character", mino_keyword(S, "char"));
+    env_bind(S, core_env, "Boolean",   mino_keyword(S, "bool"));
+    env_bind(S, core_env, "Long",      mino_keyword(S, "int"));
+    env_bind(S, core_env, "Double",    mino_keyword(S, "float"));
+    env_bind(S, core_env, "Object",    mino_keyword(S, "default"));
 }

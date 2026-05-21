@@ -64,6 +64,17 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- Bare JVM class symbols now resolve to mino's corresponding
+  type-marker keyword so that portable Clojure code using class
+  names as extend targets or `instance?` arguments doesn't need a
+  dedicated mino branch in its reader-conditionals. `String` → `:string`,
+  `Character` → `:char`, `Boolean` → `:bool`, `Long` → `:int`, `Double`
+  → `:float`, and `Object` → `:default`. `(extend-protocol P Object
+  ...)` now registers a fallback impl as the JVM idiom expects;
+  `(instance? String "hi")` returns true. `Number` is intentionally
+  omitted since mino has no single type marker covering ints, ratios,
+  and floats; `clojure.lang.*` classes are not yet bound.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and
