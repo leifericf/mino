@@ -31,6 +31,18 @@
   accidentally fed to `repeat` now surfaces as a clear error rather
   than producing the wrong sequence.
 
+- `:require` now recognises `:refer-macros` as a synonym for
+  `:refer` in ns specs. CLJS introduces the second axis to bridge
+  its JVM-compile-time / browser-runtime split; mino has no such
+  split — macros and runtime fns share a namespace, and `:refer`
+  already imports macros. Previously the parser accepted
+  `:refer-macros` without complaint and never imported the listed
+  names, leaving a CLJS-shaped require like
+  `[clojure.string :refer-macros [blank?]]` to fail later as an
+  unbound-symbol error with no signal of the cause. When both
+  `:refer` and `:refer-macros` appear in the same spec, their
+  vectors are concatenated so neither import side is dropped.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and

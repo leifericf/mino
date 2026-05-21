@@ -166,11 +166,31 @@ static int ns_process_require_spec_ex(mino_state *S, mino_val *spec,
                 alias_len     = v->as.s.len;
                 as_alias_only = 1;
             }
-            if (kw_eq(k, "refer") && mino_type_of(v) == MINO_VECTOR) {
-                refer_vec = v;
+            /* :refer-macros is the CLJS portability shape that imports
+             * macros from another namespace. CLJS introduces it because
+             * macros must be JVM-host-compiled while runtime fns live
+             * in browser-JS, so the two axes need separate clauses.
+             * mino has no such split: macros and runtime fns share a
+             * namespace, and :refer already imports macros. Treat
+             * :refer-macros as :refer so portable CLJS / .cljc code
+             * loads cleanly instead of getting a silent miss. When
+             * both appear in the same spec (e.g.
+             * `:refer [f] :refer-macros [m]`), concatenate so neither
+             * import side is dropped. */
+            if ((kw_eq(k, "refer") || kw_eq(k, "refer-macros"))
+                && mino_type_of(v) == MINO_VECTOR) {
+                if (refer_vec == NULL) {
+                    refer_vec = v;
+                } else {
+                    size_t j;
+                    for (j = 0; j < v->as.vec.len; j++) {
+                        refer_vec = vec_conj1(S, refer_vec, vec_nth(v, j));
+                    }
+                }
                 refer_all = 0;
             }
-            if (kw_eq(k, "refer") && mino_type_of(v) == MINO_KEYWORD
+            if ((kw_eq(k, "refer") || kw_eq(k, "refer-macros"))
+                && mino_type_of(v) == MINO_KEYWORD
                 && kw_eq(v, "all")) {
                 refer_all = 1;
             }

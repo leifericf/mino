@@ -19,3 +19,22 @@
                  (:require [tests.module.does.not.exist :as x]))))
   (is (thrown? (ns test.require.missing2
                  (:require tests.module.does.not.exist)))))
+
+(deftest refer-macros-imports-like-refer
+  ;; mino has no JVM-compile-time vs runtime split, so :refer-macros
+  ;; carries the same meaning as :refer -- the listed names are bound
+  ;; in the current namespace. CLJS-shaped portability requires that
+  ;; specify macro imports via :refer-macros load cleanly on mino.
+  (ns test.refer.macros1
+    (:require [clojure.string :refer-macros [blank?]]))
+  (is (false? (blank? "x")))
+  (is (true?  (blank? "")))
+  ;; Mixed form: :refer-macros and :refer in the same spec.
+  (ns test.refer.macros2
+    (:require [clojure.string :refer-macros [trim] :refer [join]]))
+  (is (= "abc" (trim "  abc  ")))
+  (is (= "a,b" (join "," ["a" "b"])))
+  ;; :refer-macros :all mirrors :refer :all.
+  (ns test.refer.macros3
+    (:require [clojure.string :refer-macros :all]))
+  (is (false? (blank? "x"))))
