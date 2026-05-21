@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.422.0 — Post-Canon-Gaps Close-Out
+
+No runtime change. Three sections of the C API stay UNSTABLE
+through the alpha series and are explicitly marked
+(`MINO_UNSTABLE_THREADPOOL`, `MINO_UNSTABLE_GC`,
+`MINO_UNSTABLE_ALLOC_PROFILE`); the rest of `src/mino.h` is the
+stable surface.
+
 ## v0.421.0 — C++ RAII Wrapper + API Audit
 
 New optional header `src/mino.hpp` ships thin RAII wrappers over
