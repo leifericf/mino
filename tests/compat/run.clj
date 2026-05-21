@@ -14,31 +14,30 @@
 ;; (clojure.java.io, java.util.concurrent, clojure.lang.* interfaces,
 ;; JVM streams, bytecode walking, JVM logging) are out of scope, as
 ;; are repos that contain a (:import …) form we can't make pass.
+;;
+;; The portability filter is :default branches in reader-conditionals:
+;; a library that consistently provides `#?(... :default ...)` arms is
+;; signalling that it expects to be loaded by non-JVM/non-CLJS dialects
+;; and has taken care to make non-platform-specific behaviour reachable.
+;; Libraries that pin every reader-conditional to :clj/:cljs only are
+;; intentionally JVM/CLJS-only — they're not a meaningful compat target
+;; for mino, and exercising them just adds noise.
 (def repos
-  {"aero"               {:url "https://github.com/juxt/aero.git" :src "src"}
-   "algo.monads"        {:url "https://github.com/clojure/algo.monads.git" :src "src"}
-   "arrangement"        {:url "https://github.com/greglook/clj-arrangement.git" :src "src"}
-   "camel-snake-kebab"  {:url "https://github.com/clj-commons/camel-snake-kebab.git" :src "src"}
-   "cats"               {:url "https://github.com/funcool/cats.git" :src "src"}
-   "cuerdas"            {:url "https://github.com/funcool/cuerdas.git" :src "src"}
-   "deep-diff2"         {:url "https://github.com/lambdaisland/deep-diff2.git" :src "src"}
-   "edamame"            {:url "https://github.com/borkdude/edamame.git" :src "src"}
-   "fipp"               {:url "https://github.com/brandonbloom/fipp.git" :src "src"}
-   "honeysql"           {:url "https://github.com/seancorfield/honeysql.git" :src "src"}
-   "integrant"          {:url "https://github.com/weavejester/integrant.git" :src "src"}
-   "macrovich"          {:url "https://github.com/cgrand/macrovich.git" :src "src"}
-   "malli"              {:url "https://github.com/metosin/malli.git" :src "src"}
-   "math.combinatorics" {:url "https://github.com/clojure/math.combinatorics.git" :src "src"}
-   "medley"             {:url "https://github.com/weavejester/medley.git" :src "src"}
-   "plumbing"           {:url "https://github.com/plumatic/plumbing.git" :src "src"}
-   "reitit"             {:url "https://github.com/metosin/reitit.git" :src "modules/reitit-core/src"}
-   "rewrite-clj"        {:url "https://github.com/clj-commons/rewrite-clj.git" :src "src" :ref "main"}
-   "specter"            {:url "https://github.com/redplanetlabs/specter.git" :src "src/clj"}
-   "test.check"         {:url "https://github.com/clojure/test.check.git" :src "src"}
-   "tongue"             {:url "https://github.com/tonsky/tongue.git" :src "src"}
-   "tools.macro"        {:url "https://github.com/clojure/tools.macro.git" :src "src"}
-   "uri"                {:url "https://github.com/lambdaisland/uri.git" :src "src"}
-   "xforms"             {:url "https://github.com/cgrand/xforms.git" :src "src"}})
+  {"cli"          {:url "https://github.com/babashka/cli.git" :src "src"}
+   "data.avl"     {:url "https://github.com/clojure/data.avl.git" :src "src"}
+   "edamame"      {:url "https://github.com/borkdude/edamame.git" :src "src"}
+   "encore"       {:url "https://github.com/taoensso/encore.git" :src "src"}
+   "honeysql"     {:url "https://github.com/seancorfield/honeysql.git" :src "src"}
+   "integrant"    {:url "https://github.com/weavejester/integrant.git" :src "src"}
+   "medley"       {:url "https://github.com/weavejester/medley.git" :src "src"}
+   "promesa"      {:url "https://github.com/funcool/promesa.git" :src "src"}
+   "re-frame"     {:url "https://github.com/day8/re-frame.git" :src "src"}
+   "rewrite-clj"  {:url "https://github.com/clj-commons/rewrite-clj.git" :src "src" :ref "main"}
+   "sci"          {:url "https://github.com/babashka/sci.git" :src "src"}
+   "shadow-cljs"  {:url "https://github.com/thheller/shadow-cljs.git" :src "src"}
+   "tools.cli"    {:url "https://github.com/clojure/tools.cli.git" :src "src"}
+   "tools.reader" {:url "https://github.com/clojure/tools.reader.git" :src "src"}
+   "xforms"       {:url "https://github.com/cgrand/xforms.git" :src "src"}})
 
 (def shim-code "")
 
