@@ -527,12 +527,15 @@
   (testing "non-exception input is nil-safe"
     (is (nil? (ex-cause nil)))))
 
-(deftest inst-ms-throws
-  (testing "inst-ms is unsupported"
+(deftest inst-ms-rejects-non-inst
+  ;; inst-ms now works on real inst values (see inst_test.clj). Passing
+  ;; a non-inst value (number / string / arbitrary map) still throws
+  ;; with the value in :got data.
+  (testing "inst-ms on a non-inst throws"
     (is (thrown? (inst-ms 0)))
     (let [d (try (inst-ms 0) nil
                  (catch e (ex-data e)))]
-      (is (= :inst-ms (:mino/unsupported d))))))
+      (is (= 0 (:got d))))))
 
 (deftest tap-mechanism
   (testing "add-tap and tap> deliver values"

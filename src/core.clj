@@ -3091,11 +3091,13 @@
    2-vectors)."
   [x] (and (vector? x) (= 2 (count x))))
 
-;; Mino has no host byte-arrays, no Inst protocol, and no URI type.
-;; These predicates exist for portability with portable-Clojure code
-;; and always return false.
+;; Mino has no host byte-arrays or URI type; the predicates return
+;; false for portability with portable-Clojure code. `inst?` does the
+;; real check against the `:mino/instant` meta marker that
+;; clojure.instant attaches to its parsed maps.
 (defn bytes? [_] false)
-(defn inst?  [_] false)
+(defn inst?  [v]
+  (boolean (and (map? v) (:mino/instant (meta v)))))
 (defn uri?   [_] false)
 
 (def ^:private uuid-hex-pattern #"[0-9a-fA-F]+")
@@ -3245,13 +3247,54 @@
   (or (some-> ex ex-data :cause)
       (some-> ex meta :cause)))
 
-;; Inst protocol shape. Mino has no Inst type; calling inst-ms on any
-;; value throws.
+;; inst-ms: returns epoch millis from an inst (a map with the
+;; `:mino/instant true` meta marker, as produced by
+;; clojure.instant/read-instant-date or the #inst reader literal).
+;; The conversion is duplicated here from clojure.instant so it works
+;; without an explicit (require 'clojure.instant); the two impls
+;; share the same component-map contract.
+(let [days-before-month [0 0 31 59 90 120 151 181 212 243 273 304 334]]
+  (defn- inst-ms-leap? [y]
+    (or (and (zero? (mod y 4)) (not (zero? (mod y 100))))
+        (zero? (mod y 400))))
+  (defn- inst-ms-count-leaps [y]
+    (- (+ (quot y 4) (quot y 400)) (quot y 100)))
+  (defn- inst-ms-days-from-1970 [y m d]
+    (let [year-days    (* 365 (- y 1970))
+          leap-correct (- (inst-ms-count-leaps (dec y))
+                          (inst-ms-count-leaps 1969))
+          month-days   (nth days-before-month m)
+          leap-of-y    (if (and (> m 2) (inst-ms-leap? y)) 1 0)]
+      (+ year-days leap-correct month-days leap-of-y (dec d)))))
+
 (defn inst-ms
-  "Throws — mino has no Inst type."
-  [_]
-  (throw (ex-info "inst-ms is not supported on mino — there is no Inst type"
-                  {:mino/unsupported :inst-ms})))
+  "Returns epoch millis (since 1970-01-01T00:00:00Z) for an inst
+   value as returned by clojure.instant/read-instant-date or the
+   `#inst \"...\"` reader literal. Throws on a non-inst argument."
+  [v]
+  (when-not (inst? v)
+    (throw (ex-info "inst-ms: not an inst" {:got v})))
+  (let [{:keys [years months days hours minutes seconds nanoseconds
+                offset-sign offset-hours offset-minutes]} v
+        epoch-days (inst-ms-days-from-1970 years months days)
+        local-ms   (+ (* 1000 (+ (* epoch-days 86400)
+                                  (* hours 3600)
+                                  (* minutes 60)
+                                  seconds))
+                      (quot nanoseconds 1000000))
+        offset-ms  (* (or offset-sign 1)
+                      (+ (* (or offset-hours 0)   3600000)
+                         (* (or offset-minutes 0) 60000)))]
+    ;; offset is east-of-UTC; subtract to reach UTC millis.
+    (- local-ms offset-ms)))
+
+;; #inst reader literal. The handler lazily requires clojure.instant
+;; the first time #inst is encountered so core boot doesn't load the
+;; bigger ISO 8601 parser unless needed.
+(let [inst-reader (fn inst-reader [s]
+                    (require 'clojure.instant)
+                    ((resolve 'clojure.instant/read-instant-date) s))]
+  (alter-var-root #'*data-readers* assoc 'inst inst-reader))
 
 ;; read: Clojure-compatible reader entry point.
 ;;   (read)        — reads one form from *in*. Atom-bound *in*

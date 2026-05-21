@@ -202,6 +202,68 @@
    component map. Named for parity with canonical clojure.instant;
    on the JVM and JS this returns a host Date instance, but mino
    has no host date type so the map is the honest representation.
-   Use the :years / :months / :days / etc. keys to interpret."
+   The returned map carries `:mino/instant true` in its metadata so
+   `inst?` recognises it; the map content itself stays free of
+   marker keys so equality with user-constructed maps of the same
+   shape isn't accidentally broken."
   [s]
-  (validated (parse-timestamp s)))
+  (with-meta (validated (parse-timestamp s))
+             {:mino/instant true}))
+
+(defn inst?
+  "True when v is a value produced by clojure.instant/read-instant-date
+   (or a map carrying the same `:mino/instant true` metadata marker).
+   Matches JVM Clojure's inst? predicate over the mino representation."
+  [v]
+  (boolean (and (map? v)
+                (:mino/instant (meta v)))))
+
+;; --- inst-ms: epoch millis from a component map ---------------------------
+
+(def ^:private days-before-month
+  ;; Cumulative days through the start of each month in a non-leap year.
+  [0   ; placeholder for index 0 (months are 1-based)
+   0 31 59 90 120 151 181 212 243 273 304 334])
+
+(defn- leap-year? [y]
+  (or (and (zero? (mod y 4)) (not (zero? (mod y 100))))
+      (zero? (mod y 400))))
+
+(defn- count-leaps
+  "Number of leap years in [1, y]. The standard
+   y/4 - y/100 + y/400 closed form."
+  [y]
+  (-> (+ (quot y 4) (quot y 400))
+      (- (quot y 100))))
+
+(defn- days-from-civil-1970
+  "Total days from 1970-01-01 (the epoch's day 0) to y-m-d. Year 1970
+   day 1 = day 0; subsequent days count forward, prior dates count
+   negative."
+  [y m d]
+  (let [year-days     (* 365 (- y 1970))
+        leap-correct  (- (count-leaps (dec y)) (count-leaps 1969))
+        month-days    (nth days-before-month m)
+        leap-of-y     (if (and (> m 2) (leap-year? y)) 1 0)]
+    (+ year-days leap-correct month-days leap-of-y (dec d))))
+
+(defn inst-ms
+  "Returns epoch millis (since 1970-01-01T00:00:00Z) for an inst
+   value as returned by `read-instant-date`. Throws on a non-inst
+   value."
+  [v]
+  (when-not (inst? v)
+    (throw (ex-info "inst-ms: not an inst" {:got v})))
+  (let [{:keys [years months days hours minutes seconds nanoseconds
+                offset-sign offset-hours offset-minutes]} v
+        epoch-days (days-from-civil-1970 years months days)
+        local-ms   (+ (* 1000 (+ (* epoch-days 86400)
+                                  (* hours 3600)
+                                  (* minutes 60)
+                                  seconds))
+                      (quot nanoseconds 1000000))
+        offset-ms  (* (or offset-sign 1)
+                      (+ (* (or offset-hours 0)   3600000)
+                         (* (or offset-minutes 0) 60000)))]
+    ;; The offset is east-of-UTC. Subtract it to get UTC millis.
+    (- local-ms offset-ms)))

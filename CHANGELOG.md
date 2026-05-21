@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.414.0 — inst? / inst-ms / #inst Reader Literal
+
+`#inst "..."` literals now read into the canonical component map
+produced by `clojure.instant/read-instant-date`, with
+`{:mino/instant true}` attached as metadata so `(inst? ...)`
+detects it. `(inst-ms inst)` returns epoch millis using the
+component-map decode (no host Date dependency).
+
+- `inst?` — true for values carrying the `:mino/instant true` meta
+  marker. Replaces the always-false stub.
+- `inst-ms` — proper epoch-millis decode over the component map.
+  Throws `{:got v}` on non-inst inputs. Replaces the always-throw
+  stub.
+- `#inst "..."` — registered in `*data-readers*` as a lazy
+  bridge that requires `clojure.instant` on first use, so the
+  reader literal works straight out of the gate without a manual
+  `(require 'clojure.instant)`.
+
+The compat_test.clj `inst-ms-throws` test (which asserted the
+always-throw behavior of the old stub) is now
+`inst-ms-rejects-non-inst` and verifies the new contract on a
+non-inst argument; the rest of the inst surface is exercised in
+the new `tests/inst_test.clj`.
+
 ## v0.413.0 — clojure-version + AOT-Compiler Dynvars
 
 `*clojure-version*` and `(clojure-version)` were already wired; this
