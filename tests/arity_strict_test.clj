@@ -88,6 +88,13 @@
   (is (thrown? (_hot-fn 1)))
   (is (thrown? (_hot-fn 1 2 3))))
 
+(deftest thrown-with-msg-arity
+  ;; The thrown-with-msg? assertion (shipped in v0.402.0) also lets
+  ;; us probe arity errors by message regex without depending on the
+  ;; structured map shape.
+  (is (thrown-with-msg? #"arity" ((fn [x] x) 1 2)))
+  (is (thrown-with-msg? Exception #"arity" ((fn [x y] x) 1))))
+
 (deftest arity-error-classifies-as-eval-arity
   ;; The thrown value IS the structured diagnostic map (mino's
   ;; `catch e` binds the raw value, not a wrapped ex-info). Lock in

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.402.0 — `thrown-with-msg?` Assertion
+
+`clojure.test` learns to dispatch on `(is (thrown-with-msg? <re> body))`
+and the JVM-shaped `(is (thrown-with-msg? <Class> <re> body))`. The
+class symbol is documentation-only (mino has no class hierarchy); the
+regex is matched against the thrown value's message. mino pulls the
+message via a small `exception-message-for-match` helper that handles
+strings, `:mino/message`-shaped maps (the catch-bound diagnostic),
+`:message`-shaped maps (`ex-info`-style), and falls back to `pr-str`.
+
+`tests/arity_strict_test.clj` gains coverage for the new assertion
+shape. Port-from-JVM test code that uses `thrown-with-msg?` now lights
+up; the older `(is (thrown? body))` shorthand keeps working unchanged.
+
+The ClojureDocs allowlist drops the two `merge:3` / `merge:4` entries
+that were holdovers from an earlier version of `merge-with`. mino's
+current `merge` produces JVM-identical output for both
+vector+vector and vector+string corpus cases — the allowlist counted
+2 entries higher than necessary.
+
 ## v0.401.0 — Strict Arity Verified and Locked In
 
 mino has been strict on function arity for a long time — both the

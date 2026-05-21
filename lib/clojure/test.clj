@@ -54,6 +54,9 @@
 (defn- thrown?-form? [sym]
   (and (symbol? sym) (= "thrown?" (name sym))))
 
+(defn- thrown-with-msg?-form? [sym]
+  (and (symbol? sym) (= "thrown-with-msg?" (name sym))))
+
 (defmacro is-thrown [expr msg]
   ;; expr matches either of two shapes:
   ;;   (thrown? <type> <body>...)  -- JVM-clojure compatible
@@ -69,6 +72,54 @@
        (do ~@body-forms
            (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
        (catch __e (assert-pass!)))))
+
+(defn exception-message-for-match [e]
+  ;; Best-effort: pull a string out of the thrown value for regex match.
+  ;; Order matches the way mino values surface from `catch`:
+  ;;   raw string  -> use it directly
+  ;;   raw map     -> :mino/message (mino diagnostic) or :message
+  ;;   ex-info     -> ex-message walks the same path
+  ;;   anything    -> pr-str fallback so the regex still has *something*
+  (cond
+    (string? e)            e
+    (and (map? e)
+         (contains? e :mino/message)) (:mino/message e)
+    (and (map? e)
+         (contains? e :message))      (:message e)
+    :else                  (or (try (ex-message e) (catch _ nil))
+                               (pr-str e))))
+
+(defmacro is-thrown-with-msg [expr msg]
+  ;; expr matches either of two shapes:
+  ;;   (thrown-with-msg? <type> <re> <body>...)  -- JVM-clojure compatible
+  ;;   (thrown-with-msg? <re> <body>...)         -- mino shorthand
+  ;; Type symbol (if present) is documentation-only; mino has no class
+  ;; hierarchy. The regex is matched against the thrown value's message
+  ;; via exception-message-for-match.
+  (let [args (rest expr)
+        ;; Detect JVM shape: first arg is a Class-like type *symbol* and
+        ;; the second is the regex; mino's shorthand puts the regex first.
+        ;; A regex literal carries the regex type; a type symbol won't.
+        first-arg  (first args)
+        regex-form (if (and (symbol? first-arg)
+                            (not (re-find #"^#" (pr-str first-arg))))
+                     (second args)
+                     first-arg)
+        body-forms (if (and (symbol? first-arg)
+                            (not (re-find #"^#" (pr-str first-arg))))
+                     (rest (rest args))
+                     (rest args))]
+    `(try
+       (do ~@body-forms
+           (assert-fail! (pr-str '~expr) ~msg
+                         "expected exception but none thrown"))
+       (catch __e
+         (let [m# (exception-message-for-match __e)]
+           (if (and m# (re-find ~regex-form m#))
+             (assert-pass!)
+             (assert-fail! (pr-str '~expr) ~msg
+                           (str "thrown message did not match " (pr-str ~regex-form)
+                                "; got: " (pr-str m#)))))))))
 
 (defmacro is-eq [expr msg]
   (let [gs-exp (gensym) gs-act (gensym)
@@ -97,6 +148,8 @@
     (cond
       (and (cons? expr) (thrown?-form? (first expr)))
       `(is-thrown ~expr ~msg)
+      (and (cons? expr) (thrown-with-msg?-form? (first expr)))
+      `(is-thrown-with-msg ~expr ~msg)
       (and (cons? expr) (= (first expr) '=))
       `(is-eq ~expr ~msg)
       :else
