@@ -2288,7 +2288,22 @@
       (if current (conj groups current) groups)
       (let [item (first remaining)]
         (if (or (cons? item) (list? item))
-          (recur (rest remaining) groups (conj current item))
+          (do
+            (when (nil? current)
+              (throw (ex-info
+                       (str "extend-protocol: method spec "
+                            (pr-str item)
+                            " is missing a preceding type marker. "
+                            "A reader-conditional that elides its type "
+                            "(for example #?(:clj Object) with no :default "
+                            "branch under another dialect) can leave the "
+                            "macro with method specs and nothing to extend "
+                            "— add a :default branch so the type marker "
+                            "survives, or supply one inline.")
+                       {:method-spec item
+                        :mino/unsupported
+                        :extend-protocol-missing-type-marker})))
+            (recur (rest remaining) groups (conj current item)))
           (recur (rest remaining)
                  (if current (conj groups current) groups)
                  [(type-marker-key item)]))))))

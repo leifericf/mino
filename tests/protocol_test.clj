@@ -133,3 +133,24 @@
     (is (some? err))
     (is (some? (re-find #"extend-type" err)))
     (is (some? (re-find #"method" err)))))
+
+(defprotocol MissingMarkerProto (mmp-fn [_]))
+
+(deftest extend-protocol-rejects-missing-type-marker
+  ;; A reader-conditional like #?(:clj Object :cljs default) with no
+  ;; :default branch produces nothing on mino, leaving the macro with
+  ;; just method specs and no type marker:
+  ;;   (extend-protocol P (foo [_x] :a) (bar [this] this))
+  ;; mino used to silently accept this, treating the first method spec
+  ;; as the type marker, and the failure surfaced far downstream as
+  ;; "unbound symbol: this" inside the method body. The macro must
+  ;; reject the form up front with a message that names the missing
+  ;; type marker so callers can find the offending spec.
+  (let [err (try
+              (eval '(extend-protocol MissingMarkerProto
+                       (mmp-fn [_x] :nope)))
+              nil
+              (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"extend-protocol" err)))
+    (is (some? (re-find #"type marker" err)))))

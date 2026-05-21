@@ -54,6 +54,16 @@
   matching JVM `clojure.test`'s long-standing per-assertion isolation
   contract.
 
+- `extend-protocol` now rejects forms with no type marker before
+  their method specs. A reader-conditional like `#?(:clj Object)`
+  with no `:default` branch can leave the macro under another
+  dialect with only method specs and nothing to extend; the macro
+  used to silently treat the first method spec as a type marker
+  and the failure surfaced far downstream as `unbound symbol: this`
+  inside the method body. `partition-protocol-specs` now throws a
+  clear `ex-info` at macro-expansion time naming the offending spec
+  and suggesting `:default` as the fix.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and
