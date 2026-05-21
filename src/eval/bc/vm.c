@@ -992,6 +992,9 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         lz->as.lazy.body     = body;
         lz->as.lazy.env      = env;
         lz->as.lazy.cached   = NULL;
+        lz->as.lazy.defining_ns = S->ns_vars.fn_ambient_ns != NULL
+                                  ? S->ns_vars.fn_ambient_ns
+                                  : S->ns_vars.current_ns;
         lz->as.lazy.realized = LAZY_UNREALIZED;
         regs = S->bc.bc_regs + base;
         regs[a] = lz;

@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.409.0 — Lazy-Seq Namespace Scoping Fix
+
+Fixes a long-standing P0 runtime bug where the body of a
+`lazy-seq` resolved unqualified ns-level symbols against the
+*realizer's* current namespace instead of the namespace in which
+the `lazy-seq` form was lexically written. The symptom was a
+`MNS001` "no var" failure whenever a library defined a
+`(lazy-seq ...)` whose body called other ns-level helpers and
+the resulting lazy was forced from a different namespace (the
+common case for any library that hands a lazy back to its
+caller).
+
+The runtime now snapshots the defining namespace on every
+`MINO_LAZY` cell at construction time — across the tree-walker
+(`eval_lazy_seq`), the bytecode interpreter's `OP_MAKE_LAZY`, and
+the JIT's `make_lazy_slow` slow-path helper. `lazy_realize`
+installs the captured namespace as both `current_ns` and
+`fn_ambient_ns` around the body's `eval_implicit_do` and restores
+on the way out, mirroring the namespace dance the fn-apply path
+already performs for fn bodies. The MINO_LAZY layout grew one
+`const char *` slot (pointing into the interned namespace name
+table; no new GC root).
+
+The closure-capture workaround in
+`lib/clojure/test/check/generators.clj` was reverted in the same
+commit: helpers (`rose-val`, `rose-children`, `vec-rose-tree`,
+etc.) are again referenced as plain ns-level symbols. Regression
+coverage is in `tests/lazy_seq_ns_scope_test.clj` (the suite
+forces lazies from foreign namespaces and asserts unqualified
+helper resolution succeeds, including the recursive and
+anonymous-fn-inside-lazy cases).
+
 ## v0.408.0 — Close-the-Gaps Cycle Banner
 
 Banner tag for the close-the-gaps cycle, which closed the known

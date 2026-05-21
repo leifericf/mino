@@ -558,9 +558,27 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                                             0,
                                             __ATOMIC_ACQ_REL,
                                             __ATOMIC_ACQUIRE)) {
+                /* Install the captured defining ns for the duration
+                 * of the body evaluation so unqualified ns-level
+                 * symbols (e.g. helper fns defined in the library
+                 * that wrote the lazy-seq) resolve against the
+                 * library's namespace rather than the realizer's
+                 * current_ns. Mirrors the save/restore dance in the
+                 * fn dispatch path (src/eval/fn.c). c_thunk lazies
+                 * skip this -- their body is C and does not consult
+                 * the namespace tables. */
+                const char *saved_ns      = S->ns_vars.current_ns;
+                const char *saved_ambient = S->ns_vars.fn_ambient_ns;
+                if (v->as.lazy.c_thunk == NULL
+                    && v->as.lazy.defining_ns != NULL) {
+                    S->ns_vars.current_ns    = v->as.lazy.defining_ns;
+                    S->ns_vars.fn_ambient_ns = v->as.lazy.defining_ns;
+                }
                 mino_val *result = v->as.lazy.c_thunk != NULL
                     ? v->as.lazy.c_thunk(S, v->as.lazy.body)
                     : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
+                S->ns_vars.current_ns    = saved_ns;
+                S->ns_vars.fn_ambient_ns = saved_ambient;
                 if (result == NULL) {
                     /* Thunk threw. Roll back the claim so a retrying
                      * caller can re-run the thunk; if other threads

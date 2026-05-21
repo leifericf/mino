@@ -236,6 +236,17 @@ struct mino_val {
             mino_env *env;
             mino_val *cached;
             mino_val *(*c_thunk)(struct mino_state *, mino_val *);
+            /* Defining namespace snapshot taken at lazy-seq construction
+             * time. NULL for c_thunk lazies (their body is C-side and
+             * does not consult fn_ambient_ns). When set, lazy_realize
+             * installs this value as both current_ns and fn_ambient_ns
+             * around the implicit-do body so unqualified ns-level
+             * symbols in the lazy body resolve in the namespace where
+             * the (lazy-seq ...) form was written, not the realizer's
+             * ns. Mirrors the defining_ns slot on MINO_FN. The pointer
+             * is interned (lives on the namespace name table); the GC
+             * tracer does not follow it. */
+            const char *defining_ns;
             /* Tri-state machine: 0=untouched, 2=a thread is computing
              * the thunk now, 1=cached holds the published value. CAS
              * 0 -> 2 claims the realization; only the claiming thread

@@ -200,6 +200,16 @@ static mino_val *eval_lazy_seq(mino_state *S, mino_val *form,
     lz->as.lazy.body     = args;
     lz->as.lazy.env      = env;
     lz->as.lazy.cached   = NULL;
+    /* Snapshot the defining ns so the body's unqualified symbols
+     * resolve in the lexically enclosing namespace at realization
+     * time. Prefer fn_ambient_ns (set by apply_callable when the
+     * enclosing fn dispatches its body) over current_ns (which a
+     * concurrent in-ns might have shifted); fall back to current_ns
+     * for top-level lazy-seq forms outside any fn. Either pointer is
+     * interned, so no new GC root is required. */
+    lz->as.lazy.defining_ns = S->ns_vars.fn_ambient_ns != NULL
+                              ? S->ns_vars.fn_ambient_ns
+                              : S->ns_vars.current_ns;
     lz->as.lazy.realized = LAZY_UNREALIZED;
     return lz;
 }

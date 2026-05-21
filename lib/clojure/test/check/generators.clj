@@ -30,31 +30,18 @@
 (defn rose-fmap
   "Apply f to every value in a rose tree, preserving structure."
   [f r]
-  ;; Closure-capture rose-val / rose-children / rose-fmap so the
-  ;; lazy-seq body resolves them from the captured env rather than
-  ;; the realizer's current ns.
-  (let [rv  rose-val
-        rc  rose-children
-        self (fn self [f r]
-               [(f (rv r))
-                (let [self2 self]
-                  (lazy-seq
-                    (clojure.core/map (fn [c] (self2 f c)) (rc r))))])]
-    (self f r)))
+  [(f (rose-val r))
+   (lazy-seq
+     (clojure.core/map (fn [c] (rose-fmap f c)) (rose-children r)))])
 
 (defn rose-filter
   "Keep only sub-rose-trees whose value satisfies pred."
   [pred r]
-  (let [rv   rose-val
-        rc   rose-children
-        self (fn self [pred r]
-               (when (pred (rv r))
-                 [(rv r)
-                  (let [self2 self]
-                    (lazy-seq
-                      (clojure.core/filter identity
-                        (clojure.core/map (fn [c] (self2 pred c)) (rc r)))))]))]
-    (self pred r)))
+  (when (pred (rose-val r))
+    [(rose-val r)
+     (lazy-seq
+       (clojure.core/filter identity
+         (clojure.core/map (fn [c] (rose-filter pred c)) (rose-children r))))]))
 
 ;; --- internals --------------------------------------------------------------
 
@@ -90,22 +77,18 @@
 
 (defn int-rose
   "Rose tree for an integer, shrinking toward 0. Children: zero, then
-  halved values. Self-recursive: use a named local fn so the
-  recursion stays inside the lazy-seq's captured env regardless of
-  the realizer's current ns."
+  halved values."
   [n]
-  (let [self (fn self [n]
-               [n (lazy-seq
-                    (when-not (zero? n)
-                      (let [halved (quot n 2)]
-                        (concat
-                          (when-not (= n 0) [(self 0)])
-                          (when-not (or (zero? halved) (= halved n))
-                            [(self halved)])
-                          (let [closer (- n (if (pos? n) 1 -1))]
-                            (when (and (not (zero? closer)) (not= closer halved))
-                              [(self closer)]))))))])]
-    (self n)))
+  [n (lazy-seq
+       (when-not (zero? n)
+         (let [halved (quot n 2)]
+           (concat
+             (when-not (= n 0) [(int-rose 0)])
+             (when-not (or (zero? halved) (= halved n))
+               [(int-rose halved)])
+             (let [closer (- n (if (pos? n) 1 -1))]
+               (when (and (not (zero? closer)) (not= closer halved))
+                 [(int-rose closer)]))))))])
 
 (defn- bool-rose
   "Rose tree for a boolean. true shrinks to false; false has no shrinks
@@ -115,54 +98,42 @@
 
 ;; vec-rose-tree builds the rose tree for a vector. The shrink children
 ;; are wrapped in a lazy-seq so they only materialize when the walker
-;; descends. Closing-over helpers as let-locals (drop-fn, shrink-fn,
-;; concat-fn) sidesteps the mino lazy-seq quirk where ns-level
-;; symbol references inside a lazy body resolve against the
-;; realizer's current ns instead of the defining ns -- the locals
-;; are captured in the lazy's env, so realization finds them via
-;; mino_env_get_sym without falling through to ns lookup.
+;; descends.
 
 (declare vec-rose-tree)
 
 (defn vec-drop-each-rose
   "Build rose trees by removing each rose at index i in turn."
   [roses]
-  (let [vrt vec-rose-tree]
-    (clojure.core/map
-      (fn [i]
-        (let [smaller (vec (concat (subvec roses 0 i) (subvec roses (inc i))))]
-          (vrt smaller)))
-      (range (count roses)))))
+  (clojure.core/map
+    (fn [i]
+      (let [smaller (vec (concat (subvec roses 0 i) (subvec roses (inc i))))]
+        (vec-rose-tree smaller)))
+    (range (count roses))))
 
 (defn vec-shrink-each-rose
   "Build rose trees by shrinking the rose at position i (using that
   position's own children) and recombining."
   [roses]
-  (let [vrt   vec-rose-tree
-        rc    rose-children]
-    (mapcat
-      (fn [i]
-        (let [elem-rose (nth roses i)]
-          (clojure.core/map
-            (fn [child]
-              (vrt (assoc roses i child)))
-            (rc elem-rose))))
-      (range (count roses)))))
+  (mapcat
+    (fn [i]
+      (let [elem-rose (nth roses i)]
+        (clojure.core/map
+          (fn [child]
+            (vec-rose-tree (assoc roses i child)))
+          (rose-children elem-rose))))
+    (range (count roses))))
 
 (defn vec-rose-tree
   "Rose tree for a vector of element-rose-trees. The root value is
   the vector of element root values; shrink children are produced
   by dropping each element, then by shrinking each element."
   [roses]
-  (let [drop-fn   vec-drop-each-rose
-        shrink-fn vec-shrink-each-rose
-        cat-fn    concat
-        rv        rose-val]
-    [(mapv rv roses)
-     (lazy-seq
-       (when (seq roses)
-         (cat-fn (drop-fn roses)
-                 (shrink-fn roses))))]))
+  [(mapv rose-val roses)
+   (lazy-seq
+     (when (seq roses)
+       (concat (vec-drop-each-rose roses)
+               (vec-shrink-each-rose roses))))])
 
 (defn- str-rose
   "Rose tree for a string. Shrinks by progressively dropping characters
@@ -327,27 +298,21 @@
   ([g num-elements]
    (gen-record
      (fn [size]
-       (let [roses     (vec (for [_ (range num-elements)] (call-gen g size)))
-             rv        rose-val
-             shrink-fn vec-shrink-each-rose]
+       (let [roses (vec (for [_ (range num-elements)] (call-gen g size)))]
          ;; Fixed-length vectors don't drop elements; only shrink each.
-         [(mapv rv roses)
-          (lazy-seq (shrink-fn roses))]))))
+         [(mapv rose-val roses)
+          (lazy-seq (vec-shrink-each-rose roses))]))))
   ([g min-elements max-elements]
    (gen-record
      (fn [size]
-       (let [n         (rand-int-in min-elements max-elements)
-             roses     (vec (for [_ (range n)] (call-gen g size)))
-             rv        rose-val
-             drop-fn   vec-drop-each-rose
-             shrink-fn vec-shrink-each-rose
-             cat-fn    concat]
+       (let [n     (rand-int-in min-elements max-elements)
+             roses (vec (for [_ (range n)] (call-gen g size)))]
          ;; min-bounded: drop elements only down to the min.
-         [(mapv rv roses)
+         [(mapv rose-val roses)
           (lazy-seq
-            (cat-fn
-              (when (> n min-elements) (drop-fn roses))
-              (shrink-fn roses)))])))))
+            (concat
+              (when (> n min-elements) (vec-drop-each-rose roses))
+              (vec-shrink-each-rose roses)))])))))
 
 (defn list
   "List of values from g. Shrinks the same way vectors do (drop and
@@ -397,9 +362,7 @@
   (gen-record
     (fn [size]
       (let [roses  (mapv (fn [g] (call-gen g size)) gens)
-            values (mapv rose-val roses)
-            rv     rose-val
-            rc     rose-children]
+            values (mapv rose-val roses)]
         ;; Build a rose tree where each child shrinks ONE position
         ;; using that position's element-rose children.
         [values
@@ -409,8 +372,8 @@
                (let [r (nth roses i)]
                  (clojure.core/map
                    (fn [child]
-                     [(assoc values i (rv child)) ()])
-                   (rc r))))
+                     [(assoc values i (rose-val child)) ()])
+                   (rose-children r))))
              (range (count roses))))]))))
 
 (def string
