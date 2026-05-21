@@ -91,17 +91,68 @@
   [coll]
   (clojure.core/reduce conj [] coll))
 
-(defn fold
-  "Reduce coll using f. mino has no fork/join, so this is the
-  sequential fallback: (fold f coll) and (fold n combinef reducef
-  coll) both reduce coll left-to-right through reducef, with combinef
-  used to seed the accumulator on a missing init.
+(defn- fold-partition-vec
+  "Partition a vector into subvecs of size n (last may be smaller).
+  Uses subvec so the result shares structure with the source vector."
+  [v n]
+  (let [c (count v)]
+    (loop [start 0
+           acc   []]
+      (if (>= start c)
+        acc
+        (recur (+ start n)
+               (conj acc (subvec v start (min (+ start n) c))))))))
 
-  Parallel fork/join semantics are queued for the multi-state OS-
-  thread cycle; until then this is a faithful sequential reducer."
+(defn- fold-sequential
+  "The sequential fallback shape used by fold when the host has no
+  thread budget or coll isn't shape-amenable to parallel reduction."
+  [combinef reducef coll]
+  (clojure.core/reduce reducef (combinef) coll))
+
+(defn fold
+  "Reduces coll using reducef. The 3-arity form takes a partition
+  size n (default 512) and a combinef. When the host has granted
+  thread budget (mino-thread-limit > 1) AND coll is a vector larger
+  than n, fold partitions coll into chunks of size n, runs reducef
+  in parallel over each chunk via futures, and combines the partial
+  results with combinef. Smaller vectors and non-vector collections
+  reduce sequentially through (clojure.core/reduce reducef
+  (combinef) coll).
+
+  - (fold reducef coll) -- combinef defaults to reducef (so the
+    no-arg branch must return the reducer's identity).
+  - (fold combinef reducef coll) -- partition size defaults to 512.
+  - (fold n combinef reducef coll) -- explicit partition size.
+
+  Pure semantics: reducef and combinef must be associative; combinef
+  with no args must return the identity element. Without those,
+  parallel and sequential results may differ."
   ([reducef coll]
-   (clojure.core/reduce reducef (reducef) coll))
+   (fold reducef reducef coll))
   ([combinef reducef coll]
-   (clojure.core/reduce reducef (combinef) coll))
-  ([_n combinef reducef coll]
-   (clojure.core/reduce reducef (combinef) coll)))
+   (fold 512 combinef reducef coll))
+  ([n combinef reducef coll]
+   (let [thr   (mino-thread-limit)
+         c     (when (vector? coll) (count coll))]
+     (if (or (<= thr 1)
+             (not (vector? coll))
+             (<= c n))
+       (fold-sequential combinef reducef coll)
+       ;; Cap chunk count at (thread-limit - 1) so we don't exceed the
+       ;; host's thread budget. The user-supplied n is a MINIMUM chunk
+       ;; size; if c/n would exceed the budget, grow the chunk size so
+       ;; the count fits in the budget. This matches the spirit of
+       ;; JVM fork/join's "n is the leaf-size hint" without needing a
+       ;; recursive split.
+       (let [max-chunks   (max 1 (dec thr))
+             ;; Integer ceiling of (c / max-chunks) without floats.
+             chunk-size   (max n (quot (+ c (dec max-chunks)) max-chunks))
+             parts        (fold-partition-vec coll chunk-size)
+             futures-seq  (mapv
+                            (fn [chunk]
+                              (future
+                                (clojure.core/reduce reducef
+                                  (combinef) chunk)))
+                            parts)
+             partial-vals (mapv clojure.core/deref futures-seq)]
+         (clojure.core/reduce combinef (combinef) partial-vals))))))

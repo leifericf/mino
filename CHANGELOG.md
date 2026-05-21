@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.407.0 — Parallel `r/fold`
+
+`clojure.core.reducers/fold` learns the parallel branch. When the
+host has granted thread budget (`(mino-thread-limit) > 1`) and the
+collection is a vector larger than the chunk-size hint, fold
+partitions the vector into chunks, runs the reducer in parallel
+via `future` over each chunk, and combines partial results with
+combinef. Smaller vectors and non-vector collections still reduce
+sequentially through `(reduce reducef (combinef) coll)`.
+
+The chunk count is capped at `(thread-limit - 1)` so the parallel
+branch never exceeds the host's grant. The user-supplied `n` is
+treated as a minimum chunk size; if `count / max-chunks` would be
+smaller than `n`, the implementation grows the chunk to fit the
+budget.
+
+`send-via` remains intentionally deferred: mino's per-state eval
+lock means agent actions always run under state_lock, so there's no
+useful Executor surface to expose. The existing `MST008` error
+message points users at send/send-off for the same dispatch
+behavior. Promoted from "will ship" to "confirmed deferred" in this
+release per the no-fakery rule.
+
 ## v0.406.0 — `test.check` Rose-Tree Shrinking
 
 `clojure.test.check` now produces rose-tree-backed generators and a
