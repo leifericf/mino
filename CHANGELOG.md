@@ -22,6 +22,15 @@
   (double 0.1))` stays false because the float-to-double widening
   of 0.1 lands on a different double than the literal 0.1.
 
+- `repeat` now throws on a boolean count instead of silently
+  coercing via `(if n 1 0)`. Float and ratio counts continue to
+  truncate toward zero (matching JVM Clojure's `RT/longCast`); only
+  the boolean clause was a divergence, and its prior docstring
+  rationale ("mirror[s] the JVM behavior on non-`:clj` dialects")
+  was incorrect — JVM throws on booleans too. A predicate result
+  accidentally fed to `repeat` now surfaces as a clear error rather
+  than producing the wrong sequence.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and

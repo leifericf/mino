@@ -403,6 +403,19 @@
   (is (= () (drop 2 (repeat 2 :a))))
   (is (= () (drop 3 (repeat 2 :a)))))
 
+(deftest clj-repeat-count-type
+  ;; Boolean counts throw -- matching JVM Clojure, where RT/longCast
+  ;; refuses to coerce a Boolean. A predicate result accidentally fed
+  ;; in surfaces immediately instead of silently producing the wrong
+  ;; sequence.
+  (is (thrown? (repeat true :a)))
+  (is (thrown? (repeat false :a)))
+  ;; Float and ratio counts truncate toward zero (RT/longCast). These
+  ;; are deliberately kept aligned with JVM, not converted to throws.
+  (is (= [:a :a] (vec (repeat 2.5 :a))))
+  (is (= [:a :a] (vec (repeat 5/2 :a))))
+  (is (= [] (vec (repeat 0.9 :a)))))
+
 ;; --- range ---
 
 (deftest clj-range

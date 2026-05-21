@@ -305,17 +305,16 @@
 
 (defn repeat
   "Returns a lazy sequence of xs. With two args, returns n repetitions
-   of x. Per Clojure, n is truncated toward zero before counting (so
-   3.14 and 3.99 both yield three repetitions). Booleans coerce as
-   if via `(if n 1 0)` to mirror the JVM behavior on non-:clj
-   dialects."
+   of x. n must be a number; floats and ratios truncate toward zero
+   (so 3.14 and 3.99 both yield three repetitions), matching JVM
+   Clojure's RT/longCast. Booleans, strings, keywords, and other
+   non-numeric counts throw."
   ([x]
    (lazy-seq (cons x (repeat x))))
   ([n x]
    (let [n (cond
              (integer? n)         n
              (number? n)          (long n)
-             (instance? :bool n)  (if n 1 0)
              :else (throw (str "repeat: count must be a number, got "
                                (type n))))]
      (lazy-seq
