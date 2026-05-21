@@ -1,7 +1,26 @@
 /*
  * mino.h - public C API for the mino runtime.
  *
- * UNSTABLE until v1.0.0. Symbol names, types, and semantics may change.
+ * Core surface is feature-complete pending a v1.0.0 tag the user
+ * approves explicitly. Three sections stay UNSTABLE through the
+ * alpha series and are explicitly marked so:
+ *
+ *   - [MINO_UNSTABLE_THREADPOOL] -- host thread pool / factory / stack
+ *   - [MINO_UNSTABLE_GC]          -- garbage-collector tuning surface
+ *   - [MINO_UNSTABLE_ALLOC_PROFILE] -- allocation profiler
+ *
+ * Everything outside those blocks aims for source stability across
+ * future minor and patch releases. After v1.0.0:
+ *
+ *   - Minor versions add new functions / types / enum members at
+ *     the end of existing groups; existing symbols keep their
+ *     signatures and semantics.
+ *   - Patch versions fix bugs without surface change.
+ *   - A breaking change starts a v2 banner.
+ *
+ * C++ embedders may include the optional `mino.hpp` after `mino.h`
+ * for thin RAII wrappers over `mino_state`, `mino_env`, and
+ * GC-rooted values (`mino::pin`).
  */
 
 #ifndef MINO_H
@@ -27,7 +46,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 420
+#define MINO_VERSION_MINOR 421
 #define MINO_VERSION_PATCH 0
 
 /*

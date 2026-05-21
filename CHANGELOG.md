@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.421.0 — C++ RAII Wrapper + API Audit
+
+New optional header `src/mino.hpp` ships thin RAII wrappers over
+the C API for C++ embedders:
+
+- `mino::state` -- owning handle for a `mino_state`.
+- `mino::env`   -- owning handle for a `mino_env` (or borrowing
+  wrapper for an existing env pointer).
+- `mino::pin`   -- GC-rooted handle for a `mino_val` across eval
+  boundaries; releases on destruct.
+- `mino::eval_string`, `mino::load_file`, `mino::print_to_string`
+  throw `mino::error` on failure instead of returning NULL.
+
+Header-only, C++14-compatible, no external dependencies. The full
+C API stays the canonical surface; the wrapper is opt-in. A worked
+example lives at `use-cases/cpp_raii.cpp` in mino-examples.
+
+`src/mino.h` top-of-file disclaimer rewritten: the core surface is
+feature-complete pending a user-approved v1.0.0 tag; three sections
+stay UNSTABLE through the alpha series and are explicitly marked
+(`MINO_UNSTABLE_THREADPOOL`, `MINO_UNSTABLE_GC`,
+`MINO_UNSTABLE_ALLOC_PROFILE`). Adds the post-1.0 strict-SemVer
+policy statement.
+
 ## v0.420.0 — Documentation Refresh
 
 Companion-repo refresh covering the v0.409-v0.419 series:
