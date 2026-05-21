@@ -1198,6 +1198,17 @@ static int eq_cross_type(const mino_val *a, const mino_val *b)
     if (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b)) {
         return mino_bigint_equals_ll(a, mino_val_int_get(b));
     }
+    /* :float32 and :float share the floating-point category for `=`.
+     * Both store their value as a double in v->as.f (the FLOAT32
+     * constructor bit-narrows via the float cast at allocation), so
+     * the comparison is the same a->as.f == b->as.f the same-type
+     * branch uses. IEEE NaN inequality falls out for free. Hash
+     * already widens, so adding this clause closes a pre-existing
+     * hash/= contract gap. */
+    if ((mino_type_of(a) == MINO_FLOAT   && mino_type_of(b) == MINO_FLOAT32)
+        || (mino_type_of(a) == MINO_FLOAT32 && mino_type_of(b) == MINO_FLOAT)) {
+        return a->as.f == b->as.f;
+    }
     /* Cross-type sequential equality: cons, vector, lazy, chunked-cons,
      * map-entry, nil all compare element-wise. Matches Clojure where
      * (= '(1 2) [1 2]) is true. */

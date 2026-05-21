@@ -58,6 +58,23 @@
   (is (thrown? (* (long (/ -9223372036854775808 2)) 3)))
   (is (thrown? (* 3 (long (/ -9223372036854775808 2))))))
 
+(deftest float32-float-cross-type-equality
+  ;; :float32 and :float share a numeric category for =. Both store
+  ;; the value as a double internally, so comparison widens to double.
+  ;; The equal-implies-equal-hash invariant requires that when two
+  ;; values share a hash, = must agree -- (float 0.5) and (double 0.5)
+  ;; already hash the same, so = must say true.
+  (is (= (float 0.5) (double 0.5)))
+  (is (= (double 0.5) (float 0.5)))
+  ;; (float 0.1) widens to a slightly different double than the
+  ;; literal 0.1, so they remain unequal -- this is correct.
+  (is (not= (float 0.1) (double 0.1)))
+  ;; IEEE NaN is not equal to itself across widths.
+  (is (not= (float ##NaN) (double ##NaN)))
+  ;; When the hashes agree, the values must be `=` (hash/= contract).
+  (is (or (not= (hash (float 0.5)) (hash (double 0.5)))
+          (= (float 0.5) (double 0.5)))))
+
 (deftest long-boundary-statics-are-fixnums
   ;; Long/MAX_VALUE and Long/MIN_VALUE are the long-tier boundary
   ;; constants; they must be :int so checked-arithmetic overflow

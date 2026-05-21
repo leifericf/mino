@@ -12,6 +12,16 @@
   and `(dec Long/MIN_VALUE)` did the same. The fix mirrors v0.422.2:
   switch to `mino_int_wrap`, the fixnum-preserving constructor.
 
+- `=` between `:float32` and `:float` now widens both operands to
+  double and compares — matching Clojure-canon's "floating-point
+  values share a numeric category for `=`" rule. Previously the
+  cross-type path returned false even when the underlying double
+  bits agreed, which violated the equal-implies-equal-hash
+  invariant (`(hash (float 0.5))` already equals `(hash 0.5)`).
+  `(= (float 0.5) (double 0.5))` is now true; `(= (float 0.1)
+  (double 0.1))` stays false because the float-to-double widening
+  of 0.1 lands on a different double than the literal 0.1.
+
 ## v0.422.4 — `*math-context*` Threads Through `+`, `-`, `*`
 
 `with-precision` now affects bigdec multiplication, addition, and
