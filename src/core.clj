@@ -2994,6 +2994,29 @@
    Resolved once per top-level pr / print call."
   nil)
 
+(def ^:dynamic *math-context*
+  "Precision/rounding-mode for bigdec division. nil means exact-or-
+   throw (mirrors java.math.BigDecimal.divide without MathContext).
+   When set, the value is a map of {:precision N :rounding-mode K}
+   where N is a positive integer and K is a rounding-mode keyword.
+   Today only :half-up is implemented (matching JVM Clojure's default
+   when MathContext is constructed precision-only); other modes throw
+   :mino/unsupported. Resolved by mino_bigdec_div on each call."
+  nil)
+
+(defmacro with-precision
+  "Sets *math-context* to {:precision precision :rounding-mode mode}
+  around body. The keyword :rounding takes the next form as a
+  rounding-mode keyword (e.g. (with-precision 5 :rounding :half-up
+  (/ 1M 3M))). Without :rounding, the mode defaults to :half-up."
+  [precision & body]
+  (let [has-rounding? (and (seq body) (= :rounding (first body)))
+        mode          (if has-rounding? (second body) :half-up)
+        actual-body   (if has-rounding? (drop 2 body) body)]
+    `(binding [*math-context* {:precision ~precision
+                               :rounding-mode ~mode}]
+       ~@actual-body)))
+
 ;; --- Pure-Clojure surface ---
 
 ;; Identifier predicates.
@@ -3133,6 +3156,27 @@
   "Combines a hash-basis with the collection's count."
   [hash-basis cnt]
   (bit-xor (or hash-basis 0) (or cnt 0)))
+
+(defn hash-combine
+  "Boost-style hash combiner: mixes seed and hash into a single 32-bit
+  hash. Matches clojure.core/hash-combine bit-for-bit so user code that
+  manually composes hashes via this helper sees the same result on
+  mino as on JVM Clojure.
+
+    seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2)
+
+  The operation is performed in unchecked 32-bit arithmetic; the result
+  is truncated to the low 32 bits."
+  [seed hash]
+  (let [seed (or seed 0)
+        hash (or hash 0)]
+    (unchecked-int
+      (bit-xor seed
+               (unchecked-add hash
+                              (unchecked-add 0x9e3779b9
+                                             (unchecked-add
+                                               (bit-shift-left seed 6)
+                                               (bit-shift-right seed 2))))))))
 
 (defn hash-ordered-coll
   "Computes a sequence-position-aware hash for an ordered collection."

@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.405.0 — `hash-combine`, `*math-context*`, `unchecked-long` Wrap
+
+Three numeric / bigdec edges close at once:
+
+`hash-combine` ships at canonical 32-bit Boost-style:
+`seed ^= hash + 0x9e3779b9 + (seed << 6) + (seed >> 2)`, truncated to
+the low 32 bits via `unchecked-int`. Matches the JVM Clojure shape
+bit-for-bit so user code that manually composes hashes via this
+helper sees the same result on mino as on JVM.
+
+`*math-context*` and `with-precision` wire bigdec rounding. The
+context value is a map `{:precision N :rounding-mode :half-up}`;
+`with-precision` is the canonical macro `(with-precision N [:rounding
+mode] body...)` defaulting to `:half-up`. `mino_bigdec_div` consults
+the dynvar on each call and either rounds the quotient to N
+significant digits half-up (matching `BigDecimal.divide(divisor,
+MathContext)` in JVM) or, when no context is in scope, keeps the
+historical exact-or-throw behavior.
+
+Other rounding modes (`:down`, `:up`, `:floor`, `:ceiling`,
+`:half-down`, `:half-even`, `:unnecessary`) throw the structured
+`:mino/host` error `MHO002` with the mode name. Implementing them
+properly needs per-mode rounding rules; deferred rather than shipped
+as fakery.
+
+`unchecked-long` now wraps bigint arguments outside the signed long
+range modulo 2^64 (interpreted as two's-complement signed long).
+`(unchecked-long -9223372036854775809N)` returns
+`9223372036854775807` instead of the previous clamp through double.
+Matches JVM Clojure's wrap. Implementation reads the low 32-bit
+mp_digit pair from imath's internal `digits[]` array, applying the
+sign via uint64 negation.
+
+`tests/numeric_edges_test.clj` covers all three.
+
 ## v0.404.0 — `pcalls`, `pvalues`, and `alt!` Macro
 
 `pcalls` and `pvalues` round out the parallel-evaluation surface

@@ -554,12 +554,90 @@ mino_val *mino_bigdec_rem(mino_state *S, const mino_val *a,
     return mino_bigdec_make(S, r, smax);
 }
 
+/* Count significant decimal digits of |q|. mp_int_string_len returns
+ * an over-estimate (it's the buffer size, not the exact digit count),
+ * so we render to string and count actual digits. Zero counts as 1
+ * digit (matches JVM BigInteger.toString().length()). */
+static int bigdec_sig_digits(mp_int z)
+{
+    mp_result buf_len;
+    char     *buf;
+    int       digits;
+    if (mp_int_compare_zero(z) == 0) return 1;
+    buf_len = mp_int_string_len(z, 10);
+    if (buf_len < 2) return 1;
+    buf = (char *)malloc((size_t)buf_len);
+    if (buf == NULL) return 1; /* OOM: caller will catch downstream */
+    if (mp_int_to_string(z, 10, buf, (int)buf_len) != MP_OK) {
+        free(buf);
+        return 1;
+    }
+    /* strlen excludes the NUL; '-' counts as a non-digit. */
+    digits = (int)strlen(buf);
+    if (buf[0] == '-') digits--;
+    free(buf);
+    if (digits < 1) return 1;
+    return digits;
+}
+
+/* Resolve *math-context* into precision + rounding mode. Returns 1
+ * when a context is active (and *precision_out / *rmode_out are set);
+ * returns 0 when no math-context is in scope (caller stays exact).
+ * *rmode_out is one of:
+ *   1  :half-up   -- implemented
+ *  -1  any other  -- caller throws :mino/unsupported. */
+static int resolve_math_context(mino_state *S, int *precision_out,
+                                int *rmode_out)
+{
+    mino_val *mc = NULL;
+    mino_val *p_key, *rm_key, *p_v, *rm_v;
+    long long ll;
+    if (mino_current_ctx(S)->dyn_stack != NULL) {
+        mc = dyn_lookup(S, "*math-context*");
+        if (mc == NULL) mc = dyn_lookup(S, "clojure.core/*math-context*");
+    }
+    if (mc == NULL) {
+        mino_val *var = var_find(S, "clojure.core", "*math-context*");
+        if (var != NULL && mino_type_of(var) == MINO_VAR
+            && var->as.var.bound) {
+            mc = var->as.var.root;
+        }
+    }
+    if (mc == NULL || mino_type_of(mc) == MINO_NIL
+        || mino_type_of(mc) != MINO_MAP) {
+        return 0;
+    }
+    p_key  = mino_keyword(S, "precision");
+    rm_key = mino_keyword(S, "rounding-mode");
+    p_v    = mino_map_lookup(mc, p_key);
+    rm_v   = mino_map_lookup(mc, rm_key);
+    if (p_v == NULL || !mino_val_int_p(p_v)) return 0;
+    ll = mino_val_int_get(p_v);
+    if (ll <= 0 || ll > 0x7fffffff) return 0;
+    *precision_out = (int)ll;
+    /* Default rounding mode is :half-up. */
+    *rmode_out = 1;
+    if (rm_v != NULL && mino_type_of(rm_v) == MINO_KEYWORD) {
+        if (rm_v->as.s.len == 7
+            && memcmp(rm_v->as.s.data, "half-up", 7) == 0) {
+            *rmode_out = 1;
+        } else {
+            *rmode_out = -1;  /* Signal unsupported */
+        }
+    }
+    return 1;
+}
+
 /* mino_bigdec_div -- exact bigdec division. Mirrors Java's
  * BigDecimal.divide(BigDecimal): preferred scale is sa - sb, but the
  * quotient is computed at whatever scale makes it exact. If the
- * division has a non-terminating decimal expansion, throw -- matching
- * Java's ArithmeticException. The trailing-zero canonicalisation on
- * mino's BigDecimal `=` (numerical equality) means callers can compare
+ * division has a non-terminating decimal expansion AND no
+ * *math-context* is in scope, throw -- matching Java's
+ * ArithmeticException. With *math-context* set, compute up to the
+ * configured precision and round per the configured mode (only
+ * :half-up is implemented; other modes throw :mino/unsupported with
+ * the mode name). The trailing-zero canonicalisation on mino's
+ * BigDecimal `=` (numerical equality) means callers can compare
  * results across scales without worrying about whether the algorithm
  * picked sa-sb vs sa-sb+k. */
 mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
@@ -568,8 +646,10 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
     int   sa, sb;
     mpz_t num, den, q, r, pw;
     int   extra;
-    int   max_extra = 1024; /* same upper bound as Java's MAX_VALUE-bounded
-                             * non-terminating detector in practice */
+    int   mc_active;
+    int   mc_precision = 0;
+    int   mc_rmode     = 0;
+    int   max_extra;
     mino_val *result = NULL;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC
         || mino_type_of(b) != MINO_BIGDEC) {
@@ -581,6 +661,14 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "division by zero");
     }
+    mc_active = resolve_math_context(S, &mc_precision, &mc_rmode);
+    if (mc_active && mc_rmode == -1) {
+        return prim_throw_classified(S, "host", "MHO002",
+            "with-precision: only :half-up rounding mode is implemented");
+    }
+    /* When *math-context* is set, use its precision as the loop cap;
+     * otherwise stay at the historical 1024-digit upper bound. */
+    max_extra = mc_active ? (mc_precision + 8) : 1024;
     sa = a->as.bigdec.scale;
     sb = b->as.bigdec.scale;
     if (mp_int_init(&num) != MP_OK) goto oom_pre;
@@ -602,6 +690,108 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
             q_wrapped = bigint_wrap(S, qz_heap);
             if (q_wrapped == NULL) goto oom;
             result = mino_bigdec_make(S, q_wrapped, sa - sb + extra);
+            break;
+        }
+        /* When a math-context is active and we have at least
+         * mc_precision+1 sig digits in q, we have one digit beyond the
+         * target precision; round HALF-UP using that excess digit and
+         * stop. Stopping at exactly mc_precision would truncate without
+         * looking at the next digit and diverge from JVM's
+         * BigDecimal.divide(BigDecimal, MathContext). */
+        if (mc_active && bigdec_sig_digits(&q) >= mc_precision + 1) {
+            int excess = bigdec_sig_digits(&q) - mc_precision;
+            mino_val *q_wrapped;
+            mpz_t      *qz_heap;
+            if (excess > 0) {
+                mpz_t divisor, q_rounded, r_rounded;
+                int   half_up_carry;
+                int   q_neg;
+                if (mp_int_init(&divisor)    != MP_OK) goto oom;
+                if (mp_int_init(&q_rounded)  != MP_OK) { mp_int_clear(&divisor); goto oom; }
+                if (mp_int_init(&r_rounded)  != MP_OK) { mp_int_clear(&divisor); mp_int_clear(&q_rounded); goto oom; }
+                /* divisor = 10^excess */
+                mp_int_set_value(&divisor, 1);
+                {
+                    int k;
+                    mp_int_set_value(&pw, 10);
+                    for (k = 0; k < excess; k++) {
+                        if (mp_int_mul(&divisor, &pw, &divisor) != MP_OK) {
+                            mp_int_clear(&divisor);
+                            mp_int_clear(&q_rounded);
+                            mp_int_clear(&r_rounded);
+                            goto oom;
+                        }
+                    }
+                }
+                /* q_rounded = |q| / divisor; remainder used for half-up. */
+                {
+                    mpz_t qabs;
+                    if (mp_int_init(&qabs) != MP_OK) {
+                        mp_int_clear(&divisor);
+                        mp_int_clear(&q_rounded);
+                        mp_int_clear(&r_rounded);
+                        goto oom;
+                    }
+                    mp_int_abs(&q, &qabs);
+                    q_neg = mp_int_compare_zero(&q) < 0;
+                    if (mp_int_div(&qabs, &divisor, &q_rounded,
+                                   &r_rounded) != MP_OK) {
+                        mp_int_clear(&qabs);
+                        mp_int_clear(&divisor);
+                        mp_int_clear(&q_rounded);
+                        mp_int_clear(&r_rounded);
+                        goto oom;
+                    }
+                    mp_int_clear(&qabs);
+                }
+                /* HALF-UP: if 2*r >= divisor, round magnitude up. */
+                {
+                    mpz_t twice_r;
+                    int   cmp;
+                    if (mp_int_init(&twice_r) != MP_OK) {
+                        mp_int_clear(&divisor);
+                        mp_int_clear(&q_rounded);
+                        mp_int_clear(&r_rounded);
+                        goto oom;
+                    }
+                    mp_int_copy(&r_rounded, &twice_r);
+                    mp_int_set_value(&pw, 2);
+                    mp_int_mul(&twice_r, &pw, &twice_r);
+                    cmp = mp_int_compare(&twice_r, &divisor);
+                    half_up_carry = (cmp >= 0);
+                    mp_int_clear(&twice_r);
+                }
+                if (half_up_carry) {
+                    mp_int_set_value(&pw, 1);
+                    mp_int_add(&q_rounded, &pw, &q_rounded);
+                }
+                /* Re-apply sign. */
+                if (q_neg) {
+                    mp_int_neg(&q_rounded, &q_rounded);
+                }
+                qz_heap = bigint_alloc_zeroed();
+                if (qz_heap == NULL) {
+                    mp_int_clear(&divisor);
+                    mp_int_clear(&q_rounded);
+                    mp_int_clear(&r_rounded);
+                    goto oom;
+                }
+                mp_int_copy(&q_rounded, qz_heap);
+                mp_int_clear(&divisor);
+                mp_int_clear(&q_rounded);
+                mp_int_clear(&r_rounded);
+                q_wrapped = bigint_wrap(S, qz_heap);
+                if (q_wrapped == NULL) goto oom;
+                result = mino_bigdec_make(S, q_wrapped,
+                                          sa - sb + extra - excess);
+            } else {
+                qz_heap = bigint_alloc_zeroed();
+                if (qz_heap == NULL) goto oom;
+                mp_int_copy(&q, qz_heap);
+                q_wrapped = bigint_wrap(S, qz_heap);
+                if (q_wrapped == NULL) goto oom;
+                result = mino_bigdec_make(S, q_wrapped, sa - sb + extra);
+            }
             break;
         }
         /* Increase precision: num *= 10 */

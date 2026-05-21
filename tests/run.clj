@@ -81,6 +81,7 @@
 (require "tests/literal_test")
 (require "tests/char_test")
 (require "tests/numeric_tower_test")
+(require "tests/numeric_edges_test")
 (require "tests/collections_semantics_test")
 (require "tests/stateful_test")
 (require "tests/hierarchy_test")

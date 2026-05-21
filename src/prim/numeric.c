@@ -1271,11 +1271,34 @@ static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
                 *out_l = ll;
                 return 1;
             }
-            /* Bigint outside long-long range: route through double so
-             * unchecked_trunc_long can clamp deterministically. */
-            *is_double = 1;
-            *out_d = tower_to_double(v);
-            return 1;
+            /* Bigint outside long-long range: take low 64 bits modulo
+             * 2^64, interpreted as two's-complement signed long. This
+             * matches JVM Clojure: (unchecked-long -9223372036854775809N)
+             * returns 9223372036854775807 (the wrap, not the clamp). The
+             * earlier clamp-through-double path was a workaround that
+             * predates the imath low-digit-extract; deterministic but
+             * not canon-correct.
+             *
+             * imath stores big values as digits[]; with the default
+             * build mp_digit is uint32_t, so the low 64 bits live in
+             * digits[0] (low 32) | digits[1] (high 32). MP_USED tells
+             * us how many digits are populated; values that fit in one
+             * digit get the upper 32 bits as zero. */
+            {
+                mp_int   z   = (mp_int)v->as.bigint.mpz;
+                uint64_t mag = 0;
+                if (MP_USED(z) >= 1) {
+                    mag = (uint64_t)MP_DIGITS(z)[0];
+                }
+                if (MP_USED(z) >= 2) {
+                    mag |= ((uint64_t)MP_DIGITS(z)[1]) << 32;
+                }
+                if (MP_SIGN(z) == MP_NEG) {
+                    mag = (uint64_t)0 - mag;
+                }
+                *out_l = (long long)mag;
+                return 1;
+            }
         }
         if (t == MINO_RATIO || t == MINO_BIGDEC) {
             *is_double = 1;
