@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.408.0 — Close-the-Gaps Cycle Banner
+
+Banner tag for the close-the-gaps cycle, which closed the known
+JVM-Clojure-canon-parity gaps over v0.401 – v0.407:
+
+- v0.401 — strict-arity verified end-to-end (both tree-walker and
+  bytecode VM). Diagnostic carries
+  `:mino/kind = :eval/arity`.
+- v0.402 — `thrown-with-msg?` assertion in `clojure.test`;
+  ClojureDocs allowlist drops `merge:3` / `merge:4`.
+- v0.403 — `*print-length*` / `*print-level*` dynvars
+  cached on state for per-pr resolution cost.
+- v0.404 — `pcalls`, `pvalues`, and `alt!` macro round out the
+  parallel/cooperative surface.
+- v0.405 — `hash-combine` (Boost-style 32-bit), `*math-context*`
+  + `with-precision` (:half-up only; other modes throw
+  `MHO002`), `unchecked-long` low-64-bits wrap for bigint args.
+- v0.406 — `clojure.test.check` rose-tree shrinking;
+  `bc/compile` constructor lanes now use qualified
+  `clojure.core/vector` / `hash-map` / `hash-set` so user
+  namespaces that exclude those names from clojure.core still
+  get working literals.
+- v0.407 — parallel `clojure.core.reducers/fold` with chunk count
+  bounded by `(mino-thread-limit) - 1`; `send-via` confirmed
+  deferred (per-state eval-lock leaves nothing for an Executor
+  surface to dispatch onto).
+
+Wins explicitly kept (NOT touched) because mino's lack of a JVM
+class hierarchy / primitive-long perf constraint / Java type
+hierarchy makes them more correct rather than less: auto-promoting
+`+` / `-` / `*` / `inc` / `dec`, one float tier, regex-as-source
+equality, cross-type `compare`, structured-map `catch` of any
+value, `pr-str` of a LazySeq realizes, cooperative `go`,
+single-version STM, no JVM-class-hierarchy
+`(is (thrown? <Class> body))`.
+
+One real runtime bug surfaced and is logged in
+`.local/BUGS.md`: lazy-seq bodies resolve ns-level symbols against
+the realizer's `*ns*` rather than the defining ns. The
+`test.check` port works around this via closure-capture; the
+proper fix (capture `defining_ns` on `MINO_LAZY` and restore
+during `lazy_realize`) is queued for a separate cycle.
+
 ## v0.407.0 — Parallel `r/fold`
 
 `clojure.core.reducers/fold` learns the parallel branch. When the
