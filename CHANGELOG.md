@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.419.0 — Bit-Syntax Cycle Close
+
+Companion-repo refresh for the MINO_BYTES + bit-syntax surface
+shipped through v0.415-v0.418:
+
+- mino-site adds a dedicated "Bytes and Bit Syntax" page under
+  /documentation/bytes/, covering MINO_BYTES, bits / bits-get /
+  subbits, the let-bits macro, print form, reader literal, and
+  the C API.
+- mino-examples adds two use-cases:
+  - use-cases/packet_parsing.cpp -- IPv4 header decoder via
+    let-bits (the canonical Erlang bit-syntax showcase).
+  - use-cases/chess_bitboard.cpp -- 64-bit piece bitboards via
+    bits-get + mino's bitwise primitives.
+
+No mino runtime code change; the version bump pins the
+companion-repo refresh to the same banner as the rest of the
+cycle.
+
 ## v0.418.0 — let-bits Destructuring Macro
 
 `let-bits` binds a sequence of named fields from a bytes value at
