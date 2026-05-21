@@ -130,3 +130,32 @@
   ;; either throw or simply fail to dispatch. We don't pin a specific
   ;; error here, just that it doesn't silently succeed.
   (is (thrown? (conj (byte-array [1 2]) 3))))
+
+(deftest bytes-first-rest-next-last
+  (is (= 9 (first (byte-array [9 8 7]))))
+  (is (= [8 7] (vec (rest (byte-array [9 8 7])))))
+  (is (= 7 (last (byte-array [9 8 7])))))
+
+(deftest bytes-nth-and-get
+  (is (= 8 (nth (byte-array [9 8 7]) 1)))
+  (is (= 8 (get (byte-array [9 8 7]) 1)))
+  (is (= :missing (get (byte-array [9 8 7]) 99 :missing)))
+  (is (= :missing (nth (byte-array [9 8 7]) 99 :missing))))
+
+(deftest bytes-reduce-fold
+  (is (= 10 (reduce + (byte-array [1 2 3 4]))))
+  (is (= 24 (reduce * 1 (byte-array [1 2 3 4]))))
+  (is (= 0  (reduce + (byte-array 0)))))
+
+(deftest bytes-into-vector
+  (is (= [10 20 30] (into [] (byte-array [10 20 30]))))
+  (is (= #{1 2 3}   (into #{} (byte-array [1 2 3 1 2])))))
+
+(deftest bytes-map-filter
+  (is (= [2 3 4]   (map inc (byte-array [1 2 3]))))
+  (is (= [2 4]     (filter even? (byte-array [1 2 3 4 5])))))
+
+(deftest bytes-empty-returns-empty-bytes
+  (let [e (empty (byte-array [1 2 3]))]
+    (is (true? (bytes? e)))
+    (is (zero? (count e)))))

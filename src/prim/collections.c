@@ -922,6 +922,10 @@ static mino_val *prim_first_step(mino_state *S, mino_val *coll,
         mino_val *first = mino_queue_peek(coll);
         return (first != NULL) ? first : mino_nil(S);
     }
+    if (mino_type_of(coll) == MINO_BYTES) {
+        if (coll->as.bytes.byte_len == 0) return mino_nil(S);
+        return mino_int(S, (long long)(unsigned)coll->as.bytes.data[0]);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -1151,6 +1155,14 @@ static mino_val *prim_rest_step(mino_state *S, mino_val *coll,
             return seqv->as.cons.cdr;
         }
     }
+    if (mino_type_of(coll) == MINO_BYTES) {
+        if (coll->as.bytes.byte_len <= 1) return mino_empty_list(S);
+        {
+            mino_val *seqv = mino_bytes_seq(S, coll);
+            if (seqv == NULL || !mino_is_cons(seqv)) return mino_empty_list(S);
+            return seqv->as.cons.cdr;
+        }
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "rest: expected a list or vector, got %s",
@@ -1369,6 +1381,14 @@ mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env)
         idx = mino_val_int_get(key);
         if (idx < 0 || (size_t)idx >= coll->as.host_array.len) return def_val;
         return coll->as.host_array.vals[(size_t)idx];
+    }
+    if (mino_type_of(coll) == MINO_BYTES) {
+        long long idx;
+        if (key == NULL || !mino_val_int_p(key)) return def_val;
+        idx = mino_val_int_get(key);
+        if (idx < 0 || (size_t)idx >= coll->as.bytes.byte_len) return def_val;
+        return mino_int(S,
+            (long long)(unsigned)coll->as.bytes.data[(size_t)idx]);
     }
     if (mino_type_of(coll) == MINO_MAP_ENTRY) {
         if (key != NULL && mino_val_int_p(key)) {

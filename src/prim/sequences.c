@@ -2380,6 +2380,11 @@ mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
             r = mino_queue_empty(S);
             r->meta = coll->meta;
             return r;
+        case MINO_BYTES:
+            /* (empty bytes-value) returns a fresh empty bytes value. */
+            r = mino_bytes(S, NULL, 0);
+            if (r != NULL) r->meta = coll->meta;
+            return r;
         default:
             return mino_nil(S);
         }

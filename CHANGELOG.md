@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.416.0 — MINO_BYTES Sequence Surface
+
+Follow-on to v0.415's core MINO_BYTES type: dispatch sites that
+previously threw on bytes values now treat the value as a sequence
+of unsigned 0..255 ints.
+
+- `first`, `rest`, `last` work on bytes values.
+- `nth` and `get` index into the byte payload.
+- `reduce`, `into`, `map`, `filter`, `vec` all walk the bytes via
+  `seq`.
+- `(empty bytes-value)` returns a fresh empty bytes value (was nil).
+
+Extended `tests/bytes_test.clj` to cover every new dispatch path.
+
 ## v0.415.0 — MINO_BYTES Value Type
 
 New first-class value tag for immutable binary data.
