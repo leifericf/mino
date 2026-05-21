@@ -3032,10 +3032,11 @@
   "Precision/rounding-mode for bigdec division. nil means exact-or-
    throw (mirrors java.math.BigDecimal.divide without MathContext).
    When set, the value is a map of {:precision N :rounding-mode K}
-   where N is a positive integer and K is a rounding-mode keyword.
-   Today only :half-up is implemented (matching JVM Clojure's default
-   when MathContext is constructed precision-only); other modes throw
-   :mino/unsupported. Resolved by mino_bigdec_div on each call."
+   where N is a positive integer and K is one of: :half-up (default),
+   :down, :up, :floor, :ceiling, :half-down, :half-even, :unnecessary.
+   :unnecessary throws when rounding would change the value (mirrors
+   JVM's ArithmeticException). Resolved by mino_bigdec_div on each
+   call."
   nil)
 
 (defmacro with-precision

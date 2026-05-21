@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.411.0 — math-context Rounding Modes
+
+`*math-context*` now accepts the full JVM Clojure set of
+`:rounding-mode` keywords on top of the previously shipped
+`:half-up` default:
+
+- `:down` — truncate toward zero.
+- `:up` — always round magnitude away from zero.
+- `:floor` — toward negative infinity.
+- `:ceiling` — toward positive infinity.
+- `:half-up` — ties go away from zero (default; existing behavior).
+- `:half-down` — ties go toward zero.
+- `:half-even` — banker's rounding: ties go to the even neighbor.
+- `:unnecessary` — throws when rounding would change the value;
+  exact divisions still succeed.
+
+Implementation: a single `apply_rounding_mode` helper that returns
+the carry decision from `(rmode, remainder, divisor, q_rounded,
+q_neg)`, called from both the "loop hit a non-zero remainder" path
+and the "exact division but result has more sig digits than the
+configured precision" path (the latter case was previously short-
+circuited before any rounding consideration). Mode resolution lives
+in `resolve_math_context`; an unrecognised keyword raises a clearly
+classified `MHO002` that names the supported set.
+
 ## v0.410.0 — Print Dynvars Completion
 
 Wires the remaining JVM Clojure print-side dynamic vars into mino's

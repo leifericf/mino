@@ -580,12 +580,26 @@ static int bigdec_sig_digits(mp_int z)
     return digits;
 }
 
+/* Rounding mode codes used by the *math-context* path. Distinct
+ * values for each JVM-canon mode plus a -1 sentinel for "unknown
+ * keyword" so the caller can throw a classified error naming the
+ * unsupported mode. */
+#define MC_RMODE_DOWN        0   /* truncate toward zero */
+#define MC_RMODE_HALF_UP     1   /* ties go away from zero (JVM default) */
+#define MC_RMODE_UP          2   /* always away from zero */
+#define MC_RMODE_FLOOR       3   /* toward negative infinity */
+#define MC_RMODE_CEILING     4   /* toward positive infinity */
+#define MC_RMODE_HALF_DOWN   5   /* ties go toward zero */
+#define MC_RMODE_HALF_EVEN   6   /* banker's rounding */
+#define MC_RMODE_UNNECESSARY 7   /* throw if any rounding would happen */
+#define MC_RMODE_UNKNOWN    (-1)
+
 /* Resolve *math-context* into precision + rounding mode. Returns 1
  * when a context is active (and *precision_out / *rmode_out are set);
  * returns 0 when no math-context is in scope (caller stays exact).
- * *rmode_out is one of:
- *   1  :half-up   -- implemented
- *  -1  any other  -- caller throws :mino/unsupported. */
+ * *rmode_out is one of the MC_RMODE_* codes above; an unrecognised
+ * mode keyword yields MC_RMODE_UNKNOWN and the caller throws
+ * :mino/unsupported. */
 static int resolve_math_context(mino_state *S, int *precision_out,
                                 int *rmode_out)
 {
@@ -615,17 +629,122 @@ static int resolve_math_context(mino_state *S, int *precision_out,
     ll = mino_val_int_get(p_v);
     if (ll <= 0 || ll > 0x7fffffff) return 0;
     *precision_out = (int)ll;
-    /* Default rounding mode is :half-up. */
-    *rmode_out = 1;
+    /* Default rounding mode is :half-up (matches JVM's
+     * BigDecimal.divide(BigDecimal, MathContext) when only the
+     * precision is supplied). */
+    *rmode_out = MC_RMODE_HALF_UP;
     if (rm_v != NULL && mino_type_of(rm_v) == MINO_KEYWORD) {
-        if (rm_v->as.s.len == 7
-            && memcmp(rm_v->as.s.data, "half-up", 7) == 0) {
-            *rmode_out = 1;
-        } else {
-            *rmode_out = -1;  /* Signal unsupported */
-        }
+        const char *d = rm_v->as.s.data;
+        size_t      n = rm_v->as.s.len;
+        if      (n == 7 && memcmp(d, "half-up",     7) == 0) *rmode_out = MC_RMODE_HALF_UP;
+        else if (n == 4 && memcmp(d, "down",        4) == 0) *rmode_out = MC_RMODE_DOWN;
+        else if (n == 2 && memcmp(d, "up",          2) == 0) *rmode_out = MC_RMODE_UP;
+        else if (n == 5 && memcmp(d, "floor",       5) == 0) *rmode_out = MC_RMODE_FLOOR;
+        else if (n == 7 && memcmp(d, "ceiling",     7) == 0) *rmode_out = MC_RMODE_CEILING;
+        else if (n == 9 && memcmp(d, "half-down",   9) == 0) *rmode_out = MC_RMODE_HALF_DOWN;
+        else if (n == 9 && memcmp(d, "half-even",   9) == 0) *rmode_out = MC_RMODE_HALF_EVEN;
+        else if (n == 11 && memcmp(d, "unnecessary", 11) == 0) *rmode_out = MC_RMODE_UNNECESSARY;
+        else                                                  *rmode_out = MC_RMODE_UNKNOWN;
     }
     return 1;
+}
+
+/* Decide whether to round the magnitude `q_rounded` (= |q| / divisor)
+ * up by one based on the rounding mode, the remainder `r`, the
+ * `divisor` (= 10^excess), and the sign of the un-divided quotient
+ * (q_neg = 1 when negative). Returns 1 to round-up, 0 to keep,
+ * -1 when :unnecessary was requested and any rounding would change
+ * the value -- caller throws.
+ *
+ * `r` is the exact remainder from |q| / divisor (always >= 0). The
+ * sign of the *original* value lives in q_neg; the magnitude-based
+ * decision is then re-signed at the call site so the rounding mode's
+ * direction-of-infinity semantics work for both positive and
+ * negative quotients.
+ *
+ * Uses `pw` as a scratch big-int for 2*r and odd-bit tests; caller
+ * owns it and must restore its value after the call. */
+static int apply_rounding_mode(int rmode, const mpz_t *r,
+                                const mpz_t *divisor,
+                                const mpz_t *q_rounded, int q_neg,
+                                mpz_t *pw)
+{
+    int r_is_zero = mp_int_compare_zero((mp_int)r) == 0;
+    int cmp_half;
+    if (r_is_zero) return 0;  /* No rounding decision when exact. */
+    /* For half-* modes: compare 2*r against divisor.
+     *   cmp_half < 0 -> r is less than half
+     *   cmp_half == 0 -> r is exactly half (tie)
+     *   cmp_half > 0 -> r is greater than half
+     * We compute it lazily; modes that don't need it don't pay. */
+    switch (rmode) {
+    case MC_RMODE_DOWN:
+        return 0;
+    case MC_RMODE_UP:
+        return 1;
+    case MC_RMODE_FLOOR:
+        /* Toward -infty: positives truncate, negatives round magnitude up. */
+        return q_neg ? 1 : 0;
+    case MC_RMODE_CEILING:
+        /* Toward +infty: positives round magnitude up, negatives truncate. */
+        return q_neg ? 0 : 1;
+    case MC_RMODE_HALF_UP: {
+        mpz_t twice_r;
+        if (mp_int_init(&twice_r) != MP_OK) return 0;
+        mp_int_copy((mp_int)r, &twice_r);
+        mp_int_set_value(pw, 2);
+        mp_int_mul(&twice_r, pw, &twice_r);
+        cmp_half = mp_int_compare(&twice_r, (mp_int)divisor);
+        mp_int_clear(&twice_r);
+        return cmp_half >= 0 ? 1 : 0;
+    }
+    case MC_RMODE_HALF_DOWN: {
+        mpz_t twice_r;
+        if (mp_int_init(&twice_r) != MP_OK) return 0;
+        mp_int_copy((mp_int)r, &twice_r);
+        mp_int_set_value(pw, 2);
+        mp_int_mul(&twice_r, pw, &twice_r);
+        cmp_half = mp_int_compare(&twice_r, (mp_int)divisor);
+        mp_int_clear(&twice_r);
+        return cmp_half > 0 ? 1 : 0;
+    }
+    case MC_RMODE_HALF_EVEN: {
+        mpz_t twice_r;
+        int   carry;
+        if (mp_int_init(&twice_r) != MP_OK) return 0;
+        mp_int_copy((mp_int)r, &twice_r);
+        mp_int_set_value(pw, 2);
+        mp_int_mul(&twice_r, pw, &twice_r);
+        cmp_half = mp_int_compare(&twice_r, (mp_int)divisor);
+        if (cmp_half < 0) {
+            carry = 0;
+        } else if (cmp_half > 0) {
+            carry = 1;
+        } else {
+            /* Tie: carry only if q_rounded is odd, so the resulting
+             * magnitude becomes even. mp_int_is_odd via the low limb
+             * (imath exposes parity through mp_int_mod_value or a
+             * direct bit test; here we use modular reduction against
+             * 2 via pw). */
+            mpz_t two, mod_r;
+            int   odd;
+            if (mp_int_init(&two)   != MP_OK) { mp_int_clear(&twice_r); return 0; }
+            if (mp_int_init(&mod_r) != MP_OK) { mp_int_clear(&twice_r); mp_int_clear(&two); return 0; }
+            mp_int_set_value(&two, 2);
+            mp_int_mod((mp_int)q_rounded, &two, &mod_r);
+            odd = mp_int_compare_zero(&mod_r) != 0;
+            mp_int_clear(&mod_r);
+            mp_int_clear(&two);
+            carry = odd ? 1 : 0;
+        }
+        mp_int_clear(&twice_r);
+        return carry;
+    }
+    case MC_RMODE_UNNECESSARY:
+        return -1;  /* caller throws */
+    default:
+        return 0;
+    }
 }
 
 /* mino_bigdec_div -- exact bigdec division. Mirrors Java's
@@ -662,9 +781,11 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                                      "division by zero");
     }
     mc_active = resolve_math_context(S, &mc_precision, &mc_rmode);
-    if (mc_active && mc_rmode == -1) {
+    if (mc_active && mc_rmode == MC_RMODE_UNKNOWN) {
         return prim_throw_classified(S, "host", "MHO002",
-            "with-precision: only :half-up rounding mode is implemented");
+            "with-precision: unknown :rounding-mode keyword "
+            "(supported: :down :up :floor :ceiling :half-up "
+            ":half-down :half-even :unnecessary)");
     }
     /* When *math-context* is set, use its precision as the loop cap;
      * otherwise stay at the historical 1024-digit upper bound. */
@@ -684,32 +805,23 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
         if (mp_int_div(&num, &den, &q, &r) != MP_OK) goto oom;
         if (mp_int_compare_zero(&r) == 0) {
             mino_val *q_wrapped;
-            mpz_t      *qz_heap = bigint_alloc_zeroed();
-            if (qz_heap == NULL) goto oom;
-            mp_int_copy(&q, qz_heap);
-            q_wrapped = bigint_wrap(S, qz_heap);
-            if (q_wrapped == NULL) goto oom;
-            result = mino_bigdec_make(S, q_wrapped, sa - sb + extra);
-            break;
-        }
-        /* When a math-context is active and we have at least
-         * mc_precision+1 sig digits in q, we have one digit beyond the
-         * target precision; round HALF-UP using that excess digit and
-         * stop. Stopping at exactly mc_precision would truncate without
-         * looking at the next digit and diverge from JVM's
-         * BigDecimal.divide(BigDecimal, MathContext). */
-        if (mc_active && bigdec_sig_digits(&q) >= mc_precision + 1) {
-            int excess = bigdec_sig_digits(&q) - mc_precision;
-            mino_val *q_wrapped;
             mpz_t      *qz_heap;
-            if (excess > 0) {
+            /* Exact division. If *math-context* is active and the
+             * exact quotient has more sig digits than the configured
+             * precision, the user asked for a rounded result; honor
+             * that even though no rounding-of-remainder is needed.
+             * Falling through to the rounding branch with a manufactured
+             * non-zero state would be wrong (the remainder is genuinely
+             * zero), so handle the in-place rounding here directly. */
+            if (mc_active
+                && bigdec_sig_digits(&q) > mc_precision) {
+                int   excess = bigdec_sig_digits(&q) - mc_precision;
                 mpz_t divisor, q_rounded, r_rounded;
-                int   half_up_carry;
+                int   carry;
                 int   q_neg;
                 if (mp_int_init(&divisor)    != MP_OK) goto oom;
                 if (mp_int_init(&q_rounded)  != MP_OK) { mp_int_clear(&divisor); goto oom; }
                 if (mp_int_init(&r_rounded)  != MP_OK) { mp_int_clear(&divisor); mp_int_clear(&q_rounded); goto oom; }
-                /* divisor = 10^excess */
                 mp_int_set_value(&divisor, 1);
                 {
                     int k;
@@ -723,7 +835,6 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                         }
                     }
                 }
-                /* q_rounded = |q| / divisor; remainder used for half-up. */
                 {
                     mpz_t qabs;
                     if (mp_int_init(&qabs) != MP_OK) {
@@ -744,24 +855,126 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                     }
                     mp_int_clear(&qabs);
                 }
-                /* HALF-UP: if 2*r >= divisor, round magnitude up. */
+                carry = apply_rounding_mode(mc_rmode, &r_rounded,
+                                            &divisor, &q_rounded,
+                                            q_neg, &pw);
+                if (carry == -1) {
+                    mp_int_clear(&divisor);
+                    mp_int_clear(&q_rounded);
+                    mp_int_clear(&r_rounded);
+                    mp_int_clear(&num);
+                    mp_int_clear(&den);
+                    mp_int_clear(&q);
+                    mp_int_clear(&r);
+                    mp_int_clear(&pw);
+                    return prim_throw_classified(S, "host", "MHO002",
+                        "with-precision :unnecessary: rounding required");
+                }
+                if (carry) {
+                    mp_int_set_value(&pw, 1);
+                    mp_int_add(&q_rounded, &pw, &q_rounded);
+                }
+                if (q_neg) {
+                    mp_int_neg(&q_rounded, &q_rounded);
+                }
+                qz_heap = bigint_alloc_zeroed();
+                if (qz_heap == NULL) {
+                    mp_int_clear(&divisor);
+                    mp_int_clear(&q_rounded);
+                    mp_int_clear(&r_rounded);
+                    goto oom;
+                }
+                mp_int_copy(&q_rounded, qz_heap);
+                mp_int_clear(&divisor);
+                mp_int_clear(&q_rounded);
+                mp_int_clear(&r_rounded);
+                q_wrapped = bigint_wrap(S, qz_heap);
+                if (q_wrapped == NULL) goto oom;
+                result = mino_bigdec_make(S, q_wrapped,
+                                          sa - sb + extra - excess);
+                break;
+            }
+            qz_heap = bigint_alloc_zeroed();
+            if (qz_heap == NULL) goto oom;
+            mp_int_copy(&q, qz_heap);
+            q_wrapped = bigint_wrap(S, qz_heap);
+            if (q_wrapped == NULL) goto oom;
+            result = mino_bigdec_make(S, q_wrapped, sa - sb + extra);
+            break;
+        }
+        /* When a math-context is active and we have at least
+         * mc_precision+1 sig digits in q, we have one digit beyond the
+         * target precision; round HALF-UP using that excess digit and
+         * stop. Stopping at exactly mc_precision would truncate without
+         * looking at the next digit and diverge from JVM's
+         * BigDecimal.divide(BigDecimal, MathContext). */
+        if (mc_active && bigdec_sig_digits(&q) >= mc_precision + 1) {
+            int excess = bigdec_sig_digits(&q) - mc_precision;
+            mino_val *q_wrapped;
+            mpz_t      *qz_heap;
+            if (excess > 0) {
+                mpz_t divisor, q_rounded, r_rounded;
+                int   carry;
+                int   q_neg;
+                if (mp_int_init(&divisor)    != MP_OK) goto oom;
+                if (mp_int_init(&q_rounded)  != MP_OK) { mp_int_clear(&divisor); goto oom; }
+                if (mp_int_init(&r_rounded)  != MP_OK) { mp_int_clear(&divisor); mp_int_clear(&q_rounded); goto oom; }
+                /* divisor = 10^excess */
+                mp_int_set_value(&divisor, 1);
                 {
-                    mpz_t twice_r;
-                    int   cmp;
-                    if (mp_int_init(&twice_r) != MP_OK) {
+                    int k;
+                    mp_int_set_value(&pw, 10);
+                    for (k = 0; k < excess; k++) {
+                        if (mp_int_mul(&divisor, &pw, &divisor) != MP_OK) {
+                            mp_int_clear(&divisor);
+                            mp_int_clear(&q_rounded);
+                            mp_int_clear(&r_rounded);
+                            goto oom;
+                        }
+                    }
+                }
+                /* q_rounded = |q| / divisor; remainder feeds the
+                 * rounding-mode decision below. */
+                {
+                    mpz_t qabs;
+                    if (mp_int_init(&qabs) != MP_OK) {
                         mp_int_clear(&divisor);
                         mp_int_clear(&q_rounded);
                         mp_int_clear(&r_rounded);
                         goto oom;
                     }
-                    mp_int_copy(&r_rounded, &twice_r);
-                    mp_int_set_value(&pw, 2);
-                    mp_int_mul(&twice_r, &pw, &twice_r);
-                    cmp = mp_int_compare(&twice_r, &divisor);
-                    half_up_carry = (cmp >= 0);
-                    mp_int_clear(&twice_r);
+                    mp_int_abs(&q, &qabs);
+                    q_neg = mp_int_compare_zero(&q) < 0;
+                    if (mp_int_div(&qabs, &divisor, &q_rounded,
+                                   &r_rounded) != MP_OK) {
+                        mp_int_clear(&qabs);
+                        mp_int_clear(&divisor);
+                        mp_int_clear(&q_rounded);
+                        mp_int_clear(&r_rounded);
+                        goto oom;
+                    }
+                    mp_int_clear(&qabs);
                 }
-                if (half_up_carry) {
+                carry = apply_rounding_mode(mc_rmode, &r_rounded,
+                                            &divisor, &q_rounded,
+                                            q_neg, &pw);
+                if (carry == -1) {
+                    /* :unnecessary with non-zero remainder: rounding
+                     * would change the value. JVM raises
+                     * ArithmeticException; we surface MHO002 with the
+                     * mode named. */
+                    mp_int_clear(&divisor);
+                    mp_int_clear(&q_rounded);
+                    mp_int_clear(&r_rounded);
+                    mp_int_clear(&num);
+                    mp_int_clear(&den);
+                    mp_int_clear(&q);
+                    mp_int_clear(&r);
+                    mp_int_clear(&pw);
+                    return prim_throw_classified(S, "host", "MHO002",
+                        "with-precision :unnecessary: rounding required");
+                }
+                if (carry) {
                     mp_int_set_value(&pw, 1);
                     mp_int_add(&q_rounded, &pw, &q_rounded);
                 }

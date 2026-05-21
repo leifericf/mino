@@ -54,12 +54,61 @@
 (deftest with-precision-explicit-half-up
   (is (= 0.33333M (with-precision 5 :rounding :half-up (/ 1M 3M)))))
 
-(deftest with-precision-unsupported-mode
-  ;; Other rounding modes throw :mino/unsupported with the host error
-  ;; class. The error message names the mode so callers can decide
-  ;; whether to retry under :half-up or fail loudly.
-  (is (thrown? (with-precision 5 :rounding :half-down (/ 1M 3M))))
-  (is (thrown? (with-precision 5 :rounding :half-even (/ 1M 3M)))))
+(deftest with-precision-rounding-down
+  ;; Truncate toward zero.
+  (is (= 0.33333M (with-precision 5 :rounding :down (/ 1M 3M))))
+  ;; 1/6 = 0.16666... truncates to 0.1666 at precision 4.
+  (is (= 0.1666M  (with-precision 4 :rounding :down (/ 1M 6M))))
+  ;; Negative: also truncates toward zero (magnitude decreases).
+  (is (= -0.33333M (with-precision 5 :rounding :down (/ -1M 3M)))))
+
+(deftest with-precision-rounding-up
+  ;; Always round away from zero when there is any non-zero excess.
+  ;; 1/3 = 0.33333... → 0.34 at precision 2, since there's residual.
+  (is (= 0.34M     (with-precision 2 :rounding :up (/ 1M 3M))))
+  (is (= 0.334M    (with-precision 3 :rounding :up (/ 1M 3M))))
+  ;; Negative: magnitude rounds up.
+  (is (= -0.34M    (with-precision 2 :rounding :up (/ -1M 3M)))))
+
+(deftest with-precision-rounding-floor
+  ;; Toward -infinity: positives truncate, negatives round magnitude up.
+  (is (= 0.33333M  (with-precision 5 :rounding :floor (/ 1M 3M))))
+  (is (= -0.34M    (with-precision 2 :rounding :floor (/ -1M 3M)))))
+
+(deftest with-precision-rounding-ceiling
+  ;; Toward +infinity: positives round magnitude up, negatives truncate.
+  (is (= 0.34M     (with-precision 2 :rounding :ceiling (/ 1M 3M))))
+  (is (= -0.33333M (with-precision 5 :rounding :ceiling (/ -1M 3M)))))
+
+(deftest with-precision-rounding-half-down
+  ;; Ties (exactly half) go toward zero; non-ties round to nearest.
+  ;; 0.25 at precision 1: candidates 0.2 / 0.3, half-point 0.25 (tie)
+  ;; → 0.2 under half-down. Under half-up it would be 0.3.
+  (is (= 0.2M      (with-precision 1 :rounding :half-down (/ 25M 100M))))
+  (is (= 0.3M      (with-precision 1 :rounding :half-up   (/ 25M 100M))))
+  ;; Strictly more than half rounds up under both half-modes.
+  (is (= 0.3M      (with-precision 1 :rounding :half-down (/ 26M 100M)))))
+
+(deftest with-precision-rounding-half-even
+  ;; Banker's rounding. 0.125 at precision 2 has a tie (0.12 vs 0.13);
+  ;; tie goes to even → 0.12.
+  (is (= 0.12M     (with-precision 2 :rounding :half-even (/ 125M 1000M))))
+  ;; 0.135 at precision 2 → tie between 0.13 and 0.14; even → 0.14.
+  (is (= 0.14M     (with-precision 2 :rounding :half-even (/ 135M 1000M))))
+  ;; Non-tie cases still round to nearest.
+  (is (= 0.13M     (with-precision 2 :rounding :half-even (/ 126M 1000M)))))
+
+(deftest with-precision-rounding-unnecessary
+  ;; Exact division: no rounding needed → returns exact value.
+  (is (= 0.5M (with-precision 5 :rounding :unnecessary (/ 1M 2M))))
+  ;; Non-exact division: throws because rounding would change the value.
+  (is (thrown? (with-precision 5 :rounding :unnecessary (/ 1M 3M))))
+  (is (thrown? (with-precision 3 :rounding :unnecessary (/ 22M 7M)))))
+
+(deftest with-precision-unknown-rounding-mode
+  ;; An unrecognised :rounding-mode keyword still throws (clearly
+  ;; classified) so user typos surface immediately.
+  (is (thrown? (with-precision 5 :rounding :bogus-mode (/ 1M 3M)))))
 
 (deftest no-math-context-still-exact-or-throws
   ;; Outside with-precision, the historical exact-or-throw behavior is
