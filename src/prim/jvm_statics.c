@@ -295,6 +295,72 @@ static mino_val *prim_character_to_string(mino_state *S, mino_val *args,
     return prim_str(S, args, env);
 }
 
+/* JVM contract: Integer/toBinaryString and Long/toBinaryString format
+ * the argument as an unsigned 64-bit two's-complement bit string. For
+ * positive longs this is just base-2; for negative longs it's the
+ * 64-bit pattern (e.g. -1 -> "1111…1111", 64 ones). The
+ * Integer/* shape matches Long/* on mino because mino has one integer
+ * tier; calling either with an out-of-range bigint throws. */
+static mino_val *prim_int_to_radix_string(mino_state *S, mino_val *args,
+                                            mino_env *env,
+                                            const char *fn_name,
+                                            int radix)
+{
+    mino_val           *v;
+    unsigned long long  u;
+    long long           n;
+    char                buf[65];     /* worst case: 64 bits + NUL */
+    int                 i = (int)sizeof(buf) - 1;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s requires one integer argument",
+                 fn_name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
+    v = args->as.cons.car;
+    if (!mino_val_int_p(v)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s: integer argument required", fn_name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    n = mino_val_int_get(v);
+    u = (unsigned long long)n;       /* implementation-defined cast OK
+                                        on every C99 host mino targets */
+    buf[i] = '\0';
+    if (u == 0ull) {
+        buf[--i] = '0';
+    } else {
+        while (u != 0ull && i > 0) {
+            int d = (int)(u % (unsigned long long)radix);
+            buf[--i] = (char)(d < 10 ? '0' + d : 'a' + d - 10);
+            u /= (unsigned long long)radix;
+        }
+    }
+    return mino_string(S, &buf[i]);
+}
+
+static mino_val *prim_int_to_binary_string(mino_state *S, mino_val *args,
+                                             mino_env *env)
+{
+    return prim_int_to_radix_string(S, args, env,
+                                    "Integer/toBinaryString", 2);
+}
+
+static mino_val *prim_int_to_hex_string(mino_state *S, mino_val *args,
+                                          mino_env *env)
+{
+    return prim_int_to_radix_string(S, args, env,
+                                    "Integer/toHexString", 16);
+}
+
+static mino_val *prim_int_to_octal_string(mino_state *S, mino_val *args,
+                                            mino_env *env)
+{
+    return prim_int_to_radix_string(S, args, env,
+                                    "Integer/toOctalString", 8);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Layer 2: embedded-host semantic remap                                    */
 /* ------------------------------------------------------------------------- */
@@ -439,6 +505,21 @@ static const mino_prim_def k_prims_jvm_statics[] = {
      "JVM String.valueOf; routes to mino's str."},
     {"Character/toString",    prim_character_to_string,
      "JVM Character.toString; routes to mino's str."},
+
+    /* Layer 1 -- radix-string formatters. Integer/* and Long/* share
+     * the implementation; mino has one integer tier. */
+    {"Integer/toBinaryString", prim_int_to_binary_string,
+     "JVM Integer.toBinaryString; unsigned base-2 digit string."},
+    {"Integer/toHexString",    prim_int_to_hex_string,
+     "JVM Integer.toHexString; unsigned base-16 digit string."},
+    {"Integer/toOctalString",  prim_int_to_octal_string,
+     "JVM Integer.toOctalString; unsigned base-8 digit string."},
+    {"Long/toBinaryString",    prim_int_to_binary_string,
+     "JVM Long.toBinaryString; unsigned base-2 digit string."},
+    {"Long/toHexString",       prim_int_to_hex_string,
+     "JVM Long.toHexString; unsigned base-16 digit string."},
+    {"Long/toOctalString",     prim_int_to_octal_string,
+     "JVM Long.toOctalString; unsigned base-8 digit string."},
 
     /* Layer 2 -- embedded-host semantic remap */
     {"System/currentTimeMillis", jvm_remap_current_time_millis,

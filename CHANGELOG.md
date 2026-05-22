@@ -64,6 +64,17 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- `Integer/toBinaryString`, `Integer/toHexString`, `Integer/toOctalString`
+  and their `Long/*` counterparts now map to a single radix-string
+  formatter. Integer/* and Long/* share the implementation because
+  mino has one integer tier; both accept the same range of inputs.
+  The formatter follows JVM's contract: unsigned 64-bit
+  two's-complement bit pattern (`(Long/toBinaryString -1)` is 64
+  ones, not a leading-minus). Adds six new entries to the
+  `clojure.core` slash-name install table; common formatting idioms
+  in portable Clojure code (`(Integer/toHexString 255)` → `"ff"`)
+  now work without a `:cljs`/`:mino` branch.
+
 - Float printing now matches JVM canon on two long-standing
   divergences. Scientific notation uses uppercase `E`
   (`-1.4210854715202004E-14`, not `e-14`), and `:float32` values

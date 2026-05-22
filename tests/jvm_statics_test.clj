@@ -87,6 +87,34 @@
   ;; Should return without error after a near-zero sleep.
   (is (= nil (Thread/sleep 1))))
 
+;; Radix-string statics. Integer/* and Long/* share the implementation
+;; because mino has one integer tier; both forms accept the same range
+;; of inputs.
+
+(deftest jvm-statics-to-binary-string
+  (is (= "0"        (Integer/toBinaryString 0)))
+  (is (= "1"        (Integer/toBinaryString 1)))
+  (is (= "1010"     (Integer/toBinaryString 10)))
+  (is (= "11101011" (Integer/toBinaryString 235)))
+  (is (= "0"        (Long/toBinaryString 0)))
+  (is (= "1010"     (Long/toBinaryString 10)))
+  ;; Negative values: JVM emits 64-bit two's-complement form.
+  (is (= "1111111111111111111111111111111111111111111111111111111111111111"
+         (Long/toBinaryString -1))))
+
+(deftest jvm-statics-to-hex-string
+  (is (= "0"   (Integer/toHexString 0)))
+  (is (= "1"   (Integer/toHexString 1)))
+  (is (= "ff"  (Integer/toHexString 255)))
+  (is (= "eb"  (Integer/toHexString 235)))
+  (is (= "deadbeef" (Long/toHexString 3735928559))))
+
+(deftest jvm-statics-to-octal-string
+  (is (= "0"   (Integer/toOctalString 0)))
+  (is (= "10"  (Integer/toOctalString 8)))
+  (is (= "777" (Integer/toOctalString 511)))
+  (is (= "353" (Long/toOctalString 235))))
+
 ;; Bare JVM class symbols resolve to mino's corresponding type-marker
 ;; keyword so that portable Clojure code using class names as extend
 ;; targets or instance? arguments doesn't need a :cljs/:mino branch.
