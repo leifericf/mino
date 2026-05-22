@@ -24,6 +24,29 @@
   (is (= "##-Inf" (pr-str ##-Inf)))
   (is (= "##NaN" (pr-str ##NaN))))
 
+(deftest scientific-notation-uses-uppercase-e
+  ;; JVM Double.toString prints scientific notation with uppercase E.
+  ;; Portable Clojure code (and the ClojureDocs diff probe) expects the
+  ;; same form. mino used to print lowercase e from snprintf's %e
+  ;; conversion, which is a silent canon divergence.
+  (is (= "1.0E-15" (pr-str 1.0e-15)))
+  (is (= "1.0E20"  (pr-str 1e20)))
+  (is (= "-1.4210854715202004E-14"
+         (pr-str (- 100.0 100.00000000000001)))))
+
+(deftest float32-print-uses-32-bit-precision
+  ;; float32 (mino :float32) values must print with the shortest
+  ;; representation that round-trips through Float.parseFloat -- not
+  ;; with the full double precision their backing storage happens to
+  ;; have after the widen-for-arith path. JVM Float.toString does
+  ;; exactly this.
+  (is (= "1.5"       (pr-str (float 1.5))))
+  (is (= "0.1"       (pr-str (float 0.1))))
+  (is (= "1.1111112" (pr-str (float 1.111111111111111M))))
+  ;; Double-precision values keep their 17-digit form.
+  (is (= "0.1"                (pr-str 0.1)))
+  (is (= "1.1111111111111112" (pr-str 1.1111111111111112))))
+
 (deftest special-float-read-string
   (is (= ##Inf (read-string "##Inf")))
   (is (= ##-Inf (read-string "##-Inf")))

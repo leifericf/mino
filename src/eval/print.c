@@ -201,57 +201,127 @@ static void print_rb_inorder_ns_stripped(mino_state *S, FILE *out,
  * write the entire form. Helpers may recurse through mino_print_to
  * and bump S->print_depth for the duration of any nested walk. */
 
-static void print_float(FILE *out, double x)
+/* Print a float (32-bit) or double (64-bit). is_float32 selects which
+ * runtime type's round-trip rule applies: float32 prints the shortest
+ * decimal that re-parses to the same `float` (mirroring JVM
+ * Float.toString), double prints the shortest re-parsable `double`
+ * (Double.toString). The two paths share the bracket-and-snprintf loop;
+ * only the comparator and significand cap differ. */
+static void print_float_typed(FILE *out, double x, int is_float32)
 {
     char buf[64];
-    int n, needs_dot, i, p;
+    int n, needs_dot, i, p, maxp, sci_cleaned;
     if (isnan(x)) { fputs("##NaN", out); return; }
     if (isinf(x)) {
         fputs(x > 0 ? "##Inf" : "##-Inf", out);
         return;
     }
-    /* Shortest round-trippable representation. JVM Double.toString
-     * uses fixed notation in [1e-3, 1e7) (signed magnitude) and
-     * scientific elsewhere; pick the shortest precision (after the
-     * decimal for fixed, significand digits for scientific) that
-     * still re-parses to the same double. */
+    /* float32 carries ~9 significant digits; double carries ~17. The
+     * loop tries widening precision until the round-trip matches, so
+     * the cap just prevents an unbounded search. */
+    maxp = is_float32 ? 9 : 17;
     {
         double absx = (x < 0.0) ? -x : x;
         int use_sci = (x != 0.0) && (absx < 1e-3 || absx >= 1e7);
         n = 0;
         if (use_sci) {
-            for (p = 0; p <= 17; p++) {
-                double back;
-                n = snprintf(buf, sizeof(buf), "%.*e", p, x);
+            for (p = 0; p <= maxp; p++) {
+                /* %E -> uppercase exponent, matching JVM. */
+                n = snprintf(buf, sizeof(buf), "%.*E", p, x);
                 if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
-                back = strtod(buf, NULL);
-                if (back == x) break;
+                if (is_float32) {
+                    float back = (float)strtod(buf, NULL);
+                    if (back == (float)x) break;
+                } else {
+                    double back = strtod(buf, NULL);
+                    if (back == x) break;
+                }
             }
         } else {
             /* Fixed: %f precision is fractional-digit count. */
-            for (p = 0; p <= 17; p++) {
-                double back;
+            for (p = 0; p <= maxp; p++) {
                 n = snprintf(buf, sizeof(buf), "%.*f", p, x);
                 if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
-                back = strtod(buf, NULL);
-                if (back == x) break;
+                if (is_float32) {
+                    float back = (float)strtod(buf, NULL);
+                    if (back == (float)x) break;
+                } else {
+                    double back = strtod(buf, NULL);
+                    if (back == x) break;
+                }
             }
         }
     }
     if (n < 0) { fputs("0.0", out); return; }
+    /* snprintf("%E") emits "1.5E+02" / "1E+05". Strip the leading '+'
+     * after E so the form matches JVM ("1.5E2", "1E5") -- JVM's
+     * Double.toString never carries the '+'. Negative exponents keep
+     * their '-'. */
+    sci_cleaned = 0;
+    for (i = 0; i + 2 < n; i++) {
+        if (buf[i] == 'E' && buf[i + 1] == '+') {
+            int j;
+            for (j = i + 1; j + 1 < n; j++) buf[j] = buf[j + 1];
+            n--;
+            buf[n] = '\0';
+            sci_cleaned = 1;
+            break;
+        }
+    }
+    /* JVM also strips a leading zero on a two-digit exponent: "E05" -> "E5".
+     * The snprintf output keeps the leading zero on macOS / glibc;
+     * trim a single leading zero in the exponent for parity. */
+    (void)sci_cleaned;
+    for (i = 0; i + 2 < n; i++) {
+        if (buf[i] == 'E' &&
+            (buf[i + 1] == '-' || (buf[i + 1] >= '0' && buf[i + 1] <= '9'))) {
+            int eidx = i + 1;
+            if (buf[eidx] == '-') eidx++;
+            if (eidx + 1 < n && buf[eidx] == '0' &&
+                buf[eidx + 1] >= '0' && buf[eidx + 1] <= '9') {
+                int j;
+                for (j = eidx; j + 1 < n; j++) buf[j] = buf[j + 1];
+                n--;
+                buf[n] = '\0';
+            }
+            break;
+        }
+    }
     /* Always include a decimal point so the printed form re-reads as
-     * a float. For fixed, p=0 has no point; for scientific, the
-     * format is like "1e+05" or "1.5e+02". Append ".0" when there's
-     * no '.' / 'e' / 'E' already. */
+     * a float. For fixed, p=0 has no point; for scientific, the form
+     * is like "1E5" or "1.5E2" -- if there's no '.' yet, insert one
+     * before the 'E'. */
     needs_dot = 1;
     for (i = 0; i < n; i++) {
-        if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E') {
+        if (buf[i] == '.') { needs_dot = 0; break; }
+    }
+    if (needs_dot) {
+        int e_at = -1;
+        for (i = 0; i < n; i++) {
+            if (buf[i] == 'E') { e_at = i; break; }
+        }
+        if (e_at >= 0 && n + 2 < (int)sizeof(buf)) {
+            int j;
+            for (j = n; j > e_at; j--) buf[j + 1] = buf[j - 1];
+            buf[e_at]     = '.';
+            buf[e_at + 1] = '0';
+            n += 2;
+            buf[n] = '\0';
             needs_dot = 0;
-            break;
         }
     }
     fputs(buf, out);
     if (needs_dot) fputs(".0", out);
+}
+
+static void print_float(FILE *out, double x)
+{
+    print_float_typed(out, x, 0);
+}
+
+static void print_float32(FILE *out, double x)
+{
+    print_float_typed(out, x, 1);
 }
 
 static void print_char(FILE *out, int cp)
@@ -778,8 +848,10 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         mino_bigdec_print(S, v, out);
         return;
     case MINO_FLOAT:
-    case MINO_FLOAT32:
         print_float(out, v->as.f);
+        return;
+    case MINO_FLOAT32:
+        print_float32(out, v->as.f);
         return;
     case MINO_CHAR:
         if (S->print_readably_flag == 0) {

@@ -64,6 +64,19 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- Float printing now matches JVM canon on two long-standing
+  divergences. Scientific notation uses uppercase `E`
+  (`-1.4210854715202004E-14`, not `e-14`), and `:float32` values
+  print with the shortest 32-bit-round-trippable form
+  (`(pr-str (float 1.111111111M))` is now `"1.1111112"`, not the
+  full-double `"1.1111111640930176"`). Internally the printer splits
+  into `print_float` (double) and `print_float32` (single-precision
+  comparator), sharing the bracket-and-snprintf loop but parameterising
+  the round-trip check and the significand cap (9 for float, 17 for
+  double). `+` exponent signs are stripped and a leading zero on the
+  exponent is trimmed so the output matches `Double.toString`
+  byte-for-byte.
+
 - `:refer` now accepts a parenthesised list as well as a vector
   (`[clojure.string :refer (blank? join)]` is treated the same as
   `[... :refer [blank? join]]`). JVM Clojure treats `:refer`'s arg
