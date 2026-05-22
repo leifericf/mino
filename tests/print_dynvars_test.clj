@@ -88,9 +88,24 @@
 
 ;; *print-namespace-maps*: a map whose keys all share one namespace
 ;; prints as #:ns{...} with the prefix stripped from each key.
+;;
+;; The var is declared false at the language level (matching JVM canon)
+;; but the CLI / REPL alters the root binding to true on startup so
+;; user-facing prints collapse qualified-key maps. Babashka and JVM
+;; Clojure both do this; mino's CLI does too.
+(deftest print-namespace-maps-cli-default-true
+  ;; Tests run through the mino CLI, so the var-root has been altered
+  ;; to true and qualified-key maps print collapsed by default.
+  (is (true? *print-namespace-maps*))
+  (is (= "#:a{:x 1, :y 2}"
+         (pr-str (sorted-map :a/x 1 :a/y 2)))))
+
 (deftest print-namespace-maps-collapse
+  ;; With the var explicitly bound back to false (programmatic /
+  ;; embedded library default), qualified keys keep their `ns/` prefix.
   (is (= "{:a/x 1, :a/y 2}"
-         (pr-str (sorted-map :a/x 1 :a/y 2))))
+         (binding [*print-namespace-maps* false]
+           (pr-str (sorted-map :a/x 1 :a/y 2)))))
   (is (= "#:a{:x 1, :y 2}"
          (binding [*print-namespace-maps* true]
            (pr-str (sorted-map :a/x 1 :a/y 2)))))

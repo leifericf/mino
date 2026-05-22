@@ -1217,6 +1217,20 @@ int main(int argc, char **argv)
     mino_install_all(S, env);
     mino_set_resolver(S, runtime_paths_resolve, S);
 
+    /* CLI / REPL prints qualified-key maps as `#:ns{:k v}`. The
+     * var declaration is `false` at the language level (matching JVM
+     * Clojure canon), but JVM Clojure's REPL and Babashka both alter
+     * the root to true on startup so users see collapsed prints; mino
+     * does the same here. Embedded users get the false default
+     * because they don't go through main() at all. Failure of this
+     * call would mean the runtime is in a bad enough state that the
+     * subsequent user load will also fail clearly; treat it as
+     * non-fatal so a build that disables print-namespace-maps still
+     * boots. */
+    (void)mino_eval_string(S,
+        "(alter-var-root (var *print-namespace-maps*) (constantly true))",
+        env);
+
     /* Bytecode require knob. With MINO_BC_REQUIRE=1 set, the bc layer
      * aborts on any tree-walker fallback so VM regressions surface
      * during development. Default (unset / "0") leaves the silent

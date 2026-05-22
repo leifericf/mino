@@ -64,6 +64,15 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- mino CLI now sets `*print-namespace-maps*` to true on startup,
+  matching JVM Clojure's REPL and Babashka. Qualified-key maps
+  print as `#:ns{:k v}` by default for users at the REPL or
+  running scripts. The var declaration stays `false` so embedded
+  callers — anyone instantiating a `mino_state` outside the CLI
+  — still see the language-spec default; only the CLI's main()
+  alters the root, mirroring `clojure.main`'s long-standing REPL
+  init.
+
 - `pop` on a single-element list now returns the empty list `()`
   instead of `nil`, and `(pop '())` throws an empty-list error rather
   than the misleading `expected vector, list, or queue, got list`.
