@@ -64,6 +64,17 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- `(meta list-literal)` now returns the reader's source position as
+  a `{:line N :column M [:file "..."]}` map, matching JVM Clojure
+  and CLJS. The reader has always tracked the position in dedicated
+  fields on each cons cell; only the surface through `meta` was
+  missing. The map is synthesized on demand in `prim_meta` (no extra
+  allocation per list literal during read), mirroring the existing
+  `synth_var_meta` path for `(meta #'var)`. Cons cells built at
+  runtime via `(cons x y)` and the canonical empty list `()` still
+  return nil from `meta` — neither carries a per-instance reader
+  position.
+
 - mino CLI now sets `*print-namespace-maps*` to true on startup,
   matching JVM Clojure's REPL and Babashka. Qualified-key maps
   print as `#:ns{:k v}` by default for users at the REPL or

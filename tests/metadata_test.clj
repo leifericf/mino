@@ -27,12 +27,36 @@
       (is (= {:private true} (meta s))))))
 
 (deftest meta-nil-when-absent
-  (testing "fresh values have no metadata"
+  (testing "fresh values without reader-tracked source meta have nil meta"
+    ;; JVM Clojure / CLJS reader does NOT attach reader meta to these
+    ;; literals -- only to lists. (We document the list exception in
+    ;; reader-attaches-line-column-to-lists.)
     (is (nil? (meta [1 2])))
     (is (nil? (meta {:a 1})))
     (is (nil? (meta #{1})))
-    (is (nil? (meta '(1 2))))
     (is (nil? (meta 'foo)))))
+
+(deftest reader-attaches-line-column-to-lists
+  ;; JVM Clojure's reader attaches {:line N :column M} reader meta to
+  ;; every list it reads; CLJS does the same. mino used to leave its
+  ;; reader-tracked source position inaccessible via `meta`, so
+  ;; (meta '(1 2)) returned nil instead of a position map.
+  (let [m (meta '(1 2))]
+    (is (map? m))
+    (is (integer? (:line m)))
+    (is (pos? (:line m)))
+    (is (integer? (:column m)))
+    (is (pos? (:column m))))
+  ;; The map shape stays consistent across positions.
+  (let [m1 (meta '(:a))
+        m2 (meta '(:b :c))]
+    (is (map? m1))
+    (is (map? m2))
+    (is (integer? (:line m1)))
+    (is (integer? (:line m2))))
+  ;; An empty list is the canonical empty value () with no per-instance
+  ;; reader position; meta stays nil.
+  (is (nil? (meta '()))))
 
 (deftest meta-does-not-affect-equality
   (testing "values with different metadata are equal"

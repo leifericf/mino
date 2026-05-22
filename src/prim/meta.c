@@ -38,6 +38,35 @@ static int meta_readable(mino_type t)
         || t == MINO_TX_REF || t == MINO_VAR;
 }
 
+/* List cons cells carry the reader's source position in dedicated
+ * file/line/column fields rather than an explicit meta map (one
+ * allocation per list literal would be wasteful and most callers
+ * never read it). Synthesize a {:line N :column M} map -- optionally
+ * including :file -- when meta is asked of a reader-built list cell.
+ * The not_list guard skips cells built by (cons x y) at runtime,
+ * which have no reader position attached; line == 0 means the cell
+ * came from a non-reader path. */
+static mino_val *synth_cons_meta(mino_state *S, const mino_val *cell)
+{
+    mino_val *keys[3];
+    mino_val *vals[3];
+    size_t      n = 0;
+    if (cell->as.cons.not_list) return NULL;
+    if (cell->as.cons.line <= 0) return NULL;
+    keys[n] = mino_keyword(S, "line");
+    vals[n] = mino_int(S, cell->as.cons.line);
+    n++;
+    keys[n] = mino_keyword(S, "column");
+    vals[n] = mino_int(S, cell->as.cons.column);
+    n++;
+    if (cell->as.cons.file != NULL) {
+        keys[n] = mino_keyword(S, "file");
+        vals[n] = mino_string(S, cell->as.cons.file);
+        n++;
+    }
+    return mino_map(S, keys, vals, n);
+}
+
 /* Vars don't store an explicit meta map -- :ns and :name come from the
  * var's ns and sym fields, and ^:private / ^:dynamic come from flags.
  * Synthesize a fresh map on each call (callers don't expect identity
@@ -104,7 +133,12 @@ mino_val *prim_meta(mino_state *S, mino_val *args,
         if (obj->meta != NULL) return obj->meta;
         return synth_var_meta(S, obj);
     }
-    return obj->meta != NULL ? obj->meta : mino_nil(S);
+    if (obj->meta != NULL) return obj->meta;
+    if (mino_type_of(obj) == MINO_CONS) {
+        mino_val *m = synth_cons_meta(S, obj);
+        if (m != NULL) return m;
+    }
+    return mino_nil(S);
 }
 
 mino_val *prim_with_meta(mino_state *S, mino_val *args,
