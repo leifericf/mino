@@ -64,6 +64,17 @@
   clear `ex-info` at macro-expansion time naming the offending spec
   and suggesting `:default` as the fix.
 
+- `pop` on a single-element list now returns the empty list `()`
+  instead of `nil`, and `(pop '())` throws an empty-list error rather
+  than the misleading `expected vector, list, or queue, got list`.
+  Both behaviours match JVM Clojure and CLJS: the empty collection
+  of a list is `()`, which is `list?`-true; `pop` of an empty list
+  is a bounds error. The bug surfaced on a three-runtime comparison
+  sweep of mino's own test suite — every other runtime returned `()`
+  and threw on the empty case. `prim_pop` now handles the
+  `MINO_EMPTY_LIST` tag and substitutes `mino_empty_list` for a
+  cdr-nil single-element list before returning.
+
 - `Integer/toBinaryString`, `Integer/toHexString`, `Integer/toOctalString`
   and their `Long/*` counterparts now map to a single radix-string
   formatter. Integer/* and Long/* share the implementation because

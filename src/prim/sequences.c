@@ -2265,8 +2265,22 @@ mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env)
         }
         return vec_pop(S, coll);
     }
-    if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list)
+    if (mino_type_of(coll) == MINO_EMPTY_LIST) {
+        return prim_throw_classified(S, "eval/bounds", "MBD001",
+            "pop: cannot pop an empty list");
+    }
+    if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list) {
+        /* Single-element list -> empty list, not nil. Clojure-canon:
+         * pop returns the collection minus its last element; the empty
+         * collection of a list is `()`, which has type :list and is
+         * `list?`-true, while `nil` is neither. Returning nil here used
+         * to make (pop '(1)) silently differ from JVM/CLJS. */
+        if (coll->as.cons.cdr == NULL
+            || mino_type_of(coll->as.cons.cdr) == MINO_NIL) {
+            return mino_empty_list(S);
+        }
         return coll->as.cons.cdr;
+    }
     if (mino_type_of(coll) == MINO_QUEUE) {
         if (mino_queue_count(coll) == 0) {
             return prim_throw_classified(S, "eval/bounds", "MBD001",

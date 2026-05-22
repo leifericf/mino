@@ -42,7 +42,21 @@
 
 (deftest pop-list
   (is (= '(2 3) (pop '(1 2 3))))
-  (is (nil? (pop '(1)))))
+  ;; Popping the only element of a list returns the empty list, not nil.
+  ;; JVM Clojure: (pop '(1)) -> () with `list?` true.
+  (is (= '() (pop '(1))))
+  (is (list? (pop '(1))))
+  (is (not (nil? (pop '(1))))))
+
+(deftest pop-empty-list-throws
+  ;; JVM Clojure throws IllegalStateException "Can't pop empty list".
+  ;; mino used to return a misleading "expected vector, list, or queue,
+  ;; got list" -- it IS a list, just empty.
+  (let [err (try (pop '()) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"empty" err)))
+    (is (some? (re-find #"pop" err)))))
 
 (deftest pop-preserves-structure
   (testing "round-trip through repeated pop"
