@@ -20,6 +20,17 @@ make
 ./mino task build-asan # ASan-instrumented build
 ```
 
+### Optional maintainer toolchain
+
+`make` + an ANSI C compiler stays the one required, canonical build path — for embedders, from-source builds, and CI. Nothing below is needed to build or embed mino.
+
+A few maintainer-only tasks can use a pinned [`zig cc`](https://ziglang.org) (a bundled Clang with cross-compilation support) when it is installed:
+
+- `./mino task gen-stencils-all` regenerates the committed copy-and-patch JIT stencil byte tables for every target from one host, reproducibly. The bytes are checked in, so normal builds never invoke this.
+- `./mino task cross-build` cross-compiles the Linux and Windows release binaries from one host. macOS stays a native build (Zig bundles no macOS SDK).
+
+The pinned Zig version is recorded in `docs/MAINTAINER_TOOLCHAIN.md`. If `zig` is absent, these tasks simply don't run — every other task is unaffected.
+
 Documentation: [mino-lang.org](https://mino-lang.org)
 
 ## Versioning
