@@ -177,15 +177,49 @@ jobs:
         run: ./mino task release-gate
         timeout-minutes: 12
 
-  # NOTE: a previous workflow had a `cross-compile` job here that
-  # regenerated each target's stencil header on macos-14 and diffed
-  # against committed bytes. It was removed when the dev / CI clang
-  # version split (Apple clang 17 locally vs Apple clang 15 on
-  # macos-14) made byte-identity infeasible across hosts. Stale-
-  # commit hygiene is now a dev pre-commit step
-  # (`./mino task check-stencils-fresh`); CI correctness is gated by
-  # the test suite, ASan, and 4-way JIT parity, which catch the
-  # runtime impact of a stale stencil regardless of compiler version.
+  # Stencil determinism, re-armed.
+  #
+  # A previous `cross-compile` job regenerated each target's stencil
+  # header on macos-14 and diffed against committed bytes. It was
+  # removed when the dev / CI clang version split (Apple clang 17
+  # locally vs Apple clang 15 on macos-14, gcc on Linux) made
+  # byte-identity infeasible across hosts.
+  #
+  # This job replaces it on a sound footing: ONE runner with ONE
+  # pinned `zig cc` (the same toolchain `gen-stencils-all` uses
+  # locally) cross-compiles every target, so the emitted bytes are
+  # reproducible by construction. It must stay a single-host job --
+  # putting a byte-identity check back on the per-OS matrix is exactly
+  # what broke the old one. The native matrix above remains the
+  # portability canary (gcc + Apple clang + mingw); this job only
+  # guards committed-byte freshness against the pinned toolchain.
+  stencil-determinism:
+    name: stencil-determinism (pinned zig)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Version must match `zig-version-pin` in
+        # lib/mino/tasks/builtin.clj. Zig is pre-1.0; a minor bump can
+        # shift the bundled LLVM and therefore the emitted stencil
+        # bytes, so bump both in lockstep and regenerate.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Check stencil freshness (all targets)
+        # Regenerates all five committed headers via the pinned zig cc
+        # and fails if `git diff` is non-empty -- i.e. somebody edited a
+        # stencil source (or bumped the pin) without regenerating.
+        run: ./mino task check-stencils-fresh-all
+        timeout-minutes: 10
 
   external-test-suite:
     name: external-test-suite (clojure-test-suite)
