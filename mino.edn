@@ -34,6 +34,10 @@
                    :task mino.tasks.builtin/test-jit-parity}
   check-stencils-fresh {:doc  "G1: gen-stencils + git-diff guardrail for stale committed bytes"
                         :task mino.tasks.builtin/check-stencils-fresh}
+  check-stencils-fresh-all {:doc  "Determinism gate: gen-stencils-all (pinned zig) + git-diff over all targets"
+                            :task mino.tasks.builtin/check-stencils-fresh-all}
+  check-zig-version {:doc  "Hard-fail unless stencil compiler is the pinned zig cc version"
+                     :task mino.tasks.builtin/check-zig-version}
   check-stencil-registry {:doc  "G2: registry <-> on-disk *.c sources cross-check"
                           :task mino.tasks.builtin/check-stencil-registry}
   check-reloc-mirror {:doc  "G3: stencil_extract --selftest pins MINO_STENCIL_RELOC_* enum mirror"
@@ -73,6 +77,8 @@
                          :task mino.tasks.builtin/build-stencil-extract}
   test-stencil-extract  {:doc  "Run stencil-extract selftest"
                          :task mino.tasks.builtin/test-stencil-extract}
+  gen-stencils-all      {:doc  "Regenerate every stencil header from one host via pinned zig cc"
+                         :task mino.tasks.builtin/gen-stencils-all}
   gen-stencils          {:doc  "Regenerate stencil byte-tables header"
                          :task mino.tasks.builtin/gen-stencils}
   gen-stencils-arm64-linux {:doc  "Cross-compile stencils for ARM64 Linux"

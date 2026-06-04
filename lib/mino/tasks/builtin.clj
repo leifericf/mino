@@ -21,6 +21,27 @@
                                        (if windows? "-lm" "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
+;; Stencil-regeneration toolchain. Stencils are committed as byte
+;; headers, so this compiler is invoked only by maintainers running
+;; gen-stencils-* / cross-build -- never by a normal build or an
+;; embedder. It defaults to a pinned `zig cc`: one host then
+;; cross-compiles every target to byte-identical output, which is
+;; what lets the determinism gate be re-armed. STENCIL_CC=clang (or
+;; any other argv) restores the legacy single-host path and opts out
+;; of the version pin. Split on spaces so `apply sh!` splices the
+;; vector (`zig cc` is two argv entries).
+(def ^:private stencil-cc
+  (str/split (or (getenv "STENCIL_CC") "zig cc") " "))
+
+(def ^:private zig-version-pin
+  "Pinned Zig version for stencil regeneration and cross-build. Zig
+   is pre-1.0; a minor bump can shift the bundled LLVM and therefore
+   the emitted stencil bytes, so byte-reproducibility requires an
+   exact-version pin. Bump deliberately, then regenerate + commit the
+   generated headers in the same change. Keep in lockstep with the
+   `setup-zig` version in .github/workflows/ci.yml."
+  "0.16.0")
+
 (def ^:private lib-srcs
   ["src/eval/eval.c" "src/diag/diag.c" "src/eval/special.c"
    "src/eval/special_registry.c"
@@ -625,6 +646,29 @@
                        :fix  "run `./mino task gen-stencils` and commit"}))))
   (println "  check-stencils-fresh: OK"))
 
+(defn check-stencils-fresh-all
+  "Determinism gate (all targets). Regenerate every committed stencil
+   header on the pinned `zig cc` via gen-stencils-all, then
+   `git diff --exit-code` the generated dir. Non-zero exit means the
+   committed bytes drifted from what the pinned toolchain emits --
+   regenerate with `./mino task gen-stencils-all` and commit.
+
+   Unlike the old per-host `check-stencils-fresh`, this is byte-stable
+   across machines because it pins one cross-compiling toolchain, so
+   it CAN run in CI. It must run on a SINGLE pinned-Zig host, never on
+   the per-OS matrix: compiler-version skew across matrix runners is
+   exactly what forced the original determinism job to be removed."
+  []
+  (gen-stencils-all)
+  (let [d (sh "git" "diff" "--exit-code"
+              "--" "src/eval/bc/stencils/generated/")]
+    (when-not (= 0 (get d :exit))
+      (println (get d :out))
+      (throw (ex-info "check-stencils-fresh-all: generated headers are stale"
+                      {:exit (get d :exit)
+                       :fix  "run `./mino task gen-stencils-all` and commit"}))))
+  (println "  check-stencils-fresh-all: OK"))
+
 (defn check-stencil-registry
   "G2: cross-check the hardcoded stencil list in gen-stencils against
    the actual *.c files under src/eval/bc/stencils/. Catches drift
@@ -916,17 +960,21 @@
      7. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
                                    skipped with a warn otherwise.
 
-   `check-stencils-fresh` is intentionally NOT part of the composite:
-   it regenerates stencils with the host `cc`, which means the
-   committed bytes have to byte-match whatever clang version the
-   runner ships. CI matrix runners (Apple clang 15 on macos-14,
-   gcc on ubuntu-24.04) diverge from dev (Apple clang 17), so the
-   check is structurally incompatible with the matrix. Dev runs
-   `./mino task check-stencils-fresh` before committing stencil
-   source edits; CI correctness is gated by test-suite + ASan +
-   4-way JIT parity, which catch the actual runtime impact of a
-   stale stencil regardless of compiler version. See
-   `.local/BUGS.md` for the architectural decision context.
+   Neither stencil-freshness check is part of this composite, but for
+   different reasons. The old per-host `check-stencils-fresh`
+   regenerates with the host `cc`, so its committed bytes would have
+   to byte-match whatever clang version the runner ships; CI matrix
+   runners (Apple clang 15 on macos-14, gcc on ubuntu-24.04) diverge
+   from dev, so it is structurally incompatible with the matrix. The
+   newer `check-stencils-fresh-all` IS byte-stable across hosts (it
+   pins one cross-compiling `zig cc`), but it belongs on a single
+   dedicated pinned-Zig CI job (`stencil-determinism` in ci.yml), NOT
+   inside a gate that runs on every matrix host -- putting a
+   determinism check on the matrix is exactly what broke the original
+   job. Either way, CI correctness here is gated by test-suite + ASan
+   + 4-way JIT parity, which catch the actual runtime impact of a
+   stale stencil regardless of compiler version. See `.local/BUGS.md`
+   for the architectural decision context.
 
    Exits 0 on a clean tree. Negative controls live in the cycle's
    .local/ status file -- this task is the positive control."
@@ -1145,15 +1193,64 @@
    ["dissoc.c"           "stencil_op_dissoc"]
    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]])
 
+(def ^:private stencil-targets
+  "Per-target table driving stencil regeneration. Each entry maps a
+   committed header's <arch>_<os> name to its `--target=` triple and
+   any extra cflags. All five cross-compile from one host under a
+   single `zig cc`: stencil sources are hermetic (only project headers
+   plus clang-resource <stdint.h>/<stddef.h>), so no target needs a
+   platform SDK or libc. x86_64 adds -mno-red-zone so the JIT region
+   never aliases red-zone slots across a helper-call return (the
+   Windows x64 ABI has no red zone either).
+
+   Windows uses the -gnu environment, not -msvc: stencil objects are
+   compiled -c only and never linked, x86_64 PE/COFF symbol naming is
+   ABI-agnostic (no leading underscore -- see
+   tools/stencil_extract/coff.c), and -gnu stays consistent with the
+   Tier-2 mingw link. The extractor is compiler-agnostic (magic-byte
+   dispatch) and unchanged."
+  [{:name "arm64_darwin"   :triple "aarch64-macos"      :cflags []}
+   {:name "x86_64_darwin"  :triple "x86_64-macos"       :cflags ["-mno-red-zone"]}
+   {:name "arm64_linux"    :triple "aarch64-linux-gnu"  :cflags []}
+   {:name "x86_64_linux"   :triple "x86_64-linux-gnu"   :cflags ["-mno-red-zone"]}
+   {:name "x86_64_windows" :triple "x86_64-windows-gnu" :cflags ["-mno-red-zone"]}])
+
+(defn check-zig-version
+  "Hard-fail unless the stencil compiler is the pinned `zig cc`
+   version (`zig-version-pin`). This is what makes regenerated bytes
+   reproducible across hosts. Skipped with a note when STENCIL_CC
+   overrides zig -- the legacy clang path opts out of byte
+   reproducibility on purpose."
+  []
+  (if-not (= ["zig" "cc"] stencil-cc)
+    (println (str "  check-zig-version: STENCIL_CC override ("
+                  (str/join " " stencil-cc)
+                  ") -- skipping zig version pin"))
+    (let [r (sh "zig" "version")
+          v (str/trim (str (get r :out)))]
+      (when-not (= 0 (get r :exit))
+        (throw (ex-info (str "check-zig-version: `zig version` failed -- "
+                             "is the pinned Zig installed and on PATH?")
+                        {:exit (get r :exit)})))
+      (when-not (= v zig-version-pin)
+        (throw (ex-info (str "check-zig-version: zig " v
+                             " != pinned " zig-version-pin)
+                        {:found  v
+                         :pinned zig-version-pin
+                         :fix    (str "install Zig " zig-version-pin
+                                      " or set STENCIL_CC to override")})))
+      (println (str "  check-zig-version: zig " v " OK")))))
+
 (defn- gen-stencils-for
-  "Compile every stencil source for the given target triple and
-   extract bytes into src/eval/bc/stencils/generated/stencils_<triple>.h.
-   target-cflags is a vector of extra cflags (e.g. cross-compile flag
-   for non-host targets) and compiler is the cc/clang binary to use."
-  [triple compiler target-cflags]
+  "Compile every stencil source for the given target and extract bytes
+   into src/eval/bc/stencils/generated/stencils_<name>.h. `compiler`
+   is the cc argv vector (e.g. [\"zig\" \"cc\"]); `target-cflags` are
+   the extra flags for this target (--target=<triple> and any
+   per-target additions such as -mno-red-zone)."
+  [name compiler target-cflags]
   (let [gen-dir   "src/eval/bc/stencils/generated"
-        out-hdr   (str gen-dir "/stencils_" triple ".h")
-        tmpdir    (str "/tmp/mino-stencils-" triple)
+        out-hdr   (str gen-dir "/stencils_" name ".h")
+        tmpdir    (str "/tmp/mino-stencils-" name)
         base-args ["-std=c99" "-O2" "-fno-builtin"
                    "-fno-optimize-sibling-calls"]]
     (sh! "mkdir" "-p" gen-dir)
@@ -1168,77 +1265,77 @@
         (let [src (str "src/eval/bc/stencils/" file)
               obj (str tmpdir "/" file ".o")]
           (when-not (compiled file)
-            (apply sh! compiler (concat base-args target-cflags
-                                        ["-c" src "-o" obj])))
+            (apply sh! (concat compiler base-args target-cflags
+                               ["-c" src "-o" obj])))
           (if first?
             (sh! "./tools/stencil-extract" obj sym out-hdr)
             (sh! "./tools/stencil-extract" "--append" obj sym out-hdr))
           (recur rest false (conj compiled file)))))
     (println (str "  stencils -> " out-hdr))))
 
-(defn gen-stencils
-  "Compile every stencil source under src/eval/bc/stencils/ to an
-   intermediate .o file and dispatch the extractor to write the byte
-   tables into src/eval/bc/stencils/generated/<arch>_<os>.h. The
-   runtime build includes the generated header; regenerate after
-   touching any stencil source or after a toolchain change that
-   would shift the emitted code.
-
-   Defaults to the host triple (arm64_darwin on Apple Silicon).
-   Other targets are produced via cross-compile and committed
-   alongside the host header so non-host platforms can be built
-   without their toolchain regenerating bytes."
-  []
+(defn- gen-stencils-target
+  "Regenerate one target's committed header by name, using the
+   configured stencil compiler (`stencil-cc`, default pinned zig cc)
+   to cross-compile it. Builds the extractor first. The named
+   gen-stencils-* tasks are thin wrappers over this."
+  [name]
   (build-stencil-extract)
-  ;; arch/os naming mirrors what platform releases extend.
-  (gen-stencils-for "arm64_darwin" cc []))
+  (let [t (some #(when (= name (:name %)) %) stencil-targets)]
+    (when-not t
+      (throw (ex-info (str "gen-stencils-target: unknown target " name)
+                      {:known (mapv :name stencil-targets)})))
+    (gen-stencils-for name stencil-cc
+                      (into [(str "--target=" (:triple t))] (:cflags t)))))
+
+(defn gen-stencils-all
+  "Regenerate every committed stencil header from one host using the
+   pinned `zig cc`. Verifies the Zig version first (byte
+   reproducibility depends on it), builds the extractor once, then
+   cross-compiles each target in `stencil-targets`. This is the
+   maintainer entry point that replaces running the five per-target
+   tasks by hand. Normal builds and embedders never invoke this --
+   they consume the committed bytes."
+  []
+  (check-zig-version)
+  (build-stencil-extract)
+  (doseq [{:keys [name triple cflags]} stencil-targets]
+    (gen-stencils-for name stencil-cc
+                      (into [(str "--target=" triple)] cflags)))
+  (println "  gen-stencils-all: OK"))
+
+(defn gen-stencils
+  "Regenerate the arm64_darwin stencil header. Historically the host
+   task on Apple Silicon; it now cross-compiles to aarch64-macos via
+   `stencil-cc` (default pinned zig cc) like every other target, so it
+   produces the same bytes from any host. Prefer `gen-stencils-all` to
+   regenerate every target at once."
+  []
+  (gen-stencils-target "arm64_darwin"))
 
 (defn gen-stencils-arm64-linux
-  "Cross-compile every stencil to aarch64-linux-gnu using clang's
-   built-in cross-target support and write stencils_arm64_linux.h.
-   The output header is checked into source so native Linux builds
-   pick it up without needing to regenerate. Re-run when stencil
-   sources change."
+  "Regenerate stencils_arm64_linux.h (aarch64-linux-gnu). Thin wrapper
+   over gen-stencils-target; see `stencil-targets`."
   []
-  (build-stencil-extract)
-  (gen-stencils-for "arm64_linux" "clang" ["--target=aarch64-linux-gnu"]))
+  (gen-stencils-target "arm64_linux"))
 
 (defn gen-stencils-x86-64-linux
-  "Cross-compile every stencil to x86_64-linux-gnu using clang's
-   built-in cross-target support and write stencils_x86_64_linux.h.
-   Adds -mno-red-zone alongside the standard stencil flags so the
-   JIT region doesn't end up reading aliased red-zone slots when a
-   helper call returns. The output header is checked into source so
-   native Linux builds pick it up without needing to regenerate."
+  "Regenerate stencils_x86_64_linux.h (x86_64-linux-gnu, -mno-red-zone).
+   Thin wrapper over gen-stencils-target; see `stencil-targets`."
   []
-  (build-stencil-extract)
-  (gen-stencils-for "x86_64_linux" "clang"
-                    ["--target=x86_64-linux-gnu" "-mno-red-zone"]))
+  (gen-stencils-target "x86_64_linux"))
 
 (defn gen-stencils-x86-64-darwin
-  "Cross-compile every stencil to x86_64-apple-darwin using clang's
-   built-in cross-target support and write stencils_x86_64_darwin.h.
-   Adds -mno-red-zone alongside the standard stencil flags so the
-   JIT region doesn't end up reading aliased red-zone slots when a
-   helper call returns. The output header is checked into source so
-   native x86_64 Darwin builds pick it up without needing to
-   regenerate."
+  "Regenerate stencils_x86_64_darwin.h (x86_64-macos, -mno-red-zone).
+   Thin wrapper over gen-stencils-target; see `stencil-targets`."
   []
-  (build-stencil-extract)
-  (gen-stencils-for "x86_64_darwin" "clang"
-                    ["--target=x86_64-apple-darwin" "-mno-red-zone"]))
+  (gen-stencils-target "x86_64_darwin"))
 
 (defn gen-stencils-x86-64-windows
-  "Cross-compile every stencil to x86_64-pc-windows-msvc (the COFF
-   target) using clang's built-in cross-target support and write
-   stencils_x86_64_windows.h. -mno-red-zone matches the Windows x64
-   ABI which has no red zone. The output header is checked into
-   source so native Windows builds pick it up without needing to
-   regenerate."
+  "Regenerate stencils_x86_64_windows.h (x86_64-windows-gnu COFF,
+   -mno-red-zone). Thin wrapper over gen-stencils-target; see
+   `stencil-targets`."
   []
-  (build-stencil-extract)
-  (gen-stencils-for "x86_64_windows" "clang"
-                    ["--target=x86_64-pc-windows-msvc" "-mno-red-zone"]))
+  (gen-stencils-target "x86_64_windows"))
 
 (defn test-suite
   "Run the test suite."
