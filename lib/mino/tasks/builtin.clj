@@ -253,6 +253,87 @@
       (when (and (= @compiled 0) (not need-link))
         (println "  nothing to compile")))))
 
+;; ---- Tier-2 cross-compile (optional) ----
+;;
+;; `zig cc` cross-compiles the Linux + Windows release binaries from
+;; one host. This is an OPTIONAL maintainer path: `make` + `cc`
+;; remains the canonical build, and embedders never touch it. Each
+;; artifact mirrors the native `make` config (-DMINO_CPJIT=1, no
+;; per-target JIT opt-in), so a cross-built binary matches what the
+;; native release matrix produces for that platform -- a bytecode-
+;; interpreter build. The committed Linux/Windows stencil headers stay
+;; dormant here exactly as they do natively (only arm64-darwin enables
+;; the JIT today, and darwin stays a native build -- Zig bundles no
+;; macOS SDK to link libSystem against).
+
+(def ^:private cross-cflags
+  "Runtime CFLAGS shared by every cross target -- the Makefile
+   bootstrap line minus the OS-specific LIBS/LDFLAGS, which each
+   cross-targets entry supplies. -mno-red-zone is deliberately absent:
+   it only affects stencil codegen, and these are no-JIT runtime
+   builds."
+  ["-std=c99" "-Wall" "-Wpedantic" "-Wextra" "-Werror"
+   "-Wno-missing-field-initializers" "-Wno-unknown-warning-option"
+   "-Wno-clobbered"
+   ;; zig cc ships a newer clang than the native gcc/Apple-clang the
+   ;; matrix uses, and it flags a set-but-unused `carry` in vendored
+   ;; src/vendor/imath/imath.c that the native compilers do not. Same
+   ;; class as -Wno-clobbered above: a toolchain-specific suppression
+   ;; over third-party code, not a mino source defect.
+   "-Wno-unused-but-set-variable"
+   "-O2" "-DMINO_CPJIT=1"])
+
+(def ^:private cross-targets
+  "Tier-2 cross-compile targets. macOS is intentionally absent: Zig
+   bundles no macOS SDK, so the full runtime (which links libSystem)
+   cannot cross-compile to darwin from Linux -- darwin stays a native
+   release build. Windows links via mingw WITHOUT -static: zig's mingw
+   links the compiler runtime statically by default, so the PE has no
+   libgcc_s_seh-1.dll / libwinpthread-1.dll dependency, retiring the
+   Makefile's -static hack."
+  [{:platform "linux-amd64"   :triple "x86_64-linux-gnu"
+    :libs ["-lm" "-lpthread"] :exe ""}
+   {:platform "linux-arm64"   :triple "aarch64-linux-gnu"
+    :libs ["-lm" "-lpthread"] :exe ""}
+   {:platform "windows-amd64" :triple "x86_64-windows-gnu"
+    :libs ["-lm"]             :exe ".exe"}])
+
+(defn- cross-build-one
+  "Cross-compile one target in a single `zig cc` invocation (compile +
+   link all sources at once, like the Makefile bootstrap line). Output
+   lands under dist-cross/ with a per-platform name, so cross objects
+   never collide with the native build's src/*.o."
+  [{:keys [platform triple libs exe]}]
+  (let [out-dir "dist-cross"
+        bin     (str out-dir "/mino_" (str/replace platform "-" "_") exe)
+        args    (concat stencil-cc
+                        cross-cflags
+                        (str/split include-flags " ")
+                        [(str "--target=" triple)]
+                        ["-o" bin]
+                        all-srcs
+                        libs)]
+    (sh! "mkdir" "-p" out-dir)
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (str "  cross-build -> " bin))))
+
+(defn cross-build
+  "Cross-compile the mino release binaries for Linux (amd64/arm64) and
+   Windows (amd64) from one host using the pinned `zig cc`. Optional
+   maintainer/release task -- `make` + `cc` stays canonical and this is
+   never required to build mino. Each binary mirrors the native `make`
+   config, so it matches the corresponding native-matrix artifact, with
+   one improvement: the Windows build carries no runtime-DLL dependency
+   (no -static hack). macOS is absent on purpose; see `cross-targets`.
+   Run gen-core-header / gen-stdlib-headers first if the bundled-source
+   headers are missing (the task deps handle this)."
+  []
+  (check-zig-version)
+  (doseq [t cross-targets]
+    (cross-build-one t))
+  (println "  cross-build: OK"))
+
 ;; ---- Amalgamation ----
 
 (def ^:private amalgam-search-paths

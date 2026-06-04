@@ -91,3 +91,4 @@ tests/embed_api_test
 tools/stencil-extract
 embed_api_test
 dist/
+dist-cross/
