@@ -128,6 +128,67 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Parallel validation: cross-compile the Linux + Windows binaries
+  # from ONE Linux host with the pinned zig cc and smoke-test them.
+  # This runs ALONGSIDE the native `build` matrix above -- it does not
+  # replace it and does not feed the published artifacts (publish-draft
+  # needs: build only). It proves the optional `cross-build` path keeps
+  # working and guards the property that retires the Windows -static
+  # hack: the cross-built PE must not import the mingw runtime DLLs.
+  # macOS is absent on purpose (Zig bundles no macOS SDK; darwin stays
+  # a native build).
+  cross-build-validate:
+    name: cross-build-validate (linux host -> linux+windows)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Cross-build Linux + Windows
+        run: ./mino task cross-build
+
+      - name: Smoke test linux-amd64 (runs natively)
+        run: |
+          ./dist-cross/mino_linux_amd64 --version
+          out=$(./dist-cross/mino_linux_amd64 -e '(+ 1 2)')
+          [ "$out" = "3" ] || { echo "linux-amd64 smoke failed: got '$out'" >&2; exit 1; }
+
+      - name: Sanity-check linux-arm64 object format
+        # The x86_64 runner can't execute the arm64 binary without an
+        # emulator; assert it's a well-formed AArch64 ELF. Native
+        # execution smoke is covered by the linux-arm64 matrix entry.
+        run: |
+          readelf -h ./dist-cross/mino_linux_arm64 | grep -q 'AArch64' \
+            || { echo "linux-arm64 is not an AArch64 ELF" >&2; exit 1; }
+          echo "linux-arm64: AArch64 ELF OK"
+
+      - name: Assert Windows PE has no mingw runtime-DLL dependency
+        # The whole point of the zig/mingw path vs the Makefile -static
+        # hack: the PE must import only the system Universal CRT +
+        # KERNEL32, never libgcc_s_seh-1.dll / libwinpthread-1.dll
+        # (which cause STATUS_DLL_NOT_FOUND on a clean Windows box).
+        # ubuntu's objdump reads PE import tables.
+        run: |
+          objdump -p ./dist-cross/mino_windows_amd64.exe \
+            | grep -i 'DLL Name' | sort -u
+          if objdump -p ./dist-cross/mino_windows_amd64.exe \
+               | grep -iE 'DLL Name: *(libgcc|libwinpthread)'; then
+            echo "Windows PE depends on mingw runtime DLLs -- regression" >&2
+            exit 1
+          fi
+          echo "windows-amd64: no mingw runtime-DLL imports OK"
+
   publish-draft:
     name: publish draft release
     needs: build

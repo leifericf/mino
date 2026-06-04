@@ -221,6 +221,40 @@ jobs:
         run: ./mino task check-stencils-fresh-all
         timeout-minutes: 10
 
+  # Portability canary: compile the amalgamated single-file source with
+  # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
+  # matrix) nor clang (macOS matrix, zig) represents. continue-on-error
+  # so an MSVC-specific C99 gap surfaces as an informational signal, not
+  # a merge block, until the amalgam is vetted MSVC-clean. This ADDS a
+  # compiler to CI without removing any -- the gcc/clang/mingw matrix
+  # stays the gating portability signal.
+  msvc-compile-canary:
+    name: msvc-compile-canary (cl.exe /TC)
+    runs-on: windows-latest
+    continue-on-error: true
+    env:
+      CC: gcc
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bootstrap mino (mingw gcc)
+        run: make
+
+      - name: Produce amalgamation
+        run: ./mino task amalgamate
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Compile amalgam with cl.exe /TC (compile-only)
+        # /TC forces C (not C++); /c is compile-only -- we're checking
+        # the C frontend accepts the source, not producing a binary.
+        shell: cmd
+        run: cl /TC /c /I dist dist\mino.c
+
   external-test-suite:
     name: external-test-suite (clojure-test-suite)
     runs-on: ubuntu-latest
