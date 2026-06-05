@@ -978,11 +978,11 @@ mino_val **mino_jit_call_known_native_slow(mino_state *S,
     return regs;
 fallback:
     {
-        mino_val *r = apply_callable_argv(S, fn,
+        mino_val *fb_r = apply_callable_argv(S, fn,
             S->bc.bc_regs + base + arg_base, (int)argc, env);
-        if (r == NULL) return NULL;
+        if (fb_r == NULL) return NULL;
         regs      = S->bc.bc_regs + base;
-        regs[dst] = r;
+        regs[dst] = fb_r;
         return regs;
     }
 }

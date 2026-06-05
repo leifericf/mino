@@ -14,6 +14,7 @@
  */
 
 #include "internal.h"
+#include "../jit.h"   /* mino_jit_stats_seal_bc / seal_all prototypes */
 
 #ifdef MINO_CPJIT_HOST
 

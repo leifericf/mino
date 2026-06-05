@@ -870,11 +870,19 @@
      -Wswitch-enum : the VM/dispatch switches carry an intentional
        `default:` arm; the valuable variant (-Wswitch, fires only when a
        switch has no default AND misses cases) stays on via -Wall.
-     -Wcast-qual, -Wbad-function-cast : real signal, but resolving them
-       needs per-symbol const-correctness work; not gated yet to avoid
-       churn. (-Wmissing-prototypes / -Wmissing-variable-declarations
-       ARE gated below: the over-export audit drove the tree to zero
-       findings by making file-local functions static.)
+     -Wcast-qual : audited 2026-06-06 and left OUT. ~90 sites, every
+       one an intentional const-drop -- GC marking const-reachable
+       objects, mutable-cache members (e.g. cached_hash memoization on
+       an immutable value), numeric tier accumulators. Gating would
+       force a uintptr_t-launder at each site across delicate GC /
+       numeric code: high churn, near-zero bug-catching signal (a real
+       accidental-mutation bug would drown in 90 known-intentional
+       drops). -Wmissing-prototypes / -Wmissing-variable-declarations
+       ARE gated below -- the over-export audit drove those to zero.
+     -Wbad-function-cast : audited 2026-06-06 and left OUT. ~30 sites,
+       all idiomatic function-return casts ((double)mino_val_int_get(v),
+       (int)mino_type_of(v)); forcing intermediate variables is pure
+       churn with no safety gain.
      -Wformat-nonliteral, -Wdouble-promotion : low signal for an IO /
        numeric library (computed format strings, deliberate float math).
 
