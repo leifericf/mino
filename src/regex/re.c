@@ -50,7 +50,11 @@
 #define MAX_CHAR_CLASS_LEN      256   /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT };
+/* RE_CHAR (not CHAR): the bare `CHAR` token collides with the Win32
+ * `CHAR` typedef from <windows.h>, which other TUs pull in under
+ * _WIN32. In the single-file amalgamation those includes precede this
+ * enum, so the unprefixed name breaks a Windows amalgam build. */
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT };
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its
@@ -70,7 +74,7 @@ static unsigned char re_flags;
 
 typedef struct regex_t
 {
-  unsigned char  type;   /* CHAR, STAR, etc.                      */
+  unsigned char  type;   /* RE_CHAR, STAR, etc.                      */
   union
   {
     unsigned char  ch;   /*      the character itself             */
@@ -342,7 +346,7 @@ re_t re_compile(const char* pattern)
   int           group_stack_depth = 0;
   /* `extended_mode` mirrors the (?x) flag at compile time so the
    * parser can skip whitespace and `#`-line comments before they
-   * become CHAR slots. Toggled when (?x) / (?-x) inline-flag ops
+   * become RE_CHAR slots. Toggled when (?x) / (?-x) inline-flag ops
    * are parsed. */
   int           extended_mode     = 0;
 
@@ -399,7 +403,7 @@ re_t re_compile(const char* pattern)
           /* Not a valid {n...}; treat '{' as a literal character so
            * `{abc}` and similar non-quantifier braces still parse. */
           i = saved_i;
-          re_compiled[j].type = CHAR;
+          re_compiled[j].type = RE_CHAR;
           re_compiled[j].u.ch = '{';
           break;
         }
@@ -472,7 +476,7 @@ re_t re_compile(const char* pattern)
             /* Escaped character, e.g. '.' or '$' */
             default:
             {
-              re_compiled[j].type = CHAR;
+              re_compiled[j].type = RE_CHAR;
               re_compiled[j].u.ch = pattern[i];
             } break;
           }
@@ -481,7 +485,7 @@ re_t re_compile(const char* pattern)
 /*
         else
         {
-          re_compiled[j].type = CHAR;
+          re_compiled[j].type = RE_CHAR;
           re_compiled[j].ch = pattern[i];
         }
 */
@@ -642,7 +646,7 @@ re_t re_compile(const char* pattern)
       /* Other characters: */
       default:
       {
-        re_compiled[j].type = CHAR;
+        re_compiled[j].type = RE_CHAR;
         re_compiled[j].u.ch = c;
       } break;
     }
