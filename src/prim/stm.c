@@ -140,7 +140,7 @@ static void tx_clear_ref_states(tx_state_t *tx)
 /* (io!-check) -- throws if a transaction is active on the current
  * thread. The `io!` macro in core.clj expands to
  * (do (io!-check) body...) so the throw fires before body evaluates. */
-mino_val *prim_io_bang_check(mino_state *S, mino_val *args,
+static mino_val *prim_io_bang_check(mino_state *S, mino_val *args,
                                 mino_env *env)
 {
     mino_thread_ctx_t *ctx;
@@ -157,7 +157,7 @@ mino_val *prim_io_bang_check(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_thread_ctx_t *ctx;
     (void)env;
@@ -172,7 +172,7 @@ mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
 /* History stubs. mino's STM uses single-version optimistic locking,
  * NOT MVCC with history. The min/max/count surface exists for
  * Clojure-script compatibility but the value is fixed. */
-mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
+static mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
     (void)env;
@@ -183,7 +183,7 @@ mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
     return mino_int(S, 0);
 }
 
-mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
+static mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
     (void)env;
@@ -194,7 +194,7 @@ mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
     return mino_int(S, 10);
 }
 
-mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
+static mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
     (void)env;
@@ -207,7 +207,7 @@ mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
 
 /* --- ref construction + identity predicate -------------------------------- */
 
-mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *initial;
     mino_val *opts;
@@ -276,7 +276,7 @@ mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
     return ref;
 }
 
-mino_val *prim_ref_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ref_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -497,7 +497,7 @@ static mino_val *tx_ref_set_core(mino_state *S, mino_val *ref,
     return val;
 }
 
-mino_val *prim_ref_set(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ref_set(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ref;
     mino_val *val;
@@ -616,7 +616,7 @@ static mino_val *tx_alter_core(mino_state *S, mino_val *ref,
     return result;
 }
 
-mino_val *prim_alter(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_alter(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ref;
     struct compute_clj_ctx clj_ctx;
@@ -732,7 +732,7 @@ static mino_val *tx_commute_core(mino_state *S, mino_val *ref,
     return result;
 }
 
-mino_val *prim_commute(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_commute(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ref;
     struct compute_clj_ctx clj_ctx;
@@ -800,7 +800,7 @@ static mino_val *tx_ensure_core(mino_state *S, mino_val *ref,
     return val;
 }
 
-mino_val *prim_ensure(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ensure(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ref;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1198,7 +1198,7 @@ static mino_val *tx_outer_run(mino_state *S,
     return result_v;
 }
 
-mino_val *prim_dosync_star(mino_state *S, mino_val *args,
+static mino_val *prim_dosync_star(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     mino_val              *thunk;

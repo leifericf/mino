@@ -1397,7 +1397,7 @@ static int unchecked_grab_one(mino_state *S, const char *opname,
                               out_l, is_double, out_d);
 }
 
-mino_val *prim_unchecked_long(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_long(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1407,7 +1407,7 @@ mino_val *prim_unchecked_long(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, unchecked_trunc_long(isd, l, d));
 }
 
-mino_val *prim_unchecked_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1419,7 +1419,7 @@ mino_val *prim_unchecked_int(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, (long long)(int32_t)trunc);
 }
 
-mino_val *prim_unchecked_short(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_short(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1431,7 +1431,7 @@ mino_val *prim_unchecked_short(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, (long long)(int16_t)trunc);
 }
 
-mino_val *prim_unchecked_byte(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_byte(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1443,7 +1443,7 @@ mino_val *prim_unchecked_byte(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, (long long)(int8_t)trunc);
 }
 
-mino_val *prim_unchecked_char(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_char(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1458,7 +1458,7 @@ mino_val *prim_unchecked_char(mino_state *S, mino_val *args, mino_env *env)
     return mino_char(S, cp);
 }
 
-mino_val *prim_unchecked_float(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_float(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1470,7 +1470,7 @@ mino_val *prim_unchecked_float(mino_state *S, mino_val *args, mino_env *env)
     return mino_float32(S, base);
 }
 
-mino_val *prim_unchecked_double(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_double(mino_state *S, mino_val *args, mino_env *env)
 {
     long long l = 0;
     int       isd = 0;
@@ -1525,7 +1525,7 @@ static int unchecked_two_int_lenient(mino_state *S, mino_val *args,
     return 1;
 }
 
-mino_val *prim_unchecked_add_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_add_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1533,7 +1533,7 @@ mino_val *prim_unchecked_add_int(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, iwrap32_add(a, b));
 }
 
-mino_val *prim_unchecked_subtract_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_subtract_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1541,7 +1541,7 @@ mino_val *prim_unchecked_subtract_int(mino_state *S, mino_val *args, mino_env *e
     return mino_int_wrap(S, iwrap32_sub(a, b));
 }
 
-mino_val *prim_unchecked_multiply_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_multiply_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1549,7 +1549,7 @@ mino_val *prim_unchecked_multiply_int(mino_state *S, mino_val *args, mino_env *e
     return mino_int_wrap(S, iwrap32_mul(a, b));
 }
 
-mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1562,7 +1562,7 @@ mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, iwrap32_add(x, 1));
 }
 
-mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1575,7 +1575,7 @@ mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, iwrap32_sub(x, 1));
 }
 
-mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1588,7 +1588,7 @@ mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_env *env
     return mino_int_wrap(S, iwrap32_sub(0, x));
 }
 
-mino_val *prim_unchecked_remainder_int(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_remainder_int(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;

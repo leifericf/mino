@@ -2728,7 +2728,7 @@ mino_val *prim_rsubseq(mino_state *S, mino_val *args, mino_env *env)
 
 /* (every? pred coll) — true iff (pred x) is truthy for every x in coll.
  * Empty / nil coll → true. Short-circuits on the first falsy result. */
-mino_val *prim_every_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_every_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pred, *coll;
     seq_iter_t  it;
@@ -2764,7 +2764,7 @@ mino_val *prim_every_p(mino_state *S, mino_val *args, mino_env *env)
 
 /* (some pred coll) — first truthy value of (pred x) for any x in coll,
  * else nil. Short-circuits on the first truthy result. */
-mino_val *prim_some(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_some(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pred, *coll;
     seq_iter_t  it;
@@ -2799,7 +2799,7 @@ mino_val *prim_some(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (not-any? pred coll) — true iff (pred x) is falsy for every x in coll. */
-mino_val *prim_not_any_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_not_any_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *r = prim_some(S, args, env);
     if (r == NULL) return NULL;
@@ -2807,7 +2807,7 @@ mino_val *prim_not_any_p(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (not-every? pred coll) — true iff (pred x) is falsy for at least one x. */
-mino_val *prim_not_every_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_not_every_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *r = prim_every_p(S, args, env);
     if (r == NULL) return NULL;
@@ -2824,7 +2824,7 @@ static mino_val *params_amp_args(mino_state *S)
 }
 
 /* (complement f) — returns a fn whose result is (not (apply f args)). */
-mino_val *prim_complement(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_complement(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *f;
     mino_env *fn_env;
@@ -2852,7 +2852,7 @@ mino_val *prim_complement(mino_state *S, mino_val *args, mino_env *env)
 
 /* (comp) -> identity; (comp f) -> f; (comp f g ...) -> applied right to left.
  * Result is (fn [& args] (f (g (... (apply h args))))). */
-mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     mino_val *fs_vec;
@@ -2935,7 +2935,7 @@ mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (partial f) -> f; (partial f & args) -> fn that calls f with args prepended. */
-mino_val *prim_partial(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_partial(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *f;
     mino_val *bound_args;
@@ -2967,7 +2967,7 @@ mino_val *prim_partial(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (juxt f g ...) — returns a fn that returns [(f a..) (g a..) ...] for its args. */
-mino_val *prim_juxt(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_juxt(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fs;
     mino_env *fn_env;
@@ -3000,7 +3000,7 @@ mino_val *prim_juxt(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (distinct? x ...) — true iff no two args are equal. Empty arglist → true. */
-mino_val *prim_distinct_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_distinct_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *cur = args;
     mino_val *seen;
@@ -3022,7 +3022,7 @@ mino_val *prim_distinct_p(mino_state *S, mino_val *args, mino_env *env)
 
 /* (merge-with f m1 m2 ...) — merge maps, calling (f a b) to combine
  * values at shared keys. Returns nil if every map is nil. */
-mino_val *prim_merge_with(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_merge_with(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn;
     mino_val *cur;
@@ -3102,7 +3102,7 @@ mino_val *prim_merge_with(mino_state *S, mino_val *args, mino_env *env)
 
 /* (group-by f coll) — map of (f x) -> vector of items in coll where
  * f's result is the key. Preserves encounter order within each bucket. */
-mino_val *prim_group_by(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_group_by(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn, *coll;
     mino_val *result;
@@ -3139,7 +3139,7 @@ mino_val *prim_group_by(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (frequencies coll) — map of distinct items in coll to their count. */
-mino_val *prim_frequencies(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_frequencies(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *result;
@@ -3171,7 +3171,7 @@ mino_val *prim_frequencies(mino_state *S, mino_val *args, mino_env *env)
 
 /* (zipmap ks vs) — map with keys ks paired with vals vs. Stops at the
  * shorter of the two collections. nil/empty pair returns {}. */
-mino_val *prim_zipmap(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_zipmap(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ks, *vs;
     mino_val *result;

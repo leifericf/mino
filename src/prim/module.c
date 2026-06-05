@@ -1112,7 +1112,7 @@ static const char *bundled_lib_lookup(mino_state *S, const char *name)
  * register external sibling-test directories without having to
  * pre-load each file. Returns nil. Idempotent: a path already in
  * the list is not appended again. */
-mino_val *prim_add_load_path(mino_state *S, mino_val *args,
+static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     mino_val *path_val;
@@ -1164,7 +1164,7 @@ mino_val *prim_add_load_path(mino_state *S, mino_val *args,
  * install time by the prim_install_table_with_capability path used by
  * mino_install_io / mino_install_fs / mino_install_proc /
  * mino_install_host / mino_install_async. */
-mino_val *prim_mino_capability(mino_state *S, mino_val *args,
+static mino_val *prim_mino_capability(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
     mino_val   *name_val;

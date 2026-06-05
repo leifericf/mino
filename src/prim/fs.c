@@ -174,7 +174,7 @@ mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (file-mtime path) -- return modification time as milliseconds, or nil. */
-mino_val *prim_file_mtime(mino_state *S, mino_val *args,
+static mino_val *prim_file_mtime(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *path_val;

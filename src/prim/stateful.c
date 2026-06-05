@@ -369,7 +369,7 @@ mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
  * which is value-equality and surprised users hitting the multi-threaded
  * path; aligning with canon both fixes that and matches what the CAS
  * primitive can deliver. */
-mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *expected, *new_val;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -739,7 +739,7 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
 
 /* (get-thread-bindings) -- snapshot the current dyn_stack into a map
  * suitable as input to with-bindings*. */
-mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
+static mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
                                      mino_env *env)
 {
     (void)args;
@@ -754,7 +754,7 @@ mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
  * raises "Can't change/establish root binding"). Used by the
  * (set! *var* expr) macro to back the JVM-Clojure dynamic-var mutation
  * shape. */
-mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
+static mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
     mino_val    *name_sym;
@@ -798,7 +798,7 @@ mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
  * malloc'd binding chain is freed on both the success and the
  * error/longjmp path because this primitive runs inside any active
  * try frame's setjmp window the caller already established. */
-mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
+static mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
     mino_val    *map_arg;
@@ -897,7 +897,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
  * unwinder in control.c does free trailing frames pushed during the
  * try body, so the worst-case path is "throw before pop" → frame is
  * freed automatically. */
-mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
+static mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
                                             mino_env *env)
 {
     mino_val    *map_arg;
@@ -971,7 +971,7 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
 
 /* (pop-thread-bindings*) — pop and free the top dynamic-binding frame.
  * Throws when the dyn-stack is empty. Returns nil. */
-mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args,
+static mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args,
                                            mino_env *env)
 {
     dyn_frame_t *frame;
@@ -994,7 +994,7 @@ mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args,
 /* (thread-bound? v) — true iff v is a var that has a thread-local
  * binding active on the current dyn_stack. Used by Clojure's
  * thread-bound? wrapper, which is variadic and ANDs over all args. */
-mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
+static mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
     mino_val    *v;
@@ -1049,7 +1049,7 @@ mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
  * mino_install_all. The script-side future/promise/thread stubs in
  * core.clj consult this to distinguish "host has not granted threads"
  * from "host granted, runtime impl in flight." */
-mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
+static mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
                                    mino_env *env)
 {
     (void)env;
@@ -1061,7 +1061,7 @@ mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
 }
 
 /* (mino-thread-count) — return the live worker count for this state. */
-mino_val *prim_mino_thread_count(mino_state *S, mino_val *args,
+static mino_val *prim_mino_thread_count(mino_state *S, mino_val *args,
                                    mino_env *env)
 {
     (void)env;

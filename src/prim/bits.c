@@ -224,7 +224,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
 /* prim_bits                                                                 */
 /* ------------------------------------------------------------------------- */
 
-mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Two passes: first compute total bit length, then write. */
     size_t total_bits = 0;
@@ -404,7 +404,7 @@ mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
 /* ------------------------------------------------------------------------- */
 
 /* (bits-get bs :offset O :size N :type T :endian E :signed? B) */
-mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *bs;
     size_t arglen = list_length(S, args);
@@ -540,7 +540,7 @@ mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
 /* prim_subbits                                                              */
 /* ------------------------------------------------------------------------- */
 
-mino_val *prim_subbits(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_subbits(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *bs;
     long long start;

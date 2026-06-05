@@ -1084,7 +1084,7 @@ void mino_agent_drain_pending(mino_state *S, mino_val *pending,
 
 /* --- primitives ----------------------------------------------------------- */
 
-mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *initial;
     mino_val *opts;
@@ -1167,7 +1167,7 @@ mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
     return agent;
 }
 
-mino_val *prim_agent_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_agent_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1177,7 +1177,7 @@ mino_val *prim_agent_p(mino_state *S, mino_val *args, mino_env *env)
     return mino_is_agent(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_send(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_send(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -1191,7 +1191,7 @@ mino_val *prim_send(mino_state *S, mino_val *args, mino_env *env)
                            "send: first argument must be an agent");
 }
 
-mino_val *prim_send_off(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_send_off(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -1365,7 +1365,7 @@ mino_val *prim_await_for(mino_state *S, mino_val *args,
     return timed_out ? mino_false(S) : mino_true(S);
 }
 
-mino_val *prim_agent_error(mino_state *S, mino_val *args,
+static mino_val *prim_agent_error(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     mino_val *agent;
@@ -1486,7 +1486,7 @@ mino_val *prim_restart_agent(mino_state *S, mino_val *args,
     return new_state;
 }
 
-mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
+static mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
                                          mino_env *env)
 {
     mino_val *agent, *fn;
@@ -1519,7 +1519,7 @@ mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_error_handler(mino_state *S, mino_val *args,
+static mino_val *prim_error_handler(mino_state *S, mino_val *args,
                                 mino_env *env)
 {
     mino_val *agent;
@@ -1538,7 +1538,7 @@ mino_val *prim_error_handler(mino_state *S, mino_val *args,
          ? agent->as.agent.err_handler : mino_nil(S);
 }
 
-mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
+static mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
                                       mino_env *env)
 {
     mino_val *agent, *mode;
@@ -1571,7 +1571,7 @@ mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_error_mode(mino_state *S, mino_val *args,
+static mino_val *prim_error_mode(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *agent;
@@ -1590,7 +1590,7 @@ mino_val *prim_error_mode(mino_state *S, mino_val *args,
         agent->as.agent.err_mode == 1 ? "continue" : "fail");
 }
 
-mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
+static mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
     (void)env;
@@ -1613,7 +1613,7 @@ mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args;
     (void)env;
@@ -1630,7 +1630,7 @@ mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
         "per-state worker.");
 }
 
-mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
+static mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
                                         mino_env *env)
 {
     mino_thread_ctx_t *ctx;

@@ -660,7 +660,7 @@ mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
 /* Chunked-seq family                                                        */
 /* ------------------------------------------------------------------------- */
 
-mino_val *prim_chunk_buffer(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_buffer(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     long long  cap;
@@ -688,7 +688,7 @@ mino_val *prim_chunk_buffer(mino_state *S, mino_val *args,
     return buf;
 }
 
-mino_val *prim_chunk_append(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_append(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     mino_val *buf, *elem;
@@ -722,7 +722,7 @@ mino_val *prim_chunk_append(mino_state *S, mino_val *args,
     return buf;
 }
 
-mino_val *prim_chunk(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_chunk(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *buf;
     size_t      n;
@@ -740,7 +740,7 @@ mino_val *prim_chunk(mino_state *S, mino_val *args, mino_env *env)
     return mino_chunk_seal(buf);
 }
 
-mino_val *prim_chunk_cons(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_cons(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *chunk, *more;
@@ -764,7 +764,7 @@ mino_val *prim_chunk_cons(mino_state *S, mino_val *args,
     return mino_chunked_cons(S, chunk, more);
 }
 
-mino_val *prim_chunk_first(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_first(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *cs;
@@ -786,7 +786,7 @@ mino_val *prim_chunk_first(mino_state *S, mino_val *args,
     return cs->as.chunked_cons.chunk;
 }
 
-mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *cs;
@@ -808,7 +808,7 @@ mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
     return more;
 }
 
-mino_val *prim_chunk_next(mino_state *S, mino_val *args,
+static mino_val *prim_chunk_next(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *cs;
@@ -837,7 +837,7 @@ mino_val *prim_chunk_next(mino_state *S, mino_val *args,
     return more;
 }
 
-mino_val *prim_chunked_seq_p(mino_state *S, mino_val *args,
+static mino_val *prim_chunked_seq_p(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     size_t n;

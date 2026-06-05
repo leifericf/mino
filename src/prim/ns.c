@@ -1000,7 +1000,7 @@ mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
 }
 
-mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     (void)env;

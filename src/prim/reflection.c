@@ -72,7 +72,7 @@ mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env)
  * reproducible stream. Returns the seed. The seed must be a
  * non-zero integer; a zero seed degenerates the xorshift step, so
  * we re-seed to a fixed non-zero constant in that case. */
-mino_val *prim_random_seed_bang(mino_state *S, mino_val *args,
+static mino_val *prim_random_seed_bang(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
     mino_val *v;
@@ -721,7 +721,7 @@ mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
  * Field-vector entries may be keywords (preferred) or symbols; both
  * resolve to keywords in the type's stored fields.
  */
-mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
+static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
                                 mino_env *env)
 {
     mino_val  *ns_arg, *name_arg, *fields_arg;
@@ -792,7 +792,7 @@ mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
  * constructor function. n_vals must equal the type's declared field
  * count.
  */
-mino_val *prim_record_star(mino_state *S, mino_val *args,
+static mino_val *prim_record_star(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val  *type_arg, *vals_arg, *result;
@@ -845,7 +845,7 @@ mino_val *prim_record_star(mino_state *S, mino_val *args,
  * fields from m by keyword; non-field keys land in ext. Runtime
  * helper for the script-side map->Type constructor function.
  */
-mino_val *prim_record_from_map(mino_state *S, mino_val *args,
+static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
     mino_val  *type_arg, *map_arg, *result, *fields;
@@ -926,7 +926,7 @@ mino_val *prim_record_from_map(mino_state *S, mino_val *args,
  * (record-fields type) -- returns the declared field-name vector
  * (keywords) for a record type. Useful for tooling and reflection.
  */
-mino_val *prim_record_fields(mino_state *S, mino_val *args,
+static mino_val *prim_record_fields(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     mino_val *t;
@@ -1421,7 +1421,7 @@ mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (alloc-profile-enabled?) -- compile-time flag. */
-mino_val *prim_alloc_profile_enabled_p(mino_state *S,
+static mino_val *prim_alloc_profile_enabled_p(mino_state *S,
                                          mino_val *args, mino_env *env)
 {
     (void)env;
@@ -1433,7 +1433,7 @@ mino_val *prim_alloc_profile_enabled_p(mino_state *S,
 }
 
 /* (alloc-profile-reset!) -- zero the per-callsite counters. */
-mino_val *prim_alloc_profile_reset_bang(mino_state *S,
+static mino_val *prim_alloc_profile_reset_bang(mino_state *S,
                                           mino_val *args, mino_env *env)
 {
     (void)env;
@@ -1447,7 +1447,7 @@ mino_val *prim_alloc_profile_reset_bang(mino_state *S,
 
 /* (alloc-profile-dump! n) -- dump top n callsites to stderr. n=0 means
  * all sites. Returns nil. */
-mino_val *prim_alloc_profile_dump_bang(mino_state *S,
+static mino_val *prim_alloc_profile_dump_bang(mino_state *S,
                                          mino_val *args, mino_env *env)
 {
     long long n = 30;

@@ -166,25 +166,25 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
     return mino_host_array_from_coll(S, arg, kind);
 }
 
-mino_val *prim_object_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_object_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "object-array");
 }
 
-mino_val *prim_int_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_int_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_INT, "int-array");
 }
 
-mino_val *prim_long_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_long_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_LONG, "long-array");
 }
 
-mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, "short-array");
@@ -195,7 +195,7 @@ mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
  * value model excludes in-place writes, so we ship the immutable
  * binary-data tier instead. bytes? on the result is true; aset!
  * throws :mino/immutable. */
-mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     (void)env;
@@ -309,31 +309,31 @@ mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_float_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_float_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_FLOAT, "float-array");
 }
 
-mino_val *prim_double_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_double_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_DOUBLE, "double-array");
 }
 
-mino_val *prim_char_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_char_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_CHAR, "char-array");
 }
 
-mino_val *prim_boolean_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_boolean_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_BOOLEAN, "boolean-array");
 }
 
-mino_val *prim_to_array(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_to_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
@@ -345,7 +345,7 @@ mino_val *prim_to_array(mino_state *S, mino_val *args, mino_env *env)
  * the *only* mutation path mino offers outside MINO_ATOM /
  * MINO_VOLATILE -- the host-array tier exists specifically to mirror
  * JVM array semantics for cross-dialect tests. */
-mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arr;
     mino_val *idx_val;
@@ -396,7 +396,7 @@ mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
  * byte as an unsigned int (0..255). For MINO_HOST_ARRAY this is a
  * straight slot read; for MINO_BYTES the byte at the index is widened
  * to long. */
-mino_val *prim_aget(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_aget(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arr;
     mino_val *idx_val;
@@ -438,7 +438,7 @@ mino_val *prim_aget(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* alength: count of elements in a host array OR bytes value. */
-mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arr;
     (void)env;
@@ -457,7 +457,7 @@ mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
     return mino_int(S, (long long)arr->as.host_array.len);
 }
 
-mino_val *prim_map_entry(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_map_entry(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -643,7 +643,7 @@ mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
     return prim_count_step(S, argv[0], env);
 }
 
-mino_val *prim_empty_queue(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_empty_queue(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -653,7 +653,7 @@ mino_val *prim_empty_queue(mino_state *S, mino_val *args, mino_env *env)
     return mino_queue_empty(S);
 }
 
-mino_val *prim_queue_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_queue_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
