@@ -770,6 +770,52 @@
     (println (str "  lint-zig: " (count own-srcs)
                   " TUs clean under the curated strict set"))))
 
+;; ---- clang static analyzer lane (pinned zig cc) ----
+
+(defn analyze-zig
+  "Run clang's static analyzer (via the pinned `zig cc`) over every
+   mino-authored TU and report findings grouped by checker.
+
+   ADVISORY, not a gate, for two structural reasons surfaced by the
+   spike: (1) zig cc's driver always appends a link step that fails on
+   the analyzer's plist output, so the process exit code is never 0 even
+   on a clean analysis -- the findings are emitted before that and are
+   what matter; (2) clang's analyzer has well-known cross-TU false
+   positives (core.NullDereference especially, since it can't see
+   invariants enforced in another TU). So this prints findings for a
+   human to triage rather than failing the build. It is the discovery
+   instrument for the C99 bloat / over-export audit: deadcode.DeadStores
+   and unix.Malloc findings in particular are worth chasing. Exits 0.
+
+   `sh` merges the analyzer's stderr into :out; we drop the benign link
+   noise (ld.lld plist error, the spurious `-c` note) and keep the
+   `warning: ... [checker.Name]` lines."
+  []
+  (check-zig-version)
+  (let [own-srcs (remove #(str/includes? % "vendor/") all-srcs)
+        base     (concat stencil-cc
+                         ["--analyze" "-Xclang" "-analyzer-output=text"
+                          "-std=c99" "-DMINO_CPJIT=1"]
+                         (str/split include-flags " "))
+        finding? (fn [line] (re-find #"warning:.*\[[a-z]+\.[A-Za-z]+\]" line))
+        findings (->> own-srcs
+                      (mapcat
+                        (fn [tu]
+                          (->> (str/split-lines
+                                 (str (get (apply sh (concat base [tu])) :out)))
+                               (filter finding?)))))]
+    (doseq [f findings]
+      (println (str "  " (str/replace f #"^.*/mino/" ""))))
+    (let [by-checker (->> findings
+                          (keep #(second (re-find #"\[([a-z]+\.[A-Za-z]+)\]" %)))
+                          frequencies
+                          (sort-by (comp - val)))]
+      (doseq [[checker n] by-checker]
+        (println (str "  " checker ": " n)))
+      (println (str "  analyze-zig: " (count findings)
+                    " analyzer finding(s) across " (count own-srcs)
+                    " TUs [advisory -- triage, not a gate]")))))
+
 (defn build-lean
   "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes
    through the bytecode interpreter; the JIT pipeline compiles to a

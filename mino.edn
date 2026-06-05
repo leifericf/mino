@@ -37,6 +37,9 @@
   lint-zig        {:doc  "Curated strict-warning lint lane via pinned zig cc (third compiler lens)"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/lint-zig}
+  analyze-zig     {:doc  "Advisory clang static-analyzer report via pinned zig cc (triage, not a gate)"
+                   :deps [gen-core-header gen-stdlib-headers]
+                   :task mino.tasks.builtin/analyze-zig}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"

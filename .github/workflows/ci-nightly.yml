@@ -42,3 +42,31 @@ jobs:
       - name: Embed stress
         run: ./mino task test-embed
         timeout-minutes: 10
+
+  # Advisory clang static-analyzer report on one pinned-zig runner.
+  # Off the PR path on purpose: the analyzer is slow (~2 min) and its
+  # findings need human triage (clang has cross-TU false positives), so
+  # it surfaces in the nightly log rather than gating merges. Drives the
+  # C99 bloat / over-export audit. The task exits 0 regardless of
+  # findings -- it reports, it does not fail.
+  analyze:
+    name: analyze-zig (clang static analyzer, advisory)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Static analyzer report
+        run: ./mino task analyze-zig
