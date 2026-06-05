@@ -397,6 +397,27 @@
   (verify-cross-static)
   (println "  cross-build: OK"))
 
+(defn build-all
+  "Developer convenience: from any host, build mino for every target in
+   one command and smoke the native one. Wraps the canonical native
+   build (cc -> ./mino) plus the pinned-zig cross-build (Linux musl
+   amd64/arm64, glibc canaries, Windows amd64). Catches arch / libc /
+   Windows breakage locally before a push, without waiting for the CI
+   matrix. Cross artifacts land in dist-cross/; the native binary is
+   ./mino. The native compiler stays cc -- only the cross targets need
+   zig -- so the canonical path is exercised exactly as an embedder
+   would build it."
+  []
+  (build)
+  (let [out (str/trim (sh! mino-bin "-e" "(+ 1 2)"))]
+    (when-not (= out "3")
+      (throw (ex-info (str "build-all: native smoke failed -- (+ 1 2) gave "
+                           (pr-str out))
+                      {:got out})))
+    (println (str "  build-all: native " mino-bin " smoke OK ((+ 1 2) => 3)")))
+  (cross-build)
+  (println "  build-all: native + all cross targets OK"))
+
 ;; ---- Amalgamation ----
 
 (def ^:private amalgam-search-paths

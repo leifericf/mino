@@ -42,6 +42,9 @@
                    :task mino.tasks.builtin/analyze-zig}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
+  build-all       {:doc  "Build mino for every target (native + cross) from one host; smoke the native"
+                   :deps [gen-core-header gen-stdlib-headers]
+                   :task mino.tasks.builtin/build-all}
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/cross-build}
