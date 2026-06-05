@@ -34,6 +34,18 @@ The maintainer tasks that require the pinned `zig cc`:
 Each hard-fails with a clear message (`check-zig-version`) when zig is absent or
 off the pinned version, rather than silently using a different compiler.
 
+### CI build cache
+
+Every zig CI job installs the toolchain via `mlugg/setup-zig@v2`, which caches
+Zig's global compile cache (`~/.cache/zig` / the per-OS equivalent) keyed on the
+zig version + source hashes. Because all the zig lanes
+(`stencil-determinism`, `sanitize-zig`, `lint-zig`, `build-zig-hermetic`,
+`darwin-zig-canary`, `jit-host-canary`, `analyze-zig`) share that action and the
+single pinned version, a warm cache carries across runs and jobs — no extra
+config is needed. Cache hit/miss is observable in each job's "Install pinned
+Zig" step log; there is nothing to tune here, only to watch if a run is
+unexpectedly slow.
+
 ## Pinned Zig version
 
 A few maintainer tasks shell out to [`zig cc`](https://ziglang.org) — a bundled,
