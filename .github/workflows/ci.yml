@@ -355,6 +355,49 @@ jobs:
       - name: Full suite with JIT forced on
         run: ./mino --jit=on tests/run.clj
 
+      - name: Verify Mach-O TLV binding (zig linker tripwire)
+        # The zig 0.16.0 self-hosted Mach-O linker mis-binds the 2nd+
+        # __thread_vars descriptor thunks to a wrong import (observed
+        # ___clear_cache / _printf instead of __tlv_bootstrap). It is
+        # HARMLESS on macOS because dyld4 rewrites every descriptor in
+        # the __thread_vars section to _tlv_get_addr at load,
+        # regardless of the symbol the linker bound -- which is exactly
+        # why the full suite above (mino leans on __thread for
+        # mino_tls_ctx / cancel_ptr / safepoint_count) passes. This
+        # step is the static tripwire: it asserts the TLV section
+        # exists with the bootstrap symbol present, and flags any
+        # mis-bind target OUTSIDE the known-benign set so a future zig
+        # bump that changes the pattern surfaces here before the
+        # darwin artifact is ever flipped to a zig build. See
+        # docs/MAINTAINER_TOOLCHAIN.md (darwin TLV note) + the upstream
+        # issue draft in .local/.
+        run: |
+          binds=$(dyld_info -fixups ./mino 2>/dev/null \
+            | awk '/__thread_vars/ {print $NF}')
+          echo "__thread_vars binds:"
+          echo "$binds" | sed 's/^/  /'
+          if [ -z "$binds" ]; then
+            echo "TLV tripwire: no __thread_vars descriptors found" >&2
+            exit 1
+          fi
+          if ! echo "$binds" | grep -q '__tlv_bootstrap'; then
+            echo "TLV tripwire: __tlv_bootstrap absent -- TLV machinery missing" >&2
+            exit 1
+          fi
+          # Known-benign bind targets: the correct bootstrap plus the
+          # symbols the zig 0.16.0 mis-bind has been observed to pick
+          # (all in the __thread_vars section dyld rewrites wholesale).
+          unexpected=$(echo "$binds" \
+            | grep -vE '(__tlv_bootstrap|___clear_cache|_printf)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "TLV tripwire: unexpected __thread_vars bind target(s):" >&2
+            echo "$unexpected" | sed 's/^/  /' >&2
+            echo "A zig bump changed the mis-bind pattern; re-verify TLV" >&2
+            echo "correctness and update the allowlist before trusting it." >&2
+            exit 1
+          fi
+          echo "TLV tripwire: OK (bootstrap present; mis-binds within known-benign set)"
+
   # Per-host JIT runtime canaries. Four of the five committed JIT
   # pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
   # behind opt-in defines no published artifact sets; these lanes are

@@ -129,6 +129,37 @@ matrix via `./mino task test-jit-host` — informational lanes until they hold a
 green streak. On arm64 darwin machines the task cross-builds the Mach-O
 x86_64 pipeline and runs it under Rosetta 2.
 
+## Darwin TLV binding (zig linker note)
+
+The published darwin artifacts are **native Apple-clang builds**
+(`release-build.yml`). The `darwin-zig-canary` lane builds a zig-cc
+darwin binary in parallel to evaluate flipping that artifact to a
+uniform zig toolchain; it stays informational until it holds a green
+streak.
+
+One known wrinkle gates the flip: zig 0.16.0's self-hosted Mach-O
+linker mis-binds the 2nd-and-later `__thread_vars` descriptor thunks
+to an unrelated libSystem import (observed `___clear_cache`,
+`_printf`) instead of `__tlv_bootstrap`. It is **harmless on macOS** —
+dyld4 rewrites every descriptor in the `__thread_vars` section to
+`_tlv_get_addr` at load regardless of the bound symbol, so the wrong
+bind never takes effect. The canary's full eager suite (mino uses
+`__thread` for `mino_tls_ctx` / `mino_tls_cancel_ptr` /
+`mino_tls_safepoint_count`) passes, confirming this dynamically.
+
+The canary's **"Verify Mach-O TLV binding"** step is the static
+tripwire: it asserts the bootstrap symbol is present and fails if any
+`__thread_vars` bind targets a symbol outside the known-benign set, so
+a zig bump that changes the mis-bind pattern surfaces before the flip.
+A minimal reproducer and an upstream-issue draft live under `.local/`
+(gitignored); the issue is not yet filed.
+
+**Flip checklist** (darwin artifact → zig): (1) canary green streak;
+(2) TLV tripwire green; (3) re-verify the mis-bind against the current
+zig pin and file/​link the upstream issue; then swap the
+`darwin-*` matrix entries in `release-build.yml` to a pinned-zig build
+and invert the canary so Apple clang becomes the informational lens.
+
 ## Guardrails
 
 - The embedder line is absolute: `zig` is never required to build or embed
