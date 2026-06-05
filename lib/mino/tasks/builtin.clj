@@ -587,6 +587,8 @@
   (when (file-exists? "mino_asan")  (rm-rf "mino_asan"))
   (when (file-exists? "mino_ubsan") (rm-rf "mino_ubsan"))
   (when (file-exists? "mino_tsan")  (rm-rf "mino_tsan"))
+  (when (file-exists? "mino_ubsan_zig") (rm-rf "mino_ubsan_zig"))
+  (when (file-exists? "mino_tsan_zig")  (rm-rf "mino_tsan_zig"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
   (doseq [[_ _ c-symbol] bundled-stdlib]
@@ -645,6 +647,76 @@
   []
   (build-sanitized "tsan" "mino_tsan"
                    ["-fsanitize=thread"]))
+
+;; ---- Reproducible pinned-zig sanitizer lane ----
+;;
+;; The sanitizer builds above use the host `cc`, so the sanitizer
+;; runtime is whatever libsanitizer the runner ships -- it drifts with
+;; the image. These variants build with the pinned `zig cc` instead, so
+;; the compiler-rt instrumentation is version-locked and reproducible
+;; across machines. The lane is ADDITIVE: the host ASan build stays in
+;; release-gate.
+;;
+;; Coverage is UBSan + TSan, not ASan: zig 0.16.0 bundles no prebuilt
+;; AddressSanitizer runtime (linking -fsanitize=address fails with
+;; `undefined symbol: __asan_init`), but it compiles the UBSan and TSan
+;; compiler-rt from source. ASan reproducibility therefore stays with
+;; the host toolchain's libasan; this lane covers the UB and data-race
+;; classes the host gate does not otherwise run. -funwind-tables +
+;; -lunwind satisfy the portable crash handler, as in cross-build.
+
+(def ^:private san-base-zig
+  (into ["-g" "-O1" "-fno-omit-frame-pointer" "-std=c99"
+         "-Wall" "-Wextra" "-Wpedantic" "-funwind-tables"]
+        (str/split include-flags " ")))
+
+(defn- build-sanitized-zig [label out-bin extra-flags]
+  (check-zig-version)
+  (gen-core-header)
+  (let [args (into (vec stencil-cc)
+                   (concat san-base-zig
+                           extra-flags
+                           ["-o" out-bin]
+                           all-srcs
+                           ;; zig's default target is musl, which folds
+                           ;; pthread into libc; -lunwind supplies the
+                           ;; crash handler's _Unwind_* symbols.
+                           ["-lm" "-lunwind"]))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (str "  " label " (pinned zig) build -> " out-bin))))
+
+(defn build-ubsan-zig
+  "Build mino_ubsan_zig with UndefinedBehaviorSanitizer using the pinned
+   `zig cc`. -fno-sanitize-recover makes the first finding fatal so it
+   trips a test runner's exit status. mino is UBSan-clean today (the
+   full suite runs with zero findings), so a regression surfaces here."
+  []
+  (build-sanitized-zig "ubsan" "mino_ubsan_zig"
+                       ["-fsanitize=undefined"
+                        "-fno-sanitize-recover=undefined"]))
+
+(defn build-tsan-zig
+  "Build mino_tsan_zig with ThreadSanitizer using the pinned `zig cc`.
+   Exercises the async scheduler + cross-state mutex paths the suite
+   spins up; the single-state evaluator is otherwise single-threaded."
+  []
+  (build-sanitized-zig "tsan" "mino_tsan_zig"
+                       ["-fsanitize=thread"]))
+
+(defn sanitize-zig
+  "Reproducible pinned-zig sanitizer lane: build mino under UBSan and
+   under TSan with the version-locked `zig cc`, and run the full test
+   suite under each. Additive to the host ASan build in release-gate;
+   covers the undefined-behavior and data-race classes with a
+   reproducible compiler-rt. ASan is intentionally absent -- zig ships
+   no ASan runtime; that coverage stays on the host toolchain."
+  []
+  (build-ubsan-zig)
+  (println (sh! "./mino_ubsan_zig" "tests/run.clj"))
+  (build-tsan-zig)
+  (println (sh! "./mino_tsan_zig" "tests/run.clj"))
+  (println "  sanitize-zig: OK"))
 
 (defn build-lean
   "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes

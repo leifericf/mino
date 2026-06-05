@@ -221,6 +221,32 @@ jobs:
         run: ./mino task check-stencils-fresh-all
         timeout-minutes: 10
 
+  sanitize-zig:
+    name: sanitize-zig (pinned zig UBSan+TSan)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Reproducible UBSan + TSan suite (pinned compiler-rt)
+        # Builds mino with the version-locked zig cc under UBSan and TSan
+        # and runs the full suite under each. Additive to the host ASan
+        # build in release-gate; ASan is absent because zig ships no ASan
+        # runtime (that coverage stays on the host toolchain).
+        run: ./mino task sanitize-zig
+        timeout-minutes: 15
+
   # Portability canary: compile the amalgamated single-file source with
   # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
   # matrix) nor clang (macOS matrix, zig) represents. continue-on-error

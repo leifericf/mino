@@ -28,6 +28,12 @@
                    :task mino.tasks.builtin/build-ubsan}
   build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"
                    :task mino.tasks.builtin/build-tsan}
+  build-ubsan-zig {:doc  "Build mino_ubsan_zig with UBSan via pinned zig cc"
+                   :task mino.tasks.builtin/build-ubsan-zig}
+  build-tsan-zig  {:doc  "Build mino_tsan_zig with TSan via pinned zig cc"
+                   :task mino.tasks.builtin/build-tsan-zig}
+  sanitize-zig    {:doc  "Reproducible pinned-zig sanitizer lane: UBSan + TSan suite run"
+                   :task mino.tasks.builtin/sanitize-zig}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"

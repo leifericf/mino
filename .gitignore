@@ -13,6 +13,8 @@ bin/
 /mino_asan
 /mino_tsan
 /mino_ubsan
+/mino_ubsan_zig
+/mino_tsan_zig
 /mino_prof
 /mino_opcounts
 /mino-lean
