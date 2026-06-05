@@ -15,6 +15,7 @@ bin/
 /mino_ubsan
 /mino_ubsan_zig
 /mino_tsan_zig
+/mino_zig
 /mino_prof
 /mino_opcounts
 /mino-lean

@@ -668,6 +668,7 @@
   (when (file-exists? "mino_tsan")  (rm-rf "mino_tsan"))
   (when (file-exists? "mino_ubsan_zig") (rm-rf "mino_ubsan_zig"))
   (when (file-exists? "mino_tsan_zig")  (rm-rf "mino_tsan_zig"))
+  (when (file-exists? "mino_zig")       (rm-rf "mino_zig"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
   (doseq [[_ _ c-symbol] bundled-stdlib]
@@ -894,6 +895,41 @@
       (println (str "  analyze-zig: " (count findings)
                     " analyzer finding(s) across " (count own-srcs)
                     " TUs [advisory -- triage, not a gate]")))))
+
+;; ---- Hermetic pinned-zig build lane ----
+
+(defn build-zig
+  "Hermetic build: compile the native mino binary with the pinned
+   `zig cc` (into ./mino_zig) instead of the host cc. The whole
+   toolchain -- compiler, libc, linker -- is the version-locked zig, so
+   a green build here does not depend on the runner image's gcc/clang
+   version; it reproduces across machines. Builds for the host via zig's
+   default target, which is musl and static-by-default, plus -static for
+   an explicit zero-dependency guarantee; -lunwind supplies the portable
+   crash handler's _Unwind_* symbols. Additive: the canonical cc build
+   and the gcc/Apple-clang/mingw canaries are untouched."
+  []
+  (check-zig-version)
+  (let [args (concat stencil-cc
+                     ["-std=c99" "-O2" "-DMINO_CPJIT=1" "-funwind-tables"
+                      "-static"]
+                     (str/split include-flags " ")
+                     ["-o" "mino_zig"]
+                     all-srcs
+                     ["-lm" "-lunwind"])]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println "  build-zig -> ./mino_zig")))
+
+(defn test-zig
+  "Hermetic compile+test lane: build mino with the pinned `zig cc`
+   (build-zig) and run the full test suite against it. Proves the
+   version-locked toolchain produces a correct mino independent of the
+   runner's system compiler -- the additive reproducibility backstop
+   behind the gcc/Apple-clang/mingw CI canaries."
+  []
+  (build-zig)
+  (println (sh! "./mino_zig" "tests/run.clj")))
 
 (defn build-lean
   "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes

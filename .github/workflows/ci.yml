@@ -272,6 +272,32 @@ jobs:
         run: ./mino task lint-zig
         timeout-minutes: 10
 
+  build-zig-hermetic:
+    name: build-zig-hermetic (pinned-zig build + suite)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Hermetic build + full suite (pinned zig cc, static musl)
+        # Builds mino entirely with the version-locked zig cc (compiler,
+        # libc, linker) and runs the full suite against it, so a green
+        # build does not depend on the runner image's gcc/clang version.
+        # Additive: the gcc/Apple-clang/mingw matrix stays the canary.
+        run: ./mino task test-zig
+        timeout-minutes: 15
+
   # Portability canary: compile the amalgamated single-file source with
   # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
   # matrix) nor clang (macOS matrix, zig) represents. continue-on-error
