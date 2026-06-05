@@ -176,4 +176,32 @@
     (is (future-done? f))
     (is (< (- (time-ms) start) 500))))
 
+;; ---- stats dump survives state teardown -------------------------------
+
+(deftest jit-stats-dump-after-teardown
+  ;; Regression: the MINO_CPJIT_STATS atexit dump pulled per-fn
+  ;; counters through borrowed bc-record pointers after
+  ;; mino_state_free had already freed them -- a use-after-free that
+  ;; segfaulted on musl (allocator returns pages) while staying
+  ;; silent on Apple libc / glibc. Entries are now sealed (counters
+  ;; snapshotted) before the records die. Subprocess test: spawn the
+  ;; binary under test with the env var set, in both stats modes, and
+  ;; require a clean exit. MINO_TEST_BIN names the binary when the
+  ;; suite runs against a non-default build (canary / sanitizer
+  ;; lanes); otherwise ./mino. Skipped when neither resolves (Windows
+  ;; builds the binary as mino.exe and runs the suite via cmd).
+  (let [bin (or (System/getenv "MINO_TEST_BIN")
+                (when (file-exists? "./mino") "./mino"))]
+    (when bin
+      (let [full (sh "sh" "-c"
+                     (str "MINO_CPJIT_STATS=1 " bin " --jit=on -e"
+                          " '(reduce + (range 1000))' 2>/dev/null"))
+            summ (sh "sh" "-c"
+                     (str "MINO_CPJIT_STATS=summary " bin " --jit=on -e"
+                          " '(reduce + (range 1000))' 2>/dev/null"))]
+        (is (= 0 (:exit full)))
+        (is (= "499500\n" (:out full)))
+        (is (= 0 (:exit summ)))
+        (is (= "499500\n" (:out summ)))))))
+
 (run-tests-and-exit)

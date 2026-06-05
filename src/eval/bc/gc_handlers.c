@@ -11,6 +11,7 @@
 
 #include "mino_internal.h"
 #include "eval/bc/internal.h"
+#include "eval/bc/jit.h"
 #include "gc/internal.h"
 
 void gc_mark_child_push_exported(mino_state *S, const void *p);
@@ -93,7 +94,18 @@ void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr)
     PUSH(bc->ic_stats);
 }
 
+/* A dead bc record may still be referenced by the MINO_CPJIT_STATS
+ * ring (the atexit dump pulls end-of-run counters through it). Seal
+ * the matching entries before the sweep frees the record's memory.
+ * No-op unless the env var enabled the ring. */
+static void finalize_bc(mino_state *S, gc_hdr_t *h)
+{
+    (void)S;
+    mino_jit_stats_seal_bc((const struct mino_bc_fn *)(h + 1));
+}
+
 void mino_bc_register_gc_handlers(mino_state *S)
 {
     gc_register_tracer(S, GC_T_BC, trace_bc);
+    gc_register_finalizer(S, GC_T_BC, finalize_bc);
 }

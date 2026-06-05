@@ -161,6 +161,16 @@ long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off);
  * Safe on a fn without a native region; reduces to a no-op. */
 void mino_jit_invalidate(struct mino_state *S, struct mino_val *fn);
 
+/* MINO_CPJIT_STATS bookkeeping: snapshot the per-fn runtime counters
+ * an entry in the stats ring borrows from a bc record, right before
+ * that record's memory is freed. seal_bc covers a single record (the
+ * GC_T_BC finalizer calls it when a dead record -- e.g. a redefined
+ * fn's -- is swept mid-run); seal_all covers state teardown, which
+ * frees the heap without running per-tag finalizers. Both are cheap
+ * no-ops when MINO_CPJIT_STATS never enabled the ring. */
+void mino_jit_stats_seal_bc(const mino_bc_fn_t *bc);
+void mino_jit_stats_seal_all(void);
+
 #else
 
 /* Stubs so callers in fn.c / state.c don't need to wrap their call
@@ -188,6 +198,10 @@ static inline long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned off) {
 static inline void mino_jit_invalidate(struct mino_state *S, struct mino_val *fn) {
     (void)S; (void)fn;
 }
+static inline void mino_jit_stats_seal_bc(const mino_bc_fn_t *bc) {
+    (void)bc;
+}
+static inline void mino_jit_stats_seal_all(void) {}
 
 #endif /* MINO_CPJIT */
 

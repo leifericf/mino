@@ -24,8 +24,8 @@
 #include <string.h>
 
 typedef struct cpjit_stat_entry {
-    const mino_bc_fn_t      *bc;
-    const char              *file;       /* borrowed; lifetime matches state */
+    const mino_bc_fn_t      *bc;         /* borrowed; NULL once sealed */
+    const char              *file;       /* owned copy (see record) */
     int                      line;
     int                      column;
     size_t                   code_len;
@@ -34,6 +34,22 @@ typedef struct cpjit_stat_entry {
     size_t                   first_unknown_pc; /* valid only when reason == UNKNOWN_OP or OK_WITH_DEOPT */
     int                      compiled;
     size_t                   native_bytes;
+    /* Sealed snapshot of the bc-side runtime counters. The bc record
+     * is a GC allocation that can die before the atexit dump runs --
+     * mid-run when a redefined fn's record is swept, and always at
+     * state teardown. mino_jit_stats_seal_bc copies the counters out
+     * right before the record is freed and NULLs `bc`; the dump
+     * reads the live bc while it is still set and the snapshot
+     * otherwise. */
+    unsigned long long       snap_invocations;
+    unsigned long long       snap_deopt_exits;
+    unsigned long long       snap_native_total_ns;
+    unsigned long long       snap_native_max_ns;
+    unsigned long long       snap_compile_ns;
+    unsigned long long       snap_code_bytes;
+    unsigned long long       snap_region_dead;
+    mino_bc_ic_stat_t       *snap_ic_stats;    /* owned copy; may be NULL */
+    int                      snap_ic_slots_len;
     struct cpjit_stat_entry *next;
 } cpjit_stat_entry_t;
 
@@ -233,12 +249,23 @@ static void cpjit_stats_dump(void)
             /* Per-fn runtime counters live on the bc record itself.
              * Pull them at dump time so the figure reflects every
              * invocation the JIT'd region accumulated through the
-             * end of the run. Skipped for non-compiled fns (they
-             * never enter the native path, so the counters are 0). */
-            unsigned long long inv = (unsigned long long)e->bc->jit_invocations;
-            unsigned long long dx  = (unsigned long long)e->bc->jit_deopt_exits;
-            unsigned long long tns = (unsigned long long)e->bc->jit_native_total_ns;
-            unsigned long long mns = (unsigned long long)e->bc->jit_native_max_ns;
+             * end of the run; when the record died first, the
+             * sealed snapshot carries the final values. Skipped for
+             * non-compiled fns (they never enter the native path,
+             * so the counters are 0). */
+            const mino_bc_fn_t *bc = e->bc;
+            unsigned long long inv = bc != NULL
+                ? (unsigned long long)bc->jit_invocations
+                : e->snap_invocations;
+            unsigned long long dx  = bc != NULL
+                ? (unsigned long long)bc->jit_deopt_exits
+                : e->snap_deopt_exits;
+            unsigned long long tns = bc != NULL
+                ? (unsigned long long)bc->jit_native_total_ns
+                : e->snap_native_total_ns;
+            unsigned long long mns = bc != NULL
+                ? (unsigned long long)bc->jit_native_max_ns
+                : e->snap_native_max_ns;
             (void)tns; (void)mns; /* used below when MINO_JIT_TIME_FNS=1 */
             if (e->reason == CPJIT_REASON_UNKNOWN_OP
                 || e->reason == CPJIT_REASON_OK_WITH_DEOPT) {
@@ -272,9 +299,15 @@ static void cpjit_stats_dump(void)
              * compiled fn so the dashboard can rank compile-ns per
              * bytecode-op and identify pathological compiles. */
             if (e->compiled) {
-                unsigned long long cns = (unsigned long long)e->bc->jit_compile_ns;
-                unsigned long long cb  = (unsigned long long)e->bc->jit_code_bytes;
-                unsigned long long rd  = (unsigned long long)e->bc->jit_code_region_dead;
+                unsigned long long cns = bc != NULL
+                    ? (unsigned long long)bc->jit_compile_ns
+                    : e->snap_compile_ns;
+                unsigned long long cb  = bc != NULL
+                    ? (unsigned long long)bc->jit_code_bytes
+                    : e->snap_code_bytes;
+                unsigned long long rd  = bc != NULL
+                    ? (unsigned long long)bc->jit_code_region_dead
+                    : e->snap_region_dead;
                 fprintf(stderr,
                         "    compile: ns=%llu  code=%llu B  region=%zu B  dead=%llu B\n",
                         cns, cb, e->native_bytes, rd);
@@ -283,11 +316,15 @@ static void cpjit_stats_dump(void)
              * populated (MINO_JIT_IC_STATS=1 was set early enough to
              * cover any resolve on this bc). Per-site, ordered by
              * slot index so the dump remains stable across runs. */
-            if (e->bc->ic_stats != NULL && e->bc->ic_slots_len > 0) {
+            const mino_bc_ic_stat_t *ic_stats =
+                bc != NULL ? bc->ic_stats : e->snap_ic_stats;
+            int ic_len = bc != NULL ? bc->ic_slots_len
+                                    : e->snap_ic_slots_len;
+            if (ic_stats != NULL && ic_len > 0) {
                 fprintf(stderr,
                         "    ic-sites (slot: hits / misses / thrash):\n");
-                for (int s = 0; s < e->bc->ic_slots_len; s++) {
-                    mino_bc_ic_stat_t *st = &e->bc->ic_stats[s];
+                for (int s = 0; s < ic_len; s++) {
+                    const mino_bc_ic_stat_t *st = &ic_stats[s];
                     if (st->hits == 0 && st->misses == 0) continue;
                     fprintf(stderr,
                             "      [%2d]  %llu / %llu / %llu\n",
@@ -399,6 +436,64 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     }
     ent->next = g_cpjit_stats.entries;
     g_cpjit_stats.entries = ent;
+}
+
+/* Copy the bc-side runtime counters into the entry and drop the
+ * borrowed pointer. Idempotent: a second call on a sealed entry is a
+ * no-op. */
+static void cpjit_seal_entry(cpjit_stat_entry_t *e)
+{
+    const mino_bc_fn_t *bc = e->bc;
+    if (bc == NULL) return;
+    e->snap_invocations     = (unsigned long long)bc->jit_invocations;
+    e->snap_deopt_exits     = (unsigned long long)bc->jit_deopt_exits;
+    e->snap_native_total_ns = (unsigned long long)bc->jit_native_total_ns;
+    e->snap_native_max_ns   = (unsigned long long)bc->jit_native_max_ns;
+    e->snap_compile_ns      = (unsigned long long)bc->jit_compile_ns;
+    e->snap_code_bytes      = (unsigned long long)bc->jit_code_bytes;
+    e->snap_region_dead     = (unsigned long long)bc->jit_code_region_dead;
+    if (bc->ic_stats != NULL && bc->ic_slots_len > 0) {
+        size_t bytes = (size_t)bc->ic_slots_len * sizeof *e->snap_ic_stats;
+        e->snap_ic_stats = (mino_bc_ic_stat_t *)malloc(bytes);
+        if (e->snap_ic_stats != NULL) {
+            memcpy(e->snap_ic_stats, bc->ic_stats, bytes);
+            e->snap_ic_slots_len = bc->ic_slots_len;
+        }
+    }
+    e->bc = NULL;
+}
+
+void mino_jit_stats_seal_bc(const mino_bc_fn_t *bc)
+{
+    if (bc == NULL || g_cpjit_stats.entries == NULL) return;
+    for (cpjit_stat_entry_t *e = g_cpjit_stats.entries;
+         e != NULL; e = e->next) {
+        if (e->bc == bc) cpjit_seal_entry(e);
+    }
+}
+
+void mino_jit_stats_seal_all(void)
+{
+    for (cpjit_stat_entry_t *e = g_cpjit_stats.entries;
+         e != NULL; e = e->next) {
+        cpjit_seal_entry(e);
+    }
+}
+
+#elif defined(MINO_CPJIT)
+
+/* MINO_CPJIT defined but not on a supported host: the runtime never
+ * compiles anything, so there are no entries to seal. Same stub
+ * pattern as entry.c. */
+#include "../internal.h"
+
+void mino_jit_stats_seal_bc(const mino_bc_fn_t *bc)
+{
+    (void)bc;
+}
+
+void mino_jit_stats_seal_all(void)
+{
 }
 
 #endif /* MINO_CPJIT_HOST */

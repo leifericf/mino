@@ -574,6 +574,11 @@ void mino_state_free(mino_state *S)
      * would crash. */
     mino_agent_quiesce_workers(S);
     mino_host_threads_quiesce(S);
+    /* Snapshot any MINO_CPJIT_STATS entries that borrow counters from
+     * bc records: state_free_heap below frees every header without
+     * running per-tag finalizers, and the stats dump fires at atexit,
+     * after this state is gone. No-op when the stats ring is off. */
+    mino_jit_stats_seal_all();
     state_free_root_envs(S);
     state_free_refs(S);
     state_free_ns_aliases(S);
