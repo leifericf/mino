@@ -325,7 +325,16 @@ jobs:
         # built. This evaluates zig cc as the uniform standalone compiler
         # on every platform. The crash handler's _Unwind_* symbols come
         # from libSystem here (no -lunwind needed, as on glibc).
-        run: make CC="zig cc"
+        #
+        # CFLAGS mirrors the Makefile default plus -Wno-unused-but-set-
+        # variable: zig ships a newer clang than Apple clang and flags a
+        # set-but-unused `carry` in vendored src/vendor/imath/imath.c that
+        # Apple clang does not. Same toolchain-specific suppression the
+        # cross-build (cross-cflags) already carries for this file.
+        run: |
+          make CC="zig cc" CFLAGS="-std=c99 -Wall -Wpedantic -Wextra -Werror \
+            -Wno-missing-field-initializers -Wno-unknown-warning-option \
+            -Wno-clobbered -Wno-unused-but-set-variable -O2 -DMINO_CPJIT=1"
 
       - name: Smoke + full suite (JIT auto-enabled on arm64-darwin)
         # arm64-darwin is the one host that runtime-exercises the CPJIT, so
