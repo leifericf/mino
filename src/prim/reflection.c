@@ -383,8 +383,15 @@ mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
  * `(fn [x] (= (type x) :foo))` form but skips the keyword allocation
  * and equality comparison by checking the tag directly. */
 
-#define DEFINE_TYPE_PRED(fn_name, pred_expr, label) \
-    mino_val *fn_name(mino_state *S, mino_val *args, mino_env *env) \
+/* Every type predicate is file-local: used only here, registered via
+ * this file's k_prims tables. `static` keeps two dozen internal symbols
+ * out of an embedder's namespace -- the matching extern declarations
+ * were removed from prim/internal.h. DEFINE_TYPE_PRED also emits an
+ * argv-ABI twin (fn_name##_argv) for fast-path dispatch;
+ * DEFINE_TYPE_PRED_NOARGV omits the twin for predicates whose argv form
+ * is never registered, so it does not become dead, unused code. */
+#define DEFINE_TYPE_PRED_NOARGV(fn_name, pred_expr, label) \
+    static mino_val *fn_name(mino_state *S, mino_val *args, mino_env *env) \
     { \
         mino_val *v; \
         (void)env; \
@@ -394,8 +401,11 @@ mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
         } \
         v = args->as.cons.car; \
         return (pred_expr) ? mino_true(S) : mino_false(S); \
-    } \
-    mino_val *fn_name##_argv(mino_state *S, mino_val **argv, int argc, \
+    }
+
+#define DEFINE_TYPE_PRED(fn_name, pred_expr, label) \
+    DEFINE_TYPE_PRED_NOARGV(fn_name, pred_expr, label) \
+    static mino_val *fn_name##_argv(mino_state *S, mino_val **argv, int argc, \
                                mino_env *env) \
     { \
         mino_val *v; \
@@ -426,12 +436,14 @@ DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (mino_type_of(v) == MINO_CONS || 
 DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && mino_type_of(v) == MINO_BOOL),          "boolean?")
 DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && mino_type_of(v) == MINO_BOOL && mino_val_bool_get(v) != 0),  "true?")
 DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && mino_type_of(v) == MINO_BOOL && mino_val_bool_get(v) == 0),  "false?")
-DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && mino_type_of(v) == MINO_TYPE), "record-type?")
-DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && mino_type_of(v) == MINO_RECORD), "record?")
-DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && mino_type_of(v) == MINO_UUID),    "uuid?")
-DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && mino_type_of(v) == MINO_REGEX),   "regex?")
-DEFINE_TYPE_PRED(prim_bytes_p,       (v != NULL && mino_type_of(v) == MINO_BYTES && v->as.bytes.bit_tail == 0), "bytes?")
-DEFINE_TYPE_PRED(prim_bitstring_p,   (v != NULL && mino_type_of(v) == MINO_BYTES),   "bitstring?")
+/* These six predicates are never dispatched via the argv fast path, so
+ * NOARGV avoids emitting an unused argv twin. */
+DEFINE_TYPE_PRED_NOARGV(prim_record_type_p, (v != NULL && mino_type_of(v) == MINO_TYPE), "record-type?")
+DEFINE_TYPE_PRED_NOARGV(prim_record_p,      (v != NULL && mino_type_of(v) == MINO_RECORD), "record?")
+DEFINE_TYPE_PRED_NOARGV(prim_uuid_p,        (v != NULL && mino_type_of(v) == MINO_UUID),    "uuid?")
+DEFINE_TYPE_PRED_NOARGV(prim_regex_p,       (v != NULL && mino_type_of(v) == MINO_REGEX),   "regex?")
+DEFINE_TYPE_PRED_NOARGV(prim_bytes_p,       (v != NULL && mino_type_of(v) == MINO_BYTES && v->as.bytes.bit_tail == 0), "bytes?")
+DEFINE_TYPE_PRED_NOARGV(prim_bitstring_p,   (v != NULL && mino_type_of(v) == MINO_BYTES),   "bitstring?")
 
 #undef DEFINE_TYPE_PRED
 
