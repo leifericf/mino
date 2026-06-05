@@ -657,7 +657,7 @@ mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
             /* Convert to string. */
             mino_val *str_a = mino_cons(S, elem, mino_nil(S));
             mino_val *str   = prim_str(S, str_a, env);
-            if (str == NULL) return NULL;
+            if (str == NULL) { free(buf); return NULL; }
             part     = str->as.s.data;
             part_len = str->as.s.len;
         }

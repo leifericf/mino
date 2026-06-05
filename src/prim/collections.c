@@ -249,11 +249,13 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
                     size_t need = idx + (len - off);
                     size_t new_cap = cap ? cap : 16;
                     while (new_cap < need) new_cap *= 2;
-                    buf = (unsigned char *)realloc(buf, new_cap);
-                    if (buf == NULL) {
+                    unsigned char *nbuf = (unsigned char *)realloc(buf, new_cap);
+                    if (nbuf == NULL) {
+                        free(buf);
                         return prim_throw_classified(S, "internal", "MIN001",
                             "byte-array: out of memory");
                     }
+                    buf = nbuf;
                     cap = new_cap;
                 }
                 for (i = off; i < len; i++) {
@@ -289,11 +291,13 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
             }
             if (idx >= cap) {
                 size_t new_cap = cap ? cap * 2 : 16;
-                buf = (unsigned char *)realloc(buf, new_cap);
-                if (buf == NULL) {
+                unsigned char *nbuf = (unsigned char *)realloc(buf, new_cap);
+                if (nbuf == NULL) {
+                    free(buf);
                     return prim_throw_classified(S, "internal", "MIN001",
                         "byte-array: out of memory");
                 }
+                buf = nbuf;
                 cap = new_cap;
             }
             buf[idx++] = (unsigned char)(bv & 0xff);
