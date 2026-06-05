@@ -128,15 +128,16 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Parallel validation: cross-compile the Linux + Windows binaries
-  # from ONE Linux host with the pinned zig cc and smoke-test them.
-  # This runs ALONGSIDE the native `build` matrix above -- it does not
-  # replace it and does not feed the published artifacts (publish-draft
-  # needs: build only). It proves the optional `cross-build` path keeps
-  # working and guards the property that retires the Windows -static
-  # hack: the cross-built PE must not import the mingw runtime DLLs.
-  # macOS is absent on purpose (Zig bundles no macOS SDK; darwin stays
-  # a native build).
+  # Parallel validation: cross-compile the Linux (musl-static +
+  # glibc-canary) and Windows binaries from ONE Linux host with the
+  # pinned zig cc and smoke-test them. This runs ALONGSIDE the native
+  # `build` matrix above -- it does not replace it and does not feed the
+  # published artifacts (publish-draft needs: build only). It proves the
+  # optional `cross-build` path keeps working and guards two properties:
+  # the musl Linux artifacts are fully static (zero NEEDED), and the
+  # cross-built Windows PE imports no mingw runtime DLLs (retiring the
+  # -static hack). macOS is absent on purpose (Zig bundles no macOS SDK;
+  # darwin stays a native build).
   cross-build-validate:
     name: cross-build-validate (linux host -> linux+windows)
     runs-on: ubuntu-24.04
@@ -158,20 +159,39 @@ jobs:
       - name: Cross-build Linux + Windows
         run: ./mino task cross-build
 
-      - name: Smoke test linux-amd64 (runs natively)
+      - name: Smoke test linux-amd64 musl (runs natively, static)
+        # The musl + -static binary is the published standalone artifact.
+        # It runs natively on the x86_64 runner; the cross-build task
+        # already asserted 0 NEEDED, re-assert here as the release gate.
         run: |
-          ./dist-cross/mino_linux_amd64 --version
-          out=$(./dist-cross/mino_linux_amd64 -e '(+ 1 2)')
-          [ "$out" = "3" ] || { echo "linux-amd64 smoke failed: got '$out'" >&2; exit 1; }
+          ./dist-cross/mino_linux_amd64_musl --version
+          out=$(./dist-cross/mino_linux_amd64_musl -e '(+ 1 2)')
+          [ "$out" = "3" ] || { echo "linux-amd64-musl smoke failed: got '$out'" >&2; exit 1; }
+          if readelf -d ./dist-cross/mino_linux_amd64_musl | grep -q 'NEEDED'; then
+            echo "linux-amd64-musl is not statically linked" >&2; exit 1
+          fi
+          echo "linux-amd64-musl: static + runs OK"
 
-      - name: Sanity-check linux-arm64 object format
+      - name: Sanity-check linux-arm64 musl object format + static
         # The x86_64 runner can't execute the arm64 binary without an
-        # emulator; assert it's a well-formed AArch64 ELF. Native
-        # execution smoke is covered by the linux-arm64 matrix entry.
+        # emulator; assert it's a well-formed, statically linked AArch64
+        # ELF. Native execution smoke is covered by the linux-arm64
+        # matrix entry.
         run: |
-          readelf -h ./dist-cross/mino_linux_arm64 | grep -q 'AArch64' \
-            || { echo "linux-arm64 is not an AArch64 ELF" >&2; exit 1; }
-          echo "linux-arm64: AArch64 ELF OK"
+          readelf -h ./dist-cross/mino_linux_arm64_musl | grep -q 'AArch64' \
+            || { echo "linux-arm64-musl is not an AArch64 ELF" >&2; exit 1; }
+          if readelf -d ./dist-cross/mino_linux_arm64_musl | grep -q 'NEEDED'; then
+            echo "linux-arm64-musl is not statically linked" >&2; exit 1
+          fi
+          echo "linux-arm64-musl: static AArch64 ELF OK"
+
+      - name: Smoke test linux-amd64 glibc canary (runs natively)
+        # The glibc build is a build-only portability canary (not
+        # published); confirm it still links and runs.
+        run: |
+          out=$(./dist-cross/mino_linux_amd64 -e '(+ 1 2)')
+          [ "$out" = "3" ] || { echo "linux-amd64 glibc smoke failed: got '$out'" >&2; exit 1; }
+          echo "linux-amd64 glibc canary: runs OK"
 
       - name: Assert Windows PE has no mingw runtime-DLL dependency
         # The whole point of the zig/mingw path vs the Makefile -static

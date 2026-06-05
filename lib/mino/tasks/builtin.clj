@@ -293,57 +293,108 @@
   "Tier-2 cross-compile targets. macOS is intentionally absent: Zig
    bundles no macOS SDK, so the full runtime (which links libSystem)
    cannot cross-compile to darwin from Linux -- darwin stays a native
-   release build. Windows links via mingw WITHOUT -static: zig's mingw
-   links the compiler runtime statically by default, so the PE has no
+   release build.
+
+   Linux ships in two flavors from the same host:
+     * musl + -static (`:static true`, `:publish true`) -- the
+       zero-dependency standalone artifact. A single file that runs on
+       any Linux (glibc, musl/Alpine, old or new) with nothing to
+       install. This is what releases publish. Unblocked by the
+       portable crash handler (see src/runtime/crash_backtrace.h): musl
+       ships no <execinfo.h>.
+     * glibc (`:static false`, `:publish false`) -- kept build-only as
+       a portability canary and for embedders who prefer a dynamically
+       linked glibc binary. Not published; the musl build is the
+       standalone download.
+
+   Windows links via mingw WITHOUT -static: zig's mingw links the
+   compiler runtime statically by default, so the PE has no
    libgcc_s_seh-1.dll / libwinpthread-1.dll dependency, retiring the
-   Makefile's -static hack."
-  [{:platform "linux-amd64"   :triple "x86_64-linux-gnu"
-    :libs ["-lm" "-lpthread"] :exe ""}
-   {:platform "linux-arm64"   :triple "aarch64-linux-gnu"
-    :libs ["-lm" "-lpthread"] :exe ""}
-   {:platform "windows-amd64" :triple "x86_64-windows-gnu"
-    :libs ["-lm"]             :exe ".exe"}])
+   Makefile's -static hack. Published.
+
+   musl folds pthread into libc, so the musl targets need only -lm; the
+   glibc targets link -lpthread explicitly."
+  [{:platform "linux-amd64-musl" :triple "x86_64-linux-musl"
+    :libs ["-lm"]                :exe "" :static true  :publish true}
+   {:platform "linux-arm64-musl" :triple "aarch64-linux-musl"
+    :libs ["-lm"]                :exe "" :static true  :publish true}
+   {:platform "linux-amd64"      :triple "x86_64-linux-gnu"
+    :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
+   {:platform "linux-arm64"      :triple "aarch64-linux-gnu"
+    :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
+   {:platform "windows-amd64"    :triple "x86_64-windows-gnu"
+    :libs ["-lm"]                :exe ".exe" :static false :publish true}])
 
 (defn- cross-build-one
   "Cross-compile one target in a single `zig cc` invocation (compile +
    link all sources at once, like the Makefile bootstrap line). Output
    lands under dist-cross/ with a per-platform name, so cross objects
    never collide with the native build's src/*.o."
-  [{:keys [platform triple libs exe]}]
+  [{:keys [platform triple libs exe static]}]
   (let [out-dir "dist-cross"
         bin     (str out-dir "/mino_" (str/replace platform "-" "_") exe)
         args    (concat stencil-cc
                         cross-cflags
                         (str/split include-flags " ")
                         [(str "--target=" triple)]
+                        (if static ["-static"] [])
                         ["-o" bin]
                         all-srcs
                         libs
                         ;; zig's libunwind supplies _Unwind_Backtrace /
                         ;; _Unwind_GetIP for the portable crash handler.
                         ;; Uniform across every cross target (gnu Linux,
-                        ;; arm64, mingw); the native make+cc build never
-                        ;; needs it since the system unwinder is implicit.
+                        ;; musl static, arm64, mingw); the native make+cc
+                        ;; build never needs it since the system unwinder
+                        ;; is implicit.
                         ["-lunwind"])]
     (sh! "mkdir" "-p" out-dir)
     (println (str "  " (str/join " " args)))
     (apply sh! args)
     (println (str "  cross-build -> " bin))))
 
+(defn- verify-cross-static
+  "Assert each :static cross target produced a binary with no dynamic
+   dependencies (no ELF NEEDED entries) -- the property that makes the
+   musl artifact a true zero-dependency standalone download. readelf
+   reads ELF headers without executing, so both the amd64 and arm64
+   musl binaries are checked on any host arch. Skipped with a note when
+   readelf is unavailable (e.g. a non-Linux maintainer host); CI's
+   cross-build-validate runs on ubuntu where readelf is present."
+  []
+  (if-not (= 0 (get (sh "readelf" "--version") :exit))
+    (println (str "  verify-cross-static: readelf unavailable -- "
+                  "skipping static-link assertion"))
+    (doseq [{:keys [platform exe static]} cross-targets
+            :when static]
+      (let [bin (str "dist-cross/mino_" (str/replace platform "-" "_") exe)
+            out (str (get (sh "readelf" "-d" bin) :out))]
+        (when (re-find #"\(NEEDED\)" out)
+          (throw (ex-info (str "verify-cross-static: " bin " has dynamic "
+                               "dependencies -- expected a fully static "
+                               "musl binary")
+                          {:platform platform})))
+        (println (str "  verify-cross-static: " bin
+                      " is fully static (0 NEEDED) OK"))))))
+
 (defn cross-build
-  "Cross-compile the mino release binaries for Linux (amd64/arm64) and
-   Windows (amd64) from one host using the pinned `zig cc`. Optional
-   maintainer/release task -- `make` + `cc` stays canonical and this is
-   never required to build mino. Each binary mirrors the native `make`
-   config, so it matches the corresponding native-matrix artifact, with
-   one improvement: the Windows build carries no runtime-DLL dependency
-   (no -static hack). macOS is absent on purpose; see `cross-targets`.
-   Run gen-core-header / gen-stdlib-headers first if the bundled-source
-   headers are missing (the task deps handle this)."
+  "Cross-compile the mino release binaries from one host using the
+   pinned `zig cc`. Produces, into dist-cross/:
+     * Linux amd64/arm64 musl + -static -- the zero-dependency
+       standalone artifacts releases publish;
+     * Linux amd64/arm64 glibc -- build-only portability canaries;
+     * Windows amd64 -- mingw PE with no runtime-DLL dependency.
+   Optional maintainer/release task -- `make` + `cc` stays canonical
+   and this is never required to build or embed mino. macOS is absent
+   on purpose; see `cross-targets`. After building, asserts the static
+   targets really are dependency-free. Run gen-core-header /
+   gen-stdlib-headers first if the bundled-source headers are missing
+   (the task deps handle this)."
   []
   (check-zig-version)
   (doseq [t cross-targets]
     (cross-build-one t))
+  (verify-cross-static)
   (println "  cross-build: OK"))
 
 ;; ---- Amalgamation ----
