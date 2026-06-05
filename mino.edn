@@ -59,6 +59,9 @@
   test-zig        {:doc  "Hermetic compile+test: build with pinned zig cc and run the full suite"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/test-zig}
+  build-debug-zig {:doc  "Dev debug binary via pinned zig cc -O0 -g -> ./mino_debug (UBSan-trap by default)"
+                   :deps [gen-core-header gen-stdlib-headers]
+                   :task mino.tasks.builtin/build-debug-zig}
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/cross-build}

@@ -16,6 +16,9 @@ bin/
 /mino_ubsan_zig
 /mino_tsan_zig
 /mino_zig
+/mino_debug
+/mino_jit_host
+/mino_jit_host_lean
 /mino_prof
 /mino_opcounts
 /mino-lean

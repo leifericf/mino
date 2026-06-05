@@ -24,6 +24,7 @@ The maintainer tasks that require the pinned `zig cc`:
 | `cross-build` (alias `release-cross`) | cross-compile the Linux + Windows release artifacts |
 | `build-all` | build every target (native + cross) from one host |
 | `sanitize-zig` | reproducible UBSan + TSan suite run, JIT-enabled, in auto and eager JIT mode |
+| `build-debug-zig` | dev binary at `zig cc -O0 -g` → `./mino_debug`; zig's default UBSan-trap aborts at the faulting instruction on UB |
 | `test-jit-host` | per-host JIT runtime canary: build the dormant JIT pipeline this machine can execute (plus a lean twin), full suite auto + eager, four-way parity |
 | `lint-zig` | curated strict-warning lane (a third compiler lens) |
 | `analyze-zig` | clang static-analyzer report (advisory, full output) |

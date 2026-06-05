@@ -669,6 +669,9 @@
   (when (file-exists? "mino_ubsan_zig") (rm-rf "mino_ubsan_zig"))
   (when (file-exists? "mino_tsan_zig")  (rm-rf "mino_tsan_zig"))
   (when (file-exists? "mino_zig")       (rm-rf "mino_zig"))
+  (when (file-exists? "mino_debug")     (rm-rf "mino_debug"))
+  (when (file-exists? "mino_jit_host")      (rm-rf "mino_jit_host"))
+  (when (file-exists? "mino_jit_host_lean") (rm-rf "mino_jit_host_lean"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
   (doseq [[_ _ c-symbol] bundled-stdlib]
@@ -1084,6 +1087,33 @@
   []
   (build-zig)
   (println (sh! "./mino_zig" "tests/run.clj")))
+
+(defn build-debug-zig
+  "Developer debug binary: compile mino with the pinned `zig cc` at
+   -O0 -g into ./mino_debug. At -O0 zig cc enables its
+   undefined-behaviour sanitizer in TRAP mode by default (no runtime
+   library, no flags needed), so the daily dev binary aborts at the
+   faulting instruction on signed overflow, OOB shift, misaligned
+   load, and the rest of the UBSan class -- a zero-config complement
+   to build-asan for catching UB while iterating. Not a CI lane: the
+   reproducible UBSan gate is sanitize-zig (which runs the suite under
+   -fsanitize=undefined). JIT-enabled for the host arch so the native
+   tier is exercised under the traps too. Run `./mino_debug <script>`
+   as you would `./mino`."
+  []
+  (check-zig-version)
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (let [args (concat stencil-cc
+                     ["-std=c99" "-O0" "-g" "-funwind-tables"]
+                     (jit-enable-flags)
+                     (str/split include-flags " ")
+                     ["-o" "mino_debug"]
+                     all-srcs
+                     (if windows? ["-lm"] ["-lm" "-lunwind"]))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println "  build-debug-zig -> ./mino_debug (zig -O0 UBSan-trap)")))
 
 (defn build-lean
   "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes
