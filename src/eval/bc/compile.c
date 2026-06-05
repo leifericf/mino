@@ -3017,18 +3017,18 @@ static int compile_fn_literal(compiler_t *c, mino_val *form, int dst, int tail)
         mino_val *body_form = body->as.cons.car;
         if (mino_is_cons(body_form)) {
             mino_val *head = body_form->as.cons.car;
-            mino_val *tail = body_form->as.cons.cdr;
+            mino_val *body_tail = body_form->as.cons.cdr;
             mino_val *param_sym = vec_nth(params, 0);
-            if (mino_is_cons(tail)
-                && (tail->as.cons.cdr == NULL
-                    || mino_is_nil(tail->as.cons.cdr)
-                    || (mino_type_of(tail->as.cons.cdr) == MINO_EMPTY_LIST))
-                && tail->as.cons.car != NULL
-                && mino_type_of(tail->as.cons.car) == MINO_SYMBOL
+            if (mino_is_cons(body_tail)
+                && (body_tail->as.cons.cdr == NULL
+                    || mino_is_nil(body_tail->as.cons.cdr)
+                    || (mino_type_of(body_tail->as.cons.cdr) == MINO_EMPTY_LIST))
+                && body_tail->as.cons.car != NULL
+                && mino_type_of(body_tail->as.cons.car) == MINO_SYMBOL
                 && param_sym != NULL
                 && mino_type_of(param_sym) == MINO_SYMBOL
-                && tail->as.cons.car->as.s.len == param_sym->as.s.len
-                && memcmp(tail->as.cons.car->as.s.data,
+                && body_tail->as.cons.car->as.s.len == param_sym->as.s.len
+                && memcmp(body_tail->as.cons.car->as.s.data,
                           param_sym->as.s.data,
                           param_sym->as.s.len) == 0) {
                 mino_val *resolved = probe_head_value(c, head);
@@ -4061,10 +4061,10 @@ static int compile_call_impl(compiler_t *c, mino_val *form, int dst, int tail)
     {
         const pure_prim_t *pp = should_fold_call(c, head);
         if (pp != NULL) {
-            int r = try_fold_call(c, form, dst, pp);
-            if (r == 0)  return 0;
-            if (r < 0)   return -1;
-            /* r == 1: decline -- fall through to normal emit path. */
+            int fold_r = try_fold_call(c, form, dst, pp);
+            if (fold_r == 0)  return 0;
+            if (fold_r < 0)   return -1;
+            /* fold_r == 1: decline -- fall through to normal emit path. */
         }
     }
 

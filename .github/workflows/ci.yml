@@ -247,6 +247,31 @@ jobs:
         run: ./mino task sanitize-zig
         timeout-minutes: 15
 
+  lint-zig:
+    name: lint-zig (pinned zig strict warnings)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Curated strict-warning lint (third compiler lens)
+        # Compiles every mino-authored TU under -Werror over a curated
+        # strict warning set with zig's newer clang -- catching issues
+        # the gcc/Apple-clang matrix does not flag. Compile-only.
+        run: ./mino task lint-zig
+        timeout-minutes: 10
+
   # Portability canary: compile the amalgamated single-file source with
   # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
   # matrix) nor clang (macOS matrix, zig) represents. continue-on-error

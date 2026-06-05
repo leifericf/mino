@@ -1097,7 +1097,7 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
         form = forced;
         if (mino_type_of(form) != MINO_CHUNKED_CONS) return form;
     }
-    /* fallthrough */
+    MINO_FALLTHROUGH; /* into CHUNKED_CONS handling below */
     case MINO_CHUNKED_CONS: {
         mino_val *as_cons = val_to_seq(S, form);
         if (as_cons == NULL) return NULL;

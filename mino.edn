@@ -34,6 +34,9 @@
                    :task mino.tasks.builtin/build-tsan-zig}
   sanitize-zig    {:doc  "Reproducible pinned-zig sanitizer lane: UBSan + TSan suite run"
                    :task mino.tasks.builtin/sanitize-zig}
+  lint-zig        {:doc  "Curated strict-warning lint lane via pinned zig cc (third compiler lens)"
+                   :deps [gen-core-header gen-stdlib-headers]
+                   :task mino.tasks.builtin/lint-zig}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"

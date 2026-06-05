@@ -718,6 +718,58 @@
   (println (sh! "./mino_tsan_zig" "tests/run.clj"))
   (println "  sanitize-zig: OK"))
 
+;; ---- Curated strict warning lane (pinned zig cc) ----
+
+(def ^:private lint-zig-warnings
+  "Curated strict warning set for the pinned-zig lint lane -- high-signal
+   warnings beyond the build's -Wall -Wextra -Wpedantic that mino's own
+   code passes cleanly under zig's newer clang. The set is deliberately
+   curated, NOT -Weverything; these categories are EXCLUDED on purpose:
+
+     -Wmissing-field-initializers : `{0}` / partial-brace zero-init is
+       correct C and the prim tables ({\"name\", fn, \"doc\"}, fn2 left
+       zero) rely on it. The native build already suppresses this.
+     -Wswitch-enum : the VM/dispatch switches carry an intentional
+       `default:` arm; the valuable variant (-Wswitch, fires only when a
+       switch has no default AND misses cases) stays on via -Wall.
+     -Wmissing-prototypes, -Wcast-qual, -Wbad-function-cast : real
+       signal, but resolving them needs per-symbol cross-TU analysis
+       (some non-static functions should be static -- over-exported
+       internal symbols matter for an embeddable library). Deferred to
+       the C99 bloat/over-export audit, not gated here as churn.
+     -Wformat-nonliteral, -Wdouble-promotion : low signal for an IO /
+       numeric library (computed format strings, deliberate float math).
+
+   -O2 -DMINO_CPJIT=1 mirror the real build: zig cc enables UBSan-style
+   safety checks by default at -O0, which flips __has_feature(...) and
+   produces spurious unreachable-code findings in sanitizer-gated code."
+  ["-Wno-missing-field-initializers"
+   "-Wshadow" "-Wstrict-prototypes" "-Wmissing-variable-declarations"
+   "-Wpointer-arith" "-Wwrite-strings" "-Wundef" "-Wvla"
+   "-Wimplicit-fallthrough" "-Wcomma" "-Wunreachable-code"
+   "-Wnested-externs" "-Wredundant-decls"
+   "-Wformat=2" "-Wno-format-nonliteral"])
+
+(defn lint-zig
+  "Strict-warning lint lane: compile every mino-authored TU with the
+   pinned `zig cc` (a third compiler lens beyond the gcc/Apple-clang CI
+   matrix) under -Werror over the curated `lint-zig-warnings` set.
+   Vendored src/vendor/ is excluded -- upstream style is not mino's to
+   gate. Compile-only (-c, output discarded); nothing is linked."
+  []
+  (check-zig-version)
+  (let [own-srcs (remove #(str/includes? % "vendor/") all-srcs)
+        null-obj (if windows? "NUL" "/dev/null")
+        base     (concat stencil-cc
+                         ["-std=c99" "-O2" "-DMINO_CPJIT=1"
+                          "-Wall" "-Wextra" "-Wpedantic" "-Werror"]
+                         lint-zig-warnings
+                         (str/split include-flags " "))]
+    (doseq [tu own-srcs]
+      (apply sh! (concat base ["-c" "-o" null-obj tu])))
+    (println (str "  lint-zig: " (count own-srcs)
+                  " TUs clean under the curated strict set"))))
+
 (defn build-lean
   "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes
    through the bytecode interpreter; the JIT pipeline compiles to a

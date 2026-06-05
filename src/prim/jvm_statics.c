@@ -460,7 +460,7 @@ static const mino_prim_def k_prims_jvm_statics[] = {
      "Parses a UUID from its canonical string form."},
 };
 
-const size_t k_prims_jvm_statics_count =
+static const size_t k_prims_jvm_statics_count =
     sizeof(k_prims_jvm_statics) / sizeof(k_prims_jvm_statics[0]);
 
 void mino_install_jvm_statics(mino_state *S, mino_env *env)

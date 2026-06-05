@@ -1655,7 +1655,7 @@ mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
 
 /* --- primitive table + install hook -------------------------------------- */
 
-const mino_prim_def k_prims_agent[] = {
+static const mino_prim_def k_prims_agent[] = {
     {"agent",       prim_agent,
      "Creates an asynchronous agent holding the given initial state. "
      "Mutate via send / send-off; read via @agent. The action runs "
@@ -1715,7 +1715,7 @@ const mino_prim_def k_prims_agent[] = {
      "transaction returns 0."},
 };
 
-const size_t k_prims_agent_count = sizeof(k_prims_agent)
+static const size_t k_prims_agent_count = sizeof(k_prims_agent)
                                     / sizeof(k_prims_agent[0]);
 
 void mino_install_agent(mino_state *S, mino_env *env)
