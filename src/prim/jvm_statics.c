@@ -298,9 +298,9 @@ static mino_val *prim_character_to_string(mino_state *S, mino_val *args,
 /* JVM contract: Integer/toBinaryString and Long/toBinaryString format
  * the argument as an unsigned 64-bit two's-complement bit string. For
  * positive longs this is just base-2; for negative longs it's the
- * 64-bit pattern (e.g. -1 -> "1111…1111", 64 ones). The
- * Integer/* shape matches Long/* on mino because mino has one integer
- * tier; calling either with an out-of-range bigint throws. */
+ * 64-bit pattern (e.g. -1 -> "1111…1111", 64 ones). The Integer and
+ * Long shapes match on mino because mino has one integer tier;
+ * calling either with an out-of-range bigint throws. */
 static mino_val *prim_int_to_radix_string(mino_state *S, mino_val *args,
                                             mino_env *env,
                                             const char *fn_name,
@@ -506,8 +506,8 @@ static const mino_prim_def k_prims_jvm_statics[] = {
     {"Character/toString",    prim_character_to_string,
      "JVM Character.toString; routes to mino's str."},
 
-    /* Layer 1 -- radix-string formatters. Integer/* and Long/* share
-     * the implementation; mino has one integer tier. */
+    /* Layer 1 -- radix-string formatters. The Integer and Long entries
+     * share the implementation; mino has one integer tier. */
     {"Integer/toBinaryString", prim_int_to_binary_string,
      "JVM Integer.toBinaryString; unsigned base-2 digit string."},
     {"Integer/toHexString",    prim_int_to_hex_string,
