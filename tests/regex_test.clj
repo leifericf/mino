@@ -123,7 +123,16 @@
            (re-matches #"(\d{4})-(\d{2})-(\d{2})" "2026-05-17")))
     (is (nil? (re-matches #"(\d{4})-(\d{2})-(\d{2})" "26-05-17"))))
   (testing "literal { without digits stays a literal char"
-    (is (= "{abc}" (re-find #"\{abc\}" "x{abc}y")))))
+    (is (= "{abc}" (re-find #"\{abc\}" "x{abc}y"))))
+  (testing "overlong repetition count does not overflow the parser"
+    ;; Regression (found by the mino-bench regex fuzz target under
+    ;; UBSan): a count past INT_MAX like {9999999999} overflowed the
+    ;; signed accumulator while parsing, before the post-loop 255
+    ;; clamp. The loop now saturates at the clamp, so a huge count is
+    ;; treated as 255 (no UB, no crash).
+    (is (nil? (re-find (re-pattern "a{9999999999}") "aaa")))
+    (is (nil? (re-find (re-pattern "a{1,9999999999}") "")))
+    (is (= "aaa" (re-find (re-pattern "a{1,9999999999}") "aaa")))))
 
 (deftest re-inline-flags
   ;; Regression: real Clojure regex supports JVM-style inline flags

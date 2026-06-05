@@ -405,7 +405,12 @@ re_t re_compile(const char* pattern)
         }
         while (pattern[i] >= '0' && pattern[i] <= '9')
         {
-          min_v = min_v * 10 + (pattern[i] - '0');
+          /* Saturate at the eventual clamp (255) instead of letting the
+           * accumulator overflow: a pathological count like {9999999999}
+           * would otherwise wrap a signed int (UB). The post-loop clamp
+           * caps the bound at 255 regardless, so stopping early is
+           * behaviour-preserving for every in-range count. */
+          if (min_v <= 255) min_v = min_v * 10 + (pattern[i] - '0');
           i++;
         }
         if (pattern[i] == ',')
@@ -419,7 +424,7 @@ re_t re_compile(const char* pattern)
           {
             while (pattern[i] >= '0' && pattern[i] <= '9')
             {
-              max_v = max_v * 10 + (pattern[i] - '0');
+              if (max_v <= 255) max_v = max_v * 10 + (pattern[i] - '0');
               i++;
             }
             has_max = 1;
