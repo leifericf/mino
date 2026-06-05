@@ -2,9 +2,12 @@
  * eval/bc/state.h -- per-state bytecode-VM block.
  *
  * Holds the BC register stack (bc_regs / bc_regs_cap / bc_top) plus
- * the optional pointer-tagged-int profile counters. bc_regs sits at
- * the stencil-ABI-pinned offset 47888 inside mino_state; the
- * embedded sub-struct is placed so the absolute offset is byte-stable.
+ * the optional pointer-tagged-int profile counters. bc_regs is a
+ * stencil-ABI anchor read by stencil bytes at the fixed offset
+ * pinned in stencils/runtime_layout.h; the block sits first in
+ * mino_state's POD-only head ahead of any libc-defined type, so the
+ * offset is identical across all JIT targets. Keep every member of
+ * this struct libc-free POD.
  *
  * Internal to the runtime; embedders should only use mino.h.
  */
@@ -22,7 +25,7 @@ typedef struct bc_vm_state {
      * n_regs slots, a fn exit pops them. Every slot in [0, bc_top) is
      * a live GC root walked by gc_mark_roots. Allocated lazily on
      * first compile + run; NULL until then. */
-    mino_val    **bc_regs;          /* stencil-ABI-pinned offset 47888 */
+    mino_val    **bc_regs;          /* stencil-ABI anchor (runtime_layout.h) */
     size_t          bc_regs_cap;
     size_t          bc_top;
 

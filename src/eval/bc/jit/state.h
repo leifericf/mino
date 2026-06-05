@@ -3,9 +3,11 @@
  *
  * Holds the JIT executable-region list, the active JIT-invoke ctx,
  * the per-state JIT mode (AUTO / OFF / ON), and the hot threshold.
- * jit_invoke_ctx sits at the stencil-ABI-pinned offset 47936 inside
- * mino_state; the embedded sub-struct is placed so the absolute
- * offset is byte-stable.
+ * jit_invoke_ctx is a stencil-ABI anchor read by stencil bytes at
+ * the fixed offset pinned in stencils/runtime_layout.h; the block
+ * sits in mino_state's POD-only head ahead of any libc-defined
+ * type, so the offset is identical across all JIT targets. Keep
+ * every member of this struct libc-free POD.
  *
  * Internal to the runtime; embedders should only use mino.h.
  */
@@ -27,7 +29,7 @@ typedef struct jit_state {
      * jumps into native code and restored on return. Lets stencil-
      * emitted code reach the calling thread's ctx via a single
      * fixed-offset load from S. NULL outside an active JIT region. */
-    struct mino_thread_ctx *jit_invoke_ctx;  /* stencil-ABI-pinned offset 47936 */
+    struct mino_thread_ctx *jit_invoke_ctx;  /* stencil-ABI anchor (runtime_layout.h) */
 
     /* Per-state JIT mode: AUTO (default) / OFF / ON. */
     int             jit_mode;

@@ -3,17 +3,9 @@
  *
  * gc_state_t holds the per-state mark/sweep machinery: generation
  * lists, range index, mark stack, remembered set, threshold and
- * tuning knobs, and the optional event ring. It is embedded inside
- * mino_state at the byte position the inline gc_* fields used to
- * occupy, preserving every downstream offset (including the
- * stencil-ABI-pinned sf_*, ic_gen, bc_regs, jit_invoke_ctx).
- *
- * The secondary instrumentation cluster (per-phase timers, pause
- * ring, barrier counters, alloc-by-tag histogram) stays inline in
- * mino_state past the JIT-pinned region. That cluster sits past
- * jit_hot_threshold by design: the runtime_layout.h offset
- * constants the stencil bytes depend on do not shift even when new
- * instrumentation lands there.
+ * tuning knobs, and the optional event ring. The secondary
+ * instrumentation cluster (per-phase timers, pause ring, barrier
+ * counters, alloc-by-tag histogram) stays inline in mino_state.
  *
  * Internal to the runtime; embedders should only use mino.h.
  */

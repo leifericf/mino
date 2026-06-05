@@ -86,6 +86,34 @@
 /* ------------------------------------------------------------------------- */
 
 struct mino_state {
+    /* === Stencil-ABI anchor blocks ===================================== */
+    /* The JIT's stencil byte tables read three fields of this struct
+     * at fixed offsets baked into the committed per-target headers
+     * (src/eval/bc/stencils/runtime_layout.h): bc.bc_regs,
+     * ns_vars.ic_gen, and jit.jit_invoke_ctx. These three blocks sit
+     * at the head of the struct, ahead of main_ctx and every other
+     * member, because everything inside them and ahead of them is
+     * mino-defined POD (pointers, size_t, unsigned) -- so the anchor
+     * offsets are identical on every JIT target and libc pairing
+     * (Apple libc, glibc, musl, mingw). main_ctx embeds jmp_buf
+     * arrays and other blocks embed pthread types, whose sizes vary
+     * per target; nothing libc-defined may ever precede these blocks.
+     * The layout asserts in eval/bc/jit/entry.c verify each pinned
+     * offset against offsetof() on every JIT-enabled host build. */
+
+    /* Bytecode-VM state lives in src/eval/bc/state.h. bc.bc_regs is
+     * a stencil-ABI anchor (offset pinned in runtime_layout.h). */
+    bc_vm_state_t   bc;
+
+    /* Namespaces, vars, host interop. Lives in
+     * src/runtime/ns_vars_state.h. ns_vars.ic_gen is a stencil-ABI
+     * anchor (offset pinned in runtime_layout.h). */
+    ns_vars_state_t ns_vars;
+
+    /* JIT state lives in src/eval/bc/jit/state.h. jit.jit_invoke_ctx
+     * is a stencil-ABI anchor (offset pinned in runtime_layout.h). */
+    jit_state_t     jit;
+
     /* Per-thread context.
      *
      * `main_ctx` is the embedded ctx for the OS thread that owns S
@@ -195,26 +223,6 @@ struct mino_state {
     /* Error reporting state moved to mino_thread_ctx_t (error_buf,
      * call_stack, call_depth, trace_added, last_diag). */
 
-    /* === Namespaces, vars, host interop ================================ */
-    /* Lives in src/runtime/ns_vars_state.h. The block is embedded at
-     * the byte position the inline current_ns / ns_* / var_* /
-     * ic_table / ic_gen / transient_owner_next / var_hash fields
-     * used to occupy. ic_gen sits at the stencil-ABI-pinned offset
-     * 47856; the embedded layout preserves it (verified by the
-     * static_assert in eval/bc/jit/entry.c). */
-    ns_vars_state_t ns_vars;
-
-    /* Bytecode-VM state lives in src/eval/bc/state.h. The block is
-     * embedded at the byte position the inline bc_* fields used to
-     * occupy. bc_regs sits at the stencil-ABI-pinned offset 47888. */
-    bc_vm_state_t   bc;
-
-    /* JIT state lives in src/eval/bc/jit/state.h. The block is
-     * embedded at the byte position the inline jit_* fields used to
-     * occupy. jit_invoke_ctx sits at the stencil-ABI-pinned offset
-     * 47936. */
-    jit_state_t     jit;
-
     /* === Instrumentation: per-phase GC timers ============================
      *
      * Cumulative ns since state creation. gc_minor_mark_ns counts time
@@ -250,8 +258,7 @@ struct mino_state {
      * parent's dirty bit is cleared and gc_remset_reset drops it. The
      * resulting multi-cycle remset retention covers the window where a
      * raised promotion_age delays the children's own promotion past the
-     * one-cycle safety net the promotion-side add provides. Past
-     * jit_hot_threshold so stencil offsets are unaffected. */
+     * one-cycle safety net the promotion-side add provides. */
     unsigned char   gc_remset_walker_active;
     unsigned char   gc_remset_walker_young_seen;
 
@@ -412,11 +419,9 @@ struct mino_state {
     long            fi_raw_countdown;
 
     /* === Host-thread runtime: grant, knobs, lock, futures, STW ========= */
-    /* Lives in src/runtime/threading_state.h. The block is embedded
-     * at the byte position the inline host-thread fields used to
-     * occupy. The threading cluster sits past every stencil-ABI- and
-     * JIT-pinned offset, so the extraction has no effect on the
-     * runtime_layout.h constants. */
+    /* Lives in src/runtime/threading_state.h. Embeds pthread types,
+     * so it must stay below the stencil-ABI anchor blocks at the
+     * struct head. */
     threading_state_t threading;
 
 
@@ -440,10 +445,7 @@ struct mino_state {
     /* Reader recursion depth. Bumped on every read_form entry,
      * checked against MINO_READER_MAX_DEPTH so pathological
      * input ('(' repeated 30k+ times) emits MRE011 instead of
-     * stack-overflowing the embedder. Placed at the end of the
-     * struct to keep the JIT's pinned offsets (ic_gen, bc_regs,
-     * jit_invoke_ctx, etc. in src/eval/bc/stencils/runtime_layout.h)
-     * stable across this addition. */
+     * stack-overflowing the embedder. */
     int             reader_depth;
 
     /* Alloc-source counters: every gc_alloc_raw call increments exactly
@@ -451,8 +453,7 @@ struct mino_state {
      * calloc_size_class_miss = size matches a freelist class but the
      * list was empty (so we calloc'd a fresh header); calloc_no_class =
      * size has no freelist class at all (so we calloc by definition).
-     * Used by (gc-stats) for allocator-source profiling. Placed at the
-     * end alongside reader_depth to keep JIT-pinned offsets stable. */
+     * Used by (gc-stats) for allocator-source profiling. */
     size_t          gc_alloc_freelist_hits;
     size_t          gc_alloc_calloc_size_class_miss;
     size_t          gc_alloc_calloc_no_class;
@@ -486,10 +487,7 @@ struct mino_state {
      * mino_bc_run publishes them right before invoking the JIT so the
      * resume dispatch can pass them as the saved_* args to
      * bc_run_dispatch_from -- matching the bounds-check semantics the
-     * interpreter path would use for the same body.
-     *
-     * Placed at the very tail to preserve JIT-pinned offsets for
-     * ic_gen, bc_regs, jit_invoke_ctx (runtime_layout.h). */
+     * interpreter path would use for the same body. */
     size_t                   jit_deopt_pc;
     int                      jit_deopt_pending;
     int                      jit_resume_saved_try_depth;
@@ -502,8 +500,7 @@ struct mino_state {
      * (slab_size - aggregate-slot-bytes) per slab. Slabs are RX-
      * sealed between compiles and RW-flipped for the duration of
      * each fill via mprotect; mino_jit_slab_alloc/seal manage the
-     * cycle. Tail-placed so the runtime_layout.h JIT-pinned offsets
-     * stay stable. */
+     * cycle. */
     struct mino_jit_slab    *jit_slabs;
 
     /* Per-tag GC dispatch tables. Tracer at gc_tracers[tag] handles
@@ -515,12 +512,10 @@ struct mino_state {
     gc_tracer_fn             gc_tracers[GC_T__COUNT];
     gc_finalizer_fn          gc_finalizers[GC_T__COUNT];
 
-    /* Cached *print-length* / *print-level* resolved values. Tail-
-     * placed so the JIT-pinned offsets (ic_gen, bc_regs,
-     * jit_invoke_ctx) earlier in the struct stay byte-stable across
-     * this addition. -1 = unset (no limit). Resolved once per top-
-     * level pr / print / pr-str call; helpers consult these inline so
-     * dynvar lookup costs once per call, not per value walked. */
+    /* Cached *print-length* / *print-level* resolved values.
+     * -1 = unset (no limit). Resolved once per top-level pr / print /
+     * pr-str call; helpers consult these inline so dynvar lookup
+     * costs once per call, not per value walked. */
     int                      print_length_limit;
     int                      print_level_limit;
     /* Cached print-side dynvar flags resolved once per top-level

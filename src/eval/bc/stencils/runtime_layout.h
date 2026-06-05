@@ -162,16 +162,21 @@ typedef struct mino_bc_ic_slot {
 
 /* === Layout-anchor offsets ========================================= */
 
-/* Measured on ARM64 Darwin with the canonical -std=c99 -O2 CFLAGS.
- * jit.c's MINO_JIT_LAYOUT_VERIFY block asserts each against
- * offsetof(<real struct>, <field>) so canonical-side drift fires a
- * compile error before any stencil could mis-read. Change one
- * number here only after updating the corresponding _Static_assert
- * in jit.c and re-running gen-stencils. */
-#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)47864)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)47896)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)47944)
-#define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK        ((size_t)25712)
+/* Identical on every JIT target and libc pairing by construction:
+ * the anchored fields live in POD-only blocks placed at the head of
+ * their structs (see struct mino_state in runtime/internal.h and
+ * struct mino_thread_ctx in runtime/thread_ctx.h), ahead of any
+ * libc-defined type (jmp_buf, pthread_*), so no target-dependent
+ * size can shift them. The layout asserts in eval/bc/jit/entry.c
+ * verify each constant against offsetof(<real struct>, <field>) on
+ * every JIT-enabled host build, so drift on any target fires a
+ * compile error before a stencil could mis-read. Change a number
+ * here only together with the struct layout, then re-run
+ * gen-stencils-all. */
+#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)152)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)0)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)192)
+#define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK        ((size_t)0)
 #define MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS          ((size_t)72)
 
 /* === Field accessors =============================================== */

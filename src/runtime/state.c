@@ -1459,9 +1459,8 @@ unsigned int mino_tls_safepoint_count = 0;
  * Returns 1 to continue, 0 to abort (caller must propagate NULL).
  * The fast path is one branch on mino_tls_cancel_ptr (NULL on the
  * embedder thread, populated on workers) plus the counter
- * increment. State is in TLS rather than mino_thread_ctx_t so
- * adding the cancel/counter doesn't shift JIT-pinned offsets in
- * main_ctx. */
+ * increment. State is in TLS rather than mino_thread_ctx_t because
+ * the lookup is inherently per-thread. */
 /* CPU sampler hook. Called from mino_bc_safepoint and gc_alloc's
  * safepoint path. Sniffs MINO_SAMPLE on first hit; with the env flag
  * on, every sampler_period-th call records the current ctx's bc/pc

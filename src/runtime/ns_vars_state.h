@@ -7,11 +7,11 @@
  * inline call cache (ic_table + ic_gen), and the transient owner-id
  * counter.
  *
- * ic_gen sits at the stencil-ABI-pinned offset 47856 inside
- * mino_state; the embedded sub-struct is placed so the absolute
- * offset is byte-stable. The runtime_layout.h offset constants are
- * unchanged; the offsetof site in eval/bc/jit/entry.c updates to
- * the nested path `ns_vars.ic_gen`.
+ * ic_gen is a stencil-ABI anchor read by stencil bytes at the fixed
+ * offset pinned in stencils/runtime_layout.h; the block sits in
+ * mino_state's POD-only head ahead of any libc-defined type, so the
+ * offset is identical across all JIT targets. Keep every member of
+ * this struct libc-free POD.
  *
  * Internal to the runtime; embedders should only use mino.h.
  */
@@ -55,7 +55,7 @@ typedef struct ns_vars_state {
         unsigned    gen_at_fill;
     } *ic_table;
     size_t          ic_cap;
-    unsigned        ic_gen;          /* stencil-ABI-pinned offset 47856 */
+    unsigned        ic_gen;          /* stencil-ABI anchor (runtime_layout.h) */
 
     /* Monotonic owner-ID generator for transient batch mutators. */
     uint32_t        transient_owner_next;

@@ -45,6 +45,18 @@ typedef struct {
 /* ------------------------------------------------------------------------- */
 
 typedef struct mino_thread_ctx {
+    /* Dynamic binding stack head.
+     *
+     * Stencil-ABI anchor: JIT stencil bytes read this field at the
+     * fixed offset pinned in
+     * src/eval/bc/stencils/runtime_layout.h. It sits first in the
+     * struct -- ahead of try_stack, whose jmp_buf elements have
+     * libc-dependent sizes -- so the offset is identical on every
+     * JIT target and libc pairing. Nothing libc-defined may ever
+     * precede it. Verified by the layout assert in
+     * eval/bc/jit/entry.c on every JIT-enabled host build. */
+    dyn_frame_t    *dyn_stack;
+
     /* Eval progress + step limit + interrupt poll. */
     size_t          eval_steps;
     int             limit_exceeded;
@@ -134,9 +146,6 @@ typedef struct mino_thread_ctx {
     void           *gc_stack_bottom;
     int             gc_depth;
 
-    /* Dynamic binding stack head. */
-    dyn_frame_t    *dyn_stack;
-
     /* Active JIT invoke env. Set by mino_jit_invoke from the
      * mino_bc_run frame's `env` parameter so slow helpers (e.g.,
      * mino_jit_getglobal_cached_slow) can resolve captured-local
@@ -183,10 +192,7 @@ typedef struct mino_thread_ctx {
      * This makes concurrent `(fn [x] (thread-sleep 5) x)` calls from
      * sibling workers safe: each worker's `x` arg lives in its own
      * private bc_regs_storage; a peer's bc_push/pop on the shared
-     * state during the yield window can't reach it.
-     *
-     * Placed at struct tail so existing JIT-pinned offsets
-     * (dyn_stack, jit_invoke_env) stay byte-stable. */
+     * state during the yield window can't reach it. */
     mino_val    **bc_regs_storage;     /* this ctx's own array */
     size_t          bc_regs_storage_cap; /* capacity of bc_regs_storage */
     size_t          bc_top_snapshot;     /* this ctx's bc_top at yield */
@@ -198,8 +204,7 @@ typedef struct mino_thread_ctx {
      * regardless of the state's jit_hot_threshold setting. This
      * accelerates the warm-up of frequently-called callees on
      * short-running scripts where the default threshold would
-     * otherwise gate compile attempts past the script's wall time.
-     * Placed at the tail to keep JIT-pinned offsets above stable. */
+     * otherwise gate compile attempts past the script's wall time. */
     int             jit_invoke_depth;
 
     /* Down-counter amortising the backward-jump safepoint in JIT'd
@@ -209,8 +214,7 @@ typedef struct mino_thread_ctx {
      * traversal -- the same 256-tick cadence the fused loop stencils
      * keep in a register. Per-thread by construction, so a spinning
      * worker can never starve its own cancel/yield poll. Zero-init
-     * makes the first back-jump poll immediately. Placed at the tail
-     * to keep JIT-pinned offsets above stable. */
+     * makes the first back-jump poll immediately. */
     int             jit_backjump_ticks;
 } mino_thread_ctx_t;
 
@@ -232,9 +236,8 @@ mino_thread_ctx_t *mino_tls_ctx;
 /* TLS pointer to the owning future_impl's cancel_flag for worker
  * threads. NULL on the embedder's main thread. The BC safepoint
  * poll reads through this pointer to check whether future-cancel
- * has been called on the worker's future. Kept out of
- * mino_thread_ctx_t so the JIT-pinned offsets in main_ctx don't
- * shift; TLS is a clean place since lookup is per-thread anyway. */
+ * has been called on the worker's future. TLS is the natural home
+ * since the lookup is inherently per-thread. */
 extern
 #if defined(_WIN32) && defined(_MSC_VER)
 __declspec(thread)
