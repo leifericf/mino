@@ -15,6 +15,7 @@
  */
 
 #include "prim/internal.h"
+#include "prim/bignum_shared.h"
 #include "mino.h"
 #include "imath.h"
 

@@ -5,6 +5,7 @@
 #include "eval/special_internal.h"
 #include "eval/internal.h"
 #include "collections/internal.h"
+#include "prim/internal.h"  /* prim_destructure (defined here) is declared there */
 
 int kw_eq(const mino_val *v, const char *s)
 {

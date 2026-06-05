@@ -812,11 +812,11 @@
      -Wswitch-enum : the VM/dispatch switches carry an intentional
        `default:` arm; the valuable variant (-Wswitch, fires only when a
        switch has no default AND misses cases) stays on via -Wall.
-     -Wmissing-prototypes, -Wcast-qual, -Wbad-function-cast : real
-       signal, but resolving them needs per-symbol cross-TU analysis
-       (some non-static functions should be static -- over-exported
-       internal symbols matter for an embeddable library). Deferred to
-       the C99 bloat/over-export audit, not gated here as churn.
+     -Wcast-qual, -Wbad-function-cast : real signal, but resolving them
+       needs per-symbol const-correctness work; not gated yet to avoid
+       churn. (-Wmissing-prototypes / -Wmissing-variable-declarations
+       ARE gated below: the over-export audit drove the tree to zero
+       findings by making file-local functions static.)
      -Wformat-nonliteral, -Wdouble-promotion : low signal for an IO /
        numeric library (computed format strings, deliberate float math).
 
@@ -824,7 +824,8 @@
    safety checks by default at -O0, which flips __has_feature(...) and
    produces spurious unreachable-code findings in sanitizer-gated code."
   ["-Wno-missing-field-initializers"
-   "-Wshadow" "-Wstrict-prototypes" "-Wmissing-variable-declarations"
+   "-Wshadow" "-Wstrict-prototypes"
+   "-Wmissing-prototypes" "-Wmissing-variable-declarations"
    "-Wpointer-arith" "-Wwrite-strings" "-Wundef" "-Wvla"
    "-Wimplicit-fallthrough" "-Wcomma" "-Wunreachable-code"
    "-Wnested-externs" "-Wredundant-decls"

@@ -50,21 +50,6 @@ static int ns_to_name(mino_state *S, mino_val *v, char *buf, size_t cap,
     return 1;
 }
 
-/* --- *ns* dynamic ---------------------------------------------------------
- *
- * Clojure exposes the running namespace through the dynamic var *ns*.
- * mino doesn't have a Namespace type; the current namespace's name as a
- * symbol is the closest analogue and matches what the SCI/Babashka tests
- * expect when comparing equality. */
-mino_val *prim_star_ns(mino_state *S, mino_val *args, mino_env *env)
-{
-    const char *name;
-    (void)args;
-    (void)env;
-    name = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
-    return ns_symbol_with_meta(S, name);
-}
-
 /* --- in-ns ---------------------------------------------------------------- */
 mino_val *prim_in_ns(mino_state *S, mino_val *args, mino_env *env)
 {

@@ -657,6 +657,12 @@ int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
  * the reader can build a MINO_REGEX for the `#"..."` literal. */
 mino_val *mino_regex_from_source(mino_state *S, mino_val *source);
 
+/* GC mark-push entry point for component-owned tracers (defined in
+ * src/gc/driver.c, wrapping the file-static gc_mark_child_push). Declared
+ * here so the definer and the GC-handler TUs share one prototype instead
+ * of scattering local forward declarations. */
+void gc_mark_child_push_exported(mino_state *S, const void *p);
+
 /* Inline truthiness for hot branch-dispatch paths (eval_if, eval_when,
  * eval_and, eval_or). The exported `mino_is_truthy` in src/mino.h
  * stays available for embedders; this internal sibling sidesteps the

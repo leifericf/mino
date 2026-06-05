@@ -835,16 +835,6 @@ void mino_host_threads_quiesce(mino_state *S)
 /* GC                                                                        */
 /* ------------------------------------------------------------------------- */
 
-void mino_future_gc_trace(mino_val *fut)
-{
-    /* Trace-only: mark the impl's referenced values. The caller in
-     * gc/trace.c handles the actual mark-and-push. We expose the
-     * pointers here for the trace driver to walk. */
-    (void)fut;
-    /* Implemented inline in gc/trace.c; this fn is kept for
-     * symmetry with the sweep hook below. */
-}
-
 /* Lock invariant: called from the GC sweep phase, which itself runs
  * under the GC's own serialization (no concurrent mutator). State_lock
  * is not taken here — instead we rely on the GC suppression while
@@ -852,7 +842,6 @@ void mino_future_gc_trace(mino_val *fut)
  * decremented thread_count and is past its last lock acquire, so a
  * pthread_join here is safe and never blocks indefinitely. impl->mu is
  * destroyed only after the join. */
-void gc_mark_child_push_exported(mino_state *S, const void *p);
 
 void mino_future_trace_impl(mino_state *S, const mino_val *fut)
 {
