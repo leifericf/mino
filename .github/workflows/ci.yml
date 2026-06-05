@@ -306,6 +306,9 @@ jobs:
     # until this proves out across releases. A failure surfaces as a signal,
     # not a merge block.
     continue-on-error: true
+    # Bound the run: a local build + suite is ~2 min, so a hang (e.g. a
+    # zig-built JIT deadlock) should trip this, not burn the 6-hour default.
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
