@@ -683,6 +683,52 @@
 ;; memory, hooks) so we do not share objects with the regular build.
 ;; Binary names are suffixed so all three can coexist in the working
 ;; tree, e.g. ./mino_asan, ./mino_ubsan, ./mino_tsan.
+;;
+;; Every sanitizer build is JIT-enabled for the host it runs on (see
+;; jit-enable-flags): the JIT's C side -- emit, patcher, helpers,
+;; invoke, safepoints -- is exactly the kind of pointer-heavy code the
+;; sanitizers exist for, and it was historically their blind spot.
+;; The JIT-emitted machine code itself is uninstrumented (no shadow
+;; tracking inside a stencil's bytes; no false positives either); the
+;; boundary is documented on the sanitize-zig task.
+
+(defn- jit-enable-flags
+  "The -D flag set that runtime-enables the CPJIT for this machine's
+   native arch/OS: -DMINO_CPJIT=1 plus the per-host opt-in define for
+   the dormant pipelines (none needed on arm64 darwin, where plain
+   MINO_CPJIT=1 is runtime-enabled). On a host with no JIT pipeline
+   the plain define still compiles the stub path, matching `make`."
+  []
+  (into ["-DMINO_CPJIT=1"]
+        (if windows?
+          ["-DMINO_CPJIT_X86_64_WINDOWS"]
+          (let [os   (str/trim (str (get (sh "uname" "-s") :out)))
+                arch (str/trim (str (get (sh "uname" "-m") :out)))]
+            (cond
+              (and (= os "Linux") (= arch "aarch64"))
+              ["-DMINO_CPJIT_ARM64_LINUX"]
+
+              (and (= os "Linux") (= arch "x86_64"))
+              ["-DMINO_CPJIT_X86_64_LINUX"]
+
+              (and (= os "Darwin") (= arch "x86_64"))
+              ["-DMINO_CPJIT_X86_64_DARWIN"]
+
+              :else [])))))
+
+(defn- run-suite-with-test-bin
+  "Run the full suite under `bin`, exporting MINO_TEST_BIN so
+   subprocess-spawning tests target the binary under test rather than
+   ./mino. POSIX-only env prefix; on Windows the suite runs without
+   the export and those tests self-skip."
+  [bin extra-args]
+  (if windows?
+    (println (apply sh! bin (concat extra-args ["tests/run.clj"])))
+    (println (sh! "sh" "-c"
+                  (str "MINO_TEST_BIN=" bin " " bin " "
+                       (str/join " " extra-args)
+                       (if (seq extra-args) " " "")
+                       "tests/run.clj")))))
 
 (def ^:private san-base
   (into ["-g" "-O1" "-fno-omit-frame-pointer" "-std=c99"
@@ -693,6 +739,7 @@
   (gen-core-header)
   (let [args (into [cc]
                    (concat san-base
+                           (jit-enable-flags)
                            extra-flags
                            ldflags
                            ["-o" out-bin]
@@ -755,6 +802,7 @@
   (gen-core-header)
   (let [args (into (vec stencil-cc)
                    (concat san-base-zig
+                           (jit-enable-flags)
                            extra-flags
                            ["-o" out-bin]
                            all-srcs
@@ -787,15 +835,25 @@
 (defn sanitize-zig
   "Reproducible pinned-zig sanitizer lane: build mino under UBSan and
    under TSan with the version-locked `zig cc`, and run the full test
-   suite under each. Additive to the host ASan build in release-gate;
+   suite under each in BOTH JIT modes -- AUTO (warm-then-compile) and
+   eager (--jit=on). Additive to the host ASan build in release-gate;
    covers the undefined-behavior and data-race classes with a
    reproducible compiler-rt. ASan is intentionally absent -- zig ships
-   no ASan runtime; that coverage stays on the host toolchain."
+   no ASan runtime; that coverage stays on the host toolchain.
+
+   Instrumentation boundary: the sanitizers cover the JIT's whole C
+   side (emit, patcher, helpers, invoke, safepoints, deopt) but NOT
+   the JIT-emitted machine code itself -- stencil bytes carry no
+   shadow-memory hooks, so a bug confined to emitted code is invisible
+   here (and produces no false positives either). The four-way parity
+   check is the net for emitted-code divergence."
   []
   (build-ubsan-zig)
-  (println (sh! "./mino_ubsan_zig" "tests/run.clj"))
+  (run-suite-with-test-bin "./mino_ubsan_zig" [])
+  (run-suite-with-test-bin "./mino_ubsan_zig" ["--jit=on"])
   (build-tsan-zig)
-  (println (sh! "./mino_tsan_zig" "tests/run.clj"))
+  (run-suite-with-test-bin "./mino_tsan_zig" [])
+  (run-suite-with-test-bin "./mino_tsan_zig" ["--jit=on"])
   (println "  sanitize-zig: OK"))
 
 ;; ---- Curated strict warning lane (pinned zig cc) ----
@@ -1126,20 +1184,6 @@
     (println (str "  " (str/join " " args)))
     (apply sh! args)
     (println (str "  jit-host build -> " out-bin))))
-
-(defn- run-suite-with-test-bin
-  "Run the full suite under `bin`, exporting MINO_TEST_BIN so
-   subprocess-spawning tests target the canary binary rather than
-   ./mino. POSIX-only env prefix; on Windows the suite runs without
-   the export and those tests self-skip."
-  [bin extra-args]
-  (if windows?
-    (println (apply sh! bin (concat extra-args ["tests/run.clj"])))
-    (println (sh! "sh" "-c"
-                  (str "MINO_TEST_BIN=" bin " " bin " "
-                       (str/join " " extra-args)
-                       (if (seq extra-args) " " "")
-                       "tests/run.clj")))))
 
 (defn test-jit-host
   "Per-host JIT runtime canary: build the dormant JIT pipeline this
@@ -1539,7 +1583,13 @@
   (check-stencil-registry)
   (test-suite)
   (build-asan)
-  (println (sh! "./mino_asan" "tests/run.clj"))
+  ;; ASan suite in both JIT modes: the JIT's C side (emit / patcher /
+  ;; helpers / invoke) is enabled in the sanitizer build via
+  ;; jit-enable-flags, so eager mode pushes every test through the
+  ;; native tier under ASan. Emitted machine code itself stays
+  ;; uninstrumented (see sanitize-zig's boundary note).
+  (run-suite-with-test-bin "./mino_asan" [])
+  (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
   (test-jit-parity)
   (examples)
   (examples-amalgam)

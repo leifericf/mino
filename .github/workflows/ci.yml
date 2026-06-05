@@ -241,11 +241,13 @@ jobs:
 
       - name: Reproducible UBSan + TSan suite (pinned compiler-rt)
         # Builds mino with the version-locked zig cc under UBSan and TSan
-        # and runs the full suite under each. Additive to the host ASan
-        # build in release-gate; ASan is absent because zig ships no ASan
-        # runtime (that coverage stays on the host toolchain).
+        # -- JIT-enabled for this host (jit-enable-flags) -- and runs the
+        # full suite under each in AUTO and eager JIT mode. Additive to
+        # the host ASan build in release-gate; ASan is absent because zig
+        # ships no ASan runtime (that coverage stays on the host
+        # toolchain).
         run: ./mino task sanitize-zig
-        timeout-minutes: 15
+        timeout-minutes: 25
 
   lint-zig:
     name: lint-zig (pinned zig strict warnings)
