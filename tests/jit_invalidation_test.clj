@@ -152,4 +152,28 @@
     (is (future-done? f))
     (is (< (- (time-ms) start) 500))))
 
+;; The bit-xor accumulator keeps this shape out of the fused-loop
+;; matcher, so the body compiles to generic ops with a direct-emit
+;; backward jump -- the OP_SAFEPOINT_POLL path.
+(defn long-generic-spin [n]
+  (loop [i 0 acc 0]
+    (if (< i n) (recur (inc i) (bit-xor acc i)) acc)))
+
+(deftest jit-loop-cancel-generic
+  ;; Regression: generic (non-fused) JIT'd loops carried no safepoint
+  ;; poll on their backward jumps, so a spinning future was
+  ;; uncancellable and never yielded the state lock. The emit pass now
+  ;; plants a safepoint stencil before every backward OP_JMP /
+  ;; OP_JMPIFNOT, mirroring the interpreter's poll-on-backward-jump
+  ;; rule.
+  (dotimes [_ +warm+] (long-generic-spin 100))
+  (let [f     (future (long-generic-spin 1000000000))
+        start (time-ms)]
+    (thread-sleep 30)
+    (future-cancel f)
+    (thread-sleep 100)
+    (is (future-cancelled? f))
+    (is (future-done? f))
+    (is (< (- (time-ms) start) 500))))
+
 (run-tests-and-exit)

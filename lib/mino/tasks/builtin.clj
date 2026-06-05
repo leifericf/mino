@@ -1184,6 +1184,7 @@
                    ["dissoc_bang.c"      "stencil_op_dissoc_bang"]
                    ["disj_bang.c"        "stencil_op_disj_bang"]
                    ["dissoc.c"           "stencil_op_dissoc"]
+                   ["safepoint.c"        "stencil_op_safepoint"]
                    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]]
         stencil-dir "src/eval/bc/stencils"
         disk-files  (->> (file-seq stencil-dir)
@@ -1621,6 +1622,7 @@
    ["dissoc_bang.c"      "stencil_op_dissoc_bang"]
    ["disj_bang.c"        "stencil_op_disj_bang"]
    ["dissoc.c"           "stencil_op_dissoc"]
+   ["safepoint.c"        "stencil_op_safepoint"]
    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]])
 
 (def ^:private stencil-targets

@@ -1521,7 +1521,7 @@ static void mino_sampler_fire(mino_state *S)
     }
 }
 
-int mino_bc_safepoint(mino_state *S)
+int mino_bc_safepoint_batch(mino_state *S, unsigned jumps)
 {
     if (S == NULL) return 1;
     mino_sampler_fire(S);
@@ -1530,8 +1530,17 @@ int mino_bc_safepoint(mino_state *S)
                                     "future was cancelled");
         return 0;
     }
+    /* Auto-yield once per ~64K backward jumps. `jumps` is the number
+     * of backward jumps this poll accounts for: 1 from the
+     * interpreter's per-jump call, MINO_JIT_BACKJUMP_TICKS from the
+     * JIT's amortised callers (fused loop stencils, the backward-jump
+     * safepoint helper). The wrapped-window test `(count & 0xFFFF) <
+     * jumps` fires exactly once per 64K-jump window for any step
+     * size, even when interpreter (+1) and JIT (+256) increments
+     * interleave on the same thread; for jumps == 1 it reduces to
+     * the old `== 0` rollover test. */
     if (S->threading.multi_threaded
-        && (++mino_tls_safepoint_count & 0xFFFFu) == 0) {
+        && ((mino_tls_safepoint_count += jumps) & 0xFFFFu) < jumps) {
         int depth = mino_yield_lock(S);
 #if defined(_WIN32) && defined(_MSC_VER)
         Sleep(0); /* yield time-slice */
@@ -1548,6 +1557,11 @@ int mino_bc_safepoint(mino_state *S)
         mino_resume_lock(S, depth);
     }
     return 1;
+}
+
+int mino_bc_safepoint(mino_state *S)
+{
+    return mino_bc_safepoint_batch(S, 1);
 }
 
 void gc_release_stw(mino_state *S)

@@ -201,6 +201,17 @@ typedef struct mino_thread_ctx {
      * otherwise gate compile attempts past the script's wall time.
      * Placed at the tail to keep JIT-pinned offsets above stable. */
     int             jit_invoke_depth;
+
+    /* Down-counter amortising the backward-jump safepoint in JIT'd
+     * code. Generic (non-fused) loop back-edges call
+     * mino_jit_backjump_safepoint, which decrements this and runs the
+     * full mino_bc_safepoint poll every MINO_JIT_BACKJUMP_TICKS-th
+     * traversal -- the same 256-tick cadence the fused loop stencils
+     * keep in a register. Per-thread by construction, so a spinning
+     * worker can never starve its own cancel/yield poll. Zero-init
+     * makes the first back-jump poll immediately. Placed at the tail
+     * to keep JIT-pinned offsets above stable. */
+    int             jit_backjump_ticks;
 } mino_thread_ctx_t;
 
 /* TLS pointer to the per-thread ctx for the current worker.

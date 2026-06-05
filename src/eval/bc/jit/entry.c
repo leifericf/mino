@@ -618,6 +618,13 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_deopt_to_interp_nrelocs,
         1u  /* final: native region terminates here, ret carries the
              * NULL deopt sentinel back to mino_jit_invoke */
+    },
+    {
+        OP_SAFEPOINT_POLL,
+        stencil_op_safepoint_bytes, stencil_op_safepoint_size,
+        stencil_op_safepoint_symbols, stencil_op_safepoint_nsymbols,
+        stencil_op_safepoint_relocs, stencil_op_safepoint_nrelocs,
+        0u
     }
 };
 const int mino_jit_stencils_count =
@@ -797,7 +804,8 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
     {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},
     {"mino_jit_deopt_exit",            (void *)(uintptr_t)mino_jit_deopt_exit},
-    {"mino_bc_safepoint",              (void *)(uintptr_t)mino_bc_safepoint},
+    {"mino_bc_safepoint_batch",        (void *)(uintptr_t)mino_bc_safepoint_batch},
+    {"mino_jit_backjump_safepoint",    (void *)(uintptr_t)mino_jit_backjump_safepoint},
     {NULL, NULL}
 };
 

@@ -40,6 +40,16 @@ void mino_safepoint_park(mino_state *S);
  * plus an unsigned counter increment. */
 int mino_bc_safepoint(mino_state *S);
 
+/* Batch form for the JIT's amortised callers: one poll accounting
+ * for `jumps` backward jumps. The fused loop stencils and the
+ * generic backward-jump safepoint helper poll once per
+ * MINO_JIT_BACKJUMP_TICKS traversals; passing that count here keeps
+ * the state_lock auto-yield at the same ~64K-jump cadence the
+ * interpreter's per-jump polls produce, so a JIT'd spin cannot
+ * starve sibling workers. mino_bc_safepoint(S) ==
+ * mino_bc_safepoint_batch(S, 1). */
+int mino_bc_safepoint_batch(mino_state *S, unsigned jumps);
+
 /* GC-side STW driver: request all worker ctxs park before a major sweep,
  * then release them after. Single-threaded today these are O(1) on
  * S->main_ctx; multi-threaded variants iterate the worker set. */

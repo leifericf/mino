@@ -81,6 +81,25 @@ extern void mino_jit_chain_continue_marker(mino_val **regs,
         return mino_jit_chain_continue_marker((regs_), (consts_), (S_));   \
     } while (0)
 
+/* `void *`-returning twin of the chain-continue marker. musttail
+ * demands an exact signature match between caller and callee, so a
+ * stencil that mixes a chain-continue path with a real `return NULL`
+ * (a mid-region exit back to mino_jit_invoke, the way the final
+ * deopt / tailcall stencils return) must be `void *`-typed and chain
+ * through this marker instead. The emit pass treats both marker
+ * names identically: every relocation against either is patched to
+ * the next stencil instance's start. */
+extern void *mino_jit_chain_continue_marker_ret(mino_val **regs,
+                                                mino_val **consts,
+                                                mino_state *S);
+
+#define MINO_STENCIL_CHAIN_RETURN_PTR(regs_, consts_, S_)                  \
+    do {                                                                   \
+        __attribute__((musttail))                                          \
+        return mino_jit_chain_continue_marker_ret((regs_), (consts_),      \
+                                                  (S_));                   \
+    } while (0)
+
 /* Extern immediate slots. Their addresses encode the patchable operands.
  * The linker emits one R_UNSIGNED / PAGE21+PAGEOFF12 relocation pair per
  * read site; the extractor records the offsets and the runtime overwrites
@@ -447,7 +466,25 @@ extern void mino_jit_loop_continue_marker(void);
  * a local downcounter per iteration and only calls this on rollover,
  * so the per-iter cost stays at one decrement + one branch on the
  * hot path. Cancel-response latency is bounded by the downcounter's
- * reload value (currently 256 iterations). */
-extern int mino_bc_safepoint(mino_state *S);
+ * reload value (currently 256 iterations). `jumps` is that reload
+ * value: the poll accounts for the iterations the downcounter
+ * amortised away, keeping the runtime's state_lock auto-yield at
+ * the same ~64K-jump cadence the interpreter's per-jump polls
+ * produce so a JIT'd spin cannot starve sibling workers. */
+extern int mino_bc_safepoint_batch(mino_state *S, unsigned jumps);
+
+/* Backward-jump safepoint for generic (non-fused) loop back-edges.
+ * The OP_SAFEPOINT_POLL stencil calls it before every direct-emit
+ * backward OP_JMP / OP_JMPIFNOT. The helper amortises the full
+ * mino_bc_safepoint poll through a per-thread tick counter (same
+ * 256-traversal cadence the fused loop stencils keep in a register).
+ * Returns the regs base unchanged to continue, NULL to bail: a
+ * cancel landed with no try frame on the worker -- the future-body
+ * norm -- and the diagnostic is already recorded. The stencil must
+ * exit the JIT region with that NULL (real ret), never chain it.
+ * Under an active try frame the poll raises through longjmp and
+ * never returns here. */
+extern mino_val **mino_jit_backjump_safepoint(mino_state *S,
+                                                mino_val **regs);
 
 #endif /* MINO_BC_STENCIL_ABI_H */

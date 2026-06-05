@@ -335,7 +335,8 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
         } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
             slots[s].kind        = SYM_SLOT_LOOP;
             slots[s].slot_offset = 0;
-        } else if (strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
+        } else if (strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0
+                   || strcmp(name, MINO_JIT_CHAIN_RET_MARKER_NAME) == 0) {
             slots[s].kind        = SYM_SLOT_CHAIN;
             slots[s].slot_offset = 0;
         } else {
@@ -449,6 +450,40 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
 
 /* ----- top-level compile -------------------------------------------------- */
 
+/* Sizing-pass symbol accounting for one stencil: bump the pool-slot
+ * count per immediate symbol and the trampoline count per extern
+ * helper, skipping the loop / chain markers (they get no slot).
+ * Returns -1 when an extern helper does not resolve, so the compile
+ * declines before any region is mapped. */
+static int stencil_account_syms(const stencil_desc_t *st,
+                                size_t *pool_slots, size_t *tramp_count)
+{
+    for (unsigned long s = 0; s < st->nsymbols; s++) {
+        const char *name = st->symbols[s];
+        int k = mino_jit_imm_kind_from_name(name);
+        if (k >= 0) {
+            (*pool_slots)++;
+        } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0
+                   || strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0
+                   || strcmp(name, MINO_JIT_CHAIN_RET_MARKER_NAME) == 0) {
+            /* Marker symbols don't get pool / tramp slots. */
+        } else {
+            if (mino_jit_lookup_extern_fn(name) == NULL) return -1;
+            (*tramp_count)++;
+        }
+    }
+    return 0;
+}
+
+/* True when the direct-emit branch at `pc` is a loop back-edge. The
+ * dispatcher adds sBx to the already-advanced pc, so any negative
+ * offset targets pc or earlier. Mirrors the interpreter's
+ * poll-on-backward-jump condition (vm.c OP_JMP / OP_JMPIFNOT). */
+static int branch_is_backward(const mino_bc_fn_t *bc, size_t pc)
+{
+    return sBx_OF(bc->code[pc]) < 0;
+}
+
 /* True when `bc` contains any direct-emit branch op. The fused
  * LOAD_K + RETURN superinstruction is disabled in that case so a
  * mis-aimed jump never lands on the RETURN-half of a fused pair. */
@@ -534,6 +569,13 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         ? mino_jit_find_stencil(OP_DEOPT_TO_INTERP) : NULL;
     if (is_deopt_compile && deopt_st == NULL) return -1;
 
+    /* Safepoint stencil: one instance precedes every backward
+     * direct-emit branch so generic loop back-edges poll
+     * mino_bc_safepoint the way the interpreter does. */
+    const stencil_desc_t *safepoint_st =
+        mino_jit_find_stencil(OP_SAFEPOINT_POLL);
+    if (safepoint_st == NULL) return -1;
+
     /* First pass: classify every symbol of every stencil to size the
      * code / trampoline / pool regions. The pass also validates that
      * every extern fn symbol resolves to a known host helper, so the
@@ -541,37 +583,26 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
     size_t code_size   = 0;
     size_t pool_slots  = 0;
     size_t tramp_count = 0;
+    size_t n_backjumps = 0;
     for (size_t pc = 0; pc < effective_code_len; pc++) {
         unsigned op = OP_OF(bc->code[pc]);
-        if (op == OP_JMP) {
-            code_size += MINO_JIT_JMP_SIZE;
-            continue;
-        }
-        if (op == OP_JMPIFNOT) {
-            code_size += MINO_JIT_JMPIFNOT_SIZE;
+        if (op == OP_JMP || op == OP_JMPIFNOT) {
+            if (branch_is_backward(bc, pc)) {
+                code_size += safepoint_st->size;
+                if (stencil_account_syms(safepoint_st, &pool_slots,
+                                         &tramp_count) != 0) return -1;
+                n_backjumps++;
+            }
+            code_size += (op == OP_JMP) ? MINO_JIT_JMP_SIZE
+                                        : MINO_JIT_JMPIFNOT_SIZE;
             continue;
         }
         int fused;
         const stencil_desc_t *st = pick_stencil(bc, pc, &fused, allow_fusion);
         if (st == NULL) return -1;
         code_size += st->size;
-        for (unsigned long s = 0; s < st->nsymbols; s++) {
-            const char *name = st->symbols[s];
-            int k = mino_jit_imm_kind_from_name(name);
-            if (k >= 0) {
-                pool_slots++;
-            } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
-                /* The back-jump marker resolves to the stencil's own
-                 * self_start at emit time -- no pool / trampoline
-                 * slot needed. */
-            } else if (strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
-                /* The chain-continue marker is patched by the
-                 * post-emit chain pass; like the loop marker, no
-                 * pool / trampoline slot is needed. */
-            } else {
-                if (mino_jit_lookup_extern_fn(name) == NULL) return -1;
-                tramp_count++;
-            }
+        if (stencil_account_syms(st, &pool_slots, &tramp_count) != 0) {
+            return -1;
         }
         if (fused) pc++;
         pc += (size_t)mino_jit_op_extra_words(op);
@@ -583,19 +614,8 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * table so a future stencil refactor stays consistent. */
     if (is_deopt_compile) {
         code_size += deopt_st->size;
-        for (unsigned long s = 0; s < deopt_st->nsymbols; s++) {
-            const char *name = deopt_st->symbols[s];
-            int k = mino_jit_imm_kind_from_name(name);
-            if (k >= 0) {
-                pool_slots++;
-            } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0
-                       || strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
-                /* Marker symbols don't get pool / tramp slots. */
-            } else {
-                if (mino_jit_lookup_extern_fn(name) == NULL) return -1;
-                tramp_count++;
-            }
-        }
+        if (stencil_account_syms(deopt_st, &pool_slots,
+                                 &tramp_count) != 0) return -1;
     }
 
     /* Layout: [code] [trampolines, 16-byte aligned] [pool, 8-byte
@@ -653,10 +673,12 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         return -1;
     }
 
-    /* Per-instance tracking. Sized to code_len -- the upper bound;
-     * fusion strictly reduces the count and direct-emit branches
-     * each take one entry. */
-    inst_t *insts = (inst_t *)malloc(bc->code_len * sizeof(*insts));
+    /* Per-instance tracking. code_len bounds the per-pc instances
+     * (fusion strictly reduces the count; direct-emit branches each
+     * take one entry); every backward branch adds one safepoint
+     * instance on top. */
+    inst_t *insts = (inst_t *)malloc((bc->code_len + n_backjumps)
+                                     * sizeof(*insts));
     if (insts == NULL) {
         free(pc_offsets);
         jit_compile_cleanup(slab, region, total_size);
@@ -677,24 +699,54 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
     for (size_t pc = 0; pc < effective_code_len; pc++) {
         pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
-        if (op == OP_JMP) {
-            mino_jit_emit_jmp_bytes(code, pos);
+        if (op == OP_JMP || op == OP_JMPIFNOT) {
+            /* Backward branch: a loop back-edge. Place a safepoint
+             * stencil instance ahead of the branch bytes so the edge
+             * polls mino_bc_safepoint, mirroring the interpreter's
+             * poll-on-backward-jump rule. pc_offsets[pc] (set at the
+             * loop head) points at the safepoint instance, so jumps
+             * targeting this pc poll too -- a harmless extra. The
+             * preceding instance's chain branch falls through into
+             * the poll, whose own chain branch continues into the
+             * branch bytes (Pass A patches both). */
+            if (branch_is_backward(bc, pc)) {
+                size_t new_pool_pos  = pool_pos;
+                size_t new_tramp_pos = tramp_pos;
+                long n = emit_stencil(code, pos, code_size,
+                                      pool, pool_pos, pool_slots,
+                                      &new_pool_pos,
+                                      tramp_buf, tramp_pos, tramp_bytes,
+                                      &new_tramp_pos,
+                                      safepoint_st, bc->code[pc], 0, bc,
+                                      code_base, pool_base, tramp_base);
+                if (n < 0) {
+                    free(insts);
+                    free(pc_offsets);
+                    jit_compile_cleanup(slab, region, total_size);
+                    return -1;
+                }
+                insts[n_inst].native_start = pos;
+                insts[n_inst].bc_pc        = pc;
+                insts[n_inst].kind         = INST_STENCIL_NONFINAL;
+                insts[n_inst].st           = safepoint_st;
+                n_inst++;
+                pos       += (size_t)n;
+                pool_pos   = new_pool_pos;
+                tramp_pos  = new_tramp_pos;
+            }
             insts[n_inst].native_start = pos;
             insts[n_inst].bc_pc        = pc;
-            insts[n_inst].kind         = INST_JMP;
             insts[n_inst].st           = NULL;
+            if (op == OP_JMP) {
+                mino_jit_emit_jmp_bytes(code, pos);
+                insts[n_inst].kind = INST_JMP;
+                pos += MINO_JIT_JMP_SIZE;
+            } else {
+                mino_jit_emit_jmpifnot_bytes(code, pos, bc->code[pc]);
+                insts[n_inst].kind = INST_JMPIFNOT;
+                pos += MINO_JIT_JMPIFNOT_SIZE;
+            }
             n_inst++;
-            pos += MINO_JIT_JMP_SIZE;
-            continue;
-        }
-        if (op == OP_JMPIFNOT) {
-            mino_jit_emit_jmpifnot_bytes(code, pos, bc->code[pc]);
-            insts[n_inst].native_start = pos;
-            insts[n_inst].bc_pc        = pc;
-            insts[n_inst].kind         = INST_JMPIFNOT;
-            insts[n_inst].st           = NULL;
-            n_inst++;
-            pos += MINO_JIT_JMPIFNOT_SIZE;
             continue;
         }
         int fused;
@@ -827,7 +879,9 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                 jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
-            if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0) {
+            if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0
+                && strcmp(st->symbols[sym],
+                          MINO_JIT_CHAIN_RET_MARKER_NAME) != 0) {
                 continue;
             }
             uintptr_t      insn_addr = code_base + insts[i].native_start + off;

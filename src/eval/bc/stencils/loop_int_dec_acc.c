@@ -21,7 +21,7 @@ void stencil_op_loop_int_dec_acc(mino_val **regs,
     unsigned long ticks = 256;
     for (;;) {
         if (__builtin_expect(--ticks == 0, 0)) {
-            if (!mino_bc_safepoint(S)) {
+            if (!mino_bc_safepoint_batch(S, 256)) {
                 MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             ticks = 256;

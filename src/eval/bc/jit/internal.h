@@ -79,6 +79,22 @@
  * by the bytecode compiler. */
 #define OP_DEOPT_TO_INTERP ((unsigned)(OP__COUNT + 2))
 
+/* Pseudo-opcode for the backward-jump safepoint stencil. The emit
+ * pass places one instance immediately before every direct-emit
+ * OP_JMP / OP_JMPIFNOT whose offset is negative, mirroring the
+ * interpreter's poll-on-backward-jump rule (vm.c OP_JMP /
+ * OP_JMPIFNOT). Without it a generic (non-fused) JIT'd loop never
+ * reaches mino_bc_safepoint: future-cancel is invisible, the state
+ * lock is never yielded, and a spinning worker wedges the state.
+ * Never emitted by the bytecode compiler. */
+#define OP_SAFEPOINT_POLL ((unsigned)(OP__COUNT + 3))
+
+/* Tick budget for the backward-jump safepoint helper. Matches the
+ * 256-iteration cadence the fused loop stencils keep in a register;
+ * the generic back-edge keeps its counter per-thread in
+ * mino_thread_ctx_t::jit_backjump_ticks instead. */
+#define MINO_JIT_BACKJUMP_TICKS 256
+
 /* Continue-marker symbol names as the extractor records them
  * (after the Mach-O / ELF underscore stripping the tool does).
  * Matched in emit_stencil to short-circuit the extern-fn lookup:
@@ -92,6 +108,11 @@
  *                   every chain reloc to point there. */
 #define MINO_JIT_LOOP_MARKER_NAME  "mino_jit_loop_continue_marker"
 #define MINO_JIT_CHAIN_MARKER_NAME "mino_jit_chain_continue_marker"
+/* `void *`-returning twin of the chain marker (see abi.h). Stencils
+ * that mix a chain-continue with a real mid-region `return NULL`
+ * (currently OP_SAFEPOINT_POLL) chain through this name; the emit
+ * pass patches relocations against either marker identically. */
+#define MINO_JIT_CHAIN_RET_MARKER_NAME "mino_jit_chain_continue_marker_ret"
 
 /* Direct-emit instruction sizes -- arch-specific because each host
  * encodes branches and trampolines differently:
@@ -273,6 +294,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
 /* Slow-path helpers (defined in helpers.c; referenced by name from
  * stencils through the extern-fn table in entry.c, and addressed
  * directly by entry.c when building that table). */
+mino_val **mino_jit_backjump_safepoint(mino_state *S, mino_val **regs);
 mino_val **mino_jit_binop_slow(mino_state *S, mino_val **regs,
                                  unsigned a, unsigned b, unsigned c,
                                  unsigned subop);

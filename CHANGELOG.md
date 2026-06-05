@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Generic (non-fused) JIT'd loops now poll the safepoint on every
+  backward jump, mirroring the interpreter's rule. Previously a loop
+  shape the fusion matcher declined compiled to a bare backward
+  branch with no poll: a spinning future could not be cancelled,
+  never yielded the state lock to sibling workers, and wedged the
+  whole state — `./mino --jit=on tests/run.clj` hung at the async
+  cancel tests on arm64-darwin under any compiler. The emit pass now
+  plants a safepoint stencil before every backward `OP_JMP` /
+  `OP_JMPIFNOT`; a per-thread tick counter amortises the full poll to
+  every 256th traversal (the cadence the fused loop stencils already
+  use). On cancel with no try frame on the worker the stencil exits
+  the JIT region with a real return instead of chaining a NULL
+  register base into the next stencil.
+
+- The safepoint's state-lock auto-yield now accounts for the JIT's
+  poll amortisation: amortised callers report how many backward jumps
+  each poll covers, so the yield fires every ~64K jumps whether the
+  loop runs interpreted, fused, or generic-JIT'd. Previously a fused
+  loop yielded only every ~16.7M iterations, monopolising the state
+  lock for the duration of a long bounded spin.
+
 - `Long/MAX_VALUE` and `Long/MIN_VALUE` are now bound as `:int`
   rather than `:bigint`. The previous binding used the tower-aware
   `mino_int` constructor, which auto-promotes values outside the

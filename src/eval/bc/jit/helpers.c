@@ -28,6 +28,32 @@
 
 #include "../../../prim/internal.h"
 
+/* Backward-jump safepoint. Called by the OP_SAFEPOINT_POLL stencil
+ * the emit pass places before every direct-emit backward OP_JMP /
+ * OP_JMPIFNOT, mirroring the interpreter's poll-on-backward-jump
+ * rule. The per-thread tick counter amortises the full
+ * mino_bc_safepoint poll to every MINO_JIT_BACKJUMP_TICKS-th
+ * traversal -- the cadence the fused loop stencils keep in a
+ * register. The counter must be per-thread (ctx, not S or bc):
+ * a shared counter lets one thread absorb every zero crossing and
+ * starve a sibling's cancel poll. On cancel mino_bc_safepoint
+ * raises through longjmp under an active try frame; with no try
+ * frame on the worker -- the future-body norm -- it returns 0 and
+ * this helper returns NULL, which the stencil carries out of the
+ * JIT region as a real ret (never into the chain, where the next
+ * stencil would dereference it). mino_bc_safepoint never
+ * allocates, so no regs refresh is needed. */
+mino_val **mino_jit_backjump_safepoint(mino_state *S, mino_val **regs)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (__builtin_expect(--ctx->jit_backjump_ticks > 0, 1)) {
+        return regs;
+    }
+    ctx->jit_backjump_ticks = MINO_JIT_BACKJUMP_TICKS;
+    if (!mino_bc_safepoint_batch(S, MINO_JIT_BACKJUMP_TICKS)) return NULL;
+    return regs;
+}
+
 /* Slow path for the arith stencils. Mirrors the interpreter's OP_*_II
  * fallback: build a two-element cons list rooted in the bytecode
  * register window, dispatch to the matching numeric prim, and store
