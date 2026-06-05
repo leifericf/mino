@@ -298,6 +298,49 @@ jobs:
         run: ./mino task test-zig
         timeout-minutes: 15
 
+  darwin-zig-canary:
+    name: darwin-zig-canary (native zig cc, informational)
+    runs-on: macos-14
+    # Informational while the zig-built darwin binary is evaluated: the
+    # published darwin artifact stays Apple-clang native (release-build.yml)
+    # until this proves out across releases. A failure surfaces as a signal,
+    # not a merge block.
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build darwin standalone with native zig cc
+        # macos-14 is arm64 with the system SDK present, so native zig cc
+        # compiles + links the full JIT-enabled Mach-O -- unlike a Linux
+        # host, where Zig bundles no macOS SDK and darwin cannot be cross-
+        # built. This evaluates zig cc as the uniform standalone compiler
+        # on every platform. The crash handler's _Unwind_* symbols come
+        # from libSystem here (no -lunwind needed, as on glibc).
+        run: make CC="zig cc"
+
+      - name: Smoke + full suite (JIT auto-enabled on arm64-darwin)
+        # arm64-darwin is the one host that runtime-exercises the CPJIT, so
+        # the suite under the zig-built binary validates a JIT-enabled
+        # distributable Mach-O -- the gate the mandate requires before this
+        # could become the published darwin build.
+        run: |
+          ./mino --version
+          out=$(./mino -e '(+ 1 2)')
+          [ "$out" = "3" ] || { echo "darwin-zig smoke failed: got '$out'" >&2; exit 1; }
+          ./mino tests/run.clj
+
+      - name: Full suite with JIT forced on
+        run: ./mino --jit=on tests/run.clj
+
   # Portability canary: compile the amalgamated single-file source with
   # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
   # matrix) nor clang (macOS matrix, zig) represents. continue-on-error
