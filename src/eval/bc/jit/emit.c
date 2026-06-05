@@ -1033,6 +1033,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         }
     } else {
         if (jit_region_make_rx(region, total_size) != 0) {
+            free(pc_offsets);
             jit_compile_cleanup(slab, region, total_size);
             return -1;
         }
