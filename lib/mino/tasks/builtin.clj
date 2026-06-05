@@ -418,6 +418,64 @@
   (cross-build)
   (println "  build-all: native + all cross targets OK"))
 
+(defn doctor
+  "Report the state of the mino development toolchain and how to close
+   any gaps. Two tiers, by design:
+
+     * The C99 `cc` + make path is REQUIRED to build or embed mino and
+       is the README promise -- zig is never needed for it.
+     * The pinned `zig cc` is REQUIRED for the full maintainer workflow:
+       stencil regeneration (gen-stencils-all), cross-build / release
+       artifacts, and the reproducible QA lanes (sanitize-zig, lint-zig,
+       analyze-zig, build-all). It is NEVER required for embedders.
+
+   Advisory: prints a checklist and install guidance, exiting 0. The
+   only hard failure is a missing C compiler -- without it nothing
+   builds at all."
+  []
+  (println "mino toolchain doctor")
+  (println "---------------------")
+  ;; Tier 1: the C compiler -- required for everything, including embedders.
+  (let [r (sh cc "--version")]
+    (if (= 0 (get r :exit))
+      (println (str "  [ok]   C compiler (" cc "): "
+                    (first (str/split-lines (str (get r :out))))))
+      (do
+        (println (str "  [FAIL] C compiler (" cc ") not found -- mino cannot "
+                      "build without a C99 compiler. Install gcc or clang "
+                      "and/or set $CC."))
+        (throw (ex-info "doctor: no C compiler" {:cc cc})))))
+  ;; Tier 2: the pinned zig -- required for the maintainer workflow only.
+  (let [r (sh "zig" "version")
+        v (str/trim (str (get r :out)))]
+    (cond
+      (not= 0 (get r :exit))
+      (do
+        (println "  [warn] zig not found on PATH.")
+        (println (str "         Required for: stencil regen, cross-build /"
+                      " release, and the sanitize-zig / lint-zig /"
+                      " analyze-zig / build-all lanes."))
+        (println "         NOT required to build or embed mino (make + cc).")
+        (println (str "         Install the pinned version " zig-version-pin
+                      " -- see docs/MAINTAINER_TOOLCHAIN.md")))
+
+      (not= v zig-version-pin)
+      (do
+        (println (str "  [warn] zig " v " on PATH, but the pinned version is "
+                      zig-version-pin "."))
+        (println (str "         The pin keeps stencil bytes + cross builds"
+                      " reproducible; a mismatch can shift emitted code."))
+        (println (str "         Install Zig " zig-version-pin
+                      " (e.g. from https://ziglang.org/download/) and put it"
+                      " ahead on PATH, or set STENCIL_CC to override (opts"
+                      " out of byte reproducibility).")))
+
+      :else
+      (println (str "  [ok]   zig " v " (matches pinned " zig-version-pin ")"))))
+  (println (str "  note: make + cc is the canonical build and embedder path;"
+                " zig is a maintainer requirement only."))
+  (println "  doctor: done"))
+
 ;; ---- Amalgamation ----
 
 (def ^:private amalgam-search-paths
