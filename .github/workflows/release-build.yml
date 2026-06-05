@@ -128,16 +128,16 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Parallel validation: cross-compile the Linux (musl-static +
-  # glibc-canary) and Windows binaries from ONE Linux host with the
-  # pinned zig cc and smoke-test them. This runs ALONGSIDE the native
-  # `build` matrix above -- it does not replace it and does not feed the
-  # published artifacts (publish-draft needs: build only). It proves the
-  # optional `cross-build` path keeps working and guards two properties:
-  # the musl Linux artifacts are fully static (zero NEEDED), and the
-  # cross-built Windows PE imports no mingw runtime DLLs (retiring the
-  # -static hack). macOS is absent on purpose (Zig bundles no macOS SDK;
-  # darwin stays a native build).
+  # Cross-compile the Linux (musl-static + glibc-canary) and Windows
+  # binaries from ONE Linux host with the pinned zig cc, smoke-test them,
+  # and (Phase-C) publish the musl-static Linux artifacts. Runs ALONGSIDE
+  # the native `build` matrix -- it does not replace it; the native build
+  # stays the glibc/darwin/Windows source and the portability canary.
+  # Guards two properties: the musl Linux artifacts are fully static
+  # (zero NEEDED), and the cross-built Windows PE imports no mingw runtime
+  # DLLs (retiring the -static hack). It also stages the musl binaries as
+  # release artifacts; publish-draft `needs` this job so they ship. macOS
+  # is absent on purpose (Zig bundles no macOS SDK; darwin stays native).
   cross-build-validate:
     name: cross-build-validate (linux host -> linux+windows)
     runs-on: ubuntu-24.04
