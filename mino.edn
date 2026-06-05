@@ -67,6 +67,8 @@
   test-embed      {:doc  "C embedding API smoke (basic surface; full battery lives in mino-tests)"
                    :deps [build]
                    :task mino.tasks.builtin/test-embed}
+  test-crash-handler {:doc  "Portable crash-handler backtrace smoke (unwinder, no <execinfo.h>)"
+                      :task mino.tasks.builtin/test-crash-handler}
   examples        {:doc  "Build and run every examples/embed_*.c against the lib srcs"
                    :deps [build]
                    :task mino.tasks.builtin/examples}

@@ -16,6 +16,7 @@
 
 #include "runtime/internal.h"
 #include "path_buf.h"
+#include "crash_backtrace.h"  /* portable _Unwind_Backtrace, replaces <execinfo.h> */
 #include "eval/bc/jit.h"  /* MINO_CPJIT_HOST_DETECTED for --help/--version */
 
 #include <errno.h>
@@ -26,7 +27,6 @@
 #include <unistd.h>
 
 #ifndef _WIN32
-#include <execinfo.h>
 #include <strings.h>  /* POSIX strcasecmp on Linux + macOS */
 #define mino_strcasecmp strcasecmp
 #else
@@ -730,19 +730,36 @@ static void crash_handler_report(int sig)
         if (n > 0) crash_handler_write_line(buf);
     }
 
-#ifndef _WIN32
     {
+        /* One portable path for every target. mino_capture_backtrace
+         * walks CFI via the compiler unwinder (_Unwind_Backtrace),
+         * which glibc, musl, macOS, and mingw all provide -- so this
+         * works where the old glibc-only backtrace()/<execinfo.h> did
+         * not (notably a fully static musl build). The capture is
+         * address-only and allocation-free; resolve the frames with
+         * addr2line (atos on macOS). We skip 0 frames -- matching the
+         * old backtrace() which also showed the handler frames -- so a
+         * couple of crash_handler_* entries lead the trace. Skipping
+         * them is tempting but unsafe: when the signal arrives
+         * asynchronously (delivered while blocked in a syscall) some
+         * unwinders, e.g. LLVM libunwind in a static musl build, cannot
+         * walk past the kernel signal trampoline and capture only the
+         * handler frames -- skipping those would drop the whole trace. */
         void *frames[64];
-        int   nframes = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+        int   nframes = mino_capture_backtrace(
+                            frames, (int)(sizeof(frames) / sizeof(frames[0])), 0);
         if (nframes > 0) {
-            const char header[] = "[mino] backtrace (best effort):\n";
-            crash_handler_write_line(header);
-            backtrace_symbols_fd(frames, nframes, STDERR_FILENO);
+            crash_handler_write_line(
+                "[mino] backtrace (addresses; resolve with addr2line):\n");
+            for (int i = 0; i < nframes; i++) {
+                n = snprintf(buf, sizeof(buf), "  #%-2d %p\n", i, frames[i]);
+                if (n > 0) crash_handler_write_line(buf);
+            }
+        } else if (nframes < 0) {
+            crash_handler_write_line(
+                "[mino] backtrace: unavailable on this toolchain\n");
         }
     }
-#else
-    crash_handler_write_line("[mino] backtrace: not implemented on Windows\n");
-#endif
 }
 
 static void crash_handler(int sig)

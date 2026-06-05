@@ -281,6 +281,12 @@
    ;; class as -Wno-clobbered above: a toolchain-specific suppression
    ;; over third-party code, not a mino source defect.
    "-Wno-unused-but-set-variable"
+   ;; The crash handler captures a backtrace via the compiler unwinder
+   ;; (_Unwind_Backtrace, see src/runtime/crash_backtrace.h). The native
+   ;; glibc/Apple-clang/mingw builds auto-link the unwinder (libgcc_s /
+   ;; libSystem); zig cross targets do not, so emit unwind tables here
+   ;; and link zig's libunwind explicitly (see cross-build-one).
+   "-funwind-tables"
    "-O2" "-DMINO_CPJIT=1"])
 
 (def ^:private cross-targets
@@ -312,7 +318,13 @@
                         [(str "--target=" triple)]
                         ["-o" bin]
                         all-srcs
-                        libs)]
+                        libs
+                        ;; zig's libunwind supplies _Unwind_Backtrace /
+                        ;; _Unwind_GetIP for the portable crash handler.
+                        ;; Uniform across every cross target (gnu Linux,
+                        ;; arm64, mingw); the native make+cc build never
+                        ;; needs it since the system unwinder is implicit.
+                        ["-lunwind"])]
     (sh! "mkdir" "-p" out-dir)
     (println (str "  " (str/join " " args)))
     (apply sh! args)
@@ -1448,6 +1460,23 @@
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
                               "embed_api_test"))
+
+(defn test-crash-handler
+  "Compile and run the crash-handler backtrace smoke. Exercises the
+   portable unwinder primitive in src/runtime/crash_backtrace.h that
+   the CLI crash handler uses instead of glibc's <execinfo.h>. The test
+   is standalone (no lib srcs): it only needs -Isrc/runtime and the
+   compiler unwinder runtime the default link already provides. Running
+   it under a static musl build is what proves the rework keeps working
+   backtraces where <execinfo.h> is absent."
+  []
+  (let [bin     "crash_handler_test"
+        args    (into [cc] (concat cflags ldflags
+                                   ["-o" bin "tests/crash_handler_test.c"]
+                                   libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
 
 ;; ---- Examples ----
 

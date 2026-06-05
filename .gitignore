@@ -91,5 +91,6 @@ examples/embed_record_amalgam
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test
+crash_handler_test
 dist/
 dist-cross/
