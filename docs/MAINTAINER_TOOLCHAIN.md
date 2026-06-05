@@ -23,7 +23,8 @@ The maintainer tasks that require the pinned `zig cc`:
 | `gen-stencils-all` / `check-stencils-fresh-all` | regenerate / gate the committed CPJIT stencil byte headers |
 | `cross-build` (alias `release-cross`) | cross-compile the Linux + Windows release artifacts |
 | `build-all` | build every target (native + cross) from one host |
-| `sanitize-zig` | reproducible UBSan + TSan suite run |
+| `sanitize-zig` | reproducible UBSan + TSan suite run, JIT-enabled, in auto and eager JIT mode |
+| `test-jit-host` | per-host JIT runtime canary: build the dormant JIT pipeline this machine can execute (plus a lean twin), full suite auto + eager, four-way parity |
 | `lint-zig` | curated strict-warning lane (a third compiler lens) |
 | `analyze-zig` | advisory clang static-analyzer report |
 
@@ -103,6 +104,30 @@ Two deliberate boundaries:
 The native release matrix in `release-build.yml` remains the source of the
 published artifacts and the portability canary (gcc + Apple Clang + mingw).
 `cross-build` runs *alongside* it as validation, never as a replacement.
+
+## Sanitizers and the JIT: instrumentation boundary
+
+Every sanitizer build (host ASan in `release-gate`, pinned-zig UBSan + TSan in
+`sanitize-zig`) is JIT-enabled for the machine it runs on and drives the suite
+in both AUTO and eager (`--jit=on`) mode. That covers the JIT's entire C side —
+emit, patcher, helpers, invoke, safepoints, deopt — which is exactly the
+pointer-heavy code sanitizers exist for.
+
+The boundary: **JIT-emitted machine code is uninstrumented.** Stencil bytes
+carry no shadow-memory hooks, so a memory bug confined to emitted code is
+invisible to the sanitizers (and produces no false positives either). The
+four-way parity check (`test-jit-parity` and its per-host twin inside
+`test-jit-host`) is the net for emitted-code divergence.
+
+## Per-host JIT canaries
+
+Only arm64 darwin runtime-enables the JIT in published artifacts. The other
+four committed pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
+behind per-host opt-in defines (`MINO_CPJIT_<ARCH>_<OS>` in
+`src/eval/bc/jit/internal.h`) and are exercised by the `jit-host-canary` CI
+matrix via `./mino task test-jit-host` — informational lanes until they hold a
+green streak. On arm64 darwin machines the task cross-builds the Mach-O
+x86_64 pipeline and runs it under Rosetta 2.
 
 ## Guardrails
 
