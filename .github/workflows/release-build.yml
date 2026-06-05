@@ -144,6 +144,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -209,9 +211,42 @@ jobs:
           fi
           echo "windows-amd64: no mingw runtime-DLL imports OK"
 
+      # Phase-C: package the zero-dependency musl-static Linux binaries as
+      # release artifacts. These are ADDITIVE -- they publish alongside the
+      # native glibc Linux builds (artifact names carry a `_musl` suffix so
+      # they never collide), giving users a single-file binary that runs on
+      # any Linux (glibc, musl/Alpine, old or new) with nothing installed.
+      # The native matrix stays the source of the glibc artifacts and the
+      # portability canary; once the musl artifacts have proven out across
+      # releases, a later change can make musl the primary Linux download.
+      - name: Stage + archive musl-static Linux artifacts
+        run: |
+          for arch in amd64 arm64; do
+            bin="dist-cross/mino_linux_${arch}_musl"
+            dir="mino_linux_${arch}_musl_${TAG}"
+            mkdir -p "$dir"
+            cp "$bin" "$dir/mino"
+            cp LICENSE "$dir/"
+            sed \
+              -e "s/__VERSION__/${TAG}/g" \
+              -e "s/__OS__/linux/g" \
+              -e "s/__ARCH__/${arch} (musl static)/g" \
+              .github/release-templates/release-readme.md > "$dir/README.md"
+            tar -czf "${dir}.tar.gz" "$dir"
+            ls -la "${dir}.tar.gz"
+          done
+
+      - name: Upload musl-static Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-musl-static
+          path: mino_linux_*_musl_${{ github.ref_name }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   publish-draft:
     name: publish draft release
-    needs: build
+    needs: [build, cross-build-validate]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
