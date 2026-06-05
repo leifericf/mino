@@ -40,6 +40,12 @@
   analyze-zig     {:doc  "Advisory clang static-analyzer report via pinned zig cc (triage, not a gate)"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/analyze-zig}
+  check-analyze-zig {:doc  "Gate: fail on static-analyzer findings not in tools/analyze_baseline.txt"
+                     :deps [gen-core-header gen-stdlib-headers]
+                     :task mino.tasks.builtin/check-analyze-zig}
+  gen-analyze-baseline {:doc  "Regenerate tools/analyze_baseline.txt from current analyzer output"
+                        :deps [gen-core-header gen-stdlib-headers]
+                        :task mino.tasks.builtin/gen-analyze-baseline}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
   build-all       {:doc  "Build mino for every target (native + cross) from one host; smoke the native"

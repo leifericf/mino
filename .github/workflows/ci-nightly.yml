@@ -43,14 +43,16 @@ jobs:
         run: ./mino task test-embed
         timeout-minutes: 10
 
-  # Advisory clang static-analyzer report on one pinned-zig runner.
-  # Off the PR path on purpose: the analyzer is slow (~2 min) and its
-  # findings need human triage (clang has cross-TU false positives), so
-  # it surfaces in the nightly log rather than gating merges. Drives the
-  # C99 bloat / over-export audit. The task exits 0 regardless of
-  # findings -- it reports, it does not fail.
+  # Clang static-analyzer gate on one pinned-zig runner. Off the PR
+  # path on purpose: the analyzer is slow (~90s) and its raw output is
+  # noisy (clang cross-TU false positives), so it runs nightly rather
+  # than gating every merge. Promoted from advisory to a GATE: the
+  # triaged finding set is checked in at tools/analyze_baseline.txt and
+  # check-analyze-zig fails the job on any finding NOT in the baseline
+  # -- a genuinely new analyzer hit. The advisory full-report step runs
+  # first for visibility, then the gate enforces no-regressions.
   analyze:
-    name: analyze-zig (clang static analyzer, advisory)
+    name: analyze-zig (clang static analyzer, baseline gate)
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -68,5 +70,8 @@ jobs:
       - name: Bootstrap mino
         run: make
 
-      - name: Static analyzer report
+      - name: Static analyzer report (advisory, full output)
         run: ./mino task analyze-zig
+
+      - name: Static analyzer gate (fail on new findings vs baseline)
+        run: ./mino task check-analyze-zig

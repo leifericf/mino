@@ -930,19 +930,8 @@
    noise (ld.lld plist error, the spurious `-c` note) and keep the
    `warning: ... [checker.Name]` lines."
   []
-  (check-zig-version)
-  (let [own-srcs (remove #(str/includes? % "vendor/") all-srcs)
-        base     (concat stencil-cc
-                         ["--analyze" "-Xclang" "-analyzer-output=text"
-                          "-std=c99" "-DMINO_CPJIT=1"]
-                         (str/split include-flags " "))
-        finding? (fn [line] (re-find #"warning:.*\[[a-z]+\.[A-Za-z]+\]" line))
-        findings (->> own-srcs
-                      (mapcat
-                        (fn [tu]
-                          (->> (str/split-lines
-                                 (str (get (apply sh (concat base [tu])) :out)))
-                               (filter finding?)))))]
+  (let [findings (analyze-zig-findings)
+        own-srcs (remove #(str/includes? % "vendor/") all-srcs)]
     (doseq [f findings]
       (println (str "  " (str/replace f #"^.*/mino/" ""))))
     (let [by-checker (->> findings
@@ -954,6 +943,104 @@
       (println (str "  analyze-zig: " (count findings)
                     " analyzer finding(s) across " (count own-srcs)
                     " TUs [advisory -- triage, not a gate]")))))
+
+;; ---- analyze-zig baseline gate ----
+;;
+;; The raw analyzer output is noisy (clang cross-TU NullDereference
+;; false positives dominate), so a "must be zero" gate is infeasible
+;; without churning the source with suppressions. Instead the triaged
+;; finding set is checked in at tools/analyze_baseline.txt and the
+;; gate fails only on findings NOT in that baseline -- a genuinely new
+;; analyzer hit. Entries are normalized to "<file>: warning: <msg>
+;; [<checker>]" with line:col stripped, so edits above a finding don't
+;; spuriously churn the baseline.
+
+(def ^:private analyze-baseline-path "tools/analyze_baseline.txt")
+
+(defn- analyze-zig-findings
+  "Run the clang static analyzer (pinned zig cc) over every
+   mino-authored TU and return the raw `warning: ... [checker.Name]`
+   lines, project-relative."
+  []
+  (check-zig-version)
+  (let [own-srcs (remove #(str/includes? % "vendor/") all-srcs)
+        base     (concat stencil-cc
+                         ["--analyze" "-Xclang" "-analyzer-output=text"
+                          "-std=c99" "-DMINO_CPJIT=1"]
+                         (str/split include-flags " "))
+        finding? (fn [line] (re-find #"warning:.*\[[a-z]+\.[A-Za-z]+\]" line))]
+    (->> own-srcs
+         (mapcat
+           (fn [tu]
+             (->> (str/split-lines
+                    (str (get (apply sh (concat base [tu])) :out)))
+                  (filter finding?)
+                  (map #(str/replace % #"^.*/mino/" "")))))
+         vec)))
+
+(defn- analyze-normalize
+  "Strip the `:line:col:` span from a finding so the baseline is stable
+   across edits that shift line numbers."
+  [line]
+  (str/replace line #":[0-9]+:[0-9]+:" ":"))
+
+(defn- analyze-baseline-set []
+  (if (file-exists? analyze-baseline-path)
+    (->> (str/split-lines (slurp analyze-baseline-path))
+         (remove #(or (str/blank? %) (str/starts-with? (str/trim %) "#")))
+         set)
+    #{}))
+
+(defn gen-analyze-baseline
+  "Regenerate tools/analyze_baseline.txt from the current analyzer
+   output, preserving the triage header. Run after an intentional
+   change that adds or removes a finding, and commit the diff."
+  []
+  (let [header (if (file-exists? analyze-baseline-path)
+                 (->> (str/split-lines (slurp analyze-baseline-path))
+                      (take-while #(or (str/blank? %)
+                                       (str/starts-with? (str/trim %) "#")))
+                      (str/join "\n"))
+                 "# analyze-zig baseline -- triaged static-analyzer findings.")
+        norm   (->> (analyze-zig-findings)
+                    (map analyze-normalize)
+                    distinct
+                    sort)]
+    (spit analyze-baseline-path
+          (str header "\n\n" (str/join "\n" norm) "\n"))
+    (println (str "  gen-analyze-baseline: " (count norm)
+                  " finding(s) written to " analyze-baseline-path))))
+
+(defn check-analyze-zig
+  "Baseline gate: run the static analyzer and fail if any finding is
+   absent from tools/analyze_baseline.txt -- i.e. the change introduced
+   a new analyzer hit. New findings are printed; resolve them or, if
+   triaged as benign, regenerate the baseline with
+   `./mino task gen-analyze-baseline` and commit. Stale baseline
+   entries (findings that no longer fire) are reported as a warning,
+   not a failure -- they make the gate stricter, not weaker."
+  []
+  (let [baseline (analyze-baseline-set)
+        current  (->> (analyze-zig-findings) (map analyze-normalize) set)
+        new-findings  (sort (set/difference current baseline))
+        gone          (sort (set/difference baseline current))]
+    (when (seq gone)
+      (println (str "  check-analyze-zig: " (count gone)
+                    " baseline finding(s) no longer fire (consider"
+                    " regenerating the baseline):"))
+      (doseq [g gone] (println (str "    - " g))))
+    (if (seq new-findings)
+      (do
+        (println (str "  check-analyze-zig: " (count new-findings)
+                      " NEW analyzer finding(s) not in the baseline:"))
+        (doseq [f new-findings] (println (str "    + " f)))
+        (throw (ex-info "check-analyze-zig: new static-analyzer findings"
+                        {:new (vec new-findings)
+                         :fix (str "fix the finding, or if benign run "
+                                   "`./mino task gen-analyze-baseline` "
+                                   "and commit")})))
+      (println (str "  check-analyze-zig: OK -- no new findings vs baseline ("
+                    (count baseline) " accepted)")))))
 
 ;; ---- Hermetic pinned-zig build lane ----
 

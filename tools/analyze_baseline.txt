@@ -1,0 +1,50 @@
+# analyze-zig baseline -- triaged static-analyzer findings (allowlist).
+#
+# Each line is one accepted finding, normalized to
+#   <file>: warning: <message> [<checker>]
+# with line:col stripped so edits above a finding don't churn the
+# baseline. The check-analyze-zig gate fails on any finding NOT
+# listed here -- i.e. a genuinely new analyzer hit.
+#
+# Triage (2026-06-06): all entries are accepted false positives or
+# benign:
+#   core.NullDereference -- clang cross-TU FPs: the analyzer cannot
+#     see invariants enforced in another TU (arg-count checks,
+#     non-NULL guarantees from the caller). mino's prim arity layer
+#     guarantees the argv shape these sites assume.
+#   deadcode.DeadStores -- defensive initialisations and
+#     loop-carried / parse-fallback resets kept for clarity.
+#   unix.Malloc (main.c) -- 'end' aliases 'buf' (freed); 'hist_buf'
+#     is freed at the same cleanup label. Both FPs.
+#   unix.Errno -- errno-clobber after a logged failure on a path
+#     that does not consult errno. Benign.
+#   unix.Malloc size-zero (emit.c) -- code_len >= 1 for any
+#     JIT-eligible bc (a body always ends in OP_RETURN).
+#
+# Regenerate after an intentional change with:
+#   ./mino task gen-analyze-baseline
+
+main.c: warning: Potential leak of memory pointed to by 'end' [unix.Malloc]
+main.c: warning: Potential leak of memory pointed to by 'hist_buf' [unix.Malloc]
+main.c: warning: Value stored to 'awaiting_continuation' is never read [deadcode.DeadStores]
+src/collections/map.c: warning: Array access (from variable 'slots') results in a null pointer dereference [core.NullDereference]
+src/eval/bc/compile.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/bc/compile.c: warning: Value stored to 'is_then_recur' is never read [deadcode.DeadStores]
+src/eval/bc/jit/emit.c: warning: Use of memory allocated with size zero [unix.Malloc]
+src/eval/bc/vm.c: warning: Value stored to 'regs' during its initialization is never read [deadcode.DeadStores]
+src/eval/bindings.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/defs.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/eval.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/fn.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/fn.c: warning: Value stored to 'local' is never read [deadcode.DeadStores]
+src/eval/print.c: warning: Value of 'errno' was not checked and may be overwritten by function 'fread' [unix.Errno]
+src/eval/read.c: warning: Value stored to 'num_len' is never read [deadcode.DeadStores]
+src/eval/special.c: warning: Dereference of null pointer [core.NullDereference]
+src/prim/bits.c: warning: Array access (from variable 'buf') results in a null pointer dereference [core.NullDereference]
+src/prim/collections.c: warning: Array access (from variable 'buf') results in a null pointer dereference [core.NullDereference]
+src/prim/collections.c: warning: Array access (from variable 'mk') results in a null pointer dereference [core.NullDereference]
+src/prim/collections.c: warning: Dereference of null pointer [core.NullDereference]
+src/prim/prim.c: warning: Value of 'errno' was not checked and may be overwritten by function 'malloc' [unix.Errno]
+src/prim/sequences.c: warning: Dereference of null pointer [core.NullDereference]
+src/prim/stm.c: warning: Dereference of null pointer [core.NullDereference]
+src/values/val.c: warning: Array access (via field 'ht_buckets') results in a null pointer dereference [core.NullDereference]

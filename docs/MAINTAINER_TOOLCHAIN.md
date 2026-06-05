@@ -26,7 +26,9 @@ The maintainer tasks that require the pinned `zig cc`:
 | `sanitize-zig` | reproducible UBSan + TSan suite run, JIT-enabled, in auto and eager JIT mode |
 | `test-jit-host` | per-host JIT runtime canary: build the dormant JIT pipeline this machine can execute (plus a lean twin), full suite auto + eager, four-way parity |
 | `lint-zig` | curated strict-warning lane (a third compiler lens) |
-| `analyze-zig` | advisory clang static-analyzer report |
+| `analyze-zig` | clang static-analyzer report (advisory, full output) |
+| `check-analyze-zig` | static-analyzer **gate**: fail on findings not in `tools/analyze_baseline.txt` |
+| `gen-analyze-baseline` | regenerate the analyzer baseline after an intentional change |
 
 Each hard-fails with a clear message (`check-zig-version`) when zig is absent or
 off the pinned version, rather than silently using a different compiler.
