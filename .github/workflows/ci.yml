@@ -353,6 +353,48 @@ jobs:
       - name: Full suite with JIT forced on
         run: ./mino --jit=on tests/run.clj
 
+  # Per-host JIT runtime canaries. Four of the five committed JIT
+  # pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
+  # behind opt-in defines no published artifact sets; these lanes are
+  # their only runtime exercise. Each runner builds the pipeline its
+  # hardware can execute (macos-14 cross-builds Mach-O x86_64 and runs
+  # it under Rosetta 2) plus a lean twin, then runs the full suite in
+  # AUTO and eager mode and the four-way parity check -- all inside
+  # `./mino task test-jit-host`. Informational while the lanes build a
+  # green streak; promotion to blocking is the gate for ever enabling
+  # the JIT in the published artifacts for these hosts.
+  jit-host-canary:
+    name: jit-host-canary (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    # A local run is ~25s on arm64 darwin; CI runners are slower and
+    # windows slower still, but a hang (the failure mode JIT bugs
+    # produce) should trip this cap, not the 6-hour default.
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Per-host JIT canary (suite auto + eager, 4-way parity)
+        run: ./mino task test-jit-host
+
   # Portability canary: compile the amalgamated single-file source with
   # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
   # matrix) nor clang (macOS matrix, zig) represents. continue-on-error

@@ -2534,7 +2534,6 @@ mino_val *mino_bc_run(mino_state *S, mino_val *fn_val,
         }
     }
 
-    mino_val **regs = S->bc.bc_regs + base;
     size_t pc = (size_t)match->entry_pc;
     mino_val *retval = NULL;
     int ok = 1;
@@ -2598,7 +2597,8 @@ mino_val *mino_bc_run(mino_state *S, mino_val *fn_val,
         S->jit_resume_saved_try_depth      = saved_try_depth;
         S->jit_resume_saved_bc_catch_depth = saved_bc_catch_depth;
         S->jit_resume_saved_dyn_stack      = saved_dyn_stack;
-        retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc, regs,
+        retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc,
+                                 S->bc.bc_regs + base,
                                  (mino_val **)bc->consts, env);
         ok = (retval != NULL);
         goto bc_done;
@@ -2609,7 +2609,11 @@ mino_val *mino_bc_run(mino_state *S, mino_val *fn_val,
                               saved_try_depth, saved_bc_catch_depth,
                               saved_dyn_stack);
 
+#ifdef MINO_CPJIT
+/* Label only targeted by the native-tier goto above; the lean build
+ * falls through and would trip -Wunused-label on it. */
 bc_done:
+#endif
     /* Roll any BC catch frames that survived back so the try_stack is
      * exactly as it was at fn entry. Normal POPCATCH paths balance the
      * count on their own; this only kicks in on error / unwind paths.

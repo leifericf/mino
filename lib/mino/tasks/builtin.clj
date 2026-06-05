@@ -983,38 +983,23 @@
      :out   (strip-jit-disabled-warning (get result :out))
      :exit  (get result :exit)}))
 
-(defn test-jit-parity
-  "Build ./mino and ./mino-lean, run tests/jit_parity_test.clj
-   against four variants -- AUTO / ON / OFF on the full binary plus
-   the lean binary -- and assert every variant's stdout bytes are
-   byte-identical. The parity test pins ~40 literal-expected-value
-   assertions covering range boundaries, tag-miss, comparison
-   identity, and unary boundaries across the 16 inlined arith /
-   cmp / unary stencils. Any divergence in either binary's output
-   -- a different diagnostic, a different boxed-int representation,
-   a missed coercion -- surfaces in the diff.
-
-   The four variants are explicit so a regression in any mode is
-   localised: AUTO is the warm-then-JIT path that release-gate
-   exercises, ON forces eager compile (catches a JIT'd stencil
-   that diverges from the interpreter), OFF inhibits compilation
-   entirely (catches a runtime gating bug), and the lean binary
-   has no JIT path at all (catches an embed-API drift between
-   the two builds).
-
-   Uses `sh` (not `sh!`) so a non-zero exit from any runner reports
-   as a parity failure rather than crashing the task."
-  []
-  (build)
-  (build-lean)
+(defn- jit-parity-check
+  "Four-way JIT parity core: run tests/jit_parity_test.clj as AUTO /
+   ON / OFF on `full-bin` plus once on `lean-bin`, and assert every
+   variant's stdout bytes are byte-identical with exit 0. Shared by
+   test-jit-parity (canonical ./mino + ./mino-lean) and test-jit-host
+   (the per-host canary twins). Uses `sh` (not `sh!`) so a non-zero
+   exit from any runner reports as a parity failure rather than
+   crashing the task."
+  [full-bin lean-bin]
   (let [parity-test "tests/jit_parity_test.clj"
-        variants    [(run-parity-variant [mino-bin "--jit=auto"]
+        variants    [(run-parity-variant [full-bin "--jit=auto"]
                                           "jit-auto"  parity-test)
-                     (run-parity-variant [mino-bin "--jit=on"]
+                     (run-parity-variant [full-bin "--jit=on"]
                                           "jit-on"    parity-test)
-                     (run-parity-variant [mino-bin "--jit=off"]
+                     (run-parity-variant [full-bin "--jit=off"]
                                           "jit-off"   parity-test)
-                     (run-parity-variant ["./mino-lean"]
+                     (run-parity-variant [lean-bin]
                                           "lean"      parity-test)]
         baseline   (first variants)
         all-match? (every? (fn [v]
@@ -1046,6 +1031,146 @@
           (throw (ex-info "jit-parity failure"
                           {:status   :differ
                            :variants (mapv (juxt :label :exit) variants)}))))))
+
+(defn test-jit-parity
+  "Build ./mino and ./mino-lean, then run the four-way parity check
+   (see jit-parity-check). The parity test pins ~40 literal-expected-
+   value assertions covering range boundaries, tag-miss, comparison
+   identity, and unary boundaries across the 16 inlined arith / cmp /
+   unary stencils. Any divergence in either binary's output -- a
+   different diagnostic, a different boxed-int representation, a
+   missed coercion -- surfaces in the diff.
+
+   The four variants are explicit so a regression in any mode is
+   localised: AUTO is the warm-then-JIT path that release-gate
+   exercises, ON forces eager compile (catches a JIT'd stencil
+   that diverges from the interpreter), OFF inhibits compilation
+   entirely (catches a runtime gating bug), and the lean binary
+   has no JIT path at all (catches an embed-API drift between
+   the two builds)."
+  []
+  (build)
+  (build-lean)
+  (jit-parity-check mino-bin "./mino-lean"))
+
+;; ---- Per-host JIT runtime canary --------------------------------------
+;;
+;; Four of the five committed JIT pipelines (ELF arm64/x86_64, COFF
+;; x86_64, Mach-O x86_64) sit behind per-host opt-in defines that no
+;; published artifact sets -- they ship interpreter-only until the
+;; canary lanes hold a green streak. This task is the runtime exercise
+;; for whichever dormant pipeline the current machine can execute:
+;; build a JIT-enabled binary (and its lean twin) with the pinned
+;; `zig cc`, then run the full suite in AUTO and eager (--jit=on) mode
+;; plus the four-way parity check against it.
+;;
+;; Host resolution: on arm64 darwin the native pipeline is already
+;; covered by `make` + darwin-zig-canary, so the canary cross-builds
+;; the x86_64-darwin pipeline instead and lets Rosetta 2 execute it --
+;; the one way to runtime-exercise a second Mach-O arch per machine.
+;; Linux hosts build their native arch as static musl (matching the
+;; published artifact's libc); Windows builds the COFF pipeline via
+;; zig's bundled mingw.
+
+(def ^:private jit-host-canary-cflags
+  "Runtime CFLAGS for the canary twins. Mirrors the Makefile bootstrap
+   line plus the zig-toolchain suppressions cross-cflags carries for
+   vendored code (newer-clang -Wunused-but-set-variable in imath) and
+   -funwind-tables + -lunwind for the portable crash handler on
+   non-darwin targets (zig links no implicit unwinder)."
+  ["-std=c99" "-Wall" "-Wpedantic" "-Wextra" "-Werror"
+   "-Wno-missing-field-initializers" "-Wno-unknown-warning-option"
+   "-Wno-clobbered" "-Wno-unused-but-set-variable"
+   "-O2"])
+
+(defn- jit-host-spec
+  "Resolve the canary build spec for the current machine: zig target
+   triple, JIT opt-in define, link shape. Returns nil on hosts with no
+   runtime-executable dormant pipeline."
+  []
+  (if windows?
+    {:triple "x86_64-windows-gnu" :define "MINO_CPJIT_X86_64_WINDOWS"
+     :static? false :unwind? true :exe ".exe"}
+    (let [os   (str/trim (str (get (sh "uname" "-s") :out)))
+          arch (str/trim (str (get (sh "uname" "-m") :out)))]
+      (cond
+        (= os "Darwin")
+        {:triple "x86_64-macos" :define "MINO_CPJIT_X86_64_DARWIN"
+         :static? false :unwind? false :exe ""}
+
+        (and (= os "Linux") (= arch "aarch64"))
+        {:triple "aarch64-linux-musl" :define "MINO_CPJIT_ARM64_LINUX"
+         :static? true :unwind? true :exe ""}
+
+        (and (= os "Linux") (= arch "x86_64"))
+        {:triple "x86_64-linux-musl" :define "MINO_CPJIT_X86_64_LINUX"
+         :static? true :unwind? true :exe ""}
+
+        :else nil))))
+
+(defn- build-jit-host-one
+  "Build one canary twin with the pinned zig cc. `defines` carries the
+   -D list that distinguishes the JIT-enabled binary from its lean
+   twin."
+  [{:keys [triple static? unwind?]} out-bin defines]
+  (let [args (concat stencil-cc
+                     jit-host-canary-cflags
+                     (when unwind? ["-funwind-tables"])
+                     defines
+                     (str/split include-flags " ")
+                     [(str "--target=" triple)]
+                     (when static? ["-static"])
+                     ["-o" out-bin]
+                     all-srcs
+                     (when unwind? ["-lm" "-lunwind"]))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (str "  jit-host build -> " out-bin))))
+
+(defn- run-suite-with-test-bin
+  "Run the full suite under `bin`, exporting MINO_TEST_BIN so
+   subprocess-spawning tests target the canary binary rather than
+   ./mino. POSIX-only env prefix; on Windows the suite runs without
+   the export and those tests self-skip."
+  [bin extra-args]
+  (if windows?
+    (println (apply sh! bin (concat extra-args ["tests/run.clj"])))
+    (println (sh! "sh" "-c"
+                  (str "MINO_TEST_BIN=" bin " " bin " "
+                       (str/join " " extra-args)
+                       (if (seq extra-args) " " "")
+                       "tests/run.clj")))))
+
+(defn test-jit-host
+  "Per-host JIT runtime canary: build the dormant JIT pipeline this
+   machine can execute (see jit-host-spec) plus its lean twin, smoke
+   it, run the full suite in AUTO and eager mode, and finish with the
+   four-way parity check. Fails loudly on hosts with no resolvable
+   pipeline -- CI should never schedule it there."
+  []
+  (check-zig-version)
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (let [spec (jit-host-spec)]
+    (when (nil? spec)
+      (throw (ex-info "test-jit-host: no runtime-executable JIT pipeline for this host"
+                      {:fix "run on darwin (arm64/x86_64), linux (aarch64/x86_64), or windows x86_64"})))
+    (let [bin  (str (if windows? "" "./") "mino_jit_host" (get spec :exe))
+          lean (str (if windows? "" "./") "mino_jit_host_lean" (get spec :exe))]
+      (println (str "  jit-host: triple=" (get spec :triple)
+                    " define=" (get spec :define)))
+      (build-jit-host-one spec bin ["-DMINO_CPJIT=1"
+                                    (str "-D" (get spec :define))])
+      (build-jit-host-one spec lean [])
+      (let [out (str/trim (sh! bin "-e" "(+ 1 2)"))]
+        (when-not (= out "3")
+          (throw (ex-info (str "test-jit-host: smoke failed -- (+ 1 2) gave "
+                               (pr-str out))
+                          {:got out}))))
+      (run-suite-with-test-bin bin [])
+      (run-suite-with-test-bin bin ["--jit=on"])
+      (jit-parity-check bin lean)
+      (println "  test-jit-host: OK"))))
 
 ;; ---- Release guardrails (G1 / G2 / G3 + composite release-gate) -----
 ;;

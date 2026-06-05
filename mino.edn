@@ -61,6 +61,8 @@
                    :task mino.tasks.builtin/cross-build}
   test-jit-parity {:doc  "Build mino + mino-lean; assert parity-test stdout matches byte-for-byte"
                    :task mino.tasks.builtin/test-jit-parity}
+  test-jit-host   {:doc  "Per-host JIT canary: build the dormant pipeline this host can run, suite auto+eager, 4-way parity"
+                   :task mino.tasks.builtin/test-jit-host}
   check-stencils-fresh {:doc  "G1: gen-stencils + git-diff guardrail for stale committed bytes"
                         :task mino.tasks.builtin/check-stencils-fresh}
   check-stencils-fresh-all {:doc  "Determinism gate: gen-stencils-all (pinned zig) + git-diff over all targets"
