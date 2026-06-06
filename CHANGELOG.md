@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Map and set literals with duplicate keys are now reader errors:
+  `{:a 1 :a 2}` and `#{1 1}` raise instead of silently keeping one
+  entry. The check is structural over the unevaluated forms, matching
+  the namespaced-map reader that already rejected duplicates; runtime
+  constructors (`assoc`, `hash-map`, `set`) are unaffected.
+
 - String literals now support the full escape repertoire: `\uXXXX`
   unicode escapes (surrogate pairs combine into one codepoint), `\b`,
   `\f`, and octal `\NNN` escapes up to `\377`. Previously these were

@@ -259,3 +259,17 @@
     (testing "set"
       (let [x (nest-deep (fn [v] #{v}) 1 levels)]
         (is (= x (read-string (pr-str x))))))))
+
+(deftest duplicate-keys-in-literals-rejected
+  ;; Literal maps and sets with duplicate keys are reader errors; the
+  ;; check is structural over the unevaluated forms, so runtime
+  ;; constructors (assoc, set, hash-map) are unaffected.
+  (is (thrown? (read-string "{:a 1 :a 2}")))
+  (is (thrown? (read-string "#{1 1}")))
+  (is (thrown? (read-string "{[1 2] :x [1 2] :y}")))
+  (is (thrown? (read-string "#{(f) (f)}")))
+  (is (= {:a 1, :b 2} (read-string "{:a 1 :b 2}")))
+  (is (= #{1 2} (read-string "#{1 2}")))
+  (is (= {:a 2} (assoc {:a 1} :a 2)))
+  (is (= #{1} (set [1 1])))
+  (is (= {:a 2} (hash-map :a 1 :a 2))))

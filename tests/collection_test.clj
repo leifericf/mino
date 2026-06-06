@@ -79,7 +79,7 @@
 
 (deftest set-literals
   (is (= #{1 2 3} #{1 2 3}))
-  (is (= #{1 2 3} #{1 2 2 3}))
+  (is (thrown? (read-string "#{1 2 2 3}")))
   (is (= 3 (count #{1 2 3})))
   (is (= #{1 2 3} #{3 2 1}))
   (is (= :set (type #{1}))))

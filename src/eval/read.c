@@ -905,6 +905,22 @@ static mino_val *read_map_form(mino_state *S, const char **p)
         }
         map_buf_push(S, &kbuf, &vbuf, &cap, &len, key, val);
     }
+    /* Duplicate keys in a map literal are a reader error, checked
+     * structurally over the unevaluated key forms (so `{(f) 1 (f) 2}`
+     * is rejected too). Runtime constructors are unaffected. */
+    {
+        size_t i, j;
+        for (i = 1; i < len; i++) {
+            for (j = 0; j < i; j++) {
+                if (mino_eq(kbuf[j], kbuf[i])) {
+                    set_reader_diag(S, MRE008,
+                        "map literal contains duplicate key",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+            }
+        }
+    }
     return mino_map(S, kbuf, vbuf, len);
 }
 
@@ -938,6 +954,22 @@ static mino_val *read_set_form(mino_state *S, const char **p)
             continue;
         }
         buf_push(S, &buf, &cap, &len, elem);
+    }
+    /* Duplicate elements in a set literal are a reader error, checked
+     * structurally over the unevaluated forms (mirroring the map
+     * literal reader). Runtime construction via `set` still dedups. */
+    {
+        size_t i, j;
+        for (i = 1; i < len; i++) {
+            for (j = 0; j < i; j++) {
+                if (mino_eq(buf[j], buf[i])) {
+                    set_reader_diag(S, MRE008,
+                        "set literal contains duplicate element",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+            }
+        }
     }
     return mino_set(S, buf, len);
 }
