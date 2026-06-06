@@ -1048,7 +1048,11 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
             errno = 0;
             n = strtoll(buf, &endp, 16);
             buf[digits_end] = saved;
-            if (endp == buf + digits_end) {
+            /* musl's strtoll leaves endp short of the digit end on
+             * overflow (glibc and macOS consume the full run), so
+             * ERANGE alone must also qualify -- the run was verified
+             * all-hex above. */
+            if (endp == buf + digits_end || errno == ERANGE) {
                 if (!force_big && errno != ERANGE)
                     TRY_PARSE_RETURN(mino_int_wrap(S, n));
                 {
@@ -1087,7 +1091,29 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
                     long long   n;
                     errno = 0;
                     n = strtoll(digits, &endp, (int)base);
-                    if (endp == digits + dlen) {
+                    {
+                        int radix_ok = (endp == digits + dlen);
+                        if (!radix_ok && errno == ERANGE) {
+                            /* musl stops endp early on overflow;
+                             * verify the digit run in the base
+                             * ourselves before promoting. */
+                            size_t k;
+                            radix_ok = dlen > 0;
+                            for (k = 0; k < dlen; k++) {
+                                int c = (unsigned char)digits[k];
+                                int v = -1;
+                                if (c >= '0' && c <= '9') v = c - '0';
+                                else if (c >= 'a' && c <= 'z') v = c - 'a' + 10;
+                                else if (c >= 'A' && c <= 'Z') v = c - 'A' + 10;
+                                if (v < 0 || v >= (int)base) {
+                                    radix_ok = 0;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!radix_ok) goto radix_done;
+                    }
+                    {
                         if (errno != ERANGE)
                             TRY_PARSE_RETURN(
                                 mino_int_wrap(S, sign_neg ? -n : n));
@@ -1097,6 +1123,7 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
                             if (bi != NULL) TRY_PARSE_RETURN(bi);
                         }
                     }
+                radix_done: ;
                 }
             }
         }
@@ -1234,7 +1261,9 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
             long long n;
             errno = 0;
             n = strtoll(digits, &endp, 8);
-            if (endp == digits + dlen) {
+            /* See the hex arm: musl stops endp early on overflow; the
+             * run was verified all-octal above. */
+            if (endp == digits + dlen || errno == ERANGE) {
                 if (errno != ERANGE)
                     TRY_PARSE_RETURN(mino_int_wrap(S, sign_neg ? -n : n));
                 {
@@ -1255,7 +1284,23 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
             long long n;
             errno = 0;
             n = strtoll(buf, &endp, 10);
-            if (endp == buf + len) {
+            {
+                int dec_ok = (endp == buf + len);
+                if (!dec_ok && errno == ERANGE) {
+                    /* musl stops endp early on overflow; verify the
+                     * digit run ourselves before promoting. */
+                    size_t k;
+                    dec_ok = len > scan_start;
+                    for (k = scan_start; k < len; k++) {
+                        if (!isdigit((unsigned char)buf[k])) {
+                            dec_ok = 0;
+                            break;
+                        }
+                    }
+                }
+                if (!dec_ok) goto try_parse_done;
+            }
+            {
                 /* strtoll saturates at LLONG_MIN/LLONG_MAX with
                  * errno=ERANGE on overflow. Promote to bigint so
                  * literals like 9223372036854775808 don't silently
