@@ -335,8 +335,14 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
         return mino_bigdec_make(S, u, 0);
     }
     if (mino_type_of(x) == MINO_FLOAT) {
+        /* Use the shortest decimal form that round-trips the double,
+         * so (bigdec 0.1) is 0.1M rather than the 17-digit binary
+         * expansion 0.10000000000000001M. */
         char buf[64];
-        snprintf(buf, sizeof(buf), "%.17g", x->as.f);
+        if (isnan(x->as.f) || isinf(x->as.f))
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "bigdec: NaN and Infinity have no decimal form");
+        mino_double_shortest(x->as.f, buf, sizeof(buf));
         return mino_bigdec_from_string(S, buf);
     }
     if (mino_type_of(x) == MINO_STRING) {
@@ -347,11 +353,16 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
         return r;
     }
     if (mino_type_of(x) == MINO_RATIO) {
-        /* Convert via float then string. Lossy; the user can pre-call
-         * with-precision once it's wired. */
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%.17g", mino_ratio_to_double(x));
-        return mino_bigdec_from_string(S, buf);
+        /* Exact conversion: divide numerator by denominator as
+         * bigdecs. Terminating expansions convert exactly; non-
+         * terminating ones raise unless an enclosing with-precision
+         * supplies a rounding context (mino_bigdec_div honors it). */
+        mino_val *num = mino_bigdec_make(S, x->as.ratio.num, 0);
+        mino_val *den;
+        if (num == NULL) return NULL;
+        den = mino_bigdec_make(S, x->as.ratio.denom, 0);
+        if (den == NULL) return NULL;
+        return mino_bigdec_div(S, num, den);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
                                  "bigdec: unsupported argument type");

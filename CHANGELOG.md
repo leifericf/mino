@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `bigdec` now coerces exactly: doubles convert via their shortest
+  round-trip decimal form (`(bigdec 0.1)` is `0.1M`, not
+  `0.10000000000000001M`), ratios convert by exact decimal division
+  (terminating expansions are exact; non-terminating ones raise
+  unless `with-precision` supplies a rounding context), and NaN /
+  Infinity raise instead of producing a broken value.
+
 - `clojure.math` now covers its full canonical surface: added
   `floor-div`, `floor-mod`, `rint`, `ulp`, `scalb`, `get-exponent`,
   `next-after`, and the exact (overflow-checked) long ops

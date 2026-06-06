@@ -212,3 +212,19 @@
 (deftest with-precision-negative
   (is (= -0.333M (with-precision 3 (/ -1M 3M))))
   (is (= -0.67M  (with-precision 2 (/ -2M 3M)))))
+
+(deftest bigdec-coercion-exactness
+  ;; A double coerces via its shortest decimal representation.
+  (is (= 0.1M (bigdec 0.1)))
+  (is (= 0.5M (bigdec 0.5)))
+  (is (= 100.25M (bigdec 100.25)))
+  ;; A terminating ratio converts exactly.
+  (is (= 0.25M (bigdec 1/4)))
+  (is (= 1.5M (bigdec 3/2)))
+  ;; A non-terminating ratio is an error without an enclosing
+  ;; precision context, and rounds under one.
+  (is (thrown? (bigdec 1/3)))
+  (is (= 0.3333333333M (with-precision 10 (bigdec 1/3))))
+  ;; Non-finite doubles cannot become decimals.
+  (is (thrown? (bigdec ##NaN)))
+  (is (thrown? (bigdec ##Inf))))
