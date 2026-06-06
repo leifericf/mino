@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Integer literals with a leading zero now read as octal: `010` is
+  `8`, `0377` is `255`, and `010N` is `8N`. A non-octal digit after
+  the leading zero (`08`, `09`) is an invalid-number reader error.
+  Previously such literals read as decimal -- a silent divergence for
+  source that expects the canonical octal semantics. Floats keep
+  their leading-zero forms (`0.5`, `05e1`).
+
 - Map and set literals with duplicate keys are now reader errors:
   `{:a 1 :a 2}` and `#{1 1}` raise instead of silently keeping one
   entry. The check is structural over the unevaluated forms, matching

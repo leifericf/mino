@@ -1156,10 +1156,25 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
         }
         if (all_digits) {
             mino_val *bi;
-            buf[num_len] = '\0';
-            bi = mino_bigint_from_string_n(S, buf, num_len);
-            buf[num_len] = 'N';
-            if (bi != NULL) TRY_PARSE_RETURN(bi);
+            /* Leading-zero magnitudes are octal, like the bare-int
+             * path below: 010N is 8N. */
+            if (buf[digit_start] == '0' && num_len > digit_start + 1) {
+                int all_oct = 1;
+                for (i = digit_start + 1; i < num_len; i++) {
+                    if (buf[i] < '0' || buf[i] > '7') { all_oct = 0; break; }
+                }
+                if (all_oct) {
+                    bi = mino_bigint_from_digits_base(
+                        S, buf + digit_start + 1, num_len - digit_start - 1,
+                        8, scan_start > 0 && buf[0] == '-');
+                    if (bi != NULL) TRY_PARSE_RETURN(bi);
+                }
+            } else {
+                buf[num_len] = '\0';
+                bi = mino_bigint_from_string_n(S, buf, num_len);
+                buf[num_len] = 'N';
+                if (bi != NULL) TRY_PARSE_RETURN(bi);
+            }
         }
         num_len = len;
     }
@@ -1188,6 +1203,36 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
             looks_numeric = 0;
             break;
         }
+    }
+    /* Leading-zero integers are octal: 010 is 8, 0377 is 255. A non-
+     * octal digit after the leading zero (08, 09) is malformed; let
+     * the token fall through so the caller's digit-leading guard
+     * raises invalid-number. Out-of-range magnitudes promote to
+     * bigint like every other integer form. */
+    if (looks_numeric && !has_dot_or_exp
+        && buf[scan_start] == '0' && len > scan_start + 1) {
+        const char *digits   = buf + scan_start + 1;
+        size_t      dlen     = len - scan_start - 1;
+        int         sign_neg = (scan_start > 0 && buf[0] == '-');
+        int         all_oct  = 1;
+        for (i = 0; i < dlen; i++) {
+            if (digits[i] < '0' || digits[i] > '7') { all_oct = 0; break; }
+        }
+        if (all_oct) {
+            long long n;
+            errno = 0;
+            n = strtoll(digits, &endp, 8);
+            if (endp == digits + dlen) {
+                if (errno != ERANGE)
+                    TRY_PARSE_RETURN(mino_int_wrap(S, sign_neg ? -n : n));
+                {
+                    mino_val *bi = mino_bigint_from_digits_base(
+                        S, digits, dlen, 8, sign_neg);
+                    if (bi != NULL) TRY_PARSE_RETURN(bi);
+                }
+            }
+        }
+        looks_numeric = 0;
     }
     if (looks_numeric) {
         if (has_dot_or_exp) {

@@ -273,3 +273,19 @@
   (is (= {:a 2} (assoc {:a 1} :a 2)))
   (is (= #{1} (set [1 1])))
   (is (= {:a 2} (hash-map :a 1 :a 2))))
+
+(deftest leading-zero-integers-are-octal
+  (is (= 8 010))
+  (is (= 255 0377))
+  (is (= -8 -010))
+  (is (= 0 00))
+  (is (= :int (type 010)))
+  ;; 8 and 9 are not octal digits.
+  (is (thrown? (read-string "08")))
+  (is (thrown? (read-string "09")))
+  ;; Leading zero with a dot or exponent is still a float.
+  (is (= 0.5 (read-string "0.5")))
+  (is (= 50.0 (read-string "05e1")))
+  ;; Out-of-long-range octal magnitudes promote to bigint.
+  (is (= (apply *' (repeat 22 8N))
+         (read-string "010000000000000000000000"))))
