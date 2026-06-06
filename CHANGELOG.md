@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.423.0 — Runtime Hardening Sweep
+
+- Values read from #inst literals print back as #inst "..." instead
+  of their raw component map, so instants round-trip through pr-str
+  and read-string with inst? and inst-ms intact.
 
 - Characters above the BMP print as the raw glyph (\u escapes only
   span four hex digits), so astral-plane chars round-trip through

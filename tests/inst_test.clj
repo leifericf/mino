@@ -58,3 +58,16 @@
   (let [v (read-string "#inst \"2026-05-21T00:00:00Z\"")]
     (is (inst? v))
     (is (= 1779321600000 (inst-ms v)))))
+
+(deftest inst-prints-as-its-literal
+  ;; Values carrying the instant marker print back as #inst literals,
+  ;; so the reader round-trips them with inst-ness intact.
+  (let [v (read-string "#inst \"2026-01-15T10:30:00.250Z\"")]
+    (is (clojure.string/starts-with? (pr-str v) "#inst \""))
+    (let [rt (read-string (pr-str v))]
+      (is (inst? rt))
+      (is (= (inst-ms v) (inst-ms rt)))
+      (is (= v rt))))
+  (let [v (read-string "#inst \"1999-12-31T23:59:59-05:00\"")
+        rt (read-string (pr-str v))]
+    (is (= (inst-ms v) (inst-ms rt)))))

@@ -363,6 +363,48 @@ static void print_char(FILE *out, int cp)
     }
 }
 
+/* Emit a map carrying the :mino/instant metadata marker as its
+ * #inst "..." reader literal so the documented literal round-trips
+ * through pr/read. Returns 1 when the value was an instant map and
+ * was printed; 0 to fall through to the generic map printer. The
+ * component fields mirror clojure.instant/read-instant-date. */
+static long long instant_field(mino_state *S, const mino_val *m,
+                               const char *name, long long dflt)
+{
+    mino_val *v = map_get_val((mino_val *)m, mino_keyword(S, name));
+    if (v == NULL || !mino_val_int_p(v)) return dflt;
+    return mino_val_int_get(v);
+}
+
+static int print_instant_literal(mino_state *S, FILE *out,
+                                 const mino_val *v)
+{
+    long long years, months, days, hours, minutes, seconds;
+    long long nanos, osign, ohours, ominutes, millis;
+    if (v->meta == NULL || mino_type_of(v->meta) != MINO_MAP) return 0;
+    {
+        mino_val *marker = map_get_val(v->meta,
+            mino_keyword(S, "mino/instant"));
+        if (marker == NULL || !mino_is_truthy(marker)) return 0;
+    }
+    years    = instant_field(S, v, "years", 1970);
+    months   = instant_field(S, v, "months", 1);
+    days     = instant_field(S, v, "days", 1);
+    hours    = instant_field(S, v, "hours", 0);
+    minutes  = instant_field(S, v, "minutes", 0);
+    seconds  = instant_field(S, v, "seconds", 0);
+    nanos    = instant_field(S, v, "nanoseconds", 0);
+    osign    = instant_field(S, v, "offset-sign", 1);
+    ohours   = instant_field(S, v, "offset-hours", 0);
+    ominutes = instant_field(S, v, "offset-minutes", 0);
+    millis   = nanos / 1000000;
+    fprintf(out,
+            "#inst \"%04lld-%02lld-%02lldT%02lld:%02lld:%02lld.%03lld%c%02lld:%02lld\"",
+            years, months, days, hours, minutes, seconds, millis,
+            osign < 0 ? '-' : '+', ohours, ominutes);
+    return 1;
+}
+
 /* True when *print-level* has been resolved (>=0) and the current
  * print_depth is at or beyond the limit. Callers replace the open
  * collection with `#` per JVM Clojure's semantics. */
@@ -916,6 +958,9 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         print_vector(S, out, v);
         return;
     case MINO_MAP:
+        if (print_instant_literal(S, out, v)) {
+            return;
+        }
         print_map(S, out, v);
         return;
     case MINO_SET:
