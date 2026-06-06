@@ -22,6 +22,7 @@
 #include "eval/bc/jit.h"
 #include "eval/bc/internal.h"        /* mino_bc_register_gc_handlers */
 #include "eval/special_internal.h"  /* normalize_exception */
+#include "values/internal.h"        /* mino_val_finalize_teardown */
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -495,23 +496,32 @@ static void state_free_heap(mino_state *S)
 {
     gc_hdr_t *h, *hnext;
     gc_bump_slab_t *slab, *snext;
-    /* Run the same per-tag finalizers the minor/major sweeps run, so
-     * headers still live at teardown release their external resources:
-     * chunk/record/host-array slot arrays, bigint payloads, byte
-     * buffers, embedder HANDLE finalizers, chan impls, and future
-     * impls (workers are already quiesced, so the future path skips
-     * its join and only frees). Skipping these leaks every payload
-     * owned by a value that is reachable when the state dies. */
+    /* Release the external payloads of every header still live at
+     * teardown: chunk/record/host-array slot arrays, bigint payloads,
+     * byte buffers, embedder HANDLE finalizers, chan impls, and future
+     * impl shells. GC_T_VAL headers go through the teardown variant of
+     * the sweep finalizer (futures skip the join/cv/mu work -- the
+     * quiesce pass above already joined every worker); other tags run
+     * their registered finalizer unchanged. Skipping this leaks every
+     * payload owned by a value that is reachable when the state dies. */
     for (h = S->gc.all_young; h != NULL; h = hnext) {
-        gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
         hnext = h->next;
-        if (fin != NULL) fin(S, h);
+        if (h->type_tag == GC_T_VAL) {
+            mino_val_finalize_teardown(S, h);
+        } else {
+            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            if (fin != NULL) fin(S, h);
+        }
         if (!h->bump) free(h);
     }
     for (h = S->gc.all_old; h != NULL; h = hnext) {
-        gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
         hnext = h->next;
-        if (fin != NULL) fin(S, h);
+        if (h->type_tag == GC_T_VAL) {
+            mino_val_finalize_teardown(S, h);
+        } else {
+            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            if (fin != NULL) fin(S, h);
+        }
         if (!h->bump) free(h);
     }
     /* Bump slabs own the bump-allocated headers; free the whole slab

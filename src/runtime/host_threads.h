@@ -62,6 +62,11 @@ void mino_host_threads_quiesce(mino_state *S);
  * minor and major sweep when a MINO_FUTURE val is collected. */
 void mino_future_gc_sweep(mino_val *fut);
 
+/* State-teardown variant: frees the impl shell of a still-live future
+ * after the quiesce pass has joined its worker, without touching the
+ * cv/mu. Called from state_free_heap only. */
+void mino_future_teardown_free(mino_val *fut);
+
 /* Walk a MINO_FUTURE.impl's GC-owned slots (result, exception, thunk,
  * body_env, dyn_snapshot). The values-side trace_val tracer delegates
  * here so it doesn't have to know struct mino_future's layout. */

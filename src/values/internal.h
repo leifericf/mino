@@ -17,6 +17,7 @@
 
 #include "mino_internal.h"
 #include "values/layout.h"
+#include "gc/layout.h"   /* gc_hdr_t for mino_val_finalize_teardown */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -67,6 +68,12 @@ mino_val          *mino_bytes_seq (mino_state *S, const mino_val *v);
 /* Register the GC tracer for GC_T_VAL. Called from
  * runtime/state.c::state_init before the first allocation. */
 void mino_values_register_gc_handlers(mino_state *S);
+
+/* Teardown variant of the GC_T_VAL finalizer: identical payload
+ * release, except futures skip the join/cv/mu teardown the sweep
+ * path performs (the quiesce pass has already joined every worker).
+ * Called from runtime/state.c::state_free_heap only. */
+void mino_val_finalize_teardown(mino_state *S, gc_hdr_t *h);
 
 #ifdef __cplusplus
 }

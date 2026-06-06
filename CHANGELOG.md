@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.423.3 — Windows Teardown Fix
+
+- State teardown releases future cells through a join-free path: the
+  quiesce pass has already reaped every worker, so only the impl
+  shell is freed and the synchronization objects are left to process
+  exit. The sweep-time path that fully destroys them is unchanged.
+  Running the full sweep finalizer at teardown aborted MinGW-built
+  Windows binaries at exit.
+
 ## v0.423.2 — Teardown and JIT-Eager Fixes
 
 - State teardown now runs the same per-type finalizers the garbage

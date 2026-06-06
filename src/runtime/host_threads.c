@@ -958,3 +958,27 @@ void mino_future_gc_sweep(mino_val *fut)
     free(impl);
     fut->as.future.impl = NULL;
 }
+
+/* State-teardown variant of the sweep above. The quiesce pass in
+ * mino_state_free has already joined every worker, so the join is
+ * skipped by construction, and the cv/mu are deliberately NOT
+ * destroyed: pthread destroy is a validation no-op on POSIX libcs,
+ * while winpthreads frees live handle state whose teardown ordering
+ * against the exiting process is not worth depending on. The
+ * malloc-owned impl shell is what a leak checker sees; release it. */
+void mino_future_teardown_free(mino_val *fut)
+{
+    mino_future *impl;
+    mino_state *S;
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return; }
+    impl = fut->as.future.impl;
+    if (impl == NULL) { return; }
+    S = impl->state;
+    if (S != NULL) {
+        mino_future **pp = &S->threading.future_list_head;
+        while (*pp != NULL && *pp != impl) { pp = &(*pp)->next_in_state; }
+        if (*pp == impl) { *pp = impl->next_in_state; }
+    }
+    free(impl);
+    fut->as.future.impl = NULL;
+}

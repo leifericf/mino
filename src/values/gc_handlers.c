@@ -195,7 +195,7 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
  * MINO_HOST_ARRAY free the malloc-owned slot arrays; MINO_FUTURE
  * tears down the worker thread, mu/cv, and impl struct. All other
  * types have nothing external to release. */
-static void finalize_val(mino_state *S, gc_hdr_t *h)
+static void finalize_val_impl(mino_state *S, gc_hdr_t *h, int teardown)
 {
     mino_val *v = (mino_val *)(h + 1);
     (void)S;
@@ -221,7 +221,11 @@ static void finalize_val(mino_state *S, gc_hdr_t *h)
         v->as.host_array.vals = NULL;
         break;
     case MINO_FUTURE:
-        mino_future_gc_sweep(v);
+        /* Sweep-time collection joins the worker and destroys the
+         * cv/mu; at state teardown the quiesce pass has already
+         * joined everything, so only the impl shell is released. */
+        if (teardown) mino_future_teardown_free(v);
+        else          mino_future_gc_sweep(v);
         break;
     case MINO_CHAN:
         mino_chan_finalize(S, v);
@@ -233,6 +237,16 @@ static void finalize_val(mino_state *S, gc_hdr_t *h)
     default:
         break;
     }
+}
+
+static void finalize_val(mino_state *S, gc_hdr_t *h)
+{
+    finalize_val_impl(S, h, 0);
+}
+
+void mino_val_finalize_teardown(mino_state *S, gc_hdr_t *h)
+{
+    finalize_val_impl(S, h, 1);
 }
 
 void mino_values_register_gc_handlers(mino_state *S)
