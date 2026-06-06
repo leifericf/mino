@@ -258,3 +258,14 @@
   (is (nil? (re-find #"\Bword" "a word")))
   (is (= "w" (re-find #"\bw" "word")))
   (is (nil? (re-find #"\bb" "abc"))))
+
+(deftest non-capturing-and-named-groups
+  ;; (?:...) groups without capturing; (?<name>...) captures
+  ;; positionally like the canonical engines.
+  (is (= "ababab" (re-find #"(?:ab)+" "ababab")))
+  (is (= ["ab" "b"] (re-find #"(?:a)(b)" "ab")))
+  (is (= "xyx" (re-matches #"(?:x|y)+" "xyx")))
+  (is (= ["ab" "a"] (re-find #"(?<y>a)b" "ab")))
+  (is (= ["2024-06" "2024" "06"] (re-find #"(?<year>\d+)-(?<m>\d+)" "2024-06")))
+  (is (thrown? (re-find #"(?=a)" "a")))
+  (is (thrown? (re-find #"(?<=a)b" "ab"))))

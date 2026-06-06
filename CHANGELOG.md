@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Regex patterns support non-capturing groups `(?:...)` and named
+  capture groups `(?<name>...)`. Named groups capture positionally,
+  matching the canonical numbering; lookahead and lookbehind remain
+  unsupported and are rejected at compile time.
+
 - Regex patterns support the word-boundary assertions `\b` and `\B`:
   `(re-find #"\bword\b" "a word here")` matches. Inside a character
   class `\b` is the backspace character, as in the canonical engines.

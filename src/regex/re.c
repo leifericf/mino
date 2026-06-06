@@ -581,6 +581,45 @@ re_t re_compile(const char* pattern)
       {
         if (pattern[i+1] == '?')
         {
+          /* (?:...) -- non-capturing group: a group marker with gid 0,
+           * which the matcher's record path skips. */
+          if (pattern[i+2] == ':')
+          {
+            if (group_stack_depth >= RE_MAX_GROUPS - 1)
+            {
+              free(re_compiled); return 0;
+            }
+            group_stack[group_stack_depth++] = 0;
+            re_compiled[j].type  = GROUP_OPEN;
+            re_compiled[j].u.gid = 0;
+            i += 2; /* leave i on ':'; the outer i++ steps past it */
+            break;
+          }
+          /* (?<name>...) -- named capture: compiled as the next
+           * positional group (canonical numbering includes named
+           * groups); the name itself is not retained. (?<= and (?<!
+           * lookbehind fall through to the flag parser's rejection. */
+          if (pattern[i+2] == '<'
+              && pattern[i+3] != '=' && pattern[i+3] != '!')
+          {
+            int k = i + 3;
+            while (pattern[k] != '\0' && pattern[k] != '>') k++;
+            if (pattern[k] == '\0' || k == i + 3)
+            {
+              free(re_compiled); return 0;
+            }
+            if (group_count >= RE_MAX_GROUPS - 1
+             || group_stack_depth >= RE_MAX_GROUPS - 1)
+            {
+              free(re_compiled); return 0;
+            }
+            group_count++;
+            group_stack[group_stack_depth++] = (unsigned char)group_count;
+            re_compiled[j].type  = GROUP_OPEN;
+            re_compiled[j].u.gid = (unsigned char)group_count;
+            i = k; /* leave i on '>'; the outer i++ steps past it */
+            break;
+          }
           unsigned int  set_mask   = 0;
           unsigned int  clear_mask = 0;
           int           direction  = 1; /* 1 = setting, 0 = clearing */
