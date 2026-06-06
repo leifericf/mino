@@ -82,7 +82,7 @@
       (prim-replace s match replacement))))
 
 (defn split-lines [s]
-  (split (assert-string s) "\n"))
+  (split (assert-string s) #"\r?\n"))
 
 (defn triml [s]
   (let [s (assert-string s)

@@ -100,6 +100,11 @@
 
 ;; --- replace ---
 
+(deftest str-split-lines-crlf
+  (is (= ["a" "b" "c"] (str/split-lines "a\nb\r\nc")))
+  (is (= ["a" "b"] (str/split-lines "a\r\nb")))
+  (is (= ["ab"] (str/split-lines "ab"))))
+
 (deftest str-replace-string-match
   (is (= "hello-world" (str/replace "hello world" " " "-")))
   (is (= "abc"         (str/replace "a.b.c" "." "")))

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `clojure.string/split-lines` now splits on `\r\n` as well as `\n`,
+  so Windows line endings no longer leave a trailing `\r` on each
+  line.
+
 - Regex patterns now understand the control-character escapes `\n`,
   `\r`, `\t`, `\f`, `\a`, `\e`, and `\0`, both as standalone atoms
   and inside character classes. Previously `#"\n"` compared the
