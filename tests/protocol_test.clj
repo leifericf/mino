@@ -193,3 +193,16 @@
   (extend-type ExtB Extendable (ext-m [_] :b))
   (is (extends? Extendable ExtB))
   (is (= 2 (count (extenders Extendable)))))
+
+(defprotocol ExtendFnProto (ef-m [x]) (ef-n [x]))
+(defrecord EFRec [])
+
+(deftest extend-function-registers-method-maps
+  (extend EFRec
+    ExtendFnProto
+    {:ef-m (fn [_] :m-impl)
+     :ef-n (fn [_] :n-impl)})
+  (is (= :m-impl (ef-m (->EFRec))))
+  (is (= :n-impl (ef-n (->EFRec))))
+  (is (extends? ExtendFnProto EFRec))
+  (is (thrown? (extend EFRec ExtendFnProto {:nope (fn [_] 1)}))))

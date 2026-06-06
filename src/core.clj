@@ -2322,6 +2322,23 @@
                     (contains? dm :default))))
             methods)))
 
+(defn extend
+  "Registers method implementations for one or more protocols on type
+   t without generating wrapper code: (extend T P {:m (fn [x] ...)}).
+   The fn-map keys are keywordized method names; values are the
+   implementation fns."
+  [t & proto+mmaps]
+  (let [tk (if (nil? t) :nil t)]
+    (doseq [[proto mmap] (partition 2 proto+mmaps)]
+      (doseq [[mkw f] mmap]
+        (let [a (get (:methods proto) mkw)]
+          (when (nil? a)
+            (throw (ex-info (str "extend: protocol " (:name proto)
+                                 " has no method " mkw)
+                            {:protocol (:name proto) :method mkw})))
+          (swap! a assoc tk f)))))
+  nil)
+
 (defn extends?
   "Returns true if type t has been extended to proto (an explicit
    registration for at least one method; :default does not count)."

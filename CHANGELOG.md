@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added `extend`, the function-level protocol registration:
+  `(extend T P {:method (fn [x] ...)})` installs implementations from
+  a plain fn map, completing the extend / extend-type /
+  extend-protocol trio.
+
 - Added the protocol introspection functions `extends?` and
   `extenders`.
 
