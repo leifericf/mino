@@ -102,6 +102,26 @@
   (is (= 4095 0xFFF))
   (is (= :int (type 0xFF))))
 
+(deftest hex-integers-promote-past-long-range
+  (is (= 9223372036854775808N 0x8000000000000000))
+  (is (= :bigint (type 0x8000000000000000)))
+  (is (= -9223372036854775809N -0x8000000000000001))
+  (is (= (-' (apply *' (repeat 18 16N)) 1) 0xFFFFFFFFFFFFFFFFFF)))
+
+(deftest hex-integers-with-bigint-suffix
+  (is (= 255N 0xffN))
+  (is (= :bigint (type 0xffN)))
+  (is (= -255N -0xFFN)))
+
+(deftest radix-integers-promote-past-long-range
+  (is (= 9223372036854775808N
+         2r1000000000000000000000000000000000000000000000000000000000000000))
+  (is (= :bigint
+         (type 2r1000000000000000000000000000000000000000000000000000000000000000)))
+  (is (= (-' (apply *' (repeat 14 36N)) 1) 36rZZZZZZZZZZZZZZ))
+  (is (= -9223372036854775809N
+         -2r1000000000000000000000000000000000000000000000000000000000000001)))
+
 ;; Ratio literals
 
 (deftest ratio-literals

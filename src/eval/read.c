@@ -838,13 +838,42 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
     if (buf[0] == '+' || buf[0] == '-') scan_start = 1;
     if (scan_start == len) looks_numeric = 0;
 
-    /* Hex: 0x... or [+-]0x... */
+    /* Hex: 0x... or [+-]0x..., with an optional bigint N suffix.
+     * Magnitudes past the long-long range promote to bigint (matching
+     * the decimal path) instead of saturating at LLONG_MAX silently. */
     if (looks_numeric && scan_start + 2 < len
         && buf[scan_start] == '0'
         && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
-        long long n = strtoll(buf, &endp, 16);
-        if (endp == buf + len)
-            TRY_PARSE_RETURN(mino_int_wrap(S, n));
+        size_t digits_start = scan_start + 2;
+        size_t digits_end   = len;
+        int    force_big    = 0;
+        int    all_hex;
+        if (buf[len - 1] == 'N' && len - 1 > digits_start) {
+            force_big  = 1;
+            digits_end = len - 1;
+        }
+        all_hex = (digits_end > digits_start);
+        for (i = digits_start; i < digits_end; i++) {
+            if (!isxdigit((unsigned char)buf[i])) { all_hex = 0; break; }
+        }
+        if (all_hex) {
+            char      saved = buf[digits_end];
+            long long n;
+            buf[digits_end] = '\0';
+            errno = 0;
+            n = strtoll(buf, &endp, 16);
+            buf[digits_end] = saved;
+            if (endp == buf + digits_end) {
+                if (!force_big && errno != ERANGE)
+                    TRY_PARSE_RETURN(mino_int_wrap(S, n));
+                {
+                    mino_val *bi = mino_bigint_from_digits_base(
+                        S, buf + digits_start, digits_end - digits_start,
+                        16, scan_start > 0 && buf[0] == '-');
+                    if (bi != NULL) TRY_PARSE_RETURN(bi);
+                }
+            }
+        }
         looks_numeric = 0;
     }
 
@@ -862,18 +891,25 @@ static mino_val *try_parse_numeric(mino_state *S, const char *start,
             if (all_base_digits) {
                 long base = strtol(buf + scan_start, NULL, 10);
                 if (base >= 2 && base <= 36) {
-                    /* Parse the digits after 'r' in the given base. */
-                    char radix_buf[64];
-                    size_t radix_len = len - (size_t)(r_pos - buf) - 1;
-                    int sign = 1;
-                    if (scan_start > 0 && buf[0] == '-') sign = -1;
-                    if (radix_len > 0 && radix_len < sizeof(radix_buf)) {
-                        memcpy(radix_buf, r_pos + 1, radix_len);
-                        radix_buf[radix_len] = '\0';
+                    /* Parse the digits after 'r' in the given base.
+                     * `buf` is NUL-terminated, so the digit run can be
+                     * scanned in place at any length. Out-of-range
+                     * magnitudes promote to bigint rather than
+                     * saturating at the long-long bound silently. */
+                    const char *digits   = r_pos + 1;
+                    size_t      dlen     = len - (size_t)(r_pos - buf) - 1;
+                    int         sign_neg = (scan_start > 0 && buf[0] == '-');
+                    long long   n;
+                    errno = 0;
+                    n = strtoll(digits, &endp, (int)base);
+                    if (endp == digits + dlen) {
+                        if (errno != ERANGE)
+                            TRY_PARSE_RETURN(
+                                mino_int_wrap(S, sign_neg ? -n : n));
                         {
-                            long long n = strtoll(radix_buf, &endp, (int)base);
-                            if (endp == radix_buf + radix_len)
-                                TRY_PARSE_RETURN(mino_int_wrap(S, sign * n));
+                            mino_val *bi = mino_bigint_from_digits_base(
+                                S, digits, dlen, (int)base, sign_neg);
+                            if (bi != NULL) TRY_PARSE_RETURN(bi);
                         }
                     }
                 }

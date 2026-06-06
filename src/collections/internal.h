@@ -292,6 +292,10 @@ int      mino_bigint_equals_ll(const mino_val *a, long long n);
 int      mino_bigint_cmp(const mino_val *a, const mino_val *b);
 uint32_t mino_bigint_hash(const mino_val *v);
 mino_val *mino_bigint_from_string_n(mino_state *S, const char *s, size_t len);
+/* Digits-only base-aware parse (2..36) for the reader's hex / radix
+ * literal paths; `negative` applies the sign carried by the token. */
+mino_val *mino_bigint_from_digits_base(mino_state *S, const char *s,
+                                       size_t len, int base, int negative);
 char    *mino_bigint_to_cstr(const mino_val *v);   /* malloc; caller frees */
 int      mino_as_ll(const mino_val *v, long long *out);
 

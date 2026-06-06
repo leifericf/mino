@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Hex and radix integer literals past the long-long range now promote
+  to bigint, matching the decimal path: `0xFFFFFFFFFFFFFFFFFF` reads as
+  `4722366482869645213695N` instead of silently saturating at
+  `9223372036854775807`. The radix path also drops its former 63-digit
+  cap, and hex literals accept the bigint `N` suffix (`0xffN` reads as
+  `255N`).
+
 - The printer's depth ceiling now matches the reader's (1024), so any
   value the reader accepts prints in a form the reader reads back:
   `(read-string (pr-str x))` round-trips deeply-nested data instead of

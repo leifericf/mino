@@ -152,6 +152,40 @@ mino_val *mino_bigint_from_string(mino_state *S, const char *s)
     return mino_bigint_from_string_n(S, s, strlen(s));
 }
 
+/* Base-aware variant for the reader's hex / radix literal paths.
+ * `s` holds digit characters only (no sign, no 0x prefix); `negative`
+ * flips the result. Returns NULL on malformed digits for the base. */
+mino_val *mino_bigint_from_digits_base(mino_state *S, const char *s,
+                                       size_t len, int base, int negative)
+{
+    mp_int    z;
+    char     *buf;
+    mp_result rr;
+    if (s == NULL || len == 0) return NULL;
+    if (base < MP_MIN_RADIX || base > MP_MAX_RADIX) return NULL;
+    buf = (char *)malloc(len + 2);
+    if (buf == NULL) {
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory building bigint");
+    }
+    buf[0] = negative ? '-' : '+';
+    memcpy(buf + 1, s, len);
+    buf[len + 1] = '\0';
+    z = bigint_alloc_zeroed();
+    if (z == NULL) {
+        free(buf);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory building bigint");
+    }
+    rr = mp_int_read_string(z, (mp_size)base, buf);
+    free(buf);
+    if (rr != MP_OK) {
+        mp_int_clear(z); free(z);
+        return NULL;
+    }
+    return bigint_wrap(S, z);
+}
+
 /* ------------------------------------------------------------------------- */
 /* Equality, hashing, comparison, printing                                    */
 /* ------------------------------------------------------------------------- */
