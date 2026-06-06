@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- (str regex) now returns the bare pattern source, matching the
+  canonical toString; pr-str keeps the readable #"..." form.
+
 - mino -e no longer prints a trailing nil when the evaluated form
   returns nil, matching the canonical CLI.
 

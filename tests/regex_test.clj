@@ -287,3 +287,9 @@
   (is (nil? (re-find #"(a)\1" "ab")))
   (is (= ["aA" "a"] (re-find #"(?i)(a)\1" "aA")))
   (is (= ["bxb" "b"] (re-find #"(a|b)x\1" "bxb"))))
+
+(deftest str-of-a-regex-is-the-pattern-source
+  (is (= "a\\d+" (str #"a\d+")))
+  (is (= "x[\\\"y\\\"]" (str #"x[\"y\"]")))
+  (is (= "#\"a\\d+\"" (pr-str #"a\d+")))
+  (is (= "prefix-a\\d+" (str "prefix-" #"a\d+"))))

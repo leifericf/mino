@@ -1239,6 +1239,15 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     while (mino_is_cons(args)) {
         mino_val *a = args->as.cons.car;
+        /* `str` on a regex yields the bare pattern source (the
+         * canonical toString), not the readable #"..." form the
+         * printer emits. Unwrap to the source string so the plain
+         * string arm below appends it raw. */
+        if (a != NULL && mino_type_of(a) == MINO_REGEX
+            && a->as.regex.source != NULL
+            && mino_type_of(a->as.regex.source) == MINO_STRING) {
+            a = a->as.regex.source;
+        }
         if (a != NULL && mino_type_of(a) == MINO_STRING) {
             /* Append raw string content without quotes. */
             size_t need = len + a->as.s.len + 1;
