@@ -2027,7 +2027,12 @@ long long mino_monotonic_ns(void)
     LARGE_INTEGER freq, count;
     QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&count);
-    return (long long)(count.QuadPart * 1000000000LL / freq.QuadPart);
+    /* Split the conversion: the naive count * 1e9 product overflows
+     * int64 after ~15 minutes of uptime at the common 10 MHz counter
+     * frequency. The remainder term stays below freq * 1e9, which
+     * fits comfortably even for GHz-rate counters. */
+    return (count.QuadPart / freq.QuadPart) * 1000000000LL
+         + (count.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart;
 #elif defined(CLOCK_MONOTONIC)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
