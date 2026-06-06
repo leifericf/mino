@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added `ns-imports`, completing the namespace introspection set. The
+  import map is always empty (the runtime has no host classes); an
+  unknown namespace throws, as in the canonical API.
+
 - Auto-gensym (`x#`) inside syntax-quote now resolves at read time
   with one mapping per syntax-quote form, exactly like the canonical
   reader: every `x#` within one backtick form is the same generated

@@ -39,3 +39,10 @@
   (def refer-test-fn (fn [x] (* x 2)))
   (let [v (resolve 'refer-test-fn)]
     (is (var? v))))
+
+(deftest ns-imports-empty-map
+  ;; mino has no host-class imports; the import map for any namespace
+  ;; is empty but the accessor follows the canonical signature.
+  (is (= {} (ns-imports 'user)))
+  (is (= {} (ns-imports *ns*)))
+  (is (thrown? (ns-imports 'no.such.namespace-xyz))))

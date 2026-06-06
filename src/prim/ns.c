@@ -259,6 +259,23 @@ mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env)
     return mino_map(S, ks, vs, len);
 }
 
+mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *arg;
+    char        buf[256];
+    (void)env;
+    if (!ns_one_arg(S, args, "ns-imports", &arg)) return NULL;
+    if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-imports")) return NULL;
+    if (ns_env_lookup(S, buf) == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "ns-imports: no such namespace: %s", buf);
+        return prim_throw_classified(S, "name", "MNS001", msg);
+    }
+    /* No host-class imports exist in this runtime, so every
+     * namespace's import map is empty. */
+    return mino_map(S, NULL, NULL, 0);
+}
+
 mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *arg;
@@ -1081,6 +1098,8 @@ const mino_prim_def k_prims_ns[] = {
      "Return the public bindings of a namespace as a map."},
     {"ns-interns",     prim_ns_interns,
      "Return the interned bindings of a namespace as a map."},
+    {"ns-imports",     prim_ns_imports,
+     "Returns the import map of the namespace (always empty: no host classes)."},
     {"ns-refers",      prim_ns_refers,
      "Return the refer'd bindings of a namespace as a map."},
     {"ns-map",         prim_ns_map,
