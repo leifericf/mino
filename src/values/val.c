@@ -1124,52 +1124,55 @@ static int eq_seq_like(const mino_val *a, const mino_val *b)
  * Cross-type map equality: compare MINO_MAP with MINO_SORTED_MAP.
  * Both must have the same length and identical key-value pairs.
  */
+/* In-order walk comparing each sorted-map entry against the HAMT map.
+ * Walking the tree needs no comparator, so maps built with
+ * sorted-map-by still compare content-wise (equality ignores the
+ * comparator; only content matters). */
+static int rb_entries_subset_of_map(const mino_rb_node_t *n,
+                                    const mino_val *hmap)
+{
+    mino_val *hv;
+    if (n == NULL) return 1;
+    if (!rb_entries_subset_of_map(n->left, hmap)) return 0;
+    hv = map_get_val(hmap, n->key);
+    if (hv == NULL || !mino_eq(hv, n->val)) return 0;
+    return rb_entries_subset_of_map(n->right, hmap);
+}
+
 static int eq_map_like_cross(const mino_val *a, const mino_val *b)
 {
     const mino_val *hmap, *smap;
-    size_t i;
 
     /* Normalize: hmap is the HAMT map, smap is the sorted map. */
     if (mino_type_of(a) == MINO_MAP) { hmap = a; smap = b; }
     else                     { hmap = b; smap = a; }
 
     if (hmap->as.map.len != smap->as.sorted.len) return 0;
-
-    /* Custom comparators need a state for eval; skip cross-type equality. */
-    if (smap->as.sorted.comparator != NULL) return 0;
-
-    /* Iterate HAMT entries, look each up in the sorted map. */
-    for (i = 0; i < hmap->as.map.len; i++) {
-        mino_val *key = vec_nth(hmap->as.map.key_order, i);
-        mino_val *hv  = map_get_val(hmap, key);
-        mino_val *sv  = rb_get(NULL, smap->as.sorted.root, key, NULL);
-        if (sv == NULL || !mino_eq(hv, sv)) return 0;
-    }
-    return 1;
+    return rb_entries_subset_of_map(smap->as.sorted.root, hmap);
 }
 
 /*
  * Cross-type set equality: compare MINO_SET with MINO_SORTED_SET.
  */
+static int rb_elems_subset_of_set(const mino_rb_node_t *n,
+                                  const mino_val *hset)
+{
+    if (n == NULL) return 1;
+    if (!rb_elems_subset_of_set(n->left, hset)) return 0;
+    if (hamt_get(hset->as.set.root, n->key,
+                 hash_val(n->key), 0u) == NULL) return 0;
+    return rb_elems_subset_of_set(n->right, hset);
+}
+
 static int eq_set_like_cross(const mino_val *a, const mino_val *b)
 {
     const mino_val *hset, *sset;
-    size_t i;
 
     if (mino_type_of(a) == MINO_SET) { hset = a; sset = b; }
     else                     { hset = b; sset = a; }
 
     if (hset->as.set.len != sset->as.sorted.len) return 0;
-
-    if (sset->as.sorted.comparator != NULL) return 0;
-
-    for (i = 0; i < hset->as.set.len; i++) {
-        mino_val *elem = vec_nth(hset->as.set.key_order, i);
-        if (!rb_contains(NULL, sset->as.sorted.root, elem, NULL)) {
-            return 0;
-        }
-    }
-    return 1;
+    return rb_elems_subset_of_set(sset->as.sorted.root, hset);
 }
 
 /*

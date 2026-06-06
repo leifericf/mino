@@ -499,3 +499,12 @@
   (is (= {1 :a 2 :b} (conj {1 :a} (sorted-map 2 :b))))
   (is (= '(2 1) (keys (conj (sorted-map-by > 1 :a) (sorted-map 2 :b)))))
   (is (= '(1 2) (keys (conj (sorted-map 2 :b) {1 :a})))))
+
+(deftest sorted-by-collections-equal-plain-ones
+  ;; Equality ignores the comparator; only content matters.
+  (is (= {1 :a 2 :b} (sorted-map-by > 1 :a 2 :b)))
+  (is (= (sorted-map-by > 1 :a 2 :b) {1 :a 2 :b}))
+  (is (= #{1 2} (sorted-set-by > 1 2)))
+  (is (= (sorted-set-by > 1 2) #{1 2}))
+  (is (not= {1 :a 2 :b} (sorted-map-by > 1 :a 2 :c)))
+  (is (= (hash {1 :a}) (hash (sorted-map-by > 1 :a)))))

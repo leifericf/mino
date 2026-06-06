@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Sorted maps and sets built with a custom comparator
+  (`sorted-map-by`, `sorted-set-by`) now compare `=` to plain maps
+  and sets with the same content. Equality walks the tree entries
+  directly, so the comparator no longer disables cross-flavor
+  equality.
+
 - `conj` and `merge` now accept whole maps into sorted maps (and
   sorted maps as items into plain maps): `(merge (sorted-map 1 :a)
   {3 :c})` merges instead of raising "conj on sorted-map requires map
