@@ -204,4 +204,32 @@
         (is (= 0 (:exit summ)))
         (is (= "499500\n" (:out summ)))))))
 
+;; ---- error raised inside a JIT'd worker body -------------------------
+
+(deftest jit-worker-raise-surfaces-as-future-failure
+  ;; An error raised inside JIT'd code running on a worker thread must
+  ;; surface as a future failure, not a crash. The worker enters mino
+  ;; with no enclosing try frame, so a prim raise on it does not
+  ;; longjmp -- it returns NULL through the JIT region. A stencil that
+  ;; chained those NULL registers into the next instance dereferenced
+  ;; them. The future body here raises on its first iteration (adding a
+  ;; string to an int); the process must stay up and the future must
+  ;; finish (failed). Subprocess + --jit=on because the eager compile
+  ;; is what puts the raising body on the native tier; under auto the
+  ;; one-shot body never gets hot. MINO_TEST_BIN selects the binary on
+  ;; the canary / sanitizer lanes; otherwise ./mino.
+  (let [bin (or (System/getenv "MINO_TEST_BIN")
+                (when (file-exists? "./mino") "./mino"))]
+    (when bin
+      (let [r (sh "sh" "-c"
+                  (str bin " --jit=on -e '"
+                       "(def f (future (loop [i 0] (recur (inc (+ i \"boom\")))))) "
+                       "(dotimes [_ 50] (when-not (future-done? f) (thread-sleep 5))) "
+                       "(println (if (future-done? f) :done :pending))' "
+                       "2>/dev/null"))]
+        ;; Exit 0 (no crash) is the core assertion; `-e` echoes the
+        ;; final form's nil after the println line.
+        (is (= 0 (:exit r)))
+        (is (= ":done\nnil\n" (:out r)))))))
+
 (run-tests-and-exit)

@@ -161,19 +161,15 @@
       (thread-sleep 200))))
 
 (deftest async-future-ex-info-data-preserved
-  ;; Regression: when a future body throws (ex-info "..." {:k :v}),
-  ;; (deref fut) inside a try/catch lost the :data payload. prim_throw
-  ;; at try_depth==0 (inside the worker) routed through
-  ;; prim_throw_classified, which drops the data field, and
-  ;; mino_future_deref's rethrow path likewise rebuilt the exception
-  ;; via prim_throw_classified rather than longjmp'ing the original
-  ;; map. Both paths fixed: prim_throw now extracts :data (or :mino/data)
-  ;; and uses set_eval_diag_with_data; mino_future_deref now longjmps
-  ;; the captured map verbatim when try_depth>0.
+  ;; When a future body throws (ex-info "..." {:k :v}), deref inside a
+  ;; try/catch must preserve both the message and the data payload, the
+  ;; same way a main-thread catch does. The worker runs the thunk under
+  ;; a protected call, so the throw normalizes through the same path as
+  ;; any other catch: (ex-data caught) returns the original data map.
   (testing "ex-info :data survives future -> deref -> catch"
     (let [f (future (throw (ex-info "boom" {:n 42 :tag :test})))
           result (try (deref f) (catch e e))
-          data   (when (map? result) (get result :mino/data))]
+          data   (ex-data result)]
       (is (map? result))
       (is (= "boom" (get result :mino/message)))
       (is (map? data))

@@ -35,6 +35,11 @@
  * the prim layer into the runtime header. */
 extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                          const char *code, const char *msg);
+/* Wraps any thrown value (kind-tagged map, ex-info, raw value, NULL)
+ * into the standard diagnostic map the future stores + deref rethrows.
+ * Defined in eval/control.c; declared in eval/special_internal.h,
+ * which is eval-layer-private, so forward-declared here. */
+extern mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
 /* ------------------------------------------------------------------------- */
 /* mu/cv portability                                                         */
@@ -264,6 +269,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
     mino_state       *S    = impl->state;
     mino_thread_ctx_t  *ctx;
     mino_val         *result;
+    mino_val         *thrown = NULL;
 
     /* Each worker has its own ctx. Allocate it on the heap (not on
      * the worker's stack) so it survives any sub-call boundary; the
@@ -350,7 +356,18 @@ static void worker_run(mino_future *impl, char *stack_anchor)
                 dyn_binding_list_free(bhead);
             }
         }
-        result = mino_call(S, impl->thunk, mino_nil(S), NULL);
+        /* Run the thunk under a protected call so an uncaught throw
+         * longjmps to this worker boundary instead of returning NULL.
+         * The worker enters mino with no enclosing try frame; without
+         * one, a prim raise on the worker (try_depth == 0) returns NULL
+         * through the call chain. The interpreter propagates that NULL
+         * safely, but a JIT'd region's stencils chain the NULL register
+         * window into the next instance and dereference it -- a crash.
+         * mino_pcall installs the frame (and recovers lock depth on the
+         * longjmp), matching how the agent worker invokes its action. */
+        result = NULL;
+        (void)mino_pcall(S, impl->thunk, mino_nil(S), NULL,
+                         &result, &thrown);
         if (conveyed != NULL) {
             ctx->dyn_stack = conveyed->prev;
             dyn_binding_list_free(conveyed->bindings);
@@ -358,21 +375,23 @@ static void worker_run(mino_future *impl, char *stack_anchor)
         }
     }
 
-    /* Publish result. mino_call returns NULL on uncaught throw; we
-     * capture the worker's diagnostic as a value-map BEFORE taking
-     * impl->mu since the conversion allocates through the GC (needs
-     * state_lock). The captured value is reachable from the future
-     * (the GC traces impl->exception), so consumer-side deref can
-     * rethrow with the original kind/code/message rather than the
-     * generic "future failed". If state_tag was already CANCELLED,
-     * leave it as CANCELLED and drop the result. */
+    /* Publish result. mino_pcall returns NULL with the thrown payload
+     * in `thrown` on an uncaught throw; we normalize it into the
+     * standard diagnostic map BEFORE taking impl->mu since the
+     * conversion allocates through the GC (needs state_lock).
+     * normalize_exception handles every payload shape: a kind-tagged
+     * diag map (prim raises) passes through; an ex-info map keeps its
+     * :mino/data; a raw value (e.g. (throw 42)) is wrapped with its
+     * printed form as the message. The captured value is reachable
+     * from the future (the GC traces impl->exception), so consumer-side
+     * deref can rethrow with full fidelity rather than the generic
+     * "future failed". If state_tag was already CANCELLED, leave it as
+     * CANCELLED and drop the result. */
     {
         mino_val *captured = NULL;
         if (result == NULL) {
             mino_lock(S);
-            if (mino_last_error(S) != NULL) {
-                captured = mino_last_error_map(S);
-            }
+            captured = normalize_exception(S, thrown);
             mino_unlock(S);
         }
         mu_lock(&impl->mu);

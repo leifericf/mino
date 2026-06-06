@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- An error raised inside JIT'd code on a worker thread (a `future`
+  body) now surfaces as a future failure instead of crashing the
+  process. The worker entered mino with no enclosing try frame, so a
+  raise on it (`try_depth == 0`) returned NULL through the call chain
+  rather than longjmp'ing; the interpreter propagated that NULL
+  safely, but a JIT'd region's stencils chained the NULL register
+  window into the next instance and dereferenced it. The future thunk
+  now runs under a protected call (the same path the agent worker
+  uses), so a raise longjmps to the worker boundary and is captured as
+  the future's failure. Exception fidelity is preserved and now
+  matches a main-thread catch: `(ex-data @failed-future)` returns the
+  original `ex-info` data.
+
 - Generic (non-fused) JIT'd loops now poll the safepoint on every
   backward jump, mirroring the interpreter's rule. Previously a loop
   shape the fusion matcher declined compiled to a bare backward
