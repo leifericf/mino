@@ -449,6 +449,7 @@ mino_val *prim_even_p_argv (mino_state *S, mino_val **argv, int argc, mino_env *
 mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env);
 mino_val *mino_regex_from_source(mino_state *S, mino_val *source);
 
 /* stateful.c */

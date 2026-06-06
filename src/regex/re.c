@@ -309,9 +309,9 @@ static int re_matchp_one(re_t pattern, const char* text, int* matchlength)
 
         if (matchpattern(&pattern[p0], text, matchlength))
         {
-          if (text[0] == '\0')
-            return -1;
-
+          /* A zero-width match at the terminal position is a real
+           * match -- empty-capable patterns match the empty string
+           * and the end-of-input site, as in the canonical engines. */
           return idx;
         }
       }

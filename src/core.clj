@@ -1761,29 +1761,18 @@
 (def ^:private prim-re-find    re-find)
 (def ^:private prim-re-matches re-matches)
 
-(defn- match-whole [m]
-  ;; The C primitives return either a string (no groups) or a vector
-  ;; [whole g1 g2 ...] (groups present). Normalise to the whole match.
-  (if (vector? m) (first m) m))
-
 (defn re-seq
   "Returns a lazy sequence of all matches of pattern in string s. Each
    match is a string when the pattern has no groups, or a vector
    [whole g1 g2 ...] when it does."
   [pattern s]
-  (letfn [(find-index [s sub i]
-            (if (> (+ i (count sub)) (count s))
-              nil
-              (if (= (subs s i (+ i (count sub))) sub)
-                i
-                (recur s sub (inc i)))))]
-    (lazy-seq
-      (when-let [m (prim-re-find pattern s)]
-        (let [whole (match-whole m)
-              idx   (find-index s whole 0)]
-          (when (some? idx)
-            (let [rest-s (subs s (+ idx (max (count whole) 1)))]
-              (cons m (re-seq pattern rest-s)))))))))
+  (letfn [(step [pos]
+            (lazy-seq
+              (when-let [[m start end] (re-find-from pattern s pos)]
+                ;; A zero-width match advances the scan one codepoint
+                ;; so the walk terminates.
+                (cons m (step (if (= start end) (inc end) end))))))]
+    (step 0)))
 
 ;; re-matcher: a stateful matcher value backed by an atom holding
 ;; {:pattern :text :pos :last}. Each (re-find m) advances :pos past the
@@ -1800,35 +1789,16 @@
        (let [v (deref m)]
          (and (map? v) (::matcher? v)))))
 
-(defn- substring-index [s sub]
-  ;; Brute-force scan for the first index of sub in s. Used by
-  ;; re-find-on-matcher to advance the matcher's :pos. Lives here
-  ;; (rather than calling clojure.string/index-of) because core.clj
-  ;; loads before clojure.string.
-  (let [slen (count s)
-        nlen (count sub)]
-    (if (zero? nlen)
-      0
-      (loop [i 0]
-        (cond
-          (> (+ i nlen) slen) nil
-          (= (subs s i (+ i nlen)) sub) i
-          :else (recur (+ i 1)))))))
-
 (defn- re-find-on-matcher [m]
   (let [state   @m
         pattern (:pattern state)
         text    (:text state)
-        pos     (:pos state)
-        rem     (subs text pos)
-        result  (prim-re-find pattern rem)]
-    (when (some? result)
-      (let [whole  (match-whole result)
-            offset (substring-index rem whole)]
-        (when (some? offset)
-          (let [end (+ pos offset (max (count whole) 1))]
-            (swap! m assoc :pos end :last result)
-            result))))))
+        pos     (:pos state)]
+    (when-let [[result start end] (re-find-from pattern text pos)]
+      ;; A zero-width match advances :pos one codepoint so repeated
+      ;; finds terminate.
+      (swap! m assoc :pos (if (= start end) (inc end) end) :last result)
+      result)))
 
 (defn re-find
   "Find the first match. (re-find pattern text) returns a string (no

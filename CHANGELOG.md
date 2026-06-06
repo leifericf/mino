@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Patterns that can match the empty string now match at the end of
+  input, as in the canonical engines: `(re-find #"x*" "")` returns
+  `""`, `(re-seq #"" "ab")` yields three empty matches, and
+  `(clojure.string/replace "abc" #"x*" "-")` produces `"-a-b-c-"`.
+  `re-seq` and the stateful matcher now advance by the real match
+  position (via a new `re-find-from` primitive) instead of
+  re-locating the matched text by substring search, which also fixes
+  wrong scan positions when the matched text occurs earlier in the
+  input and keeps multibyte UTF-8 positions intact.
+
 - The regex `?` quantifier is now greedy, matching the canonical
   engines: `(re-find #"ab?" "ab")` returns `"ab"` instead of `"a"`,
   and `(re-matches #"a?" "a")` matches.

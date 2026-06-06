@@ -227,3 +227,13 @@
   (is (= ["ab" "b"] (re-find #"a(b)?" "ab")))
   (is (= "" (re-find #"x?" "ab")))
   (is (= "ab" (re-find #"a?b" "ab"))))
+
+(deftest zero-width-match-at-end
+  ;; A pattern that can match the empty string matches at the terminal
+  ;; position too, so empty-capable scans include the final site.
+  (is (= "" (re-find #"x*" "")))
+  (is (= "" (re-matches #"x*" "")))
+  (is (= ["" "" ""] (vec (re-seq #"" "ab"))))
+  (is (= ["a" "" ""] (vec (re-seq #"a?" "ab"))))
+  (is (= ["" "" ""] (vec (re-seq #"x*" "ab"))))
+  (is (= "-a-b-c-" (clojure.string/replace "abc" #"x*" "-"))))
