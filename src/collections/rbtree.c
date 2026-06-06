@@ -546,11 +546,13 @@ mino_val *sorted_seq(mino_state *S, const mino_val *coll)
         mino_val *keys = mino_nil(S), *kt = NULL;
         rb_to_list(S, coll->as.sorted.root, &keys, &kt);
         while (mino_is_cons(keys)) {
-            mino_val *kv[2], *cell;
-            kv[0] = keys->as.cons.car;
-            kv[1] = rb_get(S, coll->as.sorted.root, kv[0],
-                           coll->as.sorted.comparator);
-            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            mino_val *k, *cell;
+            k = keys->as.cons.car;
+            cell = mino_cons(S,
+                mino_map_entry(S, k,
+                    rb_get(S, coll->as.sorted.root, k,
+                           coll->as.sorted.comparator)),
+                mino_nil(S));
             if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
             keys = keys->as.cons.cdr;
@@ -614,10 +616,7 @@ void rb_bounded_seq(mino_state *S, const mino_rb_node_t *n, int is_map,
         mino_val *entry;
         mino_val *cell;
         if (is_map) {
-            mino_val *kv[2];
-            kv[0] = n->key;
-            kv[1] = n->val;
-            entry = mino_vector(S, kv, 2);
+            entry = mino_map_entry(S, n->key, n->val);
         } else {
             entry = n->key;
         }

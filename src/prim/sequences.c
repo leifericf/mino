@@ -2430,8 +2430,7 @@ mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env)
                 mino_val *k = keys->as.cons.car;
                 mino_val *v = rb_get(S, coll->as.sorted.root, k,
                                        coll->as.sorted.comparator);
-                mino_val *kv[2]; kv[0] = k; kv[1] = v;
-                out = mino_cons(S, mino_vector(S, kv, 2), out);
+                out = mino_cons(S, mino_map_entry(S, k, v), out);
                 keys = keys->as.cons.cdr;
             }
         } else {
@@ -2687,7 +2686,7 @@ static mino_val *subseq_impl(mino_state *S, mino_val *args, int reverse)
         if (cur != NULL && mino_type_of(cur) == MINO_CONS && !pivot_inclusive) {
             mino_val *first_entry = cur->as.cons.car;
             mino_val *first_key   = is_map
-                ? vec_nth(first_entry, 0)
+                ? first_entry->as.map_entry.k
                 : first_entry;
             int cmp = rb_compare(S, first_key, pivot_key,
                                  sc->as.sorted.comparator);
@@ -2696,7 +2695,7 @@ static mino_val *subseq_impl(mino_state *S, mino_val *args, int reverse)
         /* Step 3: takeWhile the other filter. */
         while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
             mino_val *entry = cur->as.cons.car;
-            mino_val *key   = is_map ? vec_nth(entry, 0) : entry;
+            mino_val *key   = is_map ? entry->as.map_entry.k : entry;
             int cmp = rb_compare(S, key, filter_key,
                                  sc->as.sorted.comparator);
             int keep;

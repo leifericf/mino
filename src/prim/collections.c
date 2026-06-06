@@ -78,10 +78,8 @@ mino_val *val_to_seq(mino_state *S, mino_val *v)
         for (i = 0; i < v->as.map.len; i++) {
             mino_val *key = vec_nth(v->as.map.key_order, i);
             mino_val *val = map_get_val(v, key);
-            mino_val *kv[2];
             mino_val *cell;
-            kv[0] = key; kv[1] = val;
-            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            cell = mino_cons(S, mino_map_entry(S, key, val), mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;

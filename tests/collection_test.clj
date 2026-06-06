@@ -461,3 +461,14 @@
           l  (list (list 1 2) (list 3 4))]
       (is (= v l))
       (is (= (hash v) (hash l))))))
+
+(deftest map-seq-paths-yield-map-entries
+  ;; Every seq view of a map yields map entries, regardless of the
+  ;; map flavor or the path that built the seq.
+  (is (= [:map-entry :map-entry] (mapv type (seq (sorted-map 1 :a 2 :b)))))
+  (is (= '(1 2) (map key (sorted-map 1 :a 2 :b))))
+  (is (= '(:a :b) (map val (sorted-map 1 :a 2 :b))))
+  (is (= :map-entry (type (first (rseq (sorted-map 1 :a))))))
+  (is (= '(2) (map key (subseq (sorted-map 1 :a 2 :b) > 1))))
+  (is (= '(1) (map key (rsubseq (sorted-map 1 :a 2 :b) < 2))))
+  (is (= :map-entry (type (second (cons 0 {:a 1}))))))

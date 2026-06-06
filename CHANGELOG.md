@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Every seq view of a map now yields real map entries: sorted-map
+  `seq` / `rseq` / `subseq` / `rsubseq` and the cons conversion of a
+  plain map previously produced bare `[k v]` vectors, so `(map key
+  (sorted-map 1 :a))` failed with "expected a map entry" while the
+  same call on a plain map worked.
+
 - `(char n)` now rejects the UTF-16 surrogate range
   (`0xD800`-`0xDFFF`), matching the documented scalar-value contract
   and the reader's `\uXXXX` literal. Previously it built a char whose
