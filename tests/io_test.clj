@@ -118,3 +118,19 @@
 
 (deftest read-string-still-works
   (is (= '(* 6 7) (read "(* 6 7)"))))
+
+(deftest print-family-emits-nested-values-unreadably
+  ;; print/println bind readable printing off for the whole value
+  ;; walk, so strings and characters inside collections emit their
+  ;; raw content; pr/prn keep the readable forms.
+  (is (= "[s]\n" (with-out-str (println ["s"]))))
+  (is (= "{:a s}\n" (with-out-str (println {:a "s"}))))
+  (is (= "[a s]" (with-out-str (print [\a "s"]))))
+  (is (= "(y)" (print-str (list "y"))))
+  (is (= "[s]\n" (println-str ["s"])))
+  (is (= "[\"s\"]\n" (with-out-str (prn ["s"]))))
+  ;; print's own unreadable choice shadows an explicit outer binding,
+  ;; matching the canonical entry-point contract.
+  (is (= "[s]" (binding [*print-readably* true] (print-str ["s"]))))
+  ;; str keeps readable nested forms.
+  (is (= "[\"s\"]" (str ["s"]))))

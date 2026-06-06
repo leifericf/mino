@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- print and println (and print-str / println-str) now apply
+  unreadable printing to the whole value, so strings and characters
+  inside collections emit their raw content: (println ["s"]) prints
+  [s]. pr / prn / str keep the readable nested forms.
+
 - compare on vectors (and the sorted-collection comparator path) now
   walks nested element pairs iteratively, so deeply nested values
   compare correctly instead of exhausting the C stack. Sorting

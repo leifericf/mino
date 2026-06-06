@@ -294,6 +294,11 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
      * still emits print-style chunks per JVM Clojure (only readable
      * forms set the flag). */
     if (readably && !S->print_readably_flag) readably = 0;
+    /* print/println bind unreadable printing for the WHOLE value walk,
+     * not just top-level strings/chars: nested strings inside
+     * collections emit raw content too. The cached flag is restored
+     * by print_dynvars_restore on every exit path. */
+    if (!readably) S->print_readably_flag = 0;
     while (mino_is_cons(args)) {
         mino_val *v = args->as.cons.car;
         if (!first) {
