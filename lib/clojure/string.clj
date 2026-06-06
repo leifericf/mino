@@ -175,7 +175,7 @@
   "Escapes $ and \\ in replacement so s can be used literally in
    replacement strings without triggering backreference syntax."
   [replacement]
-  (escape (as-str replacement) {"\\" "\\\\" "$" "\\$"}))
+  (escape (as-str replacement) {\\ "\\\\" \$ "\\$"}))
 
 (defn replace-first
   "Replaces only the first occurrence of match in s with replacement.

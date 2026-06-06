@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `clojure.string/re-quote-replacement` now actually escapes `$` and
+  `\` in the replacement. The escape map was keyed by one-character
+  strings where `escape` looks up characters, so every input passed
+  through unchanged.
+
 - `clojure.string/replace-first` now supports regex patterns, `$N`
   template replacements, and function replacements, exactly like
   `replace`. Previously a regex match silently fell through a

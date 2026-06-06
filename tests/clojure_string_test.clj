@@ -135,7 +135,9 @@
 
 (deftest str-replace-regex-quote
   (is (= "$out"  (str/replace "Xout" #"X" (str/re-quote-replacement "$"))))
-  (is (= "\\out" (str/replace "Xout" #"X" (str/re-quote-replacement "\\")))))
+  (is (= "\\out" (str/replace "Xout" #"X" (str/re-quote-replacement "\\"))))
+  (is (= "a\\$1\\\\b" (str/re-quote-replacement "a$1\\b")))
+  (is (= "$1x" (str/replace "Ax" #"A" (str/re-quote-replacement "$1")))))
 
 (deftest str-replace-regex-fn
   (is (= "ABC"       (str/replace "abc" #"\w" (fn [m] (str/upper-case m)))))
