@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `conj` and `merge` now accept whole maps into sorted maps (and
+  sorted maps as items into plain maps): `(merge (sorted-map 1 :a)
+  {3 :c})` merges instead of raising "conj on sorted-map requires map
+  entries or 2-element vectors".
+
 - Queues now take part in the full collection contract: `coll?`,
   `counted?`, and `sequential?` answer true; a queue is `=` to a list
   or vector with the same elements (with the matching sequential

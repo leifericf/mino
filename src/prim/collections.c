@@ -1591,6 +1591,16 @@ static mino_val *conj_map(mino_state *S, mino_val *coll,
                     mino_cons(S, k, mino_cons(S, v, mino_nil(S)));
                 acc = map_assoc_pairs(S, acc, pair_args, 1);
             }
+        } else if (mino_type_of(item) == MINO_SORTED_MAP) {
+            mino_val *es = sorted_seq(S, item);
+            while (mino_is_cons(es)) {
+                mino_val *e = es->as.cons.car;
+                mino_val *pair_args =
+                    mino_cons(S, e->as.map_entry.k,
+                        mino_cons(S, e->as.map_entry.v, mino_nil(S)));
+                acc = map_assoc_pairs(S, acc, pair_args, 1);
+                es = es->as.cons.cdr;
+            }
         } else if (mino_type_of(item) == MINO_VECTOR
                    && item->as.vec.len == 2) {
             mino_val *pair_args =
@@ -1628,19 +1638,35 @@ static mino_val *conj_sorted_map(mino_state *S, mino_val *coll,
     mino_val *v = coll;
     while (mino_is_cons(items)) {
         mino_val *item = items->as.cons.car;
-        mino_val *ek, *ev;
-        if (item != NULL && mino_type_of(item) == MINO_VECTOR
+        if (item == NULL || mino_type_of(item) == MINO_NIL) {
+            items = items->as.cons.cdr;
+            continue;
+        }
+        if (mino_type_of(item) == MINO_VECTOR
             && item->as.vec.len == 2) {
-            ek = vec_nth(item, 0);
-            ev = vec_nth(item, 1);
-        } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
-            ek = item->as.map_entry.k;
-            ev = item->as.map_entry.v;
+            v = sorted_map_assoc1(S, v, vec_nth(item, 0), vec_nth(item, 1));
+        } else if (mino_type_of(item) == MINO_MAP_ENTRY) {
+            v = sorted_map_assoc1(S, v, item->as.map_entry.k,
+                                  item->as.map_entry.v);
+        } else if (mino_type_of(item) == MINO_MAP) {
+            /* Merge map entries: (conj (sorted-map) {:a 1}) */
+            size_t j;
+            for (j = 0; j < item->as.map.len; j++) {
+                mino_val *k = vec_nth(item->as.map.key_order, j);
+                v = sorted_map_assoc1(S, v, k, map_get_val(item, k));
+            }
+        } else if (mino_type_of(item) == MINO_SORTED_MAP) {
+            mino_val *es = sorted_seq(S, item);
+            while (mino_is_cons(es)) {
+                mino_val *e = es->as.cons.car;
+                v = sorted_map_assoc1(S, v, e->as.map_entry.k,
+                                      e->as.map_entry.v);
+                es = es->as.cons.cdr;
+            }
         } else {
             return prim_throw_classified(S, "eval/type", "MTY001",
-                "conj on sorted-map requires map entries or 2-element vectors");
+                "conj on sorted-map requires a map entry, 2-element vector, or map");
         }
-        v = sorted_map_assoc1(S, v, ek, ev);
         items = items->as.cons.cdr;
     }
     return v;

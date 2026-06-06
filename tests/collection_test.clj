@@ -492,3 +492,10 @@
     (is (= 0 (count (pop clojure.lang.PersistentQueue/EMPTY))))
     (is (= clojure.lang.PersistentQueue/EMPTY
            (pop clojure.lang.PersistentQueue/EMPTY)))))
+
+(deftest conj-merges-maps-into-any-map-flavor
+  (is (= {1 :a 3 :c 5 :e} (merge (sorted-map 1 :a) {5 :e 3 :c})))
+  (is (= {1 :a 2 :b} (conj (sorted-map 1 :a) {2 :b})))
+  (is (= {1 :a 2 :b} (conj {1 :a} (sorted-map 2 :b))))
+  (is (= '(2 1) (keys (conj (sorted-map-by > 1 :a) (sorted-map 2 :b)))))
+  (is (= '(1 2) (keys (conj (sorted-map 2 :b) {1 :a})))))
