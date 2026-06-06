@@ -49,3 +49,13 @@
   ;; recur in a fn inside try is fine: the fn is its own recur target
   (is (= 0 (try ((fn f [n] (if (pos? n) (recur (dec n)) n)) 3)
                 (catch e :wrong)))))
+
+(deftest loop-recur-with-destructured-bindings
+  (is (= [1 2 3] (loop [[x & more] [1 2 3]
+                        acc []]
+                   (if x (recur more (conj acc x)) acc))))
+  (is (= [false #{1 3}]
+         (loop [[[f _] & rest-pairs] [[1 2] [3 4]]
+                first? true
+                seen #{}]
+           (if f (recur rest-pairs false (conj seen f)) [first? seen])))))

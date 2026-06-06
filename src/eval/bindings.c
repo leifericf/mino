@@ -507,11 +507,19 @@ static int bind_form(mino_state *S, mino_env *env, mino_val *pattern,
     if (pattern == NULL || mino_type_of(pattern) == MINO_SYMBOL) {
         return bind_sym(S, env, pattern, val);
     }
+    /* Nested destructure patterns always nil-fill and tolerate extra
+     * elements, regardless of how strict the enclosing binding context
+     * is: recur's exact-arity contract (like fn's) applies to the
+     * top-level slot count only. */
     if (mino_type_of(pattern) == MINO_VECTOR) {
-        return bind_vec_destructure(S, env, pattern, val, ctx);
+        const char *nested = (ctx != NULL && strcmp(ctx, "recur") == 0)
+            ? "loop" : ctx;
+        return bind_vec_destructure(S, env, pattern, val, nested);
     }
     if (mino_type_of(pattern) == MINO_MAP) {
-        return bind_map_destructure(S, env, pattern, val, ctx);
+        const char *nested = (ctx != NULL && strcmp(ctx, "recur") == 0)
+            ? "loop" : ctx;
+        return bind_map_destructure(S, env, pattern, val, nested);
     }
     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003", "unsupported binding form (expected symbol, vector, or map)");
     return 0;
