@@ -441,6 +441,12 @@ static void agent_worker_run(mino_state *S, agent_pool_kind_t kind,
         return;
     }
     ctx->gc_stack_bottom = (void *)stack_anchor;
+    {
+        size_t worker_stack = S->threading.thread_stack_size > 0
+            ? S->threading.thread_stack_size
+            : (size_t)MINO_WORKER_STACK_DEFAULT;
+        ctx->eval_stack_budget = mino_eval_stack_budget_for(worker_stack);
+    }
     mino_tls_ctx = ctx;
 
     /* Link onto S->threading.worker_ctxs_head so gc_mark_roots reaches the

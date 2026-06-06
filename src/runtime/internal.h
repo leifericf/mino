@@ -550,6 +550,17 @@ struct mino_state {
     int                      print_dup_flag;
     int                      print_namespace_maps_flag;
     int                      flush_on_newline_flag;
+
+    /* Stack-guard threshold for the thread currently running script
+     * code: its ctx's gc_stack_bottom minus its eval_stack_budget
+     * (NULL disables the guard -- frame addresses are never below
+     * NULL). Lives in the state rather than TLS because exactly one
+     * mutator runs under state_lock at a time and a state-field load
+     * is far cheaper than a TLS access on Mach-O. Refreshed by
+     * mino_eval_stack_limit_refresh at every point a thread starts
+     * or resumes running script code (host-entry frame note, worker
+     * and agent-pool thread entry, mino_resume_lock). */
+    char                    *eval_stack_limit;
 };
 
 /* Resolve the active per-thread ctx for state S.
@@ -560,6 +571,38 @@ struct mino_state {
 static inline mino_thread_ctx_t *mino_current_ctx(mino_state *S)
 {
     return mino_tls_ctx != NULL ? mino_tls_ctx : &S->main_ctx;
+}
+
+/* Script-call stack guard, fast path. One state-field load and
+ * compare of the live frame address against the running thread's
+ * threshold; the slow path (mino_eval_stack_guard, eval/fn.c) raises
+ * the catchable MLM004 limit diagnostic. Returns 0 when the caller
+ * must bail with NULL. */
+int mino_eval_stack_guard(mino_state *S);
+static inline int mino_eval_stack_guard_fast(mino_state *S)
+{
+    char probe;
+    if (__builtin_expect(&probe < S->eval_stack_limit, 0)) {
+        return mino_eval_stack_guard(S);
+    }
+    return 1;
+}
+
+/* Recompute the running thread's guard threshold after its
+ * gc_stack_bottom or budget changes, or when it (re)takes the
+ * mutator role. Must run on the thread that owns ctx -- every call
+ * site (host-entry frame note, worker / agent-pool entry,
+ * mino_resume_lock) satisfies this by construction. */
+static inline void mino_eval_stack_limit_refresh(mino_state *S,
+                                                 mino_thread_ctx_t *ctx)
+{
+    if (ctx->gc_stack_bottom == NULL || ctx->eval_stack_budget == 0
+        || (size_t)(uintptr_t)ctx->gc_stack_bottom <= ctx->eval_stack_budget) {
+        S->eval_stack_limit = NULL;
+        return;
+    }
+    S->eval_stack_limit =
+        (char *)ctx->gc_stack_bottom - ctx->eval_stack_budget;
 }
 
 #include "runtime/host_future.h"
@@ -612,6 +655,9 @@ static inline void mino_lock(mino_state *S)
             S->bc.bc_regs_cap = 0;
             S->bc.bc_top      = 0;
         }
+        /* This thread is the mutator now: install its stack-guard
+         * threshold alongside its BC stack. */
+        mino_eval_stack_limit_refresh(S, ctx);
     }
     ctx->lock_depth++;
 }

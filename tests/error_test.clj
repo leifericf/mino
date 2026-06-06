@@ -37,3 +37,22 @@
 (deftest catch-preserves-diagnostic-maps
   (let [m {:mino/kind :user :mino/code "MUS001" :mino/message "test"}]
     (is (= :user (:mino/kind (try (throw m) (catch e e)))))))
+
+(deftest call-depth-limit
+  (testing "runaway non-tail recursion raises a catchable limit error"
+    (is (= :caught
+           (try ((fn deep [n] (+ 1 (deep (inc n)))) 0)
+             (catch e :caught)))))
+  (testing "the limit error carries the limit diagnostics"
+    (let [e (try ((fn deep [n] (+ 1 (deep (inc n)))) 0)
+              (catch e e))]
+      (is (= "MLM004" (:mino/code e)))
+      (is (true? (clojure.string/includes? (ex-message e) "stack overflow")))))
+  (testing "bounded non-tail recursion within the limit completes"
+    (is (= 500 ((fn deep [n] (if (= n 500) 0 (inc (deep (inc n))))) 0))))
+  (testing "loop/recur depth is unaffected by the call-depth limit"
+    (is (= 1000000 (loop [i 0] (if (= i 1000000) i (recur (inc i)))))))
+  (testing "runaway recursion on a worker thread is catchable too"
+    (is (= :caught
+           @(future (try ((fn deep [n] (+ 1 (deep (inc n)))) 0)
+                      (catch e :caught)))))))

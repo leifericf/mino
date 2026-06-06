@@ -41,6 +41,30 @@ typedef struct {
     size_t      saved_lazy_len; /* lazy_inflight depth at frame entry */
 } try_frame_t;
 
+/* Script-call stack limiting. Call-frame entries compare the live
+ * stack pointer against the thread's anchored base; when consumption
+ * crosses the budget a catchable MLM004 "limit" diagnostic is raised
+ * instead of the C stack hitting the OS guard page. The budget keeps
+ * a headroom slice (a quarter of the stack, capped at 1 MiB) free for
+ * the frames between two guarded entries, the raise path, and the
+ * conservative GC scan. The worker default matches the typical POSIX
+ * main-thread stack so script code behaves the same on both; Windows
+ * links main with a 1 MiB default reserve. */
+#define MINO_WORKER_STACK_DEFAULT (8u * 1024u * 1024u)
+#if defined(_WIN32)
+#define MINO_MAIN_STACK_ASSUME (1u * 1024u * 1024u)
+#else
+#define MINO_MAIN_STACK_ASSUME (8u * 1024u * 1024u)
+#endif
+
+static inline size_t mino_eval_stack_budget_for(size_t stack_bytes)
+{
+    size_t headroom = stack_bytes / 4u;
+    if (headroom > (1u * 1024u * 1024u)) headroom = 1u * 1024u * 1024u;
+    if (stack_bytes <= headroom) return stack_bytes / 2u;
+    return stack_bytes - headroom;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Per-thread runtime context                                                */
 /* ------------------------------------------------------------------------- */
@@ -100,6 +124,18 @@ typedef struct mino_thread_ctx {
     mino_val      **lazy_inflight;
     size_t          lazy_inflight_len;
     size_t          lazy_inflight_cap;
+
+    /* Script-call stack budget in bytes (0 = guard disabled). Set at
+     * context setup from the thread's stack size. Call-frame entries
+     * (mino_bc_run, mino_bc_run_known_native, apply_callable) measure
+     * the distance from gc_stack_bottom to the live frame and raise a
+     * catchable limit diagnostic when it crosses the budget, so
+     * runaway non-tail recursion cannot exhaust the C stack and kill
+     * the embedder. Address-based on purpose: per-frame stack cost
+     * differs by an order of magnitude between the tree-walker, the
+     * BC interpreter, and JIT-compiled code, so a frame count cannot
+     * be both safe and permissive across engines. */
+    size_t          eval_stack_budget;
 
     /* Last raw user-thrown payload caught by an inner eval try frame
      * (mino_eval_inner / mino_eval_string_inner). The inner publishes

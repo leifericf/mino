@@ -347,9 +347,36 @@ static mino_val *apply_prim_cons(mino_state *S, mino_val *fn,
     return result;
 }
 
+int mino_eval_stack_guard(mino_state *S)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    char               probe;
+    char              *own = NULL;
+    if (ctx->gc_stack_bottom != NULL && ctx->eval_stack_budget > 0
+        && (size_t)(uintptr_t)ctx->gc_stack_bottom > ctx->eval_stack_budget) {
+        own = (char *)ctx->gc_stack_bottom - ctx->eval_stack_budget;
+    }
+    /* Self-heal: a peer thread's threshold can be live in
+     * S->eval_stack_limit on the first guarded call after a mutator
+     * handoff that skipped a refresh point. Comparing this thread's
+     * frame addresses against another thread's stack region is
+     * meaningless, so re-derive and re-check before raising; a raise
+     * only ever reflects this thread's own budget. */
+    if (S->eval_stack_limit != own) {
+        S->eval_stack_limit = own;
+    }
+    if (own != NULL && &probe < own) {
+        set_eval_diag(S, ctx->eval_current_form, "limit", "MLM004",
+                      "stack overflow: script recursion too deep");
+        return 0;
+    }
+    return 1;
+}
+
 mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                            mino_env *env)
 {
+    if (!mino_eval_stack_guard_fast(S)) return NULL;
     if (fn == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002", "cannot apply null");
         return NULL;

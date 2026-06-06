@@ -2430,10 +2430,15 @@ dispatch_done:
 }
 
 
+/* Stack-guarded entry: every bc-executed (and JIT-executed) call frame
+ * passes through here, so runaway non-tail recursion raises the MLM004
+ * limit diagnostic instead of exhausting the C stack. */
 mino_val *mino_bc_run(mino_state *S, mino_val *fn_val,
                         mino_val **argv, int argc, mino_env *env)
 {
-    const mino_bc_fn_t *bc = fn_val->as.fn.bc;
+    const mino_bc_fn_t *bc;
+    if (!mino_eval_stack_guard_fast(S)) return NULL;
+    bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) return NULL;
     if (bc->n_clauses <= 0 || bc->clauses == NULL) return NULL;
 
@@ -2687,6 +2692,7 @@ mino_val *mino_bc_run_known_native(mino_state *S, mino_val *fn_val,
                                       mino_val **argv, int argc,
                                       mino_env *env)
 {
+    if (!mino_eval_stack_guard_fast(S)) return NULL;
 #ifdef MINO_CPJIT
     const mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) goto fallback;

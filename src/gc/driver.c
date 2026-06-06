@@ -28,6 +28,12 @@ void gc_note_host_frame(mino_state *S, void *addr)
         || (char *)addr > (char *)mino_current_ctx(S)->gc_stack_bottom) {
         mino_current_ctx(S)->gc_stack_bottom = addr;
     }
+    /* Unconditional: this thread is (re)entering script execution, so
+     * its stack-guard threshold must replace whatever peer thread's
+     * was live in S->eval_stack_limit -- comparing one thread's frame
+     * addresses against another thread's stack region is meaningless
+     * in both directions. */
+    mino_eval_stack_limit_refresh(S, mino_current_ctx(S));
 }
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 #pragma GCC diagnostic pop

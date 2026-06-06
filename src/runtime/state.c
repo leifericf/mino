@@ -88,6 +88,8 @@ static void state_init(mino_state *S)
     S->flush_on_newline_flag     = -1;
     /* main_ctx is the embedder thread's view; spawned worker threads
      * install their own ctx via TLS at thread entry. */
+    S->main_ctx.eval_stack_budget =
+        mino_eval_stack_budget_for(MINO_MAIN_STACK_ASSUME);
     /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /
      * on case-insensitive) for the initial mode, default AUTO. The
      * threshold seed is the compile-time MINO_JIT_THRESHOLD; embedders
@@ -1756,6 +1758,9 @@ void mino_resume_lock(mino_state *S, int saved_depth)
         S->bc.bc_regs_cap = ctx->bc_regs_storage_cap;
         S->bc.bc_top      = ctx->bc_top_snapshot;
     }
+    /* This thread is the mutator again: its stack-guard threshold
+     * replaces whichever peer's was live during the yield window. */
+    mino_eval_stack_limit_refresh(S, ctx);
 }
 
 /* ------------------------------------------------------------------------- */

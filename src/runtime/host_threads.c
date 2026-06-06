@@ -285,6 +285,12 @@ static void worker_run(mino_future *impl, char *stack_anchor)
         return;
     }
     ctx->gc_stack_bottom = (void *)stack_anchor;
+    {
+        size_t worker_stack = S->threading.thread_stack_size > 0
+            ? S->threading.thread_stack_size
+            : (size_t)MINO_WORKER_STACK_DEFAULT;
+        ctx->eval_stack_budget = mino_eval_stack_budget_for(worker_stack);
+    }
     mino_tls_ctx = ctx;
     /* Wire cooperative cancel: BC safepoint reads through this TLS
      * pointer. future-cancel writes impl->cancel_flag; the worker
@@ -557,7 +563,9 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
 
 #if defined(_WIN32) && defined(_MSC_VER)
     {
-        unsigned stack = (unsigned)S->threading.thread_stack_size;  /* 0 = default */
+        unsigned stack = (unsigned)(S->threading.thread_stack_size > 0
+                                    ? S->threading.thread_stack_size
+                                    : (size_t)MINO_WORKER_STACK_DEFAULT);
         uintptr_t h = _beginthreadex(NULL, stack, worker_entry, impl,
                                      0, NULL);
         if (h == 0) {
@@ -576,9 +584,12 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
         pthread_attr_t attr;
         pthread_attr_t *attrp = NULL;
         int rc;
-        if (S->threading.thread_stack_size > 0) {
+        {
+            size_t spawn_stack = S->threading.thread_stack_size > 0
+                ? S->threading.thread_stack_size
+                : (size_t)MINO_WORKER_STACK_DEFAULT;
             if (pthread_attr_init(&attr) == 0) {
-                pthread_attr_setstacksize(&attr, S->threading.thread_stack_size);
+                pthread_attr_setstacksize(&attr, spawn_stack);
                 attrp = &attr;
             }
         }

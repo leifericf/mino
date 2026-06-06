@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Runaway non-tail recursion now raises a catchable "stack overflow:
+  script recursion too deep" limit error instead of exhausting the C
+  stack and killing the process. The guard compares the live stack
+  pointer against a per-thread budget at every call-frame entry, so
+  it holds across the tree-walker, the bytecode interpreter, and
+  JIT-compiled code. Worker threads also get a full-size 8 MiB stack
+  by default (previously the platform default, as small as 512 KiB,
+  which a future could overflow at less than two thousand frames).
+
 - Parks nested in function-call arguments inside `(go ...)` now work:
   `(go (inc (<! ch)))` and `(go (+ (<! a) (<! b)))` are lifted into
   let bindings with left-to-right evaluation preserved, instead of
