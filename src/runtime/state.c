@@ -88,8 +88,22 @@ static void state_init(mino_state *S)
     S->flush_on_newline_flag     = -1;
     /* main_ctx is the embedder thread's view; spawned worker threads
      * install their own ctx via TLS at thread entry. */
-    S->main_ctx.eval_stack_budget =
-        mino_eval_stack_budget_for(MINO_MAIN_STACK_ASSUME);
+    {
+        size_t main_stack = MINO_MAIN_STACK_ASSUME;
+#if defined(_WIN32)
+        /* Windows can report the real bounds (reserve sizes differ by
+         * linker: MSVC defaults to 1 MiB, zig/mingw links larger).
+         * Available since Windows 8; the assume macro stays as the
+         * declaration-time fallback. */
+        {
+            ULONG_PTR lo = 0, hi = 0;
+            GetCurrentThreadStackLimits(&lo, &hi);
+            if (hi > lo) main_stack = (size_t)(hi - lo);
+        }
+#endif
+        S->main_ctx.eval_stack_budget =
+            mino_eval_stack_budget_for(main_stack);
+    }
     /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /
      * on case-insensitive) for the initial mode, default AUTO. The
      * threshold seed is the compile-time MINO_JIT_THRESHOLD; embedders
@@ -1221,6 +1235,12 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
         return -1;
     }
 
+    /* Capture the shared eval bookkeeping under the state lock: a
+     * sibling worker may be mid-call with the namespace pair switched,
+     * and an unlocked read here races with its restore. The brief
+     * lock yields a coherent entry snapshot for the catch-side
+     * rewind. */
+    mino_lock(S);
     mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
     mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
     mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
@@ -1228,6 +1248,7 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
     mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
     mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
     mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+    mino_unlock(S);
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         /* Inner-eval try frames may have caught the original throw and
@@ -1324,6 +1345,12 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         return -1;
     }
 
+    /* Capture the shared eval bookkeeping under the state lock: a
+     * sibling worker may be mid-call with the namespace pair switched,
+     * and an unlocked read here races with its restore. The brief
+     * lock yields a coherent entry snapshot for the catch-side
+     * rewind. */
+    mino_lock(S);
     mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
     mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
     mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
@@ -1331,6 +1358,7 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
     mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
     mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
     mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+    mino_unlock(S);
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. Restore the
          * eval bookkeeping that was active at pcall entry, then

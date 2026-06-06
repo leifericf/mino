@@ -26,6 +26,12 @@
 #  include <windows.h>
 #  include <process.h>
 #else
+#  if defined(_WIN32)
+     /* mingw/zig windows-gnu: threads run on winpthreads, but the
+      * stack-bounds query below still needs the Win32 surface. */
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+#  endif
 #  include <pthread.h>
 #  include <time.h>
 #endif
@@ -289,6 +295,15 @@ static void worker_run(mino_future *impl, char *stack_anchor)
         size_t worker_stack = S->threading.thread_stack_size > 0
             ? S->threading.thread_stack_size
             : (size_t)MINO_WORKER_STACK_DEFAULT;
+#if defined(_WIN32)
+        /* Query the real bounds; the reserve the spawn requested may
+         * be rounded by the loader. */
+        {
+            ULONG_PTR lo = 0, hi = 0;
+            GetCurrentThreadStackLimits(&lo, &hi);
+            if (hi > lo) worker_stack = (size_t)(hi - lo);
+        }
+#endif
         ctx->eval_stack_budget = mino_eval_stack_budget_for(worker_stack);
     }
     mino_tls_ctx = ctx;
