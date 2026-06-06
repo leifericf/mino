@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.423.4 — Windows Timing and Bigint Fixes
+
+- time-ms and nano-time no longer overflow on Windows once the
+  machine has been up for about fifteen minutes: the performance-
+  counter conversion now splits the multiply so the intermediate
+  product stays inside 64 bits.
+
+- Coercing a bigint to a long works for the full long range on
+  Windows: the conversion went through imath's mp_small (a C long,
+  32-bit there), so values past 2^31 reported "out of long range".
+  Values that fit a long long but not a long now take a string
+  round-trip. Ratio extraction had the same truncation and shares
+  the fix.
+
 ## v0.423.3 — Windows Teardown Fix
 
 - State teardown releases future cells through a join-free path: the

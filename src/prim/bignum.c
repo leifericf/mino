@@ -19,6 +19,7 @@
 #include "mino.h"
 #include "imath.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -255,6 +256,32 @@ uint32_t mino_bigint_hash(const mino_val *v)
  * MINO_INT or a MINO_BIGINT whose magnitude fits in long long, with
  * *out set to the value. Returns 0 otherwise (including nil / non-
  * numeric types); *out is left unchanged on failure. */
+/* Extract a bigint into a long long. mp_small is `long`, which is
+ * 32-bit on LLP64 and ILP32 targets, so values that fit a long long
+ * but not a long take a string round-trip instead of failing. */
+static int bigint_to_ll(mp_int z, long long *out)
+{
+    mp_small s;
+    if (mp_int_to_int(z, &s) == MP_OK) {
+        *out = (long long)s;
+        return 1;
+    }
+    {
+        /* INT64 extremes need 19 digits + sign + NUL; anything that
+         * doesn't fit this buffer is out of long-long range anyway. */
+        char       buf[24];
+        char      *end;
+        long long  n;
+        if (mp_int_string_len(z, 10) > (mp_result)sizeof(buf)) return 0;
+        if (mp_int_to_string(z, 10, buf, sizeof(buf)) != MP_OK) return 0;
+        errno = 0;
+        n = strtoll(buf, &end, 10);
+        if (end == buf || *end != '\0' || errno == ERANGE) return 0;
+        *out = n;
+        return 1;
+    }
+}
+
 int mino_as_ll(const mino_val *v, long long *out)
 {
     if (v == NULL || out == NULL) return 0;
@@ -263,13 +290,7 @@ int mino_as_ll(const mino_val *v, long long *out)
         return 1;
     }
     if (mino_type_of(v) == MINO_BIGINT && v->as.bigint.mpz != NULL) {
-        mp_int    z = (mp_int)v->as.bigint.mpz;
-        mp_small  s;
-        if (mp_int_to_int(z, &s) != MP_OK) return 0;
-        /* mp_small is long; long and long long coincide on LP64 but we
-         * stay conservative in case of ILP32. */
-        *out = (long long)s;
-        return 1;
+        return bigint_to_ll((mp_int)v->as.bigint.mpz, out);
     }
     return 0;
 }
@@ -325,9 +346,9 @@ int mino_to_bigint_str(const mino_val *v, char *buf, size_t n,
 
 int mino_to_ratio(const mino_val *v, long long *out_num, long long *out_den)
 {
-    mp_int   zn, zd;
-    mp_small n = 0;
-    mp_small d = 0;
+    mp_int    zn, zd;
+    long long nll = 0;
+    long long dll = 0;
     if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0;
     if (v->as.ratio.num == NULL || v->as.ratio.denom == NULL) return 0;
     if (mino_type_of(v->as.ratio.num) != MINO_BIGINT
@@ -337,10 +358,10 @@ int mino_to_ratio(const mino_val *v, long long *out_num, long long *out_den)
     zn = (mp_int)v->as.ratio.num->as.bigint.mpz;
     zd = (mp_int)v->as.ratio.denom->as.bigint.mpz;
     if (zn == NULL || zd == NULL) return 0;
-    if (mp_int_to_int(zn, &n) != MP_OK) return 0;
-    if (mp_int_to_int(zd, &d) != MP_OK) return 0;
-    if (out_num != NULL) *out_num = (long long)n;
-    if (out_den != NULL) *out_den = (long long)d;
+    if (!bigint_to_ll(zn, &nll)) return 0;
+    if (!bigint_to_ll(zd, &dll)) return 0;
+    if (out_num != NULL) *out_num = nll;
+    if (out_den != NULL) *out_den = dll;
     return 1;
 }
 
