@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The CLI composes -e with a script: mino -e EXPR FILE args evaluates
+  the expression and then runs the file with the remaining arguments.
+  Previously the positional after -e was silently ignored.
+
 - Added locking: evaluates its body while holding a monitor of the
   given object (identity-keyed, reentrant per thread, released on
   throw). Exclusion is cooperative and holds across yield points such

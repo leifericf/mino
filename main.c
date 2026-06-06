@@ -1294,12 +1294,18 @@ int main(int argc, char **argv)
     /* Auto-wire project paths from mino.edn if present. */
     setup_project(S, env);
 
-    /* -e / --eval EXPR mode: evaluate one expression and exit. */
+    /* -e / --eval EXPR mode: evaluate the expression, then continue
+     * into the positional dispatch when a FILE follows (the canonical
+     * CLI composition: eval the form, run the script with the
+     * remaining arguments). Without a positional, exit with the
+     * eval's status. */
     if (eval_expr != NULL) {
         exit_code = run_eval_expr(S, env, eval_expr);
-        mino_env_free(S, env);
-        mino_state_free(S);
-        return exit_code;
+        if (exit_code != 0 || first >= argc) {
+            mino_env_free(S, env);
+            mino_state_free(S);
+            return exit_code;
+        }
     }
 
     /* Subcommand: mino task [<name>] */
