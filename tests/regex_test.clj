@@ -90,7 +90,7 @@
 ;; overflow into an explicit compile failure.
 (deftest re-find-long-pattern-with-capture
   (testing "long literal prefix + capture group + quantifier"
-    (is (= ["#define MINO_STENCIL_RELOC_FOO 42"
+    (is (= ["#define MINO_STENCIL_RELOC_FOO 42u"
             "MINO_STENCIL_RELOC_FOO" "42"]
            (re-find
             #"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"
@@ -219,3 +219,11 @@
   (is (= "\n" (re-find #"[\n\t]" "ax\n")))
   (is (nil? (re-find #"[\n]" "n")))
   (is (nil? (re-find #"\n" "n"))))
+
+(deftest question-mark-is-greedy
+  (is (= "a" (re-find #"a?" "ab")))
+  (is (= "ab" (re-find #"ab?" "ab")))
+  (is (= "a" (re-matches #"a?" "a")))
+  (is (= ["ab" "b"] (re-find #"a(b)?" "ab")))
+  (is (= "" (re-find #"x?" "ab")))
+  (is (= "ab" (re-find #"a?b" "ab"))))

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The regex `?` quantifier is now greedy, matching the canonical
+  engines: `(re-find #"ab?" "ab")` returns `"ab"` instead of `"a"`,
+  and `(re-matches #"a?" "a")` matches.
+
 - `clojure.string/split` now follows the canonical piece semantics:
   a negative limit keeps trailing empty pieces (only limit 0 trims),
   a zero-width separator match splits without dropping characters (so

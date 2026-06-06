@@ -937,17 +937,17 @@ static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* mat
 {
   if (p.type == UNUSED)
     return 1;
-  if (matchpattern(pattern, text, matchlength))
-      return 1;
-  if (*text && matchone(p, *text++))
+  /* Greedy: prefer consuming the optional atom, fall back to skipping
+   * it -- the same longest-first order matchstar keeps. */
+  if (*text && matchone(p, *text))
   {
-    if (matchpattern(pattern, text, matchlength))
+    if (matchpattern(pattern, text + 1, matchlength))
     {
       (*matchlength)++;
       return 1;
     }
   }
-  return 0;
+  return matchpattern(pattern, text, matchlength);
 }
 
 
