@@ -128,3 +128,11 @@
                  (catch e (if (map? e) (:mino/message e) (str e))))]
     (is (some? err))
     (is (some? (re-find #"tagged literal" err)))))
+
+(deftest nested-anon-fns-rejected
+  ;; #() may not contain another #(): the % slots would be ambiguous.
+  (is (thrown? (read-string "#(#(inc %))")))
+  (is (thrown? (read-string "#(map #(inc %) %)")))
+  ;; Sequential (sibling) #() forms remain fine.
+  (is (= [2 3] (mapv #(inc %) [1 2])))
+  (is (= 5 (#(+ %1 %2) 2 3))))

@@ -1539,8 +1539,15 @@ static mino_val *read_anon_fn_form(mino_state *S, const char **p)
     mino_val *body;
     mino_val *params_vec;
     mino_val *fn_form;
+    if (S->reader.reader_in_anon_fn) {
+        set_reader_diag(S, MRE007, "nested #() forms are not allowed",
+                        fn_line, fn_col);
+        return NULL;
+    }
     ADVANCE(S, p); /* skip '#', read_list_form will handle '(' */
+    S->reader.reader_in_anon_fn = 1;
     body = read_list_form(S, p);
+    S->reader.reader_in_anon_fn = 0;
     if (body == NULL) return NULL;
     scan_percent_args(body, used, &max_arg, &has_rest);
     body = normalize_percent(S, body);
@@ -2619,6 +2626,7 @@ mino_val *mino_read(mino_state *S, const char *src, const char **end)
      * call that bailed via a deeper non-local exit (set_reader_diag
      * + early return) leaving the counter elevated. */
     S->reader_depth = 0;
+    S->reader.reader_in_anon_fn = 0;
     v = read_form(S, &p);
     if (end != NULL) {
         *end = p;

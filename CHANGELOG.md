@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Nested `#()` anonymous-function literals are now a reader error.
+  Previously the inner form was accepted silently and its expanded
+  `%1`-style parameters leaked into the outer literal's arity
+  inference, so which `%` belonged to which function depended on
+  shadowing accidents.
+
 - Integer literals with a leading zero now read as octal: `010` is
   `8`, `0377` is `255`, and `010N` is `8N`. A non-octal digit after
   the leading zero (`08`, `09`) is an invalid-number reader error.

@@ -34,6 +34,9 @@ typedef struct reader_printer_state {
     /* Transient flag: set by `#?(...)` when no branch matched so the
      * read returned NULL silently. */
     int             reader_last_cond_empty;
+    /* Nonzero while inside a #(...) body; nesting them is a reader
+     * error because the inner form's % slots would be ambiguous. */
+    int             reader_in_anon_fn;
 
     /* Filename intern table. Strings are malloc-owned, freed at state
      * teardown. Held here (not process-global) so two runtimes on two
