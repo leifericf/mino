@@ -59,6 +59,9 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env,
 mino_val *eval(mino_state *S, mino_val *form, mino_env *env);
 mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                            mino_env *env);
+/* True for the reader's meta-flagged record values (tagged-literal
+ * fallback, preserved reader conditionals); they self-evaluate. */
+int mino_is_reader_record(mino_state *S, mino_val *form);
 /* argv ABI variant: invoke `fn` with a slice of `argc` pointers from
  * `argv`. Skips the cons-spine build+walk used by callers that already
  * have their args in argv form (BC's OP_CALL, in particular).

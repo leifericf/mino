@@ -336,6 +336,26 @@ static mino_val *eval_vector_literal(mino_state *S, mino_val *form,
     }
 }
 
+/* Reader-produced records -- the tagged-literal fallback and
+ * preserved reader conditionals -- are values, marked by a meta flag.
+ * They self-evaluate like records; re-evaluating their map shape as a
+ * literal would try to resolve the stored tag symbol / form. */
+int mino_is_reader_record(mino_state *S, mino_val *form)
+{
+    mino_val *meta;
+    mino_val *marker;
+    if (form == NULL || mino_type_of(form) != MINO_MAP) return 0;
+    meta = form->meta;
+    if (meta == NULL || mino_type_of(meta) != MINO_MAP) return 0;
+    marker = map_get_val(meta, mino_keyword(S, "mino/tagged-literal"));
+    if (marker != NULL && marker != mino_nil(S)
+        && marker != mino_false(S)) return 1;
+    marker = map_get_val(meta, mino_keyword(S, "mino/reader-conditional"));
+    if (marker != NULL && marker != mino_nil(S)
+        && marker != mino_false(S)) return 1;
+    return 0;
+}
+
 static mino_val *eval_map_literal(mino_state *S, mino_val *form,
                                     mino_env *env)
 {
@@ -344,6 +364,9 @@ static mino_val *eval_map_literal(mino_state *S, mino_val *form,
     mino_val **ks;
     mino_val **vs;
     if (n == 0) {
+        return form;
+    }
+    if (mino_is_reader_record(S, form)) {
         return form;
     }
     /* Fast path: every key and value is self-evaluating. */

@@ -4228,6 +4228,15 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
                 emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
                 return 0;
             }
+            /* Reader records (tagged-literal fallback, preserved
+             * reader conditionals) self-evaluate; the hash-map
+             * lowering below would re-evaluate their stored tag
+             * symbol / form. Decline so the tree-walker's literal
+             * path returns the record unchanged. */
+            if (mino_is_reader_record(c->S, form)) {
+                c->ok = 0;
+                return -1;
+            }
             /* Constructor lane: lower `{:k0 v0 :k1 v1 ...}` to
              * `(hash-map :k0 v0 :k1 v1 ...)` so the call site builds
              * a fresh map per invocation with each value evaluated

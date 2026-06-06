@@ -79,3 +79,25 @@
   (let [t (tagged-literal :kw 1)]
     (is (tagged-literal? t))
     (is (= :kw (:tag t)))))
+
+(deftest reader-records-self-evaluate
+  ;; The records the reader produces (tagged-literal fallback,
+  ;; preserved reader conditionals) are values: evaluating one
+  ;; returns it unchanged instead of treating the record map as a
+  ;; map literal whose contents need resolution.
+  (let [t #foo bar]
+    (is (tagged-literal? t))
+    (is (= 'foo (:tag t)))
+    (is (= 'bar (:form t))))
+  (let [t (eval (read-string "#unknown (a b)"))]
+    (is (tagged-literal? t))
+    (is (= '(a b) (:form t))))
+  (let [c (eval (read-string {:read-cond :preserve} "#?(:clj (x))"))]
+    (is (= '(:clj (x)) (:form c)))))
+
+(deftest reader-record-self-evaluates-in-fn-body
+  (defn make-tl__drt [] #point [1 2])
+  (let [t (make-tl__drt)]
+    (is (tagged-literal? t))
+    (is (= 'point (:tag t)))
+    (is (= [1 2] (:form t)))))

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Reader records now self-evaluate. An unknown tagged literal in
+  evaluated source (`#foo 42`) produces the tagged-literal record --
+  the same value `read-string` returns -- instead of failing with
+  `unbound symbol: foo` because the record map's tag symbol got
+  re-evaluated as a map literal. Preserved reader conditionals
+  behave the same under `eval`.
+
 - Nested `#()` anonymous-function literals are now a reader error.
   Previously the inner form was accepted silently and its expanded
   `%1`-style parameters leaked into the outer literal's arity
