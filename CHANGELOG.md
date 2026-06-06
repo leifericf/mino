@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The regex `.` now matches one character instead of one byte, so
+  multibyte UTF-8 text works with wildcard patterns:
+  `(re-seq #"." "héllo")` yields five characters and
+  `(re-find #"h.l" "hél")` matches. Quantifier backtracking steps by
+  whole characters as well.
+
 - Patterns that can match the empty string now match at the end of
   input, as in the canonical engines: `(re-find #"x*" "")` returns
   `""`, `(re-seq #"" "ab")` yields three empty matches, and

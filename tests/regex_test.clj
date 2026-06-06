@@ -237,3 +237,15 @@
   (is (= ["a" "" ""] (vec (re-seq #"a?" "ab"))))
   (is (= ["" "" ""] (vec (re-seq #"x*" "ab"))))
   (is (= "-a-b-c-" (clojure.string/replace "abc" #"x*" "-"))))
+
+(deftest dot-matches-a-codepoint
+  ;; `.` consumes one character, not one byte, so multibyte UTF-8
+  ;; sequences match intact.
+  (is (= ["h" "é" "l" "l" "o"] (vec (re-seq #"." "héllo"))))
+  (is (= "é" (re-find #"." "é")))
+  (is (= "hél" (re-find #"h.l" "hél")))
+  (is (= "héllo" (re-find #".+" "héllo")))
+  (is (= "héllo" (re-matches #"h.llo" "héllo")))
+  (is (= "aébé" (re-find #".*é" "aébéx")))
+  (is (= "é" (re-find #".?" "é")))
+  (is (= "hé" (re-find #"h.{1}" "héllo"))))

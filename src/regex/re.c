@@ -109,6 +109,8 @@ static struct {
 
 
 /* Private function declarations: */
+static int re_match_width(regex_t p, const char* text);
+static const char* re_back_one(regex_t p, const char* floor, const char* text);
 static int matchpattern(regex_t* pattern, const char* text, int* matchlength);
 static int matchcharclass(char c, const char* str);
 static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchlength);
@@ -869,14 +871,20 @@ static int matchstar(regex_t p, regex_t* pattern, const char* text, int* matchle
   const char* prepoint = text;
   while ((text[0] != '\0') && matchone(p, *text))
   {
-    text++;
-    (*matchlength)++;
+    int w = re_match_width(p, text);
+    text += w;
+    *matchlength += w;
   }
-  while (text >= prepoint)
+  for (;;)
   {
-    if (matchpattern(pattern, text--, matchlength))
+    if (matchpattern(pattern, text, matchlength))
       return 1;
-    (*matchlength)--;
+    if (text == prepoint) break;
+    {
+      const char* back = re_back_one(p, prepoint, text);
+      *matchlength -= (int)(text - back);
+      text = back;
+    }
   }
 
   *matchlength = prelen;
@@ -888,14 +896,19 @@ static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchle
   const char* prepoint = text;
   while ((text[0] != '\0') && matchone(p, *text))
   {
-    text++;
-    (*matchlength)++;
+    int w = re_match_width(p, text);
+    text += w;
+    *matchlength += w;
   }
   while (text > prepoint)
   {
-    if (matchpattern(pattern, text--, matchlength))
+    if (matchpattern(pattern, text, matchlength))
       return 1;
-    (*matchlength)--;
+    {
+      const char* back = re_back_one(p, prepoint, text);
+      *matchlength -= (int)(text - back);
+      text = back;
+    }
   }
 
   return 0;
@@ -910,11 +923,13 @@ static int matchbounded(regex_t p, regex_t* pattern, const char* text,
   int prelen   = *matchlength;
   int count    = 0;
   const char *prepoint;
+  const char *start = text;
   /* Greedy: consume as many as possible up to max. */
   while (count < max && text[0] != '\0' && matchone(p, *text))
   {
-    text++;
-    (*matchlength)++;
+    int w = re_match_width(p, text);
+    text += w;
+    *matchlength += w;
     count++;
   }
   /* Backtrack down to min trying to match the suffix at each point. */
@@ -924,13 +939,56 @@ static int matchbounded(regex_t p, regex_t* pattern, const char* text,
     if (matchpattern(pattern, text, matchlength))
       return 1;
     if (count == 0) break;
-    text--;
-    (*matchlength)--;
+    {
+      const char* back = re_back_one(p, start, text);
+      *matchlength -= (int)(text - back);
+      text = back;
+    }
     count--;
   }
   (void)prepoint;
   *matchlength = prelen;
   return 0;
+}
+
+/* Consume width in bytes for a matched atom. DOT swallows a whole
+ * UTF-8 sequence so "any char" means one codepoint, not one byte;
+ * every other atom is byte-sized. Truncated sequences clamp at the
+ * NUL so the scan never walks past end-of-input. */
+static int re_match_width(regex_t p, const char* text)
+{
+  unsigned char b;
+  int w;
+  int i;
+  if (p.type != DOT) return 1;
+  b = (unsigned char)text[0];
+  if (b < 0x80) return 1;
+  if      ((b & 0xE0) == 0xC0) w = 2;
+  else if ((b & 0xF0) == 0xE0) w = 3;
+  else if ((b & 0xF8) == 0xF0) w = 4;
+  else return 1;
+  for (i = 1; i < w; i++)
+  {
+    if (text[i] == '\0') return i;
+  }
+  return w;
+}
+
+/* Step one consumed atom backwards during quantifier backtracking.
+ * For DOT the step crosses the whole UTF-8 sequence (skipping
+ * continuation bytes) so retry positions stay on codepoint
+ * boundaries; never steps below `floor`. */
+static const char* re_back_one(regex_t p, const char* floor, const char* text)
+{
+  text--;
+  if (p.type == DOT)
+  {
+    while (text > floor && (((unsigned char)text[0]) & 0xC0) == 0x80)
+    {
+      text--;
+    }
+  }
+  return text;
 }
 
 static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* matchlength)
@@ -941,9 +999,10 @@ static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* mat
    * it -- the same longest-first order matchstar keeps. */
   if (*text && matchone(p, *text))
   {
-    if (matchpattern(pattern, text + 1, matchlength))
+    int w = re_match_width(p, text);
+    if (matchpattern(pattern, text + w, matchlength))
     {
-      (*matchlength)++;
+      *matchlength += w;
       return 1;
     }
   }
@@ -1244,9 +1303,18 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
       return (matchpattern(pattern, text) || matchpattern(&pattern[2], text));
     }
 */
-  (*matchlength)++;
+  /* Single atom: consume its width and continue with the next slot. */
+  if ((text[0] != '\0') && matchone(pattern[0], text[0]))
+  {
+    int w = re_match_width(pattern[0], text);
+    *matchlength += w;
+    pattern += 1;
+    text    += w;
+    continue;
   }
-  while ((text[0] != '\0') && matchone(*pattern++, *text++));
+  break;
+  }
+  while (1);
 
   *matchlength = pre;
   return 0;
