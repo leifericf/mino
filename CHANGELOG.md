@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.423.1 — CI Matrix Portability Fixes
+
+- Integer literals that overflow into bigints now read correctly on
+  musl-based systems: musl's strtoll reports overflow without
+  consuming the full digit run, which previously surfaced as
+  "invalid number" for hex, octal, radix, and decimal forms.
+
+- recur into a loop whose bindings use destructuring works again;
+  the exact-arity check applies to the top-level slot count only and
+  nested patterns nil-fill as before.
+
+- The protected-call entry captures its namespace/loader snapshot
+  under the state lock, closing a data race with worker threads
+  observed under ThreadSanitizer.
+
+- Windows builds size the recursion guard from the thread's real
+  stack bounds instead of a fixed assumption.
+
 ## v0.423.0 — Runtime Hardening Sweep
 
 - Values read from #inst literals print back as #inst "..." instead

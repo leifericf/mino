@@ -138,12 +138,12 @@
 (deftest load-file-skips-a-shebang-line
   ;; Executable scripts start with #!; the loader treats that first
   ;; line as a comment while keeping line numbers for what follows.
-  (let [path "/tmp/mino-shebang-fixture.clj"]
+  (let [path (str tmpdir "/mino-shebang-fixture.clj")]
     (spit path "#!/usr/bin/env mino\n(def shebang-fixture-value :ran)\nshebang-fixture-value\n")
     (is (= :ran (load-file path)))))
 
 (deftest spit-append-option
-  (let [path "/tmp/mino-spit-append.txt"]
+  (let [path (str tmpdir "/mino-spit-append.txt")]
     (spit path "first")
     (spit path "-second" :append true)
     (is (= "first-second" (slurp path)))
