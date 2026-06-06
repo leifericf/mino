@@ -487,6 +487,7 @@ mino_val *prim_ns_name(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ns_publics(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ns_map(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env);
