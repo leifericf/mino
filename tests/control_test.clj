@@ -40,3 +40,12 @@
   (is (thrown? (eval '(loop [x 1] (if (= x 1) (recur 1 2) x)))))
   (is (thrown? (eval '(loop [x 1 y 2] (if (= x 1) (recur 9) x)))))
   (is (= 3 (loop [x 1 y 2] (if (= x 1) (recur 9 3) y)))))
+
+(deftest recur-across-try-rejected
+  (is (thrown? (eval '(loop [x 1] (try (recur 2) (catch e nil))))))
+  (is (thrown? (eval '(loop [x 1]
+                        (try (throw (ex-info "t" {}))
+                             (catch e (recur 2)))))))
+  ;; recur in a fn inside try is fine: the fn is its own recur target
+  (is (= 0 (try ((fn f [n] (if (pos? n) (recur (dec n)) n)) 3)
+                (catch e :wrong)))))

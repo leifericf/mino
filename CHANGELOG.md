@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `recur` across a `try` boundary (from the body or a catch handler)
+  now raises "cannot recur across try" instead of silently re-entering
+  the loop with the try frame's unwind machinery skipped.
+
 - `recur` with the wrong number of arguments now throws an arity
   error naming the expected and actual counts. Previously extra args
   were dropped and missing args were filled with nil, so a mismatched

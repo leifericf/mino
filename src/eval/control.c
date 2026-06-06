@@ -245,6 +245,15 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 eval_implicit_do(S, clauses.finally_body, env);
             return NULL;
         }
+        if (mino_type_of(r) == MINO_RECUR) {
+            /* A recur target cannot be re-entered across the try
+             * frame -- the unwind machinery would be skipped. */
+            set_eval_diag(S, form, "syntax", "MSY001",
+                          "cannot recur across try");
+            if (clauses.has_finally)
+                eval_implicit_do(S, clauses.finally_body, env);
+            return NULL;
+        }
         vol_result = r;
     } else {
         /* longjmp'd from throw in body. Restore current_ns and ambient
@@ -309,6 +318,12 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                     eval_implicit_do(S, clauses.finally_body, env);
                     return NULL;
                 }
+                if (mino_type_of(r) == MINO_RECUR) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                                  "cannot recur across try");
+                    eval_implicit_do(S, clauses.finally_body, env);
+                    return NULL;
+                }
                 vol_result    = r;
                 got_exception = 0;
             } else {
@@ -342,6 +357,11 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_val *r =
                 eval_implicit_do(S, clauses.catch_body, local);
             if (r == NULL) {
+                return NULL;
+            }
+            if (mino_type_of(r) == MINO_RECUR) {
+                set_eval_diag(S, form, "syntax", "MSY001",
+                              "cannot recur across try");
                 return NULL;
             }
             vol_result    = r;
