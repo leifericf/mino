@@ -840,6 +840,80 @@
 (defn force
   "Forces evaluation of a delay. If x is not a delay, returns x."
   [x] (if (delay? x) (deref-delay x) x))
+
+;; --- Monitors (locking) ---
+
+(def monitor-registry
+  ;; Vector of [monitor-object owner-thread-id depth] entries. Identity
+  ;; keyed (identical?) like canonical monitors; held-monitor counts
+  ;; are tiny, so a linear scan is the simple correct structure. The
+  ;; single-mutator scheduling model makes each swap! a critical
+  ;; section on its own: claims and releases cannot interleave with
+  ;; another thread's between yield points.
+  (atom []))
+
+(defn monitor-try-enter
+  "Claim x for owner, or reenter if owner already holds it. Returns
+  true when the claim succeeded, false when another thread holds x."
+  [x owner]
+  (let [claimed (volatile! false)]
+    (swap! monitor-registry
+           (fn [entries]
+             (let [idx (loop [i 0]
+                         (cond
+                           (>= i (count entries)) nil
+                           (identical? (nth (nth entries i) 0) x) i
+                           :else (recur (inc i))))]
+               (cond
+                 (nil? idx)
+                 (do (vreset! claimed true)
+                     (conj entries [x owner 1]))
+
+                 (= (nth (nth entries idx) 1) owner)
+                 (do (vreset! claimed true)
+                     (update entries idx (fn [[o w d]] [o w (inc d)])))
+
+                 :else
+                 (do (vreset! claimed false)
+                     entries)))))
+    @claimed))
+
+(defn monitor-exit
+  "Release one level of x for owner; drops the entry at depth zero."
+  [x owner]
+  (swap! monitor-registry
+         (fn [entries]
+           (let [idx (loop [i 0]
+                       (cond
+                         (>= i (count entries)) nil
+                         (and (identical? (nth (nth entries i) 0) x)
+                              (= (nth (nth entries i) 1) owner)) i
+                         :else (recur (inc i))))]
+             (cond
+               (nil? idx) entries
+               (> (nth (nth entries idx) 2) 1)
+               (update entries idx (fn [[o w d]] [o w (dec d)]))
+               :else
+               (vec (concat (subvec entries 0 idx)
+                            (subvec entries (inc idx))))))))
+  nil)
+
+(defmacro locking
+  "Executes body while holding a monitor of x. Reentrant per thread;
+  released on normal exit and on throw. Exclusion is cooperative:
+  contending threads wait for the holder to release across yield
+  points."
+  [x & body]
+  `(let [mon# ~x
+         owner# (mino-thread-id*)]
+     (loop []
+       (when-not (monitor-try-enter mon# owner#)
+         (thread-sleep 1)
+         (recur)))
+     (try
+       (do ~@body)
+       (finally
+         (monitor-exit mon# owner#)))))
 ;; Delay realisation is folded into the C prim_deref hot path
 ;; (see src/prim/stateful.c): when (deref m) is called on a map
 ;; carrying :delay/fn, the prim invokes the thunk directly. The

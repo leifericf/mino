@@ -1060,6 +1060,21 @@ static mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
     return mino_int(S, mino_get_thread_limit(S));
 }
 
+/* (mino-thread-id*) — a stable identity for the calling thread's
+ * runtime context (the ctx address as an integer). Used by the
+ * cooperative `locking` monitor registry in core.clj to record
+ * ownership; nothing dereferences the value. */
+static mino_val *prim_mino_thread_id(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "mino-thread-id* takes no arguments");
+    }
+    return mino_int(S, (long long)(intptr_t)mino_current_ctx(S));
+}
+
 /* (mino-thread-count) — return the live worker count for this state. */
 static mino_val *prim_mino_thread_count(mino_state *S, mino_val *args,
                                    mino_env *env)
@@ -1321,6 +1336,8 @@ const mino_prim_def k_prims_stateful[] = {
      "(set-dyn-binding! 'name value) — mutate the topmost active dynamic binding for `name`. Returns the value. Throws when no binding frame is active for `name`. Backs (set! *var* expr)."},
     {"set-fail-alloc-at!", prim_set_fail_alloc_at,
      "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable."},
+    {"mino-thread-id*",   prim_mino_thread_id,
+     "Stable identity of the calling thread's runtime context."},
     {"mino-thread-limit", prim_mino_thread_limit,
      "Return the host-granted thread limit for this state. 1 means single-threaded; >1 means the host has granted that many concurrent worker threads."},
     {"mino-thread-count", prim_mino_thread_count,

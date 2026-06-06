@@ -62,3 +62,27 @@
   (let [ch (a/chan)]
     (a/put! ch :hi)
     (is (= :picked (a/alt! ch :picked)))))
+
+(deftest locking-monitor
+  (testing "body value is returned and nesting on the same monitor reenters"
+    (let [m (atom :monitor)]
+      (is (= :inner (locking m (locking m :inner))))))
+  (testing "a throw releases the monitor for the next holder"
+    (let [m (atom :monitor)]
+      (is (= :caught (try (locking m (throw (ex-info "x" {})))
+                       (catch e :caught))))
+      (is (= :again (locking m :again)))))
+  (testing "contending futures serialize their critical sections"
+    (let [m       (atom :monitor)
+          active  (atom 0)
+          overlap (atom false)
+          worker  (fn []
+                    (locking m
+                      (swap! active inc)
+                      (when (> @active 1) (reset! overlap true))
+                      (Thread/sleep 20)
+                      (swap! active dec))
+                    true)
+          fs (mapv (fn [_] (future (worker))) (range 3))]
+      (doseq [f fs] (deref f 4000 :timeout))
+      (is (false? @overlap)))))

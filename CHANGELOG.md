@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added locking: evaluates its body while holding a monitor of the
+  given object (identity-keyed, reentrant per thread, released on
+  throw). Exclusion is cooperative and holds across yield points such
+  as sleeps and blocking channel operations inside the body.
+
 - A delay whose body throws now caches the failure: the body runs at
   most once and every later force rethrows the recorded error,
   matching canonical delay semantics. realized? answers true for a
