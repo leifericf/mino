@@ -76,3 +76,21 @@
     (is (= coll (filter (fn [_] true) coll)))
     (is (= coll (filter (fn [_] true) coll)))
     (is (not (= coll (filter (fn [_] false) coll))))))
+
+(deftest failed-lazy-seq-rethrows-on-each-force
+  ;; A thunk that throws leaves the seq unrealized; every subsequent
+  ;; force re-runs the thunk and surfaces the same throw.
+  (let [s (lazy-seq (throw (ex-info "boom" {:n 1})))]
+    (is (= :c1 (try (first s) (catch e :c1))))
+    (is (= :c2 (try (first s) (catch e :c2))))
+    (is (not (realized? s)))))
+
+(deftest lazy-seq-thunk-retries-after-throw
+  (let [calls (atom 0)
+        s (lazy-seq
+            (swap! calls inc)
+            (when (= 1 @calls) (throw (ex-info "transient" {})))
+            (list :ok))]
+    (is (= :caught (try (first s) (catch e :caught))))
+    (is (= :ok (first s)))
+    (is (= 2 @calls))))

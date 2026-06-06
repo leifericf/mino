@@ -311,6 +311,20 @@ static void gc_mark_ctx_gc_save(mino_state *S, mino_thread_ctx_t *ctx)
     }
 }
 
+/* gc_mark_ctx_lazy_inflight -- mark the lazy cells this ctx has
+ * CAS-claimed but not yet published or rolled back. Between the claim
+ * and the pop the cell is also live on the owning thread's C stack
+ * (the active lazy_realize frame), but a GC initiated from another
+ * thread while this worker is parked cannot see that stack, so the
+ * tracking array doubles as the precise root. */
+static void gc_mark_ctx_lazy_inflight(mino_state *S, mino_thread_ctx_t *ctx)
+{
+    size_t li;
+    for (li = 0; li < ctx->lazy_inflight_len; li++) {
+        gc_mark_interior(S, ctx->lazy_inflight[li]);
+    }
+}
+
 /* gc_mark_ctx_tx -- mark the per-ref tentative values and commute log
  * cells held by this thread's active transaction (if any). Without
  * this, a tentative value not yet committed could be collected
@@ -461,6 +475,12 @@ static void gc_mark_thread_state(mino_state *S)
     mino_worker_list_lock_acquire(S);
     for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_tx(S, w);
+    }
+    mino_worker_list_lock_release(S);
+    gc_mark_ctx_lazy_inflight(S, &S->main_ctx);
+    mino_worker_list_lock_acquire(S);
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
+        gc_mark_ctx_lazy_inflight(S, w);
     }
     mino_worker_list_lock_release(S);
     if (mino_current_ctx(S)->last_diag != NULL) {

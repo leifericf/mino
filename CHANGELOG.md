@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Forcing a lazy seq whose thunk previously threw no longer hangs.
+  When the throw unwound to an enclosing `try`, the cell was left
+  marked as realization-in-progress, so every later force spun forever
+  waiting for a realizer that no longer existed. The thunk is now
+  retried on each force and rethrows each time, matching the canonical
+  retry contract.
+
 - Map entries now support `assoc`, behaving as the 2-element vector
   they stand for (matching their existing `conj` / `nth` behaviour).
 

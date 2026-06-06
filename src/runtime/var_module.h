@@ -22,6 +22,9 @@
 
 /* ns_env.c: per-namespace root env table. */
 void load_stack_truncate(mino_state *S, size_t len);
+/* state.c: roll back this thread's LAZY_REALIZING claims past MARK on
+ * a try-frame landing pad (throw bypassed lazy_realize's rollback). */
+void mino_lazy_inflight_unwind(mino_state *S, size_t mark);
 mino_env *ns_env_lookup(mino_state *S, const char *name);   /* borrowed */
 mino_env *ns_env_ensure(mino_state *S, const char *name);   /* GC-owned, rooted */
 mino_val *ns_symbol_with_meta(mino_state *S, const char *name);

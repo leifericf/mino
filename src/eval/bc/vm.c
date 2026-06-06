@@ -2332,6 +2332,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_ns       = S->ns_vars.current_ns;
             ctx->try_stack[td].saved_ambient  = S->ns_vars.fn_ambient_ns;
             ctx->try_stack[td].saved_load_len = S->module.load_stack_len;
+            ctx->try_stack[td].saved_lazy_len = ctx->lazy_inflight_len;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
@@ -2362,6 +2363,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 S->ns_vars.current_ns    = ctx->try_stack[my_td].saved_ns;
                 S->ns_vars.fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
                 load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
+                mino_lazy_inflight_unwind(S, ctx->try_stack[my_td].saved_lazy_len);
                 ctx->try_depth = my_td;
                 /* Pop the register-window stack back down to this fn's
                  * own window. A throw from a deeper bc_run frame

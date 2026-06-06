@@ -1139,6 +1139,7 @@ static mino_val *tx_outer_run(mino_state *S,
     frame->saved_ns       = S->ns_vars.current_ns;
     frame->saved_ambient  = S->ns_vars.fn_ambient_ns;
     frame->saved_load_len = S->module.load_stack_len;
+    frame->saved_lazy_len = ctx_v->lazy_inflight_len;
     if (setjmp(frame->buf) != 0) {
         /* Body threw. Use the volatile ctx_v captured before setjmp so
          * we don't re-enter the inlined mino_current_ctx (whose locals
@@ -1147,6 +1148,7 @@ static mino_val *tx_outer_run(mino_state *S,
         mino_val        *ex = c->try_stack[saved_try].exception;
         tx_clear_ref_states(&tx);
         c->current_tx    = NULL;
+        mino_lazy_inflight_unwind(S, c->try_stack[saved_try].saved_lazy_len);
         c->try_depth     = saved_try;
         S->ns_vars.current_ns    = c->try_stack[saved_try].saved_ns;
         S->ns_vars.fn_ambient_ns = c->try_stack[saved_try].saved_ambient;

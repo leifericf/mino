@@ -544,6 +544,33 @@ mino_val *eval_implicit_do(mino_state *S, mino_val *body, mino_env *env)
  * matches JVM clojure.lang.LazySeq#sval(), which throws out the
  * cached state on exception and retries on next force.
  */
+/* Record V as claimed (LAZY_REALIZING) by this thread so a throw that
+ * longjmps out of the thunk can roll the claim back at the try-frame
+ * landing pad (mino_lazy_inflight_unwind). Returns 0 on success, -1 if
+ * the tracking array cannot grow. */
+static int lazy_inflight_push(mino_state *S, mino_val *v)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (ctx->lazy_inflight_len == ctx->lazy_inflight_cap) {
+        size_t      ncap = ctx->lazy_inflight_cap == 0
+            ? 16 : ctx->lazy_inflight_cap * 2;
+        mino_val **na  = realloc(ctx->lazy_inflight,
+                                   ncap * sizeof(*na));
+        if (na == NULL) {
+            return -1;
+        }
+        ctx->lazy_inflight     = na;
+        ctx->lazy_inflight_cap = ncap;
+    }
+    ctx->lazy_inflight[ctx->lazy_inflight_len++] = v;
+    return 0;
+}
+
+static void lazy_inflight_pop(mino_state *S)
+{
+    mino_current_ctx(S)->lazy_inflight_len--;
+}
+
 static mino_val *lazy_realize(mino_state *S, mino_val *v)
 {
     for (;;) {
@@ -558,6 +585,19 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                                             0,
                                             __ATOMIC_ACQ_REL,
                                             __ATOMIC_ACQUIRE)) {
+                /* Track the claim so a throw that longjmps out of the
+                 * thunk (try_depth > 0 routes raises through longjmp,
+                 * skipping the result==NULL rollback below) gets the
+                 * cell flipped back to UNREALIZED at the landing pad
+                 * instead of stranding it REALIZING. */
+                if (lazy_inflight_push(S, v) != 0) {
+                    __atomic_store_n(&v->as.lazy.realized,
+                                     LAZY_UNREALIZED, __ATOMIC_RELEASE);
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                  "limit", "MLM003",
+                                  "out of memory tracking lazy realization");
+                    return NULL;
+                }
                 /* Install the captured defining ns for the duration
                  * of the body evaluation so unqualified ns-level
                  * symbols (e.g. helper fns defined in the library
@@ -584,6 +624,7 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                      * caller can re-run the thunk; if other threads
                      * are spinning, they'll see UNREALIZED and one of
                      * them will try the CAS. */
+                    lazy_inflight_pop(S);
                     __atomic_store_n(&v->as.lazy.realized,
                                      LAZY_UNREALIZED, __ATOMIC_RELEASE);
                     return NULL;
@@ -604,6 +645,7 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                 v->as.lazy.env = NULL;
                 __atomic_store_n(&v->as.lazy.realized,
                                  LAZY_REALIZED, __ATOMIC_RELEASE);
+                lazy_inflight_pop(S);
                 return result;
             }
             /* CAS lost; expected now holds the observed state. Loop

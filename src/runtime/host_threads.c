@@ -450,6 +450,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
         diag_free(ctx->last_diag);
         ctx->last_diag = NULL;
     }
+    free(ctx->lazy_inflight);
     mino_tls_ctx        = NULL;
     mino_tls_cancel_ptr = NULL;
     free(ctx);

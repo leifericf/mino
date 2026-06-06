@@ -233,6 +233,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val *r;
         mino_current_ctx(S)->try_depth++;
@@ -252,6 +253,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
+        mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
         mino_current_ctx(S)->try_depth   = saved_try;
         mino_current_ctx(S)->call_depth  = saved_call;
         mino_current_ctx(S)->trace_added = saved_trace;
@@ -297,6 +299,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_current_ctx(S)->try_stack[is].saved_ns       = S->ns_vars.current_ns;
             mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
             mino_current_ctx(S)->try_stack[is].saved_load_len = S->module.load_stack_len;
+            mino_current_ctx(S)->try_stack[is].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
@@ -314,6 +317,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 S->ns_vars.current_ns    = mino_current_ctx(S)->try_stack[is].saved_ns;
                 S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[is].saved_ambient;
                 load_stack_truncate(S, mino_current_ctx(S)->try_stack[is].saved_load_len);
+                mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[is].saved_lazy_len);
                 mino_current_ctx(S)->try_depth   = is;
                 mino_current_ctx(S)->call_depth  = ic;
                 mino_current_ctx(S)->trace_added = it;

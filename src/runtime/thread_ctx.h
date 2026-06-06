@@ -38,6 +38,7 @@ typedef struct {
     const char *saved_ns;       /* current_ns at try-frame entry; restored on catch */
     const char *saved_ambient;  /* fn_ambient_ns at try-frame entry */
     size_t      saved_load_len; /* require load-stack depth at frame entry */
+    size_t      saved_lazy_len; /* lazy_inflight depth at frame entry */
 } try_frame_t;
 
 /* ------------------------------------------------------------------------- */
@@ -83,6 +84,22 @@ typedef struct mino_thread_ctx {
     /* Exception handling: longjmp targets for try/catch. */
     try_frame_t     try_stack[MAX_TRY_DEPTH];
     int             try_depth;
+
+    /* Lazy cells this thread has CAS-claimed (LAZY_REALIZING) and not
+     * yet published or rolled back, in claim order. A throw that
+     * longjmps out of a thunk bypasses lazy_realize's normal
+     * result==NULL rollback; every try-frame landing pad calls
+     * mino_lazy_inflight_unwind with the frame's saved_lazy_len to
+     * flip the abandoned cells back to LAZY_UNREALIZED so a later
+     * force re-runs the thunk instead of spinning on REALIZING
+     * forever. Grown on demand; entries are also live on this
+     * thread's C stack (the active lazy_realize frames) between the
+     * raise and the landing, and the array itself is walked by
+     * gc_mark_thread_state so a parked worker's claims stay
+     * reachable. */
+    mino_val      **lazy_inflight;
+    size_t          lazy_inflight_len;
+    size_t          lazy_inflight_cap;
 
     /* Last raw user-thrown payload caught by an inner eval try frame
      * (mino_eval_inner / mino_eval_string_inner). The inner publishes
