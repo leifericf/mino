@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `map-indexed`, `keep-indexed`, and `keep` no longer process dropped
+  elements when applied after `drop` / `drop-while` on a chunked
+  source (vectors, ranges). `chunk-first` now respects the head
+  chunk's offset, so `(map-indexed vector (drop 2 [:a :b :c :d]))`
+  returns `([0 :c] [1 :d])` instead of mapping the whole chunk.
+
 - Forcing a lazy seq whose thunk previously threw no longer hangs.
   When the throw unwound to an enclosing `try`, the cell was left
   marked as realization-in-progress, so every later force spun forever

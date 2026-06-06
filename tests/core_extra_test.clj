@@ -245,6 +245,18 @@
   (is (= [[0 :a] [1 :b] [2 :c]]
          (into [] (map-indexed vector [:a :b :c])))))
 
+(deftest chunk-first-honors-dropped-prefix
+  ;; drop on a chunked source rebases the head chunk's offset; the
+  ;; chunk view that keep / keep-indexed / map-indexed consume must
+  ;; start at that offset, not at the chunk's physical start.
+  (is (= [[0 :c] [1 :d]] (map-indexed vector (drop 2 [:a :b :c :d]))))
+  (is (= [[0 :c] [1 :d]] (keep-indexed (fn [i x] [i x]) (drop 2 [:a :b :c :d]))))
+  (is (= [:c :d] (keep identity (drop 2 [:a :b :c :d]))))
+  (is (= [[0 3] [1 4] [2 5]] (map-indexed vector (drop 3 (range 6)))))
+  (is (= [[0 3] [1 4] [2 5]] (map-indexed vector (drop-while (fn [x] (< x 3)) (range 6)))))
+  (is (= 2 (count (chunk-first (drop 2 (seq [:a :b :c :d]))))))
+  (is (= :c (nth (chunk-first (drop 2 (seq [:a :b :c :d]))) 0))))
+
 (deftest partition-all-fn
   (is (= ['(1 2 3) '(4 5 6) '(7 8)]
          (into [] (partition-all 3 [1 2 3 4 5 6 7 8])))))

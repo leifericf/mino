@@ -780,10 +780,28 @@ static mino_val *prim_chunk_first(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-first: argument must be a chunked-seq");
     }
-    /* Return the chunk as-is; consumers use count/nth. The off-truncated
-     * sub-view costs an extra alloc that callers rarely need (chunk-first
-     * is normally followed by a fresh chunk-buffer of `count` slots). */
-    return cs->as.chunked_cons.chunk;
+    /* Consumers index the result with count/nth from zero, so a head
+     * chunk whose cons carries a non-zero offset (drop / drop-while
+     * rebase `off` instead of copying) must be materialized as the
+     * remaining-elements view. The common off == 0 case stays
+     * alloc-free. */
+    if (cs->as.chunked_cons.off == 0) {
+        return cs->as.chunked_cons.chunk;
+    }
+    {
+        const mino_val *src = cs->as.chunked_cons.chunk;
+        unsigned          off = cs->as.chunked_cons.off;
+        unsigned          len = src->as.chunk.len - off;
+        unsigned          k;
+        mino_val       *buf = mino_chunk_buffer(S, len);
+        if (buf == NULL) return NULL;
+        for (k = 0; k < len; k++) {
+            buf->as.chunk.vals[buf->as.chunk.len++] =
+                src->as.chunk.vals[off + k];
+        }
+        mino_chunk_seal(buf);
+        return buf;
+    }
 }
 
 static mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
