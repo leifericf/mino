@@ -67,7 +67,14 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
             p++;
         } else if ((*p == 'e' || *p == 'E') && (p != s)) {
             char *end;
-            long  e = strtol(p + 1, &end, 10);
+            long  e;
+            /* The exponent needs at least one digit after its
+             * optional sign; musl's strtol consumes a lone sign, so
+             * check explicitly instead of trusting end == p + 1. */
+            const char *expp = p + 1;
+            if (*expp == '+' || *expp == '-') expp++;
+            if (!(*expp >= '0' && *expp <= '9')) { free(digits); return NULL; }
+            e = strtol(p + 1, &end, 10);
             if (end == p + 1) { free(digits); return NULL; }
             exp = (int)e;
             p = end;

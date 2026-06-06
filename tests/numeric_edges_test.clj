@@ -237,3 +237,15 @@
   (is (= 2N (bigint 7/3)))
   (is (= -2N (bigint -7/3)))
   (is (= :bigint (type (bigint 7/3)))))
+
+(deftest parse-fns-reject-sign-only-input
+  ;; A bare sign carries no digits, so the string parsers return nil
+  ;; regardless of how the host libc positions strtoll's end pointer.
+  (is (nil? (parse-long "+")))
+  (is (nil? (parse-long "-")))
+  (is (nil? (parse-double "+")))
+  (is (nil? (parse-double "-")))
+  ;; An exponent marker needs at least one digit after its optional
+  ;; sign for the literal to be a number.
+  (is (thrown? (read-string "1e+M")))
+  (is (thrown? (read-string "1E-M"))))

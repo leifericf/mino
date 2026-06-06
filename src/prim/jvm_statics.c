@@ -62,7 +62,13 @@ static mino_val *prim_long_parse_long(mino_state *S, mino_val *args,
         }
     }
     n = strtoll(s->as.s.data, &endp, (int)radix);
-    if (endp == s->as.s.data || (endp != NULL && *endp != '\0')) {
+    /* No-conversion gate: musl positions endp after a lone sign
+     * instead of at the start, so compare against the first possible
+     * digit rather than the raw start. */
+    if (endp == NULL ||
+        endp <= s->as.s.data +
+                    (s->as.s.data[0] == '+' || s->as.s.data[0] == '-') ||
+        *endp != '\0') {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "Long/parseLong: unparseable input");
     }
@@ -86,7 +92,10 @@ static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
             "Double/parseDouble: string argument required");
     }
     d = strtod(s->as.s.data, &endp);
-    if (endp == s->as.s.data) {
+    /* Same musl lone-sign guard as Long/parseLong above. */
+    if (endp == NULL ||
+        endp <= s->as.s.data +
+                    (s->as.s.data[0] == '+' || s->as.s.data[0] == '-')) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "Double/parseDouble: unparseable input");
     }

@@ -289,7 +289,11 @@ mino_val *prim_parse_long(mino_state *S, mino_val *args, mino_env *env)
         return mino_nil(S);
     errno = 0;
     result = strtoll(s, &end, 10);
-    if (end == s || *end != '\0' || errno == ERANGE)
+    /* No-conversion gate: musl positions `end` after a lone sign
+     * instead of at the start of the string, so compare against the
+     * first possible digit rather than the raw start. */
+    if (end <= s + (s[0] == '+' || s[0] == '-') || *end != '\0' ||
+        errno == ERANGE)
         return mino_nil(S);
     return mino_int(S, result);
 }
@@ -312,7 +316,8 @@ mino_val *prim_parse_double(mino_state *S, mino_val *args, mino_env *env)
         return mino_nil(S);
     errno = 0;
     result = strtod(s, &end);
-    if (end == s || *end != '\0')
+    /* Same musl lone-sign guard as parse-long above. */
+    if (end <= s + (s[0] == '+' || s[0] == '-') || *end != '\0')
         return mino_nil(S);
     return mino_float(S, result);
 }

@@ -55,7 +55,13 @@
   (is (= 255      (Long/parseLong "FF" 16)))
   (is (= 7        (Integer/parseInt "7")))
   (is (= 3.14     (Double/parseDouble "3.14")))
-  (is (thrown?    (Long/parseLong "not-a-number"))))
+  (is (thrown?    (Long/parseLong "not-a-number")))
+  ;; A bare sign has no digits to convert; both parsers must reject
+  ;; it on every libc.
+  (is (thrown?    (Long/parseLong "+")))
+  (is (thrown?    (Long/parseLong "-")))
+  (is (thrown?    (Double/parseDouble "+")))
+  (is (thrown?    (Double/parseDouble "-"))))
 
 (deftest jvm-statics-java-util-of
   (is (= '(1 2 3)    (java.util.List/of 1 2 3)))

@@ -9,6 +9,14 @@
   Previously these leaked at exit, which LeakSanitizer flagged on
   Linux.
 
+- parse-long, parse-double, Long/parseLong, Double/parseDouble, and
+  bigdec exponent parsing now reject a bare sign with no digits on
+  every libc. musl's strtoll positions its end pointer after a lone
+  "+"/"-", which slipped the no-conversion check and made
+  (parse-long "+") return 0; clojure.instant's digit scanner then
+  misparsed timestamps with a numeric zone offset on musl and
+  MinGW-built Windows binaries.
+
 ## v0.423.1 — CI Matrix Portability Fixes
 
 - Integer literals that overflow into bigints now read correctly on
