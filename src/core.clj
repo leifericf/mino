@@ -811,16 +811,28 @@
   "Returns true if x is a delay."
   [x] (and (map? x) (contains? x :delay/fn)))
 (defmacro delay
-  "Creates a delay that evaluates body on first deref."
+  "Creates a delay that evaluates body on first deref. The body runs
+  at most once: a failure is recorded and rethrown on every later
+  force."
   [& body]
   `(let [state# (atom {:status :pending})]
      {:delay/fn  (fn []
                    (let [s# @state#]
-                     (if (= (:status s#) :done)
+                     (cond
+                       (= (:status s#) :done)
                        (:value s#)
-                       (let [v# (do ~@body)]
-                         (reset! state# {:status :done :value v#})
-                         v#))))
+
+                       (= (:status s#) :failed)
+                       (throw (:error s#))
+
+                       :else
+                       (try
+                         (let [v# (do ~@body)]
+                           (reset! state# {:status :done :value v#})
+                           v#)
+                         (catch e#
+                           (reset! state# {:status :failed :error e#})
+                           (throw e#))))))
       :delay/state state#}))
 (defn deref-delay
   "Forces evaluation of a delay and returns its value."
@@ -843,7 +855,7 @@
     (fn [x]
       (cond
         (nil? x)    (throw "realized? requires a non-nil argument")
-        (delay? x)  (= :done (:status @(:delay/state x)))
+        (delay? x)  (not= :pending (:status @(:delay/state x)))
         (future? x) (future-done? x)
         :else       (c-realized? x)))))
 

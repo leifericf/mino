@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A delay whose body throws now caches the failure: the body runs at
+  most once and every later force rethrows the recorded error,
+  matching canonical delay semantics. realized? answers true for a
+  failed delay. (Lazy-seq thunks keep their canonical retry
+  behavior.)
+
 - Timeout channels now wake blocking takes: the blocking bridges
   (<!!, >!!, alts!!) wait only until the next pending timer deadline,
   fire it, and re-check, so (<!! (timeout 30)) returns at the deadline

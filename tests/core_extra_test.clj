@@ -372,3 +372,14 @@
 (deftest for-macro
   (is (= [1 4 9 16 25] (into [] (for (x [1 2 3 4 5]) (* x x)))))
   (is (= [4 16] (into [] (for (x [1 2 3 4 5] :when (even? x)) (* x x))))))
+
+(deftest delay-caches-a-thrown-failure
+  ;; The body runs once; a failure is recorded and rethrown on every
+  ;; subsequent force, and the delay counts as realized.
+  (let [evals (atom 0)
+        d     (delay (swap! evals inc)
+                     (throw (ex-info "boom" {:n @evals})))]
+    (is (= 1 (:n (ex-data (try @d (catch e e))))))
+    (is (= 1 (:n (ex-data (try @d (catch e e))))))
+    (is (= 1 @evals))
+    (is (true? (realized? d)))))
