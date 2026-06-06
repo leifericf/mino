@@ -13,7 +13,7 @@
  *   '$'        End anchor, matches end of string
  *   '*'        Asterisk, match zero or more (greedy)
  *   '+'        Plus, match one or more (greedy)
- *   '?'        Question, match zero or one (non-greedy)
+ *   '?'        Question, match zero or one (greedy)
  *   '[abc]'    Character class, match if one of {'a', 'b', 'c'}
  *   '[^abc]'   Inverted class, match if NOT one of {'a', 'b', 'c'}
  *   '[a-zA-Z]' Character ranges, the character set of the ranges { a-z | A-Z }
@@ -23,6 +23,9 @@
  *   '\W'       Non-alphanumeric
  *   '\d'       Digits, [0-9]
  *   '\D'       Non-digits
+ *   '\b' '\B'  Word boundary / non-boundary (zero-width)
+ *   '\n' &c.   Control-character escapes: \n \r \t \f \a \e \0
+ *              (inside a class, \b is the backspace character)
  *
  *
  * Style note. This translation unit and its header preserve the
@@ -54,7 +57,7 @@
  * `CHAR` typedef from <windows.h>, which other TUs pull in under
  * _WIN32. In the single-file amalgamation those includes precede this
  * enum, so the unprefixed name breaks a Windows amalgam build. */
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY };
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its
@@ -475,6 +478,10 @@ re_t re_compile(const char* pattern)
             case 's': {    re_compiled[j].type = WHITESPACE;       } break;
             case 'S': {    re_compiled[j].type = NOT_WHITESPACE;   } break;
 
+            /* Zero-width word-boundary assertions. */
+            case 'b': {    re_compiled[j].type = WORD_BOUNDARY;     } break;
+            case 'B': {    re_compiled[j].type = NOT_WORD_BOUNDARY; } break;
+
             /* Control-character escapes. */
             case 'n': {    re_compiled[j].type = RE_CHAR;
                            re_compiled[j].u.ch = '\n';            } break;
@@ -784,7 +791,7 @@ static int is_class_escape(char c)
 {
   return ismetachar(c)
       || (c == 'n') || (c == 'r') || (c == 't') || (c == 'f')
-      || (c == 'a') || (c == 'e') || (c == '0');
+      || (c == 'a') || (c == 'e') || (c == '0') || (c == 'b');
 }
 
 static int matchmetachar(char c, const char* str)
@@ -797,7 +804,9 @@ static int matchmetachar(char c, const char* str)
     case 'W': return !matchalphanum(c);
     case 's': return  matchwhitespace(c);
     case 'S': return !matchwhitespace(c);
-    /* Control-character escapes inside classes, e.g. [\n\t]. */
+    /* Control-character escapes inside classes, e.g. [\n\t].
+     * In a class \b is the backspace character, not a boundary. */
+    case 'b': return (c == '\b');
     case 'n': return (c == '\n');
     case 'r': return (c == '\r');
     case 't': return (c == '\t');
@@ -1251,6 +1260,24 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
         }
         pattern++;
       }
+    }
+    if (pattern[0].type == WORD_BOUNDARY
+        || pattern[0].type == NOT_WORD_BOUNDARY)
+    {
+      /* Zero-width assertion: a word boundary sits between a \w and
+       * a non-\w neighbor (start/end of input count as non-word).
+       * The window base stands in for start-of-input; a scan that
+       * begins mid-string cannot see further left. */
+      int prev_w = (text > re_g_state.base) && matchalphanum(text[-1]);
+      int cur_w  = (text[0] != '\0') && matchalphanum(text[0]);
+      int at_b   = (prev_w != cur_w);
+      if (pattern[0].type == NOT_WORD_BOUNDARY ? at_b : !at_b)
+      {
+        *matchlength = pre;
+        return 0;
+      }
+      pattern++;
+      continue;
     }
     if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
     {

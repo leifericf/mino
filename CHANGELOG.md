@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Regex patterns support the word-boundary assertions `\b` and `\B`:
+  `(re-find #"\bword\b" "a word here")` matches. Inside a character
+  class `\b` is the backspace character, as in the canonical engines.
+
 - The regex `.` now matches one character instead of one byte, so
   multibyte UTF-8 text works with wildcard patterns:
   `(re-seq #"." "héllo")` yields five characters and

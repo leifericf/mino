@@ -249,3 +249,12 @@
   (is (= "aébé" (re-find #".*é" "aébéx")))
   (is (= "é" (re-find #".?" "é")))
   (is (= "hé" (re-find #"h.{1}" "héllo"))))
+
+(deftest word-boundary-anchors
+  (is (= "word" (re-find #"\bword\b" "a word here")))
+  (is (nil? (re-find #"\bord\b" "a word here")))
+  (is (= ["ab" "cd" "ef"] (vec (re-seq #"\b\w+" "ab cd!ef"))))
+  (is (= "ord" (re-find #"\Bord" "word")))
+  (is (nil? (re-find #"\Bword" "a word")))
+  (is (= "w" (re-find #"\bw" "word")))
+  (is (nil? (re-find #"\bb" "abc"))))
