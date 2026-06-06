@@ -2156,17 +2156,31 @@
   [proto-name & methods]
   (let [pname (name proto-name)]
     (letfn [(method-meta [m]
-              (let [mname  (first m)
-                    params (second m)]
+              (let [mname (first m)
+                    sigs  (vec (take-while vector? (rest m)))]
                 {:mname mname
-                 :params params
+                 :sigs sigs
                  :dsym (symbol (str pname "--" (name mname)))}))
             (method-defn [mi]
-              (list 'defn (:mname mi) (:params mi)
-                    (apply list 'protocol-dispatch
-                           (:dsym mi)
-                           (str (:mname mi))
-                           (:params mi))))]
+              ;; Single-signature methods keep the exact single-arity
+              ;; shape the BC compiler's protocol-IC recognizer keys
+              ;; on; multi-signature methods emit an arity-dispatching
+              ;; fn (correct, falls back to the generic call path).
+              (if (= 1 (count (:sigs mi)))
+                (let [params (first (:sigs mi))]
+                  (list 'defn (:mname mi) params
+                        (apply list 'protocol-dispatch
+                               (:dsym mi)
+                               (str (:mname mi))
+                               params)))
+                (apply list 'defn (:mname mi)
+                       (map (fn [params]
+                              (list params
+                                    (apply list 'protocol-dispatch
+                                           (:dsym mi)
+                                           (str (:mname mi))
+                                           params)))
+                            (:sigs mi)))))]
       (let [methods     (remove string? methods)
             methods     (loop [ms methods result []]
                           (if (or (nil? ms) (empty? ms))
@@ -2216,18 +2230,24 @@
                       pns   (namespace proto)]
                   (map (fn [m]
                     (let [mname (first m)
-                          params (second m)
-                          body (drop 2 m)]
+                          tail  (rest m)]
                       (when-not (symbol? mname)
                         (throw (str "extend-type: method must start with a"
                                     " name symbol, got: " (pr-str m))))
-                      (when-not (vector? params)
+                      ;; Single arity: (m [params] body...).
+                      ;; Multi-arity: (m ([p] body...) ([p k] body...)).
+                      (when-not (or (vector? (first tail))
+                                    (and (seq tail)
+                                         (every? (fn [clause]
+                                                   (and (seq? clause)
+                                                        (vector? (first clause))))
+                                                 tail)))
                         (throw (str "extend-type: method " (pr-str mname)
-                                    " must have a params vector, got: "
-                                    (pr-str params))))
-                      (let [dsym (symbol pns (str pname "--" (name mname)))]
-                        (list 'swap! dsym 'assoc type-kw
-                              (apply list 'fn params body)))))
+                                    " must have a params vector or arity"
+                                    " clauses, got: " (pr-str (first tail)))))
+                      (let [dsym (symbol pns (str pname "--" (name mname)))
+                            fn-form (apply list 'fn tail)]
+                        (list 'swap! dsym 'assoc type-kw fn-form))))
                    methods)))
               groups)]
     (apply list 'do (vec swaps))))
@@ -3550,29 +3570,35 @@
    order so later fields can reference earlier ones if a user shadows
    intentionally."
   [fields method]
-  (if (and (or (list? method) (cons? method))
-           (seq method)
-           (symbol? (first method))
-           (or (list? (rest method)) (cons? (rest method)))
-           (vector? (first (rest method)))
-           (seq fields))
-    (let [mname    (first method)
-          params   (first (rest method))
-          body     (rest (rest method))
-          this-sym (first params)
-          this-kw  (when (symbol? this-sym) this-sym)
-          shadows? (fn [f] (= f this-kw))
-          binds    (vec (mapcat
-                          (fn [f]
-                            (if (shadows? f)
-                              []
-                              [f (list 'get this-sym (keyword (str f)))]))
-                          fields))]
-      (if (seq binds)
-        (list mname params
-              (apply list 'let binds body))
-        method))
-    method))
+  (letfn [(bind-clause [params body]
+            (let [this-sym (first params)
+                  binds    (vec (mapcat
+                                  (fn [f]
+                                    (if (= f this-sym)
+                                      []
+                                      [f (list 'get this-sym
+                                               (keyword (str f)))]))
+                                  fields))]
+              (if (seq binds)
+                (list params (apply list 'let binds body))
+                (apply list params body))))]
+    (if (and (or (list? method) (cons? method))
+             (seq method)
+             (symbol? (first method))
+             (seq fields))
+      (let [mname (first method)
+            tail  (rest method)]
+        (cond
+          ;; (m [params] body...)
+          (vector? (first tail))
+          (cons mname (bind-clause (first tail) (rest tail)))
+          ;; (m ([p] body...) ([p k] body...))
+          (and (seq tail)
+               (every? (fn [c] (and (seq? c) (vector? (first c)))) tail))
+          (apply list mname
+                 (map (fn [c] (bind-clause (first c) (rest c))) tail))
+          :else method))
+      method)))
 
 (defmacro defrecord
   "Defines a record type Name with the given fields and optional
@@ -3606,9 +3632,7 @@
         wrap-spec  (fn [s]
                      (if (and (or (list? s) (cons? s))
                               (seq s)
-                              (symbol? (first s))
-                              (or (list? (rest s)) (cons? (rest s)))
-                              (vector? (first (rest s))))
+                              (symbol? (first s)))
                        (bind-meth s)
                        s))
         specs*     (mapv wrap-spec specs)

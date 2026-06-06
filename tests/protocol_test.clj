@@ -154,3 +154,29 @@
     (is (some? err))
     (is (some? (re-find #"extend-protocol" err)))
     (is (some? (re-find #"type marker" err)))))
+
+(defprotocol MultiArity
+  (m-area [s])
+  (m-perim [s] [s k]))
+
+(defrecord MultiArityRect [w h]
+  MultiArity
+  (m-area [s] (* w h))
+  (m-perim ([s] (* 2 (+ w h)))
+           ([s k] (* k (m-perim s)))))
+
+(deftest protocol-method-multi-arity-on-record
+  (let [r (->MultiArityRect 3 4)]
+    (is (= 12 (m-area r)))
+    (is (= 14 (m-perim r)))
+    (is (= 28 (m-perim r 2)))))
+
+(deftest protocol-method-multi-arity-extend-type
+  (extend-type String
+    MultiArity
+    (m-area [s] (count s))
+    (m-perim ([s] 0)
+             ([s k] k)))
+  (is (= 5 (m-area "hello")))
+  (is (= 0 (m-perim "hello")))
+  (is (= 9 (m-perim "hello" 9))))

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Protocol methods with multiple arities now work end to end:
+  `defprotocol` builds an arity-dispatching method fn for
+  multi-signature declarations, and `defrecord` / `extend-type` /
+  `extend-protocol` accept `(method ([this] ...) ([this x] ...))`
+  bodies, with record fields visible in every arity clause.
+
 - Added `ns-imports`, completing the namespace introspection set. The
   import map is always empty (the runtime has no host classes); an
   unknown namespace throws, as in the canonical API.
