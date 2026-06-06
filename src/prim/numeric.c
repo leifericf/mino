@@ -2049,6 +2049,28 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
         int cmp = mino_val_char_get(a) - mino_val_char_get(b);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
+    if (mino_type_of(a) == MINO_UUID && mino_type_of(b) == MINO_UUID) {
+        /* Canonical compareTo semantics: the most- and least-
+         * significant 64-bit halves compare as SIGNED longs, so a
+         * high-bit-set half sorts before zero. (This deliberately
+         * does not match lexicographic string order; it matches the
+         * upstream host type.) */
+        int half;
+        for (half = 0; half < 2; half++) {
+            uint64_t ua = 0, ub = 0;
+            int64_t  sa, sb;
+            int      i;
+            for (i = 0; i < 8; i++) {
+                ua = (ua << 8) | a->as.uuid.bytes[half * 8 + i];
+                ub = (ub << 8) | b->as.uuid.bytes[half * 8 + i];
+            }
+            sa = (int64_t)ua;
+            sb = (int64_t)ub;
+            if (sa < sb) return mino_int(S, -1);
+            if (sa > sb) return mino_int(S, 1);
+        }
+        return mino_int(S, 0);
+    }
     {
         /* Vectors and map entries compare lexicographically as
          * sequences. A MAP_ENTRY behaves like a 2-element vector for

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `compare` and `sort` now work on UUIDs, using the canonical
+  compareTo order (the two 64-bit halves compare as signed longs).
+  Previously comparing two UUIDs raised "cannot compare values of
+  different types".
+
 - Sorted maps and sets built with a custom comparator
   (`sorted-map-by`, `sorted-set-by`) now compare `=` to plain maps
   and sets with the same content. Equality walks the tree entries

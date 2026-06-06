@@ -508,3 +508,16 @@
   (is (= (sorted-set-by > 1 2) #{1 2}))
   (is (not= {1 :a 2 :b} (sorted-map-by > 1 :a 2 :c)))
   (is (= (hash {1 :a}) (hash (sorted-map-by > 1 :a)))))
+
+(deftest uuid-compare-orders-as-signed-longs
+  ;; UUIDs compare like the canonical compareTo: most-significant and
+  ;; least-significant 64-bit halves as signed longs. A high-bit-set
+  ;; half is negative, so it sorts before zero.
+  (is (= 0 (compare #uuid "11111111-1111-1111-1111-111111111111"
+                    #uuid "11111111-1111-1111-1111-111111111111")))
+  (is (= -1 (compare #uuid "00000000-0000-0000-0000-000000000001"
+                     #uuid "00000000-0000-0000-0000-000000000002")))
+  (is (= 1 (compare #uuid "00000000-0000-0000-0000-000000000000"
+                    #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff")))
+  (is (= -1 (compare #uuid "80000000-0000-0000-0000-000000000000"
+                     #uuid "00000000-0000-0000-0000-000000000000"))))
