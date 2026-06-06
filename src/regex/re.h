@@ -82,6 +82,11 @@ int re_n_groups(re_t pattern);
  * are byte offsets relative to the input `text` (so callers should add
  * them to the match start). On no match returns -1 and `out` is left
  * untouched. */
+/* re_matchp_groups_anchored: like re_matchp_groups, but a completed
+ * pattern must also sit at end-of-input. Backs whole-string matching
+ * so lazy quantifiers grow to consume the full text. */
+int re_matchp_groups_anchored(re_t pattern, const char* text,
+                              int* matchlength, re_groups_t* out);
 int re_matchp_groups(re_t pattern, const char* text, int* matchlength,
                      re_groups_t* out);
 

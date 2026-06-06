@@ -57,7 +57,7 @@
  * `CHAR` typedef from <windows.h>, which other TUs pull in under
  * _WIN32. In the single-file amalgamation those includes precede this
  * enum, so the unprefixed name breaks a Windows amalgam build. */
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY, LAZY_QUESTIONMARK, LAZY_STAR, LAZY_PLUS, LAZY_BOUNDED };
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its
@@ -74,6 +74,12 @@ enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, I
  * compile-time default by re_matchp before walking the pattern.
  * Updated as the matcher absorbs SET_FLAGS slots. */
 static unsigned char re_flags;
+
+/* When set, pattern completion requires end-of-input: backs the
+ * whole-string matchers (re-matches) so lazy quantifiers keep growing
+ * until the input is consumed instead of stopping at the shortest
+ * accepting prefix. Set only by re_matchp_groups_anchored. */
+static int re_anchor_end;
 
 typedef struct regex_t
 {
@@ -149,6 +155,16 @@ static void re_g_state_reset(const char* base, int n)
     re_g_state.starts[i] = -1;
     re_g_state.ends[i]   = -1;
   }
+}
+
+int re_matchp_groups_anchored(re_t pattern, const char* text,
+                              int* matchlength, re_groups_t* out)
+{
+  int idx;
+  re_anchor_end = 1;
+  idx = re_matchp_groups(pattern, text, matchlength, out);
+  re_anchor_end = 0;
+  return idx;
 }
 
 int re_matchp_groups(re_t pattern, const char* text, int* matchlength,
@@ -387,9 +403,13 @@ re_t re_compile(const char* pattern)
       case '^': {    re_compiled[j].type = BEGIN;           } break;
       case '$': {    re_compiled[j].type = END;             } break;
       case '.': {    re_compiled[j].type = DOT;             } break;
-      case '*': {    re_compiled[j].type = STAR;            } break;
-      case '+': {    re_compiled[j].type = PLUS;            } break;
-      case '?': {    re_compiled[j].type = QUESTIONMARK;    } break;
+      /* A '?' right after a quantifier selects the lazy variant. */
+      case '*': {    re_compiled[j].type = STAR;
+                     if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_STAR; i++; } } break;
+      case '+': {    re_compiled[j].type = PLUS;
+                     if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_PLUS; i++; } } break;
+      case '?': {    re_compiled[j].type = QUESTIONMARK;
+                     if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_QUESTIONMARK; i++; } } break;
       /* Bounded repeat: {n} / {n,} / {n,m}. Modifies the preceding atom
        * by recording a min/max repeat count. Clamps to 0..255 since the
        * union storage is two bytes; {n,} encodes max == 0xFF (unbounded
@@ -455,6 +475,7 @@ re_t re_compile(const char* pattern)
         if (min_v > 255) min_v = 255;
         if (has_max && max_v > 255) max_v = 255;
         re_compiled[j].type = BOUNDED;
+        if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_BOUNDED; i++; }
         re_compiled[j].u.bnd.min = (unsigned char)min_v;
         re_compiled[j].u.bnd.max = has_max ? (unsigned char)max_v : (unsigned char)0xFF;
       } break;
@@ -1039,10 +1060,98 @@ static const char* re_back_one(regex_t p, const char* floor, const char* text)
   return text;
 }
 
+/* Lazy quantifier variants: prefer the shortest consumption, growing
+ * one atom at a time only when the suffix fails. */
+static int matchquestion_lazy(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  if (p.type == UNUSED)
+    return !re_anchor_end || text[0] == '\0';
+  if (matchpattern(pattern, text, matchlength))
+    return 1;
+  if (*text && matchone(p, *text))
+  {
+    int w = re_match_width(p, text);
+    if (matchpattern(pattern, text + w, matchlength))
+    {
+      *matchlength += w;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int matchstar_lazy(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  int prelen = *matchlength;
+  for (;;)
+  {
+    if (matchpattern(pattern, text, matchlength))
+      return 1;
+    if (text[0] == '\0' || !matchone(p, *text))
+      break;
+    {
+      int w = re_match_width(p, text);
+      text += w;
+      *matchlength += w;
+    }
+  }
+  *matchlength = prelen;
+  return 0;
+}
+
+static int matchplus_lazy(regex_t p, regex_t* pattern, const char* text, int* matchlength)
+{
+  if (text[0] != '\0' && matchone(p, *text))
+  {
+    int w = re_match_width(p, text);
+    if (matchstar_lazy(p, pattern, text + w, matchlength))
+    {
+      *matchlength += w;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static int matchbounded_lazy(regex_t p, regex_t* pattern, const char* text,
+                             int* matchlength, int min, int max)
+{
+  int prelen = *matchlength;
+  int count  = 0;
+  /* Consume the mandatory minimum first. */
+  while (count < min && text[0] != '\0' && matchone(p, *text))
+  {
+    int w = re_match_width(p, text);
+    text += w;
+    *matchlength += w;
+    count++;
+  }
+  if (count < min)
+  {
+    *matchlength = prelen;
+    return 0;
+  }
+  for (;;)
+  {
+    if (matchpattern(pattern, text, matchlength))
+      return 1;
+    if (count >= max || text[0] == '\0' || !matchone(p, *text))
+      break;
+    {
+      int w = re_match_width(p, text);
+      text += w;
+      *matchlength += w;
+      count++;
+    }
+  }
+  *matchlength = prelen;
+  return 0;
+}
+
 static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* matchlength)
 {
   if (p.type == UNUSED)
-    return 1;
+    return !re_anchor_end || text[0] == '\0';
   /* Greedy: prefer consuming the optional atom, fall back to skipping
    * it -- the same longest-first order matchstar keeps. */
   if (*text && matchone(p, *text))
@@ -1103,10 +1212,22 @@ static int find_alt_in_span(regex_t* gopen, int start, int end)
  * bounds (no quantifier => min=1, max=1). */
 static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
                             const char* text, int* matchlength,
-                            int count_so_far, int min_reps, int max_reps)
+                            int count_so_far, int min_reps, int max_reps,
+                            int lazy)
 {
   int ml_before = *matchlength;
   int gid       = (int)gopen[0].u.gid;
+
+  /* Lazy repetition: try the suffix before growing the count. */
+  if (lazy && count_so_far >= min_reps)
+  {
+    int suffix_ml = 0;
+    if (matchpattern(suffix, text, &suffix_ml))
+    {
+      *matchlength = ml_before + suffix_ml;
+      return 1;
+    }
+  }
 
   if (count_so_far < max_reps)
   {
@@ -1130,7 +1251,15 @@ static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
 
       saved_type = gopen[branch_end].type;
       gopen[branch_end].type = UNUSED;
-      branch_ok = matchpattern(&gopen[branch_start], text, &branch_ml);
+      {
+        /* The branch body ends at a synthetic terminator, not the real
+         * pattern end -- end-of-input anchoring must not apply to it.
+         * (The suffix match below keeps the caller's anchor state.) */
+        int saved_anchor = re_anchor_end;
+        re_anchor_end = 0;
+        branch_ok = matchpattern(&gopen[branch_start], text, &branch_ml);
+        re_anchor_end = saved_anchor;
+      }
       gopen[branch_end].type = saved_type;
 
       if (branch_ok && branch_ml > 0)
@@ -1143,7 +1272,7 @@ static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
         }
         rec_ml = 0;
         if (matchgroup_loop(gopen, gc_idx, suffix, after, &rec_ml,
-                            count_so_far + 1, min_reps, max_reps))
+                            count_so_far + 1, min_reps, max_reps, lazy))
         {
           *matchlength = ml_before + branch_ml + rec_ml;
           return 1;
@@ -1161,7 +1290,7 @@ static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
     }
   }
 
-  if (count_so_far >= min_reps)
+  if (!lazy && count_so_far >= min_reps)
   {
     int suffix_ml = 0;
     if (matchpattern(suffix, text, &suffix_ml))
@@ -1246,6 +1375,8 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
           switch (pattern[gc_rel + 1].type)
           {
             case STAR: case PLUS: case QUESTIONMARK: case BOUNDED:
+            case LAZY_STAR: case LAZY_PLUS: case LAZY_QUESTIONMARK:
+            case LAZY_BOUNDED:
               has_quant = 1;
               break;
             default:
@@ -1256,6 +1387,7 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
         {
           int      min_r  = 1;
           int      max_r  = 1;
+          int      lazy_r = 0;
           regex_t *suffix = &pattern[gc_rel + 1];
           int      gml;
           int      r;
@@ -1264,11 +1396,16 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
             case STAR:         min_r = 0; max_r = INT_MAX; suffix++; break;
             case PLUS:         min_r = 1; max_r = INT_MAX; suffix++; break;
             case QUESTIONMARK: min_r = 0; max_r = 1;       suffix++; break;
+            case LAZY_STAR:         min_r = 0; max_r = INT_MAX; lazy_r = 1; suffix++; break;
+            case LAZY_PLUS:         min_r = 1; max_r = INT_MAX; lazy_r = 1; suffix++; break;
+            case LAZY_QUESTIONMARK: min_r = 0; max_r = 1;       lazy_r = 1; suffix++; break;
             case BOUNDED:
+            case LAZY_BOUNDED:
               min_r = (int)suffix[0].u.bnd.min;
               max_r = (suffix[0].u.bnd.max == 0xFF)
                       ? INT_MAX
                       : (int)suffix[0].u.bnd.max;
+              lazy_r = (suffix[0].type == LAZY_BOUNDED);
               suffix++;
               break;
             default:
@@ -1276,7 +1413,7 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
           }
           gml = *matchlength;
           r = matchgroup_loop(pattern, gc_rel, suffix, text, &gml,
-                              0, min_r, max_r);
+                              0, min_r, max_r, lazy_r);
           *matchlength = r ? gml : pre;
           return r;
         }
@@ -1345,6 +1482,34 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
       if (max == 0xFF) max = 0x7FFFFFFF;
       r = matchbounded(pattern[0], &pattern[2], text, matchlength,
                        (int)pattern[1].u.bnd.min, max);
+      if (!r) *matchlength = pre;
+      return r;
+    }
+    else if (pattern[1].type == LAZY_QUESTIONMARK)
+    {
+      int r = matchquestion_lazy(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
+    }
+    else if (pattern[1].type == LAZY_STAR)
+    {
+      int r = matchstar_lazy(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
+    }
+    else if (pattern[1].type == LAZY_PLUS)
+    {
+      int r = matchplus_lazy(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
+    }
+    else if (pattern[1].type == LAZY_BOUNDED)
+    {
+      int max = (int)pattern[1].u.bnd.max;
+      int r;
+      if (max == 0xFF) max = 0x7FFFFFFF;
+      r = matchbounded_lazy(pattern[0], &pattern[2], text, matchlength,
+                            (int)pattern[1].u.bnd.min, max);
       if (!r) *matchlength = pre;
       return r;
     }

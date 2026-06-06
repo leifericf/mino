@@ -172,8 +172,8 @@ mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/contract", "MCT001",
             "re-matches: invalid regex pattern");
     }
-    match_idx = re_matchp_groups(compiled, text_val->as.s.data,
-                                 &match_len, &groups);
+    match_idx = re_matchp_groups_anchored(compiled, text_val->as.s.data,
+                                          &match_len, &groups);
     re_free(compiled);
     if (match_idx != 0 || (size_t)match_len != text_val->as.s.len) {
         return mino_nil(S);

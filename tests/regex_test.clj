@@ -269,3 +269,13 @@
   (is (= ["2024-06" "2024" "06"] (re-find #"(?<year>\d+)-(?<m>\d+)" "2024-06")))
   (is (thrown? (re-find #"(?=a)" "a")))
   (is (thrown? (re-find #"(?<=a)b" "ab"))))
+
+(deftest lazy-quantifiers
+  (is (= "a" (re-find #"a+?" "aaa")))
+  (is (= "aaab" (re-find #"a*?b" "aaab")))
+  (is (= "aaa" (re-matches #"a*?" "aaa")))
+  (is (= ["<a>" "a"] (re-find #"<(.+?)>" "<a><b>")))
+  (is (= "a" (re-find #"a{1,3}?" "aaa")))
+  (is (= "ab" (re-find #"(?:ab)+?" "ababab")))
+  (is (= "" (re-find #"a??" "a")))
+  (is (= "aa" (re-matches #"a+?" "aa"))))

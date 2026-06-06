@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Regex patterns support the lazy quantifiers `*?`, `+?`, `??`, and
+  `{n,m}?`, on atoms and on groups: `(re-find #"<(.+?)>" "<a><b>")`
+  returns `["<a>" "a"]`. `re-matches` anchors at end-of-input inside
+  the engine, so a lazy quantifier grows to consume the whole string
+  rather than stopping at the shortest accepting prefix.
+
 - Regex patterns support non-capturing groups `(?:...)` and named
   capture groups `(?<name>...)`. Named groups capture positionally,
   matching the canonical numbering; lookahead and lookbehind remain
