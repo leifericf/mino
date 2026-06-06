@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A token that starts with a digit (or a sign followed by a digit) but
+  fails to parse as a number is now a reader error (`invalid number:
+  1.2.3`) instead of silently reading as a symbol. Previously `1.2.3`,
+  `12abc`, `1e`, `3r123`, or `0x` produced symbols -- silently wrong as
+  data, and surfacing at eval as a baffling unbound-symbol error.
+
 - Hex and radix integer literals past the long-long range now promote
   to bigint, matching the decimal path: `0xFFFFFFFFFFFFFFFFFF` reads as
   `4722366482869645213695N` instead of silently saturating at

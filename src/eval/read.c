@@ -1161,6 +1161,25 @@ static mino_val *read_atom(mino_state *S, const char **p)
         if (err) return NULL;
     }
 
+    /* A token that starts with a digit (or a sign followed by a
+     * digit) is numeric syntax. Reaching here means it failed every
+     * numeric form, so it is malformed -- e.g. `1.2.3`, `12abc`,
+     * `3r123`, `0x` -- and must be a reader error, not a symbol.
+     * Falling through would hand back a symbol that is silently
+     * wrong as data and surfaces later as a baffling unbound-symbol
+     * eval error. */
+    {
+        size_t d = (start[0] == '+' || start[0] == '-') ? 1 : 0;
+        if (d < len && isdigit((unsigned char)start[d])) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "invalid number: %.*s",
+                     (int)(len > 200 ? 200 : len), start);
+            set_reader_diag(S, MRE008, msg,
+                            S->reader.reader_line, S->reader.reader_col);
+            return NULL;
+        }
+    }
+
     /* Symbols must not end with a colon (foo: is rejected by upstream
      * readers; ::-prefix and :name keywords are handled earlier). */
     if (len > 0 && start[len - 1] == ':') {

@@ -181,6 +181,27 @@
   ;; slash. The reader must still reject it.
   (is (thrown? (read-string ":foo/"))))
 
+(deftest digit-leading-tokens-must-be-numbers
+  ;; A token that starts with a digit (or a sign followed by a digit)
+  ;; is numeric syntax. When it fails to parse as a number it is a
+  ;; reader error, never a symbol.
+  (is (thrown? (read-string "1.2.3")))
+  (is (thrown? (read-string "12abc")))
+  (is (thrown? (read-string "1e")))
+  (is (thrown? (read-string "3r123")))
+  (is (thrown? (read-string "0x")))
+  (is (thrown? (read-string "0xG")))
+  (is (thrown? (read-string "1.5N")))
+  (is (thrown? (read-string "1.5MM")))
+  (is (thrown? (read-string "+5x")))
+  (is (thrown? (read-string "-2r")))
+  (is (thrown? (read-string "1/x")))
+  ;; Signs alone (and sign-leading operators) are still symbols.
+  (is (= '+ (read-string "+")))
+  (is (= '- (read-string "-")))
+  (is (= '->> (read-string "->>")))
+  (is (= '.5 (read-string ".5"))))
+
 (deftest non-empty-map-literal-uses-local-bindings
   ;; A defn body whose value is a literal map with non-self-evaluating
   ;; values (here: a symbol bound by the surrounding let) must build a
