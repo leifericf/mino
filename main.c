@@ -378,6 +378,8 @@ static void print_usage(FILE *out)
 #endif
         "    --                  End of options; treat the rest as FILE\n"
         "\n"
+        "    A FILE of '-' reads the script from standard input.\n"
+        "\n"
         "SUBCOMMANDS:\n"
         "    repl                Start the interactive REPL (default with no FILE)\n"
         "    task [NAME]         Run a task from mino.edn, or list tasks\n"

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Scripts can be read from standard input: a FILE argument of - reads
+  the script from stdin, and non-seekable inputs like /dev/stdin and
+  pipes load via a chunked reader instead of failing with a seek
+  error.
+
 - The CLI composes -e with a script: mino -e EXPR FILE args evaluates
   the expression and then runs the file with the remaining arguments.
   Previously the positional after -e was silently ignored.

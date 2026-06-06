@@ -1037,57 +1037,108 @@ mino_val *mino_eval_string(mino_state *S, const char *src, mino_env *env)
     return v;
 }
 
+/* Read the rest of a stream into a NUL-terminated heap buffer via
+ * chunked freads. Handles non-seekable inputs (pipes, /dev/stdin,
+ * the "-" stdin convention) and doubles as the fallback when the
+ * seek-based sizing fast path fails. Returns NULL with a diagnostic
+ * set on read error or OOM. */
+static char *read_stream_all(mino_state *S, FILE *f, size_t *out_len)
+{
+    size_t cap = 8192, len = 0;
+    char  *buf = (char *)malloc(cap);
+    if (buf == NULL) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", "out of memory loading file");
+        return NULL;
+    }
+    for (;;) {
+        size_t got;
+        if (len + 4096 + 1 > cap) {
+            size_t nc = cap * 2;
+            char  *nb = (char *)realloc(buf, nc);
+            if (nb == NULL) {
+                free(buf);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "out of memory loading file");
+                return NULL;
+            }
+            buf = nb;
+            cap = nc;
+        }
+        got = fread(buf + len, 1, 4096, f);
+        len += got;
+        if (got < 4096) {
+            if (ferror(f)) {
+                free(buf);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "host", "MHO001", "read error loading file");
+                return NULL;
+            }
+            break;
+        }
+    }
+    buf[len]  = '\0';
+    *out_len = len;
+    return buf;
+}
+
 mino_val *mino_load_file(mino_state *S, const char *path, mino_env *env)
 {
     FILE  *f;
-    char  *buf;
-    long   sz;
-    size_t rd;
+    char  *buf = NULL;
+    size_t rd  = 0;
+    int    from_stdin;
     mino_val    *result;
     const char    *saved_file;
+    const char    *display_path;
     if (path == NULL || env == NULL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "mino_load_file: NULL argument");
         return NULL;
     }
-    f = fopen(path, "rb");
-    if (f == NULL) {
-        char msg[300];
-        snprintf(msg, sizeof(msg), "cannot open file: %s", path);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
-        return NULL;
+    from_stdin   = (strcmp(path, "-") == 0);
+    display_path = from_stdin ? "<stdin>" : path;
+    if (from_stdin) {
+        f = stdin;
+    } else {
+        f = fopen(path, "rb");
+        if (f == NULL) {
+            char msg[300];
+            snprintf(msg, sizeof(msg), "cannot open file: %s", path);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
+            return NULL;
+        }
     }
-    if (fseek(f, 0, SEEK_END) != 0) {
+    if (!from_stdin && fseek(f, 0, SEEK_END) == 0) {
+        /* Seekable fast path: size once, read once. */
+        long sz = ftell(f);
+        if (sz < 0 || fseek(f, 0, SEEK_SET) != 0) {
+            fclose(f);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "cannot determine file size");
+            return NULL;
+        }
+        buf = (char *)malloc((size_t)sz + 1);
+        if (buf == NULL) {
+            fclose(f);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory loading file");
+            return NULL;
+        }
+        rd = fread(buf, 1, (size_t)sz, f);
         fclose(f);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "cannot seek to end of file");
-        return NULL;
+        if (rd != (size_t)sz) {
+            free(buf);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "short read loading file");
+            return NULL;
+        }
+        buf[rd] = '\0';
+    } else {
+        /* Pipe / character device / stdin: chunked read to EOF. */
+        buf = read_stream_all(S, f, &rd);
+        if (!from_stdin) fclose(f);
+        if (buf == NULL) return NULL;
     }
-    sz = ftell(f);
-    if (sz < 0) {
-        fclose(f);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "cannot determine file size");
-        return NULL;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "cannot seek to start of file");
-        return NULL;
-    }
-    buf = (char *)malloc((size_t)sz + 1);
-    if (buf == NULL) {
-        fclose(f);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory loading file");
-        return NULL;
-    }
-    rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    if (rd != (size_t)sz) {
-        free(buf);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "host", "MHO001", "short read loading file");
-        return NULL;
-    }
-    buf[rd] = '\0';
     saved_file  = S->reader.reader_file;
-    S->reader.reader_file = intern_filename(S, path);
+    S->reader.reader_file = intern_filename(S, display_path);
     source_cache_store(S, S->reader.reader_file, buf, rd);
     result = mino_eval_string(S, buf, env);
     S->reader.reader_file = saved_file;

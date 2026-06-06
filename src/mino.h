@@ -1266,6 +1266,8 @@ mino_val *mino_eval_string(mino_state *S, const char *src,
 /*
  * Read a file at `path` and evaluate all forms. Returns the value of the
  * last form, or NULL on error (file I/O failures and parse/eval errors).
+ * The path "-" reads the script from stdin; non-seekable inputs (pipes,
+ * character devices) are read in chunks to EOF.
  */
 mino_val *mino_load_file(mino_state *S, const char *path,
                            mino_env *env);
