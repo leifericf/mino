@@ -382,6 +382,85 @@ static mino_val *range_make_lazy(mino_state *S, long long start,
     return lz;
 }
 
+/* Generic (non-long) range: floats, ratios, bigints, bigdecs, and any
+ * mix of them. Each element is the previous plus `step` through the
+ * auto-promoting add, with the bound checked through the numeric
+ * tower's `<` -- the same repeated-addition contract the canonical
+ * generic range keeps (so `(count (range 0 1 0.1))` is 10, float
+ * drift included). ctx = cons(cur, cons(end, cons(step, cons(asc?,
+ * nil)))). */
+static mino_val *range_thunk_g(mino_state *S, mino_val *ctx);
+
+static mino_val *range_make_lazy_g(mino_state *S, mino_val *cur,
+                                     mino_val *end, mino_val *step,
+                                     int ascending)
+{
+    mino_val *ctx;
+    mino_val *lz;
+    ctx = mino_cons(S, cur,
+            mino_cons(S, end,
+                mino_cons(S, step,
+                    mino_cons(S, ascending ? mino_true(S) : mino_false(S),
+                              mino_nil(S)))));
+    lz = alloc_val(S, MINO_LAZY);
+    if (lz == NULL) return NULL;
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = range_thunk_g;
+    return lz;
+}
+
+/* `cur` still inside the range? Ascending checks cur < end, descending
+ * end < cur. Sets *ok to 0 when the comparison itself threw. */
+static int range_g_in_bounds(mino_state *S, mino_val *cur, mino_val *end,
+                             int ascending, int *ok)
+{
+    mino_val *argv[2];
+    mino_val *r;
+    if (ascending) { argv[0] = cur; argv[1] = end; }
+    else           { argv[0] = end; argv[1] = cur; }
+    r = prim_lt_argv(S, argv, 2, NULL);
+    if (r == NULL) { *ok = 0; return 0; }
+    *ok = 1;
+    return mino_type_of(r) == MINO_BOOL && mino_val_bool_get(r) != 0;
+}
+
+static mino_val *range_thunk_g(mino_state *S, mino_val *ctx)
+{
+    enum { CHUNK_N = 32 };
+    mino_val *cur  = ctx->as.cons.car;
+    mino_val *end  = ctx->as.cons.cdr->as.cons.car;
+    mino_val *step = ctx->as.cons.cdr->as.cons.cdr->as.cons.car;
+    int ascending  = ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car
+                         == mino_true(S);
+    mino_val *buf;
+    unsigned    n    = 0;
+    int         more;
+    int         ok;
+    more = range_g_in_bounds(S, cur, end, ascending, &ok);
+    if (!ok) return NULL;
+    if (!more) return mino_nil(S);
+    buf = mino_chunk_buffer(S, CHUNK_N);
+    if (buf == NULL) return NULL;
+    while (n < CHUNK_N && more) {
+        mino_val *argv[2];
+        if (!mino_chunk_append(buf, cur)) return NULL;
+        n++;
+        argv[0] = cur;
+        argv[1] = step;
+        cur = prim_addp_argv(S, argv, 2, NULL);
+        if (cur == NULL) return NULL;
+        more = range_g_in_bounds(S, cur, end, ascending, &ok);
+        if (!ok) return NULL;
+    }
+    mino_chunk_seal(buf);
+    if (more) {
+        mino_val *tail = range_make_lazy_g(S, cur, end, step, ascending);
+        if (tail == NULL) return NULL;
+        return mino_chunked_cons(S, buf, tail);
+    }
+    return mino_chunked_cons(S, buf, mino_nil(S));
+}
+
 static mino_val *range_thunk(mino_state *S, mino_val *ctx)
 {
     long long start = mino_val_int_get(ctx->as.cons.car);
@@ -613,40 +692,83 @@ mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (range), (range end), (range start end), (range start end step). */
+/* Numeric-tower membership for range bounds. */
+static int range_val_is_number(const mino_val *v)
+{
+    return v != NULL
+        && (mino_val_int_p(v)
+            || mino_type_of(v) == MINO_FLOAT
+            || mino_type_of(v) == MINO_FLOAT32
+            || mino_type_of(v) == MINO_BIGINT
+            || mino_type_of(v) == MINO_RATIO
+            || mino_type_of(v) == MINO_BIGDEC);
+}
+
 mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
 {
     long long start = 0, end = 0, step = 1;
     size_t n;
     int infinite = 0;
+    int generic  = 0;
     (void)env;
     arg_count(S, args, &n);
     if (n == 0) {
         infinite = 1;
     } else if (n == 1) {
-        if (!mino_to_int(args->as.cons.car, &end)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "range argument must be an integer");
-        }
+        generic = !mino_to_int(args->as.cons.car, &end);
     } else if (n == 2) {
-        if (!mino_to_int(args->as.cons.car, &start) ||
-            !mino_to_int(args->as.cons.cdr->as.cons.car, &end)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "range arguments must be integers");
-        }
+        generic = !mino_to_int(args->as.cons.car, &start)
+               || !mino_to_int(args->as.cons.cdr->as.cons.car, &end);
     } else if (n == 3) {
-        if (!mino_to_int(args->as.cons.car, &start) ||
-            !mino_to_int(args->as.cons.cdr->as.cons.car, &end) ||
-            !mino_to_int(args->as.cons.cdr->as.cons.cdr->as.cons.car, &step)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "range arguments must be integers");
-        }
-        if (step == 0) {
+        generic = !mino_to_int(args->as.cons.car, &start)
+               || !mino_to_int(args->as.cons.cdr->as.cons.car, &end)
+               || !mino_to_int(args->as.cons.cdr->as.cons.cdr->as.cons.car,
+                               &step);
+        if (!generic && step == 0) {
             return prim_throw_classified(S, "eval/bounds", "MBD001",
                 "range step must not be zero");
         }
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "range takes 0, 1, 2, or 3 arguments");
+    }
+    if (generic) {
+        /* At least one bound falls outside long long: dispatch through
+         * the numeric tower (floats, ratios, bigints, bigdecs). */
+        mino_val *g_start = mino_int(S, 0);
+        mino_val *g_end   = args->as.cons.car;
+        mino_val *g_step  = mino_int(S, 1);
+        mino_val *zero    = mino_int(S, 0);
+        int         ascending;
+        int         ok;
+        if (n >= 2) {
+            g_start = args->as.cons.car;
+            g_end   = args->as.cons.cdr->as.cons.car;
+        }
+        if (n == 3) {
+            g_step = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        }
+        if (!range_val_is_number(g_start) || !range_val_is_number(g_end)
+            || !range_val_is_number(g_step)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "range arguments must be numbers");
+        }
+        ascending = range_g_in_bounds(S, zero, g_step, 1, &ok);
+        if (!ok) return NULL;
+        if (!ascending) {
+            int descending = range_g_in_bounds(S, g_step, zero, 1, &ok);
+            if (!ok) return NULL;
+            if (!descending) {
+                return prim_throw_classified(S, "eval/bounds", "MBD001",
+                    "range step must not be zero");
+            }
+        }
+        {
+            mino_val *r = range_make_lazy_g(S, g_start, g_end, g_step,
+                                              ascending);
+            if (r == NULL) return NULL;
+            return r;
+        }
     }
     {
         mino_val *r = range_make_lazy(S, start, end, step, infinite);

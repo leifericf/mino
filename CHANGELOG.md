@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `range` now accepts the whole numeric tower: floats, ratios,
+  bigints, and bigdecs, in any mix. `(range 0.0 1.0 0.25)` yields
+  `(0.0 0.25 0.5 0.75)` and `(range 1/2 2 1/2)` yields `(1/2 1 3/2)`.
+  Elements step by repeated auto-promoting addition with the bound
+  checked through the numeric tower, matching the canonical generic
+  range contract (float drift included). Integer ranges keep the
+  existing chunked fast path.
+
 - `map-indexed`, `keep-indexed`, and `keep` no longer process dropped
   elements when applied after `drop` / `drop-while` on a chunked
   source (vectors, ranges). `chunk-first` now respects the head

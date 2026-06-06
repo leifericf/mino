@@ -34,6 +34,23 @@
   (is (= '(0 3 6 9) (range 0 10 3)))
   (is (= '(5 4 3 2 1) (range 5 0 -1))))
 
+(deftest range-numeric-tower
+  (is (= '(0.0 0.25 0.5 0.75) (range 0.0 1.0 0.25)))
+  (is (= '(0.5 1.5 2.5) (range 0.5 3)))
+  (is (= '(2.0 1.0) (range 2.0 0.0 -1.0)))
+  (is (= 11 (count (range 0 1 0.1))))
+  (is (= 0.9999999999999999 (last (range 0 1 0.1))))
+  (is (= 10 (count (range 0.1 1.0 0.1))))
+  (is (= '(0 1 2) (range 2.5)))
+  (is (= '(1/2 1 3/2) (range 1/2 2 1/2)))
+  (is (= '() (range 1.5 1.5)))
+  (is (= '() (range 2.0 1.0)))
+  (is (= 3N (first (range 3N 5N))))
+  (is (= '(0.0 0.5 1.0) (take 3 (iterate (fn [x] (+ x 0.5)) 0.0))))
+  (is (thrown? (range :a)))
+  (is (thrown? (range 0 :b)))
+  (is (thrown? (range 0 5 "s"))))
+
 (deftest repeat-fn
   (is (= '("x" "x" "x") (repeat 3 "x")))
   (is (= '() (repeat 0 "x"))))
