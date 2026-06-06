@@ -136,3 +136,13 @@
   ;; Sequential (sibling) #() forms remain fine.
   (is (= [2 3] (mapv #(inc %) [1 2])))
   (is (= 5 (#(+ %1 %2) 2 3))))
+
+(deftest unknown-double-hash-token-names-itself
+  (let [m (try (read-string "##inf")
+               (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (clojure.string/includes? m "unknown ## token: ##inf"))))
+
+(deftest reader-conditional-odd-forms-named
+  (let [m (try (read-string "#?(:mino)")
+               (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (clojure.string/includes? m "reader conditional requires an even number of forms"))))

@@ -499,6 +499,14 @@ static mino_val *read_cond_body(mino_state *S, const char **p,
             return NULL;
         }
         skip_ws(S, p);
+        if (**p == ')') {
+            /* A key with no paired form: name the actual problem
+             * instead of letting read_form surface "unexpected ')'". */
+            set_reader_diag(S, MRE006,
+                "reader conditional requires an even number of forms",
+                S->reader.reader_line, S->reader.reader_col);
+            return NULL;
+        }
         val = read_form(S, p);
         if (val == NULL) {
             if (mino_last_error(S) == NULL) {
@@ -2162,8 +2170,13 @@ static mino_val *read_dispatch_special_float(mino_state *S, const char **p)
         return mino_float(S, -INFINITY);
     if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
         return mino_float(S, NAN);
-    set_reader_diag(S, MRE008, "unknown tagged literal",
-                    S->reader.reader_line, S->reader.reader_col);
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "unknown ## token: ##%.*s",
+                 (int)(tlen > 200 ? 200 : tlen), start);
+        set_reader_diag(S, MRE008, msg,
+                        S->reader.reader_line, S->reader.reader_col);
+    }
     return NULL;
 }
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Two reader diagnostics now name the actual problem: an unknown `##`
+  token reports `unknown ## token: ##inf` (was `unknown tagged
+  literal`), and a reader conditional with an odd number of forms
+  reports `reader conditional requires an even number of forms` (was
+  `unexpected ')'`).
+
 - Unicode character literals in the UTF-16 surrogate range
   (`\ud800`-`\udfff`) are now reader errors. Chars are codepoints and
   the range encodes nothing; the old behaviour produced a char that
