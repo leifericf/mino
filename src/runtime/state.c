@@ -495,24 +495,23 @@ static void state_free_heap(mino_state *S)
 {
     gc_hdr_t *h, *hnext;
     gc_bump_slab_t *slab, *snext;
+    /* Run the same per-tag finalizers the minor/major sweeps run, so
+     * headers still live at teardown release their external resources:
+     * chunk/record/host-array slot arrays, bigint payloads, byte
+     * buffers, embedder HANDLE finalizers, chan impls, and future
+     * impls (workers are already quiesced, so the future path skips
+     * its join and only frees). Skipping these leaks every payload
+     * owned by a value that is reachable when the state dies. */
     for (h = S->gc.all_young; h != NULL; h = hnext) {
+        gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
         hnext = h->next;
-        if (h->type_tag == GC_T_VAL) {
-            mino_val *v = (mino_val *)(h + 1);
-            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
-                v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
-            }
-        }
+        if (fin != NULL) fin(S, h);
         if (!h->bump) free(h);
     }
     for (h = S->gc.all_old; h != NULL; h = hnext) {
+        gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
         hnext = h->next;
-        if (h->type_tag == GC_T_VAL) {
-            mino_val *v = (mino_val *)(h + 1);
-            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
-                v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
-            }
-        }
+        if (fin != NULL) fin(S, h);
         if (!h->bump) free(h);
     }
     /* Bump slabs own the bump-allocated headers; free the whole slab
@@ -613,9 +612,9 @@ void mino_state_free(mino_state *S)
     mino_agent_quiesce_workers(S);
     mino_host_threads_quiesce(S);
     /* Snapshot any MINO_CPJIT_STATS entries that borrow counters from
-     * bc records: state_free_heap below frees every header without
-     * running per-tag finalizers, and the stats dump fires at atexit,
-     * after this state is gone. No-op when the stats ring is off. */
+     * bc records before any of the teardown below can touch them; the
+     * stats dump fires at atexit, after this state is gone. No-op when
+     * the stats ring is off. */
     mino_jit_stats_seal_all();
     state_free_root_envs(S);
     state_free_refs(S);

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.423.2 — Teardown and JIT-Eager Fixes
+
+- State teardown now runs the same per-type finalizers the garbage
+  collector runs, so values still live when the state is freed
+  release their external payloads (chunk and record slot arrays,
+  bigint storage, byte buffers, channel and future internals).
+  Previously these leaked at exit, which LeakSanitizer flagged on
+  Linux.
+
 ## v0.423.1 — CI Matrix Portability Fixes
 
 - Integer literals that overflow into bigints now read correctly on
