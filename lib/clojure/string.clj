@@ -15,6 +15,7 @@
 (def ^:private prim-ends-with?   ends-with?)
 (def ^:private prim-includes?    includes?)
 (def ^:private prim-replace      replace)
+(def ^:private prim-replace-first replace-first)
 (def ^:private prim-trim         trim)
 
 (defn- assert-string [s]
@@ -178,14 +179,12 @@
 
 (defn replace-first
   "Replaces only the first occurrence of match in s with replacement.
-   match is a string (mino's regex literals share the string type, so
-   regex matching follows the literal-substring path the same way
-   clojure.string/replace does)."
+   match may be a string, char, or regex; for regex match, replacement
+   may be a $N template string or a function, exactly as in replace."
   [s match replacement]
-  (let [s (assert-string s)
-        m (as-str match)]
-    (if-let [i (index-of s m)]
-      (str (subs s 0 i) replacement (subs s (+ i (count m))))
-      s)))
+  (let [s (assert-string s)]
+    (if (char? match)
+      (prim-replace-first s (str match) (as-str replacement))
+      (prim-replace-first s match replacement))))
 
 

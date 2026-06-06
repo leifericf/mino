@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `clojure.string/replace-first` now supports regex patterns, `$N`
+  template replacements, and function replacements, exactly like
+  `replace`. Previously a regex match silently fell through a
+  literal-substring path and replaced nothing.
+
 - `doall` and `dorun` accept the bounded two-argument form:
   `(doall n coll)` / `(dorun n coll)` force at most `n` steps of the
   spine and leave the rest lazy.

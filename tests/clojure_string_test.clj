@@ -120,6 +120,19 @@
   (is (= "[H][e][l][l][o]" (str/replace "Hello" #"(\w)" "[$1]")))
   (is (= "1a2b"            (str/replace "a1b2" #"(\w)(\d)" "$2$1"))))
 
+(deftest str-replace-first-string-match
+  (is (= "a!b.c" (str/replace-first "a.b.c" "." "!")))
+  (is (= "aXc"   (str/replace-first "abc" \b "X")))
+  (is (= "abc"   (str/replace-first "abc" "x" "y"))))
+
+(deftest str-replace-first-regex
+  (is (= "heLlo"   (str/replace-first "hello" #"l" "L")))
+  (is (= "he[l]lo" (str/replace-first "hello" #"(l)" "[$1]")))
+  (is (= "heXlo"   (str/replace-first "hello" #"l" (fn [m] "X"))))
+  (is (= "1a-b2"   (str/replace-first "a1-b2" #"(\w)(\d)"
+                                      (fn [[_ g1 g2]] (str g2 g1)))))
+  (is (= "abc"     (str/replace-first "abc" #"x" "y"))))
+
 (deftest str-replace-regex-quote
   (is (= "$out"  (str/replace "Xout" #"X" (str/re-quote-replacement "$"))))
   (is (= "\\out" (str/replace "Xout" #"X" (str/re-quote-replacement "\\")))))

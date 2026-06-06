@@ -312,6 +312,7 @@ mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_str_replace(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_str_replace_first(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env);

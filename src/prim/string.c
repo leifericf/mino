@@ -824,8 +824,8 @@ static mino_val *str_replace_match_arg(mino_state *S,
  *                  the pattern has no groups, or `[whole g1 g2 ...]`
  *                  when it does) and its (str-coerced) result is used
  *                  literally. */
-mino_val *prim_str_replace(mino_state *S, mino_val *args,
-                             mino_env *env)
+static mino_val *str_replace_impl(mino_state *S, mino_val *args,
+                                    mino_env *env, int first_only)
 {
     mino_val *s_val, *match_val, *repl_val;
     const char *s;
@@ -887,6 +887,12 @@ mino_val *prim_str_replace(mino_state *S, mino_val *args,
                 if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
                                            repl, rlen) < 0) return NULL;
                 p = found + mlen;
+                if (first_only) {
+                    size_t tail_len = (size_t)(s + slen - p);
+                    if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                               p, tail_len) < 0) return NULL;
+                    break;
+                }
             } else {
                 size_t tail_len = (size_t)(s + slen - p);
                 if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
@@ -991,6 +997,15 @@ mino_val *prim_str_replace(mino_state *S, mino_val *args,
                     return prim_throw_classified(S, "eval/type", "MTY001",
                         "str-replace: fn replacement must return a string or char");
                 }
+            }
+            if (first_only) {
+                size_t done = pos + (size_t)idx + (size_t)(match_len > 0
+                                                            ? match_len : 0);
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           s + done, slen - done) < 0) {
+                    re_free(compiled); return NULL;
+                }
+                break;
             }
             /* Advance past the match. For zero-width matches, step by
              * one byte to avoid an infinite loop -- copy the byte at
@@ -1532,6 +1547,18 @@ const mino_prim_def k_prims_string[] = {
 const size_t k_prims_string_count =
     sizeof(k_prims_string) / sizeof(k_prims_string[0]);
 
+mino_val *prim_str_replace(mino_state *S, mino_val *args,
+                             mino_env *env)
+{
+    return str_replace_impl(S, args, env, 0);
+}
+
+mino_val *prim_str_replace_first(mino_state *S, mino_val *args,
+                                   mino_env *env)
+{
+    return str_replace_impl(S, args, env, 1);
+}
+
 /* Operations that match Clojure's clojure.string namespace. mino
  * installs these into clojure.string directly so user code that
  * refers them in via :require works the way Clojure programmers
@@ -1544,6 +1571,8 @@ const mino_prim_def k_prims_clojure_string[] = {
      "Returns a string of the items in coll joined by separator."},
     {"replace",      prim_str_replace,
      "Replaces all occurrences of match in s with replacement."},
+    {"replace-first", prim_str_replace_first,
+     "Replaces the first occurrence of match in s with replacement."},
     {"starts-with?", prim_starts_with_p,
      "Returns true if the string starts with the given prefix."},
     {"ends-with?",   prim_ends_with_p,
