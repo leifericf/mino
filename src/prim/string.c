@@ -485,63 +485,102 @@ mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
     if (mino_type_of(sep_val) == MINO_REGEX
         && sep_val->as.regex.source != NULL
         && mino_type_of(sep_val->as.regex.source) == MINO_STRING) {
-        /* Regex separators: walk the compiled pattern across the input,
-         * emitting the substring between each match site. Follows
-         * Clojure's String.split(re, limit) semantics — limit > 0 caps
-         * the result and the final piece absorbs the rest of the input;
-         * limit <= 0 strips trailing empty pieces (only the limit == 0
-         * case strips by JVM convention, but mino has historically
-         * conflated 0 and negative for the literal-string path, so the
-         * regex path matches that). */
+        /* Regex separators: mirror java.util.regex.Pattern#split.
+         * Pieces span [index, match-start); a zero-width match at the
+         * very beginning contributes no leading empty piece; limit > 0
+         * caps the piece count with the final piece absorbing the rest;
+         * limit == 0 trims trailing empty pieces; limit < 0 keeps
+         * them. */
         const char *pat_src = sep_val->as.regex.source->as.s.data;
         re_t        compiled;
+        size_t      scan  = 0;   /* next search position */
+        size_t      index = 0;   /* end of last consumed match */
+        int         absorbed = 0;
         /* See prim_re_find for the rationale: the regex engine's
          * static-global match state requires every caller to be in
          * a state-safe window (state_lock held). */
         MINO_ASSERT_STATE_SAFE(S);
         compiled = re_compile(pat_src);
-        size_t      pos = 0;
         if (compiled == NULL) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
                 "split: invalid regex pattern");
         }
         for (;;) {
-            int  mlen = 0;
-            int  idx;
-            if (pos > slen) break;
-            idx = re_matchp(compiled, s + pos, &mlen);
+            int    mlen = 0;
+            int    idx;
+            size_t abs_start, abs_end;
+            if (scan > slen) break;
+            idx = re_matchp(compiled, s + scan, &mlen);
+            if (idx < 0) break;
+            abs_start = scan + (size_t)idx;
+            abs_end   = abs_start + (size_t)(mlen > 0 ? mlen : 0);
+            if (limit <= 0 || (long long)len < limit - 1) {
+                /* Leading zero-width match: no empty first piece. */
+                if (!(index == 0 && abs_start == 0 && mlen <= 0)) {
+                    if (len == cap) {
+                        size_t new_cap = cap == 0 ? 8 : cap * 2;
+                        mino_val **nb = (mino_val **)gc_alloc_typed(S,
+                            GC_T_VALARR, new_cap * sizeof(*nb));
+                        if (nb == NULL) return NULL;
+                        if (buf != NULL && len > 0)
+                            memcpy(nb, buf, len * sizeof(*nb));
+                        buf = nb;
+                        cap = new_cap;
+                    }
+                    buf[len++] = mino_string_n(S, s + index,
+                                               abs_start - index);
+                    index = abs_end;
+                }
+            } else {
+                /* Piece count is at limit - 1: the final piece absorbs
+                 * everything from the last consumed end. */
+                if (len == cap) {
+                    size_t new_cap = cap == 0 ? 8 : cap * 2;
+                    mino_val **nb = (mino_val **)gc_alloc_typed(S,
+                        GC_T_VALARR, new_cap * sizeof(*nb));
+                    if (nb == NULL) return NULL;
+                    if (buf != NULL && len > 0)
+                        memcpy(nb, buf, len * sizeof(*nb));
+                    buf = nb;
+                    cap = new_cap;
+                }
+                buf[len++] = mino_string_n(S, s + index, slen - index);
+                absorbed = 1;
+                break;
+            }
+            /* Continue the scan past this match; bump one codepoint
+             * past a zero-width site so the search advances without
+             * splitting a multibyte UTF-8 sequence. */
+            scan = (mlen > 0)
+                ? abs_end
+                : (abs_end >= slen
+                       ? slen + 1
+                       : abs_end + utf8_codepoint_step(s, slen, abs_end));
+        }
+        re_free(compiled);
+        /* No (kept) match at all: the whole input is the only piece. */
+        if (index == 0 && len == 0) {
+            mino_val **buf1 = (mino_val **)gc_alloc_typed(S,
+                GC_T_VALARR, 1 * sizeof(*buf1));
+            if (buf1 == NULL) return NULL;
+            buf1[0] = s_val;
+            return mino_vector(S, buf1, 1);
+        }
+        if (!absorbed && (limit <= 0 || (long long)len < limit)) {
             if (len == cap) {
                 size_t new_cap = cap == 0 ? 8 : cap * 2;
                 mino_val **nb = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, new_cap * sizeof(*nb));
+                if (nb == NULL) return NULL;
                 if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
                 buf = nb;
                 cap = new_cap;
             }
-            if (limit > 0 && (long long)len + 1 == limit) {
-                buf[len++] = mino_string_n(S, s + pos,
-                                           (size_t)(slen - pos));
-                break;
-            }
-            if (idx < 0) {
-                buf[len++] = mino_string_n(S, s + pos,
-                                           (size_t)(slen - pos));
-                break;
-            }
-            buf[len++] = mino_string_n(S, s + pos, (size_t)idx);
-            /* Zero-width match: advance by one character so we don't
-             * loop forever on patterns like #"a*". */
-            if (mlen <= 0) {
-                if (pos + (size_t)idx >= slen) break;
-                pos += (size_t)idx + 1;
-            } else {
-                pos += (size_t)idx + (size_t)mlen;
-            }
+            buf[len++] = mino_string_n(S, s + index, slen - index);
         }
-        re_free(compiled);
-        /* Trim trailing empty pieces unless limit > 0 (matches JVM
-         * Clojure default split-with-limit-0 behaviour). */
-        if (limit <= 0) {
+        /* Only limit == 0 trims trailing empty pieces (JVM rule);
+         * negative limits keep them. */
+        if (limit == 0) {
             while (len > 0
                    && buf[len - 1] != NULL
                    && mino_type_of(buf[len - 1]) == MINO_STRING
@@ -556,23 +595,34 @@ mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
     }
     p       = s;
     if (sep_len == 0) {
-        /* Split into individual characters. */
-        size_t i;
-        size_t out_len = (limit > 0 && (size_t)limit < slen) ? (size_t)limit : slen;
-        buf = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
-              (out_len > 0 ? out_len : 1) * sizeof(*buf));
-        if (limit > 0 && (size_t)limit < slen) {
-            for (i = 0; i + 1 < out_len; i++) {
-                buf[i] = mino_string_n(S, s + i, 1);
+        /* Split into individual characters (codepoints, not bytes, so
+         * multibyte UTF-8 sequences stay intact). limit > 0 caps the
+         * piece count with the final piece absorbing the rest. */
+        size_t pos = 0;
+        while (pos < slen) {
+            size_t step = utf8_codepoint_step(s, slen, pos);
+            if (len == cap) {
+                size_t new_cap = cap == 0 ? 8 : cap * 2;
+                mino_val **nb = (mino_val **)gc_alloc_typed(S,
+                    GC_T_VALARR, new_cap * sizeof(*nb));
+                if (nb == NULL) return NULL;
+                if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
+                buf = nb;
+                cap = new_cap;
             }
-            buf[out_len - 1] = mino_string_n(S, s + (out_len - 1),
-                slen - (out_len - 1));
-        } else {
-            for (i = 0; i < slen; i++) {
-                buf[i] = mino_string_n(S, s + i, 1);
+            if (limit > 0 && (long long)len + 1 == limit) {
+                buf[len++] = mino_string_n(S, s + pos, slen - pos);
+                pos = slen;
+                break;
             }
+            buf[len++] = mino_string_n(S, s + pos, step);
+            pos += step;
         }
-        return mino_vector(S, buf, out_len);
+        if (buf == NULL) {
+            buf = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, sizeof(*buf));
+            if (buf == NULL) return NULL;
+        }
+        return mino_vector(S, buf, len);
     }
     while (p <= s + slen) {
         const char *found = NULL;
@@ -603,6 +653,16 @@ mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
         } else {
             buf[len++] = mino_string_n(S, p, (size_t)(s + slen - p));
             break;
+        }
+    }
+    /* Only limit == 0 trims trailing empty pieces (JVM rule); negative
+     * limits keep them. */
+    if (limit == 0) {
+        while (len > 0
+               && buf[len - 1] != NULL
+               && mino_type_of(buf[len - 1]) == MINO_STRING
+               && buf[len - 1]->as.s.len == 0) {
+            len--;
         }
     }
     return mino_vector(S, buf, len);

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `clojure.string/split` now follows the canonical piece semantics:
+  a negative limit keeps trailing empty pieces (only limit 0 trims),
+  a zero-width separator match splits without dropping characters (so
+  `(split "abc" #"")` is `["a" "b" "c"]`), the leading zero-width
+  match produces no empty first piece, and character splits respect
+  multibyte UTF-8 sequences instead of cutting bytes.
+
 - `clojure.string/split-lines` now splits on `\r\n` as well as `\n`,
   so Windows line endings no longer leave a trailing `\r` on each
   line.

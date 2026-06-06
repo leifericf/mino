@@ -100,6 +100,28 @@
 
 ;; --- replace ---
 
+(deftest str-split-limit
+  ;; limit 0 (or absent) trims trailing empty pieces; a negative limit
+  ;; keeps them; a positive limit caps the piece count with the final
+  ;; piece absorbing the rest.
+  (is (= ["" "" "a"]       (str/split ",,a,," #",")))
+  (is (= ["" "" "a" "" ""] (str/split ",,a,," #"," -1)))
+  (is (= ["" "" "a"]       (str/split ",,a,," "," 0)))
+  (is (= ["" "" "a" "" ""] (str/split ",,a,," "," -1)))
+  (is (= ["" ",a,,"]       (str/split ",,a,," #"," 2)))
+  (is (= ["q"]             (str/split "q" #","))))
+
+(deftest str-split-zero-width
+  ;; A zero-width separator match contributes a piece boundary without
+  ;; consuming input; the leading zero-width match produces no empty
+  ;; first piece. An empty pattern therefore splits into characters.
+  (is (= ["a" "b" "c"] (str/split "abc" #"")))
+  (is (= ["a" "b" "c"] (str/split "abc" "")))
+  (is (= ["h" "é" "l"] (str/split "hél" "")))
+  (is (= ["h" "é" "l"] (str/split "hél" #"")))
+  (is (= ["a" "bc"]    (str/split "abc" #"" 2)))
+  (is (= ["a" "b" "c"] (str/split "abc" #"x*y?"))))
+
 (deftest str-split-lines-crlf
   (is (= ["a" "b" "c"] (str/split-lines "a\nb\r\nc")))
   (is (= ["a" "b"] (str/split-lines "a\r\nb")))
