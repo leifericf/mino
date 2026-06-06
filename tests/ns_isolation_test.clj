@@ -77,3 +77,17 @@
 
 ;; --- File-to-ns declaration validation -------------------------------------
 ;; File-load tests live in the require/load file once we have on-disk fixtures.
+
+(require '[clojure.core.async :as nsiso-async])
+
+(deftest parked-worker-does-not-leak-its-namespace
+  ;; A future parked inside a fn defined in another namespace must not
+  ;; change the resuming thread's *ns*.
+  (let [before (str *ns*)
+        ch     (nsiso-async/chan)
+        worker (future (nsiso-async/<!! ch))]
+    (Thread/sleep 50)
+    (is (= before (str *ns*)))
+    (nsiso-async/close! ch)
+    (is (nil? @worker))
+    (is (= before (str *ns*)))))

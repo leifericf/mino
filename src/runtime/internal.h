@@ -656,8 +656,11 @@ static inline void mino_lock(mino_state *S)
             S->bc.bc_top      = 0;
         }
         /* This thread is the mutator now: install its stack-guard
-         * threshold alongside its BC stack. */
+         * threshold alongside its BC stack, and record the namespace
+         * pair it found so a later mid-call yield can hand it back. */
         mino_eval_stack_limit_refresh(S, ctx);
+        ctx->ns_entry_current = S->ns_vars.current_ns;
+        ctx->ns_entry_ambient = S->ns_vars.fn_ambient_ns;
     }
     ctx->lock_depth++;
 }

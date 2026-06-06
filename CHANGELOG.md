@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- A worker thread that parks mid-call (a blocking channel take inside
+  a future, for example) no longer leaks its callee's namespace to
+  the thread that resumes: yielding hands back the namespace pair the
+  worker found, and resuming reinstalls its own. Previously the main
+  thread could silently end up in clojure.core.async after a future
+  blocked there, breaking alias resolution.
+
 - A throw from a lazy thunk (or any tree-walked context) after an
   earlier caught error now reports its own source location. The
   throw site is captured before the unwind and the bytecode source

@@ -132,6 +132,23 @@ typedef struct mino_thread_ctx {
     size_t          lazy_inflight_len;
     size_t          lazy_inflight_cap;
 
+    /* Namespace continuity across yield points. current_ns /
+     * fn_ambient_ns live in the shared state and are switched per
+     * call to the callee's defining ns; a thread that parks mid-call
+     * (mino_yield_lock) would otherwise leak its callee's namespace
+     * to whichever thread runs next. At yield the live pair is saved
+     * into ns_snapshot_* and the pair captured at this thread's last
+     * acquire (ns_entry_*) is handed back; at resume the snapshot is
+     * reinstalled and the entry re-captured. Plain acquire/release
+     * paths leave the live pair untouched so top-level (ns ...) /
+     * (in-ns ...) switches and C-side boundary writes persist.
+     * Interned name pointers -- stable for the state's lifetime,
+     * nothing for the GC to trace. */
+    const char     *ns_snapshot_current;
+    const char     *ns_snapshot_ambient;
+    const char     *ns_entry_current;
+    const char     *ns_entry_ambient;
+
     /* Script-call stack budget in bytes (0 = guard disabled). Set at
      * context setup from the thread's stack size. Call-frame entries
      * (mino_bc_run, mino_bc_run_known_native, apply_callable) measure

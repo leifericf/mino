@@ -1750,6 +1750,15 @@ int mino_yield_lock(mino_state *S)
     ctx->bc_regs_storage_cap  = S->bc.bc_regs_cap;
     ctx->bc_top_snapshot      = S->bc.bc_top;
     ctx->bc_snapshot_valid    = 1;
+    /* Save this thread's live namespace pair and hand back the pair
+     * it found at its last acquire, so the next mutator never sees a
+     * parked call's mid-switch namespace. */
+    ctx->ns_snapshot_current  = S->ns_vars.current_ns;
+    ctx->ns_snapshot_ambient  = S->ns_vars.fn_ambient_ns;
+    if (ctx->ns_entry_current != NULL) {
+        S->ns_vars.current_ns    = ctx->ns_entry_current;
+        S->ns_vars.fn_ambient_ns = ctx->ns_entry_ambient;
+    }
     while (ctx->lock_depth > 0) {
         ctx->lock_depth--;
         mino_state_lock_release(S);
@@ -1773,6 +1782,15 @@ void mino_resume_lock(mino_state *S, int saved_depth)
         S->bc.bc_regs     = ctx->bc_regs_storage;
         S->bc.bc_regs_cap = ctx->bc_regs_storage_cap;
         S->bc.bc_top      = ctx->bc_top_snapshot;
+    }
+    /* Re-capture the entry pair (the world as it looks now), then
+     * reinstall the namespace pair this thread was running under
+     * when it yielded. */
+    ctx->ns_entry_current = S->ns_vars.current_ns;
+    ctx->ns_entry_ambient = S->ns_vars.fn_ambient_ns;
+    if (ctx->ns_snapshot_current != NULL) {
+        S->ns_vars.current_ns    = ctx->ns_snapshot_current;
+        S->ns_vars.fn_ambient_ns = ctx->ns_snapshot_ambient;
     }
     /* This thread is the mutator again: its stack-guard threshold
      * replaces whichever peer's was live during the yield window. */
