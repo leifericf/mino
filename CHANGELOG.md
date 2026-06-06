@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `(char n)` now rejects the UTF-16 surrogate range
+  (`0xD800`-`0xDFFF`), matching the documented scalar-value contract
+  and the reader's `\uXXXX` literal. Previously it built a char whose
+  string form was invalid UTF-8.
+
 - `bigint` and `biginteger` now accept ratios, truncating toward zero:
   `(bigint 7/3)` is `2N`. Previously ratios were rejected with a type
   error.

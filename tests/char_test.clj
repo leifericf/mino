@@ -108,3 +108,11 @@
   (is (thrown? (read-string "\\udfff")))
   (is (= 55295 (int (read-string "\\ud7ff"))))
   (is (= 57344 (int (read-string "\\ue000")))))
+
+(deftest char-coercion-rejects-surrogates
+  ;; Chars are Unicode scalar values; the coercion enforces the same
+  ;; exclusion as the reader's \uXXXX literal.
+  (is (thrown? (char 0xD800)))
+  (is (thrown? (char 0xDFFF)))
+  (is (= 55295 (int (char 0xD7FF))))
+  (is (= 57344 (int (char 0xE000)))))

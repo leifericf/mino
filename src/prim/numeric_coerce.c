@@ -208,6 +208,13 @@ mino_val *prim_char(mino_state *S, mino_val *args, mino_env *env)
                  "char: codepoint %lld out of range (0..0x10FFFF)", ll);
         return prim_throw_classified(S, "eval/bounds", "MBD001", buf);
     }
+    if (ll >= 0xD800LL && ll <= 0xDFFFLL) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "char: codepoint %lld is a surrogate, not a scalar value",
+                 ll);
+        return prim_throw_classified(S, "eval/bounds", "MBD001", buf);
+    }
     return mino_char(S, (int)ll);
 }
 
