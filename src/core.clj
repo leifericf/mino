@@ -1991,10 +1991,16 @@
   "Create an exception map with a message and data map. The 3-arity
   form additionally attaches a cause; ex-cause walks the chain via
   metadata so the visible map structure stays the same as the
-  2-arity form."
+  2-arity form. The data argument must be a map (or nil)."
   ([msg data]
+   (when-not (or (nil? data) (map? data))
+     (throw {:mino/kind :type :mino/code "MTY001"
+             :mino/message "ex-info: data must be a map"}))
    {:message msg :data data})
   ([msg data cause]
+   (when-not (or (nil? data) (map? data))
+     (throw {:mino/kind :type :mino/code "MTY001"
+             :mino/message "ex-info: data must be a map"}))
    (with-meta {:message msg :data data} {:cause cause})))
 
 (defn ex-data

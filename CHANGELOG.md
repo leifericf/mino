@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- ex-info now throws a clean type error when its data argument is not
+  a map (nil and sorted maps stay accepted), instead of silently
+  building an exception whose ex-data is not map-shaped.
+
 - print and println (and print-str / println-str) now apply
   unreadable printing to the whole value, so strings and characters
   inside collections emit their raw content: (println ["s"]) prints

@@ -56,3 +56,12 @@
     (is (= :caught
            @(future (try ((fn deep [n] (+ 1 (deep (inc n)))) 0)
                       (catch e :caught)))))))
+
+(deftest ex-info-data-must-be-a-map
+  (is (thrown? (ex-info "m" :not-a-map)))
+  (is (thrown? (ex-info "m" [1 2])))
+  (is (thrown? (ex-info "m" :bad (ex-info "cause" {}))))
+  (is (= {:k 1} (ex-data (try (throw (ex-info "m" {:k 1})) (catch e e)))))
+  (is (nil? (ex-data (try (throw (ex-info "m" nil)) (catch e e)))))
+  (is (= {:a 1} (into {} (ex-data (try (throw (ex-info "m" (sorted-map :a 1)))
+                                    (catch e e)))))))
