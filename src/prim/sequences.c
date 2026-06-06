@@ -1950,6 +1950,15 @@ mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
         }
         return out;
     }
+    if (mino_type_of(to) == MINO_QUEUE) {
+        mino_val *out = to;
+        seq_iter_init(S, &it, from);
+        while (!seq_iter_done(&it)) {
+            out = mino_queue_conj(S, out, seq_iter_val(S, &it));
+            seq_iter_next(S, &it);
+        }
+        return out;
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg),
@@ -2282,10 +2291,8 @@ mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env)
         return coll->as.cons.cdr;
     }
     if (mino_type_of(coll) == MINO_QUEUE) {
-        if (mino_queue_count(coll) == 0) {
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
-                "pop: cannot pop an empty queue");
-        }
+        /* Popping an empty queue yields the empty queue (queues are
+         * the one collection where pop is total). */
         return mino_queue_pop(S, coll);
     }
     {

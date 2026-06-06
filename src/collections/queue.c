@@ -197,6 +197,14 @@ static mino_val *queue_nth(const mino_val *q, size_t i, size_t front_len)
     }
 }
 
+/* Public deque-order indexed access (O(n) for back access). */
+mino_val *mino_queue_nth(const mino_val *q, size_t i)
+{
+    if (q == NULL || mino_type_of(q) != MINO_QUEUE) return NULL;
+    if (i >= q->as.queue.len) return NULL;
+    return queue_nth(q, i, cons_len(q->as.queue.front));
+}
+
 int mino_queue_eq(const mino_val *a, const mino_val *b)
 {
     size_t n, i, a_fl, b_fl;
@@ -215,22 +223,3 @@ int mino_queue_eq(const mino_val *a, const mino_val *b)
     return 1;
 }
 
-/* Hash matching the sequence-hash contract (so two queues with the
- * same elements in the same order share a hash and equal queues hash
- * the same). Uses Clojure's hash-ordered-coll algorithm. */
-uint32_t mino_queue_hash(const mino_val *q)
-{
-    size_t n, i, fl;
-    uint32_t h = 1u;
-    if (q == NULL || mino_type_of(q) != MINO_QUEUE) return 0u;
-    n  = q->as.queue.len;
-    if (n == 0) return 0u;
-    fl = cons_len(q->as.queue.front);
-    for (i = 0; i < n; i++) {
-        h = 31u * h + (uint32_t)mino_hash(queue_nth(q, i, fl));
-    }
-    /* mix the count in like clojure.lang.Util/hashOrdered does */
-    h ^= (uint32_t)n;
-    h *= 0x9e3779b9u;
-    return h;
-}

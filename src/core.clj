@@ -764,7 +764,7 @@
             :else       (throw "num expects a number")))
 (defn coll?
   "Returns true if x is a collection."
-  [x] (or (seq? x) (vector? x) (map? x) (set? x)))
+  [x] (or (seq? x) (vector? x) (map? x) (set? x) (= :queue (type x))))
 ;; some? is a C primitive.
 ;; list? is registered as a C primitive (see src/prim/reflection.c)
 ;; that distinguishes MINO_CONS / MINO_EMPTY_LIST from
@@ -882,7 +882,8 @@
   [x]
   (let [t (type x)]
     (or (= t :vector) (= t :map) (= t :set)
-        (= t :sorted-map) (= t :sorted-set) (= t :map-entry))))
+        (= t :sorted-map) (= t :sorted-set) (= t :map-entry)
+        (= t :queue))))
 
 (defn bounded-count
   "Returns the count of coll, but stops counting at n."
@@ -1687,10 +1688,10 @@
 ;; --- Tree walking ---
 
 (defn sequential?
-  "Returns true if x is a sequential collection (list, vector, or
-   lazy-seq)."
+  "Returns true if x is a sequential collection (list, vector,
+   lazy-seq, or queue)."
   [x]
-  (or (cons? x) (vector? x) (seq? x)))
+  (or (cons? x) (vector? x) (seq? x) (= :queue (type x))))
 
 (defn flatten
   "Returns a lazy sequence of the non-sequential items from a nested

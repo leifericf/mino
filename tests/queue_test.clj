@@ -36,8 +36,11 @@
     (is (= '(3) (seq (pop (pop q)))))
     (is (= 0 (count (pop (pop (pop q))))))))
 
-(deftest pop-empty-throws
-  (is (thrown? (pop clojure.lang.PersistentQueue/EMPTY))))
+(deftest pop-empty-returns-empty-queue
+  ;; pop is total on queues: popping the empty queue yields the empty
+  ;; queue (unlike vectors and lists, where it throws).
+  (is (= clojure.lang.PersistentQueue/EMPTY
+         (pop clojure.lang.PersistentQueue/EMPTY))))
 
 (deftest seq-walks-in-deque-order
   (let [q (-> clojure.lang.PersistentQueue/EMPTY
@@ -67,9 +70,12 @@
     (is (not= a c))
     (is (= clojure.lang.PersistentQueue/EMPTY (empty a)))))
 
-(deftest queue-and-list-are-not-equal
-  ;; A queue is not = a list with the same elements (different type).
-  (is (not= '(1 2 3) (conj clojure.lang.PersistentQueue/EMPTY 1 2 3))))
+(deftest queue-equals-sequentials
+  ;; A queue takes part in sequential equality: it is = to a list or
+  ;; vector with the same elements in the same order.
+  (is (= '(1 2 3) (conj clojure.lang.PersistentQueue/EMPTY 1 2 3)))
+  (is (= [1 2 3] (conj clojure.lang.PersistentQueue/EMPTY 1 2 3)))
+  (is (not= '(1 2) (conj clojure.lang.PersistentQueue/EMPTY 1 2 3))))
 
 (deftest queue-as-fifo-after-pop-rotation
   ;; After several conj+pop cycles, the front-list eventually empties

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Queues now take part in the full collection contract: `coll?`,
+  `counted?`, and `sequential?` answer true; a queue is `=` to a list
+  or vector with the same elements (with the matching sequential
+  hash); `into` accepts a queue target; and popping an empty queue
+  returns the empty queue instead of raising.
+
 - Every seq view of a map now yields real map entries: sorted-map
   `seq` / `rseq` / `subseq` / `rsubseq` and the cons conversion of a
   plain map previously produced bare `[k v]` vectors, so `(map key

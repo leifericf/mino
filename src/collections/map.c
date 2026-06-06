@@ -401,9 +401,16 @@ uint32_t hash_val(const mino_val *v)
         /* Identity equality means identity hash too. */
         h = fnv_mix(h, 0x16);
         return hash_pointer_bytes(h, (uintptr_t)v);
-    case MINO_QUEUE:
-        h = fnv_mix(h, 0x17);
-        return hash_uint32_bytes(h, mino_queue_hash(v));
+    case MINO_QUEUE: {
+        /* Sequential category: hash exactly like a vector / list with
+         * the same elements, since (= queue [1 2]) is true. */
+        size_t i, n = v->as.queue.len;
+        h = fnv_mix(h, 0x09);
+        for (i = 0; i < n; i++) {
+            h = hash_uint32_bytes(h, hash_val(mino_queue_nth(v, i)));
+        }
+        return h;
+    }
     case MINO_BYTES:
         h = fnv_mix(h, 0x18);
         return hash_uint32_bytes(h, mino_bytes_hash(v));

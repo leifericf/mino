@@ -472,3 +472,23 @@
   (is (= '(2) (map key (subseq (sorted-map 1 :a 2 :b) > 1))))
   (is (= '(1) (map key (rsubseq (sorted-map 1 :a 2 :b) < 2))))
   (is (= :map-entry (type (second (cons 0 {:a 1}))))))
+
+;; --- Queues ---
+
+(deftest queue-collection-contract
+  (let [q (conj clojure.lang.PersistentQueue/EMPTY 1 2)]
+    (is (coll? q))
+    (is (counted? q))
+    (is (sequential? q))
+    (is (not (seq? q)))
+    ;; Sequential equality and the matching hash.
+    (is (= q [1 2]))
+    (is (= q (list 1 2)))
+    (is (= (hash q) (hash [1 2])))
+    (is (not= q [1 3]))
+    ;; into via conj.
+    (is (= [1 2 3 4] (vec (into q [3 4]))))
+    ;; Popping an empty queue yields an empty queue.
+    (is (= 0 (count (pop clojure.lang.PersistentQueue/EMPTY))))
+    (is (= clojure.lang.PersistentQueue/EMPTY
+           (pop clojure.lang.PersistentQueue/EMPTY)))))

@@ -56,7 +56,7 @@ mino_val *mino_mk_var(mino_state *S, const char *ns, const char *name,
 /* PersistentQueue internal helpers — implemented in collections/queue.c.
  * Public ctor / accessors live on the embedder surface (mino_queue_*). */
 int       mino_queue_eq  (const mino_val *a, const mino_val *b);
-uint32_t  mino_queue_hash(const mino_val *q);
+mino_val *mino_queue_nth(const mino_val *q, size_t i);
 
 /* MINO_BYTES internal helpers — implemented in collections/bytes.c.
  * Public ctor / accessors live on the embedder surface (mino_bytes_*). */

@@ -1016,7 +1016,7 @@ static int is_sequential(mino_type t)
 {
     return (t == MINO_CONS || t == MINO_VECTOR || t == MINO_EMPTY_LIST
             || t == MINO_LAZY || t == MINO_CHUNKED_CONS
-            || t == MINO_MAP_ENTRY);
+            || t == MINO_MAP_ENTRY || t == MINO_QUEUE);
 }
 
 /*
@@ -1083,11 +1083,13 @@ static int eq_seq_like(const mino_val *a, const mino_val *b)
                  || mino_type_of(ca) == MINO_EMPTY_LIST
                  || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
                  || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2)
+                 || (mino_type_of(ca) == MINO_QUEUE && ia >= ca->as.queue.len)
                  || mino_type_of(ca) == MINO_LAZY /* unrealized */);
         b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
                  || mino_type_of(cb) == MINO_EMPTY_LIST
                  || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
                  || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2)
+                 || (mino_type_of(cb) == MINO_QUEUE && ib >= cb->as.queue.len)
                  || mino_type_of(cb) == MINO_LAZY /* unrealized */);
 
         if (a_end && b_end) return 1;
@@ -1098,6 +1100,8 @@ static int eq_seq_like(const mino_val *a, const mino_val *b)
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
         else if (mino_type_of(ca) == MINO_MAP_ENTRY)
             ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
+        else if (mino_type_of(ca) == MINO_QUEUE)
+            ea = mino_queue_nth(ca, ia);
         else ea = vec_nth(ca, ia);
 
         if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
@@ -1105,6 +1109,8 @@ static int eq_seq_like(const mino_val *a, const mino_val *b)
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
         else if (mino_type_of(cb) == MINO_MAP_ENTRY)
             eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
+        else if (mino_type_of(cb) == MINO_QUEUE)
+            eb = mino_queue_nth(cb, ib);
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq(ea, eb)) return 0;
@@ -1505,11 +1511,13 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
         a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
                  || mino_type_of(ca) == MINO_EMPTY_LIST
                  || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
-                 || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2));
+                 || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2)
+                 || (mino_type_of(ca) == MINO_QUEUE && ia >= ca->as.queue.len));
         b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
                  || mino_type_of(cb) == MINO_EMPTY_LIST
                  || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
-                 || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2));
+                 || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2)
+                 || (mino_type_of(cb) == MINO_QUEUE && ib >= cb->as.queue.len));
 
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
@@ -1519,6 +1527,8 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
         else if (mino_type_of(ca) == MINO_MAP_ENTRY)
             ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
+        else if (mino_type_of(ca) == MINO_QUEUE)
+            ea = mino_queue_nth(ca, ia);
         else ea = vec_nth(ca, ia);
 
         if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
@@ -1526,6 +1536,8 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
         else if (mino_type_of(cb) == MINO_MAP_ENTRY)
             eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
+        else if (mino_type_of(cb) == MINO_QUEUE)
+            eb = mino_queue_nth(cb, ib);
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq_force(S, ea, eb)) return 0;
