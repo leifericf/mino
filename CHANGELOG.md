@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Regex patterns support backreferences `\1`..`\9`:
+  `(re-find #"(\w)\1" "abbc")` returns `["bb" "b"]`. A reference to
+  a group that did not participate fails the match, and `(?i)` makes
+  the comparison case-insensitive, as in the canonical engines.
+  Previously a backreference silently never matched. Quantifying a
+  backreference is rejected at compile time.
+
 - Regex patterns support the lazy quantifiers `*?`, `+?`, `??`, and
   `{n,m}?`, on atoms and on groups: `(re-find #"<(.+?)>" "<a><b>")`
   returns `["<a>" "a"]`. `re-matches` anchors at end-of-input inside

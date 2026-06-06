@@ -24,6 +24,7 @@
  *   '\d'       Digits, [0-9]
  *   '\D'       Non-digits
  *   '\b' '\B'  Word boundary / non-boundary (zero-width)
+ *   '\1'..'\9' Backreference to capture group 1..9
  *   '\n' &c.   Control-character escapes: \n \r \t \f \a \e \0
  *              (inside a class, \b is the backspace character)
  *
@@ -57,7 +58,7 @@
  * `CHAR` typedef from <windows.h>, which other TUs pull in under
  * _WIN32. In the single-file amalgamation those includes precede this
  * enum, so the unprefixed name breaks a Windows amalgam build. */
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY, LAZY_QUESTIONMARK, LAZY_STAR, LAZY_PLUS, LAZY_BOUNDED };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY, LAZY_QUESTIONMARK, LAZY_STAR, LAZY_PLUS, LAZY_BOUNDED, BACKREF };
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its
@@ -404,11 +405,14 @@ re_t re_compile(const char* pattern)
       case '$': {    re_compiled[j].type = END;             } break;
       case '.': {    re_compiled[j].type = DOT;             } break;
       /* A '?' right after a quantifier selects the lazy variant. */
-      case '*': {    re_compiled[j].type = STAR;
+      case '*': {    if (j > 0 && re_compiled[j-1].type == BACKREF) { free(re_compiled); return 0; }
+                     re_compiled[j].type = STAR;
                      if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_STAR; i++; } } break;
-      case '+': {    re_compiled[j].type = PLUS;
+      case '+': {    if (j > 0 && re_compiled[j-1].type == BACKREF) { free(re_compiled); return 0; }
+                     re_compiled[j].type = PLUS;
                      if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_PLUS; i++; } } break;
-      case '?': {    re_compiled[j].type = QUESTIONMARK;
+      case '?': {    if (j > 0 && re_compiled[j-1].type == BACKREF) { free(re_compiled); return 0; }
+                     re_compiled[j].type = QUESTIONMARK;
                      if (pattern[i+1] == '?') { re_compiled[j].type = LAZY_QUESTIONMARK; i++; } } break;
       /* Bounded repeat: {n} / {n,} / {n,m}. Modifies the preceding atom
        * by recording a min/max repeat count. Clamps to 0..255 since the
@@ -420,6 +424,7 @@ re_t re_compile(const char* pattern)
       case '{':
       {
         int min_v = 0, max_v = 0;
+        if (j > 0 && re_compiled[j-1].type == BACKREF) { free(re_compiled); return 0; }
         int has_max = 0;
         int saved_i = i;
         i++;
@@ -498,6 +503,14 @@ re_t re_compile(const char* pattern)
             case 'W': {    re_compiled[j].type = NOT_ALPHA;        } break;
             case 's': {    re_compiled[j].type = WHITESPACE;       } break;
             case 'S': {    re_compiled[j].type = NOT_WHITESPACE;   } break;
+
+            /* Backreferences \1..\9. */
+            case '1': case '2': case '3': case '4': case '5':
+            case '6': case '7': case '8': case '9':
+            {
+              re_compiled[j].type  = BACKREF;
+              re_compiled[j].u.gid = (unsigned char)(pattern[i] - '0');
+            } break;
 
             /* Zero-width word-boundary assertions. */
             case 'b': {    re_compiled[j].type = WORD_BOUNDARY;     } break;
@@ -1436,6 +1449,41 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
         }
         pattern++;
       }
+    }
+    if (pattern[0].type == BACKREF)
+    {
+      /* Compare the input against the span the referenced group
+       * matched in this attempt. A group that has not participated
+       * fails the reference, as in the canonical engines. Honors
+       * (?i) via the same per-byte fold the literal matcher uses. */
+      int gid = (int)pattern[0].u.gid;
+      int gs, ge, blen, k;
+      if (gid < 1 || gid > RE_MAX_GROUPS)
+      {
+        *matchlength = pre;
+        return 0;
+      }
+      gs = re_g_state.starts[gid - 1];
+      ge = re_g_state.ends[gid - 1];
+      if (gs < 0 || ge < gs)
+      {
+        *matchlength = pre;
+        return 0;
+      }
+      blen = ge - gs;
+      for (k = 0; k < blen; k++)
+      {
+        if (text[k] == '\0'
+            || re_fold(text[k]) != re_fold(re_g_state.base[gs + k]))
+        {
+          *matchlength = pre;
+          return 0;
+        }
+      }
+      text += blen;
+      *matchlength += blen;
+      pattern++;
+      continue;
     }
     if (pattern[0].type == WORD_BOUNDARY
         || pattern[0].type == NOT_WORD_BOUNDARY)

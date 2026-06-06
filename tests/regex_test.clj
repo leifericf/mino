@@ -279,3 +279,11 @@
   (is (= "ab" (re-find #"(?:ab)+?" "ababab")))
   (is (= "" (re-find #"a??" "a")))
   (is (= "aa" (re-matches #"a+?" "aa"))))
+
+(deftest backreferences
+  (is (= ["aaaa" "aa"] (re-find #"(a+)\1" "aaaa")))
+  (is (= ["bb" "b"] (re-find #"(\w)\1" "abbc")))
+  (is (= ["abab" "ab"] (re-matches #"(ab)\1" "abab")))
+  (is (nil? (re-find #"(a)\1" "ab")))
+  (is (= ["aA" "a"] (re-find #"(?i)(a)\1" "aA")))
+  (is (= ["bxb" "b"] (re-find #"(a|b)x\1" "bxb"))))
