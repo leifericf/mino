@@ -96,6 +96,18 @@ static mino_val *synth_var_meta(mino_state *S, mino_val *var)
         vals[n] = mino_true(S);
         n++;
     }
+    /* User metadata from the def site (the name symbol's map, plus
+     * :doc) lives on the var's meta slot; the synthesized entries
+     * overlay it so :ns/:name/flags stay authoritative. */
+    if (var->meta != NULL && mino_type_of(var->meta) == MINO_MAP) {
+        mino_val *merged = var->meta;
+        size_t      i;
+        for (i = 0; i < n; i++) {
+            merged = mino_map_assoc1(S, merged, keys[i], vals[i]);
+            if (merged == NULL) return NULL;
+        }
+        return merged;
+    }
     return mino_map(S, keys, vals, n);
 }
 
@@ -130,7 +142,8 @@ mino_val *prim_meta(mino_state *S, mino_val *args,
         return mino_nil(S);
     }
     if (mino_type_of(obj) == MINO_VAR) {
-        if (obj->meta != NULL) return obj->meta;
+        /* synth_var_meta overlays :ns/:name/flag entries on the
+         * def-site user map stored in obj->meta (when present). */
         return synth_var_meta(S, obj);
     }
     if (obj->meta != NULL) return obj->meta;

@@ -700,6 +700,29 @@ mino_val *eval_declare(mino_state *S, mino_val *form,
     return mino_nil(S);
 }
 
+/* Attach the def name-symbol's metadata map (plus the docstring, when
+ * given) to the var so (meta #'x) surfaces user keys like :doc and
+ * :deprecated, not just the synthesized :ns/:name/flag entries. */
+static void var_attach_user_meta(mino_state *S, mino_val *var,
+                                 mino_val *name_meta,
+                                 const char *doc, size_t doc_len)
+{
+    mino_val *m = NULL;
+    if (name_meta != NULL && mino_type_of(name_meta) == MINO_MAP) {
+        m = name_meta;
+    }
+    if (doc != NULL) {
+        mino_val *dk = mino_keyword(S, "doc");
+        mino_val *dv = mino_string_n(S, doc, doc_len);
+        if (dk == NULL || dv == NULL) return;
+        m = mino_map_assoc1(S, m != NULL ? m : mino_map(S, NULL, NULL, 0),
+                            dk, dv);
+    }
+    if (m == NULL) return;
+    gc_write_barrier(S, var, var->meta, m);
+    var->meta = m;
+}
+
 mino_val *eval_def(mino_state *S, mino_val *form,
                      mino_val *args, mino_env *env, int tail)
 {
@@ -748,6 +771,7 @@ mino_val *eval_def(mino_state *S, mino_val *form,
             if (var != NULL) {
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
+                var_attach_user_meta(S, var, m, NULL, 0);
             }
             meta_set(S, buf, NULL, 0, form);
             return var != NULL ? var : mino_nil(S);
@@ -776,6 +800,7 @@ mino_val *eval_def(mino_state *S, mino_val *form,
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
+                var_attach_user_meta(S, var, m, doc, doc_len);
             }
             env_bind(S, current_ns_env(S), buf, value);
             gc_unpin(1);

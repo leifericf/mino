@@ -70,3 +70,20 @@
   (declare def-after-declare)
   (def def-after-declare :now-bound)
   (is (= :now-bound def-after-declare)))
+
+(deftest var-meta-carries-user-map
+  (def ^{:doc "docd" :other 42} var-meta-probe 3)
+  (is (= "docd" (:doc (meta #'var-meta-probe))))
+  (is (= 42 (:other (meta #'var-meta-probe))))
+  (is (= 'var-meta-probe (:name (meta #'var-meta-probe)))))
+
+(deftest var-meta-doc-from-docstring
+  (defn var-meta-doc-fn "the doc" [a b] a)
+  (is (= "the doc" (:doc (meta #'var-meta-doc-fn))))
+  (def var-meta-doc-val "vdoc" 5)
+  (is (= "vdoc" (:doc (meta #'var-meta-doc-val)))))
+
+(deftest var-meta-flags-still-present
+  (def ^{:private true :doc "p"} var-meta-priv 1)
+  (is (= true (:private (meta #'var-meta-priv))))
+  (is (= "p" (:doc (meta #'var-meta-priv)))))

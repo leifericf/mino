@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `(meta #'x)` now carries the def site's full metadata map and the
+  docstring: `(def ^{:doc "d" :deprecated true} x 1)` surfaces both
+  keys, and `(defn f "doc" [x] ...)` puts the docstring under `:doc`.
+  Previously only the synthesized `:ns`/`:name`/`:private`/`:dynamic`
+  entries were visible and every other key was silently dropped.
+
 - Regex patterns support backreferences `\1`..`\9`:
   `(re-find #"(\w)\1" "abbc")` returns `["bb" "b"]`. A reference to
   a group that did not participate fails the match, and `(?i)` makes
