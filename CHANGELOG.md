@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Parks nested in function-call arguments inside `(go ...)` now work:
+  `(go (inc (<! ch)))` and `(go (+ (<! a) (<! b)))` are lifted into
+  let bindings with left-to-right evaluation preserved, instead of
+  failing with "(<! port) used not in (go ...) block".
+
 - The C API's `mino_atom_reset` now takes the `mino_state` and routes
   the store through the GC write barrier. Previously a reset on a
   tenured atom could leave the new value invisible to the next minor

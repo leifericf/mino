@@ -441,13 +441,17 @@
 ;;   - loop/recur:       (go (loop [x (<! ch)] (recur (<! ch))))
 ;;   - try/catch/finally: (go (try (<! ch) (catch e (handle e))))
 ;;
+;; Parks nested in plain function-call arguments (callee or argument
+;; position, through vector literals, at any call depth) are lifted
+;; into let bindings by an A-normalization pre-pass, preserving
+;; left-to-right evaluation order: (+ (<! ch1) (<! ch2)) becomes
+;; (let [a (<! ch1) b (<! ch2)] (+ a b)) before the state split.
+;;
 ;; Known limitations (scope boundaries, not bugs):
 ;;   - try with parks must be in tail position of the go body
 ;;   - Parks in catch or finally bodies are not supported
-;;   - Nested parks in function call args are not supported;
-;;     use let bindings instead:
-;;       BAD:  (+ (<! ch1) (<! ch2))
-;;       GOOD: (let [a (<! ch1) b (<! ch2)] (+ a b))
+;;   - Parks nested under a macro call or inside map/set literals are
+;;     not lifted; bind them with let first
 ;;   - go does not walk into fn or nested go forms
 
 (defn go-park?
@@ -508,6 +512,144 @@
     (vector? form) (boolean (some go-contains-recur? (seq form)))
     :else false))
 
+(declare go-anf-seq)
+
+(def go-structural-heads
+  "Form heads the go expander and transformer treat structurally, plus
+   special forms whose argument shapes must not be rebuilt into let
+   bindings. Calls with any other non-macro head are plain calls whose
+   arguments evaluate left to right and may be A-normalized."
+  #{"if" "do" "let" "let*" "letfn*" "loop" "loop*" "recur" "try" "catch"
+    "finally" "quote" "quasiquote" "unquote" "unquote-splicing" "var"
+    "def" "defmacro" "declare" "ns" "fn" "fn*" "binding" "lazy-seq"
+    "new" "when" "and" "or" "set!" "go" "go-loop" "when-not" "cond"})
+
+(defn go-self-eval?
+  "True for literals whose evaluation order can never be observed."
+  [x]
+  (or (nil? x) (true? x) (false? x)
+      (number? x) (string? x) (keyword? x) (char? x)))
+
+(defn go-plain-call?
+  "True when form is a call whose arguments may be lifted: the head is
+   not a special form, not a construct the go transformer handles
+   structurally, and does not resolve to a macro."
+  [form]
+  (and (cons? form)
+       (let [h (first form)]
+         (if (symbol? h)
+           (and (not (contains? go-structural-heads (name h)))
+                (let [v (resolve h)]
+                  (or (nil? v)
+                      (not= :macro (try (type (var-get v))
+                                        (catch e :unbound))))))
+           true))))
+
+(defn go-anf
+  "A-normalize a park-containing form reachable through plain calls,
+   vector literals, and park operations. Returns {:bindings [[sym val]
+   ...] :expr e} with bindings in evaluation order and every park
+   surfacing as a direct binding value, or nil when the form holds a
+   park in a shape the lift does not understand."
+  [form]
+  (cond
+    (not (go-contains-park? form))
+    {:bindings [] :expr form}
+
+    (go-park? form)
+    (let [parts (go-anf-seq (vec (rest form)))]
+      (when parts
+        (let [g (gensym "park_v_")]
+          {:bindings (conj (:bindings parts)
+                           [g (apply list (first form) (seq (:exprs parts)))])
+           :expr g})))
+
+    (vector? form)
+    (let [parts (go-anf-seq form)]
+      (when parts
+        {:bindings (:bindings parts) :expr (vec (:exprs parts))}))
+
+    (go-plain-call? form)
+    (let [head (first form)
+          argv (vec (rest form))]
+      (if (go-contains-park? head)
+        (let [hsub (go-anf head)]
+          (when hsub
+            (let [asub (go-anf-seq argv)]
+              (when asub
+                {:bindings (vec (concat (:bindings hsub) (:bindings asub)))
+                 :expr (apply list (:expr hsub) (seq (:exprs asub)))}))))
+        (let [asub (go-anf-seq argv)]
+          (when asub
+            {:bindings (:bindings asub)
+             :expr (apply list head (seq (:exprs asub)))}))))
+
+    :else nil))
+
+(defn go-anf-seq
+  "Normalize a vector of element forms that evaluate left to right.
+   Elements evaluating before a later park are lifted into bindings so
+   the park cannot reorder them. Returns {:bindings [[sym val] ...]
+   :exprs [...]} or nil on an unsupported shape."
+  [elems]
+  (let [n (count elems)
+        last-park (loop [i (dec n)]
+                    (cond
+                      (neg? i) -1
+                      (go-contains-park? (nth elems i)) i
+                      :else (recur (dec i))))]
+    (loop [i 0 bindings [] exprs []]
+      (if (>= i n)
+        {:bindings bindings :exprs exprs}
+        (let [e (nth elems i)]
+          (cond
+            (go-contains-park? e)
+            (let [sub (go-anf e)]
+              (cond
+                (nil? sub) nil
+                (< i last-park)
+                (let [g (gensym "arg_")]
+                  (recur (inc i)
+                         (conj (vec (concat bindings (:bindings sub)))
+                               [g (:expr sub)])
+                         (conj exprs g)))
+                :else
+                (recur (inc i)
+                       (vec (concat bindings (:bindings sub)))
+                       (conj exprs (:expr sub)))))
+            (and (< i last-park) (not (go-self-eval? e)))
+            (let [g (gensym "arg_")]
+              (recur (inc i) (conj bindings [g e]) (conj exprs g)))
+            :else
+            (recur (inc i) bindings (conj exprs e))))))))
+
+(defn go-flat-bindings
+  "Flatten [[sym val] ...] pairs into a let binding vector."
+  [bindings]
+  (vec (mapcat identity bindings)))
+
+(defn go-let-anf-bindings
+  "For a let binding vector, lift park-containing non-direct binding
+   values into preceding direct-park bindings. Returns the new binding
+   vector, or nil when nothing was lifted."
+  [bindings]
+  (let [pairs  (vec (partition 2 bindings))
+        lifted (vec (map (fn [pair]
+                           (let [bname (first pair)
+                                 v     (second pair)]
+                             (if (and (go-contains-park? v)
+                                      (not (go-park? v)))
+                               (let [sub (go-anf v)]
+                                 (if (nil? sub)
+                                   {:forms [bname v] :changed false}
+                                   {:forms (conj (go-flat-bindings (:bindings sub))
+                                                 bname (:expr sub))
+                                    :changed true}))
+                               {:forms [bname v] :changed false})))
+                         pairs))]
+    (when (boolean (some :changed lifted))
+      (vec (mapcat :forms lifted)))))
+
 (defn go-loop-park?
   "Returns true if form is (loop [bindings] body) where body contains parks."
   [form]
@@ -525,7 +667,7 @@
     (not (cons? form)) form
     (and (symbol? (first form))
          (let [n (name (first form))]
-           (or (= n "fn") (= n "fn*") (= n "go"))))
+           (or (= n "fn") (= n "fn*") (= n "go") (= n "quote"))))
     form
     ;; (when test body...) -> (if test body nil) or (if test (do body...) nil)
     (= 'when (first form))
@@ -597,6 +739,75 @@
           new-bindings (vec (mapcat (fn [l] [(:name l) (:init l)]) lifted))
           body (rest (rest form))]
       (go-expand-if `(let ~outer-lets (loop ~new-bindings ~@(seq body)))))
+    ;; if test with parks nested in plain calls -> lift them out
+    (and (= 'if (first form))
+         (let [fv (vec form)]
+           (and (>= (count fv) 3)
+                (go-contains-park? (nth fv 1))
+                (not (go-park? (nth fv 1)))
+                (some? (go-anf (nth fv 1))))))
+    (let [fv  (vec form)
+          sub (go-anf (nth fv 1))]
+      (go-expand-if
+        `(let ~(go-flat-bindings (:bindings sub))
+           (if ~(:expr sub) ~@(seq (subvec fv 2))))))
+
+    ;; recur args with parks nested in plain calls
+    (and (= 'recur (first form))
+         (boolean (some (fn [a] (and (go-contains-park? a)
+                                     (not (go-park? a))))
+                        (rest form)))
+         (some? (go-anf-seq (vec (rest form)))))
+    (let [sub (go-anf-seq (vec (rest form)))]
+      (go-expand-if
+        `(let ~(go-flat-bindings (:bindings sub))
+           (recur ~@(seq (:exprs sub))))))
+
+    ;; loop inits with parks nested in plain calls -> lift before loop
+    (and (= 'loop (first form))
+         (vector? (second form))
+         (boolean (some (fn [pair]
+                          (and (go-contains-park? (second pair))
+                               (not (go-park? (second pair)))))
+                        (partition 2 (second form)))))
+    (let [pairs (vec (partition 2 (second form)))
+          inits (vec (map second pairs))
+          sub   (go-anf-seq inits)]
+      (if (nil? sub)
+        (apply list (map go-expand-if form))
+        (go-expand-if
+          `(let ~(go-flat-bindings (:bindings sub))
+             (loop ~(vec (mapcat (fn [pair e] [(first pair) e])
+                                 pairs (seq (:exprs sub))))
+               ~@(seq (rest (rest form))))))))
+
+    ;; let with a binding value holding parks nested in plain calls
+    (and (= 'let (first form))
+         (vector? (second form))
+         (some? (go-let-anf-bindings (second form))))
+    (go-expand-if
+      `(let ~(go-let-anf-bindings (second form))
+         ~@(seq (rest (rest form)))))
+
+    ;; park whose channel or value expression itself parks
+    (and (go-park? form)
+         (boolean (some go-contains-park? (rest form))))
+    (let [sub (go-anf form)]
+      (if (nil? sub)
+        (apply list (map go-expand-if form))
+        (go-expand-if
+          `(let ~(go-flat-bindings (:bindings sub)) ~(:expr sub)))))
+
+    ;; plain call with parks in callee or argument position: surface
+    ;; every park as a direct let binding the state splitter parks on
+    (and (go-plain-call? form)
+         (boolean (some go-contains-park? form)))
+    (let [sub (go-anf form)]
+      (if (nil? sub)
+        (apply list (map go-expand-if form))
+        (go-expand-if
+          `(let ~(go-flat-bindings (:bindings sub)) ~(:expr sub)))))
+
     ;; Recurse into other forms
     :else (apply list (map go-expand-if form))))
 
@@ -758,6 +969,40 @@
                                         th  (nth ifv 2)
                                         el  (if (>= (count ifv) 4) (nth ifv 3) nil)]
                                     `(if ~t ~(make-branch th) ~(make-branch el)))
+                                  ;; (let [x (<! ch) ...] body): take or
+                                  ;; put, bind, then continue with the
+                                  ;; residual let (chains across several
+                                  ;; park bindings; the leaf form puts
+                                  ;; its value on the bridge).
+                                  (go-let-park? form)
+                                  (let [bindings (second form)
+                                        pairs    (vec (partition 2 bindings))
+                                        idx      (go-first-park-idx pairs)
+                                        pre      (vec (mapcat identity (subvec pairs 0 idx)))
+                                        park-pair (nth pairs idx)
+                                        sym      (first park-pair)
+                                        pf       (second park-pair)
+                                        post     (vec (mapcat identity (subvec pairs (inc idx))))
+                                        body     (vec (rest (rest form)))
+                                        cont-form (if (empty? post)
+                                                    (if (= 1 (count body))
+                                                      (first body)
+                                                      (cons 'do (seq body)))
+                                                    `(let ~post ~@(seq body)))
+                                        op       (name (first pf))
+                                        cb       (gensym "let_v_")
+                                        wrapped  (if (= op "<!")
+                                                   `(chan-take* ~(second pf)
+                                                      (fn [~cb]
+                                                        (let [~sym ~cb]
+                                                          ~(make-branch cont-form))))
+                                                   `(chan-put* ~(second pf) ~(nth pf 2)
+                                                      (fn [~cb]
+                                                        (let [~sym ~cb]
+                                                          ~(make-branch cont-form)))))]
+                                    (if (empty? pre)
+                                      wrapped
+                                      `(let ~pre ~wrapped)))
                                   ;; (do ... park) -> execute stmts then park
                                   (and (cons? form) (= 'do (first form)))
                                   (let [body-forms (vec (rest form))

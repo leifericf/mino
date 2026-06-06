@@ -175,3 +175,48 @@
       (is (map? data))
       (is (= 42 (get data :n)))
       (is (= :test (get data :tag))))))
+
+(defn- note-arg
+  "Record k on the order atom and return v."
+  [order k v]
+  (swap! order conj k)
+  v)
+
+(deftest go-parks-in-argument-position
+  (testing "take in function argument position"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 41)
+      (is (= 42 (a/<!! (a/go (inc (a/<! ch))))))))
+  (testing "sibling takes as arguments evaluate left to right"
+    (let [c1 (a/chan 1) c2 (a/chan 1)]
+      (a/>!! c1 40)
+      (a/>!! c2 2)
+      (is (= 42 (a/<!! (a/go (+ (a/<! c1) (a/<! c2))))))))
+  (testing "park nested two calls deep"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 20)
+      (is (= 42 (a/<!! (a/go (+ 2 (* 2 (a/<! ch)))))))))
+  (testing "take in put value position"
+    (let [src (a/chan 1) dst (a/chan 1)]
+      (a/>!! src 42)
+      (a/<!! (a/go (a/>! dst (a/<! src))))
+      (is (= 42 (a/<!! dst)))))
+  (testing "take inside the if test"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 4)
+      (is (= :even (a/<!! (a/go (if (even? (a/<! ch)) :even :odd)))))))
+  (testing "take inside a let binding computation"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 20)
+      (is (= 42 (a/<!! (a/go (let [x (+ 1 (a/<! ch))] (* 2 x))))))))
+  (testing "take inside a vector literal argument"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 1)
+      (is (= 2 (a/<!! (a/go (count [(a/<! ch) 2])))))))
+  (testing "argument evaluation order is preserved around parks"
+    (let [ch    (a/chan 1)
+          order (atom [])]
+      (a/>!! ch 1)
+      (is (= 43 (a/<!! (a/go (+ (note-arg order :a 40)
+                                (+ (note-arg order :b 2) (a/<! ch)))))))
+      (is (= [:a :b] @order)))))
