@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- String literals now support the full escape repertoire: `\uXXXX`
+  unicode escapes (surrogate pairs combine into one codepoint), `\b`,
+  `\f`, and octal `\NNN` escapes up to `\377`. Previously these were
+  silently mangled -- `"\u0041"` read as `"u0041"` -- because unknown
+  escapes passed the character through bare. An unrecognised escape is
+  now a reader error instead of a silent passthrough.
+
 - A token that starts with a digit (or a sign followed by a digit) but
   fails to parse as a number is now a reader error (`invalid number:
   1.2.3`) instead of silently reading as a symbol. Previously `1.2.3`,

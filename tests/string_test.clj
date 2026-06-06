@@ -147,3 +147,33 @@
   (is (= [""] (split "" #",")))
   (is (= [""] (split "" #"\s+")))
   (is (= [""] (split "" ","))))
+
+;; String literal escape repertoire
+
+(deftest string-escapes-control
+  (is (= [8] (mapv int "\b")))
+  (is (= [12] (mapv int "\f")))
+  (is (= [9 10 13] (mapv int "\t\n\r"))))
+
+(deftest string-escapes-unicode
+  (is (= "A" (read-string "\"\\u0041\"")))
+  (is (= [233] (mapv int (read-string "\"\\u00e9\""))))
+  (is (= [9731] (mapv int (read-string "\"\\u2603\""))))
+  ;; A surrogate pair combines into one codepoint.
+  (is (= [128512] (mapv int (read-string "\"\\ud83d\\ude00\""))))
+  ;; Lone surrogates are not representable codepoints.
+  (is (thrown? (read-string "\"\\ud800\"")))
+  (is (thrown? (read-string "\"\\u00g1\"")))
+  (is (thrown? (read-string "\"\\u12\""))))
+
+(deftest string-escapes-octal
+  (is (= [65] (mapv int (read-string "\"\\101\""))))
+  (is (= [0] (mapv int (read-string "\"\\0\""))))
+  (is (= [255] (mapv int (read-string "\"\\377\""))))
+  ;; Octal escapes consume at most three digits.
+  (is (= [83 52] (mapv int (read-string "\"\\1234\""))))
+  (is (thrown? (read-string "\"\\400\""))))
+
+(deftest string-escapes-unknown-rejected
+  (is (thrown? (read-string "\"\\q\"")))
+  (is (thrown? (read-string "\"\\8\""))))

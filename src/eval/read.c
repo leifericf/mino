@@ -214,6 +214,66 @@ static mino_val *read_regex_string(mino_state *S, const char **p)
     }
 }
 
+/* Grow `buf` so it can take `need` more bytes past `len`. On
+ * allocation failure frees the buffer, sets the reader diag, and
+ * returns NULL (caller just returns NULL). */
+static char *str_buf_reserve(mino_state *S, char *buf, size_t *cap,
+                             size_t len, size_t need,
+                             int str_line, int str_col)
+{
+    char  *nb;
+    size_t want = len + need + 1;
+    if (want <= *cap) return buf;
+    while (*cap < want) *cap *= 2;
+    nb = (char *)realloc(buf, *cap);
+    if (nb == NULL) {
+        free(buf);
+        set_reader_diag(S, MRE004, "out of memory reading string",
+                        str_line, str_col);
+        return NULL;
+    }
+    return nb;
+}
+
+/* Encode `cp` as UTF-8 into out[0..3]; returns the byte count. */
+static int utf8_encode_cp(unsigned cp, unsigned char *out)
+{
+    int n = 0;
+    if (cp < 0x80u) {
+        out[n++] = (unsigned char)cp;
+    } else if (cp < 0x800u) {
+        out[n++] = (unsigned char)(0xC0u | (cp >> 6));
+        out[n++] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    } else if (cp < 0x10000u) {
+        out[n++] = (unsigned char)(0xE0u | (cp >> 12));
+        out[n++] = (unsigned char)(0x80u | ((cp >> 6) & 0x3Fu));
+        out[n++] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    } else {
+        out[n++] = (unsigned char)(0xF0u | (cp >> 18));
+        out[n++] = (unsigned char)(0x80u | ((cp >> 12) & 0x3Fu));
+        out[n++] = (unsigned char)(0x80u | ((cp >> 6) & 0x3Fu));
+        out[n++] = (unsigned char)(0x80u | (cp & 0x3Fu));
+    }
+    return n;
+}
+
+/* Parse exactly four hex digits at q[0..3]. Returns the value, or -1
+ * on any non-hex character (including an early NUL). */
+static int read_hex4(const char *q)
+{
+    int v = 0, j;
+    for (j = 0; j < 4; j++) {
+        char c = q[j];
+        int  d;
+        if      (c >= '0' && c <= '9') d = c - '0';
+        else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+        else return -1;
+        v = (v << 4) | d;
+    }
+    return v;
+}
+
 static mino_val *read_string_form(mino_state *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
@@ -241,18 +301,99 @@ static mino_val *read_string_form(mino_state *S, const char **p)
             case 'n':  c = '\n'; break;
             case 't':  c = '\t'; break;
             case 'r':  c = '\r'; break;
+            case 'b':  c = '\b'; break;
+            case 'f':  c = '\f'; break;
             case '\\': c = '\\'; break;
             case '"':  c = '"';  break;
-            case '0':  c = '\0'; break;
+            case 'u': {
+                /* \uXXXX -- exactly four hex digits. A high surrogate
+                 * must pair with an immediately following low-
+                 * surrogate escape; the pair combines into one
+                 * supplementary codepoint (strings are UTF-8, so a
+                 * lone surrogate is not representable). */
+                int cp = read_hex4(*p + 1);
+                unsigned char enc[4];
+                int           n;
+                if (cp < 0) {
+                    free(buf);
+                    set_reader_diag(S, MRE008,
+                        "\\u escape requires four hex digits",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+                ADVANCE_N(S, p, 5); /* skip uXXXX */
+                if (cp >= 0xD800 && cp <= 0xDBFF) {
+                    int lo = -1;
+                    if ((*p)[0] == '\\' && (*p)[1] == 'u') {
+                        lo = read_hex4(*p + 2);
+                    }
+                    if (lo < 0xDC00 || lo > 0xDFFF) {
+                        free(buf);
+                        set_reader_diag(S, MRE008,
+                            "lone surrogate in \\u escape",
+                            S->reader.reader_line, S->reader.reader_col);
+                        return NULL;
+                    }
+                    ADVANCE_N(S, p, 6); /* skip \uXXXX */
+                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                    free(buf);
+                    set_reader_diag(S, MRE008,
+                        "lone surrogate in \\u escape",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+                buf = str_buf_reserve(S, buf, &cap, len, 4,
+                                      str_line, str_col);
+                if (buf == NULL) return NULL;
+                n = utf8_encode_cp((unsigned)cp, enc);
+                memcpy(buf + len, enc, (size_t)n);
+                len += (size_t)n;
+                continue;
+            }
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7': {
+                /* Octal escape: up to three digits, max \377. The
+                 * value is a codepoint, UTF-8-encoded like \u. */
+                unsigned      oval = 0;
+                int           nd   = 0;
+                unsigned char enc[4];
+                int           n;
+                while (nd < 3 && **p >= '0' && **p <= '7') {
+                    oval = (oval << 3) | (unsigned)(**p - '0');
+                    ADVANCE(S, p);
+                    nd++;
+                }
+                if (oval > 0377) {
+                    free(buf);
+                    set_reader_diag(S, MRE008,
+                        "octal escape out of range [0, 377]",
+                        S->reader.reader_line, S->reader.reader_col);
+                    return NULL;
+                }
+                buf = str_buf_reserve(S, buf, &cap, len, 2,
+                                      str_line, str_col);
+                if (buf == NULL) return NULL;
+                n = utf8_encode_cp(oval, enc);
+                memcpy(buf + len, enc, (size_t)n);
+                len += (size_t)n;
+                continue;
+            }
             case '\0':
                 free(buf);
                 set_reader_diag(S, MRE001, "unterminated string literal",
                                 str_line, str_col);
                 return NULL;
-            default:
-                /* Unknown escape: keep the character literally. */
-                c = **p;
-                break;
+            default: {
+                char msg[64];
+                snprintf(msg, sizeof(msg),
+                         "unsupported escape character: \\%c", **p);
+                free(buf);
+                set_reader_diag(S, MRE008, msg,
+                                S->reader.reader_line,
+                                S->reader.reader_col);
+                return NULL;
+            }
             }
         }
         if (len + 1 >= cap) {
