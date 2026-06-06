@@ -1691,9 +1691,10 @@ mino_val *mino_volatile_deref(const mino_val *v)
     return v->as.volatile_.val;
 }
 
-void mino_atom_reset(mino_val *a, mino_val *val)
+void mino_atom_reset(mino_state *S, mino_val *a, mino_val *val)
 {
     if (a != NULL && mino_type_of(a) == MINO_ATOM) {
+        gc_write_barrier(S, a, a->as.atom.val, val);
         a->as.atom.val = val;
     }
 }

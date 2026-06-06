@@ -523,8 +523,10 @@ int         mino_is_volatile(const mino_val *v);
 /* Return the current value of a volatile, or NULL if v is not a volatile. */
 mino_val *mino_volatile_deref(const mino_val *v);
 
-/* Set the value of an atom. */
-void        mino_atom_reset(mino_val *a, mino_val *val);
+/* Set the value of an atom. Equivalent to reset! from script code:
+ * the store is routed through the GC write barrier so the new value
+ * survives collection regardless of the atom's age. */
+void        mino_atom_reset(mino_state *S, mino_val *a, mino_val *val);
 
 /* Construct a map entry holding (k, v). Used by first / seq of a map
  * to publish entries with the right type identity (so key / val can

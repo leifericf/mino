@@ -212,6 +212,63 @@ static void test_to_int_bignum_round_trip(void)
     }
 }
 
+#if defined(__GNUC__)
+#  define MINO_NOINLINE __attribute__((noinline))
+#else
+#  define MINO_NOINLINE
+#endif
+
+/* Build the replacement value in its own frame so its survival across
+ * the collections below comes from the atom's reference, not from a
+ * live C-stack slot the conservative scan would pin. */
+MINO_NOINLINE
+static void atom_reset_fresh_payload(mino_state *S, mino_val *a)
+{
+    mino_atom_reset(S, a, mino_string(S, "tenured-reset-payload"));
+}
+
+MINO_NOINLINE
+static void clobber_c_stack(void)
+{
+    volatile char buf[16384];
+    memset((void *)buf, 0x5a, sizeof(buf));
+}
+
+/* mino_atom_reset on a tenured atom: the stored value must survive
+ * subsequent minor collections exactly like a script-side reset!. The
+ * tiny nursery makes the eval churn below run real minor cycles. */
+static void test_atom_reset_tenured(void)
+{
+    mino_state *S   = mino_state_new();
+    mino_env   *env = mino_env_new(S);
+    mino_val   *a;
+    mino_val   *r;
+    const char  *s   = NULL;
+    size_t       len = 0;
+    mino_install(S, env, MINO_CAP_BIGNUM);
+    mino_gc_set_param(S, MINO_GC_NURSERY_BYTES, 4096);
+    mino_eval_string(S, "(def keeper (atom :init))", env);
+    a = mino_eval_string(S, "keeper", env);
+    REQUIRE(a != NULL && mino_is_atom(a), "atom-reset: keeper is an atom");
+    /* Tenure the atom, then run one more minor so it settles out of the
+     * post-promotion remembered set before the reset. */
+    mino_gc_collect(S, MINO_GC_FULL);
+    mino_gc_collect(S, MINO_GC_FULL);
+    mino_gc_collect(S, MINO_GC_MINOR);
+    atom_reset_fresh_payload(S, a);
+    clobber_c_stack();
+    mino_eval_string(S, "(dotimes [i 400] (vec (range 100)))", env);
+    mino_gc_collect(S, MINO_GC_MINOR);
+    mino_eval_string(S, "(dotimes [i 400] (vec (range 100)))", env);
+    r = mino_eval_string(S, "(deref keeper)", env);
+    REQUIRE(r != NULL && mino_to_string(r, &s, &len) == 1
+            && len == strlen("tenured-reset-payload")
+            && memcmp(s, "tenured-reset-payload", len) == 0,
+            "atom-reset: value survives minors after tenured reset");
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 /* The _ex eval family delivers the raw thrown payload through out_ex,
  * matching the contract documented for mino_pcall. */
 static void test_eval_ex_out_ex_payload(mino_state *S, mino_env *env)
@@ -479,6 +536,7 @@ int main(void)
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
     test_to_int_bignum_round_trip();
+    test_atom_reset_tenured();
     test_predicate_grid(S, env);
 
     /* Phase 6 -- embed-API ergonomics. */

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The C API's `mino_atom_reset` now takes the `mino_state` and routes
+  the store through the GC write barrier. Previously a reset on a
+  tenured atom could leave the new value invisible to the next minor
+  collection, freeing it while the atom still referenced it.
+
 - `recur` across a `try` boundary (from the body or a catch handler)
   now raises "cannot recur across try" instead of silently re-entering
   the loop with the try frame's unwind machinery skipped.
