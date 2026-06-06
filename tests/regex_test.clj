@@ -205,3 +205,17 @@
     (is (= ["foofoofoo" "foo"] (re-find #"(foo)+" "foofoofoo")))
     (is (= ["foo"       "foo"] (re-find #"(foo)+" "foox")))
     (is (nil? (re-find #"(foo)+" "fofo")))))
+
+(deftest control-character-escapes
+  ;; \n \r \t \f in a pattern match the control characters, both as
+  ;; standalone atoms and inside character classes.
+  (is (= "\n" (re-find #"\n" "a\nb")))
+  (is (= "\r" (re-find #"\r" "a\rb")))
+  (is (= "\t" (re-find #"\t" "a\tb")))
+  (is (= "\f" (re-find #"\f" "a\fb")))
+  (is (= "\r\n" (re-find #"\r?\n" "a\r\nb")))
+  (is (= "\n" (re-find #"\r?\n" "a\nb")))
+  (is (= ["a" "b"] (vec (clojure.string/split "a\tb" #"\t"))))
+  (is (= "\n" (re-find #"[\n\t]" "ax\n")))
+  (is (nil? (re-find #"[\n]" "n")))
+  (is (nil? (re-find #"\n" "n"))))

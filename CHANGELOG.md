@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Regex patterns now understand the control-character escapes `\n`,
+  `\r`, `\t`, `\f`, `\a`, `\e`, and `\0`, both as standalone atoms
+  and inside character classes. Previously `#"\n"` compared the
+  letter `n` against the newline byte and never matched.
+
 - `clojure.string/re-quote-replacement` now actually escapes `$` and
   `\` in the replacement. The escape map was keyed by one-character
   strings where `escape` looks up characters, so every input passed

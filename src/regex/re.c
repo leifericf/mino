@@ -473,6 +473,22 @@ re_t re_compile(const char* pattern)
             case 's': {    re_compiled[j].type = WHITESPACE;       } break;
             case 'S': {    re_compiled[j].type = NOT_WHITESPACE;   } break;
 
+            /* Control-character escapes. */
+            case 'n': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\n';            } break;
+            case 'r': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\r';            } break;
+            case 't': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\t';            } break;
+            case 'f': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\f';            } break;
+            case 'a': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\a';            } break;
+            case 'e': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = 0x1b;            } break;
+            case '0': {    re_compiled[j].type = RE_CHAR;
+                           re_compiled[j].u.ch = '\0';            } break;
+
             /* Escaped character, e.g. '.' or '$' */
             default:
             {
@@ -759,6 +775,16 @@ static int ismetachar(char c)
   return ((c == 's') || (c == 'S') || (c == 'w') || (c == 'W') || (c == 'd') || (c == 'D'));
 }
 
+/* Escape chars that matchmetachar resolves authoritatively -- the
+ * class-membership fallback that compares the escape char literally
+ * must not run for these (e.g. [\n] must not match the letter n). */
+static int is_class_escape(char c)
+{
+  return ismetachar(c)
+      || (c == 'n') || (c == 'r') || (c == 't') || (c == 'f')
+      || (c == 'a') || (c == 'e') || (c == '0');
+}
+
 static int matchmetachar(char c, const char* str)
 {
   switch (str[0])
@@ -769,6 +795,14 @@ static int matchmetachar(char c, const char* str)
     case 'W': return !matchalphanum(c);
     case 's': return  matchwhitespace(c);
     case 'S': return !matchwhitespace(c);
+    /* Control-character escapes inside classes, e.g. [\n\t]. */
+    case 'n': return (c == '\n');
+    case 'r': return (c == '\r');
+    case 't': return (c == '\t');
+    case 'f': return (c == '\f');
+    case 'a': return (c == '\a');
+    case 'e': return (c == 0x1b);
+    case '0': return (c == '\0');
     default:  return (c == str[0]);
   }
 }
@@ -789,7 +823,8 @@ static int matchcharclass(char c, const char* str)
       {
         return 1;
       }
-      else if ((re_fold(c) == re_fold(str[0])) && !ismetachar(c))
+      else if (!is_class_escape(str[0])
+               && (re_fold(c) == re_fold(str[0])) && !ismetachar(c))
       {
         return 1;
       }
