@@ -132,8 +132,15 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  * emits #<...> instead of descending further. This prevents stack overflow
  * on deeply nested or self-referential structures (possible through mutable
  * cons tails in internal data, though the user-facing API is immutable).
+ *
+ * Kept equal to MINO_READER_MAX_DEPTH (read.c): anything the reader will
+ * accept must print in a form the reader can read back, so pr-str round-
+ * trips for every value `read` admits. The printer's per-frame cost is no
+ * larger than the reader's, so the same ceiling sits the same safe margin
+ * below the stack-overflow point. Deeper structures (reachable only via
+ * internal mutable cons tails) still elide.
  */
-#define MINO_PRINT_DEPTH_MAX 128
+#define MINO_PRINT_DEPTH_MAX 1024
 
 /* Forward declaration: defined alongside print_map below; used by the
  * rb-tree namespace-stripped walker introduced for sorted maps. */

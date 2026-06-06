@@ -195,3 +195,26 @@
       `(hash-map :tag ~tag :payload ~payload)))
   (is (= {:tag :pair :payload [1 2]} (mk-pair__mt 1 2)))
   (is (= {:tag :pair :payload [:x :y]} (mk-pair__mt :x :y))))
+
+;; Print depth and read depth share a ceiling: a structure nested
+;; beyond a hundred levels but within the reader's accepted depth
+;; prints in a form the reader reads back identically. Lists, vectors,
+;; maps, and sets each exercise a distinct printer recursion path.
+(defn- nest-deep [build base levels]
+  (loop [n levels acc base]
+    (if (zero? n) acc (recur (dec n) (build acc)))))
+
+(deftest deeply-nested-structures-round-trip
+  (let [levels 200]
+    (testing "list"
+      (let [x (nest-deep list 1 levels)]
+        (is (= x (read-string (pr-str x))))))
+    (testing "vector"
+      (let [x (nest-deep vector 1 levels)]
+        (is (= x (read-string (pr-str x))))))
+    (testing "map value"
+      (let [x (nest-deep (fn [v] {:k v}) 1 levels)]
+        (is (= x (read-string (pr-str x))))))
+    (testing "set"
+      (let [x (nest-deep (fn [v] #{v}) 1 levels)]
+        (is (= x (read-string (pr-str x))))))))

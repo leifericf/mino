@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The printer's depth ceiling now matches the reader's (1024), so any
+  value the reader accepts prints in a form the reader reads back:
+  `(read-string (pr-str x))` round-trips deeply-nested data instead of
+  losing it. Previously the printer elided with `#<...>` past depth
+  128 -- a quarter of what the reader admits -- so a 140-deep list read
+  fine but printed to an unreadable form. Structures deeper than the
+  reader's own ceiling (reachable only via internal mutable cons tails)
+  still elide as a stack-overflow guard.
+
 - An error raised inside JIT'd code on a worker thread (a `future`
   body) now surfaces as a future failure instead of crashing the
   process. The worker entered mino with no enclosing try frame, so a
