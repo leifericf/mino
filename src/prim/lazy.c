@@ -692,6 +692,28 @@ mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (range), (range end), (range start end), (range start end step). */
+/* Infinite repetition of one value, element-wise. Zero-step ranges
+ * degenerate to this, mirroring the canonical contract where the seq
+ * never advances. Element-wise (not chunked) so a take/first consumer
+ * realizes exactly what it asks for. ctx is the repeated value. */
+static mino_val *repeat_forever_thunk(mino_state *S, mino_val *ctx)
+{
+    mino_val *next = alloc_val(S, MINO_LAZY);
+    if (next == NULL) return NULL;
+    next->as.lazy.body    = ctx;
+    next->as.lazy.c_thunk = repeat_forever_thunk;
+    return mino_cons(S, ctx, next);
+}
+
+static mino_val *repeat_forever_lazy(mino_state *S, mino_val *x)
+{
+    mino_val *lz = alloc_val(S, MINO_LAZY);
+    if (lz == NULL) return NULL;
+    lz->as.lazy.body    = x;
+    lz->as.lazy.c_thunk = repeat_forever_thunk;
+    return lz;
+}
+
 /* Numeric-tower membership for range bounds. */
 static int range_val_is_number(const mino_val *v)
 {
@@ -725,8 +747,10 @@ mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
                || !mino_to_int(args->as.cons.cdr->as.cons.cdr->as.cons.car,
                                &step);
         if (!generic && step == 0) {
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
-                "range step must not be zero");
+            /* Zero step never advances: empty when the bounds already
+             * meet, otherwise start repeats forever. */
+            if (end == start) return mino_empty_list(S);
+            return repeat_forever_lazy(S, mino_int(S, start));
         }
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -759,8 +783,17 @@ mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
             int descending = range_g_in_bounds(S, g_step, zero, 1, &ok);
             if (!ok) return NULL;
             if (!descending) {
-                return prim_throw_classified(S, "eval/bounds", "MBD001",
-                    "range step must not be zero");
+                /* Zero step (or unordered, e.g. NaN): empty when the
+                 * bounds are numerically equal, otherwise start
+                 * repeats forever. */
+                int apart = range_g_in_bounds(S, g_start, g_end, 1, &ok);
+                if (!ok) return NULL;
+                if (!apart) {
+                    apart = range_g_in_bounds(S, g_end, g_start, 1, &ok);
+                    if (!ok) return NULL;
+                }
+                if (!apart) return mino_empty_list(S);
+                return repeat_forever_lazy(S, g_start);
             }
         }
         {

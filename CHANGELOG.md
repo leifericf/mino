@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A zero-step `range` now repeats `start` forever (empty when the
+  bounds already meet) instead of raising "range step must not be
+  zero", matching the canonical contract: `(take 4 (range 0 5 0))`
+  yields `(0 0 0 0)` and `(range 5 5 0)` yields `()`.
+
 - `range` now accepts the whole numeric tower: floats, ratios,
   bigints, and bigdecs, in any mix. `(range 0.0 1.0 0.25)` yields
   `(0.0 0.25 0.5 0.75)` and `(range 1/2 2 1/2)` yields `(1/2 1 3/2)`.

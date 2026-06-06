@@ -51,6 +51,13 @@
   (is (thrown? (range 0 :b)))
   (is (thrown? (range 0 5 "s"))))
 
+(deftest range-zero-step
+  (is (= '(0 0 0 0) (take 4 (range 0 5 0))))
+  (is (= '(5 5 5) (take 3 (range 5 0 0))))
+  (is (= '() (range 5 5 0)))
+  (is (= '(1.5 1.5) (take 2 (range 1.5 9 0.0))))
+  (is (= '() (range 2.0 2.0 0.0))))
+
 (deftest repeat-fn
   (is (= '("x" "x" "x") (repeat 3 "x")))
   (is (= '() (repeat 0 "x"))))
