@@ -105,3 +105,25 @@
 (deftest empty-string-returns-nil
   (is (nil? (empty "hello")))
   (is (nil? (empty ""))))
+
+(deftest deeply-nested-structural-equality
+  ;; Element-position nesting must compare to arbitrary depth, bounded
+  ;; by the heap rather than the C stack.
+  (testing "deep car-nested lists"
+    (let [build (fn [n] (reduce (fn [acc _] (list acc)) :bottom (range n)))
+          d1 (build 100000)
+          d2 (build 100000)]
+      (is (true? (= d1 d2)))
+      (is (false? (= d1 (build 99999))))))
+  (testing "deep vector towers"
+    (let [build (fn [n leaf] (reduce (fn [acc _] (vector acc)) leaf (range n)))
+          v1 (build 100000 :x)
+          v2 (build 100000 :x)]
+      (is (true? (= v1 v2)))
+      (is (false? (= v1 (build 100000 :y))))))
+  (testing "deep mixed list-vector nesting"
+    (let [build (fn [n] (reduce (fn [acc i] (if (even? i) (list acc) (vector acc)))
+                                :z (range n)))
+          m1 (build 60000)
+          m2 (build 60000)]
+      (is (true? (= m1 m2))))))

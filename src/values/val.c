@@ -1002,8 +1002,6 @@ int mino_is_future(const mino_val *v)  { return mino_type_of(v) == MINO_FUTURE; 
 /* Forward declarations. */
 int mino_eq(const mino_val *a, const mino_val *b);
 int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b);
-static int eq_seq_like_force(mino_state *S, const mino_val *a,
-                           const mino_val *b);
 
 /*
  * Check whether a type is sequential (list, vector, empty-list, or
@@ -1030,6 +1028,77 @@ static const mino_val *resolve_lazy(const mino_val *v)
         v = v->as.lazy.cached;
     }
     return v;
+}
+
+/* Iterative structural equality.
+ *
+ * Element-position nesting (car towers, vectors of vectors, map
+ * values holding maps, ...) is walked through an explicit worklist of
+ * deferred pairs so comparison depth is bounded by the heap rather
+ * than the C stack. Spine length stays O(1) on the worklist (the
+ * cons case iterates cdr in place); only element nesting grows it.
+ * Sorted collections keep their tree-shaped walkers: tree depth is
+ * logarithmic and their per-entry value compares re-enter the
+ * iterative driver, so only a tower built purely of sorted
+ * collections walks O(nesting) C frames. */
+#define EQ_STACK_INLINE 64u
+typedef struct { const mino_val *a; const mino_val *b; } eq_pair_t;
+typedef struct {
+    eq_pair_t  inline_buf[EQ_STACK_INLINE];
+    eq_pair_t *buf;
+    size_t     len;
+    size_t     cap;
+} eq_stack_t;
+
+static int eq_step(const mino_val *a, const mino_val *b,
+                   eq_stack_t *st);
+static int eq_step_force(mino_state *S, const mino_val *a,
+                         const mino_val *b, eq_stack_t *st);
+
+static void eq_stack_init(eq_stack_t *st)
+{
+    st->buf = st->inline_buf;
+    st->len = 0;
+    st->cap = EQ_STACK_INLINE;
+}
+
+static void eq_stack_free(eq_stack_t *st)
+{
+    if (st->buf != st->inline_buf) free(st->buf);
+}
+
+static int eq_stack_push(eq_stack_t *st, const mino_val *a,
+                         const mino_val *b)
+{
+    if (st->len == st->cap) {
+        size_t     new_cap = st->cap * 2u;
+        eq_pair_t *nb;
+        if (st->buf == st->inline_buf) {
+            nb = (eq_pair_t *)malloc(new_cap * sizeof(*nb));
+            if (nb != NULL) memcpy(nb, st->buf, st->len * sizeof(*nb));
+        } else {
+            nb = (eq_pair_t *)realloc(st->buf, new_cap * sizeof(*nb));
+        }
+        if (nb == NULL) return 0;
+        st->buf = nb;
+        st->cap = new_cap;
+    }
+    st->buf[st->len].a = a;
+    st->buf[st->len].b = b;
+    st->len++;
+    return 1;
+}
+
+/* Defer one element pair onto the worklist. Identical pointers
+ * (covering inline-tagged scalars) short-circuit without touching
+ * it; a worklist that cannot grow falls back to direct recursion,
+ * which preserves answers at the cost of the old depth exposure. */
+static int eq_child(mino_state *S, eq_stack_t *st,
+                    const mino_val *a, const mino_val *b)
+{
+    if (a == b) return 1;
+    if (st != NULL && eq_stack_push(st, a, b)) return 1;
+    return S != NULL ? eq_step_force(S, a, b, st) : eq_step(a, b, st);
 }
 
 /*
@@ -1061,7 +1130,8 @@ static void eq_seq_step(const mino_val **cur, size_t *idx)
     (*idx)++;
 }
 
-static int eq_seq_like(const mino_val *a, const mino_val *b)
+static int eq_seq_like(const mino_val *a, const mino_val *b,
+                       eq_stack_t *st)
 {
     const mino_val *ca = resolve_lazy(a);
     const mino_val *cb = resolve_lazy(b);
@@ -1113,7 +1183,7 @@ static int eq_seq_like(const mino_val *a, const mino_val *b)
             eb = mino_queue_nth(cb, ib);
         else eb = vec_nth(cb, ib);
 
-        if (!mino_eq(ea, eb)) return 0;
+        if (!eq_child(NULL, st, ea, eb)) return 0;
 
         eq_seq_step(&ca, &ia);
         eq_seq_step(&cb, &ib);
@@ -1193,7 +1263,8 @@ static int eq_set_like_cross(const mino_val *a, const mino_val *b)
  * cons/vector/etc compare as seqs; map/sorted-map compare by entry
  * pairs; set/sorted-set compare by element membership). Everything
  * else with mismatched tags is unequal. */
-static int eq_cross_type(const mino_val *a, const mino_val *b)
+static int eq_cross_type(const mino_val *a, const mino_val *b,
+                         eq_stack_t *st)
 {
     /* Cross-tier integer equality: int and bigint represent the same
      * arbitrary-precision integer kind, and Clojure treats them as
@@ -1222,7 +1293,7 @@ static int eq_cross_type(const mino_val *a, const mino_val *b)
      * map-entry, nil all compare element-wise. Matches Clojure where
      * (= '(1 2) [1 2]) is true. */
     if (is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
-        return eq_seq_like(a, b);
+        return eq_seq_like(a, b, st);
     }
     /* Cross-type map equality: sorted-map and map compare by entries. */
     {
@@ -1244,6 +1315,20 @@ static int eq_cross_type(const mino_val *a, const mino_val *b)
 }
 
 int mino_eq(const mino_val *a, const mino_val *b)
+{
+    eq_stack_t st;
+    int        ok;
+    eq_stack_init(&st);
+    ok = eq_step(a, b, &st);
+    while (ok && st.len > 0) {
+        eq_pair_t p = st.buf[--st.len];
+        ok = eq_step(p.a, p.b, &st);
+    }
+    eq_stack_free(&st);
+    return ok;
+}
+
+static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
 {
     if (a == b) {
         return 1;
@@ -1306,7 +1391,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
         }
     }
     if (mino_type_of(a) != mino_type_of(b)) {
-        return eq_cross_type(a, b);
+        return eq_cross_type(a, b, st);
     }
     switch (mino_type_of(a)) {
     case MINO_NIL:
@@ -1334,15 +1419,32 @@ int mino_eq(const mino_val *a, const mino_val *b)
             && a->as.s.ns_len == b->as.s.ns_len
             && memcmp(a->as.s.data, b->as.s.data, a->as.s.len) == 0;
     case MINO_CONS:
-        return mino_eq(a->as.cons.car, b->as.cons.car)
-            && mino_eq(a->as.cons.cdr, b->as.cons.cdr);
+        /* Iterate the spine in place (worklist stays O(1) for list
+         * length); defer each car. The first non-cons tail on either
+         * side re-enters the full dispatch so improper, lazy, and
+         * cross-type tails keep their semantics. */
+        for (;;) {
+            if (!eq_child(NULL, st, a->as.cons.car, b->as.cons.car)) {
+                return 0;
+            }
+            a = a->as.cons.cdr;
+            b = b->as.cons.cdr;
+            if (a == b) return 1;
+            if (a == NULL || b == NULL) {
+                return mino_is_nil(a) && mino_is_nil(b);
+            }
+            if (mino_type_of(a) != MINO_CONS
+                || mino_type_of(b) != MINO_CONS) {
+                return eq_child(NULL, st, a, b);
+            }
+        }
     case MINO_VECTOR: {
         size_t i;
         if (a->as.vec.len != b->as.vec.len) {
             return 0;
         }
         for (i = 0; i < a->as.vec.len; i++) {
-            if (!mino_eq(vec_nth(a, i), vec_nth(b, i))) {
+            if (!eq_child(NULL, st, vec_nth(a, i), vec_nth(b, i))) {
                 return 0;
             }
         }
@@ -1362,7 +1464,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
             if (bv == NULL) {
                 return 0;
             }
-            if (!mino_eq(av, bv)) {
+            if (!eq_child(NULL, st, av, bv)) {
                 return 0;
             }
         }
@@ -1423,7 +1525,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
          * arm fires for the empty-empty case. eq_seq_like handles
          * any pair of seq-shaped values uniformly, including two
          * empty lazies (both walks immediately terminate). */
-        return eq_seq_like(a, b);
+        return eq_seq_like(a, b, st);
     case MINO_CHUNK:
         /* Internal seq leaf; identity equality (chunk-buffer state
          * is mutable and not meaningfully comparable across instances). */
@@ -1431,7 +1533,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
     case MINO_CHUNKED_CONS:
         /* Should not reach here — handled by the cross-type sequential
          * path via is_sequential. */
-        return eq_seq_like(a, b);
+        return eq_seq_like(a, b, st);
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET:
         /* Same length is necessary either way. When the comparators are
@@ -1488,7 +1590,7 @@ int mino_eq(const mino_val *a, const mino_val *b)
  * Compare two sequential values element-by-element, forcing lazy seqs.
  */
 static int eq_seq_like_force(mino_state *S, const mino_val *a,
-                           const mino_val *b)
+                           const mino_val *b, eq_stack_t *st)
 {
     const mino_val *ca = a;
     const mino_val *cb = b;
@@ -1543,7 +1645,7 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
             eb = mino_queue_nth(cb, ib);
         else eb = vec_nth(cb, ib);
 
-        if (!mino_eq_force(S, ea, eb)) return 0;
+        if (!eq_child(S, st, ea, eb)) return 0;
 
         eq_seq_step(&ca, &ia);
         eq_seq_step(&cb, &ib);
@@ -1551,6 +1653,21 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
 }
 
 int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
+{
+    eq_stack_t st;
+    int        ok;
+    eq_stack_init(&st);
+    ok = eq_step_force(S, a, b, &st);
+    while (ok && st.len > 0) {
+        eq_pair_t p = st.buf[--st.len];
+        ok = eq_step_force(S, p.a, p.b, &st);
+    }
+    eq_stack_free(&st);
+    return ok;
+}
+
+static int eq_step_force(mino_state *S, const mino_val *a,
+                         const mino_val *b, eq_stack_t *st)
 {
     /* Force lazy seqs, but preserve the LAZY tag when the forced
      * result is nil/empty-list. A lazy seq that resolves to nothing is
@@ -1580,7 +1697,7 @@ int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
      * lazy-realized-to-nil are equivalent at end-of-seq but
      * is_sequential(NIL) is false at top level. */
     if (mino_type_of(a) == MINO_CONS && mino_type_of(b) == MINO_CONS) {
-        return eq_seq_like_force(S, a, b);
+        return eq_seq_like_force(S, a, b, st);
     }
     /* Same-tag chunked sequential: a chunked-cons spine can have a
      * lazy seq in its `more` field (the typical shape filter/range
@@ -1588,19 +1705,19 @@ int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
      * lazy as end-of-seq and short-circuit incorrectly. Force on both
      * sides instead. */
     if (mino_type_of(a) == MINO_CHUNKED_CONS && mino_type_of(b) == MINO_CHUNKED_CONS) {
-        return eq_seq_like_force(S, a, b);
+        return eq_seq_like_force(S, a, b, st);
     }
     /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
     if (mino_type_of(a) != mino_type_of(b) && is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
         /* Force any remaining lazy seqs in elements during comparison. */
-        return eq_seq_like_force(S, a, b);
+        return eq_seq_like_force(S, a, b, st);
     }
     /* Vectors: compare elements with forcing. */
     if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
         size_t i;
         if (a->as.vec.len != b->as.vec.len) return 0;
         for (i = 0; i < a->as.vec.len; i++) {
-            if (!mino_eq_force(S, vec_nth(a, i), vec_nth(b, i))) return 0;
+            if (!eq_child(S, st, vec_nth(a, i), vec_nth(b, i))) return 0;
         }
         return 1;
     }
@@ -1618,7 +1735,7 @@ int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
             mino_val *av  = map_get_val(a, key);
             mino_val *bv  = map_get_val(b, key);
             if (bv == NULL) return 0;
-            if (!mino_eq_force(S, av, bv)) return 0;
+            if (!eq_child(S, st, av, bv)) return 0;
         }
         return 1;
     }
@@ -1642,5 +1759,5 @@ int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
         }
         return 1;
     }
-    return mino_eq(a, b);
+    return eq_step(a, b, st);
 }

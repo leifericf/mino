@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Structural equality now walks element nesting through an explicit
+  worklist, so comparing arbitrarily deep values (lists inside lists,
+  vector towers, nested map values) completes correctly instead of
+  exhausting the C stack. Nested lazy seqs inside map values are also
+  forced during `=` now, matching canonical equality.
+
 - Runaway non-tail recursion now raises a catchable "stack overflow:
   script recursion too deep" limit error instead of exhausting the C
   stack and killing the process. The guard compares the live stack
