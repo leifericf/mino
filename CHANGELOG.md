@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Unicode character literals in the UTF-16 surrogate range
+  (`\ud800`-`\udfff`) are now reader errors. Chars are codepoints and
+  the range encodes nothing; the old behaviour produced a char that
+  could not round-trip through a string.
+
 - Reader records now self-evaluate. An unknown tagged literal in
   evaluated source (`#foo 42`) produces the tagged-literal record --
   the same value `read-string` returns -- instead of failing with

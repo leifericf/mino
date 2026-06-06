@@ -101,3 +101,10 @@
   (testing "char of non-integer throws MTY001"
     (is (thrown? (char "x")))
     (is (thrown? (char :kw)))))
+
+(deftest char-literal-surrogates-rejected
+  ;; Chars are codepoints; the UTF-16 surrogate range encodes nothing.
+  (is (thrown? (read-string "\\ud800")))
+  (is (thrown? (read-string "\\udfff")))
+  (is (= 55295 (int (read-string "\\ud7ff"))))
+  (is (= 57344 (int (read-string "\\ue000")))))

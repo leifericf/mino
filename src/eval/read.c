@@ -1785,6 +1785,14 @@ static mino_val *read_char_literal(mino_state *S, const char **p)
             }
             u = (u << 4) | d;
         }
+        if (u >= 0xD800u && u <= 0xDFFFu) {
+            /* Chars are codepoints; the UTF-16 surrogate range does
+             * not encode one. */
+            set_reader_diag(S, MRE008,
+                            "surrogate character literal not allowed",
+                            S->reader.reader_line, S->reader.reader_col);
+            return NULL;
+        }
         cp = (int)u;
     } else {
         set_reader_diag(S, MRE008, "unknown character literal",
