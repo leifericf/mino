@@ -68,3 +68,27 @@
   ;; only has :tp-A > :tp-B; transitive prefers follow parents so
   ;; :tp-child-a wins via its parent :tp-A.
   (is (= :child-a-method (tp-mm :tp-tri))))
+
+(deftest defmulti-custom-hierarchy
+  (def mh-hier (atom (-> (make-hierarchy)
+                         (derive :mh/kid :mh/parent))))
+  (defmulti mh-speak identity :hierarchy mh-hier)
+  (defmethod mh-speak :mh/parent [_] :via-parent)
+  (is (= :via-parent (mh-speak :mh/kid)))
+  ;; growing the custom hierarchy invalidates the dispatch cache
+  (defmethod mh-speak :mh/gran [_] :via-gran)
+  (swap! mh-hier derive :mh/parent :mh/gran)
+  (defmulti mh-speak2 identity :hierarchy mh-hier)
+  (defmethod mh-speak2 :mh/gran [_] :via-gran)
+  (is (= :via-gran (mh-speak2 :mh/kid)))
+  ;; the global hierarchy is untouched
+  (is (not (isa? :mh/kid :mh/parent))))
+
+(deftest defmulti-custom-hierarchy-cache-invalidation
+  (def mh-hier2 (atom (make-hierarchy)))
+  (defmulti mh-pick identity :hierarchy mh-hier2)
+  (defmethod mh-pick :mh2/base [_] :base)
+  (defmethod mh-pick :default [_] :none)
+  (is (= :none (mh-pick :mh2/leaf)))
+  (swap! mh-hier2 derive :mh2/leaf :mh2/base)
+  (is (= :base (mh-pick :mh2/leaf))))

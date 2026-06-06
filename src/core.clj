@@ -2622,39 +2622,46 @@
                        {:dispatch-val dval
                         :matches (mapv first matches)})))))))))
 
-(defn- create-multimethod [dispatch-fn default-val]
-  (let [method-table   (atom {})
-        prefer-table   (atom {})
-        dispatch-cache (atom {})
-        cache-version  (atom @hierarchy-version)
-        mm (fn [& args]
-             (let [hver @hierarchy-version]
-               (when (not= hver @cache-version)
-                 (reset! dispatch-cache {})
-                 (reset! cache-version hver)))
-             (let [dval    (apply dispatch-fn args)
-                   cached  (get @dispatch-cache dval)]
-               (if cached
-                 (apply cached args)
-                 (let [methods @method-table
-                       impl    (or (get methods dval)
-                                   (find-best-method methods dval default-val
-                                                      @prefer-table
-                                                      @global-hierarchy)
-                                   (get methods default-val))]
-                   (if impl
-                     (do (swap! dispatch-cache assoc dval impl)
-                         (apply impl args))
-                     (throw (ex-info
-                              (str "No method in multimethod for"
-                                   " dispatch value: " (pr-str dval))
-                              {:dispatch-val dval})))))))]
-    (with-meta mm {:type           :multimethod
-                   :method-table   method-table
-                   :prefer-table   prefer-table
-                   :dispatch-cache dispatch-cache
-                   :cache-version  cache-version
-                   :default        default-val})))
+(defn- create-multimethod
+  ([dispatch-fn default-val]
+   (create-multimethod dispatch-fn default-val global-hierarchy))
+  ([dispatch-fn default-val hierarchy-ref]
+   (let [method-table   (atom {})
+         prefer-table   (atom {})
+         dispatch-cache (atom {})
+         seen-hierarchy (atom (deref hierarchy-ref))
+         mm (fn [& args]
+              ;; Stale-cache check by hierarchy identity: derive /
+              ;; underive (on the global atom or a custom :hierarchy
+              ;; ref) install a fresh hierarchy value, so an identity
+              ;; flip means cached isa? matches may no longer hold.
+              (let [h (deref hierarchy-ref)]
+                (when-not (identical? h @seen-hierarchy)
+                  (reset! dispatch-cache {})
+                  (reset! seen-hierarchy h))
+                (let [dval    (apply dispatch-fn args)
+                      cached  (get @dispatch-cache dval)]
+                  (if cached
+                    (apply cached args)
+                    (let [methods @method-table
+                          impl    (or (get methods dval)
+                                      (find-best-method methods dval default-val
+                                                         @prefer-table
+                                                         h)
+                                      (get methods default-val))]
+                      (if impl
+                        (do (swap! dispatch-cache assoc dval impl)
+                            (apply impl args))
+                        (throw (ex-info
+                                 (str "No method in multimethod for"
+                                      " dispatch value: " (pr-str dval))
+                                 {:dispatch-val dval}))))))))]
+     (with-meta mm {:type           :multimethod
+                    :method-table   method-table
+                    :prefer-table   prefer-table
+                    :dispatch-cache dispatch-cache
+                    :hierarchy-ref  hierarchy-ref
+                    :default        default-val}))))
 
 (defn- register-method [mm dispatch-val f]
   (swap! (:method-table (meta mm)) assoc dispatch-val f)
@@ -2668,9 +2675,13 @@
         options  (if (map? (first options)) (rest options) options)
         dispatch-fn-form (first options)
         kw-opts  (apply hash-map (rest options))
-        default-val (get kw-opts :default :default)]
+        default-val (get kw-opts :default :default)
+        hierarchy-form (get kw-opts :hierarchy)]
     (list 'def mm-name
-          (list 'create-multimethod dispatch-fn-form default-val))))
+          (if (some? hierarchy-form)
+            (list 'create-multimethod dispatch-fn-form default-val
+                  hierarchy-form)
+            (list 'create-multimethod dispatch-fn-form default-val)))))
 
 (defmacro defmethod
   "Defines a method for a multimethod."

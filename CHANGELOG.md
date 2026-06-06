@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `defmulti` honors the `:hierarchy` option: dispatch matching and
+  prefer resolution consult the supplied hierarchy reference, and the
+  dispatch cache invalidates when that hierarchy changes. Previously
+  the option was silently ignored and dispatch always used the global
+  hierarchy.
+
 - Protocol methods with multiple arities now work end to end:
   `defprotocol` builds an arity-dispatching method fn for
   multi-signature declarations, and `defrecord` / `extend-type` /
