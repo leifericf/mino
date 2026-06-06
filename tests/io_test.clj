@@ -141,3 +141,15 @@
   (let [path "/tmp/mino-shebang-fixture.clj"]
     (spit path "#!/usr/bin/env mino\n(def shebang-fixture-value :ran)\nshebang-fixture-value\n")
     (is (= :ran (load-file path)))))
+
+(deftest spit-append-option
+  (let [path "/tmp/mino-spit-append.txt"]
+    (spit path "first")
+    (spit path "-second" :append true)
+    (is (= "first-second" (slurp path)))
+    (spit path "fresh" :append false)
+    (is (= "fresh" (slurp path)))
+    (spit path "enc" :encoding "UTF-8")
+    (is (= "enc" (slurp path)))
+    (is (thrown? (spit path "x" :encoding "latin-1")))
+    (is (thrown? (spit path "x" :no-such-opt 1)))))

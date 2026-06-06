@@ -658,24 +658,71 @@ mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
+/* Case-insensitive compare of a length-delimited string against a
+ * NUL-terminated ASCII literal. Returns 0 on match. */
+static int str_ieq_lit(const char *s, size_t len, const char *lit)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        char a = s[i], b = lit[i];
+        if (b == '\0') return 1;
+        if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+        if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+        if (a != b) return 1;
+    }
+    return lit[len] == '\0' ? 0 : 1;
+}
+
 mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     mino_val *content;
+    mino_val *opts;
     const char *path;
     FILE       *f;
+    int         append = 0;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
-        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "spit requires two arguments");
     }
     path_val = args->as.cons.car;
     content  = args->as.cons.cdr->as.cons.car;
+    /* Trailing option pairs: :append <truthy> selects append mode;
+     * :encoding is accepted only for "UTF-8" (the native encoding, so
+     * accepting it is a no-op truth rather than a silent lie). Any
+     * other key or encoding is rejected loudly. */
+    opts = args->as.cons.cdr->as.cons.cdr;
+    while (mino_is_cons(opts)) {
+        mino_val *k = opts->as.cons.car;
+        mino_val *v;
+        if (!mino_is_cons(opts->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "spit: options must be key/value pairs");
+        }
+        v    = opts->as.cons.cdr->as.cons.car;
+        opts = opts->as.cons.cdr->as.cons.cdr;
+        if (k != NULL && mino_type_of(k) == MINO_KEYWORD
+            && k->as.s.len == 6 && memcmp(k->as.s.data, "append", 6) == 0) {
+            append = mino_is_truthy(v);
+        } else if (k != NULL && mino_type_of(k) == MINO_KEYWORD
+                   && k->as.s.len == 8
+                   && memcmp(k->as.s.data, "encoding", 8) == 0) {
+            if (v == NULL || mino_type_of(v) != MINO_STRING
+                || (str_ieq_lit(v->as.s.data, v->as.s.len, "UTF-8") != 0
+                    && str_ieq_lit(v->as.s.data, v->as.s.len, "UTF8") != 0)) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                    "spit: only UTF-8 encoding is supported");
+            }
+        } else {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "spit: unknown option (supported: :append, :encoding)");
+        }
+    }
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "spit: first argument must be a string path");
     }
     path = path_val->as.s.data;
-    f = fopen(path, "wb");
+    f = fopen(path, append ? "ab" : "wb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- spit accepts option pairs: :append true appends instead of
+  truncating, and :encoding is accepted for UTF-8 (the native
+  encoding); other encodings and unknown options raise clear errors.
+
 - (str regex) now returns the bare pattern source, matching the
   canonical toString; pr-str keeps the readable #"..." form.
 
