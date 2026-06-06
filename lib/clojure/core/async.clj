@@ -1185,8 +1185,12 @@
                                     (fn [~val-sym] nil)))
                                 (chan-close* ~result-ch))]
               (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))))))
-      `(fn ~machine-sym [state# val#]
-         (case state# ~@(seq (deref arms)))))))
+      ;; The arm bodies are built as plain data above and reference
+      ;; the literal symbols state# / val#; bind those exact symbols
+      ;; (deliberate capture) rather than letting syntax-quote resolve
+      ;; fresh auto-gensyms for them.
+      `(fn ~machine-sym [~'state# ~'val#]
+         (case ~'state# ~@(seq (deref arms)))))))
 
 (defmacro go
   "Asynchronously executes the body in a lightweight state machine.

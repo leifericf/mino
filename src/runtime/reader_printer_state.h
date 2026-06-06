@@ -18,6 +18,22 @@
 
 #define MINO_SOURCE_CACHE_SIZE 4
 
+/* One resolved auto-gensym name inside a syntax-quote read:
+ * `name#` (sans '#') -> `name__N__auto__`. */
+typedef struct qq_gensym_entry {
+    struct qq_gensym_entry *next;
+    char   *name;        /* prefix without the trailing '#' */
+    size_t  name_len;
+    char   *replacement; /* full resolved symbol name */
+    size_t  repl_len;
+} qq_gensym_entry_t;
+
+typedef struct qq_gensym_frame {
+    struct qq_gensym_frame *prev;
+    int                     suppress; /* 1 = unquote frame */
+    qq_gensym_entry_t      *entries;
+} qq_gensym_frame_t;
+
 typedef struct reader_printer_state {
     /* Reader. print_depth stays inline in mino_state so it packs with
      * caps_installed and the sub-struct starts at an 8-aligned offset
@@ -37,6 +53,16 @@ typedef struct reader_printer_state {
     /* Nonzero while inside a #(...) body; nesting them is a reader
      * error because the inner form's % slots would be ambiguous. */
     int             reader_in_anon_fn;
+
+    /* Auto-gensym frames for syntax-quote reads. Each backtick pushes
+     * a mapping frame and each ~ / ~@ pushes a suppress frame, popped
+     * when the wrapped subform finishes reading. read_atom consults
+     * the TOP frame only: a mapping frame rewrites a trailing-#
+     * symbol to its per-read gensym (creating the entry on first
+     * sight, so every x# in one syntax-quote read resolves to the
+     * same symbol); a suppress frame leaves symbols untouched. Frames
+     * and entries are malloc-owned and freed on pop. */
+    struct qq_gensym_frame *qq_gensym_top;
 
     /* Filename intern table. Strings are malloc-owned, freed at state
      * teardown. Held here (not process-global) so two runtimes on two

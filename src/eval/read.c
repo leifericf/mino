@@ -57,6 +57,10 @@ const char *intern_filename(mino_state *S, const char *name)
 #define MRE010 "MRE010" /* invalid metadata */
 #define MRE011 "MRE011" /* nesting too deep */
 
+/* syntax-quote auto-gensym (defined after read_atom; used inside it). */
+static mino_val *qq_gensym_resolve(mino_state *S, const char *start,
+                                     size_t len);
+
 /* Hard cap on read_form recursion depth. Default main-thread stack
  * on macOS / glibc is ~8 MiB; read_form's call frame plus the
  * list/vector/map walkers' per-element state takes ~250-300 bytes,
@@ -1413,7 +1417,96 @@ static mino_val *read_atom(mino_state *S, const char **p)
                         S->reader.reader_line, S->reader.reader_col);
         return NULL;
     }
+    /* Inside a syntax-quote read, a trailing-# symbol resolves to its
+     * per-read auto-gensym. */
+    if (len >= 2 && start[len - 1] == '#') {
+        mino_val *g = qq_gensym_resolve(S, start, len);
+        if (g != NULL) return g;
+    }
     return mino_symbol_n(S, start, len);
+}
+
+/* ---- syntax-quote auto-gensym helpers ---- */
+
+/* Push a gensym frame (suppress == 0) for a backtick or a suppress
+ * frame (suppress == 1) for ~ / ~@. Returns 0, or -1 on OOM with the
+ * reader diag set. */
+static int qq_gensym_push(mino_state *S, int suppress)
+{
+    qq_gensym_frame_t *f = (qq_gensym_frame_t *)malloc(sizeof(*f));
+    if (f == NULL) {
+        set_reader_diag(S, MRE004, "out of memory",
+                        S->reader.reader_line, S->reader.reader_col);
+        return -1;
+    }
+    f->prev     = S->reader.qq_gensym_top;
+    f->suppress = suppress;
+    f->entries  = NULL;
+    S->reader.qq_gensym_top = f;
+    return 0;
+}
+
+static void qq_gensym_pop(mino_state *S)
+{
+    qq_gensym_frame_t *f = S->reader.qq_gensym_top;
+    if (f == NULL) return;
+    S->reader.qq_gensym_top = f->prev;
+    while (f->entries != NULL) {
+        qq_gensym_entry_t *e = f->entries;
+        f->entries = e->next;
+        free(e->name);
+        free(e->replacement);
+        free(e);
+    }
+    free(f);
+}
+
+/* Resolve a trailing-# token inside an active syntax-quote read.
+ * Returns the gensym symbol, or NULL when no rewriting applies (no
+ * frame, suppress frame, qualified name, or allocation failure --
+ * the caller then takes the plain-symbol path). The same name maps
+ * to the same gensym for the lifetime of the frame, matching the
+ * canonical per-syntax-quote GENSYM_ENV. */
+static mino_val *qq_gensym_resolve(mino_state *S, const char *start,
+                                     size_t len)
+{
+    qq_gensym_frame_t *f = S->reader.qq_gensym_top;
+    qq_gensym_entry_t *e;
+    size_t  name_len;
+    char    repl[160];
+    int     used;
+    if (f == NULL || f->suppress) return NULL;
+    if (len < 2 || start[len - 1] != '#') return NULL;
+    if (memchr(start, '/', len) != NULL) return NULL;
+    name_len = len - 1;
+    for (e = f->entries; e != NULL; e = e->next) {
+        if (e->name_len == name_len
+            && memcmp(e->name, start, name_len) == 0) {
+            return mino_symbol_n(S, e->replacement, e->repl_len);
+        }
+    }
+    if (name_len > 96) return NULL;
+    used = snprintf(repl, sizeof(repl), "%.*s__%ld__auto__",
+                    (int)name_len, start, ++S->gensym_counter);
+    if (used < 0 || (size_t)used >= sizeof(repl)) return NULL;
+    e = (qq_gensym_entry_t *)malloc(sizeof(*e));
+    if (e == NULL) return NULL;
+    e->name = (char *)malloc(name_len + 1);
+    e->replacement = (char *)malloc((size_t)used + 1);
+    if (e->name == NULL || e->replacement == NULL) {
+        free(e->name);
+        free(e->replacement);
+        free(e);
+        return NULL;
+    }
+    memcpy(e->name, start, name_len);
+    e->name[name_len] = '\0';
+    memcpy(e->replacement, repl, (size_t)used + 1);
+    e->name_len = name_len;
+    e->repl_len = (size_t)used;
+    e->next     = f->entries;
+    f->entries  = e;
+    return mino_symbol_n(S, e->replacement, e->repl_len);
 }
 
 /* ---- #() anonymous function reader macro helpers ---- */
@@ -2576,11 +2669,15 @@ static mino_val *read_form_dispatch(mino_state *S, const char **p)
                              q_line, q_col);
     }
     if (**p == '`') {
-        int q_line = S->reader.reader_line;
-        int q_col  = S->reader.reader_col;
+        int        q_line = S->reader.reader_line;
+        int        q_col  = S->reader.reader_col;
+        mino_val *r;
         ADVANCE(S, p);
-        return read_wrap_one(S, p, "quasiquote", "expected form after `",
-                             q_line, q_col);
+        if (qq_gensym_push(S, 0) != 0) return NULL;
+        r = read_wrap_one(S, p, "quasiquote", "expected form after `",
+                          q_line, q_col);
+        qq_gensym_pop(S);
+        return r;
     }
     if (**p == '@') {
         int q_line = S->reader.reader_line;
@@ -2596,10 +2693,18 @@ static mino_val *read_form_dispatch(mino_state *S, const char **p)
         int         q_line = S->reader.reader_line;
         int         q_col  = S->reader.reader_col;
         const char *name   = "unquote";
+        mino_val  *r;
         ADVANCE(S, p);
         if (**p == '@') {
             name = "unquote-splicing";
             ADVANCE(S, p);
+        }
+        if (S->reader.qq_gensym_top != NULL) {
+            if (qq_gensym_push(S, 1) != 0) return NULL;
+            r = read_wrap_one(S, p, name, "expected form after ~",
+                              q_line, q_col);
+            qq_gensym_pop(S);
+            return r;
         }
         return read_wrap_one(S, p, name, "expected form after ~",
                              q_line, q_col);

@@ -36,3 +36,29 @@
   (is (= '(1 2 3) (cons 1
                      (cons 2
                        (cons 3 nil))))))
+
+(deftest auto-gensym-distinct-per-syntax-quote
+  ;; Each syntax-quote read resolves its own x#; the same name in two
+  ;; separate syntax-quote forms must not collide.
+  (is (not= `x# `x#))
+  ;; Within one syntax-quote, every x# is the same symbol.
+  (is (let [[a b] `[x# x#]] (= a b)))
+  ;; The resolved symbol carries the canonical __auto__ shape.
+  (is (clojure.string/includes? (str `x#) "__auto__"))
+  (is (clojure.string/starts-with? (str `x#) "x__")))
+
+(deftest auto-gensym-prevents-cross-macro-capture
+  (defmacro hygiene-inner [y] `(let [v# 2] (+ ~y v#)))
+  (defmacro hygiene-outer [] `(let [v# 1] (hygiene-inner v#)))
+  (is (= 3 (hygiene-outer))))
+
+(deftest auto-gensym-stable-within-macro
+  ;; The defmacro body is read once, so the baked gensym is the same
+  ;; on every expansion.
+  (defmacro hygiene-stable [] `(quote q#))
+  (is (= (hygiene-stable) (hygiene-stable))))
+
+(deftest auto-gensym-untouched-in-unquote
+  ;; An unquoted position escapes gensym resolution entirely.
+  (def gensym-passthrough 'kept#)
+  (is (= 'kept# (let [r `(~gensym-passthrough)] (first r)))))

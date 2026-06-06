@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Auto-gensym (`x#`) inside syntax-quote now resolves at read time
+  with one mapping per syntax-quote form, exactly like the canonical
+  reader: every `x#` within one backtick form is the same generated
+  symbol, two separate backtick forms get distinct symbols, and
+  unquoted positions are left untouched. Previously `x#` stayed a
+  literal symbol, so two macros using the same auto-gensym name could
+  silently capture each other's bindings.
+
 - `(meta #'x)` now carries the def site's full metadata map and the
   docstring: `(def ^{:doc "d" :deprecated true} x 1)` surfaces both
   keys, and `(defn f "doc" [x] ...)` puts the docstring under `:doc`.
