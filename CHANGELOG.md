@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Characters above the BMP print as the raw glyph (\u escapes only
+  span four hex digits), so astral-plane chars round-trip through
+  pr-str and read-string.
+
 - spit accepts option pairs: :append true appends instead of
   truncating, and :encoding is accepted for UTF-8 (the native
   encoding); other encodings and unknown options raise clear errors.

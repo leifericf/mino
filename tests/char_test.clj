@@ -116,3 +116,12 @@
   (is (thrown? (char 0xDFFF)))
   (is (= 55295 (int (char 0xD7FF))))
   (is (= 57344 (int (char 0xE000)))))
+
+(deftest astral-chars-round-trip
+  ;; Codepoints above the BMP print as the raw glyph (the \uXXXX
+  ;; escape only spans four hex digits), so the reader can take them
+  ;; back; BMP characters keep their escape form.
+  (is (= (char 128169) (read-string (pr-str (char 128169)))))
+  (is (= (char 128512) (read-string (pr-str (char 128512)))))
+  (is (= "\\💩" (pr-str (char 128169))))
+  (is (= "\\u65E5" (pr-str \日))))

@@ -344,11 +344,20 @@ static void print_char(FILE *out, int cp)
         if (cp >= 0x21 && cp <= 0x7E) {
             fputc('\\', out);
             fputc(cp, out);
-        } else {
-            /* Out-of-ASCII codepoints print as \uXXXX. Codepoints
-             * above 0xFFFF are uncommon; surface them with a full
-             * width that re-reads correctly. */
+        } else if (cp <= 0xFFFF) {
+            /* BMP codepoints print as the four-hex \uXXXX escape. */
             fprintf(out, "\\u%04X", (unsigned)cp);
+        } else {
+            /* The \uXXXX escape only spans four hex digits, so
+             * astral codepoints print as the raw glyph -- the reader
+             * accepts one full UTF-8 codepoint after the backslash. */
+            unsigned char b[4];
+            b[0] = (unsigned char)(0xF0u | ((unsigned)cp >> 18));
+            b[1] = (unsigned char)(0x80u | (((unsigned)cp >> 12) & 0x3Fu));
+            b[2] = (unsigned char)(0x80u | (((unsigned)cp >> 6) & 0x3Fu));
+            b[3] = (unsigned char)(0x80u | ((unsigned)cp & 0x3Fu));
+            fputc('\\', out);
+            fwrite(b, 1, 4, out);
         }
         return;
     }
