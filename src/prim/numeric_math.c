@@ -10,6 +10,7 @@
 #include "prim/internal.h"
 
 #include <math.h>
+#include <float.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -200,4 +201,78 @@ mino_val *prim_math_ieee_remainder(mino_state *S, mino_val *args, mino_env *env)
         || !as_double(args->as.cons.cdr->as.cons.car, &b))
         return prim_throw_classified(S, "eval/type", "MTY001", "math-ieee-remainder expects numbers");
     return mino_float(S, remainder(a, b));
+}
+mino_val *prim_math_rint(mino_state *S, mino_val *args, mino_env *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-rint requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-rint expects a number");
+    /* Default FE rounding is to-nearest / ties-to-even, matching the
+     * half-even contract. */
+    return mino_float(S, rint(x));
+}
+mino_val *prim_math_ulp(mino_state *S, mino_val *args, mino_env *env)
+{
+    double x, ax;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-ulp requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-ulp expects a number");
+    if (isnan(x)) return mino_float(S, x);
+    if (isinf(x)) return mino_float(S, 1.0 / 0.0);
+    ax = fabs(x);
+    if (ax == DBL_MAX) {
+        /* nextafter would step to +Inf; the ulp of MAX_VALUE is the
+         * gap below it instead (2^971). */
+        return mino_float(S, ax - nextafter(ax, 0.0));
+    }
+    return mino_float(S, nextafter(ax, 1.0 / 0.0) - ax);
+}
+mino_val *prim_math_scalb(mino_state *S, mino_val *args, mino_env *env)
+{
+    double    x;
+    long long n;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-scalb requires two arguments");
+    if (!as_double(args->as.cons.car, &x)
+        || !mino_as_ll(args->as.cons.cdr->as.cons.car, &n))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-scalb expects a number and an integer scale factor");
+    /* Clamp the scale factor; past +-2200 every double has already
+     * saturated to 0 / Inf, so the clamp cannot change the result. */
+    if (n > 2200)  n = 2200;
+    if (n < -2200) n = -2200;
+    return mino_float(S, scalbn(x, (int)n));
+}
+mino_val *prim_math_get_exponent(mino_state *S, mino_val *args, mino_env *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-get-exponent requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-get-exponent expects a number");
+    /* Unbiased exponent with the canonical edge values: NaN / Inf
+     * report MAX_EXPONENT + 1, zero and subnormals MIN_EXPONENT - 1
+     * (ilogb would report the effective exponent of a subnormal). */
+    if (isnan(x) || isinf(x)) return mino_int_wrap(S, 1024);
+    if (x == 0.0 || fabs(x) < DBL_MIN) return mino_int_wrap(S, -1023);
+    return mino_int_wrap(S, ilogb(x));
+}
+mino_val *prim_math_next_after(mino_state *S, mino_val *args, mino_env *env)
+{
+    double start, direction;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-after requires two arguments");
+    if (!as_double(args->as.cons.car, &start)
+        || !as_double(args->as.cons.cdr->as.cons.car, &direction))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-after expects numbers");
+    return mino_float(S, nextafter(start, direction));
 }

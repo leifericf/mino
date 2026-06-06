@@ -58,6 +58,72 @@
 (defn round "Returns the closest long to n, rounding half-up away from zero." [n]
   (math-round n))
 
+(defn rint "Returns the double closest to n and equal to a mathematical
+   integer, rounding ties to the even integer." [n]
+  (math-rint n))
+
+;; --- Integer division --------------------------------------------------------
+
+(defn floor-div
+  "Integer division rounding toward negative infinity: the largest
+   integer <= the exact quotient of x and y."
+  [x y]
+  (if (and (int? x) (int? y))
+    (quot (- x (mod x y)) y)
+    (throw (ex-info "floor-div expects longs" {:x x :y y}))))
+
+(defn floor-mod
+  "Floor modulus of x and y: x - (floor-div x y) * y. Has the sign of
+   the divisor y."
+  [x y]
+  (if (and (int? x) (int? y))
+    (mod x y)
+    (throw (ex-info "floor-mod expects longs" {:x x :y y}))))
+
+;; --- Exact (overflow-checked) long arithmetic --------------------------------
+
+(defn add-exact
+  "Returns the sum of x and y; throws on long overflow."
+  [x y]
+  (if (and (int? x) (int? y))
+    (+ x y)
+    (throw (ex-info "add-exact expects longs" {:x x :y y}))))
+
+(defn subtract-exact
+  "Returns the difference of x and y; throws on long overflow."
+  [x y]
+  (if (and (int? x) (int? y))
+    (- x y)
+    (throw (ex-info "subtract-exact expects longs" {:x x :y y}))))
+
+(defn multiply-exact
+  "Returns the product of x and y; throws on long overflow."
+  [x y]
+  (if (and (int? x) (int? y))
+    (* x y)
+    (throw (ex-info "multiply-exact expects longs" {:x x :y y}))))
+
+(defn increment-exact
+  "Returns x incremented by 1; throws on long overflow."
+  [x]
+  (if (int? x)
+    (inc x)
+    (throw (ex-info "increment-exact expects a long" {:x x}))))
+
+(defn decrement-exact
+  "Returns x decremented by 1; throws on long overflow."
+  [x]
+  (if (int? x)
+    (dec x)
+    (throw (ex-info "decrement-exact expects a long" {:x x}))))
+
+(defn negate-exact
+  "Returns the negation of x; throws on long overflow."
+  [x]
+  (if (int? x)
+    (- x)
+    (throw (ex-info "negate-exact expects a long" {:x x}))))
+
 ;; --- Angle conversion --------------------------------------------------------
 
 (defn to-radians "Converts the angle a (in degrees) to radians." [a] (math-to-radians a))
@@ -79,6 +145,26 @@
 
 (defn next-down "Returns the next representable double less than n." [n]
   (math-next-down n))
+
+(defn next-after "Returns the double adjacent to start in the direction
+   of direction." [start direction]
+  (math-next-after start direction))
+
+(defn ulp "Returns the size of an ulp (unit in last place) of n." [n]
+  (math-ulp n))
+
+(defn scalb
+  "Returns n scaled by 2 to the power of the integer scale-factor:
+   n * 2^scale-factor, computed as a single rounding."
+  [n scale-factor]
+  (math-scalb n scale-factor))
+
+(defn get-exponent
+  "Returns the unbiased binary exponent of n. Zero and subnormals
+   report MIN_EXPONENT - 1 (-1023); NaN and infinities report
+   MAX_EXPONENT + 1 (1024)."
+  [n]
+  (math-get-exponent n))
 
 (defn IEEE-remainder "Returns the IEEE 754 remainder of a/b." [a b]
   (math-ieee-remainder a b))

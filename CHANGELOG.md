@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `clojure.math` now covers its full canonical surface: added
+  `floor-div`, `floor-mod`, `rint`, `ulp`, `scalb`, `get-exponent`,
+  `next-after`, and the exact (overflow-checked) long ops
+  `add-exact`, `subtract-exact`, `multiply-exact`, `increment-exact`,
+  `decrement-exact`, `negate-exact`.
+
 - `#()` literals now support positional args past `%9`, up to `%20`
   (the fn parameter ceiling); `%21` and beyond is a reader error.
   Previously `%10` was left as an unresolved symbol.

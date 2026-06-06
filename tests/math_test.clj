@@ -78,3 +78,56 @@
 (deftest math-pi-constant
   (is (> math-pi 3.14159))
   (is (< math-pi 3.14160)))
+
+;; --- clojure.math: integer division, rounding, exact ops, double bits ---
+
+(require '[clojure.math :as cmath])
+
+(deftest clojure-math-floor-div-mod
+  (is (= -4 (cmath/floor-div 7 -2)))
+  (is (= -1 (cmath/floor-mod 7 -2)))
+  (is (= 3 (cmath/floor-div 7 2)))
+  (is (= 1 (cmath/floor-mod 7 2)))
+  (is (= -4 (cmath/floor-div -7 2)))
+  (is (= 1 (cmath/floor-mod -7 2)))
+  (is (thrown? (cmath/floor-div 1 0)))
+  (is (thrown? (cmath/floor-div 1.5 2))))
+
+(deftest clojure-math-rint
+  ;; Half-even rounding, result is a double.
+  (is (= 2.0 (cmath/rint 2.5)))
+  (is (= 4.0 (cmath/rint 3.5)))
+  (is (= -2.0 (cmath/rint -2.5)))
+  (is (= 2.0 (cmath/rint 1.7))))
+
+(deftest clojure-math-exact-ops
+  (is (= 5 (cmath/add-exact 2 3)))
+  (is (thrown? (cmath/add-exact 9223372036854775807 1)))
+  (is (= -1 (cmath/subtract-exact 2 3)))
+  (is (thrown? (cmath/subtract-exact -9223372036854775808 1)))
+  (is (= 6 (cmath/multiply-exact 2 3)))
+  (is (thrown? (cmath/multiply-exact 9223372036854775807 2)))
+  (is (= 3 (cmath/increment-exact 2)))
+  (is (thrown? (cmath/increment-exact 9223372036854775807)))
+  (is (= 1 (cmath/decrement-exact 2)))
+  (is (thrown? (cmath/decrement-exact -9223372036854775808)))
+  (is (= -2 (cmath/negate-exact 2)))
+  (is (thrown? (cmath/negate-exact -9223372036854775808)))
+  ;; Longs only, like the canonical signatures.
+  (is (thrown? (cmath/add-exact 1.5 1))))
+
+(deftest clojure-math-double-bits
+  (is (= 2.220446049250313E-16 (cmath/ulp 1.0)))
+  (is (= 4.9E-324 (cmath/ulp 0.0)))
+  (is (= ##Inf (cmath/ulp ##Inf)))
+  (is (NaN? (cmath/ulp ##NaN)))
+  (is (= 8.0 (cmath/scalb 1.0 3)))
+  (is (= 0.125 (cmath/scalb 1.0 -3)))
+  (is (= 0 (cmath/get-exponent 1.5)))
+  (is (= 1 (cmath/get-exponent 2.0)))
+  (is (= -1023 (cmath/get-exponent 0.0)))
+  (is (= 1024 (cmath/get-exponent ##Inf)))
+  (is (= 1024 (cmath/get-exponent ##NaN)))
+  (is (= 1.0 (cmath/next-after 1.0 1.0)))
+  (is (< 1.0 (cmath/next-after 1.0 2.0)))
+  (is (> 1.0 (cmath/next-after 1.0 0.0))))
