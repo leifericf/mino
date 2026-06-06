@@ -35,3 +35,8 @@
 (deftest threading
   (is (= 5 (-> 10 (- 3) (- 2))))
   (is (= 9 (->> 10 (- 3) (- 2)))))
+
+(deftest recur-arity-must-match-loop-bindings
+  (is (thrown? (eval '(loop [x 1] (if (= x 1) (recur 1 2) x)))))
+  (is (thrown? (eval '(loop [x 1 y 2] (if (= x 1) (recur 9) x)))))
+  (is (= 3 (loop [x 1 y 2] (if (= x 1) (recur 9 3) y)))))

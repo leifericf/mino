@@ -217,6 +217,18 @@ static int bind_vec_destructure(mino_state *S, mino_env *env,
         }
         /* Normal positional binding. */
         if (!mino_is_cons(args)) {
+            /* recur rebinds positionally and must match the binding
+             * count exactly -- a short arg list is an arity error,
+             * not a nil fill (which would loop forever on a recur
+             * that never converges). */
+            if (ctx != NULL && strcmp(ctx, "recur") == 0) {
+                char msg[96];
+                snprintf(msg, sizeof(msg),
+                         "recur expects %zu args, got %zu", plen, i);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "eval/arity", "MAR001", msg);
+                return 0;
+            }
             /* Bind to nil when value is shorter than pattern. */
             if (!bind_form(S, env, p, mino_nil(S), ctx)) return 0;
         } else {
@@ -231,7 +243,8 @@ static int bind_vec_destructure(mino_state *S, mino_env *env,
      * ignore tail elements (vector destructuring binds available
      * positions and stops). */
     if (mino_is_cons(args) && ctx != NULL
-        && (strcmp(ctx, "fn") == 0 || strcmp(ctx, "defn") == 0)) {
+        && (strcmp(ctx, "fn") == 0 || strcmp(ctx, "defn") == 0
+            || strcmp(ctx, "recur") == 0)) {
         char msg[96];
         snprintf(msg, sizeof(msg),
                  "wrong number of args (more than %zu) passed", plen);

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `recur` with the wrong number of arguments now throws an arity
+  error naming the expected and actual counts. Previously extra args
+  were dropped and missing args were filled with nil, so a mismatched
+  recur silently looped forever.
+
 - Added `extend`, the function-level protocol registration:
   `(extend T P {:method (fn [x] ...)})` installs implementations from
   a plain fn map, completing the extend / extend-type /
