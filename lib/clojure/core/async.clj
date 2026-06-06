@@ -1467,6 +1467,24 @@
 ;; drains the scheduler in a loop and throws on no progress, since no
 ;; other thread can ever supply the value.
 
+(defn- block-on
+  "Block until promise p is realized and return its value, driving any
+   pending timer callbacks while parked. Timer callbacks only fire
+   inside scheduler drains, so a thread that parks on a bare deref
+   would never wake for a timeout channel: wait only until the next
+   timer deadline, drain, and re-check."
+  [p]
+  (loop []
+    (if (realized? p)
+      @p
+      (let [t (async-next-timer-ms*)]
+        (if (nil? t)
+          @p
+          (let [v (deref p (max 1 (long t)) ::timer-tick)]
+            (if (= v ::timer-tick)
+              (do (drain!) (recur))
+              v)))))))
+
 (defn <!!
   "Blocking take from a channel. When host threads are granted, parks
    the calling thread until a value is available (or the channel
@@ -1481,7 +1499,7 @@
       (first @p)
 
       (> (mino-thread-limit) 1)
-      (first @p)
+      (first (block-on p))
 
       :else
       (if (drain-loop! (fn [] (realized? p)))
@@ -1502,7 +1520,7 @@
       (first @p)
 
       (> (mino-thread-limit) 1)
-      (first @p)
+      (first (block-on p))
 
       :else
       (if (drain-loop! (fn [] (realized? p)))
@@ -1524,7 +1542,7 @@
        (first @p)
 
        (> (mino-thread-limit) 1)
-       (first @p)
+       (first (block-on p))
 
        :else
        (if (drain-loop! (fn [] (realized? p)))

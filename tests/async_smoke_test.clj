@@ -220,3 +220,14 @@
       (is (= 43 (a/<!! (a/go (+ (note-arg order :a 40)
                                 (+ (note-arg order :b 2) (a/<! ch)))))))
       (is (= [:a :b] @order)))))
+
+(deftest timeout-channels-wake-blocking-takes
+  (testing "blocking take on a timeout channel returns nil at deadline"
+    (is (nil? (a/<!! (a/timeout 30)))))
+  (testing "go block parked on a timeout completes"
+    (is (= :timed (a/<!! (a/go (a/<! (a/timeout 30)) :timed)))))
+  (testing "alts!! with a timeout channel selects it at deadline"
+    (let [t (a/timeout 30)
+          [v ch] (a/alts!! [(a/chan) t])]
+      (is (nil? v))
+      (is (= t ch)))))

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Timeout channels now wake blocking takes: the blocking bridges
+  (<!!, >!!, alts!!) wait only until the next pending timer deadline,
+  fire it, and re-check, so (<!! (timeout 30)) returns at the deadline
+  instead of deadlocking when host threads are granted.
+
 - A worker thread that parks mid-call (a blocking channel take inside
   a future, for example) no longer leaks its callee's namespace to
   the thread that resumes: yielding hands back the namespace pair the

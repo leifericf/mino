@@ -69,6 +69,21 @@ static mino_val *prim_timer_schedule(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
+/* (async-next-timer-ms*) -> ms until the next pending timer fires
+ * (number, >= 0) or nil when no timer is pending. Lets the blocking
+ * bridges wake in time to drive timer callbacks, which only fire
+ * inside scheduler drains. */
+static mino_val *prim_timer_next_ms(mino_state *S, mino_val *args,
+                                      mino_env *env)
+{
+    double rem;
+    (void)args;
+    (void)env;
+    rem = async_timer_next_ms(S);
+    if (rem < 0.0) return mino_nil(S);
+    return mino_float(S, rem);
+}
+
 static mino_val *prim_drain(mino_state *S, mino_val *args,
                               mino_env *env)
 {
@@ -440,6 +455,8 @@ const mino_prim_def k_prims_async[] = {
      "Enqueue a callback on the async scheduler run queue."},
     {"async-schedule-timer*", prim_timer_schedule,
      "Schedule a callback to fire after ms milliseconds."},
+    {"async-next-timer-ms*",  prim_timer_next_ms,
+     "Milliseconds until the next pending timer, or nil when none."},
     {"drain!",                prim_drain,
      "Drain the async run queue once."},
     {"drain-loop!",           prim_drain_loop,

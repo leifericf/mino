@@ -23,6 +23,9 @@ typedef struct timer_entry {
 /* Schedule callback to fire after ms milliseconds. Returns 0 on success. */
 int async_timer_schedule(mino_state *S, double ms, mino_val *callback);
 
+/* Milliseconds until the next pending timer, or -1.0 when none. */
+double async_timer_next_ms(mino_state *S);
+
 /* Check and fire any expired timers.
  * Called from the scheduler drain loop. */
 void async_timers_check(mino_state *S);

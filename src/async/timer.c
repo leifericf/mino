@@ -75,6 +75,17 @@ int async_timer_schedule(mino_state *S, double ms, mino_val *callback)
     return 0;
 }
 
+/* Milliseconds until the earliest pending timer fires, clamped at
+ * zero once due; -1.0 when no timer is pending. The queue is sorted
+ * by deadline so the head is always the next to fire. */
+double async_timer_next_ms(mino_state *S)
+{
+    double rem;
+    if (S->async.timers == NULL) return -1.0;
+    rem = S->async.timers->deadline_ms - now_ms();
+    return rem > 0.0 ? rem : 0.0;
+}
+
 void async_timers_check(mino_state *S)
 {
     double t = now_ms();
