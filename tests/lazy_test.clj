@@ -66,6 +66,16 @@
 (deftest doall-fn
   (is (= 3 (count (doall (map inc [1 2 3]))))))
 
+(deftest doall-realizes-every-chunk
+  ;; A chunked source spans multiple chunks; doall must force the
+  ;; whole spine, not just the head chunk.
+  (let [hits (atom 0)]
+    (doall (map (fn [x] (swap! hits inc) x) (vec (range 70))))
+    (is (= 70 @hits)))
+  (let [s (map inc (vec (range 70)))]
+    (doall s)
+    (is (= 70 (count s)))))
+
 (deftest eq-chunked-cons-with-lazy-tail
   ;; Regression: a chunked-cons spine can have an unrealized lazy seq
   ;; in its `more` field. Equality must force that tail rather than

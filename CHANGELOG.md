@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `doall` now realizes the whole seq when the source is chunked.
+  Previously only the head chunk was forced, so side effects past the
+  first 32 elements never ran until something else walked the tail.
+
 - A zero-step `range` now repeats `start` forever (empty when the
   bounds already meet) instead of raising "range step must not be
   zero", matching the canonical contract: `(take 4 (range 0 5 0))`

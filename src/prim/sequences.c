@@ -1441,6 +1441,12 @@ static mino_val *realize_seq(mino_state *S, mino_val *coll)
             coll = coll->as.cons.cdr;
             continue;
         }
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+            /* The chunk's slots are already values; the tail is the
+             * part still to force. */
+            coll = coll->as.chunked_cons.more;
+            continue;
+        }
         /* Non-lazy, non-cons collections are already fully realized. */
         return coll;
     }
