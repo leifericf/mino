@@ -1993,6 +1993,103 @@ static int is_compare_number(const mino_val *v)
  * applies; for values of different types within the canon-recognized
  * set, the tier order above provides a total order matching
  * Clojure's `compare`. */
+/* Sequence-position accessor shared by the iterative vector compare:
+ * a MAP_ENTRY behaves like a 2-element vector. */
+static mino_val *compare_seq_elem(mino_val *v, size_t i)
+{
+    if (mino_type_of(v) == MINO_VECTOR) return vec_nth(v, i);
+    return i == 0 ? v->as.map_entry.k : v->as.map_entry.v;
+}
+
+static size_t compare_seq_len(mino_val *v)
+{
+    return mino_type_of(v) == MINO_VECTOR ? v->as.vec.len : 2u;
+}
+
+/* Lexicographic vector / map-entry compare without per-element C
+ * recursion: a frame machine with an explicit stack walks nested
+ * vector pairs left to right, so comparison depth is bounded by the
+ * heap rather than the C stack. Scalar element pairs delegate to
+ * prim_compare, whose other arms do not recurse structurally; a
+ * nested pair that cannot be pushed (allocation failure) falls back
+ * to a recursive prim_compare call. */
+#define COMPARE_FRAMES_INLINE 32u
+typedef struct {
+    mino_val *a;
+    mino_val *b;
+    size_t      i;
+} compare_frame_t;
+
+static mino_val *compare_vec_iter(mino_state *S, mino_val *a,
+                                    mino_val *b, mino_env *env)
+{
+    compare_frame_t  inline_buf[COMPARE_FRAMES_INLINE];
+    compare_frame_t *frames = inline_buf;
+    size_t           len = 0, cap = COMPARE_FRAMES_INLINE;
+    mino_val      *result = NULL;
+    frames[len].a = a; frames[len].b = b; frames[len].i = 0;
+    len++;
+    while (len > 0) {
+        compare_frame_t *f  = &frames[len - 1];
+        size_t           la = compare_seq_len(f->a);
+        size_t           lb = compare_seq_len(f->b);
+        size_t           n  = la < lb ? la : lb;
+        mino_val      *ea;
+        mino_val      *eb;
+        int              ea_vec;
+        int              eb_vec;
+        if (f->i >= n) {
+            len--;
+            if (la != lb) {
+                result = mino_int(S, la < lb ? -1 : 1);
+                break;
+            }
+            continue;
+        }
+        ea = compare_seq_elem(f->a, f->i);
+        eb = compare_seq_elem(f->b, f->i);
+        f->i++;
+        if (ea == eb) continue;
+        ea_vec = (ea != NULL && (mino_type_of(ea) == MINO_VECTOR
+                                 || mino_type_of(ea) == MINO_MAP_ENTRY));
+        eb_vec = (eb != NULL && (mino_type_of(eb) == MINO_VECTOR
+                                 || mino_type_of(eb) == MINO_MAP_ENTRY));
+        if (ea_vec && eb_vec) {
+            if (len == cap) {
+                size_t           new_cap = cap * 2u;
+                compare_frame_t *nb;
+                if (frames == inline_buf) {
+                    nb = (compare_frame_t *)malloc(new_cap * sizeof(*nb));
+                    if (nb != NULL) memcpy(nb, frames, len * sizeof(*nb));
+                } else {
+                    nb = (compare_frame_t *)realloc(frames,
+                                                    new_cap * sizeof(*nb));
+                }
+                if (nb == NULL) goto element_compare;
+                frames = nb;
+                cap    = new_cap;
+            }
+            frames[len].a = ea; frames[len].b = eb; frames[len].i = 0;
+            len++;
+            continue;
+        }
+    element_compare:
+        {
+            mino_val *pair_args =
+                mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
+            mino_val *r = prim_compare(S, pair_args, env);
+            if (r == NULL) { result = NULL; break; }
+            if (mino_val_int_p(r) && mino_val_int_get(r) != 0) {
+                result = r;
+                break;
+            }
+        }
+    }
+    if (frames != inline_buf) free(frames);
+    if (result == NULL && len == 0) return mino_int(S, 0);
+    return result;
+}
+
 mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Mirrors Clojure: nil is less than anything (and equal to itself);
@@ -2079,25 +2176,7 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
         int a_vec = (mino_type_of(a) == MINO_VECTOR || mino_type_of(a) == MINO_MAP_ENTRY);
         int b_vec = (mino_type_of(b) == MINO_VECTOR || mino_type_of(b) == MINO_MAP_ENTRY);
         if (a_vec && b_vec) {
-            size_t la = mino_type_of(a) == MINO_VECTOR ? a->as.vec.len : 2;
-            size_t lb = mino_type_of(b) == MINO_VECTOR ? b->as.vec.len : 2;
-            size_t n  = la < lb ? la : lb;
-            size_t i;
-            for (i = 0; i < n; i++) {
-                mino_val *ea = mino_type_of(a) == MINO_VECTOR
-                    ? vec_nth(a, i)
-                    : (i == 0 ? a->as.map_entry.k : a->as.map_entry.v);
-                mino_val *eb = mino_type_of(b) == MINO_VECTOR
-                    ? vec_nth(b, i)
-                    : (i == 0 ? b->as.map_entry.k : b->as.map_entry.v);
-                mino_val *recur_args =
-                    mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
-                mino_val *r = prim_compare(S, recur_args, env);
-                if (r == NULL) return NULL;
-                if (mino_val_int_p(r) && mino_val_int_get(r) != 0) return r;
-            }
-            if (la == lb) return mino_int(S, 0);
-            return mino_int(S, la < lb ? -1 : 1);
+            return compare_vec_iter(S, a, b, env);
         }
     }
     return prim_throw_classified(S, "eval/type", "MTY001", "compare: cannot compare values of different types");

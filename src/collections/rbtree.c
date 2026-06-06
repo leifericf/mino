@@ -11,6 +11,80 @@
 /* --- Comparison ---------------------------------------------------------- */
 
 /* Natural ordering for mino values. Shared with sort in prim/sequences.c. */
+/* Lexicographic vector compare without per-element C recursion. A
+ * frame machine walks nested vector pairs left to right with an
+ * explicit stack (inline storage for the common shallow case, heap
+ * growth beyond), so comparison depth is bounded by the heap rather
+ * than the C stack. Non-vector element pairs route back through
+ * val_compare, whose other arms do not recurse structurally; a
+ * nested vector pair that cannot be pushed (allocation failure)
+ * falls back to a fresh val_compare call, trading the depth
+ * exposure back only under memory pressure. */
+#define CMP_FRAMES_INLINE 32u
+typedef struct {
+    const mino_val *a;
+    const mino_val *b;
+    size_t            i;
+} cmp_frame_t;
+
+static int val_compare_vec_iter(const mino_val *a, const mino_val *b)
+{
+    cmp_frame_t  inline_buf[CMP_FRAMES_INLINE];
+    cmp_frame_t *frames = inline_buf;
+    size_t       len = 0, cap = CMP_FRAMES_INLINE;
+    int          result = 0;
+    frames[len].a = a; frames[len].b = b; frames[len].i = 0;
+    len++;
+    while (len > 0) {
+        cmp_frame_t      *f  = &frames[len - 1];
+        size_t            la = f->a->as.vec.len;
+        size_t            lb = f->b->as.vec.len;
+        size_t            n  = la < lb ? la : lb;
+        const mino_val *ea;
+        const mino_val *eb;
+        if (f->i >= n) {
+            int c = la == lb ? 0 : (la < lb ? -1 : 1);
+            len--;
+            if (c != 0) { result = c; break; }
+            continue;
+        }
+        ea = vec_nth(f->a, f->i);
+        eb = vec_nth(f->b, f->i);
+        f->i++;
+        if (ea == eb) continue;
+        if (ea != NULL && eb != NULL
+            && mino_type_of(ea) == MINO_VECTOR
+            && mino_type_of(eb) == MINO_VECTOR) {
+            if (len == cap) {
+                size_t       new_cap = cap * 2u;
+                cmp_frame_t *nb;
+                if (frames == inline_buf) {
+                    nb = (cmp_frame_t *)malloc(new_cap * sizeof(*nb));
+                    if (nb != NULL) memcpy(nb, frames, len * sizeof(*nb));
+                } else {
+                    nb = (cmp_frame_t *)realloc(frames, new_cap * sizeof(*nb));
+                }
+                if (nb == NULL) {
+                    int c = val_compare(ea, eb);
+                    if (c != 0) { result = c; break; }
+                    continue;
+                }
+                frames = nb;
+                cap    = new_cap;
+            }
+            frames[len].a = ea; frames[len].b = eb; frames[len].i = 0;
+            len++;
+            continue;
+        }
+        {
+            int c = val_compare(ea, eb);
+            if (c != 0) { result = c; break; }
+        }
+    }
+    if (frames != inline_buf) free(frames);
+    return result;
+}
+
 int val_compare(const mino_val *a, const mino_val *b)
 {
     if (a == b) return 0;
@@ -78,15 +152,7 @@ int val_compare(const mino_val *a, const mino_val *b)
         }
     }
     if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
-        size_t i;
-        size_t min_len = a->as.vec.len < b->as.vec.len
-                       ? a->as.vec.len : b->as.vec.len;
-        for (i = 0; i < min_len; i++) {
-            int c = val_compare(vec_nth(a, i), vec_nth(b, i));
-            if (c != 0) return c;
-        }
-        return a->as.vec.len < b->as.vec.len ? -1
-             : a->as.vec.len > b->as.vec.len ? 1 : 0;
+        return val_compare_vec_iter(a, b);
     }
     {
         mino_type ta = mino_type_of(a);

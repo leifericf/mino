@@ -127,3 +127,19 @@
           m1 (build 60000)
           m2 (build 60000)]
       (is (true? (= m1 m2))))))
+
+(deftest deeply-nested-compare
+  ;; Lexicographic vector compare must handle element nesting bounded
+  ;; by the heap rather than the C stack, for both the compare fn and
+  ;; the sorted-collection comparator path.
+  (let [build (fn [n leaf] (reduce (fn [acc _] (vector acc)) leaf (range n)))
+        v1 (build 100000 1)
+        v2 (build 100000 1)
+        v3 (build 100000 2)]
+    (testing "equal towers compare zero"
+      (is (zero? (compare v1 v2))))
+    (testing "leaf difference decides deep compare"
+      (is (neg? (compare v1 v3)))
+      (is (pos? (compare v3 v1))))
+    (testing "sorted collections accept deeply nested keys"
+      (is (= 2 (count (sorted-set v1 v3)))))))

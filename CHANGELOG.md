@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- compare on vectors (and the sorted-collection comparator path) now
+  walks nested element pairs iteratively, so deeply nested values
+  compare correctly instead of exhausting the C stack. Sorting
+  vectors of vectors got measurably faster as a side effect.
+
 - Structural equality now walks element nesting through an explicit
   worklist, so comparing arbitrarily deep values (lists inside lists,
   vector towers, nested map values) completes correctly instead of
