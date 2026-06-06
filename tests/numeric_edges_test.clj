@@ -228,3 +228,12 @@
   ;; Non-finite doubles cannot become decimals.
   (is (thrown? (bigdec ##NaN)))
   (is (thrown? (bigdec ##Inf))))
+
+(deftest bigint-of-ratio-truncates
+  ;; Ratio coercion truncates toward zero, like the other integer
+  ;; coercions.
+  (is (= 0N (bigint 1/2)))
+  (is (= 0N (bigint -1/2)))
+  (is (= 2N (bigint 7/3)))
+  (is (= -2N (bigint -7/3)))
+  (is (= :bigint (type (bigint 7/3)))))

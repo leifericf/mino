@@ -466,10 +466,23 @@ mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
         }
         return r;
     }
+    case MINO_RATIO: {
+        /* Truncate toward zero: integer-divide numerator by
+         * denominator (mp_int_div quotients truncate toward zero). */
+        mino_val *out = mino_bigint_from_ll(S, 0);
+        if (out == NULL) return NULL;
+        if (mp_int_div((mp_int)x->as.ratio.num->as.bigint.mpz,
+                       (mp_int)x->as.ratio.denom->as.bigint.mpz,
+                       (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
+            return prim_throw_classified(S, "eval/out-of-memory",
+                                         "MOM001", "out of memory");
+        }
+        return out;
+    }
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigint: argument must be integer, "
-                                     "float, string, or bigint");
+                                     "float, ratio, string, or bigint");
     }
 }
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `bigint` and `biginteger` now accept ratios, truncating toward zero:
+  `(bigint 7/3)` is `2N`. Previously ratios were rejected with a type
+  error.
+
 - `bigdec` now coerces exactly: doubles convert via their shortest
   round-trip decimal form (`(bigdec 0.1)` is `0.1M`, not
   `0.10000000000000001M`), ratios convert by exact decimal division
