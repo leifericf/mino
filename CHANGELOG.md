@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Scripts starting with a #! shebang line now load: the file loader
+  treats the first line as a comment (blanked, so later line numbers
+  stay accurate), making executable mino scripts work with chmod +x.
+
 - Scripts can be read from standard input: a FILE argument of - reads
   the script from stdin, and non-seekable inputs like /dev/stdin and
   pipes load via a chunked reader instead of failing with a seek

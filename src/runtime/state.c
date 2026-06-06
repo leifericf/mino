@@ -1137,6 +1137,17 @@ mino_val *mino_load_file(mino_state *S, const char *path, mino_env *env)
         if (!from_stdin) fclose(f);
         if (buf == NULL) return NULL;
     }
+    /* Executable-script support: treat a leading "#!" line as a
+     * comment, the way Lua's file loader does. The bytes are blanked
+     * rather than skipped so diagnostics on later lines keep their
+     * real line numbers. File-level only on purpose -- read-string
+     * and embedded eval keep rejecting the dispatch sequence. */
+    if (rd >= 2 && buf[0] == '#' && buf[1] == '!') {
+        size_t bi;
+        for (bi = 0; bi < rd && buf[bi] != '\n'; bi++) {
+            buf[bi] = ' ';
+        }
+    }
     saved_file  = S->reader.reader_file;
     S->reader.reader_file = intern_filename(S, display_path);
     source_cache_store(S, S->reader.reader_file, buf, rd);

@@ -134,3 +134,10 @@
   (is (= "[s]" (binding [*print-readably* true] (print-str ["s"]))))
   ;; str keeps readable nested forms.
   (is (= "[\"s\"]" (str ["s"]))))
+
+(deftest load-file-skips-a-shebang-line
+  ;; Executable scripts start with #!; the loader treats that first
+  ;; line as a comment while keeping line numbers for what follows.
+  (let [path "/tmp/mino-shebang-fixture.clj"]
+    (spit path "#!/usr/bin/env mino\n(def shebang-fixture-value :ran)\nshebang-fixture-value\n")
+    (is (= :ran (load-file path)))))
