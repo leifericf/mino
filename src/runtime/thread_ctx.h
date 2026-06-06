@@ -39,6 +39,13 @@ typedef struct {
     const char *saved_ambient;  /* fn_ambient_ns at try-frame entry */
     size_t      saved_load_len; /* require load-stack depth at frame entry */
     size_t      saved_lazy_len; /* lazy_inflight depth at frame entry */
+    /* BC source cursor at frame entry. A longjmp skips mino_bc_run's
+     * exit-time cursor restore, and normalize_exception trusts the
+     * cursor for :mino/location, so each landing pad rewinds it to
+     * the frame-entry value; a later throw from a tree-walked context
+     * then attributes to its own form instead of the stale BC fn. */
+    const struct mino_bc_fn *saved_bc_cursor;
+    size_t      saved_bc_cursor_pc;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live
@@ -190,6 +197,15 @@ typedef struct mino_thread_ctx {
      * BC is on the C stack). */
     const struct mino_bc_fn *bc_current_bc;
     size_t                   bc_current_pc;
+
+    /* Throw-site location captured by prim_throw at the longjmp, so
+     * catch-side normalization attributes the raw user throw to the
+     * exact (throw ...) site even after the landing pads rewind the
+     * BC cursor. Consumed (and cleared) by normalize_exception; zero
+     * line means "nothing captured, derive from the live cursor". */
+    const char              *throw_loc_file;
+    int                      throw_loc_line;
+    int                      throw_loc_col;
 
     /* GC save stack: transient roots pinned across allocations. */
     mino_val     *gc_save[64];

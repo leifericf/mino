@@ -773,6 +773,8 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
@@ -787,6 +789,8 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
             S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
             mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
+            mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+            mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 /* Normalize first so an ex-info map ({:message :data})
@@ -917,6 +921,8 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
             /* Same payload-stash as in mino_eval_inner: outer pcall-style
@@ -928,6 +934,8 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
             S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
             mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
+            mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+            mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth   = saved_try;
             S->reader.reader_file = saved_file;
             S->reader.reader_line = saved_line;
@@ -1156,6 +1164,8 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
     mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
     mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
+    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         /* Inner-eval try frames may have caught the original throw and
@@ -1171,6 +1181,8 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
             mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_lazy_inflight_unwind(S,
             mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
+        mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+        mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
@@ -1255,6 +1267,8 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
     mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
     mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
+    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. Restore the
          * eval bookkeeping that was active at pcall entry, then
@@ -1291,6 +1305,8 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
+            mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+            mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);

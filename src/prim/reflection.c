@@ -957,6 +957,11 @@ static mino_val *prim_record_fields(mino_state *S, mino_val *args,
 }
 
 /* (throw value) -- raise a script exception. */
+/* Focused extern: throw-site capture lives in eval/control.c; pulling
+ * eval/special_internal.h into the prim layer would invert the
+ * layering. Same pattern as values/val.c's prim_compare extern. */
+void mino_throw_capture_site(mino_state *S);
+
 mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ex;
@@ -1034,6 +1039,7 @@ mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
         }
         return prim_throw_classified(S, kind, code, msg);
     }
+    mino_throw_capture_site(S);
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
     longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     return NULL; /* unreachable */

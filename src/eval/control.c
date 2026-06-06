@@ -100,6 +100,36 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
  * (the inner instruction position); tree-walker frames fall back to
  * `eval_current_form`. This brings user-throw catch values in line
  * with system-throw catch values, which already carry the field. */
+/* Capture the throw site into the ctx side channel before a user
+ * throw unwinds. The landing pads rewind the BC cursor to its
+ * frame-entry value, so normalize_exception could not derive the
+ * position after the longjmp; both throw paths (prim_throw and the
+ * VM's OP_THROW) call this right before jumping. */
+void mino_throw_capture_site(mino_state *S)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    const char *loc_file = NULL;
+    int         loc_line = 0;
+    int         loc_col  = 0;
+    if (ctx->bc_current_bc != NULL) {
+        (void)mino_bc_source_lookup(ctx->bc_current_bc,
+                                    ctx->bc_current_pc,
+                                    &loc_file, &loc_line, &loc_col);
+    }
+    if (loc_file == NULL || loc_line <= 0) {
+        const mino_val *form = ctx->eval_current_form;
+        if (form != NULL && mino_is_cons(form)
+            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+            loc_file = form->as.cons.file;
+            loc_line = form->as.cons.line;
+            loc_col  = form->as.cons.column;
+        }
+    }
+    ctx->throw_loc_file = loc_file;
+    ctx->throw_loc_line = loc_line;
+    ctx->throw_loc_col  = loc_col;
+}
+
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val)
 {
     mino_val *keys[6], *vals[6];
@@ -110,6 +140,9 @@ mino_val *normalize_exception(mino_state *S, mino_val *ex_val)
     int loc_col  = 0;
     if (mino_type_of(ex_val) == MINO_MAP
         && map_get_val(ex_val, mino_keyword(S, "mino/kind")) != NULL) {
+        mino_current_ctx(S)->throw_loc_file = NULL;
+        mino_current_ctx(S)->throw_loc_line = 0;
+        mino_current_ctx(S)->throw_loc_col  = 0;
         return ex_val;
     }
     keys[0] = mino_keyword(S, "mino/kind");
@@ -152,21 +185,33 @@ mino_val *normalize_exception(mino_state *S, mino_val *ex_val)
      * location, and a BC-fn-body throw caught from outside would
      * blame the caller's line rather than the (throw ...) form. */
     {
-        const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
-        size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
-        if (cur_bc != NULL) {
-            (void)mino_bc_source_lookup(cur_bc, cur_pc,
-                                        &loc_file, &loc_line, &loc_col);
-        }
-        if (loc_file == NULL || loc_line <= 0) {
-            const mino_val *form = mino_current_ctx(S)->eval_current_form;
-            if (form != NULL && mino_is_cons(form)
-                && form->as.cons.file != NULL && form->as.cons.line > 0) {
-                loc_file = form->as.cons.file;
-                loc_line = form->as.cons.line;
-                loc_col  = form->as.cons.column;
+        mino_thread_ctx_t *ctx = mino_current_ctx(S);
+        if (ctx->throw_loc_line > 0 && ctx->throw_loc_file != NULL) {
+            /* prim_throw captured the throw site before the landing
+             * pad rewound the BC cursor; prefer it. */
+            loc_file = ctx->throw_loc_file;
+            loc_line = ctx->throw_loc_line;
+            loc_col  = ctx->throw_loc_col;
+        } else {
+            const mino_bc_fn_t *cur_bc = ctx->bc_current_bc;
+            size_t              cur_pc = ctx->bc_current_pc;
+            if (cur_bc != NULL) {
+                (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                            &loc_file, &loc_line, &loc_col);
+            }
+            if (loc_file == NULL || loc_line <= 0) {
+                const mino_val *form = ctx->eval_current_form;
+                if (form != NULL && mino_is_cons(form)
+                    && form->as.cons.file != NULL && form->as.cons.line > 0) {
+                    loc_file = form->as.cons.file;
+                    loc_line = form->as.cons.line;
+                    loc_col  = form->as.cons.column;
+                }
             }
         }
+        ctx->throw_loc_file = NULL;
+        ctx->throw_loc_line = 0;
+        ctx->throw_loc_col  = 0;
     }
     if (loc_file != NULL && loc_line > 0) {
         mino_val *lkeys[3], *lvals[3];
@@ -234,6 +279,8 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor =     mino_current_ctx(S)->bc_current_bc;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc =     mino_current_ctx(S)->bc_current_pc;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val *r;
         mino_current_ctx(S)->try_depth++;
@@ -263,6 +310,8 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
+        mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+        mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth   = saved_try;
         mino_current_ctx(S)->call_depth  = saved_call;
         mino_current_ctx(S)->trace_added = saved_trace;
@@ -309,6 +358,8 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
             mino_current_ctx(S)->try_stack[is].saved_load_len = S->module.load_stack_len;
             mino_current_ctx(S)->try_stack[is].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
+    mino_current_ctx(S)->try_stack[is].saved_bc_cursor =             mino_current_ctx(S)->bc_current_bc;
+    mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc =             mino_current_ctx(S)->bc_current_pc;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
@@ -333,6 +384,8 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[is].saved_ambient;
                 load_stack_truncate(S, mino_current_ctx(S)->try_stack[is].saved_load_len);
                 mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[is].saved_lazy_len);
+                mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[is].saved_bc_cursor;
+                mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc;
                 mino_current_ctx(S)->try_depth   = is;
                 mino_current_ctx(S)->call_depth  = ic;
                 mino_current_ctx(S)->trace_added = it;

@@ -73,6 +73,7 @@ mino_val *eval_binding(mino_state *S, mino_val *form,
 /* control.c */
 mino_val *eval_try(mino_state *S, mino_val *form,
                      mino_val *args, mino_env *env, int tail);
+void mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
 /* fn.c */

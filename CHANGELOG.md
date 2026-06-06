@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A throw from a lazy thunk (or any tree-walked context) after an
+  earlier caught error now reports its own source location. The
+  throw site is captured before the unwind and the bytecode source
+  cursor is rewound by every catch landing, so a stale cursor can no
+  longer attribute a later error to the previous throw's line.
+
 - ex-info now throws a clean type error when its data argument is not
   a map (nil and sorted maps stay accepted), instead of silently
   building an exception whose ex-data is not map-shaped.

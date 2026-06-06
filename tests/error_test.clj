@@ -65,3 +65,15 @@
   (is (nil? (ex-data (try (throw (ex-info "m" nil)) (catch e e)))))
   (is (= {:a 1} (into {} (ex-data (try (throw (ex-info "m" (sorted-map :a 1)))
                                     (catch e e)))))))
+
+(deftest throw-location-tracks-each-throw-site
+  ;; Each caught error reports its own throw site, including a throw
+  ;; from a lazy thunk realized after an earlier caught error.
+  (let [first-line (:line (:mino/location
+                            (try ((fn [] (throw (ex-info "a" {}))))
+                              (catch e e))))
+        lz (lazy-seq (throw (ex-info "b" {})))
+        lazy-line (:line (:mino/location (try (first lz) (catch e e))))]
+    (is (pos? first-line))
+    (is (pos? lazy-line))
+    (is (< first-line lazy-line))))

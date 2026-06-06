@@ -1115,6 +1115,7 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         unsigned a = A_OF(ins);
         mino_val *exc = regs[a];
         if (ctx->try_depth > 0) {
+            mino_throw_capture_site(S);
             ctx->try_stack[ctx->try_depth - 1].exception = exc;
             longjmp(ctx->try_stack[ctx->try_depth - 1].buf, 1);
             /* unreachable */
@@ -2333,6 +2334,8 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_ambient  = S->ns_vars.fn_ambient_ns;
             ctx->try_stack[td].saved_load_len = S->module.load_stack_len;
             ctx->try_stack[td].saved_lazy_len = ctx->lazy_inflight_len;
+ctx->try_stack[td].saved_bc_cursor =             ctx->bc_current_bc;
+ctx->try_stack[td].saved_bc_cursor_pc =             ctx->bc_current_pc;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
