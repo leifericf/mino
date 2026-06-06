@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added the protocol introspection functions `extends?` and
+  `extenders`.
+
 - `defmulti` honors the `:hierarchy` option: dispatch matching and
   prefer resolution consult the supplied hierarchy reference, and the
   dispatch cache invalidates when that hierarchy changes. Previously

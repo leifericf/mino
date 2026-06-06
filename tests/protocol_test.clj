@@ -180,3 +180,16 @@
   (is (= 5 (m-area "hello")))
   (is (= 0 (m-perim "hello")))
   (is (= 9 (m-perim "hello" 9))))
+
+(defprotocol Extendable (ext-m [x]))
+(defrecord ExtA [])
+(defrecord ExtB [])
+(extend-type ExtA Extendable (ext-m [_] :a))
+
+(deftest extends?-and-extenders
+  (is (extends? Extendable ExtA))
+  (is (not (extends? Extendable ExtB)))
+  (is (= [ExtA] (vec (extenders Extendable))))
+  (extend-type ExtB Extendable (ext-m [_] :b))
+  (is (extends? Extendable ExtB))
+  (is (= 2 (count (extenders Extendable)))))

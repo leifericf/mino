@@ -2322,6 +2322,21 @@
                     (contains? dm :default))))
             methods)))
 
+(defn extends?
+  "Returns true if type t has been extended to proto (an explicit
+   registration for at least one method; :default does not count)."
+  [proto t]
+  (boolean (some (fn [dispatch-atom] (contains? @dispatch-atom t))
+                 (vals (:methods proto)))))
+
+(defn extenders
+  "Returns a seq of the types explicitly extended to proto, or nil
+   when there are none."
+  [proto]
+  (seq (distinct (remove (fn [t] (= t :default))
+                         (mapcat (fn [a] (keys @a))
+                                 (vals (:methods proto)))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Core protocols: extension points wired into reduce / reduce-kv /
 ;; datafy / nav.
