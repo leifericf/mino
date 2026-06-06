@@ -462,7 +462,12 @@ static int run_eval_expr(mino_state *S, mino_env *env, const char *expr)
         report_eval_error(S);
         return 1;
     }
-    mino_println(S, result);
+    /* Print the value unless it is nil, matching the canonical CLI:
+     * side-effecting forms like (println ...) don't emit a trailing
+     * "nil" after their own output. */
+    if (!mino_is_nil(result)) {
+        mino_println(S, result);
+    }
     return 0;
 }
 

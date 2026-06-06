@@ -227,9 +227,9 @@
                        "(dotimes [_ 50] (when-not (future-done? f) (thread-sleep 5))) "
                        "(println (if (future-done? f) :done :pending))' "
                        "2>/dev/null"))]
-        ;; Exit 0 (no crash) is the core assertion; `-e` echoes the
-        ;; final form's nil after the println line.
+        ;; Exit 0 (no crash) is the core assertion; the println line is
+        ;; the only output (`-e` does not echo nil results).
         (is (= 0 (:exit r)))
-        (is (= ":done\nnil\n" (:out r)))))))
+        (is (= ":done\n" (:out r)))))))
 
 (run-tests-and-exit)

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- mino -e no longer prints a trailing nil when the evaluated form
+  returns nil, matching the canonical CLI.
+
 - Scripts starting with a #! shebang line now load: the file loader
   treats the first line as a comment (blanked, so later line numbers
   stay accurate), making executable mino scripts work with chmod +x.
