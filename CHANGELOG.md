@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `#()` literals now support positional args past `%9`, up to `%20`
+  (the fn parameter ceiling); `%21` and beyond is a reader error.
+  Previously `%10` was left as an unresolved symbol.
+
 - Two reader diagnostics now name the actual problem: an unknown `##`
   token reports `unknown ## token: ##inf` (was `unknown tagged
   literal`), and a reader conditional with an odd number of forms

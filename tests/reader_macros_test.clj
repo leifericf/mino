@@ -146,3 +146,9 @@
   (let [m (try (read-string "#?(:mino)")
                (catch e (if (map? e) (:mino/message e) (str e))))]
     (is (clojure.string/includes? m "reader conditional requires an even number of forms"))))
+
+(deftest anon-fn-args-beyond-nine
+  (is (= 10 (apply #(+ %9 %10) [0 0 0 0 0 0 0 0 4 6])))
+  (is (= [1 12] (apply #(vector %1 %12) [1 0 0 0 0 0 0 0 0 0 0 12])))
+  ;; The positional ceiling matches the fn arg limit.
+  (is (thrown? (read-string "#(+ %21)"))))

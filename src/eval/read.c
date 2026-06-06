@@ -1418,12 +1418,17 @@ static mino_val *read_atom(mino_state *S, const char **p)
 
 /* ---- #() anonymous function reader macro helpers ---- */
 
+/* Highest positional slot a #() literal may use. Matches the
+ * canonical fn parameter ceiling. */
+#define MINO_ANON_FN_MAX_ARG 20
+
 /*
- * Walk a parsed form tree, recording which % arg slots are used.
- * used[0] = true means bare % or %1, used[1] = %2, ..., used[8] = %9.
- * *has_rest = true means %& was found.  *max_arg = highest numbered slot.
+ * Walk a parsed form tree for #() arg usage. Bare % counts as %1;
+ * %N tracks the highest numbered slot in *max_arg (multi-digit
+ * allowed; the ceiling is validated by the caller). *has_rest = true
+ * means %& was found.
  */
-static void scan_percent_args(mino_val *form, int used[9],
+static void scan_percent_args(mino_val *form,
                               int *max_arg, int *has_rest)
 {
     if (form == NULL) return;
@@ -1431,36 +1436,40 @@ static void scan_percent_args(mino_val *form, int used[9],
         const char *s = form->as.s.data;
         size_t      n = form->as.s.len;
         if (n == 1 && s[0] == '%') {
-            used[0] = 1;
             if (*max_arg < 1) *max_arg = 1;
-        } else if (n == 2 && s[0] == '%' && s[1] >= '1' && s[1] <= '9') {
-            int idx = s[1] - '1';
-            used[idx] = 1;
-            if (*max_arg < idx + 1) *max_arg = idx + 1;
-        } else if (n == 2 && s[0] == '%' && s[1] == '&') {
+        } else if (n >= 2 && s[0] == '%' && s[1] == '&') {
             *has_rest = 1;
+        } else if (n >= 2 && s[0] == '%' && s[1] >= '1' && s[1] <= '9') {
+            int    idx = 0;
+            size_t j;
+            for (j = 1; j < n; j++) {
+                if (!isdigit((unsigned char)s[j])) { idx = 0; break; }
+                idx = idx * 10 + (s[j] - '0');
+                if (idx > 999) break; /* clamp; caller rejects > cap */
+            }
+            if (*max_arg < idx) *max_arg = idx;
         }
         return;
     }
     if (mino_is_cons(form)) {
-        scan_percent_args(form->as.cons.car, used, max_arg, has_rest);
-        scan_percent_args(form->as.cons.cdr, used, max_arg, has_rest);
+        scan_percent_args(form->as.cons.car, max_arg, has_rest);
+        scan_percent_args(form->as.cons.cdr, max_arg, has_rest);
         return;
     }
     if (mino_type_of(form) == MINO_VECTOR) {
         size_t i;
         for (i = 0; i < form->as.vec.len; i++)
-            scan_percent_args(vec_nth(form, i), used, max_arg, has_rest);
+            scan_percent_args(vec_nth(form, i), max_arg, has_rest);
         return;
     }
     if (mino_type_of(form) == MINO_MAP) {
         size_t i;
         for (i = 0; i < form->as.map.len; i++) {
             scan_percent_args(vec_nth(form->as.map.key_order, i),
-                              used, max_arg, has_rest);
+                              max_arg, has_rest);
             scan_percent_args(map_get_val(form,
                               vec_nth(form->as.map.key_order, i)),
-                              used, max_arg, has_rest);
+                              max_arg, has_rest);
         }
         return;
     }
@@ -1468,7 +1477,7 @@ static void scan_percent_args(mino_val *form, int used[9],
         size_t i;
         for (i = 0; i < form->as.set.len; i++)
             scan_percent_args(vec_nth(form->as.set.key_order, i),
-                              used, max_arg, has_rest);
+                              max_arg, has_rest);
         return;
     }
 }
@@ -1542,7 +1551,6 @@ static mino_val *read_anon_fn_form(mino_state *S, const char **p)
 {
     int fn_line = S->reader.reader_line;
     int fn_col  = S->reader.reader_col;
-    int used[9] = {0};
     int max_arg = 0, has_rest = 0;
     mino_val *body;
     mino_val *params_vec;
@@ -1557,17 +1565,22 @@ static mino_val *read_anon_fn_form(mino_state *S, const char **p)
     body = read_list_form(S, p);
     S->reader.reader_in_anon_fn = 0;
     if (body == NULL) return NULL;
-    scan_percent_args(body, used, &max_arg, &has_rest);
+    scan_percent_args(body, &max_arg, &has_rest);
+    if (max_arg > MINO_ANON_FN_MAX_ARG) {
+        char msg[64];
+        snprintf(msg, sizeof(msg),
+                 "#() supports at most %%1..%%%d", MINO_ANON_FN_MAX_ARG);
+        set_reader_diag(S, MRE007, msg, fn_line, fn_col);
+        return NULL;
+    }
     body = normalize_percent(S, body);
     {
-        mino_val *items[12]; /* max 9 + & + %& */
+        mino_val *items[MINO_ANON_FN_MAX_ARG + 2]; /* args + & + %& */
         size_t      nparams = 0;
         int         i;
-        char        name[4];
+        char        name[8];
         for (i = 0; i < max_arg; i++) {
-            name[0] = '%';
-            name[1] = (char)('1' + i);
-            name[2] = '\0';
+            snprintf(name, sizeof(name), "%%%d", i + 1);
             items[nparams++] = mino_symbol(S, name);
         }
         if (has_rest) {
