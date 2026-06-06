@@ -1453,15 +1453,82 @@ static mino_val *realize_seq(mino_state *S, mino_val *coll)
     return mino_nil(S);
 }
 
+/* Bounded realization: force at most N steps of the spine, leaving
+ * the rest lazy. Each step is one `next`, so N steps realize at most
+ * N + 1 elements -- the same over-read the canonical bounded dorun's
+ * (seq coll) probe performs on its final iteration. */
+static mino_val *realize_seq_n(mino_state *S, mino_val *coll, long long n)
+{
+    while (coll != NULL) {
+        if (mino_type_of(coll) == MINO_LAZY) {
+            coll = lazy_force(S, coll);
+            if (coll == NULL) return NULL;
+            continue;
+        }
+        if (mino_type_of(coll) == MINO_NIL) return coll;
+        if (n <= 0) return coll;
+        if (mino_type_of(coll) == MINO_CONS) {
+            coll = coll->as.cons.cdr;
+            n--;
+            continue;
+        }
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+            long long avail = (long long)(coll->as.chunked_cons.chunk
+                                              ->as.chunk.len
+                                          - coll->as.chunked_cons.off);
+            if (avail > n) return coll;
+            n -= avail;
+            coll = coll->as.chunked_cons.more;
+            continue;
+        }
+        return coll;
+    }
+    return mino_nil(S);
+}
+
+/* Shared arg parse for doall / dorun: 1-arity fills *coll_out only,
+ * 2-arity also fills *n_out and sets *bounded. Returns 0 on success,
+ * -1 after raising the arity / type error. */
+static int doall_parse_args(mino_state *S, mino_val *args,
+                            const char *who, mino_val **coll_out,
+                            long long *n_out, int *bounded)
+{
+    size_t argc;
+    char   msg[64];
+    arg_count(S, args, &argc);
+    *bounded = 0;
+    if (argc == 1) {
+        *coll_out = args->as.cons.car;
+        return 0;
+    }
+    if (argc == 2) {
+        if (!mino_to_int(args->as.cons.car, n_out)) {
+            snprintf(msg, sizeof(msg), "%s: count must be an integer", who);
+            (void)prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return -1;
+        }
+        *coll_out = args->as.cons.cdr->as.cons.car;
+        *bounded  = 1;
+        return 0;
+    }
+    snprintf(msg, sizeof(msg), "%s requires 1 or 2 arguments", who);
+    (void)prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    return -1;
+}
+
 mino_val *prim_doall(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *coll;
+    mino_val *coll = NULL;
+    long long   n    = 0;
+    int         bounded;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "doall requires 1 argument");
+    if (doall_parse_args(S, args, "doall", &coll, &n, &bounded) != 0) {
+        return NULL;
     }
-    coll = args->as.cons.car;
+    if (bounded) {
+        if (realize_seq_n(S, coll, n) == NULL) return NULL;
+        return coll;
+    }
     if (realize_seq(S, coll) == NULL) return NULL;
     return coll;
 }
@@ -1478,12 +1545,16 @@ static int discard_step(mino_state *S, void *ctx, mino_val *elem,
 
 mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *coll;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "dorun requires 1 argument");
+    mino_val *coll = NULL;
+    long long   n    = 0;
+    int         bounded;
+    if (doall_parse_args(S, args, "dorun", &coll, &n, &bounded) != 0) {
+        return NULL;
     }
-    coll = args->as.cons.car;
+    if (bounded) {
+        if (realize_seq_n(S, coll, n) == NULL) return NULL;
+        return mino_nil(S);
+    }
     if (coll_is_pipeline_head(coll)) {
         pipeline_stage_t stages[PIPELINE_MAX_STAGES];
         mino_val      *src = NULL;
@@ -3255,9 +3326,9 @@ const mino_prim_def k_prims_sequences[] = {
     {"set",      prim_set,
      "Returns a set of the items in coll."},
     {"doall",    prim_doall,
-     "Forces realization of a lazy sequence. Returns coll."},
+     "Forces realization of a lazy sequence. With a leading count, forces at most that many steps. Returns coll."},
     {"dorun",    prim_dorun,
-     "Forces realization of a lazy sequence. Returns nil."},
+     "Forces realization of a lazy sequence. With a leading count, forces at most that many steps. Returns nil."},
     {"rangev",   prim_rangev,
      "Returns a vector of integers from start (inclusive) to end (exclusive)."},
     {"mapv",     prim_mapv,

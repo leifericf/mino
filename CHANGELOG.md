@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `doall` and `dorun` accept the bounded two-argument form:
+  `(doall n coll)` / `(dorun n coll)` force at most `n` steps of the
+  spine and leave the rest lazy.
+
 - `doall` now realizes the whole seq when the source is chunked.
   Previously only the head chunk was forced, so side effects past the
   first 32 elements never ran until something else walked the tail.

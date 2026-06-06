@@ -66,6 +66,17 @@
 (deftest doall-fn
   (is (= 3 (count (doall (map inc [1 2 3]))))))
 
+(deftest doall-bounded-arity
+  ;; (doall n coll) / (dorun n coll) force at most n steps of the
+  ;; spine and leave the rest lazy.
+  (is (= '(2 3 4) (doall 2 (map inc [1 2 3]))))
+  (is (= nil (dorun 1 (map inc [1 2 3]))))
+  (let [hits (atom 0)
+        s (map (fn [x] (swap! hits inc) x) (list 1 2 3 4 5 6))]
+    (dorun 2 s)
+    (is (<= @hits 3))
+    (is (>= @hits 2))))
+
 (deftest doall-realizes-every-chunk
   ;; A chunked source spans multiple chunks; doall must force the
   ;; whole spine, not just the head chunk.
