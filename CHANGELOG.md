@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Map entries now support `assoc`, behaving as the 2-element vector
+  they stand for (matching their existing `conj` / `nth` behaviour).
+
 - `compare` and `sort` now work on UUIDs, using the canonical
   compareTo order (the two 64-bit halves compare as signed longs).
   Previously comparing two UUIDs raised "cannot compare values of

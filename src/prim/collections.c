@@ -1389,6 +1389,17 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
         }
         return acc;
     }
+    if (mino_type_of(coll) == MINO_MAP_ENTRY) {
+        /* A map entry assocs like the 2-element vector it stands
+         * for, mirroring its conj / nth behaviour. */
+        mino_val *kv[2];
+        mino_val *as_vec;
+        kv[0] = coll->as.map_entry.k;
+        kv[1] = coll->as.map_entry.v;
+        as_vec = mino_vector(S, kv, 2);
+        return prim_assoc(S,
+            mino_cons(S, as_vec, args->as.cons.cdr), env);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "assoc: expected a map or vector, got %s",

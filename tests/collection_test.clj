@@ -521,3 +521,12 @@
                     #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff")))
   (is (= -1 (compare #uuid "80000000-0000-0000-0000-000000000000"
                      #uuid "00000000-0000-0000-0000-000000000000"))))
+
+(deftest map-entry-supports-assoc
+  ;; A map entry behaves as a 2-element vector under assoc, like it
+  ;; already does under conj and nth.
+  (let [e (first {:a 1})]
+    (is (= [:a 1 :x] (assoc e 2 :x)))
+    (is (= [:b 1] (assoc e 0 :b)))
+    (is (= [:a 2] (assoc e 1 2)))
+    (is (thrown? (assoc e 3 :y)))))
