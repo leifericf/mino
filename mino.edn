@@ -65,6 +65,8 @@
   cross-build     {:doc  "Cross-compile Linux+Windows release binaries from one host via zig cc"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/cross-build}
+  test-cross-qemu {:doc  "Execute the cross-built arm64 musl artifact under qemu-user (binfmt) and run the full suite"
+                   :task mino.tasks.builtin/test-cross-qemu}
   release-cross   {:doc  "Alias for cross-build"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/cross-build}

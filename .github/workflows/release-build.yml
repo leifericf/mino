@@ -175,10 +175,9 @@ jobs:
           echo "linux-amd64-musl: static + runs OK"
 
       - name: Sanity-check linux-arm64 musl object format + static
-        # The x86_64 runner can't execute the arm64 binary without an
-        # emulator; assert it's a well-formed, statically linked AArch64
-        # ELF. Native execution smoke is covered by the linux-arm64
-        # matrix entry.
+        # Assert it's a well-formed, statically linked AArch64 ELF. This
+        # gates; the emulated-execution step below adds an actual run on
+        # top (informational until promoted).
         run: |
           readelf -h ./dist-cross/mino_linux_arm64_musl | grep -q 'AArch64' \
             || { echo "linux-arm64-musl is not an AArch64 ELF" >&2; exit 1; }
@@ -186,6 +185,26 @@ jobs:
             echo "linux-arm64-musl is not statically linked" >&2; exit 1
           fi
           echo "linux-arm64-musl: static AArch64 ELF OK"
+
+      - name: Register qemu-user (binfmt) for aarch64
+        # Lets the x86_64 runner execute the static AArch64 ELF
+        # transparently, so the published arm64 artifact is actually run,
+        # not just readelf-inspected.
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Execute arm64 musl artifact under qemu (informational)
+        # The step above proves the arm64 binary *links* as a static
+        # AArch64 ELF; this proves it *runs* correct code on the ARM ISA.
+        # `test-cross-qemu` smoke-tests it and runs the full suite against
+        # it via MINO_TEST_BIN (binfmt makes the suite's subprocess
+        # re-execs transparent too). Informational until it holds a green
+        # streak, then promote to a gate -- the same playbook as
+        # darwin-zig-canary / jit-host-canary. See
+        # docs/ZIG_TOOLCHAIN_MAXOUT.md.
+        continue-on-error: true
+        run: ./mino task test-cross-qemu
 
       - name: Smoke test linux-amd64 glibc canary (runs natively)
         # The glibc build is a build-only portability canary (not

@@ -733,6 +733,65 @@
                        (if (seq extra-args) " " "")
                        "tests/run.clj")))))
 
+(defn- aarch64-runnable?
+  "True if this host can execute an AArch64 Linux ELF: either it is a
+   native arm64 host, or a qemu-user binfmt_misc handler covering
+   aarch64 is registered (apt `qemu-user-static` and docker
+   `tonistiigi/binfmt` both register a handler whose name contains
+   `aarch64`)."
+  []
+  (or (= "aarch64" (str/trim (str (:out (sh "uname" "-m")))))
+      (let [d "/proc/sys/fs/binfmt_misc"]
+        (and (file-exists? (str d "/status"))
+             (boolean
+              (some #(str/includes? (str/lower-case %) "aarch64")
+                    (str/split-lines (str (:out (sh "ls" d))))))))))
+
+(defn test-cross-qemu
+  "Execute the cross-built linux-arm64 musl artifact and run the full
+   suite against it. Closes the gap where the published arm64 binary was
+   only readelf-inspected (`verify-cross-static`) and never run: that
+   proves it is a static AArch64 ELF, this proves it executes correct
+   code on the ARM ISA.
+
+   Assumes `./mino task cross-build` produced
+   dist-cross/mino_linux_arm64_musl and that the kernel can run AArch64
+   ELFs transparently -- a native arm64 host, or an x86_64 host with
+   qemu-user-static registered in binfmt_misc. With binfmt in place the
+   ELF runs without a qemu prefix, so `run-suite-with-test-bin` reuses
+   unchanged: its exported MINO_TEST_BIN makes subprocess-spawning tests
+   re-exec the arm64 binary (again via binfmt) rather than ./mino. When
+   no aarch64 handler is present the run is skipped with a note -- CI's
+   cross-build-validate installs qemu-user-static so the coverage lands
+   there."
+  []
+  (let [bin "dist-cross/mino_linux_arm64_musl"]
+    (cond
+      windows?
+      (println "  test-cross-qemu: not applicable on Windows -- skipping")
+
+      (not (file-exists? bin))
+      (throw (ex-info (str "test-cross-qemu: " bin " missing -- run "
+                           "`./mino task cross-build` first")
+                      {:bin bin}))
+
+      (not (aarch64-runnable?))
+      (println (str "  test-cross-qemu: no aarch64 binfmt handler "
+                    "(qemu-user-static not registered) and host is not "
+                    "arm64 -- skipping; CI's cross-build-validate provides "
+                    "this coverage"))
+
+      :else
+      (let [out (str/trim (sh! bin "-e" "(+ 1 2)"))]
+        (when-not (= out "3")
+          (throw (ex-info (str "test-cross-qemu: arm64 smoke failed -- "
+                               "(+ 1 2) gave " (pr-str out))
+                          {:got out})))
+        (println "  test-cross-qemu: arm64 smoke OK ((+ 1 2) => 3)")
+        (run-suite-with-test-bin bin [])
+        (println (str "  test-cross-qemu: arm64 musl suite passed "
+                      "(emulated via qemu-user / binfmt)"))))))
+
 (def ^:private san-base
   (into ["-g" "-O1" "-fno-omit-frame-pointer" "-std=c99"
          "-Wall" "-Wextra" "-Wpedantic"]

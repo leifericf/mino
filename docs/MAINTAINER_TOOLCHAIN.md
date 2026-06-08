@@ -120,6 +120,22 @@ The native release matrix in `release-build.yml` remains the source of the
 published artifacts and the portability canary (gcc + Apple Clang + mingw).
 `cross-build` runs *alongside* it as validation, never as a replacement.
 
+- `./mino task test-cross-qemu` — execute the cross-built
+  `linux-arm64-musl` artifact and run the full suite against it. The
+  `cross-build-validate` job only `readelf`-inspects the arm64 binary (it
+  can't run an AArch64 ELF natively on an x86_64 runner); this task closes
+  that gap by registering `qemu-user-static` in `binfmt_misc` so the static
+  ELF executes transparently, then reusing `MINO_TEST_BIN` so the suite —
+  including its subprocess re-execs — runs through the arm64 binary. It
+  runs without emulation on a native arm64 host, and **skips with a note**
+  when no aarch64 binfmt handler is present (no `qemu-user-static`), so it
+  is safe to invoke anywhere. In CI it is wired into `cross-build-validate`
+  as an **informational** step (`continue-on-error`); promote it to a gate
+  once it holds a green streak, the same playbook as `darwin-zig-canary`.
+  Local one-off: `sudo apt-get install -y qemu-user-static && ./mino task
+  cross-build && ./mino task test-cross-qemu`. The forward roadmap for this
+  and the other toolchain-axis items lives in `docs/ZIG_TOOLCHAIN_MAXOUT.md`.
+
 ## Sanitizers and the JIT: instrumentation boundary
 
 Every sanitizer build (host ASan in `release-gate`, pinned-zig UBSan + TSan in
