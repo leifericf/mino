@@ -24,17 +24,16 @@
 # Regenerate after an intentional change with:
 #   ./mino task gen-analyze-baseline
 
-main.c: warning: Potential leak of memory pointed to by 'end' [unix.Malloc]
-main.c: warning: Potential leak of memory pointed to by 'hist_buf' [unix.Malloc]
+
 main.c: warning: Value stored to 'awaiting_continuation' is never read [deadcode.DeadStores]
 src/collections/map.c: warning: Array access (from variable 'slots') results in a null pointer dereference [core.NullDereference]
 src/eval/bc/compile.c: warning: Dereference of null pointer [core.NullDereference]
 src/eval/bc/compile.c: warning: Value stored to 'is_then_recur' is never read [deadcode.DeadStores]
-src/eval/bc/jit/emit.c: warning: Use of memory allocated with size zero [unix.Malloc]
 src/eval/bc/vm.c: warning: Value stored to 'regs' during its initialization is never read [deadcode.DeadStores]
 src/eval/bindings.c: warning: Dereference of null pointer [core.NullDereference]
 src/eval/defs.c: warning: Dereference of null pointer [core.NullDereference]
 src/eval/eval.c: warning: Dereference of null pointer [core.NullDereference]
+src/eval/eval.c: warning: Null pointer passed to 2nd parameter expecting 'nonnull' [core.NonNullParamChecker]
 src/eval/fn.c: warning: Dereference of null pointer [core.NullDereference]
 src/eval/fn.c: warning: Value stored to 'local' is never read [deadcode.DeadStores]
 src/eval/print.c: warning: Value of 'errno' was not checked and may be overwritten by function 'fread' [unix.Errno]
@@ -44,7 +43,12 @@ src/prim/bits.c: warning: Array access (from variable 'buf') results in a null p
 src/prim/collections.c: warning: Array access (from variable 'buf') results in a null pointer dereference [core.NullDereference]
 src/prim/collections.c: warning: Array access (from variable 'mk') results in a null pointer dereference [core.NullDereference]
 src/prim/collections.c: warning: Dereference of null pointer [core.NullDereference]
+src/prim/io.c: warning: Null pointer passed to 1st parameter expecting 'nonnull' [core.NonNullParamChecker]
 src/prim/prim.c: warning: Value of 'errno' was not checked and may be overwritten by function 'malloc' [unix.Errno]
 src/prim/sequences.c: warning: Dereference of null pointer [core.NullDereference]
 src/prim/stm.c: warning: Dereference of null pointer [core.NullDereference]
+src/prim/string.c: warning: Null pointer passed to 1st parameter expecting 'nonnull' [core.NonNullParamChecker]
+src/prim/string.c: warning: Value stored to 'cap' is never read [deadcode.DeadStores]
+src/prim/string.c: warning: Value stored to 'pos' is never read [deadcode.DeadStores]
+src/runtime/var.c: warning: Null pointer passed to 1st parameter expecting 'nonnull' [core.NonNullParamChecker]
 src/values/val.c: warning: Array access (via field 'ht_buckets') results in a null pointer dereference [core.NullDereference]

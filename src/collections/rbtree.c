@@ -212,8 +212,13 @@ static mino_rb_node_t *rb_new(mino_state *S, mino_val *key,
 
 static mino_rb_node_t *rb_clone(mino_state *S, const mino_rb_node_t *src)
 {
-    mino_rb_node_t *n = (mino_rb_node_t *)gc_alloc_typed(
-        S, GC_T_RB_NODE, sizeof(*n));
+    mino_rb_node_t *n;
+    /* Callers clone h->left / h->right, which are NULL at the tree
+     * fringe; rotations only reach this with a non-NULL child by the
+     * red-black invariant, but guard so a NULL src is defined (clone of
+     * nothing is nothing) rather than a memcpy from NULL. */
+    if (src == NULL) return NULL;
+    n = (mino_rb_node_t *)gc_alloc_typed(S, GC_T_RB_NODE, sizeof(*n));
     memcpy(n, src, sizeof(*n));
     return n;
 }
