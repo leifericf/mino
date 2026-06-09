@@ -67,6 +67,9 @@
                    :task mino.tasks.builtin/cross-build}
   test-cross-qemu {:doc  "Execute the cross-built arm64 musl artifact under qemu-user (binfmt) and run the full suite"
                    :task mino.tasks.builtin/test-cross-qemu}
+  check-binary-reproducible {:doc  "Gate: linux-amd64-musl artifact builds byte-identically and embeds no builder-specific paths"
+                             :deps [gen-core-header gen-stdlib-headers]
+                             :task mino.tasks.builtin/check-binary-reproducible}
   release-cross   {:doc  "Alias for cross-build"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/cross-build}

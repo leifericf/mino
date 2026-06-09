@@ -333,11 +333,32 @@
   [{:keys [platform triple libs exe static]}]
   (let [out-dir "dist-cross"
         bin     (str out-dir "/mino_" (str/replace platform "-" "_") exe)
+        win?    (str/includes? triple "windows")
         args    (concat stencil-cc
                         cross-cflags
                         (str/split include-flags " ")
                         [(str "--target=" triple)]
                         (if static ["-static"] [])
+                        ;; Reproducibility: zig's bundled libunwind /
+                        ;; compiler_rt objects carry DWARF stamped with the
+                        ;; builder's absolute paths (zig install dir, cache,
+                        ;; cwd) -- ~470 path strings that otherwise make every
+                        ;; published binary builder-specific and unrepro-
+                        ;; ducible across machines. Stripping is the only
+                        ;; cross-arch, single-host fix (host binutils strip
+                        ;; can't read a foreign-arch ELF; zig objcopy
+                        ;; --strip-debug is unimplemented in 0.16). lld's
+                        ;; --strip-debug drops .debug_* AND .symtab for this
+                        ;; static link, yielding a fully stripped, smaller,
+                        ;; reproducible artifact. Backtrace symbols are not
+                        ;; lost for good: the build is now reproducible, so a
+                        ;; symbolised twin is recovered by rebuilding WITHOUT
+                        ;; this flag -- identical .text layout, addresses
+                        ;; align for addr2line. ELF-only: the COFF linker does
+                        ;; not take this GNU ld flag, so the Windows PE keeps
+                        ;; its paths for now. Enforced by
+                        ;; check-binary-reproducible.
+                        (if win? [] ["-Wl,--strip-debug"])
                         ["-o" bin]
                         all-srcs
                         libs
@@ -396,6 +417,59 @@
     (cross-build-one t))
   (verify-cross-static)
   (println "  cross-build: OK"))
+
+(defn check-binary-reproducible
+  "Gate: the published Linux artifact must be reproducible -- byte-identical
+   build-to-build and free of builder-specific absolute paths -- so a third
+   party rebuilding from the pinned toolchain + source gets the same bytes.
+
+   Builds the linux-amd64-musl artifact (the primary standalone download)
+   twice from clean and asserts:
+     1. the two builds are byte-identical (cmp) -- catches any timestamp,
+        link-order, or other non-determinism; and
+     2. neither the build directory ($PWD) nor $HOME appears in the binary
+        -- a host-independent proxy for cross-machine reproducibility. The
+        --strip-debug applied by cross-build-one drops the DWARF sections
+        where zig's toolchain paths would otherwise be stamped (see that
+        function); this gate fails if that protection regresses.
+
+   Single-host by design (like the stencil-determinism gate): it asserts a
+   property of one build environment, never compares across runner images.
+   Skips with a note if sha/cmp/grep tooling is unavailable."
+  []
+  (check-zig-version)
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (let [t   (first (filter #(= "linux-amd64-musl" (:platform %)) cross-targets))
+        bin "dist-cross/mino_linux_amd64_musl"
+        ref (str bin ".repro1")]
+    (cross-build-one t)
+    (sh! "cp" bin ref)
+    (cross-build-one t)
+    (let [identical? (= 0 (:exit (sh "cmp" "-s" ref bin)))]
+      (sh "rm" "-f" ref)
+      (when-not identical?
+        (throw (ex-info (str "check-binary-reproducible: two clean builds of "
+                             bin " differ -- the build is non-deterministic")
+                        {:bin bin})))
+      (println (str "  check-binary-reproducible: two clean builds byte-identical OK")))
+    ;; Cross-machine proxy: no builder-specific absolute path embedded.
+    (let [home (or (getenv "HOME") "")
+          cwd  (str/trim (str (:out (sh "pwd"))))
+          embedded (for [p [cwd home]
+                         :when (not (str/blank? p))
+                         :let [n (str/trim (str (:out (sh "grep" "-c" "-a" "-F"
+                                                          p bin))))]
+                         :when (not (contains? #{"" "0"} n))]
+                     [p n])]
+      (when (seq embedded)
+        (throw (ex-info (str "check-binary-reproducible: builder-specific paths "
+                             "embedded in " bin " (breaks cross-machine "
+                             "reproducibility; --strip-debug regressed?): "
+                             (pr-str embedded))
+                        {:embedded embedded})))
+      (println (str "  check-binary-reproducible: no builder-specific paths "
+                    "embedded OK")))))
 
 (defn build-all
   "Developer convenience: from any host, build mino for every target in

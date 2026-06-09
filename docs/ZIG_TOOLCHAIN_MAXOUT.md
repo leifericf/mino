@@ -31,19 +31,35 @@ binfmt makes execution transparent, including the suite's subprocess re-execs.
   first** (`continue-on-error`), promoted to gating after a green streak — the
   same playbook as `darwin-zig-canary` / `jit-host-canary`.
 
-## 2. Whole-binary reproducible build gate  — *supply-chain trust, low risk*
+## 2. Whole-binary reproducible build gate  — *supply-chain trust* — SHIPPED
 
-**Gap:** determinism today stops at the committed stencil bytes
-(`check-stencils-fresh-all`). The shipped `mino` is not verified byte-identical
-build-to-build.
+**Gap:** determinism stopped at the committed stencil bytes
+(`check-stencils-fresh-all`). The shipped binaries were **not** reproducible:
+each published `linux-*-musl` artifact embedded ~470 references to the builder's
+absolute paths (zig install dir, cache hash, cwd), so two machines produced
+different bytes.
 
-**Mechanism:** `-ffile-prefix-map=$PWD=.` / `-fdebug-prefix-map`, a pinned
-`SOURCE_DATE_EPOCH`, and deterministic `zig ar`; build twice from clean and
-assert identical `sha256`. Lifts the stencil-determinism discipline to the final
-artifact.
+**Root cause (not what the original plan guessed):** the paths are **not** from
+`__DATE__`/`__FILE__` or our compile dir — they live in the **DWARF** carried by
+zig's bundled `libunwind` / `compiler_rt` objects, which `-ffile-prefix-map`
+cannot reach (those objects are compiled by zig, not through our `cc` flags). So
+prefix-map / `SOURCE_DATE_EPOCH` / `zig ar` were all no-ops here.
 
-- Task: `check-binary-reproducible`.
-- CI: a single-host pinned-zig job (like `stencil-determinism`).
+**Fix:** `-Wl,--strip-debug` on the ELF (Linux) cross targets in
+`cross-build-one`. It's the only cross-arch, single-host option — host binutils
+`strip` can't read a foreign-arch ELF, and `zig objcopy --strip-debug` is
+unimplemented in 0.16. lld drops `.debug_*` **and** `.symtab` for this static
+link, giving a fully stripped, smaller, reproducible artifact. Symbols aren't
+lost for good: the build is now reproducible, so a symbolised twin is recovered
+by rebuilding *without* the flag (identical `.text`, addresses align for
+`addr2line`). The Windows PE keeps its paths for now (COFF linker rejects the
+GNU flag) — a follow-up.
+
+- Task: `check-binary-reproducible` — builds `linux-amd64-musl` twice, asserts
+  byte-identical **and** no embedded `$PWD`/`$HOME` (a host-independent
+  cross-machine-reproducibility proxy).
+- CI: `binary-reproducible`, a single-host pinned-zig job (like
+  `stencil-determinism`).
 
 ## 3. PGO release build  — *performance, gated on parity*
 

@@ -300,6 +300,34 @@ jobs:
         run: ./mino task test-zig
         timeout-minutes: 15
 
+  binary-reproducible:
+    name: binary-reproducible (pinned zig, byte-identical artifact)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Reproducible-artifact gate (pinned zig cc)
+        # Builds the published linux-amd64-musl artifact twice and asserts
+        # it is byte-identical and embeds no builder-specific absolute path
+        # ($PWD / $HOME) -- the property that lets a third party rebuild the
+        # exact published bytes from the pinned toolchain + source. Like
+        # stencil-determinism, this is single-host on purpose: it asserts a
+        # property of one build environment, never compares across images.
+        run: ./mino task check-binary-reproducible
+        timeout-minutes: 15
+
   darwin-zig-canary:
     name: darwin-zig-canary (native zig cc, informational)
     runs-on: macos-14

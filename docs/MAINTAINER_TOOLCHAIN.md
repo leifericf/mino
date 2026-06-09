@@ -136,6 +136,22 @@ published artifacts and the portability canary (gcc + Apple Clang + mingw).
   cross-build && ./mino task test-cross-qemu`. The forward roadmap for this
   and the other toolchain-axis items lives in `docs/ZIG_TOOLCHAIN_MAXOUT.md`.
 
+- `./mino task check-binary-reproducible` — gate that the published
+  `linux-amd64-musl` artifact is reproducible: built twice from clean it must
+  be **byte-identical**, and it must embed **no builder-specific absolute
+  path** (`$PWD` / `$HOME`) — a host-independent proxy for cross-machine
+  reproducibility. The published binaries otherwise embed ~470 references to
+  the builder's paths, carried in the **DWARF** of zig's bundled
+  `libunwind`/`compiler_rt` objects (which `-ffile-prefix-map` can't reach).
+  `cross-build-one` strips them with `-Wl,--strip-debug` on the ELF targets —
+  the only cross-arch, single-host fix (host binutils `strip` can't read a
+  foreign-arch ELF; `zig objcopy --strip-debug` is unimplemented in 0.16).
+  That fully strips the static link (`.debug_*` and `.symtab`), so the
+  artifacts are smaller too; a symbolised twin for `addr2line` is recovered by
+  rebuilding without the flag, since the build is now reproducible. Runs in CI
+  as the single-host `binary-reproducible` job. The Windows PE is not yet
+  covered (its COFF linker rejects the GNU flag).
+
 ## Sanitizers and the JIT: instrumentation boundary
 
 Every sanitizer build (host ASan in `release-gate`, pinned-zig UBSan + TSan in
