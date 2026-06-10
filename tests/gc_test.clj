@@ -76,3 +76,23 @@
     (aset arr 0 (assoc {} :marker 12345))
     (dotimes [_ 4] (gc!))   ; minor cycles after the OLD->YOUNG write
     (is (= 12345 (get (nth arr 0) :marker)))))
+
+(deftest string-construction-under-nursery-pressure
+  ;; mino_string_n allocates the raw data buffer (dup_n) before the
+  ;; MINO_STRING val cell (alloc_val). If alloc_val triggers a minor GC
+  ;; and the data pointer is kept only in a register (not spilled to
+  ;; the C stack), the conservative scanner misses it and frees the
+  ;; buffer -- the string cell then holds a dangling pointer.
+  ;;
+  ;; Without gc_depth++ protection this is reliably caught by ASAN and
+  ;; by MINO_GC_STRESS=1 (which collects on every allocation). The loop
+  ;; below creates enough strings to overflow the nursery many times,
+  ;; verifying that content is preserved across all the GC cycles.
+  (let [n 8000
+        result (loop [i 0 acc []]
+                 (if (= i n)
+                   acc
+                   (recur (inc i) (conj acc (str "gc-str-" i)))))]
+    (is (= n (count result)))
+    (dotimes [i n]
+      (is (= (str "gc-str-" i) (nth result i))))))

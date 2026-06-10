@@ -105,13 +105,24 @@ mino_val *mino_char(mino_state *S, int codepoint)
 
 mino_val *mino_string_n(mino_state *S, const char *s, size_t len)
 {
+    mino_val *v;
     /* Allocate the data buffer first so alloc_val runs last; if a
      * minor collection fires between the two allocations, v is the
-     * younger of the two and the store is a safe YOUNG->anything. */
-    char       *data = dup_n(S, s, len);
-    mino_val *v    = alloc_val(S, MINO_STRING);
-    v->as.s.data = data;
-    v->as.s.len  = len;
+     * younger of the two and the store is a safe YOUNG->anything.
+     *
+     * Suppress collection across the alloc pair: data is GC-allocated
+     * by dup_n but not yet referenced from a rooted val, and the
+     * conservative stack scan can miss the local `data` pointer when
+     * the optimizer keeps it only in a register (not spilled to the
+     * C stack). Matches the gc_depth guard in intern_lookup_or_create. */
+    mino_current_ctx(S)->gc_depth++;
+    {
+        char *data = dup_n(S, s, len);
+        v = alloc_val(S, MINO_STRING);
+        v->as.s.data = data;
+        v->as.s.len  = len;
+    }
+    mino_current_ctx(S)->gc_depth--;
     return v;
 }
 
