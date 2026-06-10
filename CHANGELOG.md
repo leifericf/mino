@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.423.5 — Security Fixes
+
+- `(format "%Nd" n)` and `(format "%Nf" n)` with a field width or
+  precision larger than the internal stack buffer (64 bytes for
+  integers, 128 bytes for floats) now produce the correct padded
+  string without reading past the buffer. Previously `snprintf`'s
+  return value (the would-be length) was passed directly to `memcpy`
+  as the source size, copying stack memory into the returned string.
+
+- `mino_string_n` now holds a `gc_depth` guard across the
+  `dup_n`→`alloc_val` allocation pair, matching the pattern already
+  present in `intern_lookup_or_create`. Without the guard the
+  conservative C-stack scanner could miss the raw data buffer when
+  the optimiser kept it only in a register, leaving the string cell
+  with a dangling pointer after a minor collection.
+
+- `(rm-rf path)` and `(file-seq dir)` no longer follow symbolic
+  links when classifying directory entries. The previous `stat()`
+  call followed symlinks, so a symlink-to-directory inside the
+  removal tree caused `rm-rf` to descend into the link target and
+  delete its contents. Both functions now use `lstat()` (POSIX) so
+  symlinks are unlinked directly without traversal (CWE-59).
+
 ## v0.423.4 — Windows Timing and Bigint Fixes
 
 - time-ms and nano-time no longer overflow on Windows once the
