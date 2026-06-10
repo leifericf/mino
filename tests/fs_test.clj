@@ -49,4 +49,25 @@
   (is (thrown? (mkdir-p :foo)))
   (is (thrown? (rm-rf 123))))
 
+(deftest rm-rf-does-not-follow-symlinks
+  ;; rmrf() used stat() which follows symlinks; a symlink-to-directory
+  ;; planted inside the removal tree caused rmrf to recurse through it
+  ;; and delete the *target* directory's contents (CWE-59).
+  ;; The fix changes stat() to lstat() so symlinks are unlinked directly.
+  (let [sentinel "/tmp/mino-fs-symlink-sentinel"]
+    (try (rm-rf test-dir)   (catch _ nil))
+    (try (rm-rf sentinel)   (catch _ nil))
+    (mkdir-p sentinel)
+    (spit (str sentinel "/victim.txt") "must survive")
+    (mkdir-p test-dir)
+    ;; Plant a symlink-to-dir inside the tree we are about to remove.
+    (sh! "ln" "-s" sentinel (str test-dir "/evil-link"))
+    ;; rm-rf must remove test-dir (including the symlink) but must NOT
+    ;; descend through the symlink into sentinel.
+    (try (rm-rf test-dir) (catch _ nil))
+    (is (file-exists? (str sentinel "/victim.txt"))
+        "victim file inside symlink target was deleted")
+    (try (rm-rf test-dir)   (catch _ nil))
+    (try (rm-rf sentinel)   (catch _ nil))))
+
 (run-tests-and-exit)

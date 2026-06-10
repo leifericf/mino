@@ -127,7 +127,7 @@ mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
 static int rmrf(const char *path)
 {
     struct stat st;
-    if (stat(path, &st) != 0) return 0; /* nothing to remove */
+    if (lstat(path, &st) != 0) return 0; /* nothing to remove */
 
     if (S_ISDIR(st.st_mode)) {
         DIR *d = opendir(path);

@@ -862,7 +862,7 @@ static void file_seq_recurse(mino_state *S, const char *dir,
         struct stat st;
         if (ent->d_name[0] == '.') continue;
         snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-        if (stat(path, &st) != 0) continue;
+        if (lstat(path, &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             file_seq_recurse(S, path, items, len, cap);
         } else {
