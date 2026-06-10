@@ -75,6 +75,13 @@
   (let [expected (apply str (concat (repeat 79 \space) [\1]))]
     (is (= expected (format "%80d" 1)))))
 
+(deftest format-wide-float-no-stack-bleed
+  ;; Width > 128 (the float branch stack-buffer size) triggered the same
+  ;; snprintf-return-value oob_read: memcpy used the would-be length,
+  ;; reading past the 128-byte stack buffer.
+  (let [expected (apply str (concat (repeat 192 \space) (seq "1.500000")))]
+    (is (= expected (format "%200f" 1.5)))))
+
 (deftest pr-str-fn
   (is (= "42" (pr-str 42)))
   (is (= "\"hi\"" (pr-str "hi")))
