@@ -68,6 +68,13 @@
   (is (= "100%" (format "100%%")))
   (is (= "key: :hello" (format "key: %s" :hello))))
 
+(deftest format-wide-integer-no-stack-bleed
+  ;; Width > 64 (the stack-buffer size in the integer branch) triggered an
+  ;; snprintf-return-value oob_read: memcpy used the would-be length, not
+  ;; the truncated length, reading past the 64-byte stack buffer.
+  (let [expected (apply str (concat (repeat 79 \space) [\1]))]
+    (is (= expected (format "%80d" 1)))))
+
 (deftest pr-str-fn
   (is (= "42" (pr-str 42)))
   (is (= "\"hi\"" (pr-str "hi")))

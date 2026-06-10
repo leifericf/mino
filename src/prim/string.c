@@ -167,10 +167,22 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 directive[di++] = spec;
                 directive[di]   = '\0';
                 tn = snprintf(tmp, sizeof(tmp), directive, n2);
-                buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
-                if (buf == NULL) return NULL;
-                memcpy(buf + len, tmp, (size_t)tn);
-                len += (size_t)tn;
+                if (tn < 0) { free(buf); return NULL; }
+                {
+                    char *fsrc = tmp;
+                    char *fhtmp = NULL;
+                    if ((size_t)tn >= sizeof(tmp)) {
+                        fhtmp = (char *)malloc((size_t)tn + 1);
+                        if (fhtmp == NULL) { free(buf); return NULL; }
+                        snprintf(fhtmp, (size_t)tn + 1, directive, n2);
+                        fsrc = fhtmp;
+                    }
+                    buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
+                    if (buf == NULL) { free(fhtmp); return NULL; }
+                    memcpy(buf + len, fsrc, (size_t)tn);
+                    free(fhtmp);
+                    len += (size_t)tn;
+                }
             } else if (spec == 'f' || spec == 'e' || spec == 'g') {
                 double d;
                 char tmp[128];
