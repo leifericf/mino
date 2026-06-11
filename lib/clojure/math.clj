@@ -168,3 +168,9 @@
 
 (defn IEEE-remainder "Returns the IEEE 754 remainder of a/b." [a b]
   (math-ieee-remainder a b))
+
+(defn random
+  "Returns a positive double between 0.0 (inclusive) and 1.0 (exclusive),
+   chosen pseudorandomly with approximately uniform distribution."
+  []
+  (rand))
