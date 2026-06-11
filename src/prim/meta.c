@@ -30,8 +30,8 @@ static int supports_meta(mino_type t)
  * alter-meta! does an in-place mutation of obj->meta rather than
  * copying the cell, so it stays safe for identity-tied values, and
  * (meta x) is read-only. (meta var) additionally synthesizes a
- * fresh map of {:ns :name :private :dynamic} from the var fields
- * when obj->meta is NULL. */
+ * fresh map of {:ns :name :private :dynamic :macro} from the var
+ * fields when obj->meta is NULL. */
 static int meta_readable(mino_type t)
 {
     return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT
@@ -73,8 +73,8 @@ static mino_val *synth_cons_meta(mino_state *S, const mino_val *cell)
  * stability on var meta). */
 static mino_val *synth_var_meta(mino_state *S, mino_val *var)
 {
-    mino_val *keys[4];
-    mino_val *vals[4];
+    mino_val *keys[5];
+    mino_val *vals[5];
     size_t      n = 0;
     keys[n] = mino_keyword(S, "ns");
     vals[n] = var->as.var.ns != NULL
@@ -93,6 +93,17 @@ static mino_val *synth_var_meta(mino_state *S, mino_val *var)
     }
     if (var->as.var.dynamic) {
         keys[n] = mino_keyword(S, "dynamic");
+        vals[n] = mino_true(S);
+        n++;
+    }
+    /* :macro is derived from the root value's type rather than a
+     * stored flag, so it stays truthful when a var is re-def'd from
+     * macro to fn (or back) and needs no stamping at definition
+     * time. Covers boot-time core macros, bundled-lib macros, and
+     * runtime defmacro through the one synthesis path. */
+    if (var->as.var.bound && var->as.var.root != NULL
+        && mino_type_of(var->as.var.root) == MINO_MACRO) {
+        keys[n] = mino_keyword(S, "macro");
         vals[n] = mino_true(S);
         n++;
     }
