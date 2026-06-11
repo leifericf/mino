@@ -12,12 +12,16 @@ src/
 ├── core_mino.h                    # generated from core.clj
 │
 ├── public/                        # host-facing C API
-├── runtime/                       # state, env, vars, errors, modules (+ internal.h)
+├── runtime/                       # state, env, vars, errors, modules, capabilities (+ internal.h)
 ├── gc/                            # generational + incremental collector (+ internal.h)
 ├── eval/                          # evaluator + reader + printer (+ internal.h)
-├── collections/                   # val, vec, map, rbtree, transient, clone (+ internal.h)
+├── eval/bc/                       # bytecode compiler + register VM (+ internal.h)
+├── eval/bc/jit/                   # copy-and-patch JIT: emit, patcher, helpers (+ internal.h)
+├── eval/bc/stencils/              # JIT stencil sources + committed generated/ byte headers
+├── values/                        # tagged value layout, constructors, interning (+ internal.h)
+├── collections/                   # vec, map, rbtree, transient, bytes, queue, clone (+ internal.h)
 ├── prim/                          # primitive registration tables (+ internal.h)
-├── async/                         # scheduler + timers (+ internal.h)
+├── async/                         # scheduler + timers + channels (+ internal.h)
 ├── interop/                       # host interop syntax (+ internal.h)
 ├── regex/                         # self-contained regex engine
 ├── diag/                          # diagnostic kinds + reporting (+ diag_contract.h severity classes)
@@ -42,6 +46,7 @@ src/
 | `src/gc/major.c` | Major collector state machine: `gc_major_begin`, `gc_major_step`, `gc_major_remark`, `gc_major_sweep_phase`; OLD sweep that preserves YOUNG survivors |
 | `src/gc/barrier.c` | Write barrier fast/slow path, SATB old-value push during MAJOR_MARK, remembered set (add + purge dead), singleton pointer filter |
 | `src/gc/trace.c` | GC tracing hooks for diagnostics |
+| `src/gc/profile.c` | Compile-time-gated allocation profiler (`-DMINO_ALLOC_PROFILE=1`) |
 | `src/public/gc.c` | Host-facing GC API: `mino_gc_collect` (MINOR/MAJOR/FULL), `mino_gc_set_param` (range-validated tuning knobs), `mino_gc_stats` (out-struct populate) |
 | `src/public/embed.c` | Host-facing embedding API surface |
 | `src/runtime/env.c` | Internal environment ops (`env_alloc`, `env_child`, `env_root`, `env_bind`, `env_find_here`), root-env registry, dynamic binding lookup |
@@ -50,6 +55,8 @@ src/
 | `src/runtime/ns_env.c` | Per-namespace root env table (`ns_env_lookup`, `ns_env_ensure`, `current_ns_env`, `ns_env_get_meta`, `ns_env_set_meta`, `mino_publish_current_ns`) |
 | `src/runtime/module.c` | Module/namespace machinery (`require`, save/restore of `current_ns`) |
 | `src/runtime/path_buf.c` | Bounded-buffer path helper used by the resolver |
+| `src/runtime/capabilities.c` | Data-driven capability install (`mino_install` + `MINO_CAP_*` tiers) |
+| `src/runtime/host_threads.c` | pthread/Win32 worker threads for futures + promises |
 
 ## Primitives
 
@@ -57,10 +64,17 @@ src/
 |------|----------------|
 | `src/prim/prim.c` | Shared helpers (`prim_throw_classified`, `prim_throw_error`, `args_have_float`, `as_double`, `as_long`, `print_to_string`) |
 | `src/prim/install.c` | `prim_install_table` helper, `install_core_mino` bootstrap, `mino_install_core` data-driven loop over `k_core_domains[]` |
-| `src/prim/numeric.c` | Arithmetic (`+`, `-`, `*`, `/`, `mod`, `rem`, `quot`), coercion (`int`, `float`), bitwise ops, math functions, comparison (`=`, `<`, `compare`, `identical?`) |
-| `src/prim/bignum.c` | Arbitrary-precision integer/ratio/decimal primitives backed by vendored imath |
-| `src/prim/collections.c` | List/vector/map/set primitives (`car`, `cdr`, `cons`, `count`, `nth`, `first`, `rest`, `assoc`, `get`, `conj`, `keys`, `vals`, `hash-set`, `contains?`, `disj`, `dissoc`, `seq`, `realized?`) |
+| `src/prim/numeric.c` | Arithmetic (`+`, `-`, `*`, `/`, `mod`, `rem`, `quot`) and comparison (`=`, `<`, `compare`, `identical?`) |
+| `src/prim/numeric_coerce.c` | Type coercions (`int`, `long`, `short`, `byte`, `char`, `float`, `double`, `parse-long`, `parse-double`); carved out of `numeric.c` |
+| `src/prim/numeric_math.c` | math.h wrappers (`floor`, `ceil`, `sqrt`, `log`, `exp`, trig, `pow`, ...); carved out of `numeric.c` |
+| `src/prim/numeric_bit.c` | Bitwise ops (`bit-and`, `bit-or`, `bit-xor`, `bit-not`, shifts); carved out of `numeric.c` |
+| `src/prim/bignum.c` | Arbitrary-precision integer primitives backed by vendored imath |
+| `src/prim/ratio.c` | `MINO_RATIO`: canonical-form fractions with bigint numerator/denominator |
+| `src/prim/bigdec.c` | `MINO_BIGDEC`: arbitrary-precision decimal arithmetic over bigint cells |
+| `src/prim/collections.c` | List/vector/map/set primitives (`car`, `cdr`, `cons`, `count`, `nth`, `first`, `rest`, `assoc`, `get`, `conj`, `keys`, `vals`, `hash-set`, `contains?`, `disj`, `dissoc`) |
+| `src/prim/collections_transient.c` | Transient primitives: thin wrappers over the kernel in `src/collections/transient.c` |
 | `src/prim/sequences.c` | Sequence operations (`reduce`, `into`, `apply`, `reverse`, `sort`, `rangev`, `mapv`, `filterv`, `reduced`, `reduced?`) |
+| `src/prim/sequences_seq.c` | `seq` / `realized?` and the seq-building helper `seq_cons_append`; carved out of `sequences.c` |
 | `src/prim/string.c` | String primitives (`str`, `pr-str`, `format`, `read-string`, `subs`, `split`, `join`, `starts-with?`, `ends-with?`, `includes?`, `upper-case`, `lower-case`, `trim`, `char-at`) |
 | `src/prim/io.c` | I/O primitives (`println`, `prn`, `slurp`, `spit`, `exit`, `time-ms`, `getenv`) |
 | `src/prim/lazy.c` | Lazy sequence primitives implemented as C thunks (`range`, `lazy-map-1`, `lazy-filter`, `lazy-take`, `drop-seq`, `doall`, `dorun`) |
@@ -68,6 +82,12 @@ src/
 | `src/prim/meta.c` | Metadata (`meta`, `with-meta`, `vary-meta`, `alter-meta!`) |
 | `src/prim/regex.c` | Regex (`re-find`, `re-matches`); returns `[whole g1 g2 ...]` vectors for grouped patterns. `re-matcher` and `re-groups` are mino-side wrappers in `src/core.clj`. |
 | `src/prim/stateful.c` | Atoms (`atom`, `deref`, `reset!`, `swap!`, `atom?`, `add-watch`, `remove-watch`, `set-validator!`, `get-validator`, `swap-vals!`, `reset-vals!`, `compare-and-set!`); dynamic-binding capture (`get-thread-bindings`, `with-bindings*`) |
+| `src/prim/agent.c` | Agents: asynchronous mutable cells with serialized actions (`send`, `send-off`) |
+| `src/prim/stm.c` | Software transactional memory: refs and `dosync` |
+| `src/prim/bits.c` | Bit-syntax surface over `MINO_BYTES` (`bits` constructor/matcher) |
+| `src/prim/ns.c` | Namespace and var introspection primitives (Clojure namespace API parity) |
+| `src/prim/jvm_statics.c` | JVM-Clojure surface-parity statics layer |
+| `src/prim/install_stdlib.c` | Per-namespace install hooks for the bundled `clojure.*` stdlib sources |
 | `src/prim/module.c` | Module system (`require`, `doc`, `source`, `apropos`, `mino_set_resolver`) |
 | `src/prim/fs.c` | Filesystem primitives |
 | `src/prim/proc.c` | Process / subprocess primitives |
@@ -81,6 +101,7 @@ src/
 | `src/values/layout.h` | Pointer-tagged scheme + `struct mino_val` body + opaque node typedefs |
 | `src/values/internal.h` | `intern_lookup_or_create`, `make_fn`, `hash_val`, `mino_eq_force`, `mino_mk_var` forward decls |
 | `src/values/val.c` | Value constructors, interning, hashing, equality |
+| `src/values/gc_handlers.c` | Per-tag GC tracer registration for the `GC_T_VAL` layout |
 
 ## Data Structures
 
@@ -90,6 +111,12 @@ src/
 | `src/collections/map.c` | HAMT for maps and sets |
 | `src/collections/rbtree.c` | Persistent left-leaning red-black tree for sorted maps and sets |
 | `src/collections/transient.c` | Transient kernel for vec/map/set |
+| `src/collections/queue.c` | PersistentQueue: two-list persistent FIFO |
+| `src/collections/bytes.c` | `MINO_BYTES`: immutable binary-data value |
+| `src/collections/chunk.c` | Chunked-seq support: `MINO_CHUNK` buffer + `MINO_CHUNKED_CONS` cell |
+| `src/collections/builders.c` | Embedder-friendly builders wrapping transients with explicit names |
+| `src/collections/iter.c` | Unified C-side iterator over mino collections (`seq_iter_t` backing) |
+| `src/collections/gc_handlers.c` | Per-tag GC tracer registration for collection-owned layouts |
 
 ## Reader/Printer/Regex
 
@@ -115,7 +142,24 @@ and a four-primitive bridge.
 |------|----------------|
 | `src/async/scheduler.c` | Scheduler run queue and drain loop |
 | `src/async/timer.c` | Deadline priority queue; enqueues callbacks on expiry |
+| `src/async/chan.c` | `clojure.core.async` channel primitive implementation |
 | `src/prim/async.c` | Bridge primitives: `async-sched-enqueue*`, `async-schedule-timer*`, `drain!`, `drain-loop!` |
+
+## Bytecode VM + JIT
+
+| File | Responsibility |
+|------|----------------|
+| `src/eval/bc/compile.c` | AST-to-bytecode compiler |
+| `src/eval/bc/vm.c` | Register-based bytecode VM dispatch |
+| `src/eval/bc/gc_handlers.c` | Per-tag GC tracer registration for bc-owned layouts |
+| `src/eval/bc/internal.h` | Bytecode VM internals (opcodes, frames, compile state) |
+| `src/eval/bc/jit.h` / `state.h` | JIT entry surface and per-state JIT fields |
+| `src/eval/bc/jit/emit.c` | Copy-and-patch code emission from stencil byte tables |
+| `src/eval/bc/jit/patcher.c` / `patcher_x86_64.c` | Relocation patching per architecture |
+| `src/eval/bc/jit/helpers.c` | C helpers called from emitted code |
+| `src/eval/bc/jit/entry.c` | JIT entry/exit, safepoints, deopt; per-target opt-in gates |
+| `src/eval/bc/jit/stats.c` | Tracing/blocker statistics |
+| `src/eval/bc/stencils/` | Stencil sources (`*.c`) + committed `generated/stencils_<arch>_<os>.h` byte headers (see `docs/MAINTAINER_TOOLCHAIN.md`) |
 
 ## Diagnostics
 

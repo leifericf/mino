@@ -30,8 +30,9 @@ mino is an embeddable runtime. The host drives everything.
 
 - The host creates and owns `mino_state`. No global or ambient state exists.
 - The host creates environments (`mino_env`) and chooses which primitives
-  to install. `mino_install_core` provides the language; `mino_install_io`
-  is opt-in.
+  to install. `mino_install(S, env, caps)` takes a `MINO_CAP_*` capability
+  bitmask; `mino_install_minimal` / `mino_install_sandbox` /
+  `mino_install_all` are the convenience tiers.
 - The host drives evaluation by calling `mino_eval`, `mino_eval_string`,
   `mino_call`, or `mino_repl_feed`. No background threads are started by the
   runtime.
@@ -161,11 +162,15 @@ environment bindings:
 
     quote  quasiquote  unquote  unquote-splicing
     def  defmacro  declare
-    if  do  let  let*  fn  fn*
+    if  do  let  let*  letfn*  fn  fn*
     loop  loop*  recur
-    try  catch  finally
+    try
     binding  lazy-seq
     ns  var
+
+`catch` and `finally` are not special forms themselves: they are clauses
+recognized inside `try` (`partition_try_clauses` in `src/eval/control.c`),
+not entries in the registry.
 
 `when`, `and`, and `or` are macros defined in `core.clj` and ALSO have
 fast-path entries in the special-form registry — the evaluator inlines
