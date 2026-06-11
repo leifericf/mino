@@ -96,3 +96,24 @@
     (is (= n (count result)))
     (dotimes [i n]
       (is (= (str "gc-str-" i) (nth result i))))))
+
+;; Regression: fn.wraps_prim (a GC-owned MINO_PRIM pointer) was not
+;; pushed in the MINO_FN/MINO_MACRO GC walker.  A wrapper closure
+;; surviving into OLD generation could have its target primitive freed
+;; by a major sweep, causing a use-after-free in the fast-lane dispatch.
+;;
+;; MINO_GC_STRESS=1 triggers this reliably before the fix.
+(deftest wraps-prim-gc-traced
+  ;; A single-arg wrapper closure -- compile recognises these and sets
+  ;; wraps_prim to the underlying primitive for the fast lane.
+  (let [my-inc (fn [x] (inc x))
+        my-neg (fn [x] (- x))]
+    ;; Warm up both closures so wraps_prim is stamped.
+    (is (= 1 (my-inc 0)))
+    (is (= -1 (my-neg 1)))
+    ;; Allocate aggressively to force GC cycles; under GC stress every
+    ;; alloc collects.  The target primitives must survive.
+    (dotimes [_ 2000]
+      (vec (range 50)))
+    (is (= 43 (my-inc 42)))
+    (is (= -7 (my-neg 7)))))

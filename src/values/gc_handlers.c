@@ -66,6 +66,7 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
         PUSH(v->as.fn.params);
         PUSH(v->as.fn.body);
         PUSH(v->as.fn.env);
+        PUSH(v->as.fn.wraps_prim);
         PUSH(v->as.fn.template_fn);
         /* The bc record under fn.bc holds its own GC-owned buffers
          * (code / consts / clauses / ic_slots). eval/bc/ owns the
