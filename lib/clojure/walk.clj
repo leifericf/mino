@@ -27,3 +27,14 @@
 
 (defn macroexpand-all [form]
   (prewalk (fn [x] (if (seq? x) (macroexpand x) x)) form))
+
+;; Demonstration walkers: visit every sub-form in traversal order,
+;; printing "Walked: <form>" per visit, and return the walked form
+;; unchanged. Useful at the REPL for seeing how postwalk and prewalk
+;; order their visits.
+
+(defn postwalk-demo [form]
+  (postwalk (fn [x] (print "Walked: ") (prn x) x) form))
+
+(defn prewalk-demo [form]
+  (prewalk (fn [x] (print "Walked: ") (prn x) x) form))
