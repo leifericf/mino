@@ -33,8 +33,11 @@ skill-system changes. Those live in commit messages. An empty
   behavior/cause follows only if it earns its space.
 - 1–5 lines once wrapped; mechanism detail beyond that belongs in the
   commit body or an ADR.
-- Reference the finding id in parentheses when the entry came from an
-  audit round.
+- The changelog talks only about the changes themselves: never
+  reference plan or cycle names, round/phase numbers, finding or task
+  IDs, or `.local/` working files. (A tool's documented output path
+  is feature behavior and is fine.) That provenance lives in commits,
+  run dirs, and ADRs.
 
 ## Cutting a release
 

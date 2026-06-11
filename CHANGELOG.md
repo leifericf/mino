@@ -2,12 +2,12 @@
 
 ## Unreleased
 
-- GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker (memory-values-003)
-- GC: Guard float/double fill pointer across alloc_val in mino_host_array_new (memory-values-002)
-- GC: Guard fields_vec pointer across alloc_val in mino_defrecord (memory-values-001)
-- Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n (security-values-001, security-values-002)
-- Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n (security-values-003, security-values-004)
-- Security: Add size_t overflow guards in intern table entries-array and ht doubling (security-values-005, security-values-006)
+- GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker
+- GC: Guard float/double fill pointer across alloc_val in mino_host_array_new
+- GC: Guard fields_vec pointer across alloc_val in mino_defrecord
+- Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
+- Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
+- Security: Add size_t overflow guards in intern table entries-array and ht doubling
 - Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
 
 ## v0.423.5 — Security Fixes
@@ -240,7 +240,7 @@
   series (lazy-seq ns scoping, print dynvars, math-context rounding, JVM
   statics, inst/bytes/bit-syntax, AOT dynvars).
 
-## v0.419.0 — Bit-Syntax Cycle Close
+## v0.419.0 — Bit-Syntax Documentation
 
 - Docs: mino-site adds "Bytes and Bit Syntax" page; mino-examples adds
   IPv4 header decoder and chess bitboard use-cases.
@@ -319,9 +319,9 @@
   namespace, not the realizer's; `MINO_LAZY` stores a `const char *` ns slot
   set at construction across tree-walker, bytecode, and JIT paths.
 
-## v0.408.0 — Close-the-Gaps Cycle Banner
+## v0.408.0 — Canon-Parity Summary
 
-- Stdlib: Banner tag summarizing canon-parity work across v0.401–v0.407:
+- Stdlib: canon-parity summary for v0.401–v0.407:
   strict arity, `thrown-with-msg?`, `*print-length*`/`*print-level*`, `pcalls`
   / `pvalues` / `alt!`, `hash-combine` / `*math-context*` / `unchecked-long`,
   `test.check` rose-tree shrinking, parallel `r/fold`.
@@ -538,9 +538,9 @@
   edge across multiple minor cycles, preventing a YOUNG child from being freed
   while the parent slot still points to it (was a Heisenbug under tight nursery).
 
-## v0.388.0 — Embedder UX: Cycle Close
+## v0.388.0 — Embedder UX Roundup
 
-- API: Cycle close for v0.382–v0.387: dead `mino_install_core` references
+- API: roundup for v0.382–v0.387: dead `mino_install_core` references
   removed, 19 public typedefs dropped `_t` suffix, amalgamation distribution
   added, predicate/extractor grid complete, Clojure-canon C surface added,
   bulk `mino_register_fns` added, throw-payload preservation fixed at 3 sites.
@@ -565,7 +565,7 @@
   non-transferable type instead of a generic list.
 - API: `'M'` specifier in `mino_args_parse` now matches both `MINO_MAP`
   and `MINO_SORTED_MAP`.
-- Tests: `embed_api_test` Phase 6 block covers all new additions.
+- Tests: `embed_api_test` covers all new additions.
 
 ## v0.386.0 — Embedder UX: Clojure-Canon C Surface
 
@@ -579,7 +579,7 @@
   `(binding [...] ...)`; frame is cleared on script-side throw.
 - API: add `mino_can_clone(v, out_reason)` transferability pre-flight
   that names the first non-transferable type without copying.
-- Tests: `embed_api_test` Phase 5 block covers all new entry points.
+- Tests: `embed_api_test` covers all new entry points.
 
 ## v0.385.0 — Embedder UX: Predicate / Extractor Grid
 
@@ -656,7 +656,7 @@
 - Compiler: extract `vec_destructure_args` from `bind_vec_destructure`;
   shrinks from 193 to 80 lines.
 
-## v0.380.0 — Architecture Cycle 6c: Splits in numeric / collections / sequences
+## v0.380.0 — Splits in numeric / collections / sequences
 
 - Build: extract `numeric_math.c` (203 lines), `numeric_bit.c` (150),
   `numeric_coerce.c` (310) from `prim/numeric.c`; file shrinks from
@@ -666,7 +666,7 @@
 - Build: extract `sequences_seq.c` (255 lines) from `prim/sequences.c`;
   file shrinks from 3499 to 3257 lines.
 
-## v0.379.0 — Architecture Cycle 4c: Complete mino_state Decomposition
+## v0.379.0 — Complete mino_state Decomposition
 
 - Build: extract all remaining `mino_state` field clusters into ten
   named sub-structs embedded at byte-stable positions; JIT-pinned
@@ -675,14 +675,14 @@
 - Build: migrate ~600 field-access sites to nested paths
   (e.g. `S->gc_x` → `S->gc.x`, `S->ic_gen` → `S->ns_vars.ic_gen`).
 
-## v0.378.0 — Architecture Cycle 6b: Real Mega-prim Splits
+## v0.378.0 — Mega-prim Splits
 
 - Build: extract `prim/ratio.c` (510 lines) and `prim/bigdec.c` (625
   lines) from `prim/bignum.c`; bignum.c shrinks from 1797 to 702 lines.
 - Build: introduce `prim/bignum_shared.h` for shared bigint helpers
   used by all three files.
 
-## v0.377.0 — Architecture Cycle 4b: Real mino_state Decomposition
+## v0.377.0 — mino_state Decomposition
 
 - Build: extract `gc_state_t` (`src/gc/state.h`, ~40 fields),
   `stm_subsystem_t` (`src/prim/stm_state.h`, 3 fields), and
@@ -691,29 +691,26 @@
 - Build: migrate ~341 field-access sites to nested paths
   (`S->gc_x` → `S->gc.x`, etc.); JIT offset asserts still pass.
 
-## v0.376.0 — Architecture Cycle 7: Cleanup + Graph Audit
+## v0.376.0 — Cleanup + Graph Audit
 
 - Build: delete stale `.d` dependency files for removed sources.
 - Build: cross-component import edges down to 49 (from 117 at v0.369.0)
-  after the seven-cycle refactor; 43 components in the noumenon graph.
+  after the refactor series; 43 components in the noumenon graph.
 
-## v0.375.0 — Architecture Cycle 6 (Audit, Splits Deferred)
+## v0.375.0 — Mega-prim Audit, Splits Deferred
 
-- Build: audit four mega `prim/` files; splits deferred with per-file
-  sub-domain breakdown and extraction order in
-  `.local/cycle-6-followups.md`.
+- Build: audit four mega `prim/` files; splits deferred with a
+  per-file sub-domain breakdown and extraction order.
 
 ## v0.374.0 — mino.h Audited for Embedder Fit
 
 - API: demote `mino_sampler_dump` and `mino_alloc_sampler_dump` from
   `mino.h` to `mino_internal.h`; public header stays single-file.
 
-## v0.373.0 — Architecture Cycle 4 (Scope-Reduced)
+## v0.373.0 — gc_state_t Type Alias
 
 - Build: introduce `src/gc/state.h` declaring `gc_state_t` as a type
   alias for the GC subsection of `mino_state`; no byte layout change.
-- Docs: capture remaining `mino_state` decomposition work with
-  constraints and verification checklist in `.local/cycle-4-followups.md`.
 
 ## v0.372.0 — gc/collections Coupling Broken
 
@@ -739,7 +736,7 @@
   117 to a first batch of four dropped edges in initial consumer
   switches.
 
-## v0.369.0 — Perf cycle G close
+## v0.369.0 — Write Barrier + JIT Slab Packing
 
 - GC: drop SATB push from write barrier; grow major remark with full
   `gc_mark_roots` re-walk replacing snapshot-at-begin invariant with
@@ -804,10 +801,10 @@
 - GC: `gc_remset_reset` re-adds each OLD bc-regs buffer to the remset
   after every clear, closing a remset-miss flagged by `MINO_GC_VERIFY=1`.
 
-## v0.362.0 — Perf cycle F close (SATB drop deferred)
+## v0.362.0 — SATB Restored; Faster JIT Loops
 
 - GC: restore SATB push to pre-prototype shape after OLD-VALARR remset
-  miss was found; SATB drop deferred to follow-on cycle.
+  miss was found; SATB drop deferred.
 - Performance: `(+ acc i)` accumulator loops 1.77–1.78x faster under JIT;
   `deref` path -6.3% from C-prim inlining; adaptive pause-budget
   controller added.
@@ -827,25 +824,23 @@
 ## v0.359.0 — Major-mark root pruning deferred (soundness gate)
 
 - GC: defer MAJOR_MARK intern-walk skip; intern table is the canonical
-  root for interned names; safe skip requires a weak-ref intern table
-  (scheduled for a future cycle).
+  root for interned names; safe skip requires a weak-ref intern table.
 
 ## v0.358.0 — Anonymous-fn bc dedup deferred (diagnostic logged)
 
 - Compiler: defer anonymous-fn bc dedup; root cause identified as
   per-closure recompile from stale `ic_gen` check firing on closures
-  rather than their shared template; fix path documented for follow-on
-  cycle.
+  rather than their shared template; fix path documented.
 
 ## v0.357.0 — JIT per-fn slot invalidate (folded into v0.356 deferral)
 
-- JIT: per-fn slot invalidate deferred together with v0.356 JIT slab
-  pool as a combined follow-on cycle.
+- JIT: per-fn slot invalidate deferred together with the v0.356 JIT
+  slab pool.
 
 ## v0.356.0 — JIT region sub-allocator deferred
 
-- JIT: defer slab pool sub-allocator; 94–99% per-page waste documented
-  as next-cycle entry point; W^X page management and per-fn invalidate
+- JIT: defer slab pool sub-allocator; 94–99% per-page waste documented;
+  W^X page management and per-fn invalidate
   complexity exceed single-release scope.
 
 ## v0.355.0 — Fold delay realisation into C prim_deref
@@ -879,19 +874,16 @@
   copy-and-patch stencils for forward/reverse counter + register-step
   accumulator loops; 1.77x speedup on 100k-iter `(+ acc i)` loop.
 
-## v0.350.0 — Perf cycle E close
+## v0.350.0 — GC Instrumentation Complete
 
-- Performance: 16-tag instrumentation cycle closed; all planned surfaces
-  landed; GC phase-timer sum tracks `total-gc-ns` within 1–3%.
-- Performance: top next-cycle levers identified: JIT region sub-allocator
-  (94–99% per-page waste), loop matcher extension, pipeline alloc audit.
+- GC: 16-tag instrumentation complete; phase-timer sum tracks
+  `total-gc-ns` within 1–3%.
 
 ## v0.349.0 — Synthesis dashboard
 
-- Performance: synthesis dashboard at `.local/instrumentation-dashboard.md`
-  ranks levers by measurement: JIT region waste is biggest (94–99%
-  per-page); promotion-age tuning and SATB-only barrier work have zero
-  corpus headroom.
+- Performance: measurement synthesis ranks JIT region waste (94–99%
+  per-page) as the dominant lever; promotion-age tuning and SATB-only
+  barrier work have zero corpus headroom.
 
 ## v0.348.2 — Allocation-site sampler (env-gated light)
 
@@ -977,9 +969,10 @@
 - API: surface as `:minor-mark-ns`, `:minor-sweep-ns`, `:major-mark-ns`,
   `:major-sweep-ns`, `:root-scan-ns` in `(gc-stats)`.
 
-## v0.344.0 — Perf cycle close
+## v0.344.0 — Measurement Notes
 
-- Docs: close v0.340–v0.343 perf cycle; no production code change.
+- Docs: performance measurement notes for v0.340–v0.343; no production
+  code change.
 
 ## v0.343.0 — GC discovery, no production change
 
@@ -1002,10 +995,10 @@
   `(+ 1 counter)` as inc-equivalent step shapes, enabling loop fusion
   for those forms.
 
-## v0.339.0 — Perf cycle close
+## v0.339.0 — Measurement Notes
 
-- Docs: close v0.330–v0.338 perf cycle; forward stencil hooks deferred
-  (workload corpus shows 0% `OK_WITH_DEOPT` fns).
+- Docs: forward stencil hooks deferred; workload corpus shows 0%
+  `OK_WITH_DEOPT` fns.
 
 ## v0.338.0 — Bigram discovery instrumentation, no fusions shipped
 
@@ -1063,9 +1056,9 @@
   rewritten at compile time to a transient-wrapped equivalent, cutting
   bump-5k alloc ~10% and GC collections ~22%.
 
-## v0.329.0 — Map / collection wins cycle close
+## v0.329.0 — Map / Collection Results
 
-- Docs: close v0.327–v0.329 cycle; net win is nested-vec row −29% (JIT
+- Performance: net result for v0.327–v0.329: nested-vec row −29% (JIT
   off and on); alloc-bound rows within noise.
 
 ## v0.328.0 — Transient fast path in `into` for vectors
@@ -1080,9 +1073,9 @@
   `get`/`nth`/`count`/`get-in` reads on acc in step args; bump-loop
   5k map −45%.
 
-## v0.326.0 — Interpreter-foundations cycle close
+## v0.326.0 — Interpreter Results
 
-- Docs: close v0.324–v0.326 cycle; headline win is realize-10k-lazy
+- Performance: headline win for v0.324–v0.326 is realize-10k-lazy
   ~1000x from chunked take/drop; recur move-coalescing −11 to −14%
   on interpreter-bound loops.
 
@@ -1098,10 +1091,10 @@
   when no later recur arg reads it, eliminating one `OP_MOVE` per
   independent binding; interpreter recur loops −11–14%.
 
-## v0.323.0 — Post-JIT-2 cycle close
+## v0.323.0 — Side-Exit + Eligibility Results
 
-- Docs: close v0.317–v0.323 sub-cycle; side-exit deopt stencil shipped,
-  JIT loop cancellability added, real-workload eligibility at 100% OK.
+- JIT: side-exit deopt stencil shipped, loop cancellability added,
+  real-workload eligibility at 100% OK across v0.317–v0.323.
 
 ## v0.322.0 — Control-flow stencil measurement decision
 
@@ -1144,11 +1137,11 @@
   `bc_run_dispatch_from`, enabling future resume-at-arbitrary-PC entry
   for the JIT deopt path; no behavior change.
 
-## v0.316.0 — JIT-2 cycle close
+## v0.316.0 — Tiering + Loop Results
 
-- Docs: close 12-release JIT-2 cycle; headline movers: `OP_LOOP_INT_LT`
-  re-enabled (−35% JIT-on), adaptive tiering shipped, real-workload
-  pipeline 1.24× JIT-on/off, invalidation torture suite green.
+- JIT: headline results: `OP_LOOP_INT_LT` re-enabled (−35% JIT-on),
+  adaptive tiering shipped, real-workload pipeline 1.24× JIT-on/off,
+  invalidation torture suite green.
 
 ## v0.315.0 — Real-workload bench corpus
 
@@ -1180,10 +1173,9 @@
   `mino_apply_known_bc_fn_argv`, skipping one var-deref and one
   type-of dispatch per non-IC call.
 
-## v0.310.0 — Side-exit design scoped to a follow-up cycle
+## v0.310.0 — Side-Exit Design Deferred
 
-- Docs: full side-exit implementation deferred to a follow-up sub-cycle;
-  design captured in `.local/side-exit-design.md`.
+- JIT: full side-exit implementation deferred; design document captured.
 
 ## v0.309.0 — `OP_BINOP_INT` reachability audit
 
@@ -1212,10 +1204,10 @@
 - JIT: add `tracing` mode to `MINO_CPJIT_STATS`; appends bytes-blocked-
   by-op table at dump end, sorted descending by blocked bytes.
 
-## v0.304.0 — GC/alloc cycle close
+## v0.304.0 — GC/Alloc Results
 
-- Docs: close 8-release GC/alloc cycle; net wins vs v0.296: build-5k-map
-  −10%, bump-5k-map −8%, nested-vec −22%, realize-10k-lazy −45%.
+- Performance: net wins vs v0.296: build-5k-map −10%, bump-5k-map −8%,
+  nested-vec −22%, realize-10k-lazy −45%.
 
 ## v0.303.0 — Nursery default 4 MiB → 8 MiB
 
@@ -1690,14 +1682,14 @@
   dotimes, for comprehension, macro-introduced futures, and
   multi-arity self-call
 
-## v0.252.2 — Runtime Hardening from Cycle-I Whitebox Pass 2
+## v0.252.2 — Runtime Hardening from Whitebox Review
 
 - Reader: bound recursion depth at 1024 levels; deep nesting now
   returns MRE011 instead of stack-overflowing the embedder
 - VM: gate `gc_pin`/`gc_unpin` overflow asserts on sanitizer builds
   only; scripts with many case/cond arms no longer abort release builds
 
-## v0.252.1 — Developer UX Fixes from Cycle-I Whitebox Pass
+## v0.252.1 — Developer UX Fixes from Whitebox Review
 
 - Errors: reset `reader_col` at the start of each eval/load so
   line-1 errors report the correct column instead of the previous
@@ -1711,7 +1703,7 @@
 - CLI: `mino-lean --help` annotates JIT flags as compiled-out
 - CLI: `mino-lean --version` reports `mino-lean X.Y.Z (no-jit)`
 
-## v0.252.0 — JIT Feature-Complete Declaration + Cycle I Close
+## v0.252.0 — JIT Feature-Complete
 
 - JIT: declare CPJIT feature-complete on the dev host; 39 stencils
   across 5 host arches, dual-binary build, 4-way parity green
@@ -1723,19 +1715,19 @@
 - Docs: mino-site gains JIT support matrix page with on/off A/B
   numbers; fibonacci(25) shows 1.37x JIT win on the dev host
 
-## v0.250.0 — Default Nursery 1 MiB -> 4 MiB + Cycle G Close
+## v0.250.0 — Default Nursery 1 MiB -> 4 MiB
 
 - GC: bump default nursery from 1 MiB to 4 MiB; allocation-heavy
   workloads run up to 1.42x faster with ~35-60% less total GC time
 - GC: embedders can override via `MINO_GC_NURSERY_BYTES` or
   `mino_gc_set(state, MINO_GC_NURSERY_BYTES, n)`
 
-## v0.249.0 — Perf Cycle G: Measurement Baseline
+## v0.249.0 — Measurement Baseline
 
-- Performance: capture realistic_bench baseline for cycle G; four of
-  six rows are 35-43% GC time, establishing allocation as dominant cost
+- Performance: capture realistic_bench baseline; four of six rows are
+  35-43% GC time, establishing allocation as dominant cost
 
-## v0.248.0 — Nightly Matrix Workflow + Cycle F Close
+## v0.248.0 — Nightly Matrix Workflow
 
 - CI: add `ci-nightly.yml` cron workflow (04:00 UTC daily) running
   release-gate, GC stress, fault-inject, and embed stress on Linux +
@@ -1759,7 +1751,7 @@
 - Build: add `mino task ci-matrix` to build images, bind-mount repo,
   and run release-gate per target with aggregated pass/fail output
 
-## v0.244.0 — Extractor Carve-Out: coff + Synthetic-Blob Selftests + Cycle E Close
+## v0.244.0 — Extractor Carve-Out: coff + Synthetic-Blob Selftests
 
 - Toolchain: carve PE/COFF parser into `tools/stencil_extract/coff.{h,c}`
 - Toolchain: add `tools/stencil_extract/selftest.{h,c}` with synthetic
@@ -1784,7 +1776,7 @@
 - Build: `build-stencil-extract` now takes a source list; adding a
   format is a localised change
 
-## v0.240.0 — 4-Way JIT Parity (AUTO / ON / OFF / lean) + Cycle Close
+## v0.240.0 — 4-Way JIT Parity (AUTO / ON / OFF / lean)
 
 - JIT: expand parity test to assert byte-identical stdout across
   `--jit=auto`, `--jit=on`, `--jit=off`, and `mino-lean`
@@ -1865,10 +1857,9 @@
 - Toolchain: add `reloc_arm64_elf_kind_map` covering all AArch64 reloc
   kinds used by clang stencil output
 
-## v0.229.0 — JIT Stencil For OP_ASSOC + Cycle C Close
+## v0.229.0 — JIT Stencil For OP_ASSOC
 
-- JIT: add `OP_ASSOC` stencil with fast lanes for vector and map cases;
-  closes stencil coverage cycle C
+- JIT: add `OP_ASSOC` stencil with fast lanes for vector and map cases
 
 ## v0.228.0 — JIT Stencil For OP_CONJ_VEC
 
@@ -1892,11 +1883,11 @@
   indexing or first now pass JIT eligibility instead of forcing
   interpreter fallback
 
-## v0.224.0 — Perf-Pivot Cycle Close
+## v0.224.0 — apply_callable_argv Inlining Results
 
-- JIT: close apply_callable_argv inlining cycle (v0.220-v0.224);
-  architecture is in place but fib(25) 1.30x gate was not met due to
-  `mino_bc_run` setup and re-entry overhead dominating
+- JIT: apply_callable_argv inlining (v0.220-v0.224) lands the
+  architecture, but the fib(25) 1.30x target was not met; `mino_bc_run`
+  setup and re-entry overhead dominate
 
 ## v0.223.0 — PRIM_ARGV Fast Path In OP_CALL_CACHED
 
@@ -1957,10 +1948,10 @@
   `jit/entry.c`, `jit/stats.c`, `jit/helpers.c`, `jit/patcher.c`,
   `jit/emit.c`, and `jit/internal.h`; no behaviour change
 
-## v0.215.0 — CPJIT Speedup Cycle Close
+## v0.215.0 — CPJIT Speedup Results
 
-- JIT: close speedup cycle (v0.210-v0.214); fibonacci(25) reaches
-  1.19x JIT vs interpreter; other realistic_bench rows within noise
+- JIT: fibonacci(25) reaches 1.19x JIT vs interpreter (v0.210-v0.214);
+  other realistic_bench rows within noise
 - JIT: multi-ret chain patching now rewrites every `ret` in a stencil
   span, not just the first
 - JIT: publish `S->jit_invoke_ctx` so stencils read dynamic stack via
@@ -2005,16 +1996,16 @@
 - JIT: Build-time offsetof asserts in jit.c catch field-reorder
   regressions at compile time rather than stencil mis-reads at runtime.
 
-## v0.209.0 — CPJIT Coverage Cycle Close
+## v0.209.0 — CPJIT Coverage Results
 
 - JIT: CPJIT eligibility on tests/run.clj reaches 83.9% (up from
-  18.8% at cycle start); jit_bench reaches 94.9%.
+  18.8%); jit_bench reaches 94.9%.
 - JIT: jit_bench perf gate deferred — per-row deltas remain within
   run-to-run noise; gate will land alongside a measurable speedup.
 - JIT: LOOP_INT_LT direct-emit redo stays deferred; no new evidence
   justifies the work over existing fused stencils.
-- Build: ARM64 Darwin only for this cycle; Windows/x86_64/ARM64 Linux
-  portability deferred to a follow-on cycle.
+- Build: JIT builds are ARM64 Darwin only; Windows/x86_64/ARM64 Linux
+  portability deferred.
 
 ## v0.208.0 — Closure / Env Stencils
 
@@ -2067,7 +2058,7 @@
 - JIT: Baseline eligibility: 18.8% on tests/run.clj, 43.6% on
   jit_bench; top blocker is ic-slots.
 
-## v0.202.0 — CPJIT Stencil Cycle Close + Perf Measurement
+## v0.202.0 — CPJIT Stencil Coverage + Perf Measurement
 
 - JIT: OP_LOOP_INT_LT removed from active stencil table after
   measuring a 17% regression vs interpreter inline fast path.
@@ -2498,7 +2489,7 @@
 - Embedding: `mino_int` auto-promotes to `MINO_BIGINT` when
   `MINO_CAP_BIGNUM` is installed and value exceeds 61-bit tag range.
 
-## v0.150.0 — Stabilization Cycle: Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
+## v0.150.0 — Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
 
 - Security: Fix nine `realloc`-overwrite leaks in `src/prim/string.c`
   using canonical temp-pointer pattern.
@@ -2605,7 +2596,7 @@
   body; task fns are now pre-resolved via a `mapv` pass before any
   task runs.
 
-## v0.145.0 — Fusion Cycle
+## v0.145.0 — Reduce Fast Paths
 
 - Collections: `reduce` over map/set takes a direct-walk path, yielding
   `MINO_MAP_ENTRY` (single alloc) instead of a per-entry vector; 1.6× faster.
@@ -2695,9 +2686,9 @@
 - VM: `OP_LOOP_INT_DEC` miss path now raises the correct diagnostic via
   `prim_zero_p` / `prim_dec` instead of returning NULL silently.
 
-## v0.141.0 — Cycle Close: Measurement Gate
+## v0.141.0 — Measurement Gate
 
-- Performance: bytecode-VM cycle closes at 10.5× faster than v0.128.0 on
+- Performance: bytecode VM reaches 10.5× faster than v0.128.0 on
   tight-loop-10M; beats Lua 5.5 by 4.5× on that benchmark.
 
 ## v0.140.0 — Direct Compile for when / and / or
@@ -2904,7 +2895,7 @@
 
 ## v0.108.0 — Specialization Opcode Reservation
 
-- VM: eleven Phase-4 opcode enum entries reserved (`OP_GETGLOBAL_CACHED`,
+- VM: eleven specialization opcode enum entries reserved (`OP_GETGLOBAL_CACHED`,
   `OP_CALL_CACHED`, eight per-op int+int variants, `OP_GET_KW_MAP`,
   `OP_NTH_VEC`) to stabilise encoding before handlers land.
 
@@ -2924,18 +2915,17 @@
 - VM: register-based bytecode interpreter added behind the tree-walker; lazy
   per-fn compilation caches compiled programs on the fn; falls back to
   tree-walker on unsupported forms.
-- VM: 11 Phase-1 opcodes implemented: `OP_MOVE`, `OP_LOAD_K`,
+- VM: 11 core opcodes implemented: `OP_MOVE`, `OP_LOAD_K`,
   `OP_GETGLOBAL`, `OP_SETGLOBAL`, `OP_JMP`, `OP_JMPIFNOT`, `OP_CALL`,
   `OP_TAILCALL`, `OP_RETURN`, `OP_CLOSURE`, `OP_BINOP_INT`.
 - VM: `MINO_FN.bc` field, register stack on `mino_state_t`, and GC root scan
   of live register slots added.
-- Compiler: Phase-1 compiler covers literals, local/global refs, `if`, `do`,
+- Compiler: covers literals, local/global refs, `if`, `do`,
   plain-symbol `let`, `quote`, and top-level `def`.
 
-## v0.104.0 — Eval-Floor Performance Cycle
+## v0.104.0 — Eval-Floor Performance
 
-- Performance: eval/alloc cycle cuts tight integer loop/recur from 941 ms
-  to 375 ms; `(reduce + (range 1M))` from ~870 ms to ~514 ms (~24%
+- Performance: tight integer loop/recur cut from 941 ms to 375 ms; `(reduce + (range 1M))` from ~870 ms to ~514 ms (~24%
   avg reduction across 15 benches).
 - Toolchain: add compile-time allocation profiler (`-DMINO_ALLOC_PROFILE=1`)
   with `alloc-profile-enabled?`, `alloc-profile-reset!`,
@@ -2995,8 +2985,7 @@
 - Docs: update Compatibility Matrix `send-via` row to reflect POOLED/SOLO
   pool split from v0.102.0.
 - Docs: update STM page intro to reflect both agent pools.
-- Tests: new adversarial probes under `.local/adversarial/` for agent
-  surfaces.
+- Tests: add adversarial probes for agent surfaces.
 - Build: 11 `abort()` sites now carry rationale comments; `task qa-arch`
   now passes; fix `check-large-fn` calling unqualified `includes?`.
 
@@ -3663,7 +3652,7 @@
 - Atoms: `compare-and-set!` switches to pointer-identity comparison,
   matching JVM `AtomicReference` semantics.
 
-## v0.86.1 — Audit-Cycle Fixes
+## v0.86.1 — Audit Fixes
 
 - Linux: fix CPU-count detection by dropping dead `#ifdef` guard and
   calling `sysconf(_SC_NPROCESSORS_ONLN)` unconditionally.
@@ -4347,7 +4336,7 @@
 - Errors: fix reader `#?`/`#?@` handling; fix go macro park transform
   in multiple positions
 
-## v0.34.0 — Conformance Hardening Phase 2
+## v0.34.0 — Further Conformance Hardening
 
 - Reader: add radix integer literals (`2r…`, `8r…`, `16r…`)
 - Reader: add tagged literal handling for unknown dispatch macros
