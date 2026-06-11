@@ -1394,6 +1394,37 @@ int mino_eq(const mino_val *a, const mino_val *b)
     return ok;
 }
 
+/* Same-type HAMT map equality: same length, every key in a maps to an
+ * equal value in b (key_order gives a stable traversal). */
+static int eq_map_same_type(const mino_val *a, const mino_val *b,
+                            eq_stack_t *st)
+{
+    size_t i;
+    if (a->as.map.len != b->as.map.len) return 0;
+    for (i = 0; i < a->as.map.len; i++) {
+        mino_val *key = vec_nth(a->as.map.key_order, i);
+        mino_val *bv  = map_get_val(b, key);
+        mino_val *av  = map_get_val(a, key);
+        if (bv == NULL) return 0;
+        if (!eq_child(NULL, st, av, bv)) return 0;
+    }
+    return 1;
+}
+
+/* Same-type HAMT set equality: same length, every element in a is
+ * present in b (key_order gives a stable traversal). */
+static int eq_set_same_type(const mino_val *a, const mino_val *b)
+{
+    size_t i;
+    if (a->as.set.len != b->as.set.len) return 0;
+    for (i = 0; i < a->as.set.len; i++) {
+        mino_val *elem = vec_nth(a->as.set.key_order, i);
+        uint32_t  h    = hash_val(elem);
+        if (hamt_get(b->as.set.root, elem, h, 0u) == NULL) return 0;
+    }
+    return 1;
+}
+
 static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
 {
     if (a == b) {
@@ -1516,41 +1547,13 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
         }
         return 1;
     }
-    case MINO_MAP: {
+    case MINO_MAP:
         /* Map equality ignores iteration order: same key set with the same
          * values, regardless of when each was inserted. */
-        size_t i;
-        if (a->as.map.len != b->as.map.len) {
-            return 0;
-        }
-        for (i = 0; i < a->as.map.len; i++) {
-            mino_val *key = vec_nth(a->as.map.key_order, i);
-            mino_val *bv  = map_get_val(b, key);
-            mino_val *av  = map_get_val(a, key);
-            if (bv == NULL) {
-                return 0;
-            }
-            if (!eq_child(NULL, st, av, bv)) {
-                return 0;
-            }
-        }
-        return 1;
-    }
-    case MINO_SET: {
+        return eq_map_same_type(a, b, st);
+    case MINO_SET:
         /* Set equality: same elements regardless of insertion order. */
-        size_t i;
-        if (a->as.set.len != b->as.set.len) {
-            return 0;
-        }
-        for (i = 0; i < a->as.set.len; i++) {
-            mino_val *elem = vec_nth(a->as.set.key_order, i);
-            uint32_t    h    = hash_val(elem);
-            if (hamt_get(b->as.set.root, elem, h, 0u) == NULL) {
-                return 0;
-            }
-        }
-        return 1;
-    }
+        return eq_set_same_type(a, b);
     /* Identity-equality kinds: callables, mutable cells, opaque values,
      * and internal sentinels. For these, two distinct allocations are
      * never `=`. Each primitive is allocated once per state by
