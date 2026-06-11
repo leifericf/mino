@@ -64,6 +64,36 @@ When this file and a gate disagree, the gate wins — fix this file.
   per-subsystem `internal.h` files carry "Error classes emitted"
   blocks — keep them current when you add paths.
 
+## Core and shell (decide, then act)
+
+mino already separates deciding from doing in its load-bearing
+places; new code follows the same shape (the pattern is
+functional-core/imperative-shell — Bernhardt's "Boundaries" talk —
+adapted to C):
+
+- **Compute a plan, return it, let the caller act.** The compiler
+  (`bc/compile.c`) produces bytecode the VM executes; the GC driver
+  tick *picks* minor vs major vs incremental-slice and the collectors
+  carry it out; the error path *classifies* (`MINO_ERR_*`) and then
+  reports through one channel. A decision in C is an enum, a small
+  struct, or a filled out-parameter — make the caller's switch
+  explicit rather than burying the choice inside the effectful loop.
+- **Pragmatic, not pure.** Core/decision functions read state
+  directly — `S->field` access and walking live values is expected,
+  exactly like the rest of mino. Purity theater (handle indirection,
+  wrapper layers, function-pointer seams introduced only so a test
+  can intercept) is a factoring defect, not a virtue.
+- **What decision code must not do:** perform I/O, mutate GC state,
+  signal the host, or consult *operational* bookkeeping (retry
+  counters, trace stats) to make a *semantic* choice.
+- **Keep the shell boring.** The function that loops, calls out, and
+  writes results should contain no branching a test would want to
+  reach; if it does, that branch is a decision that belongs in the
+  core.
+- **Test the core, not the shell.** Decision functions get direct
+  tests; effectful shells are covered by the suite end to end. mino
+  has no mocks and that is deliberate.
+
 ## Comments
 
 - Comment density matches the surrounding file. Comments state

@@ -30,6 +30,11 @@ Rules of the suite:
 4. **Behavior, not implementation.** Assert observable results, error
    kinds (`:type/...`, `:arity/...`), and printed forms — not
    internals that factoring is allowed to change.
+   Corollary (core-and-shell, see the style references): test the
+   decision functions directly and never mock; effects run against
+   real scratch state (a /tmp dir, a scratch git repo, a fresh
+   mino_state). A shell whose branches feel untestable is a factoring
+   finding — move the branch into the core, don't build a mock.
 5. **Edge cases are the point.** nil, empty, single, boundary sizes
    (the 64-slot gc_save stack, 32-way trie boundaries at 32/33,
    chunk boundaries), unicode in strings, negative/overflow numerics.

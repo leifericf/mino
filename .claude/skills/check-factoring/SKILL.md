@@ -25,7 +25,16 @@ Look for:
 4. **Mixed concerns.** A function doing allocate + compute + report;
    special-form handlers carrying logic that belongs in a helper;
    primitives reimplementing collection internals.
-5. **Dead structure.** Exported (non-static) symbols with one caller;
+5. **Decisions trapped in effect loops** (the core-and-shell rule in
+   c-style.md): semantic choices made inline inside a loop that also
+   performs I/O or mutates GC state, when the choice could be a
+   returned enum/struct/plan the caller switches on; decision
+   helpers that perform effects; semantic behavior keyed off
+   operational bookkeeping (retry counts, trace stats). The inverse
+   is equally a finding: wrapper layers, handle indirection, or
+   function-pointer seams introduced only to fake purity or enable
+   mocking — direct `S->field` reads in decision code are correct.
+6. **Dead structure.** Exported (non-static) symbols with one caller;
    parameters every caller passes identically.
 
 Do NOT propose moves that change the public surface (`src/mino.h`,

@@ -37,6 +37,26 @@ Applies to everything written in the mino dialect: `src/core.clj`,
   (`*file*` stays the entry script across `require` — that is what
   makes the guard work.)
 
+## Core and shell
+
+Spine scripts and tasks separate deciding from doing — the existing
+scripts are the template:
+
+- Pure transformation functions first (`insert-lines` in
+  merge_proposals: text → text; the triage fold: findings → ordered
+  punch list), then a thin effectful layer (`merge!`, `-main`) that
+  reads files, calls the pure core, writes results.
+- Decisions return data (EDN-shaped maps like
+  `{:merged [...] :escalated [...]}`) so the shell's behavior is a
+  switch on values, not logic of its own.
+- Tests require the script as a library and exercise the functions —
+  never by shelling out to the CLI and never by mocking; effects are
+  exercised against real scratch dirs and scratch git repos (see
+  tests/tooling_integrate_fixes_test.clj).
+- Reading state directly in a decision function is fine (slurp the
+  EDN, query the table); introducing an indirection layer purely for
+  testability is not.
+
 ## Tests
 
 - Test files are flat: `(require "tests/test")`, `deftest`/`is`
