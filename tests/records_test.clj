@@ -207,3 +207,22 @@
     (is (some? (re-find #"deftype" thrown)))
     (is (some? (re-find #"fields" thrown)))
     (is (some? (re-find #"vector" thrown)))))
+
+;; Regression: fields_vec returned by mino_vector was not protected by
+;; a gc_depth guard across the subsequent alloc_val(S, MINO_TYPE) call
+;; inside mino_defrecord.  Under MINO_GC_STRESS=1 (every alloc collects),
+;; the fields vector could be freed before being stored into type_val,
+;; leaving type_val->as.record_type.fields as a dangling pointer; field
+;; lookup and GC tracing of the type would then corrupt memory.
+(deftest defrecord-fields-vec-gc-safe
+  ;; Create a record with several fields to exercise the mino_vector
+  ;; allocation path.  Under GC stress the alloc_val for the MINO_TYPE
+  ;; cell triggers a collection; fields_vec must survive.
+  (defrecord GcSafeRecord__rt [alpha beta gamma delta epsilon])
+  (let [r (->GcSafeRecord__rt 1 2 3 4 5)]
+    (is (= 1 (:alpha r)))
+    (is (= 5 (:epsilon r)))
+    ;; Allocation churn to stress the GC between field accesses.
+    (dotimes [_ 1000]
+      (vec (range 50)))
+    (is (= 3 (:gamma r)))))

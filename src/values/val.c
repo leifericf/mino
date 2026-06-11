@@ -663,11 +663,22 @@ mino_val *mino_defrecord(mino_state *S,
         if (fields_vec == NULL) return NULL;
     }
 
+    /* Suppress collection across the two-alloc window: fields_vec is a
+     * GC-owned pointer held only in a C local variable.  An optimizing
+     * compiler may keep it in a register without a stack spill; the
+     * conservative scanner would then miss it and a collection triggered
+     * inside alloc_val(S, MINO_TYPE) would free fields_vec before it is
+     * stored into type_val.  Matches the gc_depth guard in
+     * intern_lookup_or_create_ns and mino_string_n. */
+    mino_current_ctx(S)->gc_depth++;
     type_val = alloc_val(S, MINO_TYPE);
+    if (type_val != NULL) {
+        type_val->as.record_type.ns     = ns_interned;
+        type_val->as.record_type.name   = name_interned;
+        type_val->as.record_type.fields = fields_vec;
+    }
+    mino_current_ctx(S)->gc_depth--;
     if (type_val == NULL) return NULL;
-    type_val->as.record_type.ns     = ns_interned;
-    type_val->as.record_type.name   = name_interned;
-    type_val->as.record_type.fields = fields_vec;
 
     e = (record_type_entry_t *)malloc(sizeof(*e));
     if (e == NULL) return NULL;
