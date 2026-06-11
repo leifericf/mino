@@ -23,7 +23,7 @@ first error and the repro command, then stop (unless dispatched with
 | # | Command | Notes |
 |---|---------|-------|
 | 1 | `./mino task test` | full suite |
-| 2 | `./mino task qa-arch` | architecture gates |
+| 2 | `./mino task qa-arch` | architecture gates — currently carries known pre-existing failures on main (oversized TUs/functions, one abort rationale); the lane verdict is PASS iff the failure set did not grow relative to the feature branch's base commit. Diff the FAIL lines, don't eyeball. (A committed baseline gate is pending in the guidance inbox.) |
 | 3 | `./mino task test-jit-parity` | byte-identical stdout, JIT vs lean |
 | 4 | `./mino task lint-zig` | third-compiler strict-warning lens (pinned zig) |
 | 5 | `./mino task sanitize-zig` | UBSan + TSan suite, auto + eager JIT |

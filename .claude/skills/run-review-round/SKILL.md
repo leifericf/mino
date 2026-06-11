@@ -40,7 +40,11 @@ shards), round number.
      the union of those items on its own branch.
    - Integrate the wave:
      `./mino tools/integrate_fixes.clj <run-dir> --repo . --target <feature-branch> --branches <landed,in,test-first-order>`
-     then `./mino tools/merge_proposals.clj <run-dir>`.
+     then `./mino tools/merge_proposals.clj <run-dir>`, then COMMIT the
+     merged changelog on the feature branch
+     (`Changelog: Land round-<N> proposal lines under Unreleased`) —
+     merge_proposals edits the working tree only; an uncommitted
+     CHANGELOG.md leaks across branch switches.
    - Escalations in `<run-dir>/escalations.edn`: dispatch one fresh
      editor per escalation with both diffs; if it fails again, leave
      it recorded for the maintainer and continue.
