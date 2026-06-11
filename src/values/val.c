@@ -351,9 +351,16 @@ mino_val *mino_keyword_ns_n(mino_state *S,
      * (keyword "" "hi") prints as ":/hi" and (namespace ...) returns
      * "" rather than nil. */
     {
-        size_t total = ns_len + 1 + name_len;
+        size_t total;
         char  *buf;
         mino_val *v;
+        /* Guard against size_t overflow before computing total. */
+        if (ns_len > SIZE_MAX - 1 - name_len) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "arg", "MIN002", "keyword ns+name length overflow");
+            return NULL;
+        }
+        total = ns_len + 1 + name_len;
         if (total < 256) {
             char stack_buf[256];
             buf = stack_buf;
@@ -365,6 +372,11 @@ mino_val *mino_keyword_ns_n(mino_state *S,
             return v;
         }
         buf = (char *)malloc(total);
+        if (buf == NULL) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
         memcpy(buf, ns, ns_len);
         buf[ns_len] = '/';
         memcpy(buf + ns_len + 1, name, name_len);
@@ -386,9 +398,14 @@ mino_val *mino_symbol_ns_n(mino_state *S,
     /* ns != NULL but possibly empty -- preserve via the leading-slash
      * convention; see mino_keyword_ns_n for the encoding rationale. */
     {
-        size_t total = ns_len + 1 + name_len;
+        size_t total;
         char  *buf;
         mino_val *v;
+        /* Guard against size_t overflow before computing total. */
+        if (ns_len > SIZE_MAX - 1 - name_len) {
+            return NULL;
+        }
+        total = ns_len + 1 + name_len;
         if (total < 256) {
             char stack_buf[256];
             buf = stack_buf;
@@ -400,6 +417,9 @@ mino_val *mino_symbol_ns_n(mino_state *S,
             return v;
         }
         buf = (char *)malloc(total);
+        if (buf == NULL) {
+            return NULL;
+        }
         memcpy(buf, ns, ns_len);
         buf[ns_len] = '/';
         memcpy(buf + ns_len + 1, name, name_len);

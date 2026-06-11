@@ -100,6 +100,7 @@
 (require "tests/tooling_integrate_fixes_test")
 (require "tests/tooling_skill_consistency_test")
 (require "tests/records_test")
+(require "tests/values_safety_test")
 (require "tests/instant_template_test")
 (require "tests/data_test")
 (require "tests/data_readers_test")
