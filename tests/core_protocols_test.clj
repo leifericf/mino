@@ -98,3 +98,18 @@
     (is (identical? IKVReduce--kv-reduce    p/IKVReduce--kv-reduce))
     (is (identical? Datafiable--datafy      p/Datafiable--datafy))
     (is (identical? Navigable--nav          p/Navigable--nav))))
+
+;; --- InternalReduce: the seq-side reduce extension point ---
+
+(deftest internal-reduce-vars-exist
+  (testing "the protocol and its method are interned in the namespace"
+    (is (= "InternalReduce" (:name p/InternalReduce)))
+    (is (contains? (:methods p/InternalReduce) :internal-reduce))
+    (is (fn? p/internal-reduce))))
+
+(deftest internal-reduce-seq-pinning
+  (testing "reduce over seqs still works through whatever routing is in place"
+    (is (= 45 (reduce + (range 10))))
+    (is (= 45 (reduce + 0 (range 10))))
+    (is (= 45 (reduce + 0 (seq (range 10)))))
+    (is (= [0 1 2] (reduce conj [] (seq [0 1 2]))))))

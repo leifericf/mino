@@ -131,3 +131,12 @@
   (is (= 1.0 (cmath/next-after 1.0 1.0)))
   (is (< 1.0 (cmath/next-after 1.0 2.0)))
   (is (> 1.0 (cmath/next-after 1.0 0.0))))
+
+(deftest clojure-math-random
+  (let [draws (mapv (fn [_] (cmath/random)) (range 64))]
+    (testing "every draw is a double in [0.0, 1.0)"
+      (is (every? double? draws))
+      (is (every? (fn [r] (>= r 0.0)) draws))
+      (is (every? (fn [r] (< r 1.0)) draws)))
+    (testing "draws vary"
+      (is (> (count (distinct draws)) 1)))))
