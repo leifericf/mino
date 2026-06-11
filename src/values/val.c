@@ -148,8 +148,13 @@ static uint32_t intern_hash(const char *s, size_t len)
 static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
 {
     size_t i;
-    size_t mask = new_ht_cap - 1;
-    size_t *buckets = (size_t *)malloc(new_ht_cap * sizeof(*buckets));
+    size_t mask;
+    size_t *buckets;
+    /* Reject a new_ht_cap that wrapped (caller overflow) or shrank
+     * below the current capacity — either would produce a broken table. */
+    if (new_ht_cap <= tbl->ht_cap) return;
+    mask = new_ht_cap - 1;
+    buckets = (size_t *)malloc(new_ht_cap * sizeof(*buckets));
     if (buckets == NULL) return;  /* caller handles gracefully */
     for (i = 0; i < new_ht_cap; i++) buckets[i] = INTERN_HT_EMPTY;
     /* Rebuild skips NULL entries (tombstoned slots whose underlying
@@ -256,8 +261,15 @@ mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
 
     /* Not found — grow entries array if needed. */
     if (tbl->len == tbl->cap) {
-        size_t new_cap = tbl->cap == 0 ? 64 : tbl->cap * 2;
-        mino_val **ne = (mino_val **)realloc(
+        size_t new_cap;
+        mino_val **ne;
+        if (tbl->cap > SIZE_MAX / 2) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN003", "intern table too large");
+            return NULL;
+        }
+        new_cap = tbl->cap == 0 ? 64 : tbl->cap * 2;
+        ne = (mino_val **)realloc(
             tbl->entries, new_cap * sizeof(*ne));
         if (ne == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
@@ -303,7 +315,11 @@ mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
 
     /* Rehash if load exceeds threshold. */
     if (tbl->len * 100 > tbl->ht_cap * INTERN_HT_LOAD) {
-        intern_ht_rebuild(tbl, tbl->ht_cap * 2);
+        if (tbl->ht_cap <= SIZE_MAX / 2) {
+            intern_ht_rebuild(tbl, tbl->ht_cap * 2);
+        }
+        /* else: table is at capacity; skip rehash. A full table just
+         * degrades probe chains rather than producing an overflow. */
     }
 
     return v;

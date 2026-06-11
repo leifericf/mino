@@ -46,4 +46,22 @@
   (is (= 'hello     (symbol nil "hello")))
   (is (= nil        (namespace 'hello))))
 
+(deftest values-safety-intern-table-many-keywords
+  ;; Exercise intern-table doubling across multiple resizes.  With 1000
+  ;; distinct keywords the entries[] array doubles from 64 to 1024 and
+  ;; the ht_buckets array rehashes at least four times.  After the
+  ;; overflow-guard additions, each doubling must still produce a
+  ;; correctly functioning table (no lost entries, no stale look-ups).
+  (let [n     1000
+        kws   (mapv (fn [i] (keyword (str "intern-safety-kw-" i))) (range n))
+        kw-set (set kws)]
+    (is (= n (count kw-set)))
+    ;; Spot-check first, middle, last.
+    (is (contains? kw-set :intern-safety-kw-0))
+    (is (contains? kw-set :intern-safety-kw-499))
+    (is (contains? kw-set :intern-safety-kw-999))
+    ;; Interning is idempotent: same input returns the same object.
+    (is (identical? (keyword "intern-safety-kw-0")
+                    (keyword "intern-safety-kw-0")))))
+
 (run-tests-and-exit)
