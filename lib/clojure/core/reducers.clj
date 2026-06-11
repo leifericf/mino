@@ -1,29 +1,87 @@
-;; clojure.core.reducers — sequential transducer-layer wrapper.
+;; clojure.core.reducers — reducers and sequential folding.
 ;;
 ;; Each transformer here builds a transducer when called with a single
-;; collection argument, in the canonical Clojure shape. Reduce / fold
-;; are sequential — mino does not yet ship the JVM fork/join machinery
-;; that backs parallel `r/fold`, so the body is reduced left-to-right
-;; through the standard `reduce` path.
+;; collection argument, in the canonical shape. The transformer
+;; wrappers (map / filter / mapcat / etc.) produce a "reducer" — a
+;; value that can be handed to `reduce` and whose elements are the
+;; result of applying the named transducer to the source collection.
+;; mino represents these as eductions over the source coll; eductions
+;; reduce through the standard `reduce` path and fold through the seq
+;; strategies registered on CollFold at the bottom of this file.
 ;;
-;; The transducer-shaped wrappers (r/map / r/filter / r/mapcat / etc.)
-;; produce a "reducer" — an object that can be passed to `reduce` and
-;; whose elements are the result of applying the named transducer to
-;; the source collection. mino represents reducers as anonymous fns
-;; that satisfy `clojure.core.protocols/CollReduce` via the existing
-;; `reduce-fn` chain — wrap the source coll in an eduction over the
-;; same transducer.
+;; The `reducer` / `folder` constructors wrap a collection with a
+;; user-supplied reducing-fn transformer instead: Reducer is reducible
+;; only, Folder is reducible and foldable. Both are field-slot record
+;; types so each wrapper carries its own coll and xf.
 
 (ns clojure.core.reducers
+  "A library for reduction and folding. fold executes sequentially by
+  design: mino ships no parallel task pool, so every fold runs as one
+  left-to-right reduce pass. The fold contract still holds in full —
+  (combinef) seeds the reduction, reducef accumulates, and folding a
+  map feeds reducef the key and value separately as (reducef ret k v).
+  Code written against grouped parallel fold semantics (associative
+  combinef and reducef) therefore produces identical results here."
   (:refer-clojure :exclude [reduce map mapcat filter remove take take-while
                             drop drop-while flatten cat]))
 
 (defn reduce
-  "Like clojure.core/reduce except sequential by definition (mino has
-  no fork/join). Identical contract: with an init, calls (f init x0),
-  (f acc x1), ...; without an init, uses (f x0) for arity-0 of f."
-  ([f coll]      (clojure.core/reduce f coll))
-  ([f init coll] (clojure.core/reduce f init coll)))
+  "Like clojure.core/reduce, with two reducer-layer differences: the
+  no-init arity seeds the reduction from (f) rather than the first
+  element, and maps reduce through reduce-kv so f receives the
+  accumulator, key, and value."
+  ([f coll] (reduce f (f) coll))
+  ([f init coll]
+   (if (map? coll)
+     (reduce-kv f init coll)
+     (clojure.core/reduce f init coll))))
+
+(defprotocol CollFold
+  "Per-type folding strategy. fold dispatches through coll-fold with
+  the group-size hint n, the combining fn, and the reducing fn. Every
+  mino strategy reduces sequentially (see the ns docstring), so n is
+  accepted and unused."
+  (coll-fold [coll n combinef reducef]))
+
+(defn fold
+  "Reduces coll through a seed-and-combine contract: reducef
+  accumulates over the elements starting from (combinef), and combinef
+  (default reducef) must be associative with (combinef) producing its
+  identity element. n is the canonical group-size hint (default 512).
+  mino executes the whole fold as one sequential pass, which yields
+  the same result a grouped execution of associative fns would."
+  ([reducef coll] (fold reducef reducef coll))
+  ([combinef reducef coll] (fold 512 combinef reducef coll))
+  ([n combinef reducef coll] (coll-fold coll n combinef reducef)))
+
+(defrecord Reducer [coll xf]
+  CollReduce
+  (coll-reduce [r f1 init]
+    (clojure.core/reduce (xf f1) init coll)))
+
+(defn reducer
+  "Wraps a reducible coll so any reducing fn supplied to reduce is
+  first transformed by xf — a fn from reducing fn to reducing fn. The
+  wrapper is reducible only; folding it falls back to the sequential
+  reduce strategy."
+  [coll xf]
+  (->Reducer coll xf))
+
+(defrecord Folder [coll xf]
+  CollReduce
+  (coll-reduce [fld f1 init]
+    (clojure.core/reduce (xf f1) init coll))
+  CollFold
+  (coll-fold [fld n combinef reducef]
+    (coll-fold coll n combinef (xf reducef))))
+
+(defn folder
+  "Wraps a foldable coll so any reducing fn supplied to reduce or fold
+  is first transformed by xf — a fn from reducing fn to reducing fn.
+  Unlike reducer, the wrapper participates in fold: coll-fold hands
+  (xf reducef) down to the wrapped collection's own strategy."
+  [coll xf]
+  (->Folder coll xf))
 
 (defn map
   "Reducer that applies f to each element."
@@ -70,13 +128,6 @@
   [coll]
   (eduction clojure.core/cat coll))
 
-(defn cat
-  "A reducer that concatenates the output of x-coll and y-coll. Calls
-  reduce on x-coll first then y-coll. Returns a fn so it composes the
-  standard reducer protocol."
-  [x-coll y-coll]
-  (eduction clojure.core/cat (list x-coll y-coll)))
-
 (defn monoid
   "Helper for fold: return f if init is provided, else a fn that calls
   ctor for an init value."
@@ -85,74 +136,91 @@
     ([]    (ctor))
     ([a b] (op a b))))
 
+;; Catenation values. The canonical Cat is a deferred binary node;
+;; mino realizes the catenation into a vector tagged with the Cat type
+;; (via :type metadata), so count, seq, and reduce operate on the
+;; native value while fold dispatches through CollFold. Construct
+;; through `cat`, not ->Cat.
+
+(def Cat ::Cat)
+
+(defn ->Cat
+  "Positional constructor for a catenation value: a count and the left
+  and right halves. mino realizes the halves eagerly, so the resulting
+  count always comes from the data itself; cnt is accepted for
+  signature parity with the canonical constructor."
+  [cnt left right]
+  (with-meta (into (vec left) right) {:type Cat}))
+
+(defn cat
+  "Combining fn yielding the catenation of its two reduced arguments.
+  With no arguments, returns the empty accumulator (a vector). With
+  one argument ctor, returns a combining fn whose zero arity calls
+  ctor instead. With two, a side whose count is zero answers the other
+  side unchanged; otherwise the halves become a Cat value — counted,
+  seqable, reducible, and foldable. See also foldcat."
+  ([] [])
+  ([ctor]
+   (fn
+     ([] (ctor))
+     ([left right] (cat left right))))
+  ([left right]
+   (cond
+     (zero? (count left))  right
+     (zero? (count right)) left
+     :else (->Cat (+ (count left) (count right)) left right))))
+
+(defn append!
+  "Accumulates x onto acc and returns the updated accumulator. Named
+  with a bang for contract parity: the canonical accumulator mutates
+  in place, while mino's is a persistent vector and a fresh value
+  comes back — fold threads the return value either way."
+  [acc x]
+  (conj acc x))
+
 (defn foldcat
-  "Equivalent to (fold cat append! coll), but reducer-shaped: returns a
-  vector of all elements in coll."
+  "Pours coll into a counted, seqable, reducible accumulation of its
+  elements: (fold cat append! coll)."
   [coll]
-  (clojure.core/reduce conj [] coll))
+  (fold cat append! coll))
 
-(defn- fold-partition-vec
-  "Partition a vector into subvecs of size n (last may be smaller).
-  Uses subvec so the result shares structure with the source vector."
-  [v n]
-  (let [c (count v)]
-    (loop [start 0
-           acc   []]
-      (if (>= start c)
-        acc
-        (recur (+ start n)
-               (conj acc (subvec v start (min (+ start n) c))))))))
+;; Fold strategies. One sequential shape serves every type: seed with
+;; (combinef), accumulate with reducef. Maps get their own clause so
+;; reducef sees each key and value separately ((reducef ret k v) via
+;; reduce-kv) instead of whole map entries; nil folds straight to the
+;; combinef identity. The :default clause covers everything else —
+;; including Reducer wrappers, whose CollReduce impl applies their xf
+;; inside the reduce.
 
-(defn- fold-sequential
-  "The sequential fallback shape used by fold when the host has no
-  thread budget or coll isn't shape-amenable to parallel reduction."
-  [combinef reducef coll]
-  (clojure.core/reduce reducef (combinef) coll))
+(extend-protocol CollFold
+  nil
+  (coll-fold [_coll _n combinef _reducef]
+    (combinef))
 
-(defn fold
-  "Reduces coll using reducef. The 3-arity form takes a partition
-  size n (default 512) and a combinef. When the host has granted
-  thread budget (mino-thread-limit > 1) AND coll is a vector larger
-  than n, fold partitions coll into chunks of size n, runs reducef
-  in parallel over each chunk via futures, and combines the partial
-  results with combinef. Smaller vectors and non-vector collections
-  reduce sequentially through (clojure.core/reduce reducef
-  (combinef) coll).
+  :default
+  (coll-fold [coll _n combinef reducef]
+    (reduce reducef (combinef) coll))
 
-  - (fold reducef coll) -- combinef defaults to reducef (so the
-    no-arg branch must return the reducer's identity).
-  - (fold combinef reducef coll) -- partition size defaults to 512.
-  - (fold n combinef reducef coll) -- explicit partition size.
+  :vector
+  (coll-fold [v _n combinef reducef]
+    (reduce reducef (combinef) v))
 
-  Pure semantics: reducef and combinef must be associative; combinef
-  with no args must return the identity element. Without those,
-  parallel and sequential results may differ."
-  ([reducef coll]
-   (fold reducef reducef coll))
-  ([combinef reducef coll]
-   (fold 512 combinef reducef coll))
-  ([n combinef reducef coll]
-   (let [thr   (mino-thread-limit)
-         c     (when (vector? coll) (count coll))]
-     (if (or (<= thr 1)
-             (not (vector? coll))
-             (<= c n))
-       (fold-sequential combinef reducef coll)
-       ;; Cap chunk count at (thread-limit - 1) so we don't exceed the
-       ;; host's thread budget. The user-supplied n is a MINIMUM chunk
-       ;; size; if c/n would exceed the budget, grow the chunk size so
-       ;; the count fits in the budget. This matches the spirit of
-       ;; JVM fork/join's "n is the leaf-size hint" without needing a
-       ;; recursive split.
-       (let [max-chunks   (max 1 (dec thr))
-             ;; Integer ceiling of (c / max-chunks) without floats.
-             chunk-size   (max n (quot (+ c (dec max-chunks)) max-chunks))
-             parts        (fold-partition-vec coll chunk-size)
-             futures-seq  (mapv
-                            (fn [chunk]
-                              (future
-                                (clojure.core/reduce reducef
-                                  (combinef) chunk)))
-                            parts)
-             partial-vals (mapv clojure.core/deref futures-seq)]
-         (clojure.core/reduce combinef (combinef) partial-vals))))))
+  :list
+  (coll-fold [s _n combinef reducef]
+    (reduce reducef (combinef) s))
+
+  :lazy-seq
+  (coll-fold [s _n combinef reducef]
+    (reduce reducef (combinef) s))
+
+  :map
+  (coll-fold [m _n combinef reducef]
+    (reduce-kv reducef (combinef) m))
+
+  :sorted-map
+  (coll-fold [m _n combinef reducef]
+    (reduce-kv reducef (combinef) m))
+
+  Cat
+  (coll-fold [c _n combinef reducef]
+    (reduce reducef (combinef) c)))
