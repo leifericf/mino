@@ -176,7 +176,7 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
 }
 
 /* Forward decl; defined below. */
-mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
+static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
                                               mino_type type,
                                               const char *s, size_t len,
                                               size_t ns_len_hint);
@@ -188,7 +188,7 @@ mino_val *intern_lookup_or_create(mino_state *S, intern_table_t *tbl,
     return intern_lookup_or_create_ns(S, tbl, type, s, len, (size_t)-1);
 }
 
-mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
+static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
                                               mino_type type,
                                               const char *s, size_t len,
                                               size_t ns_len_hint)
@@ -1676,7 +1676,9 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
         int a_end;
         int b_end;
 
-        /* Force lazy seqs */
+        /* Force before the end-of-seq test: an unrealized lazy that would
+         * produce elements must not be mistaken for end-of-seq (unlike
+         * eq_step_force, which preserves the LAZY tag on nil/empty results). */
         if (ca != NULL && mino_type_of(ca) == MINO_LAZY)
             ca = lazy_force(S, (mino_val *)ca);
         if (cb != NULL && mino_type_of(cb) == MINO_LAZY)
