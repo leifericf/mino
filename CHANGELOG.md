@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker (memory-values-003)
+- GC: Guard float/double fill pointer across alloc_val in mino_host_array_new (memory-values-002)
+- GC: Guard fields_vec pointer across alloc_val in mino_defrecord (memory-values-001)
+- Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n (security-values-001, security-values-002)
+- Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n (security-values-003, security-values-004)
+- Security: Add size_t overflow guards in intern table entries-array and ht doubling (security-values-005, security-values-006)
+
+- Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
+
 ## v0.423.5 — Security Fixes
 
 - `(format "%Nd" n)` and `(format "%Nf" n)` with a field width or
