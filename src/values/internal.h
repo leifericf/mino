@@ -2,12 +2,21 @@
  * values/internal.h -- the value-layer API: constructors, interning,
  * hashing, equality, and the first-class var constructor.
  *
- * Implementations live in src/values/val.c.
+ * Implementations:
+ *   val.c                  -- constructors, interning, equality, var
+ *   collections/map.c      -- hash_val, fnv_mix, fnv_bytes, make_fn
+ *   collections/queue.c    -- mino_queue_eq, mino_queue_nth
+ *   collections/bytes.c    -- mino_bytes_eq, mino_bytes_hash, mino_bytes_seq
  *
  * Interning depends on intern_table_t which is collection-owned
  * (its backing entries vector is structurally a vector). The struct
  * stays in collections/internal.h; this header declares the API that
  * operates on it.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_RECOVERABLE -- intern_lookup_or_create emits :internal/MIN001
+ *      when the intern-table entries array cannot be grown (OOM).
  *
  * Internal to the runtime; embedders should only use mino.h.
  */
@@ -63,7 +72,7 @@ mino_val *mino_queue_nth(const mino_val *q, size_t i);
  * Public ctor / accessors live on the embedder surface (mino_bytes_*). */
 int                  mino_bytes_eq  (const mino_val *a, const mino_val *b);
 uint32_t             mino_bytes_hash(const mino_val *v);
-mino_val          *mino_bytes_seq (mino_state *S, const mino_val *v);
+mino_val            *mino_bytes_seq (mino_state *S, const mino_val *v);
 
 /* Register the GC tracer for GC_T_VAL. Called from
  * runtime/state.c::state_init before the first allocation. */
