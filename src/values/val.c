@@ -503,6 +503,11 @@ mino_val *mino_host_array_new(mino_state *S, size_t len,
     } else if (kind == HOST_ARRAY_BOOLEAN) {
         fill = mino_false(S);
     } else if (kind == HOST_ARRAY_FLOAT || kind == HOST_ARRAY_DOUBLE) {
+        /* mino_float returns a GC-owned heap pointer. Suppress
+         * collection from here through alloc_val so the conservative
+         * scanner cannot miss `fill` while it lives only in a register
+         * (vals[] is malloc-owned and not a GC root). */
+        mino_current_ctx(S)->gc_depth++;
         fill = mino_float(S, 0.0);
     } else if (kind == HOST_ARRAY_CHAR) {
         fill = mino_char(S, '\0');
@@ -511,6 +516,9 @@ mino_val *mino_host_array_new(mino_state *S, size_t len,
     }
     for (i = 0; i < len; i++) vals[i] = fill;
     v = alloc_val(S, MINO_HOST_ARRAY);
+    if (kind == HOST_ARRAY_FLOAT || kind == HOST_ARRAY_DOUBLE) {
+        mino_current_ctx(S)->gc_depth--;
+    }
     if (v == NULL) {
         free(vals);
         return NULL;

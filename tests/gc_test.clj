@@ -97,6 +97,30 @@
     (dotimes [i n]
       (is (= (str "gc-str-" i) (nth result i))))))
 
+;; Regression: the float/double fill value created by mino_float(S, 0.0)
+;; inside mino_host_array_new was not protected across the subsequent
+;; alloc_val(S, MINO_HOST_ARRAY) call.  vals[] is malloc-owned so the GC
+;; does not trace it; without gc_depth protection the conservative scanner
+;; could miss `fill` in a register and collect it mid-alloc, leaving
+;; dangling pointers in every slot.
+;;
+;; MINO_GC_STRESS=1 triggers this reliably before the fix.
+(deftest host-array-float-fill-gc-safe
+  ;; Allocate a double-array under allocation pressure; under GC stress
+  ;; the alloc_val inside mino_host_array_new triggers a collection.
+  (let [n 500
+        arr (double-array n)]
+    (is (= n (alength arr)))
+    ;; Every slot must hold the correct 0.0 fill -- not a dangling ptr.
+    (dotimes [i n]
+      (is (= 0.0 (aget arr i)))))
+  ;; Same for float-array.
+  (let [n 500
+        arr (float-array n)]
+    (is (= n (alength arr)))
+    (dotimes [i n]
+      (is (= (float 0.0) (aget arr i))))))
+
 ;; Regression: fn.wraps_prim (a GC-owned MINO_PRIM pointer) was not
 ;; pushed in the MINO_FN/MINO_MACRO GC walker.  A wrapper closure
 ;; surviving into OLD generation could have its target primitive freed
