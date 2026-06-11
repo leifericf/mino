@@ -95,6 +95,7 @@
 (require "tests/clojure_string_test")
 (require "tests/tasks_test")
 (require "tests/tooling_run_state_test")
+(require "tests/tooling_triage_findings_test")
 (require "tests/records_test")
 (require "tests/instant_template_test")
 (require "tests/data_test")
