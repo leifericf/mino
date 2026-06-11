@@ -62,3 +62,38 @@
   ;; An unquoted position escapes gensym resolution entirely.
   (def gensym-passthrough 'kept#)
   (is (= 'kept# (let [r `(~gensym-passthrough)] (first r)))))
+
+(deftest macro-var-meta-core-macros
+  ;; Every core macro's var carries :macro true in its metadata.
+  (doseq [s '[when cond -> ->> doseq dotimes when-let if-let or and
+              defn defonce condp case]]
+    (is (true? (:macro (meta (resolve s)))) (str s))))
+
+(deftest macro-var-meta-user-defmacro
+  (defmacro macro-flag-m__mt [x] x)
+  (is (true? (:macro (meta (resolve 'macro-flag-m__mt))))))
+
+(deftest macro-var-meta-absent-on-fns
+  ;; Functions never carry the :macro flag.
+  (is (not (:macro (meta (resolve 'inc)))))
+  (is (not (:macro (meta (resolve 'map)))))
+  (defn macro-flag-f__mt [x] x)
+  (is (not (:macro (meta (resolve 'macro-flag-f__mt))))))
+
+(deftest macro-var-meta-bundled-lib-macro
+  ;; clojure.test is loaded via (require "tests/test") at the top.
+  (is (true? (:macro (meta (resolve 'clojure.test/deftest))))))
+
+(deftest macro-var-meta-preserves-ns-and-name
+  ;; :macro joins the existing keys; it must not displace :ns or :name.
+  (let [m (meta (resolve 'when))]
+    (is (= 'clojure.core (:ns m)))
+    (is (= 'when (:name m)))
+    (is (true? (:macro m))))
+  (defmacro macro-flag-keep__mt [x] x)
+  (let [m (meta (resolve 'macro-flag-keep__mt))]
+    (is (some? (:ns m)))
+    (is (= 'macro-flag-keep__mt (:name m)))
+    (is (true? (:macro m)))))
+
+(run-tests-and-exit)
