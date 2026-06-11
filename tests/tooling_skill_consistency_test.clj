@@ -21,7 +21,7 @@
     "check-factoring" "check-portability"
     "write-c" "write-clj" "write-tests"
     "apply-findings" "verify-lanes" "maintain-toolchain"
-    "gather-module-context" "run-review-round"})
+    "gather-module-context" "run-review-round" "write-changelog"})
 
 ;; Shared skills carry NEITHER flag: in the / menu for humans AND
 ;; invocable by agents via the Skill tool.
