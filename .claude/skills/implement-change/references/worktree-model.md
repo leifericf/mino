@@ -57,11 +57,33 @@ bookkeeping; this file is the topology and the rules.
   dispatched with both diffs — or to the maintainer if it is a real
   design collision.
 
-## Commit format
+## Commit format — category first
 
-- `Category: Imperative summary` — e.g. `gc: Guard sweep cursor
-  against mid-phase promotion`. No version numbers in commit messages
-  (versions are release metadata). Body optional, trailers at bottom.
+The full form, in order of the message:
+
+1. **`Category: ` prefix.** A capitalized noun naming the area or
+   effort the commit belongs to (`GC:`, `Security:`, `Tooling:`,
+   `Docs:`, `Build:`) — chosen so the log scans and related commits
+   group. The category slot is for humans; that is why Conventional
+   Commits is rejected here (it spends the most valuable part of the
+   message on machine-readable tokens). An occasional uncategorized
+   commit is acceptable when no meaningful category fits — never
+   invent a hollow one.
+2. **Imperative, sentence-case subject** describing the *effect* of
+   the change, not the diff: `GC: Trace fn.wraps_prim in the
+   FN/MACRO walker`, not `GC: Add PUSH call to gc_handlers.c`.
+   Capital first letter, no trailing period, ~70 characters — exceed
+   that for clarity rather than compressing into noise. The category
+   already gives context, so the subject doesn't repeat it.
+3. **Body (optional).** The context a future reader needs: why, what
+   broke, what was considered. Constraints and causes, not a prose
+   restatement of the diff.
+4. **Trailers at the very bottom.** Machine-readable lines
+   (`Co-Authored-By:`, `[skip ci]`) — order among them doesn't
+   matter, but they come after everything human-readable.
+
+No version numbers in commit messages — versions are release
+metadata. One commit per finding or per tightly-related group.
 
 ## Run state
 
