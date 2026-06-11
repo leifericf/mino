@@ -115,3 +115,41 @@
     (is (= :caught (try (first s) (catch e :caught))))
     (is (= :ok (first s)))
     (is (= 2 @calls))))
+
+;; --- Non-seq thunk results ---
+;; Forcing a lazy-seq must call seq on the thunk's result when it is
+;; not already a seq, so any seqable body (vector, string, map, set,
+;; another lazy-seq) behaves like its seq.
+
+(deftest lazy-seq-vector-body
+  (is (= '(1 2) (seq (lazy-seq [1 2]))))
+  (is (seq? (seq (lazy-seq [1 2]))))
+  (is (= 1 (first (lazy-seq [1 2]))))
+  (is (= '(2) (rest (lazy-seq [1 2])))))
+
+(deftest lazy-seq-empty-body
+  (is (= nil (seq (lazy-seq nil))))
+  (is (= nil (first (lazy-seq nil))))
+  (is (= nil (seq (lazy-seq []))))
+  (is (= nil (first (lazy-seq [])))))
+
+(deftest lazy-seq-string-body
+  (is (= \a (first (lazy-seq "ab"))))
+  (is (= '(\a \b) (seq (lazy-seq "ab")))))
+
+(deftest lazy-seq-map-body
+  (is (= [:a 1] (first (lazy-seq {:a 1}))))
+  (is (= '([:a 1]) (seq (lazy-seq {:a 1})))))
+
+(deftest lazy-seq-set-body
+  (is (= #{1 2} (set (lazy-seq #{1 2}))))
+  (is (contains? #{1 2} (first (lazy-seq #{1 2})))))
+
+(deftest lazy-seq-nested-body
+  (is (= 1 (first (lazy-seq (lazy-seq [1]))))))
+
+(deftest lazy-seq-seq-body-still-works
+  (is (= '(2 3 4) (take 3 (lazy-seq (map inc [1 2 3])))))
+  (is (= 1 (first (lazy-seq (cons 1 nil))))))
+
+(run-tests-and-exit)
