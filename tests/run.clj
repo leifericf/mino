@@ -98,6 +98,7 @@
 (require "tests/tooling_triage_findings_test")
 (require "tests/tooling_merge_proposals_test")
 (require "tests/tooling_integrate_fixes_test")
+(require "tests/tooling_skill_consistency_test")
 (require "tests/records_test")
 (require "tests/instant_template_test")
 (require "tests/data_test")

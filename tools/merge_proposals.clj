@@ -20,7 +20,10 @@
 
 (require '[clojure.string :as str])
 
-(defn- validate-proposal [p source]
+(defn validate-proposal
+  "Throw if `p` does not match the proposal shape; nil if ok. Public:
+   the skill-consistency test validates agent-stated examples with it."
+  [p source]
   (let [problem
         (cond
           (not (map? p))                       "proposal is not a map"
