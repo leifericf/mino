@@ -69,6 +69,13 @@
   [& body]
   `(dosync* (fn [] ~@body)))
 
+(defmacro sync
+  "Like dosync: runs the exprs (which may be nil) in an STM
+  transaction. flags-ignored is accepted for arglist parity and
+  currently ignored."
+  [flags-ignored & body]
+  `(dosync ~@body))
+
 (defmacro io!
   "If invoked within an STM transaction, throws an
   IllegalStateException-equivalent before evaluating body. Marks a
@@ -1796,6 +1803,12 @@
                      (mapcat walk (children node))))))]
     (walk root)))
 
+(defn xml-seq
+  "A tree seq on the xml elements as per xml/parse: nodes are maps
+   with :tag and :content keys, leaves are strings."
+  [root]
+  (tree-seq (complement string?) (comp seq :content) root))
+
 (defn walk
   "Traverses form, applying inner to each element and outer to the
    result."
@@ -2201,6 +2214,30 @@
    evaluated in parallel via pcalls. Mirrors clojure.core/pvalues."
   [& exprs]
   `(pcalls ~@(map (fn [e] `(fn [] ~e)) exprs)))
+
+(defn seque
+  "Returns a seq with the same elements and order as s, where a
+   producer running on another thread stays up to n elements (default
+   128) ahead of the consumer. The producer realizes s in n-sized
+   batches, each batch filling while the consumer walks the previous
+   one. When host threads are not granted (mino-thread-limit <= 1),
+   falls back to (seq s) so callers don't need a conditional."
+  ([s] (seque 128 s))
+  ([n s]
+   (when-not (and (int? n) (pos? n))
+     (throw (ex-info "seque: buffer size must be a positive integer"
+                     {:got n})))
+   (if (<= (mino-thread-limit) 1)
+     (seq s)
+     (let [step (fn step [fut s]
+                  (lazy-seq
+                    (let [chunk (deref fut)]
+                      (when (seq chunk)
+                        (let [more (drop n s)
+                              nfut (future-call
+                                     (fn [] (doall (take n more))))]
+                          (concat chunk (step nfut more)))))))]
+       (step (future-call (fn [] (doall (take n s)))) s)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
@@ -2906,6 +2943,34 @@
   [& args]
   (with-out-str (apply println args)))
 
+(defn print-simple
+  "Writes the plain text form of o (its str form, bypassing the
+   print-method dispatch) to w, a string-collecting atom like the one
+   *out* is bound to inside with-out-str. Returns nil."
+  [o w]
+  (binding [*out* w]
+    (print (str o)))
+  nil)
+
+(def char-escape-string
+  "Returns escape string for char or nil if none."
+  {\newline   "\\n"
+   \tab       "\\t"
+   \return    "\\r"
+   \"         "\\\""
+   \\         "\\\\"
+   \formfeed  "\\f"
+   \backspace "\\b"})
+
+(def char-name-string
+  "Returns name string for char or nil if none."
+  {\newline   "newline"
+   \tab       "tab"
+   \space     "space"
+   \backspace "backspace"
+   \formfeed  "formfeed"
+   \return    "return"})
+
 (defmacro with-open
   "Binds resources, evaluates body, then closes each resource."
   [bindings & body]
@@ -3084,6 +3149,13 @@
       (sequence (first xfs) coll)
       (sequence (apply comp xfs) coll))))
 
+(defn ->Eduction
+  "Factory matching the value (eduction xform coll) returns. mino's
+   eduction values are sequences, so the factory applies xform to
+   coll the same way eduction does."
+  [xform coll]
+  (eduction xform coll))
+
 ) ;; end (when (mino-installed? :transducers) ...)
 
 ;; --- Array constructors ---
@@ -3120,6 +3192,11 @@
 (def ^:dynamic *compile-files* false)
 (def ^:dynamic *warn-on-reflection* false)
 (def ^:dynamic *unchecked-math* false)
+
+(def ^:dynamic *repl*
+  "Bound to true in an interactive read-eval-print context, false in
+   script execution. Defaults to false."
+  false)
 
 (defmacro assert
   ([x] (list 'when-not x (list 'throw "Assert failed")))
@@ -3492,6 +3569,31 @@
   (or (some-> ex ex-data :cause)
       (some-> ex meta :cause)))
 
+(defn Throwable->map
+  "Constructs a data representation of an error value, shaped
+   {:cause m :data d :via [...] :trace []}: :cause is the root
+   cause's message, :data its ex-data (absent when nil), :via a
+   vector of {:message ... :data ...} maps from the outermost error
+   to the root, and :trace an empty vector (mino error values do not
+   retain call-stack frames). Works on caught diagnostic maps and on
+   ex-info values alike; the cause chain is walked via ex-cause."
+  [t]
+  (let [chain (loop [e t acc []]
+                (let [acc (conj acc e)
+                      c   (ex-cause e)]
+                  (if (map? c) (recur c acc) acc)))
+        root  (peek chain)
+        via   (mapv (fn [e]
+                      (let [d (ex-data e)
+                            m {:message (ex-message e)}]
+                        (if (some? d) (assoc m :data d) m)))
+                    chain)
+        base  {:cause (ex-message root)
+               :via   via
+               :trace []}
+        d     (ex-data root)]
+    (if (some? d) (assoc base :data d) base)))
+
 ;; inst-ms: returns epoch millis from an inst (a map with the
 ;; `:mino/instant true` meta marker, as produced by
 ;; clojure.instant/read-instant-date or the #inst reader literal).
@@ -3533,12 +3635,38 @@
     ;; offset is east-of-UTC; subtract to reach UTC millis.
     (- local-ms offset-ms)))
 
-;; #inst reader literal. The handler lazily requires clojure.instant
+;; Inst protocol. mino insts are maps carrying the :mino/instant meta
+;; marker, and protocol dispatch keys on (type x), so the extension
+;; registers under :map and inst-ms validates the marker. Divergence:
+;; (satisfies? Inst m) is true for any map, not only insts.
+(when (mino-installed? :protocols)
+
+(defprotocol Inst
+  (inst-ms* [inst]))
+
+(extend-type :map Inst
+  (inst-ms* [v] (inst-ms v)))
+
+) ;; end (when (mino-installed? :protocols) ...)
+
+;; Reader literals. The #inst handler lazily requires clojure.instant
 ;; the first time #inst is encountered so core boot doesn't load the
-;; bigger ISO 8601 parser unless needed.
+;; bigger ISO 8601 parser unless needed. #uuid is handled directly by
+;; the reader (src/eval/read.c) before *data-readers* is consulted;
+;; its entry here covers callers that look the reader fn up by tag.
 (let [inst-reader (fn inst-reader [s]
                     (require 'clojure.instant)
-                    ((resolve 'clojure.instant/read-instant-date) s))]
+                    ((resolve 'clojure.instant/read-instant-date) s))
+      uuid-reader (fn uuid-reader [s]
+                    (or (parse-uuid s)
+                        (throw (ex-info (str "Invalid UUID string: "
+                                             (pr-str s))
+                                        {:input s}))))]
+  (def default-data-readers
+    "Default map of data reader functions keyed by tag symbol: 'inst
+     and 'uuid."
+    {'inst inst-reader
+     'uuid uuid-reader})
   (alter-var-root #'*data-readers* assoc 'inst inst-reader))
 
 ;; read: Clojure-compatible reader entry point.
@@ -3552,6 +3680,75 @@
   ([]       (read*))
   ([s]      (read-string s))
   ([opts s] (read-string opts s)))
+
+(defn- read+string-trim
+  "Strips leading and trailing ASCII whitespace from s. Local helper
+   for read+string; clojure.string is not loaded during core boot."
+  [s]
+  (let [ws?   (fn [c] (or (= c " ") (= c "\t") (= c "\n")
+                          (= c "\r") (= c "\f")))
+        n     (count s)
+        start (loop [i 0]
+                (if (and (< i n) (ws? (nth s i))) (recur (inc i)) i))
+        end   (loop [i n]
+                (if (and (> i start) (ws? (nth s (dec i))))
+                  (recur (dec i))
+                  i))]
+    (subs s start end)))
+
+(defn read+string
+  "Like read: consumes one form from the source and returns
+   [form text] where text is the exactly-consumed input, whitespace-
+   trimmed. The source may be a string or a string-cursor atom of the
+   kind *in* / with-in-str use (the cursor advances past the form)."
+  [s]
+  (let [a      (if (string? s) (atom s) s)
+        before (deref a)
+        form   (binding [*in* a] (read*))
+        after  (deref a)
+        taken  (subs before 0 (- (count before) (count after)))]
+    [form (read+string-trim taken)]))
+
+(defn line-seq
+  "Returns the lines of text from rdr as a lazy sequence of strings.
+   rdr is a string-cursor atom (the *in* model that read-line
+   consumes from): each realized element takes one line off the
+   cursor. Returns nil when the cursor is exhausted."
+  [rdr]
+  (when-let [line (binding [*in* rdr] (read-line))]
+    (cons line (lazy-seq (line-seq rdr)))))
+
+;; Reader placeholders. Syntax-quote handles ~ and ~@ itself, so
+;; these exist only so the names resolve; calling either one means
+;; the form escaped syntax-quote, which is an error.
+(defn unquote
+  "Placeholder for the ~ reader form. Only meaningful inside
+   syntax-quote; calling it directly throws."
+  [& _]
+  (throw (ex-info "unquote (~) is only valid inside syntax-quote"
+                  {:mino/unsupported :unquote})))
+
+(defn unquote-splicing
+  "Placeholder for the ~@ reader form. Only meaningful inside
+   syntax-quote; calling it directly throws."
+  [& _]
+  (throw (ex-info "unquote-splicing (~@) is only valid inside syntax-quote"
+                  {:mino/unsupported :unquote-splicing})))
+
+(defn test
+  "Finds fn at key :test in v's metadata, calls it (presumably with
+   no side effects on the wider system), and reports :ok when it
+   returns, :no-test when no :test fn is present. An error thrown by
+   the :test fn flows out unwrapped.
+
+   Divergence: mino's def stores var metadata unevaluated, so the
+   :test entry arrives as the literal fn form; it is evaluated here
+   at use. A fn value (e.g. placed via alter-meta!) is called as-is."
+  [v]
+  (let [f (:test (meta v))]
+    (if f
+      (do ((if (fn? f) f (eval f))) :ok)
+      :no-test)))
 
 ;; bound? / thread-bound?: variadic over vars, true iff every var has a
 ;; binding of the right shape. The C primitives -var-root-bound? and
