@@ -629,6 +629,34 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                                      LAZY_UNREALIZED, __ATOMIC_RELEASE);
                     return NULL;
                 }
+                /* Per the canonical lazy-seq contract, forcing coerces
+                 * the thunk's value through seq, so a body that yields
+                 * a vector / map / set / string behaves like its seq.
+                 * Seq-shaped results (cons, chunked-cons), the empty
+                 * markers, and nested lazies pass through: lazy_force
+                 * unwraps nesting and each inner realize coerces its
+                 * own value. A non-seqable result rethrows seq's type
+                 * error, with the claim rolled back like a thunk
+                 * throw. */
+                {
+                    int rt = mino_type_of(result);
+                    if (rt != MINO_NIL && rt != MINO_EMPTY_LIST
+                        && rt != MINO_CONS && rt != MINO_CHUNKED_CONS
+                        && rt != MINO_LAZY) {
+                        /* Pin: result's only reference is this frame,
+                         * and mino_seq allocates before reading it. */
+                        gc_pin(result);
+                        result = mino_seq(S, result);
+                        gc_unpin(1);
+                        if (result == NULL) {
+                            lazy_inflight_pop(S);
+                            __atomic_store_n(&v->as.lazy.realized,
+                                             LAZY_UNREALIZED,
+                                             __ATOMIC_RELEASE);
+                            return NULL;
+                        }
+                    }
+                }
                 /* Pre-realized lazy: cached is NULL, body/env hold
                  * the thunk. Realisation overwrites three slots. The
                  * body and env stores need SATB because the thunk
