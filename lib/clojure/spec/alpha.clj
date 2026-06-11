@@ -2,20 +2,27 @@
 ;;
 ;; Mino port of the canonical surface. Spec values are maps tagged with
 ;; ::kind and dispatched via multimethods (conform-impl, explain-impl).
+;; The canonical Spec / Specize protocols are exposed as descriptor
+;; values; their methods (conform* unform* explain* gen* with-gen*
+;; describe* / specize*) are namespace fns dispatching on that tag.
 ;; Macros at the bottom of the file expand to calls of the corresponding
 ;; *-impl builder fn so the same surface works inside and outside macro
-;; context. Generators throw :mino/unsupported -- s/gen requires
-;; clojure.test.check, deferred until a concrete user need lands.
+;; context. Generators are backed by the bundled clojure.test.check
+;; (see the generator section below).
 ;;
 ;; File ordering: ns -> registry -> helpers -> defmulti decls ->
 ;; dispatch methods -> all macros at the bottom.  This ordering is
 ;; load-bearing because mino's syntax-quote auto-qualifies bare symbols
 ;; against the runtime current-ns env.  If `def`, `and`, `or`, `cat`,
 ;; `*`, `+`, `?`, `keys`, `nilable`, `coll-of`, `map-of`, `tuple`,
-;; `assert`, `fdef`, or `alt` are bound as macros mid-file, internal
-;; (defn ...) / (def ...) calls expand to qualified forms that miss the
-;; special-form dispatch and fire the macros instead, leaving the var
-;; unbound.
+;; `assert`, `fdef`, `alt`, `every`, `every-kv`, `keys*`, `merge`, or
+;; `multi-spec` are bound as macros mid-file, internal (defn ...) /
+;; (def ...) calls expand to qualified forms that miss the special-form
+;; dispatch and fire the macros instead, leaving the var unbound.
+;; Names that collide with clojure.core fns (`merge`, `keys`, `*`, ...)
+;; must be called via their clojure.core/ qualified form in every fn
+;; body in this file, because bodies macroexpand at first call -- after
+;; the whole file (macros included) has loaded.
 
 (ns clojure.spec.alpha
   (:require [clojure.walk :as walk]))
@@ -44,8 +51,27 @@
 (defmulti ^:private unform-impl
   (fn [spec _y] (::kind spec)))
 
-(defn- spec? [x]
+(defn- spec-map?
+  "True when x is a spec value of any kind -- regex ops included --
+  i.e. a map carrying the ::kind tag.  Internal coercion helper; the
+  public spec? excludes regex ops the way the canonical fn does."
+  [x]
   (and (map? x) (contains? x ::kind)))
+
+(defn spec?
+  "Return x when x is a spec object, else nil.  Regex ops are not
+  spec objects (see regex?)."
+  [x]
+  (when (and (map? x) (contains? x ::kind) (not (::op x)))
+    x))
+
+(defn regex?
+  "Return x when x is a spec regex op (cat / * / + / ? / alt / &),
+  else nil.  Specs that merely wrap a regex (see spec / regex-spec-impl)
+  are spec objects, not regex ops."
+  [x]
+  (when (and (map? x) (::op x))
+    x))
 
 (defn- pred-spec
   "Wrap a predicate fn as a spec value."
@@ -58,7 +84,7 @@
   (fn, set, map, vector, keyword used as fn) becomes a pred spec."
   [x]
   (cond
-    (spec? x)              x
+    (spec-map? x)          x
     (and (keyword? x)
          (get @registry-ref x))
                            (get @registry-ref x)
@@ -86,6 +112,42 @@
   "Internal dispatch for unform.  Public callers use unform."
   [spec y]
   (unform-impl spec y))
+
+;; ---------------------------------------------------------------------------
+;; Protocol surface.  The canonical library reifies specs over the Spec
+;; and Specize protocols; mino specs are plain maps tagged with ::kind,
+;; so the protocols are exposed as descriptor values and their methods
+;; as namespace fns dispatching on that tag.
+;; ---------------------------------------------------------------------------
+
+(def Spec
+  "Descriptor for the Spec protocol.  Spec values are ::kind-tagged
+  maps; the protocol's methods are the namespace fns listed under
+  ::methods, dispatching on that tag."
+  {::protocol 'clojure.spec.alpha/Spec
+   ::methods  '[conform* unform* explain* gen* with-gen* describe*]})
+
+(def Specize
+  "Descriptor for the Specize protocol.  Coercion to a spec value is
+  the namespace fn specize*."
+  {::protocol 'clojure.spec.alpha/Specize
+   ::methods  '[specize*]})
+
+(defn specize*
+  "Coerce x to a spec value: spec maps pass through, registered
+  keywords resolve, anything callable as a predicate is promoted to a
+  pred spec.  The binary arity uses form as the promoted description."
+  ([x] (as-spec x))
+  ([x form]
+   (cond
+     (spec-map? x)          x
+     (and (keyword? x)
+          (get @registry-ref x))
+                            (get @registry-ref x)
+     (ifn? x)               (pred-spec form x)
+     :else                  (throw (ex-info (str "Unable to coerce to spec: "
+                                                 (pr-str x))
+                                            {:spec x})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public conform / valid? / explain entry points.
@@ -195,6 +257,12 @@
   [spec]
   (abbrev (form spec)))
 
+(defn describe*
+  "Protocol-shaped describe: return the raw (unabbreviated) form of a
+  spec.  Public callers usually want describe."
+  [spec]
+  (::form (as-spec spec)))
+
 ;; ---------------------------------------------------------------------------
 ;; pred -- bare predicates promoted to specs.
 ;; ---------------------------------------------------------------------------
@@ -208,14 +276,21 @@
 
 (defmethod unform-impl ::pred [_s y] y)
 
+(defn regex-spec-impl
+  "Wrap a regex op as a non-regex spec: the result conforms an element
+  value as a whole sequence rather than splicing into the surrounding
+  regex context.  gfn, when given, attaches a generator fn."
+  [re gfn]
+  (let [s {::kind ::wrap ::form (::form re) ::wrapped re}]
+    (if gfn (assoc s ::gen gfn) s)))
+
 (defn spec-impl
   "Build a spec value from a form and predicate.  When pred resolves to
   a regex spec (cat / * / + / ? / alt / a registered regex), the result
-  wraps the regex so it conforms an element value as a whole sequence
-  rather than splicing into the surrounding regex context."
+  wraps the regex (see regex-spec-impl)."
   [form pred]
   (if-let [reg (as-regex-spec pred)]
-    {::kind ::wrap ::form form ::wrapped reg}
+    (assoc (regex-spec-impl reg nil) ::form form)
     (pred-spec form pred)))
 
 (defmethod conform-impl ::wrap [s x]
@@ -263,7 +338,7 @@
     (throw (ex-info "k must be namespaced keyword or fully-qualified symbol"
                     {:k k})))
   (let [s (cond
-            (spec? spec) (assoc spec ::name k ::form form)
+            (spec-map? spec) (assoc spec ::name k ::form form)
             (fn? spec)   (assoc (pred-spec form spec) ::name k)
             (keyword? spec) (assoc (or (get @registry-ref spec)
                                        (throw (ex-info
@@ -419,19 +494,33 @@
              (map vector (::specs s) (::forms s))))))
 
 ;; ---------------------------------------------------------------------------
-;; coll-of / map-of via every-impl.
+;; every / every-kv / coll-of / map-of via every-impl.  coll-of and
+;; map-of conform every element (::conform-all); every and every-kv
+;; only validate, by sampling at most coll-check-limit elements, and
+;; conform to the input collection unchanged.
 ;; ---------------------------------------------------------------------------
 
+(def ^:private coll-check-limit
+  ;; The number of elements every / every-kv validate.  The canonical
+  ;; dynamic var *coll-check-limit* lands in a later wave; until then
+  ;; the canonical default is fixed here.
+  101)
+
 (defn every-impl
+  "Build an ::every spec value.  Recognized opts: :kind, :count,
+  :min-count, :max-count, :distinct, :into, plus ::conform-all
+  (conform each element instead of sampling) and ::kv (elements are
+  [k v] entries; explain reports the key, not the index)."
   [form spec opts]
-  (merge {::kind ::every ::form form ::spec spec
-          ::kind-pred (:kind opts)
-          ::count (:count opts)
-          ::min-count (:min-count opts)
-          ::max-count (:max-count opts)
-          ::distinct (:distinct opts)
-          ::into (:into opts)}
-         opts))
+  (clojure.core/merge
+    {::kind ::every ::form form ::spec spec
+     ::kind-pred (:kind opts)
+     ::count (:count opts)
+     ::min-count (:min-count opts)
+     ::max-count (:max-count opts)
+     ::distinct (:distinct opts)
+     ::into (:into opts)}
+    opts))
 
 (defmethod conform-impl ::every [s x]
   (let [kp (::kind-pred s)
@@ -447,34 +536,46 @@
       (and mx (> (count x) mx)) ::invalid
       (and d (not= (count x) (count (set x)))) ::invalid
       :else
-      (let [sp  (as-spec (::spec s))
-            ok? (every? (fn [v] (not= ::invalid (conform* sp v))) x)]
-        (if ok?
-          (let [conformed (map (fn [v] (conform* sp v)) x)
-                target    (::into s)]
+      (let [sp (as-spec (::spec s))]
+        (if (::conform-all s)
+          (let [ok? (every? (fn [v] (not= ::invalid (conform* sp v))) x)]
+            (if ok?
+              (let [conformed (map (fn [v] (conform* sp v)) x)
+                    target    (::into s)]
+                (cond
+                  (vector? target) (vec conformed)
+                  (set? target)    (set conformed)
+                  (list? target)   (apply list conformed)
+                  (vector? x)      (vec conformed)
+                  (set? x)         (set conformed)
+                  :else            (apply list conformed)))
+              ::invalid))
+          ;; Sampling mode: validate up to coll-check-limit elements and
+          ;; return the input unchanged -- elements are never conformed.
+          (loop [i 0 vs (seq x)]
             (cond
-              (vector? target) (vec conformed)
-              (set? target)    (set conformed)
-              (list? target)   (apply list conformed)
-              (vector? x)      (vec conformed)
-              (set? x)         (set conformed)
-              :else            (apply list conformed)))
-          ::invalid)))))
+              (or (nil? vs) (>= i coll-check-limit)) x
+              (= ::invalid (conform* sp (first vs))) ::invalid
+              :else (recur (inc i) (next vs)))))))))
 
 (defmethod unform-impl ::every [s y]
-  ;; Elements are conformed individually; unform each through the
-  ;; element spec and reconstruct in the original collection shape.
-  (let [sp        (as-spec (::spec s))
-        conformed (map (fn [v] (unform* sp v)) y)
-        target    (::into s)]
-    (cond
-      (vector? target) (vec conformed)
-      (set? target)    (set conformed)
-      (list? target)   (apply list conformed)
-      (vector? y)      (vec conformed)
-      (set? y)         (set conformed)
-      (map? y)         (into {} conformed)
-      :else            (apply list conformed))))
+  ;; coll-of / map-of conform elements individually; unform each
+  ;; through the element spec and reconstruct in the original
+  ;; collection shape.  Sampling specs never conformed, so y is
+  ;; already the original value.
+  (if-not (::conform-all s)
+    y
+    (let [sp        (as-spec (::spec s))
+          conformed (map (fn [v] (unform* sp v)) y)
+          target    (::into s)]
+      (cond
+        (vector? target) (vec conformed)
+        (set? target)    (set conformed)
+        (list? target)   (apply list conformed)
+        (vector? y)      (vec conformed)
+        (set? y)         (set conformed)
+        (map? y)         (into {} conformed)
+        :else            (apply list conformed)))))
 
 (defmethod explain-impl ::every [s path via in x]
   (let [kp (::kind-pred s)
@@ -498,22 +599,28 @@
       [{:path path :pred (list '>= mx '(count %)) :val x :via via :in in}]
 
       :else
-      (let [sp (as-spec (::spec s))]
+      (let [sp (as-spec (::spec s))
+            kv (::kv s)]
         (apply concat
                (map-indexed
                  (fn [i v]
-                   (let [r (conform* sp v)]
+                   (let [r (conform* sp v)
+                         ;; kv entries report the entry key; fall back
+                         ;; to the index when the element isn't a pair.
+                         k (if (and kv (sequential? v) (pos? (count v)))
+                             (nth v 0)
+                             i)]
                      (when (= ::invalid r)
-                       (explain* sp (conj path i) via (conj in i) v))))
+                       (explain* sp (conj path i) via (conj in k) v))))
                  x))))))
 
 (defn coll-of-impl [form spec opts]
   (every-impl (cons 'clojure.spec.alpha/coll-of (cons form (mapcat identity opts)))
-              spec opts))
+              spec (assoc opts ::conform-all true)))
 
 (defn map-of-impl [k-form v-form k-spec v-spec opts]
   (let [pair-spec (tuple-impl [k-form v-form] [k-spec v-spec])
-        opts'     (assoc opts :kind map?)]
+        opts'     (assoc opts :kind map? ::conform-all true)]
     (every-impl (list 'clojure.spec.alpha/map-of k-form v-form)
                 pair-spec opts')))
 
@@ -606,6 +713,185 @@
       (concat missing-problems per-key-problems))))
 
 ;; ---------------------------------------------------------------------------
+;; map-spec-impl -- the canonical keys plumbing fn.  Driven entirely by
+;; the argument map the canonical keys macro compiles: keys-pred gates
+;; the map shape, then every entry whose spec name (req/opt key mapped
+;; through req-specs/opt-specs, or the entry key itself) is registered
+;; has its value conformed.  The keys macro in this file uses the
+;; simpler keys-impl; map-spec-impl exists for callers of the canonical
+;; plumbing signature.
+;; ---------------------------------------------------------------------------
+
+(defn map-spec-impl
+  "Build a map spec from the canonical argument map.  See the comment
+  above; callers normally use the keys macro."
+  [{:keys [req opt req-un opt-un req-keys req-specs opt-keys opt-specs
+           keys-pred pred-exprs pred-forms gfn]
+    :as argm}]
+  (let [k->s (zipmap (concat req-keys opt-keys)
+                     (concat req-specs opt-specs))
+        s    {::kind ::map-spec
+              ::form (cons 'clojure.spec.alpha/keys
+                           (concat (when req    [:req req])
+                                   (when opt    [:opt opt])
+                                   (when req-un [:req-un req-un])
+                                   (when opt-un [:opt-un opt-un])))
+              ::argm argm
+              ::k->s k->s}]
+    (if gfn (assoc s ::gen gfn) s)))
+
+(defmethod conform-impl ::map-spec [s m]
+  (if-not ((:keys-pred (::argm s)) m)
+    ::invalid
+    (let [reg  @registry-ref
+          k->s (::k->s s)]
+      (loop [ret m entries (seq m)]
+        (if entries
+          (let [[k v] (first entries)
+                sp    (get reg (or (get k->s k) k))]
+            (if sp
+              (let [cv (conform* sp v)]
+                (if (= ::invalid cv)
+                  ::invalid
+                  (recur (if (= cv v) ret (assoc ret k cv))
+                         (next entries))))
+              (recur ret (next entries))))
+          ret)))))
+
+(defmethod unform-impl ::map-spec [s m]
+  (let [reg  @registry-ref
+        k->s (::k->s s)]
+    (loop [ret m entries (seq m)]
+      (if entries
+        (let [[k cv] (first entries)
+              sp     (get reg (or (get k->s k) k))]
+          (if sp
+            (let [v (unform* sp cv)]
+              (recur (if (= cv v) ret (assoc ret k v))
+                     (next entries)))
+            (recur ret (next entries))))
+        ret))))
+
+(defmethod explain-impl ::map-spec [s path via in x]
+  (if-not (map? x)
+    [{:path path :pred 'map? :val x :via via :in in}]
+    (let [reg  @registry-ref
+          k->s (::k->s s)
+          {:keys [pred-exprs pred-forms]} (::argm s)
+          pred-problems
+          (map (fn [f] {:path path :pred f :val x :via via :in in})
+               (filter some?
+                       (map (fn [pred f] (when-not (pred x) f))
+                            pred-exprs pred-forms)))
+          key-problems
+          (mapcat (fn [[k v]]
+                    (when-let [sp (get reg (or (get k->s k) k))]
+                      (when (= ::invalid (conform* sp v))
+                        (explain* sp (conj path k) via (conj in k) v))))
+                  (seq x))]
+      (concat pred-problems key-problems))))
+
+;; ---------------------------------------------------------------------------
+;; merge -- conjunction of map specs.  x must conform to every branch
+;; and the conformed maps are merged left to right; explain reports
+;; only the failing branches.
+;; ---------------------------------------------------------------------------
+
+(defn merge-spec-impl
+  "Build a merge spec from branch forms and branch specs.  Callers
+  normally use the merge macro."
+  [forms preds gfn]
+  (let [s {::kind ::merge
+           ::form (cons 'clojure.spec.alpha/merge forms)
+           ::forms forms ::specs preds}]
+    (if gfn (assoc s ::gen gfn) s)))
+
+(defmethod conform-impl ::merge [s x]
+  (loop [specs (seq (::specs s)) ms []]
+    (if specs
+      (let [r (conform* (as-spec (first specs)) x)]
+        (if (= ::invalid r)
+          ::invalid
+          (recur (next specs) (conj ms r))))
+      (apply clojure.core/merge ms))))
+
+(defmethod unform-impl ::merge [s y]
+  ;; Later branches win on conform, so unform them first and let
+  ;; earlier branches' results overwrite.
+  (apply clojure.core/merge
+         (map (fn [sp] (unform* (as-spec sp) y))
+              (reverse (::specs s)))))
+
+(defmethod explain-impl ::merge [s path via in x]
+  (apply concat
+         (map (fn [sp] (explain* (as-spec sp) path via in x))
+              (::specs s))))
+
+;; ---------------------------------------------------------------------------
+;; multi-spec -- open dispatch through a multimethod.  Each method
+;; takes the value and returns the spec for its dispatch value, so new
+;; branches are added with defmethod, without touching the spec.
+;; ---------------------------------------------------------------------------
+
+(defn- multi-spec-dval
+  "Dispatch value for a multi-spec.  mino multimethods do not expose
+  their dispatch fn, so the keyword retag (multi-spec's pervasive
+  shape, where retag and the defmulti dispatch key coincide) doubles
+  as the dispatch fn.  Fn retags are generation-only in the canonical
+  library and cannot drive dispatch here."
+  [retag x]
+  (if (keyword? retag)
+    (retag x)
+    (throw (ex-info "multi-spec requires a keyword retag on mino"
+                    {:retag retag}))))
+
+(defn- multi-spec-method
+  "Return mm's method fn for dispatch value dval, or nil: exact
+  dispatch value first, then the default method.  Hierarchy-derived
+  matches (isa? parents of dval) are not consulted."
+  [mm dval]
+  (or (get-method mm dval)
+      (get-method mm (:default (meta mm)))))
+
+(defn multi-spec-impl
+  "Build a multi-spec value.  form names the multimethod, mmvar is the
+  var holding it, retag is the tag key.  Callers normally use the
+  multi-spec macro."
+  ([form mmvar retag] (multi-spec-impl form mmvar retag nil))
+  ([form mmvar retag gfn]
+   (let [s {::kind ::multi
+            ::form (list 'clojure.spec.alpha/multi-spec form retag)
+            ::mm-form form ::mmvar mmvar ::retag retag}]
+     (if gfn (assoc s ::gen gfn) s))))
+
+(defmethod conform-impl ::multi [s x]
+  (let [mm     @(::mmvar s)
+        method (multi-spec-method mm (multi-spec-dval (::retag s) x))]
+    (if method
+      (conform* (as-spec (method x)) x)
+      ::invalid)))
+
+(defmethod unform-impl ::multi [s y]
+  (let [mm     @(::mmvar s)
+        dval   (multi-spec-dval (::retag s) y)
+        method (multi-spec-method mm dval)]
+    (if method
+      (unform* (as-spec (method y)) y)
+      (throw (ex-info (str "No method of: " (::mm-form s)
+                           " for dispatch value: " (pr-str dval))
+                      {:form (::mm-form s) :val y})))))
+
+(defmethod explain-impl ::multi [s path via in x]
+  (let [mm     @(::mmvar s)
+        dval   (multi-spec-dval (::retag s) x)
+        path   (conj path dval)
+        method (multi-spec-method mm dval)]
+    (if method
+      (explain* (as-spec (method x)) path via in x)
+      [{:path path :pred (::mm-form s) :val x
+        :reason "no method" :via via :in in}])))
+
+;; ---------------------------------------------------------------------------
 ;; Regex ops: cat, *, +, ?, alt.  These compose into a regex spec value
 ;; that walks an input sequence one element at a time.
 ;; ---------------------------------------------------------------------------
@@ -636,15 +922,29 @@
                       (= op ::?) 'clojure.spec.alpha/?) form)
    ::form-inner form ::spec spec})
 
+(defn rep+impl
+  "Build a + regex spec: one or more occurrences of pred.  Callers
+  normally use the + macro."
+  [form pred]
+  (rep-impl ::+ form pred))
+
+(defn maybe-impl
+  "Build a ? regex spec: zero or one occurrence of pred.  Callers
+  normally use the ? macro.  Note the canonical argument order: pred
+  first, form second."
+  [pred form]
+  (rep-impl ::? form pred))
+
 (defn alt-impl [keys forms specs]
   {::kind ::regex ::regex true ::op ::alt
    ::form (cons 'clojure.spec.alpha/alt (interleave keys forms))
    ::keys keys ::forms forms ::specs specs})
 
 (defn amp-impl
-  "Build an ::amp regex spec: re-spec is consumed normally; preds are
-  applied to the conformed sequence. All preds must return truthy or
-  the consume yields ::invalid."
+  "Build an ::amp regex spec: re-spec is consumed normally; the
+  conformed sequence is then threaded through each pred as a spec
+  (see the ::amp branch of re-consume).  Any ::invalid step yields
+  ::invalid for the whole consume."
   [re-form pred-forms re-spec pred-fns]
   {::kind ::regex ::regex true ::op ::amp
    ::form (cons 'clojure.spec.alpha/& (cons re-form pred-forms))
@@ -769,9 +1069,19 @@
                     [::invalid xs])]
       (if (= ::invalid r)
         [::invalid xs]
-        (if (every? (fn [p] (p r)) (::preds spec))
-          [r rem]
-          [::invalid xs])))))
+        ;; Thread the conformed value through each pred as a spec:
+        ;; plain predicates act as filters (the value passes through
+        ;; unchanged), conformer / map specs transform it -- keys*
+        ;; relies on the transformation.
+        (let [r' (loop [v r ps (seq (::preds spec))]
+                   (cond
+                     (= ::invalid v) ::invalid
+                     (nil? ps)       v
+                     :else (recur (conform* (as-spec (first ps)) v)
+                                  (next ps))))]
+          (if (= ::invalid r')
+            [::invalid xs]
+            [r' rem]))))))
 
 (defn- re-conform [spec xs]
   (let [[r rem] (re-consume spec xs)]
@@ -835,10 +1145,13 @@
               (list (unform* (as-spec sp) v))))))
 
       (= ::amp op)
-      ;; Unform through the wrapped regex; the extra preds don't
-      ;; transform the value.
-      (let [re-sp (as-regex-spec (::re spec))]
-        (if re-sp (re-unform re-sp y) y))
+      ;; Reverse the pred threading (conformers may have transformed
+      ;; the value), then unform through the wrapped regex.
+      (let [re-sp (as-regex-spec (::re spec))
+            v     (reduce (fn [acc p] (unform* (as-spec p) acc))
+                          y
+                          (reverse (::preds spec)))]
+        (if re-sp (re-unform re-sp v) v))
 
       :else y)))
 
@@ -941,9 +1254,10 @@
                'number?  gen-impl/double
                'nil?     (gen-impl/return nil)
                'any?     gen-impl/any}]
-    (merge pairs
-           (into {} (for [[k v] pairs]
-                      [(symbol "clojure.core" (name k)) v])))))
+    (clojure.core/merge
+      pairs
+      (into {} (for [[k v] pairs]
+                 [(symbol "clojure.core" (name k)) v])))))
 
 (defn- spec-form-key [spec]
   ;; Spec values store the form under :clojure.spec.alpha/form. Fall
@@ -1032,7 +1346,8 @@
 (defn gen
   "Build a clojure.test.check generator for `spec`. `overrides` is a
   map from spec-key keywords (or predicate symbols) to alternative
-  generators."
+  generators. A generator attached with with-gen wins over the one
+  derived from the spec's form."
   ([spec] (gen spec nil))
   ([spec overrides]
    (or (when overrides
@@ -1041,9 +1356,20 @@
                (get overrides spec))))
        (let [resolved (cond
                         (keyword? spec) (get @registry-ref spec)
-                        :else            spec)
-             form     (spec-form resolved)]
-         (form->generator form (or overrides {}))))))
+                        :else            spec)]
+         (if-let [gfn (and (map? resolved) (::gen resolved))]
+           (gfn)
+           (form->generator (spec-form resolved) (or overrides {})))))))
+
+(defn gen*
+  "Protocol-shaped generator hook: return the generator for spec,
+  honoring an attached with-gen generator. path and rmap are accepted
+  for the canonical signature; recursion limiting arrives with the
+  dynamic-var wave."
+  [spec overrides _path _rmap]
+  (if-let [gfn (and (map? spec) (::gen spec))]
+    (gfn)
+    (gen spec overrides)))
 
 (defn exercise
   "Generate `n` (default 10) sample/conformed pairs for `spec`."
@@ -1093,17 +1419,76 @@
   ((::unform-fn s) y))
 
 ;; ---------------------------------------------------------------------------
+;; nonconforming -- same acceptance as the wrapped spec, but conform
+;; returns the original (not the conformed) value.
+;; ---------------------------------------------------------------------------
+
+(defn nonconforming
+  "Return a spec with the same properties as spec, except conform
+  returns the original (not the conformed) value."
+  [spec]
+  (let [sp (as-spec spec)]
+    {::kind ::nonconforming
+     ::form (list 'clojure.spec.alpha/nonconforming (::form sp))
+     ::spec sp}))
+
+(defmethod conform-impl ::nonconforming [s x]
+  (let [r (conform* (::spec s) x)]
+    (if (= ::invalid r) ::invalid x)))
+
+(defmethod unform-impl ::nonconforming [_s y] y)
+
+(defmethod explain-impl ::nonconforming [s path via in x]
+  (explain* (::spec s) path via in x))
+
+;; ---------------------------------------------------------------------------
+;; keys* -- keys spec as a regex op.  An & wrapper consumes inline
+;; keyword/value pairs via (* (cat ::k keyword? ::v any?)), the
+;; kvs->map conformer turns the matched pairs into a map, and the keys
+;; spec built from the same arguments validates that map.
+;; ---------------------------------------------------------------------------
+
+(def ^:private kvs->map-spec
+  ;; Conformer threading keys* matches into a map; unform turns the
+  ;; map back into the {::k k ::v v} pairs the regex unfolds.
+  (conformer
+    (fn [kvs] (into {} (map (fn [kv] [(get kv ::k) (get kv ::v)]) kvs)))
+    (fn [m] (map (fn [[k v]] {::k k ::v v}) m))))
+
+(def ^:private keys*-kv-form
+  '(clojure.spec.alpha/cat :clojure.spec.alpha/k clojure.core/keyword?
+                           :clojure.spec.alpha/v clojure.core/any?))
+
+(defn keys*-impl
+  "Build the keys* regex op around mspec, a keys spec built from the
+  same arguments.  Callers normally use the keys* macro."
+  [mspec]
+  (amp-impl (list 'clojure.spec.alpha/* keys*-kv-form)
+            (list :clojure.spec.alpha/kvs->map (::form mspec))
+            (rep-impl ::* keys*-kv-form
+                      (cat-impl [::k ::v]
+                                '[clojure.core/keyword? clojure.core/any?]
+                                [keyword? any?]))
+            [kvs->map-spec mspec]))
+
+;; ---------------------------------------------------------------------------
 ;; with-gen -- attach an alternative generator to a spec. Generators
 ;; require clojure.test.check; the alternative is stored on the spec
 ;; map and surfaced through gen.
 ;; ---------------------------------------------------------------------------
+
+(defn with-gen*
+  "Protocol-shaped with-gen: return a copy of the spec value carrying
+  gen-fn as its generator."
+  [spec gen-fn]
+  (assoc (as-spec spec) ::gen gen-fn))
 
 (defn with-gen
   "Return a copy of spec that uses gen-fn as its generator. spec may
   be a registered keyword, a spec map, or any predicate-shaped value
   acceptable to as-spec."
   [spec gen-fn]
-  (assoc (as-spec spec) ::gen gen-fn))
+  (with-gen* spec gen-fn))
 
 (defn- res
   "Resolve a symbol to its qualified form for stable :form data."
@@ -1188,12 +1573,12 @@
 (defmacro +
   "One or more occurrences of pred."
   [pred]
-  `(clojure.spec.alpha/rep-impl :clojure.spec.alpha/+ '~(res pred) ~pred))
+  `(clojure.spec.alpha/rep+impl '~(res pred) ~pred))
 
 (defmacro ?
   "Zero or one occurrence of pred."
   [pred]
-  `(clojure.spec.alpha/rep-impl :clojure.spec.alpha/? '~(res pred) ~pred))
+  `(clojure.spec.alpha/maybe-impl ~pred '~(res pred)))
 
 (defmacro alt
   "Alternation: branches with named tags, single-element."
@@ -1232,3 +1617,52 @@
        x#
        (throw (ex-info (str "Spec assertion failed: " (pr-str ~spec))
                        (or (clojure.spec.alpha/explain-data ~spec x#) {}))))))
+
+(defmacro every
+  "Validate that every element of a collection satisfies pred.  Samples
+  up to coll-check-limit (101) elements; does not conform elements; the
+  input collection is returned unchanged on success.
+
+  Opts: :kind pred, :count n, :min-count n, :max-count n, :distinct bool."
+  [pred & opts]
+  (let [opts-map (apply hash-map opts)]
+    `(clojure.spec.alpha/every-impl
+       '(clojure.spec.alpha/every ~(res pred) ~@opts)
+       ~pred
+       ~opts-map)))
+
+(defmacro every-kv
+  "Like every but validates associative entries as [kpred vpred] pairs.
+  Works on maps and sequences of pairs."
+  [kpred vpred & opts]
+  (let [opts-map (apply hash-map opts)]
+    `(clojure.spec.alpha/every-impl
+       '(clojure.spec.alpha/every-kv ~(res kpred) ~(res vpred))
+       (clojure.spec.alpha/tuple-impl '~[(res kpred) (res vpred)] [~kpred ~vpred])
+       (assoc ~opts-map ::kv true))))
+
+(defmacro keys*
+  "Like keys but produces a regex spec that matches inline key/value
+  pairs in a sequence.  Conforms to a map."
+  [& opts]
+  (let [opts-map (apply hash-map opts)]
+    `(clojure.spec.alpha/keys*-impl
+       (clojure.spec.alpha/keys-impl '~opts ~opts-map))))
+
+(defmacro merge
+  "Conjunction of map specs.  x must conform to every branch; the
+  conformed maps are merged left to right."
+  [& specs]
+  `(clojure.spec.alpha/merge-spec-impl
+     '~(mapv res specs)
+     ~(vec specs)
+     nil))
+
+(defmacro multi-spec
+  "Dispatch a spec through a multimethod.  mm is the multimethod
+  symbol; retag is the keyword used to extract the dispatch value."
+  [mm retag]
+  `(clojure.spec.alpha/multi-spec-impl
+     '~mm
+     (resolve '~mm)
+     ~retag))
