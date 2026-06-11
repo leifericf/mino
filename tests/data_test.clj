@@ -1,6 +1,6 @@
 (require "tests/test")
 
-(require '[clojure.data :refer [diff]])
+(require '[clojure.data :as data :refer [diff]])
 
 ;; --- equal arguments ---
 
@@ -43,13 +43,13 @@
 ;; --- sequential diffs ---
 
 (deftest data-diff-seq-equal-length
-  (is (= [[nil nil 3] [nil nil 4] [1 2 nil]]
+  (is (= [[nil nil 3] [nil nil 4] [1 2]]
          (diff [1 2 3] [1 2 4]))))
 
 (deftest data-diff-seq-different-length
-  (is (= [[nil nil 3] nil [1 2 nil]]
+  (is (= [[nil nil 3] nil [1 2]]
          (diff [1 2 3] [1 2])))
-  (is (= [nil [nil nil 4] [1 2 nil]]
+  (is (= [nil [nil nil 4] [1 2]]
          (diff [1 2] [1 2 4]))))
 
 (deftest data-diff-seq-empty
@@ -70,5 +70,43 @@
 
 (deftest data-diff-set-empty
   (is (= [nil nil #{}] (diff #{} #{}))))
+
+(deftest data-diff-set-shared-element
+  (is (= [#{1} #{3} #{2}] (diff #{1 2} #{2 3}))))
+
+;; --- canon pinning: keys replaced across maps ---
+
+(deftest data-diff-map-key-replaced
+  (is (= [{:b 2} {:c 3} {:a 1}]
+         (diff {:a 1 :b 2} {:a 1 :c 3}))))
+
+(deftest data-diff-map-nested-key-replaced
+  (is (= [{:a {:c 2}} {:a {:d 3}} {:a {:b 1}}]
+         (diff {:a {:b 1 :c 2}} {:a {:b 1 :d 3}}))))
+
+(deftest data-diff-map-shared-nil-value
+  (is (= [{:b 1} nil {:a nil}]
+         (diff {:a nil :b 1} {:a nil}))))
+
+;; --- protocols ---
+
+(deftest data-protocol-vars-exist
+  (is (var? (resolve 'clojure.data/EqualityPartition)))
+  (is (var? (resolve 'clojure.data/Diff)))
+  (is (var? (resolve 'clojure.data/equality-partition)))
+  (is (var? (resolve 'clojure.data/diff-similar))))
+
+(deftest data-equality-partition
+  (is (= :atom (data/equality-partition 1)))
+  (is (= :atom (data/equality-partition "x")))
+  (is (= :atom (data/equality-partition nil)))
+  (is (= :sequential (data/equality-partition [1])))
+  (is (= :sequential (data/equality-partition '(1))))
+  (is (= :set (data/equality-partition #{1})))
+  (is (= :map (data/equality-partition {:a 1}))))
+
+(deftest data-diff-similar-sequential
+  (is (= [[nil 2] [nil 3] [1]] (data/diff-similar [1 2] [1 3])))
+  (is (= (diff [1 2] [1 3]) (data/diff-similar [1 2] [1 3]))))
 
 (run-tests-and-exit)
