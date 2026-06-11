@@ -202,7 +202,7 @@ jobs:
         # re-execs transparent too). Informational until it holds a green
         # streak, then promote to a gate -- the same playbook as
         # darwin-zig-canary / jit-host-canary. See
-        # docs/ZIG_TOOLCHAIN_MAXOUT.md.
+        # docs/MAINTAINER_TOOLCHAIN.md.
         continue-on-error: true
         run: ./mino task test-cross-qemu
 

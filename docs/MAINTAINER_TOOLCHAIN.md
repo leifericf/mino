@@ -133,8 +133,7 @@ published artifacts and the portability canary (gcc + Apple Clang + mingw).
   as an **informational** step (`continue-on-error`); promote it to a gate
   once it holds a green streak, the same playbook as `darwin-zig-canary`.
   Local one-off: `sudo apt-get install -y qemu-user-static && ./mino task
-  cross-build && ./mino task test-cross-qemu`. The forward roadmap for this
-  and the other toolchain-axis items lives in `docs/ZIG_TOOLCHAIN_MAXOUT.md`.
+  cross-build && ./mino task test-cross-qemu`.
 
 - `./mino task check-binary-reproducible` — gate that the published
   `linux-amd64-musl` artifact is reproducible: built twice from clean it must
@@ -209,6 +208,10 @@ and invert the canary so Apple clang becomes the informational lens.
 
 ## Guardrails
 
+- **Zig is a toolchain, never a source language.** No `.zig` files in the
+  runtime, the tests, or the tooling — language behavior is tested in
+  `tests/*_test.clj`, the C ABI in C embed tests. The only sanctioned Zig
+  artifact is a `build.zig.zon` package smoke test, if one is ever added.
 - The embedder line is absolute: `zig` is never required to build or embed
   mino, nor for a from-source standalone build. `make` + `cc` stays the
   canonical bootstrap. zig is a *maintainer* requirement only — it gates the
@@ -218,3 +221,27 @@ and invert the canary so Apple clang becomes the informational lens.
   an informational MSVC compile canary (`msvc-compile-canary`) was added.
 - Build orchestration stays in the self-hosted Clojure task runner; it shells
   `zig cc` underneath rather than moving anything into `build.zig`.
+
+## The toolchain ceiling (what zig 0.16 cannot do — don't re-spike)
+
+zig 0.16 is a superb *compiler + cross + linker*, but it ships **none of the
+LLVM runtime libraries** (asan, msan, fuzzer, profile) nor the **LLVM tool
+binaries** (`llvm-profdata`, `llvm-cov`). Anything needing those stays on a
+host LLVM/clang, off the pinned-zig path — by design, not oversight:
+
+- **PGO** — investigated hands-on and deferred on three independently verified
+  counts: zig ships no profile runtime (`-fprofile-generate` fails to link),
+  no `llvm-profdata` to merge raw profiles, and zig's clang driver never
+  registers the profile `atexit` writer even when both are supplied
+  externally (zero `.profraw` written). Making it work would mean adopting a
+  version-coupled second LLVM toolchain, contradicting the single-pin
+  mandate — and mino's hot path, the copy-and-patch JIT, is uninstrumentable
+  by PGO anyway (stencils ship as committed machine-code bytes). Revisit only
+  if zig bundles the profile runtime plus a `profdata` subcommand.
+- **ASan** — zig ships no asan runtime; stays on host `cc` (`release-gate`).
+- **MSan** — needs an MSan-instrumented libc zig's musl doesn't provide.
+- **libFuzzer** — fuzzer runtime missing; fuzzing stays on host clang
+  (`mino-bench` `fuzz-build-libfuzzer`).
+- **Coverage rendering** — `zig cc` can instrument (`-fcoverage-mapping`) but
+  zig exposes no `llvm-cov` / `llvm-profdata` to render reports.
+- **Debugger / profiler** — zig ships none; use lldb/gdb, perf/valgrind.
