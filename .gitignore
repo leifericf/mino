@@ -51,7 +51,10 @@ Thumbs.db
 .vscode/
 .idea/
 .lsp/
-.claude/
+# .claude/ is shared maintainer infrastructure (skills, agents,
+# settings.json); only personal config stays untracked.
+.claude/settings.local.json
+.claude/hooks/
 .mcp.json
 *.swp
 *.swo
