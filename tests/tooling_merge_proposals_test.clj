@@ -95,4 +95,93 @@
     (is (= [] (:appended r)))
     (is (= base-mp-changelog (slurp mp-changelog)))))
 
+;; ---- category grouping ----
+;; Lines carry Category: prefixes (the commit-form convention); the
+;; Unreleased section groups bullets by category, categories in
+;; first-seen order, uncategorized bullets last.
+
+(defn- mp-unreleased-bullets []
+  (let [lines (str/split-lines (slurp mp-changelog))
+        after (rest (drop-while #(not= "## Unreleased" (str/trim %)) lines))
+        body  (take-while #(not (str/starts-with? % "## ")) after)]
+    (filterv #(str/starts-with? % "- ") body)))
+
+(deftest groups-bullets-by-category-prefix
+  (mp-fresh!)
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["GC: First gc line"
+                                                    "Security: A security line"
+                                                    "GC: Second gc line"]})
+  (mp-merge!)
+  (is (= ["- GC: First gc line"
+          "- GC: Second gc line"
+          "- Security: A security line"]
+         (mp-unreleased-bullets))))
+
+(deftest grouping-respects-existing-section-and-order
+  (mp-fresh!)
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["GC: Old line"]})
+  (mp-merge!)
+  (mp-propose! "b.edn" {:branch "fix/2" :changelog ["Security: New sec line"
+                                                    "GC: New gc line"]})
+  (mp-merge!)
+  (is (= ["- GC: Old line"
+          "- GC: New gc line"
+          "- Security: New sec line"]
+         (mp-unreleased-bullets))))
+
+(deftest uncategorized-lines-group-last
+  (mp-fresh!)
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["No category here"
+                                                    "GC: Categorized"]})
+  (mp-merge!)
+  (is (= ["- GC: Categorized"
+          "- No category here"]
+         (mp-unreleased-bullets))))
+
+;; ---- cut-release ----
+
+(deftest cut-release-renames-unreleased
+  (mp-fresh!)
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["GC: A fix"]})
+  (mp-merge!)
+  (let [r (tools.merge-proposals/cut-release!
+            {:changelog mp-changelog :version "v0.2.0" :title "Bug Fixes"})
+        text (slurp mp-changelog)]
+    (is (= "v0.2.0" (:version r)))
+    (is (= 1 (:entries r)))
+    (is (not (str/includes? text "## Unreleased")))
+    (is (str/includes? text "## v0.2.0 — Bug Fixes"))
+    (is (str/includes? text "- GC: A fix"))
+    ;; old releases untouched, new section sits above them
+    (is (< (str/index-of text "## v0.2.0")
+           (str/index-of text "## v0.1.0")))))
+
+(deftest merge-after-cut-starts-a-fresh-unreleased
+  (mp-fresh!)
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["GC: Released line"]})
+  (mp-merge!)
+  (tools.merge-proposals/cut-release!
+    {:changelog mp-changelog :version "v0.2.0" :title "Bug Fixes"})
+  (mp-propose! "b.edn" {:branch "fix/2" :changelog ["GC: Next line"]})
+  (mp-merge!)
+  (let [text (slurp mp-changelog)]
+    (is (str/includes? text "## Unreleased"))
+    (is (< (str/index-of text "## Unreleased")
+           (str/index-of text "## v0.2.0")))
+    (is (= ["- GC: Next line"] (mp-unreleased-bullets)))))
+
+(deftest cut-release-requires-a-nonempty-unreleased
+  (mp-fresh!)
+  (is (thrown? Exception
+        (tools.merge-proposals/cut-release!
+          {:changelog mp-changelog :version "v0.2.0" :title "Nothing"})))
+  (mp-propose! "a.edn" {:branch "fix/1" :changelog ["GC: A fix"]})
+  (mp-merge!)
+  (is (thrown? Exception
+        (tools.merge-proposals/cut-release!
+          {:changelog mp-changelog :version "v0.2.0"})))
+  (is (thrown? Exception
+        (tools.merge-proposals/cut-release!
+          {:changelog mp-changelog :title "No version"}))))
+
 (run-tests-and-exit)

@@ -32,7 +32,9 @@ Per finding:
    the landing wave.
 6. **Land.** Commit `Category: Imperative summary`; write your
    proposal EDN (`{:branch ... :changelog [...] :commits [...]}`) —
-   never touch CHANGELOG.md or version fields.
+   never touch CHANGELOG.md or version fields. Changelog lines follow
+   the write-changelog recipe (user-visible effects only; an empty
+   `:changelog []` is normal for style/factoring fixes).
 
 If two of your findings conflict (one wants the code the other
 removes), fix in punch-list order and note the second as overtaken:
