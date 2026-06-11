@@ -3,65 +3,102 @@
 
 (declare diff)
 
-(defn- diff-map [a b]
+(defn- atom-diff [a b]
+  (if (= a b) [nil nil a] [a b nil]))
+
+(defn- sparse->vec
+  "Builds a vector from an index->value map, nil-filling gaps up to
+   the highest index. Returns nil for an empty map so an absent diff
+   slot stays nil."
+  [m]
+  (when (seq m)
+    (let [n (inc (apply max (keys m)))]
+      (mapv (fn [i] (get m i)) (range n)))))
+
+(defn- diff-at-key
+  "Diffs a and b at the single key k, returning a triple of one-entry
+   maps [only-a only-b both] with nil for absent slots. The pair is
+   shared at k when the sub-diff found common structure, or when both
+   sides hold nil at k."
+  [a b k]
+  (let [va (get a k)
+        vb (get b k)
+        [oa ob ab] (diff va vb)
+        in-a (contains? a k)
+        in-b (contains? b k)
+        shared (and in-a in-b
+                    (or (some? ab)
+                        (and (nil? va) (nil? vb))))]
+    [(when (and in-a (or (some? oa) (not shared))) {k oa})
+     (when (and in-b (or (some? ob) (not shared))) {k ob})
+     (when shared {k ab})]))
+
+(defn- diff-associative
+  "Diffs associative things a and b over the keys in ks, merging the
+   per-key triples into [only-a only-b both] maps (nil when empty)."
+  [a b ks]
   (reduce
-    (fn [[only-a only-b both] k]
-      (let [has-a (contains? a k)
-            has-b (contains? b k)]
-        (cond
-          (and has-a (not has-b))
-          [(assoc only-a k (get a k)) only-b both]
-
-          (and (not has-a) has-b)
-          [only-a (assoc only-b k (get b k)) both]
-
-          :else
-          (let [[da db db2] (diff (get a k) (get b k))]
-            [(if (some? da) (assoc only-a k da) only-a)
-             (if (some? db) (assoc only-b k db) only-b)
-             (if (some? db2) (assoc both k db2) both)]))))
+    (fn [acc k] (mapv merge acc (diff-at-key a b k)))
     [nil nil nil]
-    (distinct (concat (keys a) (keys b)))))
+    ks))
 
 (defn- diff-sequential [a b]
   (let [va (vec a)
         vb (vec b)
-        na (count va)
-        nb (count vb)
-        mx (max na nb)
-        [ra rb rc]
-        (reduce
-          (fn [[only-a only-b both] i]
-            (let [has-a (< i na)
-                  has-b (< i nb)]
-              (cond
-                (and has-a (not has-b))
-                [(conj only-a (nth va i)) (conj only-b nil) (conj both nil)]
-
-                (and (not has-a) has-b)
-                [(conj only-a nil) (conj only-b (nth vb i)) (conj both nil)]
-
-                :else
-                (let [[da db db2] (diff (nth va i) (nth vb i))]
-                  [(conj only-a da) (conj only-b db) (conj both db2)]))))
-          [[] [] []]
-          (range mx))]
-    [(when (some some? ra) ra)
-     (when (some some? rb) rb)
-     (when (some some? rc) rc)]))
+        [oa ob ab] (diff-associative va vb
+                                     (range (max (count va) (count vb))))]
+    [(sparse->vec oa) (sparse->vec ob) (sparse->vec ab)]))
 
 (defn- diff-set [a b]
-  (let [only-a (set/difference a b)
-        only-b (set/difference b a)
-        both   (set/intersection a b)]
-    [(when (seq only-a) only-a)
-     (when (seq only-b) only-b)
-     (when (seq both) both)]))
+  [(not-empty (set/difference a b))
+   (not-empty (set/difference b a))
+   (not-empty (set/intersection a b))])
 
-(defn diff [a b]
-  (cond
-    (= a b) [nil nil a]
-    (and (map? a) (map? b)) (diff-map a b)
-    (and (set? a) (set? b)) (diff-set a b)
-    (and (sequential? a) (sequential? b)) (diff-sequential a b)
-    :else [a b nil]))
+(defprotocol EqualityPartition
+  "Internal dispatch hook for diff; not a stable interface."
+  (equality-partition [x]
+    "Returns the partition x diffs within: :atom, :set,
+     :sequential, or :map."))
+
+(defprotocol Diff
+  "Internal dispatch hook for diff; not a stable interface."
+  (diff-similar [a b]
+    "Diffs a and b, which share an equality partition."))
+
+;; Built-in types grouped by equality partition; everything else
+;; (including strings) compares as an atom via the :default entries.
+(def ^:private partition-types
+  {:sequential [:vector :list :lazy-seq :map-entry]
+   :set        [:set :sorted-set]
+   :map        [:map :sorted-map]})
+
+(def ^:private diff-similar-fns
+  {:sequential diff-sequential
+   :set        diff-set
+   :map        (fn [a b]
+                 (diff-associative a b
+                                   (distinct (concat (keys a) (keys b)))))})
+
+(doseq [[part types] partition-types
+        t types]
+  (extend t
+    EqualityPartition {:equality-partition (fn [_] part)}
+    Diff              {:diff-similar (get diff-similar-fns part)}))
+
+(extend :default
+  EqualityPartition {:equality-partition (fn [_] :atom)}
+  Diff              {:diff-similar atom-diff})
+
+(defn diff
+  "Recursively compares a and b, returning the triple
+  [only-in-a only-in-b in-both]. Equal values yield [nil nil a].
+  Maps recurse into values under shared keys; sequential things
+  diff position by position and report vectors; sets split into
+  difference/difference/intersection without recursing. Anything
+  else, strings included, compares whole as an atom."
+  [a b]
+  (if (= a b)
+    [nil nil a]
+    (if (= (equality-partition a) (equality-partition b))
+      (diff-similar a b)
+      (atom-diff a b))))
