@@ -23,6 +23,11 @@
     "apply-findings" "verify-lanes" "maintain-toolchain"
     "gather-module-context" "run-review-round"})
 
+;; Shared skills carry NEITHER flag: in the / menu for humans AND
+;; invocable by agents via the Skill tool.
+(def sk-shared-skills
+  #{"record-decision"})
+
 (defn- sk-skill-files []
   (sort (filterv #(str/ends-with? % "/SKILL.md") (file-seq sk-skills-dir))))
 
@@ -52,17 +57,23 @@
 
 (deftest skill-inventory-is-complete
   (let [names (set (mapv sk-skill-name (sk-skill-files)))]
-    (is (= (into sk-entry-skills sk-internal-skills) names)
-        "skills on disk must be exactly the 5 entry + 14 internal")))
+    (is (= (into (into sk-entry-skills sk-internal-skills) sk-shared-skills)
+           names)
+        "skills on disk must be exactly the entry + internal + shared sets")))
 
-(deftest every-skill-has-exactly-one-visibility-flag
+(deftest every-skill-has-the-right-visibility-flags
   (doseq [path (sk-skill-files)]
-    (let [fm (sk-frontmatter path)
+    (let [nm (sk-skill-name path)
+          fm (sk-frontmatter path)
           entry?    (= "true" (get fm "disable-model-invocation"))
           internal? (= "false" (get fm "user-invocable"))]
-      (is (or (and entry? (not (contains? fm "user-invocable")))
-              (and internal? (not (contains? fm "disable-model-invocation"))))
-          (str path " must carry exactly one visibility flag")))))
+      (if (sk-shared-skills nm)
+        (is (and (not (contains? fm "disable-model-invocation"))
+                 (not (contains? fm "user-invocable")))
+            (str path " is shared: it must carry neither visibility flag"))
+        (is (or (and entry? (not (contains? fm "user-invocable")))
+                (and internal? (not (contains? fm "disable-model-invocation"))))
+            (str path " must carry exactly one visibility flag"))))))
 
 (deftest entry-and-internal-classification-matches
   (doseq [path (sk-skill-files)]

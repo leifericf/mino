@@ -23,11 +23,16 @@ Per entry, in inbox order:
      known-bugs.md with commit hash and repro.
    - **check-* / write-* skill body** — when it changes what a
      dimension looks for or how a recipe proceeds.
+   - **Decision record** (`docs/adr/`, via the record-decision
+     skill) — when the entry is a *why* (a choice between
+     alternatives) rather than a *how*. Often paired: the ADR holds
+     the reasoning, a reference holds the resulting rule.
    - **Agent body / entry skill** — only for dispatch-contract or
      orchestration changes.
 2. **Resolve conflicts.** An entry with `:conflicts-with` (or one you
    discover contradicts current text): present both rules to the
-   maintainer and apply the decision; never keep both.
+   maintainer and apply the decision; never keep both. The resolution
+   is a decision — record it via record-decision.
 3. **Write it in place**, in the file's voice — a rule, not a
    changelog of the conversation. Delete the entry from inbox.edn in
    the same change.

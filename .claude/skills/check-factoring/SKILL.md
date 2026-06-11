@@ -35,3 +35,7 @@ with the suggestion clearly marked cross-module.
 Findings are `:level :factoring`; severity `:medium` for boundary
 violations and duplication, `:low` for size pressure. Factoring fixes
 land in their own wave after correctness, before style.
+
+Before filing, scan the decision index (`docs/adr/README.md`): a
+structure an ADR chose deliberately is not a finding; a structure
+that violates an ADR is one, citing `ADR-NN`.

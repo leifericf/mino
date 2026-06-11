@@ -26,8 +26,14 @@ flag only:
    the gate will eventually fire mid-unrelated-change.
 
 Do NOT flag: audited non-gated idioms (the c-style.md "deliberately
-NOT gated" list), vendored code under `src/vendor/`, generated files
-(`src/core_mino.h`, `src/lib_*.h`, stencil `generated/*.h`).
+NOT gated" list and ADR 04), vendored code under `src/vendor/`,
+generated files (`src/core_mino.h`, `src/lib_*.h`, stencil
+`generated/*.h`), or anything the decision index
+(`docs/adr/README.md`) records as deliberate.
+
+When the shard includes prose (docs, ADRs, changelog sections,
+docstrings), the standard is `references/prose-style.md` in this
+skill — apply it the same way.
 
 Style findings are `:level :style`, severity `:low` (or `:medium`
 when a misleading comment could cause a future correctness mistake).

@@ -15,7 +15,13 @@ orchestrating — it is the topology, ordering, and conflict law.
 1. **Initialize.** Pick a slug; create feature branch `change/<slug>`
    off main;
    `./mino tools/run_state.clj init .local/runs/<slug> --kind change --scope <scope> --branch change/<slug>`.
-2. **Plan units.** Split the spec into units, each owning one module
+2. **Plan units.** First scan the decision index (`docs/adr/README.md`)
+   for records the spec touches: a plan that contradicts an ADR goes
+   to the maintainer before any dispatch (supersede the decision or
+   change the plan — never silently override). A real choice made
+   while planning, where the rejected alternative would have been
+   reasonable, gets recorded via the record-decision skill.
+   Then split the spec into units, each owning one module
    (gather-module-context per module). Every unit gets: a test unit
    and an implementation unit. State each unit's spec in 3–6 lines.
    Size every unit to be completable by one agent in one sitting —

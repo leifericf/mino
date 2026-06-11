@@ -9,7 +9,9 @@ user-invocable: false
 Write new C for the mino runtime. The standards are
 `.claude/skills/check-style/references/c-style.md` (read it first) and
 the contracts in `docs/ARCHITECTURE_CONTRACT.md`; placement comes from
-`docs/INTERNAL_MODULE_MAP.md`.
+`docs/INTERNAL_MODULE_MAP.md`; the *why* behind the constraints is the
+decision index (`docs/adr/README.md`) — scan it before designing
+anything that feels constrained by an unexplained rule.
 
 Procedure:
 

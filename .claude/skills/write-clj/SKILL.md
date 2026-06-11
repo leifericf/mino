@@ -7,7 +7,9 @@ user-invocable: false
 # write-clj
 
 Write Clojure-dialect code for mino. The standard is
-`.claude/skills/check-style/references/clj-style.md` (read it first).
+`.claude/skills/check-style/references/clj-style.md` (read it first);
+decisions constraining the tooling live in the index at
+`docs/adr/README.md`.
 
 Placement decides the rules:
 

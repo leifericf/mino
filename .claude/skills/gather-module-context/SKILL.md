@@ -24,6 +24,9 @@ Sources, in order:
    and why; flags active work and fresh bug history.
 5. `grep -c '' <files>` — sizes, to warn editors near the qa-arch
    limits (1100 TU / 250 fn).
+6. `docs/adr/README.md` — decision records touching the module or
+   its idioms; quote the relevant index lines so dispatched agents
+   know what is deliberate before they review or edit it.
 
 Brief format (keep under ~40 lines):
 

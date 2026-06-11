@@ -22,7 +22,10 @@ The discipline, in order — do not skip steps:
    surface (write-tests: language → `tests/*_test.clj`, ABI → embed
    tests). Run it; watch it fail for the expected reason. Commit it
    first (`tests: ...`) so history proves fail→pass.
-3. **Find the cause, not the symptom.** Check
+3. **Find the cause, not the symptom.** First check the decision
+   index (`docs/adr/README.md`) and the deviation comments near the
+   site — "wrong" behavior that an ADR or documented deviation chose
+   is not a bug; report that back instead of fixing it. Then check
    `.claude/skills/check-security/references/known-bugs.md` — most
    shipped bugs are recurrences of five patterns. Fix at the source:
    the C or core.clj defect, never a caller-side special case, never

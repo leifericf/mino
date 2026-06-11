@@ -38,3 +38,8 @@ Severity: silent wrong answers are `:high`; wrong error shapes
 `:style`). Cross-check candidates against `tests/conformance_test.clj`
 and `tests/clojure_coverage_test.clj` before filing — it may be a
 known, tracked gap.
+
+Before filing, scan the decision index (`docs/adr/README.md`): a
+divergence an ADR decided is not a finding (cite the ADR if the site
+lacks its deviation comment — that's a `:style` doc gap); code that
+*violates* an ADR is a `:high` finding citing `ADR-NN`.
