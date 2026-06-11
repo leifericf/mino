@@ -24,3 +24,18 @@
 (def IKVReduce--kv-reduce    clojure.core/IKVReduce--kv-reduce)
 (def Datafiable--datafy      clojure.core/Datafiable--datafy)
 (def Navigable--nav          clojure.core/Navigable--nav)
+
+;; InternalReduce - the seq-side reduction extension point. It has no
+;; boot-time twin in clojure.core (reduce's built-in seq path lives in
+;; C), so the protocol itself is declared here rather than re-bound.
+;; The :default implementation hands the seq to the built-in reduction,
+;; so calling internal-reduce directly works on any reducible value.
+
+(defprotocol InternalReduce
+  "Protocol for seq types that can provide their own reduction
+  strategy. The default walks the seq with the built-in reduction."
+  (internal-reduce [s f start]))
+
+(extend-type :default InternalReduce
+  (internal-reduce [s f start]
+    (clojure.core/internal-reduce f start s)))
