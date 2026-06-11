@@ -18,12 +18,17 @@ orchestrating — it is the topology, ordering, and conflict law.
 2. **Plan units.** Split the spec into units, each owning one module
    (gather-module-context per module). Every unit gets: a test unit
    and an implementation unit. State each unit's spec in 3–6 lines.
+   Size every unit to be completable by one agent in one sitting —
+   if a unit needs a second dispatch to finish, it was two units.
    Surface the plan to the maintainer if the spec is ambiguous —
    ambiguity is cheaper to resolve now.
 3. **Write in parallel.** Dispatch `writer` agents (worktrees off the
    feature branch): test units first wave (skill write-tests), then
    implementation units (write-c / write-clj) — implementation
-   writers are told their failing tests' paths.
+   writers are told their failing tests' paths. Each dispatch prompt
+   carries the unit's complete spec plus its module brief
+   (gather-module-context): self-contained, so the writer never needs
+   this session's context — the prompt IS the plan's hand-off.
 4. **Integrate.** `./mino tools/integrate_fixes.clj` with tests
    ordered before their implementations;
    `./mino tools/merge_proposals.clj`. Escalations → one fresh editor
