@@ -438,7 +438,20 @@ static void gc_mark_module_and_meta(mino_state *S)
  * state_lock waiting to enter mino_call. The GC reaches this from
  * inside state_lock (gc_alloc_typed -> major collect), so the
  * effective lock order is state_lock outer, worker_list_lock inner --
- * matching the spawn path. */
+ * matching the spawn path.
+ *
+ * Why worker_list_lock is acquired and released separately for each
+ * per-worker category (dyn_stack, bc_current_bc, gc_save, tx,
+ * lazy_inflight): each marking helper (gc_mark_ctx_dyn_stack, etc.)
+ * may call gc_mark_push, which in turn may trigger realloc on the mark
+ * stack. Holding worker_list_lock across the full mark pass would
+ * prevent a worker from attaching during that window, which is
+ * acceptable, but would also exclude the per-category main_ctx pass
+ * (done without the lock) from being interleaved correctly. Releasing
+ * and re-acquiring between categories keeps the lock held only for the
+ * duration of the list walk, not for the mark work itself, and lets
+ * the same category pattern apply uniformly to main_ctx (no lock) and
+ * worker ctxs (with lock) without structural divergence. */
 static void gc_mark_thread_state(mino_state *S)
 {
     mino_thread_ctx_t *w;
