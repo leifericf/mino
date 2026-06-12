@@ -9,6 +9,14 @@
  */
 
 #include "prim/internal.h"
+/* Prototypes for all non-static functions in this TU. */
+mino_val *mino_snapshot_thread_bindings(mino_state *S);
+mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_with_bindings_star(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_thread_bound_p(mino_state *S, mino_val *args, mino_env *env);
 
 /* Snapshot the current thread's dyn_stack into a map keyed by binding-
  * name symbols. Var-backed bindings key on the fully qualified ns/name

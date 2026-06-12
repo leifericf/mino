@@ -1305,8 +1305,9 @@ static mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
     return mino_string_n(S, start, (size_t)(end_ptr - start));
 }
 
-/* Grow *buf/*cap to hold at least need bytes. Returns 1 on success, 0 on OOM
- * (frees *buf and sets *buf to NULL). SIZE_MAX/2 overflow guard included. */
+/* Grow the buffer *buf to capacity *cap, ensuring at least need bytes fit.
+ * Returns 1 on success, 0 on OOM (frees *buf, sets it to NULL).
+ * Includes a SIZE_MAX/2 overflow guard. */
 static int str_buf_grow(mino_state *S, char **buf, size_t *cap, size_t need)
 {
     char *newbuf;
@@ -1334,7 +1335,7 @@ static int str_buf_grow(mino_state *S, char **buf, size_t *cap, size_t need)
     return 1;
 }
 
-/* Append `nbytes` bytes from `src` to the dynamic buffer *buf/*len/*cap.
+/* Append nbytes bytes from src to the dynamic buffer (buf, len, cap).
  * Returns 1 on success, 0 on OOM (frees *buf and sets it to NULL). */
 static int str_buf_append(mino_state *S, char **buf, size_t *len, size_t *cap,
                           const char *src, size_t nbytes)
