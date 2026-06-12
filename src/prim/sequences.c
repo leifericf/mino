@@ -1603,11 +1603,26 @@ static mino_val *prim_rangev(mino_state *S, mino_val *args, mino_env *env)
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "rangev requires 1, 2, or 3 arguments");
     }
-    /* Compute length. */
+    /* Compute length using unsigned arithmetic to avoid signed overflow when
+     * end and start span the full signed range (e.g. LLONG_MIN..LLONG_MAX).
+     * Negating a negative step via (unsigned long long)(~step)+1 avoids UB
+     * for the LLONG_MIN edge case. */
     if (step > 0) {
-        len = (end > start) ? (size_t)((end - start + step - 1) / step) : 0;
+        if (end > start) {
+            unsigned long long uspan = (unsigned long long)end - (unsigned long long)start;
+            unsigned long long ustep = (unsigned long long)step;
+            len = (size_t)((uspan + ustep - 1) / ustep);
+        } else {
+            len = 0;
+        }
     } else {
-        len = (start > end) ? (size_t)((start - end + (-step) - 1) / (-step)) : 0;
+        if (start > end) {
+            unsigned long long uspan = (unsigned long long)start - (unsigned long long)end;
+            unsigned long long ustep = (unsigned long long)(~step) + 1ULL; /* -step without UB */
+            len = (size_t)((uspan + ustep - 1) / ustep);
+        } else {
+            len = 0;
+        }
     }
     items = malloc(len * sizeof(mino_val *));
     if (!items && len > 0) { return prim_throw_classified(S, "eval/bounds", "MBD001", "rangev: out of memory"); }
@@ -2285,6 +2300,10 @@ static mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { n_items++; seq_iter_next(S, &it); }
     if (n_items == 0) return mino_empty_list(S);
+    if (n_items > SIZE_MAX / sizeof(*arr)) {
+        return prim_throw_classified(S, "eval/bounds", "MBD001",
+            "sort: collection too large");
+    }
     arr = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*arr));
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*tmp));
     i = 0;
@@ -2981,12 +3000,16 @@ static mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
             return prim_throw_classified(S, "eval/oom", "MOM001",
                 "comp: out of memory");
         }
+        /* Suppress GC while items[] (C-heap, GC-invisible) holds live pointers.
+         * Mirrors the gc_depth guard in prim_rangev. */
+        mino_current_ctx(S)->gc_depth++;
         cur = args;
         for (i = 0; i < n; i++) {
             items[i] = cur->as.cons.car;
             cur = cur->as.cons.cdr;
         }
         fs_vec = mino_vector(S, items, n);
+        mino_current_ctx(S)->gc_depth--;
         free(items);
     }
     fn_env = env_child(S, env);
