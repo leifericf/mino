@@ -1901,8 +1901,11 @@ static mino_val *rewrite_recur_args(mino_state *S,
             S, step_kind == 0 ? "conj!" : "assoc!");
         if (new_head == NULL) { free(buf); return NULL; }
         buf[step_pos] = mino_cons(S, new_head, step_args);
+        if (buf[step_pos] == NULL) { free(buf); return NULL; }
+        gc_pin(buf[step_pos]);
     }
     result = list_from_array(S, buf, n);
+    gc_unpin(1);
     free(buf);
     return result;
 }
@@ -4482,9 +4485,13 @@ static int rewrite_destructure_params(compiler_t *c, mino_val *params,
 
     /* Build the new params vector and the let-binding pairs in
      * parallel. */
+    mino_state *S = c->S;  /* needed for gc_pin / gc_unpin macros */
     mino_val **new_params_buf = (mino_val **)gc_alloc_typed(
         c->S, GC_T_VALARR, n * sizeof(mino_val *));
     if (new_params_buf == NULL) return 0;
+    /* Pin new_params_buf so subsequent allocating calls (mino_symbol_n,
+     * mino_cons) cannot collect it while the loop fills it. */
+    gc_pin((mino_val *)new_params_buf);
     /* binding-pairs is built in reverse, then a final pass writes
      * them in source order into the vector backing the let form. */
     mino_val *acc = mino_nil(c->S);
@@ -4504,46 +4511,54 @@ static int rewrite_destructure_params(compiler_t *c, mino_val *params,
         int     gused;
         gused = snprintf(gbuf, sizeof(gbuf), "p__%ld__auto__",
                          ++c->S->gensym_counter);
-        if (gused < 0) return 0;
+        if (gused < 0) { gc_unpin(1); return 0; }
         mino_val *gs = mino_symbol_n(c->S, gbuf, (size_t)gused);
-        if (gs == NULL) return 0;
+        if (gs == NULL) { gc_unpin(1); return 0; }
         new_params_buf[i] = gs;
         acc = mino_cons(c->S, gs, acc);
+        if (acc == NULL) { gc_unpin(1); return 0; }
         acc = mino_cons(c->S, p, acc);
+        if (acc == NULL) { gc_unpin(1); return 0; }
         n_pairs += 2;
     }
     if (n_pairs == 0) {
         /* Nothing to rewrite; caller's plain path already handles this. */
+        gc_unpin(1);
         return 0;
     }
     /* Collect the binding-pair list into a vector for the let form. */
+    /* Pin new_params_buf again before allocating bind_buf so a GC
+     * triggered by gc_alloc_typed cannot collect new_params_buf. */
     mino_val **bind_buf = (mino_val **)gc_alloc_typed(
         c->S, GC_T_VALARR, n_pairs * sizeof(mino_val *));
-    if (bind_buf == NULL) return 0;
+    if (bind_buf == NULL) { gc_unpin(1); return 0; }
+    gc_pin((mino_val *)bind_buf);
     {
         mino_val *cur = acc;
         for (size_t i = 0; i < n_pairs; i++) {
-            if (!mino_is_cons(cur)) return 0;
+            if (!mino_is_cons(cur)) { gc_unpin(2); return 0; }
             bind_buf[i] = cur->as.cons.car;
             cur = cur->as.cons.cdr;
         }
     }
     mino_val *bind_vec = mino_vector(c->S, bind_buf, n_pairs);
-    if (bind_vec == NULL) return 0;
+    gc_unpin(1);  /* bind_buf no longer needed after mino_vector */
+    if (bind_vec == NULL) { gc_unpin(1); return 0; }
     /* Wrap body in (let [pat1 g1 pat2 g2 ...] body...). The body is
      * a cons list of forms; the let needs (let bind-vec body...) so
      * we cons the bind-vec onto body and prepend `let`. */
     mino_val *let_sym = mino_symbol(c->S, "let");
-    if (let_sym == NULL) return 0;
+    if (let_sym == NULL) { gc_unpin(1); return 0; }
     mino_val *wrapped = mino_cons(c->S, bind_vec, body);
-    if (wrapped == NULL) return 0;
+    if (wrapped == NULL) { gc_unpin(1); return 0; }
     wrapped = mino_cons(c->S, let_sym, wrapped);
-    if (wrapped == NULL) return 0;
+    if (wrapped == NULL) { gc_unpin(1); return 0; }
     /* The new body for compile_clause is a single-element list whose
      * one form is the let. compile_body walks it as (let ...). */
     mino_val *new_body = mino_cons(c->S, wrapped, mino_nil(c->S));
-    if (new_body == NULL) return 0;
+    if (new_body == NULL) { gc_unpin(1); return 0; }
     mino_val *new_params = mino_vector(c->S, new_params_buf, n);
+    gc_unpin(1);  /* new_params_buf no longer needed after mino_vector */
     if (new_params == NULL) return 0;
     *out_params = new_params;
     *out_body   = new_body;
