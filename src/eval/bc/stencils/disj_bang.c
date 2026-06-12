@@ -9,7 +9,7 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_disj_bang(mino_val **regs,
+void *stencil_op_disj_bang(mino_val **regs,
                           mino_val **consts,
                           mino_state *S)
 {
@@ -17,5 +17,6 @@ void stencil_op_disj_bang(mino_val **regs,
                                    (unsigned)IMM_A,
                                    (unsigned)IMM_B,
                                    (unsigned)IMM_C);
-    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+    if (__builtin_expect(regs == NULL, 0)) return NULL;
+    MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
 }

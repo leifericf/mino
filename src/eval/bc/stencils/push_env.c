@@ -13,10 +13,11 @@
 
 #include "abi.h"
 
-void stencil_op_push_env(mino_val **regs,
+void *stencil_op_push_env(mino_val **regs,
                           mino_val **consts,
                           mino_state *S)
 {
     regs = mino_jit_push_env_slow(S, regs);
-    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+    if (__builtin_expect(regs == NULL, 0)) return NULL;
+    MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
 }

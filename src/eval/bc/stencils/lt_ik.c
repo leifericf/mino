@@ -8,7 +8,7 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_lt_ik(mino_val **regs, mino_val **consts,
+void *stencil_op_lt_ik(mino_val **regs, mino_val **consts,
                        mino_state *S)
 {
     mino_val *lhs  = regs[IMM_B];
@@ -19,5 +19,6 @@ void stencil_op_lt_ik(mino_val **regs, mino_val **consts,
         regs = mino_jit_binop_k_slow(S, regs, IMM_A, IMM_B, kimm,
                                      STENCIL_BINOP_LT);
     }
-    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+    if (__builtin_expect(regs == NULL, 0)) return NULL;
+    MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
 }

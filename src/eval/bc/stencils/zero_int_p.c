@@ -12,7 +12,7 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-void stencil_op_zero_int_p(mino_val **regs,
+void *stencil_op_zero_int_p(mino_val **regs,
                             mino_val **consts,
                             mino_state *S)
 {
@@ -23,5 +23,6 @@ void stencil_op_zero_int_p(mino_val **regs,
         regs = mino_jit_unop_slow(S, regs, IMM_A, IMM_B,
                                   STENCIL_UNOP_ZERO_P);
     }
-    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+    if (__builtin_expect(regs == NULL, 0)) return NULL;
+    MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
 }
