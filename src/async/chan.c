@@ -159,15 +159,18 @@ mino_val *mino_chan_new(mino_state *S, int buf_kind, size_t buf_capacity,
             impl->buf_capacity = buf_capacity;
         }
     }
-    impl->xform      = xform;
-    impl->ex_handler = ex_handler;
     v = alloc_val(S, MINO_CHAN);
     if (v == NULL) {
         free(impl->buf);
         free(impl);
         return NULL;
     }
-    v->as.chan.impl = impl;
+    /* Attach impl before storing GC pointers so the chan tracer can
+     * reach xform/ex_handler through the live val if a subsequent
+     * allocation triggers a collection. */
+    v->as.chan.impl  = impl;
+    impl->xform      = xform;
+    impl->ex_handler = ex_handler;
     return v;
 }
 
