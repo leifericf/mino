@@ -71,16 +71,27 @@ enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, I
 #define RE_FLAG_MULTILINE  (1u << 2)  /* (?m) ^ $ at line boundaries */
 #define RE_FLAG_EXTENDED   (1u << 3)  /* (?x) strip pattern ws       */
 
+/* Thread-local qualifier. These three match-state variables are written
+ * at the start of every re_matchp / re_matchp_groups call and read
+ * throughout the match. Making them thread-local ensures concurrent
+ * mino_state instances each see only their own match context.
+ * MSVC uses __declspec(thread); GCC/Clang use __thread. */
+#if defined(_WIN32) && defined(_MSC_VER)
+#  define RE_TLS __declspec(thread)
+#else
+#  define RE_TLS __thread
+#endif
+
 /* Active flag word during a match. Reset to the pattern-level
  * compile-time default by re_matchp before walking the pattern.
  * Updated as the matcher absorbs SET_FLAGS slots. */
-static unsigned char re_flags;
+static RE_TLS unsigned char re_flags;
 
 /* When set, pattern completion requires end-of-input: backs the
  * whole-string matchers (re-matches) so lazy quantifiers keep growing
  * until the input is consumed instead of stopping at the shortest
  * accepting prefix. Set only by re_matchp_groups_anchored. */
-static int re_anchor_end;
+static RE_TLS int re_anchor_end;
 
 typedef struct regex_t
 {
@@ -108,13 +119,15 @@ typedef struct regex_t
 /* Capture-group state for the active match call. The matcher walks
  * the pattern in a forward-only fashion with limited backtracking
  * inside matchstar / matchplus / matchquestion, so a successful match
- * leaves spans pointing at the final write for each group. */
-static struct {
+ * leaves spans pointing at the final write for each group.
+ * Thread-local so concurrent mino_state instances do not share state. */
+typedef struct re_g_state_s {
   const char *base;                 /* start of input text */
   int         n;
   int         starts[RE_MAX_GROUPS];
   int         ends[RE_MAX_GROUPS];
-} re_g_state;
+} re_g_state_t;
+static RE_TLS re_g_state_t re_g_state;
 
 
 
