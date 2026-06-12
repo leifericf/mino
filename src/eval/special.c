@@ -145,6 +145,7 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
     const char *data = form->as.s.data;  /* null-terminated (dup_n adds \0) */
     mino_val *v;
     const char *slash;
+    int from_ns_env = 0;
 
     /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
      * Single-char "/" is the division function, not a qualified symbol. */
@@ -183,7 +184,6 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
      * bindings only on the ns-env path -- lexical/dynamic bindings to
      * a var (e.g. `(let [v (resolve 'foo)] ...)`) must preserve the
      * var as the binding value. */
-    int from_ns_env = 0;
     v = (mino_current_ctx(S)->dyn_stack != NULL)
         ? dyn_lookup_sym(S, data, n) : NULL;
     if (v == NULL) v = mino_env_get_sym(env, form);
@@ -741,15 +741,6 @@ static int eval_try_host_syntax(mino_state *S, mino_val *form,
 #undef HOST_PRIM_LOOKUP
 }
 
-/*
- * Apply a regular (non-special-form) call. Resolves the head into
- * a callable, evaluates the args, and dispatches by callable kind:
- * PRIM/FN go through apply_callable (with a tail-call sentinel for
- * FN in tail position); MACRO expands and re-evaluates the result;
- * other callables (keyword, map, vector, set, sorted-map,
- * sorted-set) flow through apply_non_fn_callable so the two
- * dispatch entries cannot drift.
- */
 /* Best-effort check: is `name` bound somewhere in the local env chain
  * (i.e. lexical, not in the ns env)? Walks until env hits a known ns
  * root. Used by the inline call cache to skip filling on calls whose
@@ -769,6 +760,15 @@ static int local_lexical_shadow(mino_state *S, mino_env *env,
     return 0;
 }
 
+/*
+ * Apply a regular (non-special-form) call. Resolves the head into
+ * a callable, evaluates the args, and dispatches by callable kind:
+ * PRIM/FN go through apply_callable (with a tail-call sentinel for
+ * FN in tail position); MACRO expands and re-evaluates the result;
+ * other callables (keyword, map, vector, set, sorted-map,
+ * sorted-set) flow through apply_non_fn_callable so the two
+ * dispatch entries cannot drift.
+ */
 static mino_val *eval_apply_regular_call(mino_state *S, mino_val *form,
                                            mino_val *head, mino_val *args,
                                            mino_env *env, int tail)

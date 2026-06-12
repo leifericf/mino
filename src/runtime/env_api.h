@@ -42,7 +42,11 @@ void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc c
 
 /* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
  * Returns mino_nil(S) when the stack is empty. Used by future spawn to
- * convey caller bindings to the worker, and by get-thread-bindings. */
+ * convey caller bindings to the worker, and by get-thread-bindings.
+ * NOTE: the implementation lives in src/prim/stateful.c, not env.c,
+ * because it needs gc_alloc_typed and mino_symbol which are only
+ * available after the prim layer initialises. Callers reach it via
+ * this header (pulled in through runtime/internal.h). */
 mino_val    *mino_snapshot_thread_bindings(mino_state *S);
 
 #endif /* RUNTIME_ENV_API_H */

@@ -538,17 +538,6 @@ mino_val *eval_implicit_do(mino_state *S, mino_val *body, mino_env *env)
     return eval_implicit_do_impl(S, body, env, 0);
 }
 
-/*
- * Realize one lazy. Concurrent forcers race on a CAS of `realized`
- * from LAZY_UNREALIZED to LAZY_REALIZING; the CAS winner runs the
- * thunk, publishes `cached`, then flips `realized` to LAZY_REALIZED.
- * Losers spin (yielding state_lock so the realizer can make progress
- * if its thunk itself blocks) until they observe LAZY_REALIZED. If
- * the thunk throws (result == NULL) the realizer reverts `realized`
- * back to LAZY_UNREALIZED so a retry can re-run the thunk -- this
- * matches JVM clojure.lang.LazySeq#sval(), which throws out the
- * cached state on exception and retries on next force.
- */
 /* Record V as claimed (LAZY_REALIZING) by this thread so a throw that
  * longjmps out of the thunk can roll the claim back at the try-frame
  * landing pad (mino_lazy_inflight_unwind). Returns 0 on success, -1 if
@@ -576,6 +565,17 @@ static void lazy_inflight_pop(mino_state *S)
     mino_current_ctx(S)->lazy_inflight_len--;
 }
 
+/*
+ * Realize one lazy. Concurrent forcers race on a CAS of `realized`
+ * from LAZY_UNREALIZED to LAZY_REALIZING; the CAS winner runs the
+ * thunk, publishes `cached`, then flips `realized` to LAZY_REALIZED.
+ * Losers spin (yielding state_lock so the realizer can make progress
+ * if its thunk itself blocks) until they observe LAZY_REALIZED. If
+ * the thunk throws (result == NULL) the realizer reverts `realized`
+ * back to LAZY_UNREALIZED so a retry can re-run the thunk -- this
+ * matches JVM clojure.lang.LazySeq#sval(), which throws out the
+ * cached state on exception and retries on next force.
+ */
 static mino_val *lazy_realize(mino_state *S, mino_val *v)
 {
     for (;;) {
