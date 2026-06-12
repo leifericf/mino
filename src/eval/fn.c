@@ -2,6 +2,8 @@
  * fn.c -- fn special form, arity dispatch, apply_callable.
  */
 
+#include <limits.h>
+
 #include "eval/special_internal.h"
 #include "eval/bc/internal.h"
 #include "eval/bc/jit.h"
@@ -365,7 +367,11 @@ int mino_eval_stack_guard(mino_state *S)
     if (S->eval_stack_limit != own) {
         S->eval_stack_limit = own;
     }
-    if (own != NULL && &probe < own) {
+    /* Cast through uintptr_t for defined C99 behaviour: comparing pointers
+     * from different allocations (stack frame vs derived stack limit) is
+     * implementation-defined; integer comparison of their addresses is not. */
+    if (own != NULL
+        && (uintptr_t)(void *)&probe < (uintptr_t)(void *)own) {
         set_eval_diag(S, ctx->eval_current_form, "limit", "MLM004",
                       "stack overflow: script recursion too deep");
         return 0;
@@ -861,7 +867,9 @@ static mino_val *argv_to_cons(mino_state *S, mino_val **argv, int argc)
  * always_inline forced so the refactor doesn't add a function-call
  * layer to either caller — apply_callable_argv's MINO_FN branch and
  * mino_apply_known_bc_fn_argv both inline the body. */
+#if defined(__GNUC__) || defined(__clang__)
 __attribute__((always_inline))
+#endif
 static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
                                             mino_val **argv, int argc,
                                             mino_env *env)
@@ -971,6 +979,18 @@ static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
             mino_val *cur = next_args;
             while (mino_is_cons(cur)) {
                 if (new_argc >= cap || !heap) {
+                    /* Guard against signed overflow in cap * 2.  An int
+                     * cap above INT_MAX/2 means we already hold an
+                     * unreasonably large argv; treat it as an OOM. */
+                    if (cap > INT_MAX / 2) {
+                        S->ns_vars.current_ns    = saved_ns;
+                        S->ns_vars.fn_ambient_ns = saved_ambient;
+                        set_eval_diag(S,
+                            mino_current_ctx(S)->eval_current_form,
+                            "limit", "MLM003",
+                            "argv buffer too large: tail-call arity overflow");
+                        return NULL;
+                    }
                     int new_cap = (new_argc + 1) < (cap * 2)
                         ? (cap * 2) : (new_argc + 8);
                     mino_val **grown = (mino_val **)gc_alloc_typed(
