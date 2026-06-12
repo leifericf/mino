@@ -1,5 +1,5 @@
 /*
- * prim_sequences.c -- sequence iteration and higher-order primitives:
+ * sequences.c -- sequence iteration and higher-order primitives:
  *                     seq, realized?, seq_iter_*, reduce, reduced,
  *                     into, apply, reverse, sort, set, rangev, mapv,
  *                     filterv, peek, pop, find, empty, rseq,

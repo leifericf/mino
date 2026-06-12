@@ -1,5 +1,5 @@
 /*
- * prim_stateful.c -- atom primitives and watch/validator support.
+ * stateful.c -- atom primitives and watch/validator support.
  *
  * Primitives: atom, deref, reset!, swap!, atom?, add-watch, remove-watch,
  *             set-validator!, get-validator, swap-vals!, reset-vals!.

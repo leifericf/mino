@@ -1,5 +1,5 @@
 /*
- * prim/bits.c -- Erlang-inspired bit-syntax surface over MINO_BYTES.
+ * bits.c -- Erlang-inspired bit-syntax surface over MINO_BYTES.
  *
  *   (bits [v :size N :type T :endian E :signed? B] ...)
  *   (bits-get bs :offset O :size N :type T :endian E :signed? B)
