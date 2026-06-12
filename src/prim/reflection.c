@@ -292,29 +292,12 @@ static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
     return mino_int(S, (long long)hash_val(args->as.cons.car));
 }
 
-static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
+/* tag_kw -- return the keyword for v's concrete tag. Called by both
+ * prim_type and prim_class. v must be non-NULL and not MINO_NIL, and
+ * not MINO_RECORD (records are handled before this call so their
+ * MINO_TYPE pointer is returned directly). */
+static mino_val *tag_kw(mino_state *S, mino_val *v)
 {
-    mino_val *v;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
-    }
-    v = args->as.cons.car;
-    if (v == NULL || mino_type_of(v) == MINO_NIL)  return mino_keyword(S, "nil");
-    /* Records return their MINO_TYPE value directly so protocol
-     * dispatch keys for built-ins (keywords) and user types (type
-     * pointers) live in the same atom-keyed table. The :type
-     * metadata path runs for non-records only, keeping the keyword
-     * tagging mechanism (used by mino's multimethods and print
-     * surface) unchanged. */
-    if (mino_type_of(v) == MINO_RECORD) return v->as.record.type;
-    /* Honor :type metadata (Clojure semantics). Enables print-method
-     * dispatch for user types via (with-meta obj {:type :my-type}). */
-    if (MINO_IS_PTR(v) && v->meta != NULL && mino_type_of(v->meta) == MINO_MAP) {
-        mino_val *tk = mino_keyword(S, "type");
-        mino_val *tv = map_get_val(v->meta, tk);
-        if (tv != NULL) return tv;
-    }
     switch (mino_type_of(v)) {
     case MINO_NIL:     return mino_keyword(S, "nil");
     case MINO_BOOL:    return mino_keyword(S, "bool");
@@ -351,9 +334,8 @@ static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
     case MINO_BIGDEC:    return mino_keyword(S, "bigdec");
     case MINO_TYPE:      return mino_keyword(S, "record-type");
     case MINO_RECORD:
-        /* Unreachable: handled above so dispatch sees the type
-         * pointer. Returning a keyword here would be a leak in the
-         * protocol-dispatch story. */
+        /* Unreachable: callers peel the MINO_RECORD case before calling
+         * tag_kw so the type pointer is returned directly. */
         return v->as.record.type;
     case MINO_FUTURE:    return mino_keyword(S, "future");
     case MINO_UUID:      return mino_keyword(S, "uuid");
@@ -376,6 +358,50 @@ static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
     case MINO_BYTES:     return mino_keyword(S, "bytes");
     }
     return mino_keyword(S, "unknown");
+}
+
+static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || mino_type_of(v) == MINO_NIL)  return mino_keyword(S, "nil");
+    /* Records return their MINO_TYPE value directly so protocol
+     * dispatch keys for built-ins (keywords) and user types (type
+     * pointers) live in the same atom-keyed table. The :type
+     * metadata path runs for non-records only, keeping the keyword
+     * tagging mechanism (used by mino's multimethods and print
+     * surface) unchanged. */
+    if (mino_type_of(v) == MINO_RECORD) return v->as.record.type;
+    /* Honor :type metadata (Clojure semantics). Enables print-method
+     * dispatch for user types via (with-meta obj {:type :my-type}). */
+    if (MINO_IS_PTR(v) && v->meta != NULL && mino_type_of(v->meta) == MINO_MAP) {
+        mino_val *tk = mino_keyword(S, "type");
+        mino_val *tv = map_get_val(v->meta, tk);
+        if (tv != NULL) return tv;
+    }
+    return tag_kw(S, v);
+}
+
+/* (class x) -- returns the concrete type tag keyword, like type, except:
+ * (class nil) is nil (not :nil), and :type metadata is never consulted.
+ * Records return the record's type value, matching type's behavior. */
+static mino_val *prim_class(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "class requires one argument");
+    }
+    v = args->as.cons.car;
+    /* nil -> nil, not :nil. */
+    if (v == NULL || mino_type_of(v) == MINO_NIL) return mino_nil(S);
+    /* Records: return the MINO_TYPE pointer directly, same as type. */
+    if (mino_type_of(v) == MINO_RECORD) return v->as.record.type;
+    return tag_kw(S, v);
 }
 
 /* Type-predicate primitives. Each mirrors the mino-level
@@ -1508,6 +1534,9 @@ static mino_val *prim_alloc_profile_dump_bang(mino_state *S,
 const mino_prim_def k_prims_reflection[] = {
     {"type",      prim_type,
      "Returns a keyword indicating the type of the value."},
+    {"class",     prim_class,
+     "Returns the concrete type tag of a value, ignoring :type metadata. "
+     "(class nil) is nil."},
     {"nil?",      prim_nil_p,
      "Returns true if x is nil.", prim_nil_p_argv},
     {"cons?",     prim_cons_p,
