@@ -1861,6 +1861,8 @@ static mino_val *read_char_literal(mino_state *S, const char **p)
         cp = '\b';
     } else if (tlen == 8 && memcmp(start, "formfeed", 8) == 0) {
         cp = '\f';
+    } else if (tlen == 6 && memcmp(start, "delete", 6) == 0) {
+        cp = 0x7f;
     } else if (tlen == 1) {
         cp = (unsigned char)start[0];
     } else if (tlen >= 2 && tlen <= 4 && ((unsigned char)start[0] & 0x80)) {

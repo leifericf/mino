@@ -2969,7 +2969,8 @@
    \space     "space"
    \backspace "backspace"
    \formfeed  "formfeed"
-   \return    "return"})
+   \return    "return"
+   \delete    "delete"})
 
 (defmacro with-open
   "Binds resources, evaluates body, then closes each resource."
