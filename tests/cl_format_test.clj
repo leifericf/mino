@@ -174,10 +174,14 @@
   (is (= "a=1 b=2" (pp/cl-format nil "~{~a=~a~^ ~}" ["a" 1 "b" 2]))))
 
 (deftest clf-iteration-colon-sublists
-  ;; ~:{...~} treats each element as a sublist
-  (is (= "1, 2, 3"
+  ;; ~:{...~} treats each element as a sublist. A plain ~^ inside ~:{ ends
+  ;; only the current sub-iteration (not the whole loop), so the trailing
+  ;; separator after the last consumed arg of each sublist is skipped; and
+  ;; with no separator directive, adjacent iterations abut directly. These
+  ;; expected values match JVM Clojure's clojure.pprint/cl-format.
+  (is (= "123"
          (pp/cl-format nil "~:{~a~^, ~}" [[1] [2] [3]])))
-  (is (= "a=1 b=2"
+  (is (= "a=1b=2"
          (pp/cl-format nil "~:{~a=~a~}" [["a" 1] ["b" 2]]))))
 
 ;; ---------------------------------------------------------------------------
