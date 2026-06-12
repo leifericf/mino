@@ -19,6 +19,7 @@
  */
 
 #include "runtime/internal.h"
+#include <limits.h>             /* INT_MAX for precision clamping */
 
 /* ------------------------------------------------------------------------- */
 /* Source cache                                                              */
@@ -232,6 +233,13 @@ int diag_render_compact(const mino_diag *d, char *buf, size_t n)
     return written < 0 ? 0 : written;
 }
 
+/* Advance pos by w bytes from snprintf, clamped so pos never exceeds n-1.
+ * snprintf returns the number of bytes that *would* be written (may exceed
+ * the available space), so naively adding w to pos can push pos past n,
+ * causing n-pos to wrap on the next call and smash memory. */
+#define DIAG_POS_ADVANCE(pos, n, w) \
+    do { if ((w) > 0) { (pos) += (size_t)(w); if ((pos) >= (n)) (pos) = (n) - 1; } } while (0)
+
 int diag_render_pretty(mino_state *S, const mino_diag *d,
                        char *buf, size_t n)
 {
@@ -244,7 +252,7 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
     w = snprintf(buf + pos, n - pos, "error[%s]: %s\n",
                  d->code ? d->code : "???",
                  d->message ? d->message : "error");
-    if (w > 0) pos += (size_t)w;
+    DIAG_POS_ADVANCE(pos, n, w);
 
     /* Location pointer */
     if (d->has_primary_span && d->primary_span.file != NULL
@@ -252,7 +260,7 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
         const mino_span_t *sp = &d->primary_span;
         w = snprintf(buf + pos, n - pos, "  --> %s:%d:%d\n",
                      sp->file, sp->line, sp->column);
-        if (w > 0) pos += (size_t)w;
+        DIAG_POS_ADVANCE(pos, n, w);
 
         /* Source snippet with caret */
         if (S != NULL && pos < n) {
@@ -260,19 +268,23 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
             const char *line_text = source_cache_get_line(
                 S, sp->file, sp->line, &line_len);
             if (line_text != NULL) {
-                int gutter_w = snprintf(buf + pos, n - pos, "   |\n");
-                if (gutter_w > 0) pos += (size_t)gutter_w;
+                w = snprintf(buf + pos, n - pos, "   |\n");
+                DIAG_POS_ADVANCE(pos, n, w);
 
-                /* Source line */
-                w = snprintf(buf + pos, n - pos, "%3d | %.*s\n",
-                             sp->line, (int)line_len, line_text);
-                if (w > 0) pos += (size_t)w;
+                /* Source line: clamp line_len to INT_MAX so the %.*s
+                 * precision argument (int) does not wrap to negative. */
+                {
+                    int prec = (line_len > (size_t)INT_MAX) ? INT_MAX : (int)line_len;
+                    w = snprintf(buf + pos, n - pos, "%3d | %.*s\n",
+                                 sp->line, prec, line_text);
+                    DIAG_POS_ADVANCE(pos, n, w);
+                }
 
                 /* Caret line */
                 if (sp->column > 0 && pos < n) {
                     int pad = sp->column - 1;
                     w = snprintf(buf + pos, n - pos, "    | ");
-                    if (w > 0) pos += (size_t)w;
+                    DIAG_POS_ADVANCE(pos, n, w);
                     while (pad > 0 && pos < n - 1) {
                         buf[pos++] = ' ';
                         pad--;
@@ -288,13 +300,13 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
     for (i = 0; i < d->notes_len && pos < n; i++) {
         w = snprintf(buf + pos, n - pos, "note: %s\n",
                      d->notes[i].message ? d->notes[i].message : "");
-        if (w > 0) pos += (size_t)w;
+        DIAG_POS_ADVANCE(pos, n, w);
     }
 
     /* Stack trace */
     if (d->frames_len > 0 && pos < n) {
         w = snprintf(buf + pos, n - pos, "stack trace:\n");
-        if (w > 0) pos += (size_t)w;
+        DIAG_POS_ADVANCE(pos, n, w);
         for (i = 0; i < d->frames_len && pos < n; i++) {
             const mino_diag_frame_t *f = &d->frames[i];
             if (f->file != NULL) {
@@ -305,7 +317,7 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
                 w = snprintf(buf + pos, n - pos, "  at %s\n",
                              f->fn_name ? f->fn_name : "<fn>");
             }
-            if (w > 0) pos += (size_t)w;
+            DIAG_POS_ADVANCE(pos, n, w);
         }
     }
 
@@ -313,6 +325,8 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
     else if (n > 0) buf[n - 1] = '\0';
     return (int)pos;
 }
+
+#undef DIAG_POS_ADVANCE
 
 /* Public rendering dispatcher. */
 int mino_render_diag(mino_state *S, const mino_diag *d,
