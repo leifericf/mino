@@ -527,7 +527,13 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
 
     /* Enforce the host-thread grant. The gate-and-increment is one
      * critical section under worker_list_lock so a parallel spawn
-     * can't both read thread_count < limit and then both increment. */
+     * can't both read thread_count < limit and then both increment.
+     * Note: the Clojure-side future/thread macros short-circuit with
+     * :mino/unsupported when thread_limit <= 1, so this C gate is
+     * only reached when thread_limit >= 2.  limit=0 blocks here too
+     * (0 >= 0 is true), but limit=1 would allow the first spawn if
+     * called directly; callers below the Clojure layer must not set
+     * limit=1 and expect single-threaded enforcement from this gate. */
     mino_worker_list_lock_acquire(S);
     if (tc_load(&S->threading.thread_count) >= S->threading.thread_limit) {
         mino_worker_list_lock_release(S);
