@@ -1387,8 +1387,8 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         S->ns_vars.fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_lazy_inflight_unwind(S, mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len);
-            mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
-            mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
+        mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
+        mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
@@ -1614,34 +1614,7 @@ __thread
 #endif
 unsigned int mino_tls_safepoint_count = 0;
 
-/* BC dispatch safepoint poll.
- *
- * Called from the bytecode VM at every backward jump. Two jobs:
- *
- * 1. Cooperative cancellation: if a sibling thread set our
- *    impl->cancel_flag via future-cancel, throw :mino/cancelled
- *    so the BC loop unwinds and worker_run publishes CANCELLED.
- *    The throw routes through prim_throw_classified, which either
- *    longjmps into an enclosing try-frame or sets the eval diag
- *    and we return failure.
- *
- * 2. Auto-yield for busy-spin patterns: every ~64K backward jumps,
- *    drop and re-acquire state_lock so sibling workers waiting on
- *    the same per-state lock can make progress. Without this, a
- *    fn like `(loop [i 0] (recur (inc i)))` monopolizes state_lock
- *    indefinitely. The yield window must include a brief nanosleep
- *    -- POSIX mutex_unlock/lock is not a fair handoff, so on tight-
- *    CPU hosts the yielding thread can re-acquire ahead of waiters
- *    if we only call sched_yield. A 100us sleep is long enough for
- *    the OS scheduler to wake a waiter and have it grab the mutex,
- *    short enough to be invisible at one-per-64K-backjumps rates.
- *
- * Returns 1 to continue, 0 to abort (caller must propagate NULL).
- * The fast path is one branch on mino_tls_cancel_ptr (NULL on the
- * embedder thread, populated on workers) plus the counter
- * increment. State is in TLS rather than mino_thread_ctx_t because
- * the lookup is inherently per-thread. */
-/* CPU sampler hook. Called from mino_bc_safepoint and gc_alloc's
+/* CPU sampler hook. Called from mino_bc_safepoint_batch and gc_alloc's
  * safepoint path. Sniffs MINO_SAMPLE on first hit; with the env flag
  * on, every sampler_period-th call records the current ctx's bc/pc
  * into the ring buffer. The ring buffer is malloc'd lazily on the
@@ -1700,6 +1673,33 @@ static void mino_sampler_fire(mino_state *S)
     }
 }
 
+/* BC dispatch safepoint poll.
+ *
+ * Called from the bytecode VM at every backward jump. Two jobs:
+ *
+ * 1. Cooperative cancellation: if a sibling thread set our
+ *    impl->cancel_flag via future-cancel, throw :mino/cancelled
+ *    so the BC loop unwinds and worker_run publishes CANCELLED.
+ *    The throw routes through prim_throw_classified, which either
+ *    longjmps into an enclosing try-frame or sets the eval diag
+ *    and we return failure.
+ *
+ * 2. Auto-yield for busy-spin patterns: every ~64K backward jumps,
+ *    drop and re-acquire state_lock so sibling workers waiting on
+ *    the same per-state lock can make progress. Without this, a
+ *    fn like `(loop [i 0] (recur (inc i)))` monopolizes state_lock
+ *    indefinitely. The yield window must include a brief nanosleep
+ *    -- POSIX mutex_unlock/lock is not a fair handoff, so on tight-
+ *    CPU hosts the yielding thread can re-acquire ahead of waiters
+ *    if we only call sched_yield. A 100us sleep is long enough for
+ *    the OS scheduler to wake a waiter and have it grab the mutex,
+ *    short enough to be invisible at one-per-64K-backjumps rates.
+ *
+ * Returns 1 to continue, 0 to abort (caller must propagate NULL).
+ * The fast path is one branch on mino_tls_cancel_ptr (NULL on the
+ * embedder thread, populated on workers) plus the counter
+ * increment. State is in TLS rather than mino_thread_ctx_t because
+ * the lookup is inherently per-thread. */
 int mino_bc_safepoint_batch(mino_state *S, unsigned jumps)
 {
     if (S == NULL) return 1;
