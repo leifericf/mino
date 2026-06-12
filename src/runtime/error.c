@@ -148,33 +148,42 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
         }
         mino_val *keys[7], *vals[7];
         size_t      n = 0;
-        keys[n] = mino_keyword(S, "mino/kind");
-        vals[n] = mino_keyword(S, kind);
+        size_t      npin = 0; /* tracks live gc_pin count for gc_unpin */
+        /* Each mino_keyword/mino_string/mino_int/mino_map call can trigger
+         * GC.  Pin every key/val as it is produced so earlier entries are
+         * not swept while later ones are being allocated.  All pins are
+         * released with a single gc_unpin just before mino_map consumes
+         * the completed arrays. */
+        keys[n] = mino_keyword(S, "mino/kind");    gc_pin(keys[n]); npin++;
+        vals[n] = mino_keyword(S, kind);            gc_pin(vals[n]); npin++;
         n++;
-        keys[n] = mino_keyword(S, "mino/code");
-        vals[n] = mino_string(S, code);
+        keys[n] = mino_keyword(S, "mino/code");    gc_pin(keys[n]); npin++;
+        vals[n] = mino_string(S, code);             gc_pin(vals[n]); npin++;
         n++;
-        keys[n] = mino_keyword(S, "mino/phase");
-        vals[n] = mino_keyword(S, "eval");
+        keys[n] = mino_keyword(S, "mino/phase");   gc_pin(keys[n]); npin++;
+        vals[n] = mino_keyword(S, "eval");          gc_pin(vals[n]); npin++;
         n++;
-        keys[n] = mino_keyword(S, "mino/message");
-        vals[n] = mino_string(S, msg);
+        keys[n] = mino_keyword(S, "mino/message"); gc_pin(keys[n]); npin++;
+        vals[n] = mino_string(S, msg);              gc_pin(vals[n]); npin++;
         n++;
-        keys[n] = mino_keyword(S, "mino/data");
-        vals[n] = data != NULL ? data : mino_nil(S);
+        keys[n] = mino_keyword(S, "mino/data");    gc_pin(keys[n]); npin++;
+        vals[n] = data != NULL ? data : mino_nil(S); gc_pin(vals[n]); npin++;
         n++;
         if (loc_file != NULL && loc_line > 0) {
             mino_val *lkeys[3], *lvals[3];
-            lkeys[0] = mino_keyword(S, "file");
-            lvals[0] = mino_string(S, loc_file);
-            lkeys[1] = mino_keyword(S, "line");
-            lvals[1] = mino_int(S, loc_line);
-            lkeys[2] = mino_keyword(S, "column");
-            lvals[2] = mino_int(S, loc_col);
-            keys[n] = mino_keyword(S, "mino/location");
+            lkeys[0] = mino_keyword(S, "file");    gc_pin(lkeys[0]);
+            lvals[0] = mino_string(S, loc_file);   gc_pin(lvals[0]);
+            lkeys[1] = mino_keyword(S, "line");    gc_pin(lkeys[1]);
+            lvals[1] = mino_int(S, loc_line);      gc_pin(lvals[1]);
+            lkeys[2] = mino_keyword(S, "column");  gc_pin(lkeys[2]);
+            lvals[2] = mino_int(S, loc_col);       gc_pin(lvals[2]);
+            keys[n] = mino_keyword(S, "mino/location"); gc_pin(keys[n]);
             vals[n] = mino_map(S, lkeys, lvals, 3);
+            gc_unpin(7); /* lkeys[0..2], lvals[0..2], keys[n] */
+            gc_pin(vals[n]); npin++;
             n++;
         }
+        gc_unpin(npin); /* all keys[] and vals[] entries */
         mino_val *ex = mino_map(S, keys, vals, n);
         (void)note;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
