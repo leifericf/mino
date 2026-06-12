@@ -1,5 +1,9 @@
 /*
  * fn.c -- fn special form, arity dispatch, apply_callable.
+ *
+ * argv-ABI invocation (argv_to_cons, invoke_bc_fn_argv,
+ * mino_apply_known_bc_fn_argv, apply_callable_argv) lives in fn_argv.c.
+ * Non-function callable dispatch (apply_non_fn_callable) lives in fn_nonfn.c.
  */
 
 #include <limits.h>
@@ -379,6 +383,407 @@ int mino_eval_stack_guard(mino_state *S)
     return 1;
 }
 
+/* apply_fn_bc_cons -- bc fast path for a MINO_FN with a runnable bc program
+ * and a pure cons-spine args list (no lazy tail). Pre-conditions: fn is a
+ * MINO_FN, MINO_BC_RUNNABLE(fn) is true, args has no lazy tail.
+ * Handles JIT tier promotion, the bc trampoline, and tail-call hand-off. */
+static mino_val *apply_fn_bc_cons(mino_state *S, mino_val *fn,
+                                   mino_val *args, mino_env *env,
+                                   const char *tag)
+{
+    mino_bc_fn_t *bc_rec = fn->as.fn.bc;
+    mino_val  *scratch[16];
+    mino_val **argv = scratch;
+    int          argc = 0;
+    int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
+    mino_val  *cur  = args;
+    const char  *file = NULL;
+    int          line = 0;
+    int          col  = 0;
+    const char  *saved_ns      = S->ns_vars.current_ns;
+    const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
+    mino_val  *result;
+    /* Tier selection for the interpreter / native split. When
+     * CPJIT is enabled and the fn has crossed the hot
+     * threshold, attempt a single compile per generation. The
+     * native field stays NULL until a successful compile;
+     * after that, the runtime's invocation path (below) hands
+     * off to mino_jit_invoke instead of mino_bc_run. */
+    if (bc_rec->native != NULL && bc_rec->native_gen != S->ns_vars.ic_gen) {
+        /* Stale native code: ic_gen advanced (def / ns-unmap /
+         * var_set_root / var_unintern), so the JIT'd inline-
+         * cache state and global resolutions are no longer
+         * trustworthy. The deopt primitive drops the
+         * runtime-visible pointers and rewinds the hot
+         * counter; the underlying region and offset table
+         * stay owned by the state's jit_regions list and
+         * get reaped on teardown. */
+        mino_jit_invalidate(S, fn);
+    }
+    if (bc_rec->native == NULL
+        && bc_rec->hot_counter < (unsigned)-1
+        && S->jit.jit_mode != (int)MINO_JIT_MODE_OFF) {
+        bc_rec->hot_counter++;
+        /* MODE_ON -> compile on first call (threshold = 1).
+         * MODE_AUTO -> per-state hot threshold (defaults to
+         * MINO_JIT_THRESHOLD; tunable via the public
+         * MINO_OPT_JIT_HOT_THRESHOLD option). */
+        unsigned thresh = (S->jit.jit_mode == (int)MINO_JIT_MODE_ON)
+            ? 1u : S->jit.jit_hot_threshold;
+        if (bc_rec->hot_counter >= thresh) {
+            /* One compile attempt per crossing. On success
+             * native becomes non-NULL and subsequent calls
+             * route to it. On failure (ineligible shape,
+             * mmap failure) the counter is saturated so the
+             * per-call eligibility re-check stops -- the fn
+             * shape won't change under us, so a single
+             * negative answer is final. */
+            if (mino_jit_compile(S, fn) < 0) {
+                bc_rec->hot_counter = (unsigned)-1;
+            }
+        }
+    }
+    /* argv ABI: walk the cons spine into a stack scratch array.
+     * The slots are kept alive across any GC the body triggers
+     * because the conservative stack scan covers this frame
+     * AND the bc register stack is a GC root once mino_bc_run
+     * copies the values in. */
+    while (mino_is_cons(cur)) {
+        if (argc == cap) {
+            int new_cap = cap * 2;
+            mino_val **grown = (mino_val **)gc_alloc_typed(
+                S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
+            if (grown == NULL) return NULL;
+            memcpy(grown, argv, (size_t)argc * sizeof(*argv));
+            argv = grown;
+            cap  = new_cap;
+        }
+        if (argv != scratch) {
+            gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
+            argc++;
+        } else {
+            argv[argc++] = cur->as.cons.car;
+        }
+        cur = cur->as.cons.cdr;
+    }
+    if (fn->as.fn.defining_ns != NULL) {
+        S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+        S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+    }
+    if (mino_current_ctx(S)->eval_current_form != NULL
+        && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
+        file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+        line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+        col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
+    }
+    push_frame(S, tag, file, line, col);
+    /* Trampoline loop: re-enter mino_bc_run as long as the body
+     * returns a MINO_TAIL_CALL sentinel. When the tail-call
+     * target is itself a bc-compatible MINO_FN, we stay in
+     * the bc world. When it isn't, we hand off to
+     * apply_callable so a non-bc callee runs through the
+     * regular dispatch. This keeps tail recursion flat across
+     * compiled fns without growing the C stack. */
+    for (;;) {
+        result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
+        if (result == NULL) {
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
+            return NULL;
+        }
+        if (mino_type_of(result) != MINO_TAIL_CALL) break;
+        mino_val *next_fn   = result->as.tail_call.fn;
+        mino_val *next_args = result->as.tail_call.args;
+        /* Lazy compile the new target if it's a fresh MINO_FN. */
+        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
+            && next_fn->as.fn.bc == NULL) {
+            (void)mino_bc_compile_fn(S, next_fn);
+        }
+        /* Non-CONS seq-tail detection on the new args. If a
+         * tail call landed at a callee whose argv would lose
+         * a trailing LAZY / CHUNKED_CONS / CHUNK cell, bail
+         * out of the bc trampoline and let the recursive
+         * apply_callable route to the tree-walker. */
+        int next_args_lazy_tail = 0;
+        {
+            mino_val *np = next_args;
+            mino_type ntt;
+            while (mino_is_cons(np)) np = np->as.cons.cdr;
+            ntt = np != NULL ? mino_type_of(np) : MINO_NIL;
+            next_args_lazy_tail = (ntt == MINO_LAZY
+                || ntt == MINO_CHUNKED_CONS
+                || ntt == MINO_CHUNK);
+        }
+        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
+            && MINO_BC_RUNNABLE(next_fn)
+            && next_fn->as.fn.params != NULL
+            && !next_args_lazy_tail) {
+            /* Rebuild argv from the new args list. */
+            argc = 0;
+            cur  = next_args;
+            while (mino_is_cons(cur)) {
+                if (argc == cap) {
+                    int new_cap = cap * 2;
+                    mino_val **grown = (mino_val **)gc_alloc_typed(
+                        S, GC_T_VALARR,
+                        (size_t)new_cap * sizeof(*grown));
+                    if (grown == NULL) {
+                        S->ns_vars.current_ns    = saved_ns;
+                        S->ns_vars.fn_ambient_ns = saved_ambient;
+                        return NULL;
+                    }
+                    memcpy(grown, argv,
+                           (size_t)argc * sizeof(*argv));
+                    argv = grown;
+                    cap  = new_cap;
+                }
+                if (argv != scratch) {
+                    gc_valarr_set(S, argv, (size_t)argc,
+                                  cur->as.cons.car);
+                    argc++;
+                } else {
+                    argv[argc++] = cur->as.cons.car;
+                }
+                cur = cur->as.cons.cdr;
+            }
+            fn = next_fn;
+            if (fn->as.fn.defining_ns != NULL) {
+                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+            }
+            continue;
+        }
+        /* Non-bc target: pop our frame and hand off. */
+        pop_frame(S);
+        S->ns_vars.current_ns    = saved_ns;
+        S->ns_vars.fn_ambient_ns = saved_ambient;
+        return apply_callable(S, next_fn, next_args, env);
+    }
+    pop_frame(S);
+    S->ns_vars.current_ns    = saved_ns;
+    S->ns_vars.fn_ambient_ns = saved_ambient;
+    return result;
+}
+
+/* apply_fn_tree_walk -- tree-walker dispatch for MINO_FN / MINO_MACRO.
+ * Called when the bc path is unavailable (macro, lazy tail, bc declined).
+ * Handles macro &env/&form injection, multi-arity dispatch, recur loop,
+ * and proper tail-call trampoline. */
+static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
+                                     mino_val *args, mino_env *env,
+                                     const char *tag)
+{
+    mino_val *cur_params = fn->as.fn.params;
+    mino_val *cur_body   = fn->as.fn.body;
+    mino_env *local     = env_child(S, fn->as.fn.env);
+    mino_val *call_args = args;
+    const char *file      = NULL;
+    int         line      = 0;
+    int         col       = 0;
+    const char *saved_ns      = S->ns_vars.current_ns;
+    const char *saved_ambient = S->ns_vars.fn_ambient_ns;
+    mino_val *result;
+    if (mino_type_of(fn) == MINO_MACRO) {
+        /* &env is a map of {sym <opaque-info>} for every local
+         * in scope at the call site. JVM Clojure binds the values
+         * to LocalBinding objects; mino doesn't have a corresponding
+         * shape, so each entry maps to nil — the truthy check on
+         * (contains? &env sym) and (keys &env) work, which is what
+         * macros that introspect locals actually use.
+         *
+         * &form is the entire macro-call form (head + tail). It
+         * comes from the evaluator's "currently expanding" form
+         * pointer set by eval_value before any macro invocation. */
+        mino_env *e;
+        size_t      n_locals = 0;
+        mino_val *form_for_env = NULL;
+        if (mino_current_ctx(S)->eval_current_form != NULL) {
+            form_for_env = (mino_val *)mino_current_ctx(S)->eval_current_form;
+        }
+        /* Walk lexical frames; stop at the namespace root env so
+         * we don't enumerate the (large) set of Vars. The ns root
+         * lives in current_ns_env(S). */
+        {
+            mino_env *ns_root = current_ns_env(S);
+            for (e = env; e != NULL && e != ns_root; e = e->parent) {
+                size_t i;
+                for (i = 0; i < e->len; i++) n_locals++;
+            }
+        }
+        {
+            mino_val **keys = NULL;
+            mino_val **vals = NULL;
+            if (n_locals > 0) {
+                keys = (mino_val **)gc_alloc_typed(
+                    S, GC_T_VALARR, n_locals * sizeof(*keys));
+                vals = (mino_val **)gc_alloc_typed(
+                    S, GC_T_VALARR, n_locals * sizeof(*vals));
+                if (keys != NULL && vals != NULL) {
+                    mino_env *ns_root = current_ns_env(S);
+                    size_t out = 0;
+                    for (e = env; e != NULL && e != ns_root; e = e->parent) {
+                        size_t i;
+                        for (i = 0; i < e->len; i++) {
+                            if (out < n_locals) {
+                                keys[out] = mino_symbol(S, e->bindings[i].name);
+                                vals[out] = mino_nil(S);
+                                out++;
+                            }
+                        }
+                    }
+                    n_locals = out;
+                }
+            }
+            env_bind(S, local, "&env", mino_map(S, keys, vals, n_locals));
+            env_bind(S, local, "&form",
+                     form_for_env != NULL ? form_for_env : mino_nil(S));
+        }
+    }
+    /* Closures resolve free unqualified vars in the namespace they
+     * were created in. Swap current_ns for the body so def/etc land
+     * in the right place by default; record the same ns as the
+     * "ambient" so eval_symbol can still find these bindings even
+     * after the body itself mutates current_ns via (ns ...) or
+     * (in-ns ...).
+     *
+     * Macros are different: their body runs at the *caller's*
+     * macroexpansion context, so *ns* and (resolve ...) must see
+     * the caller's namespace. Set only fn_ambient_ns for macros so
+     * helper-symbol lookups fall back to the defining ns without
+     * shifting current_ns. */
+    if (fn->as.fn.defining_ns != NULL) {
+        if (mino_type_of(fn) == MINO_MACRO) {
+            S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+        } else {
+            S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+            S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+        }
+    }
+    if (mino_current_ctx(S)->eval_current_form != NULL
+        && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
+        file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+        line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+        col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
+    }
+    push_frame(S, tag, file, line, col);
+    /* Multi-arity dispatch: params == NULL means body is a clause list. */
+    if (cur_params == NULL
+        && dispatch_multi_arity(S, cur_body, call_args, "",
+                                &cur_params, &cur_body) != 0) {
+        S->ns_vars.current_ns    = saved_ns;
+        S->ns_vars.fn_ambient_ns = saved_ambient;
+        return NULL;
+    }
+    for (;;) {
+        int simple_path = 0;
+        if (cur_params != NULL && cur_params == fn->as.fn.params) {
+            /* Lazy shape detection on the per-fn cache. dispatch_multi_arity
+             * yields per-clause params that are not the cached one; those
+             * walks fall through to the general bind_params. */
+            if (fn->as.fn.shape == 0) {
+                fn->as.fn.shape =
+                    fn_params_simple_shape(cur_params) ? 1 : -1;
+            }
+            simple_path = (fn->as.fn.shape == 1);
+        }
+        if (simple_path) {
+            if (!bind_simple_params(S, local, cur_params, call_args, tag)) {
+                S->ns_vars.current_ns    = saved_ns;
+                S->ns_vars.fn_ambient_ns = saved_ambient;
+                return NULL;
+            }
+        } else if (!bind_params(S, local, cur_params, call_args, tag)) {
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
+            return NULL; /* leave frame for trace */
+        }
+        result = eval_implicit_do_impl(S, cur_body, local, 1);
+        if (result == NULL) {
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
+            return NULL; /* leave frame for trace */
+        }
+        if (mino_type_of(result) == MINO_RECUR) {
+            /* Self-recursion: rebind params and loop.
+             * For multi-arity, re-dispatch on new arg count. */
+            call_args = result->as.recur.args;
+            if (fn->as.fn.params == NULL) {
+                mino_val *prev_params = cur_params;
+                if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
+                                         " in recur",
+                                         &cur_params, &cur_body) != 0) {
+                    S->ns_vars.current_ns = saved_ns;
+                    return NULL;
+                }
+                /* Reuse `local` only when the recur lands on the
+                 * same clause: the binding slots line up with the
+                 * existing env and bind_params will overwrite them
+                 * in place. A different clause may have a
+                 * different param shape (different arity, rest
+                 * arg, destructuring), so allocate a fresh env. */
+                if (cur_params != prev_params)
+                    local = env_child(S, fn->as.fn.env);
+            }
+            /* Each recur allocates a fresh env_child so a closure
+             * built during the current iteration keeps pointing at
+             * the slots it captured, not the next iteration's
+             * rebinds. Source-level scanning of the body can't see
+             * closures introduced by macros that expand to a
+             * (fn ...) form (e.g. `future`, `delay`, `for`,
+             * `doseq`), so the alloc is unconditional here. Tight
+             * counted-loop shapes the BC compiler can recognise
+             * skip this trampoline entirely; the cost is contained
+             * to general self-recursion. */
+            local = env_child(S, fn->as.fn.env);
+            /* Safepoint poll at the fn-self-recur backward
+             * branch — same rationale as the loop trampoline in
+             * eval/bindings.c: tight tail-recursive bodies skip
+             * eval_impl entry between iterations. */
+            mino_safepoint_poll(S);
+            continue;
+        }
+        if (mino_type_of(result) == MINO_TAIL_CALL) {
+            /* Proper tail call: switch to the target function. */
+            mino_val *new_fn = result->as.tail_call.fn;
+            call_args = result->as.tail_call.args;
+            if (new_fn == fn && fn->as.fn.params != NULL) {
+                /* Self tail call, single-arity: allocate a fresh
+                 * env_child each iteration. The previous
+                 * reuse-and-mutate-in-place shortcut let a closure
+                 * built in iteration N silently observe iteration
+                 * N+1's params once bind_params ran -- a Clojure-
+                 * semantics divergence. Closure-free tail recurs
+                 * pay one env_child alloc per iteration; the BC
+                 * compiler's fused counted-loop family covers the
+                 * tight-loop case ahead of this path. */
+                local = env_child(S, fn->as.fn.env);
+                continue;
+            }
+            fn        = new_fn;
+            cur_params = fn->as.fn.params;
+            cur_body   = fn->as.fn.body;
+            local     = env_child(S, fn->as.fn.env);
+            /* Tail-call to a different fn: switch to its defining ns
+             * so its body's free vars resolve correctly. */
+            if (mino_type_of(fn) == MINO_FN && fn->as.fn.defining_ns != NULL) {
+                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+            }
+            if (cur_params == NULL
+                && dispatch_multi_arity(S, cur_body, call_args, "",
+                                        &cur_params, &cur_body) != 0) {
+                S->ns_vars.current_ns = saved_ns;
+                return NULL;
+            }
+            continue;
+        }
+        pop_frame(S);
+        S->ns_vars.current_ns    = saved_ns;
+        S->ns_vars.fn_ambient_ns = saved_ambient;
+        return result;
+    }
+}
+
 mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                            mino_env *env)
 {
@@ -454,907 +859,10 @@ mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
         mino_bc_check_require(S, fn);
         if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)
             && !args_lazy_tail) {
-            /* Tier selection for the interpreter / native split. When
-             * CPJIT is enabled and the fn has crossed the hot
-             * threshold, attempt a single compile per generation. The
-             * native field stays NULL until a successful compile;
-             * after that, the runtime's invocation path (below) hands
-             * off to mino_jit_invoke instead of mino_bc_run. */
-            mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-            if (bc_rec->native != NULL && bc_rec->native_gen != S->ns_vars.ic_gen) {
-                /* Stale native code: ic_gen advanced (def / ns-unmap /
-                 * var_set_root / var_unintern), so the JIT'd inline-
-                 * cache state and global resolutions are no longer
-                 * trustworthy. The deopt primitive drops the
-                 * runtime-visible pointers and rewinds the hot
-                 * counter; the underlying region and offset table
-                 * stay owned by the state's jit_regions list and
-                 * get reaped on teardown. */
-                mino_jit_invalidate(S, fn);
-            }
-            if (bc_rec->native == NULL
-                && bc_rec->hot_counter < (unsigned)-1
-                && S->jit.jit_mode != (int)MINO_JIT_MODE_OFF) {
-                bc_rec->hot_counter++;
-                /* MODE_ON -> compile on first call (threshold = 1).
-                 * MODE_AUTO -> per-state hot threshold (defaults to
-                 * MINO_JIT_THRESHOLD; tunable via the public
-                 * MINO_OPT_JIT_HOT_THRESHOLD option). */
-                unsigned thresh = (S->jit.jit_mode == (int)MINO_JIT_MODE_ON)
-                    ? 1u : S->jit.jit_hot_threshold;
-                if (bc_rec->hot_counter >= thresh) {
-                    /* One compile attempt per crossing. On success
-                     * native becomes non-NULL and subsequent calls
-                     * route to it. On failure (ineligible shape,
-                     * mmap failure) the counter is saturated so the
-                     * per-call eligibility re-check stops -- the fn
-                     * shape won't change under us, so a single
-                     * negative answer is final. */
-                    if (mino_jit_compile(S, fn) < 0) {
-                        bc_rec->hot_counter = (unsigned)-1;
-                    }
-                }
-            }
-            /* argv ABI: walk the cons spine into a stack scratch array.
-             * The slots are kept alive across any GC the body triggers
-             * because the conservative stack scan covers this frame
-             * AND the bc register stack is a GC root once mino_bc_run
-             * copies the values in. */
-            mino_val  *scratch[16];
-            mino_val **argv = scratch;
-            int          argc = 0;
-            int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
-            mino_val  *cur  = args;
-            const char  *file = NULL;
-            int          line = 0;
-            int          col  = 0;
-            const char  *saved_ns      = S->ns_vars.current_ns;
-            const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
-            mino_val  *result;
-            while (mino_is_cons(cur)) {
-                if (argc == cap) {
-                    int new_cap = cap * 2;
-                    mino_val **grown = (mino_val **)gc_alloc_typed(
-                        S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
-                    if (grown == NULL) return NULL;
-                    memcpy(grown, argv, (size_t)argc * sizeof(*argv));
-                    argv = grown;
-                    cap  = new_cap;
-                }
-                if (argv != scratch) {
-                    gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
-                    argc++;
-                } else {
-                    argv[argc++] = cur->as.cons.car;
-                }
-                cur = cur->as.cons.cdr;
-            }
-            if (fn->as.fn.defining_ns != NULL) {
-                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-            }
-            if (mino_current_ctx(S)->eval_current_form != NULL
-                && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-                file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-                line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-                col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-            }
-            push_frame(S, tag, file, line, col);
-            /* Trampoline loop: re-enter mino_bc_run as long as the body
-             * returns a MINO_TAIL_CALL sentinel. When the tail-call
-             * target is itself a bc-compatible MINO_FN, we stay in
-             * the bc world. When it isn't, we hand off to
-             * apply_callable so a non-bc callee runs through the
-             * regular dispatch. This keeps tail recursion flat across
-             * compiled fns without growing the C stack. */
-            for (;;) {
-                result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
-                if (result == NULL) {
-                    S->ns_vars.current_ns    = saved_ns;
-                    S->ns_vars.fn_ambient_ns = saved_ambient;
-                    return NULL;
-                }
-                if (mino_type_of(result) != MINO_TAIL_CALL) break;
-                mino_val *next_fn   = result->as.tail_call.fn;
-                mino_val *next_args = result->as.tail_call.args;
-                /* Lazy compile the new target if it's a fresh MINO_FN. */
-                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-                    && next_fn->as.fn.bc == NULL) {
-                    (void)mino_bc_compile_fn(S, next_fn);
-                }
-                /* Non-CONS seq-tail detection on the new args. If a
-                 * tail call landed at a callee whose argv would lose
-                 * a trailing LAZY / CHUNKED_CONS / CHUNK cell, bail
-                 * out of the bc trampoline and let the recursive
-                 * apply_callable route to the tree-walker. */
-                int next_args_lazy_tail = 0;
-                {
-                    mino_val *np = next_args;
-                    mino_type ntt;
-                    while (mino_is_cons(np)) np = np->as.cons.cdr;
-                    ntt = np != NULL ? mino_type_of(np) : MINO_NIL;
-                    next_args_lazy_tail = (ntt == MINO_LAZY
-                        || ntt == MINO_CHUNKED_CONS
-                        || ntt == MINO_CHUNK);
-                }
-                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-                    && MINO_BC_RUNNABLE(next_fn)
-                    && next_fn->as.fn.params != NULL
-                    && !next_args_lazy_tail) {
-                    /* Rebuild argv from the new args list. */
-                    argc = 0;
-                    cur  = next_args;
-                    while (mino_is_cons(cur)) {
-                        if (argc == cap) {
-                            int new_cap = cap * 2;
-                            mino_val **grown = (mino_val **)gc_alloc_typed(
-                                S, GC_T_VALARR,
-                                (size_t)new_cap * sizeof(*grown));
-                            if (grown == NULL) {
-                                S->ns_vars.current_ns    = saved_ns;
-                                S->ns_vars.fn_ambient_ns = saved_ambient;
-                                return NULL;
-                            }
-                            memcpy(grown, argv,
-                                   (size_t)argc * sizeof(*argv));
-                            argv = grown;
-                            cap  = new_cap;
-                        }
-                        if (argv != scratch) {
-                            gc_valarr_set(S, argv, (size_t)argc,
-                                          cur->as.cons.car);
-                            argc++;
-                        } else {
-                            argv[argc++] = cur->as.cons.car;
-                        }
-                        cur = cur->as.cons.cdr;
-                    }
-                    fn = next_fn;
-                    if (fn->as.fn.defining_ns != NULL) {
-                        S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-                        S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-                    }
-                    continue;
-                }
-                /* Non-bc target: pop our frame and hand off. */
-                pop_frame(S);
-                S->ns_vars.current_ns    = saved_ns;
-                S->ns_vars.fn_ambient_ns = saved_ambient;
-                return apply_callable(S, next_fn, next_args, env);
-            }
-            pop_frame(S);
-            S->ns_vars.current_ns    = saved_ns;
-            S->ns_vars.fn_ambient_ns = saved_ambient;
-            return result;
+            return apply_fn_bc_cons(S, fn, args, env, tag);
         }
-        mino_val *cur_params = fn->as.fn.params;
-        mino_val *cur_body   = fn->as.fn.body;
-        mino_env *local     = env_child(S, fn->as.fn.env);
-        mino_val *call_args = args;
-        const char *file      = NULL;
-        int         line      = 0;
-        int         col       = 0;
-        const char *saved_ns      = S->ns_vars.current_ns;
-        const char *saved_ambient = S->ns_vars.fn_ambient_ns;
-        mino_val *result;
-        if (mino_type_of(fn) == MINO_MACRO) {
-            /* &env is a map of {sym <opaque-info>} for every local
-             * in scope at the call site. JVM Clojure binds the values
-             * to LocalBinding objects; mino doesn't have a corresponding
-             * shape, so each entry maps to nil — the truthy check on
-             * (contains? &env sym) and (keys &env) work, which is what
-             * macros that introspect locals actually use.
-             *
-             * &form is the entire macro-call form (head + tail). It
-             * comes from the evaluator's "currently expanding" form
-             * pointer set by eval_value before any macro invocation. */
-            mino_env *e;
-            size_t      n_locals = 0;
-            mino_val *form_for_env = NULL;
-            if (mino_current_ctx(S)->eval_current_form != NULL) {
-                form_for_env = (mino_val *)mino_current_ctx(S)->eval_current_form;
-            }
-            /* Walk lexical frames; stop at the namespace root env so
-             * we don't enumerate the (large) set of Vars. The ns root
-             * lives in current_ns_env(S). */
-            {
-                mino_env *ns_root = current_ns_env(S);
-                for (e = env; e != NULL && e != ns_root; e = e->parent) {
-                    size_t i;
-                    for (i = 0; i < e->len; i++) n_locals++;
-                }
-            }
-            {
-                mino_val **keys = NULL;
-                mino_val **vals = NULL;
-                if (n_locals > 0) {
-                    keys = (mino_val **)gc_alloc_typed(
-                        S, GC_T_VALARR, n_locals * sizeof(*keys));
-                    vals = (mino_val **)gc_alloc_typed(
-                        S, GC_T_VALARR, n_locals * sizeof(*vals));
-                    if (keys != NULL && vals != NULL) {
-                        mino_env *ns_root = current_ns_env(S);
-                        size_t out = 0;
-                        for (e = env; e != NULL && e != ns_root; e = e->parent) {
-                            size_t i;
-                            for (i = 0; i < e->len; i++) {
-                                if (out < n_locals) {
-                                    keys[out] = mino_symbol(S, e->bindings[i].name);
-                                    vals[out] = mino_nil(S);
-                                    out++;
-                                }
-                            }
-                        }
-                        n_locals = out;
-                    }
-                }
-                env_bind(S, local, "&env", mino_map(S, keys, vals, n_locals));
-                env_bind(S, local, "&form",
-                         form_for_env != NULL ? form_for_env : mino_nil(S));
-            }
-        }
-        /* Closures resolve free unqualified vars in the namespace they
-         * were created in. Swap current_ns for the body so def/etc land
-         * in the right place by default; record the same ns as the
-         * "ambient" so eval_symbol can still find these bindings even
-         * after the body itself mutates current_ns via (ns ...) or
-         * (in-ns ...).
-         *
-         * Macros are different: their body runs at the *caller's*
-         * macroexpansion context, so *ns* and (resolve ...) must see
-         * the caller's namespace. Set only fn_ambient_ns for macros so
-         * helper-symbol lookups fall back to the defining ns without
-         * shifting current_ns. */
-        if (fn->as.fn.defining_ns != NULL) {
-            if (mino_type_of(fn) == MINO_MACRO) {
-                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-            } else {
-                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-            }
-        }
-        if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-        }
-        push_frame(S, tag, file, line, col);
-        /* Multi-arity dispatch: params == NULL means body is a clause list. */
-        if (cur_params == NULL
-            && dispatch_multi_arity(S, cur_body, call_args, "",
-                                    &cur_params, &cur_body) != 0) {
-            S->ns_vars.current_ns    = saved_ns;
-            S->ns_vars.fn_ambient_ns = saved_ambient;
-            return NULL;
-        }
-        for (;;) {
-            int simple_path = 0;
-            if (cur_params != NULL && cur_params == fn->as.fn.params) {
-                /* Lazy shape detection on the per-fn cache. dispatch_multi_arity
-                 * yields per-clause params that are not the cached one; those
-                 * walks fall through to the general bind_params. */
-                if (fn->as.fn.shape == 0) {
-                    fn->as.fn.shape =
-                        fn_params_simple_shape(cur_params) ? 1 : -1;
-                }
-                simple_path = (fn->as.fn.shape == 1);
-            }
-            if (simple_path) {
-                if (!bind_simple_params(S, local, cur_params, call_args, tag)) {
-                    S->ns_vars.current_ns    = saved_ns;
-                    S->ns_vars.fn_ambient_ns = saved_ambient;
-                    return NULL;
-                }
-            } else if (!bind_params(S, local, cur_params, call_args, tag)) {
-                S->ns_vars.current_ns    = saved_ns;
-                S->ns_vars.fn_ambient_ns = saved_ambient;
-                return NULL; /* leave frame for trace */
-            }
-            result = eval_implicit_do_impl(S, cur_body, local, 1);
-            if (result == NULL) {
-                S->ns_vars.current_ns    = saved_ns;
-                S->ns_vars.fn_ambient_ns = saved_ambient;
-                return NULL; /* leave frame for trace */
-            }
-            if (mino_type_of(result) == MINO_RECUR) {
-                /* Self-recursion: rebind params and loop.
-                 * For multi-arity, re-dispatch on new arg count. */
-                call_args = result->as.recur.args;
-                if (fn->as.fn.params == NULL) {
-                    mino_val *prev_params = cur_params;
-                    if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
-                                             " in recur",
-                                             &cur_params, &cur_body) != 0) {
-                        S->ns_vars.current_ns = saved_ns;
-                        return NULL;
-                    }
-                    /* Reuse `local` only when the recur lands on the
-                     * same clause: the binding slots line up with the
-                     * existing env and bind_params will overwrite them
-                     * in place. A different clause may have a
-                     * different param shape (different arity, rest
-                     * arg, destructuring), so allocate a fresh env. */
-                    if (cur_params != prev_params)
-                        local = env_child(S, fn->as.fn.env);
-                }
-                /* Each recur allocates a fresh env_child so a closure
-                 * built during the current iteration keeps pointing at
-                 * the slots it captured, not the next iteration's
-                 * rebinds. Source-level scanning of the body can't see
-                 * closures introduced by macros that expand to a
-                 * (fn ...) form (e.g. `future`, `delay`, `for`,
-                 * `doseq`), so the alloc is unconditional here. Tight
-                 * counted-loop shapes the BC compiler can recognise
-                 * skip this trampoline entirely; the cost is contained
-                 * to general self-recursion. */
-                local = env_child(S, fn->as.fn.env);
-                /* Safepoint poll at the fn-self-recur backward
-                 * branch — same rationale as the loop trampoline in
-                 * eval/bindings.c: tight tail-recursive bodies skip
-                 * eval_impl entry between iterations. */
-                mino_safepoint_poll(S);
-                continue;
-            }
-            if (mino_type_of(result) == MINO_TAIL_CALL) {
-                /* Proper tail call: switch to the target function. */
-                mino_val *new_fn = result->as.tail_call.fn;
-                call_args = result->as.tail_call.args;
-                if (new_fn == fn && fn->as.fn.params != NULL) {
-                    /* Self tail call, single-arity: allocate a fresh
-                     * env_child each iteration. The previous
-                     * reuse-and-mutate-in-place shortcut let a closure
-                     * built in iteration N silently observe iteration
-                     * N+1's params once bind_params ran -- a Clojure-
-                     * semantics divergence. Closure-free tail recurs
-                     * pay one env_child alloc per iteration; the BC
-                     * compiler's fused counted-loop family covers the
-                     * tight-loop case ahead of this path. */
-                    local = env_child(S, fn->as.fn.env);
-                    continue;
-                }
-                fn        = new_fn;
-                cur_params = fn->as.fn.params;
-                cur_body   = fn->as.fn.body;
-                local     = env_child(S, fn->as.fn.env);
-                /* Tail-call to a different fn: switch to its defining ns
-                 * so its body's free vars resolve correctly. */
-                if (mino_type_of(fn) == MINO_FN && fn->as.fn.defining_ns != NULL) {
-                    S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-                    S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-                }
-                if (cur_params == NULL
-                    && dispatch_multi_arity(S, cur_body, call_args, "",
-                                            &cur_params, &cur_body) != 0) {
-                    S->ns_vars.current_ns = saved_ns;
-                    return NULL;
-                }
-                continue;
-            }
-            pop_frame(S);
-            S->ns_vars.current_ns    = saved_ns;
-            S->ns_vars.fn_ambient_ns = saved_ambient;
-            return result;
-        }
+        return apply_fn_tree_walk(S, fn, args, env, tag);
     }
     return apply_non_fn_callable(S, fn, args, mino_current_ctx(S)->eval_current_form);
 }
 
-/* Helper: build a cons-spine list from argv[0..argc). Used by the slow
- * paths of apply_callable_argv that need to delegate back to
- * apply_callable's cons-list-based dispatch. Returns NULL on alloc
- * failure. */
-static mino_val *argv_to_cons(mino_state *S, mino_val **argv, int argc)
-{
-    mino_val *list = mino_nil(S);
-    if (list == NULL) return NULL;
-    for (int i = argc - 1; i >= 0; i--) {
-        mino_val *cell = mino_cons(S, argv[i], list);
-        if (cell == NULL) return NULL;
-        list = cell;
-    }
-    return list;
-}
-
-/* Shared bc-fn invocation. Called from apply_callable_argv's MINO_FN
- * branch and from the JIT's known-callee fast path. Pre-condition:
- * `fn` is a MINO_FN with `as.fn.bc != NULL` and `MINO_BC_RUNNABLE(fn)`
- * (caller checks). The implementation is the only place that handles
- * lazy-recompile-on-fold-staleness, hot-counter bumping, JIT
- * invalidation, push/pop frame, defining_ns scope, and the tail-call
- * trampoline. Returns the final value or NULL on error.
- *
- * always_inline forced so the refactor doesn't add a function-call
- * layer to either caller — apply_callable_argv's MINO_FN branch and
- * mino_apply_known_bc_fn_argv both inline the body. */
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((always_inline))
-#endif
-static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
-                                            mino_val **argv, int argc,
-                                            mino_env *env)
-{
-    /* The two staleness checks (NULL bc + fold-staleness recompile)
-     * still run because the JIT path's IC slot can predate a fold
-     * promotion (compile_ic_gen advances independently of S->ns_vars.ic_gen,
-     * via mino_jit_compile). Skipping them risks running stale bc. */
-    if (fn->as.fn.bc == NULL) {
-        (void)mino_bc_compile_fn(S, fn);
-    }
-    if (fn->as.fn.bc != NULL
-        && fn->as.fn.bc != &mino_bc_declined
-        && fn->as.fn.bc->has_folds
-        && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
-        /* Template-aware recompile: closures share their template's
-         * bc, so the recompile fires once on the template and every
-         * sibling closure inherits the fresh bc through the back-
-         * pointer. Without this, every closure with stale folds would
-         * rebuild its own bc per call, defeating dedup. */
-        mino_val *tmpl = fn->as.fn.template_fn;
-        if (tmpl != NULL && tmpl->as.fn.bc == fn->as.fn.bc) {
-            tmpl->as.fn.bc = NULL;
-            (void)mino_bc_compile_fn(S, tmpl);
-            fn->as.fn.bc = tmpl->as.fn.bc;
-        } else {
-            fn->as.fn.bc = NULL;
-            (void)mino_bc_compile_fn(S, fn);
-        }
-    }
-    mino_bc_check_require(S, fn);
-    if (!MINO_BC_RUNNABLE(fn)) {
-        /* Compile declined post-recompile: fall back to cons-form
-         * apply_callable for full multi-arity dispatch. */
-        mino_val *args = argv_to_cons(S, argv, argc);
-        if (args == NULL) return NULL;
-        return apply_callable(S, fn, args, env);
-    }
-    mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-    if (bc_rec->native != NULL && bc_rec->native_gen != S->ns_vars.ic_gen) {
-        mino_jit_invalidate(S, fn);
-    }
-    if (bc_rec->native == NULL
-        && bc_rec->hot_counter < (unsigned)-1
-        && S->jit.jit_mode != (int)MINO_JIT_MODE_OFF) {
-        bc_rec->hot_counter++;
-        /* Adaptive tiering: a callee invoked from inside a JIT'd
-         * region (jit_invoke_depth > 0) is on the hot path of
-         * something already paying compile cost, so the threshold
-         * collapses to 1. AUTO without a JIT'd caller keeps the
-         * state's hot-threshold setting; ON mode threshold stays at
-         * 1 unconditionally. */
-        unsigned thresh;
-        if (S->jit.jit_mode == (int)MINO_JIT_MODE_ON) {
-            thresh = 1u;
-        } else if (mino_current_ctx(S)->jit_invoke_depth > 0) {
-            thresh = 1u;
-        } else {
-            thresh = S->jit.jit_hot_threshold;
-        }
-        if (bc_rec->hot_counter >= thresh) {
-            if (mino_jit_compile(S, fn) < 0) {
-                bc_rec->hot_counter = (unsigned)-1;
-            }
-        }
-    }
-    mino_val **call_argv = argv;
-    int          call_argc = argc;
-    int          cap       = argc;
-    int          heap      = 0;
-    const char  *file      = NULL;
-    int          line      = 0;
-    int          col       = 0;
-    const char  *saved_ns      = S->ns_vars.current_ns;
-    const char  *saved_ambient = S->ns_vars.fn_ambient_ns;
-    mino_val  *result;
-    if (fn->as.fn.defining_ns != NULL) {
-        S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-        S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-    }
-    if (mino_current_ctx(S)->eval_current_form != NULL
-        && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-        file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-        line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-        col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-    }
-    push_frame(S, "fn", file, line, col);
-    for (;;) {
-        result = mino_bc_run(S, fn, call_argv, call_argc,
-                             fn->as.fn.env);
-        if (result == NULL) {
-            S->ns_vars.current_ns    = saved_ns;
-            S->ns_vars.fn_ambient_ns = saved_ambient;
-            return NULL;
-        }
-        if (mino_type_of(result) != MINO_TAIL_CALL) break;
-        mino_val *next_fn   = result->as.tail_call.fn;
-        mino_val *next_args = result->as.tail_call.args;
-        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-            && next_fn->as.fn.bc == NULL) {
-            (void)mino_bc_compile_fn(S, next_fn);
-        }
-        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-            && MINO_BC_RUNNABLE(next_fn)
-            && next_fn->as.fn.params != NULL) {
-            int new_argc = 0;
-            mino_val *cur = next_args;
-            while (mino_is_cons(cur)) {
-                if (new_argc >= cap || !heap) {
-                    /* Guard against signed overflow in cap * 2.  An int
-                     * cap above INT_MAX/2 means we already hold an
-                     * unreasonably large argv; treat it as an OOM. */
-                    if (cap > INT_MAX / 2) {
-                        S->ns_vars.current_ns    = saved_ns;
-                        S->ns_vars.fn_ambient_ns = saved_ambient;
-                        set_eval_diag(S,
-                            mino_current_ctx(S)->eval_current_form,
-                            "limit", "MLM003",
-                            "argv buffer too large: tail-call arity overflow");
-                        return NULL;
-                    }
-                    int new_cap = (new_argc + 1) < (cap * 2)
-                        ? (cap * 2) : (new_argc + 8);
-                    mino_val **grown = (mino_val **)gc_alloc_typed(
-                        S, GC_T_VALARR,
-                        (size_t)new_cap * sizeof(*grown));
-                    if (grown == NULL) {
-                        S->ns_vars.current_ns    = saved_ns;
-                        S->ns_vars.fn_ambient_ns = saved_ambient;
-                        return NULL;
-                    }
-                    memcpy(grown, call_argv,
-                           (size_t)new_argc * sizeof(*grown));
-                    call_argv = grown;
-                    cap       = new_cap;
-                    heap      = 1;
-                }
-                if (heap) {
-                    gc_valarr_set(S, call_argv, (size_t)new_argc,
-                                  cur->as.cons.car);
-                    new_argc++;
-                } else {
-                    call_argv[new_argc++] = cur->as.cons.car;
-                }
-                cur = cur->as.cons.cdr;
-            }
-            call_argc = new_argc;
-            fn        = next_fn;
-            if (fn->as.fn.defining_ns != NULL) {
-                S->ns_vars.current_ns    = fn->as.fn.defining_ns;
-                S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
-            }
-            continue;
-        }
-        pop_frame(S);
-        S->ns_vars.current_ns    = saved_ns;
-        S->ns_vars.fn_ambient_ns = saved_ambient;
-        return apply_callable(S, next_fn, next_args, env);
-    }
-    pop_frame(S);
-    S->ns_vars.current_ns    = saved_ns;
-    S->ns_vars.fn_ambient_ns = saved_ambient;
-    return result;
-}
-
-/* JIT entry point: invoke a pre-resolved MINO_FN bc-runnable callable
- * without going through apply_callable_argv's var-unwrap + type-of
- * dispatch switch. The caller (mino_jit_call_known_fn_slow) only routes
- * here when the IC slot's cached_callable_kind is MINO_FN_BC_SINGLE
- * and a basic arity match held. Defensive: re-resolves a stale Var
- * pointer and falls back to apply_callable_argv if the callee's shape
- * drifted out from under the cache. */
-mino_val *mino_apply_known_bc_fn_argv(mino_state *S, mino_val *fn,
-                                        mino_val **argv, int argc,
-                                        mino_env *env)
-{
-    if (fn != NULL && mino_type_of(fn) == MINO_VAR) {
-        if (!fn->as.var.bound || fn->as.var.root == NULL) {
-            return apply_callable_argv(S, fn, argv, argc, env);
-        }
-        fn = fn->as.var.root;
-    }
-    if (fn == NULL || mino_type_of(fn) != MINO_FN) {
-        return apply_callable_argv(S, fn, argv, argc, env);
-    }
-    return invoke_bc_fn_argv(S, fn, argv, argc, env);
-}
-
-mino_val *apply_callable_argv(mino_state *S, mino_val *fn,
-                                mino_val **argv, int argc,
-                                mino_env *env)
-{
-    if (fn == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY002", "cannot apply null");
-        return NULL;
-    }
-    /* Var deref. A var bound to a callable just unwraps; matches
-     * apply_callable's first action. */
-    if (mino_type_of(fn) == MINO_VAR) {
-        if (!fn->as.var.bound) {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "var is unbound: %s/%s",
-                     fn->as.var.ns ? fn->as.var.ns : "?",
-                     fn->as.var.sym ? fn->as.var.sym : "?");
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "eval/type", "MTY002", msg);
-            return NULL;
-        }
-        fn = fn->as.var.root;
-        if (fn == NULL) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "eval/type", "MTY002", "var has nil root");
-            return NULL;
-        }
-    }
-
-    /* Fast path #1: argv-ABI prim. The hot case for arithmetic, IO,
-     * and collection prims after the install_stdlib migration. No
-     * cons-spine traffic. */
-    if (mino_type_of(fn) == MINO_PRIM && fn->as.prim.fn2 != NULL) {
-        const char *file = NULL;
-        int         line = 0;
-        int         col  = 0;
-        mino_val *result;
-        if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-        }
-        push_frame(S, fn->as.prim.name, file, line, col);
-        result = fn->as.prim.fn2(S, argv, argc, env);
-        if (result == NULL) return NULL; /* leave frame for trace */
-        pop_frame(S);
-        return result;
-    }
-
-    /* Fast path #2: bc-runnable FN. invoke_bc_fn_argv handles lazy
-     * compile, staleness check, tier promotion, and the tail-call
-     * trampoline. */
-    if (mino_type_of(fn) == MINO_FN) {
-        return invoke_bc_fn_argv(S, fn, argv, argc, env);
-    }
-
-    /* Slow paths: PRIM with fn1 ABI, MINO_MACRO, non-fn callables.
-     * Build the cons-spine and delegate. */
-    {
-        mino_val *args = argv_to_cons(S, argv, argc);
-        if (args == NULL) return NULL;
-        return apply_callable(S, fn, args, env);
-    }
-}
-
-mino_val *apply_non_fn_callable(mino_state *S, mino_val *fn,
-                                  mino_val *args, const mino_val *form)
-{
-    int         nargs = 0;
-    mino_val *tmp;
-    for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-        nargs++;
-
-    /* Transients delegate the read interface to their persistent view.
-     * (t-vec idx), (t-map :k), (t-set v) all behave identically to the
-     * persistent original until persistent! is called -- matching
-     * Clojure's read-only-on-transient contract. */
-    if (mino_type_of(fn) == MINO_TRANSIENT) {
-        if (!fn->as.transient.valid) {
-            set_eval_diag(S, form, "eval/state", "MST001",
-                "transient is no longer valid");
-            return NULL;
-        }
-        fn = fn->as.transient.current;
-        if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
-            set_eval_diag(S, form, "eval/type", "MTY002",
-                "transient has no underlying collection");
-            return NULL;
-        }
-    }
-
-    if (mino_type_of(fn) == MINO_KEYWORD) {
-        /* (:k m) => (get m :k); (:k m default) => (get m :k default). */
-        if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "keyword as function takes 1 or 2 arguments");
-            return NULL;
-        }
-        {
-            mino_val *coll    = args->as.cons.car;
-            mino_val *def_val = nargs == 2
-                ? args->as.cons.cdr->as.cons.car
-                : mino_nil(S);
-            if (coll != NULL && mino_type_of(coll) == MINO_TRANSIENT) {
-                if (!coll->as.transient.valid) {
-                    set_eval_diag(S, form, "eval/state", "MST001",
-                        "transient is no longer valid");
-                    return NULL;
-                }
-                coll = coll->as.transient.current;
-                if (coll == NULL || mino_type_of(coll) == MINO_NIL) return def_val;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-                mino_val *v = map_get_val(coll, fn);
-                return v == NULL ? def_val : v;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
-                mino_val *v = rb_get(S, coll->as.sorted.root, fn,
-                                        coll->as.sorted.comparator);
-                return v == NULL ? def_val : v;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
-                int idx = record_field_index(coll, fn);
-                if (idx >= 0) return coll->as.record.vals[idx];
-                if (coll->as.record.ext != NULL) {
-                    mino_val *v = map_get_val(coll->as.record.ext, fn);
-                    if (v != NULL) return v;
-                }
-                return def_val;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_SET) {
-                /* (:k #{:k :other}) returns :k if present, else default.
-                 * Mirrors Clojure's keyword-as-fn behaviour against a
-                 * set: the set acts as a "is this key present?" check
-                 * and the keyword is its own value. */
-                uint32_t h = hash_val(fn);
-                if (hamt_get(coll->as.set.root, fn, h, 0u) != NULL)
-                    return fn;
-                return def_val;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_SET) {
-                if (rb_contains(S, coll->as.sorted.root, fn,
-                                coll->as.sorted.comparator))
-                    return fn;
-                return def_val;
-            }
-            return def_val;
-        }
-    }
-    if (mino_type_of(fn) == MINO_SYMBOL) {
-        /* ('sym m) => (get m 'sym); ('sym m default) => (get m 'sym default).
-         * Mirrors JVM Clojure: Symbols implement IFn through getLookup,
-         * yielding nil for non-map collections. */
-        if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "symbol as function takes 1 or 2 arguments");
-            return NULL;
-        }
-        {
-            mino_val *coll    = args->as.cons.car;
-            mino_val *def_val = nargs == 2
-                ? args->as.cons.cdr->as.cons.car
-                : mino_nil(S);
-            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-                mino_val *v = map_get_val(coll, fn);
-                return v == NULL ? def_val : v;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
-                mino_val *v = rb_get(S, coll->as.sorted.root, fn,
-                                        coll->as.sorted.comparator);
-                return v == NULL ? def_val : v;
-            }
-            if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
-                int idx = record_field_index(coll, fn);
-                if (idx >= 0) return coll->as.record.vals[idx];
-                if (coll->as.record.ext != NULL) {
-                    mino_val *v = map_get_val(coll->as.record.ext, fn);
-                    if (v != NULL) return v;
-                }
-                return def_val;
-            }
-            return def_val;
-        }
-    }
-    if (mino_type_of(fn) == MINO_MAP) {
-        /* ({:a 1} :k) => (get {:a 1} :k). */
-        if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "map as function takes 1 or 2 arguments");
-            return NULL;
-        }
-        {
-            mino_val *key     = args->as.cons.car;
-            mino_val *def_val = nargs == 2
-                ? args->as.cons.cdr->as.cons.car
-                : mino_nil(S);
-            mino_val *v = map_get_val(fn, key);
-            return v == NULL ? def_val : v;
-        }
-    }
-    if (mino_type_of(fn) == MINO_RECORD) {
-        /* (record :key) and (record :key default) -- same lookup
-         * surface as map. Goes through record_field_index (declared
-         * fields) and falls back to ext lookup before returning the
-         * default. */
-        if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "record as function takes 1 or 2 arguments");
-            return NULL;
-        }
-        {
-            mino_val *key     = args->as.cons.car;
-            mino_val *def_val = nargs == 2
-                ? args->as.cons.cdr->as.cons.car
-                : mino_nil(S);
-            int idx = record_field_index(fn, key);
-            if (idx >= 0) return fn->as.record.vals[idx];
-            if (fn->as.record.ext != NULL) {
-                mino_val *v = map_get_val(fn->as.record.ext, key);
-                if (v != NULL) return v;
-            }
-            return def_val;
-        }
-    }
-    if (mino_type_of(fn) == MINO_VECTOR) {
-        /* ([1 2 3] 0) => (nth [1 2 3] 0). */
-        if (nargs != 1) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "vector as function takes 1 argument");
-            return NULL;
-        }
-        {
-            mino_val *idx = args->as.cons.car;
-            long long i;
-            if (idx == NULL || !mino_val_int_p(idx)) {
-                set_eval_diag(S, form, "eval/type", "MTY001",
-                    "vector index must be an integer");
-                return NULL;
-            }
-            i = mino_val_int_get(idx);
-            if (i < 0 || (size_t)i >= fn->as.vec.len) {
-                set_eval_diag(S, form, "eval/bounds", "MBD001",
-                    "vector index out of bounds");
-                return NULL;
-            }
-            return vec_nth(fn, (size_t)i);
-        }
-    }
-    if (mino_type_of(fn) == MINO_SET) {
-        /* (#{:a :b} :a) => :a or nil. */
-        if (nargs != 1) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "set as function takes 1 argument");
-            return NULL;
-        }
-        {
-            mino_val *key = args->as.cons.car;
-            uint32_t h = hash_val(key);
-            return hamt_get(fn->as.set.root, key, h, 0u) != NULL
-                ? key : mino_nil(S);
-        }
-    }
-    if (mino_type_of(fn) == MINO_SORTED_MAP) {
-        if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "sorted-map as function takes 1 or 2 arguments");
-            return NULL;
-        }
-        {
-            mino_val *key     = args->as.cons.car;
-            mino_val *def_val = nargs == 2
-                ? args->as.cons.cdr->as.cons.car
-                : mino_nil(S);
-            mino_val *v = rb_get(S, fn->as.sorted.root, key,
-                                    fn->as.sorted.comparator);
-            return v == NULL ? def_val : v;
-        }
-    }
-    if (mino_type_of(fn) == MINO_SORTED_SET) {
-        if (nargs != 1) {
-            set_eval_diag(S, form, "eval/arity", "MAR001",
-                "sorted-set as function takes 1 argument");
-            return NULL;
-        }
-        {
-            mino_val *key = args->as.cons.car;
-            return rb_contains(S, fn->as.sorted.root, key,
-                                fn->as.sorted.comparator)
-                ? key : mino_nil(S);
-        }
-    }
-    {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "not a function (got %s)",
-                 type_tag_str(fn));
-        set_eval_diag(S, form, "eval/type", "MTY002", msg);
-    }
-    return NULL;
-}
