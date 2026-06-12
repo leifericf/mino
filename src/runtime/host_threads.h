@@ -13,6 +13,42 @@
 
 #include "runtime/internal.h"
 
+
+/* ------------------------------------------------------------------------- */
+/* thread_count atomic shim                                                  */
+/* ------------------------------------------------------------------------- */
+
+/* thread_count is a plain int; all writes happen under worker_list_lock
+ * so sequential-consistency is not required. We only need atomicity to
+ * let mino_thread_count() read without taking the lock. On MSVC the
+ * Interlocked* family is the correct portability surface; on GCC/Clang
+ * we keep the __atomic_* builtins already in use here. */
+#if defined(_MSC_VER)
+static inline int tc_load(int *p)
+{
+    return (int)InterlockedCompareExchange((LONG volatile *)p, 0, 0);
+}
+static inline void tc_add(int *p, int delta)
+{
+    InterlockedExchangeAdd((LONG volatile *)p, (LONG)delta);
+}
+#else
+static inline int tc_load(int *p)
+{
+    return __atomic_load_n(p, __ATOMIC_RELAXED);
+}
+static inline void tc_add(int *p, int delta)
+{
+    __atomic_fetch_add(p, delta, __ATOMIC_RELAXED);
+}
+#endif
+
+/* Decrement p guarded against going below zero. */
+static inline void tc_dec_if_positive(int *p)
+{
+    if (tc_load(p) > 0) { tc_add(p, -1); }
+}
+
 /* Construct a fresh promise (no worker spawned). Returns a MINO_FUTURE
  * value in the PENDING state with thread_started == 0. */
 mino_val *mino_promise_new(mino_state *S);

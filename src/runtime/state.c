@@ -1498,7 +1498,7 @@ int mino_get_thread_limit(mino_state *S)
 int mino_thread_count(mino_state *S)
 {
     if (S == NULL) { return 0; }
-    return __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED);
+    return tc_load(&S->threading.thread_count);
 }
 
 void mino_quiesce_threads(mino_state *S)

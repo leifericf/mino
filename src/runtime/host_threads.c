@@ -462,9 +462,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
-    if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
-    }
+    tc_dec_if_positive(&S->threading.thread_count);
     mino_worker_list_lock_release(S);
 
     /* Worker may have set ctx->last_diag if its body threw and the
@@ -531,13 +529,13 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
      * critical section under worker_list_lock so a parallel spawn
      * can't both read thread_count < limit and then both increment. */
     mino_worker_list_lock_acquire(S);
-    if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) >= S->threading.thread_limit) {
+    if (tc_load(&S->threading.thread_count) >= S->threading.thread_limit) {
         mino_worker_list_lock_release(S);
         return prim_throw_classified(S,
             "mino/thread-limit-exceeded", "MTH001",
             "thread limit exceeded; raise via mino_set_thread_limit");
     }
-    __atomic_fetch_add(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
+    tc_add(&S->threading.thread_count, 1);
     mino_worker_list_lock_release(S);
     (void)env; /* env borrowing reserved for richer body forms */
 
@@ -549,9 +547,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
     fut = future_alloc(S);
     if (fut == NULL) {
         mino_worker_list_lock_acquire(S);
-        if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
-    }
+        tc_dec_if_positive(&S->threading.thread_count);
         mino_worker_list_lock_release(S);
         return NULL;
     }
@@ -573,9 +569,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
                                            worker_pool_entry, impl);
         if (rc != 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
-    }
+            tc_dec_if_positive(&S->threading.thread_count);
             mino_worker_list_lock_release(S);
             return prim_throw_classified(S,
                 "mino/thread-limit-exceeded", "MTH001",
@@ -593,9 +587,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
                                      0, NULL);
         if (h == 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
-    }
+            tc_dec_if_positive(&S->threading.thread_count);
             mino_worker_list_lock_release(S);
             return NULL;
         }
@@ -620,9 +612,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
             mino_worker_list_lock_acquire(S);
-            if (__atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0) {
-        __atomic_fetch_sub(&S->threading.thread_count, 1, __ATOMIC_RELAXED);
-    }
+            tc_dec_if_positive(&S->threading.thread_count);
             mino_worker_list_lock_release(S);
             return NULL;
         }
