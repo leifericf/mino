@@ -48,6 +48,7 @@
 - Core: Add `refer-clojure` macro honoring `:exclude`, `:only`, and `:rename`
 - Core: Mark `*clojure-version*` as dynamic
 - Core: `vswap!` is now a macro expanding to `vreset!` plus `deref` per canon; behavior unchanged
+- Core: `clojure-version` now appends `-<qualifier>` when `(:qualifier *clojure-version*)` is non-nil, matching JVM Clojure behavior
 - Lib: `clojure.data/diff` now trims trailing nils from the both slot, so `(diff [1 2 3] [1 2 4])` reports both `[1 2]` instead of `[1 2 nil]`. Shared map keys whose values are nil on both sides land in both: `(diff {:a nil :b 1} {:a nil})` returns `[{:b 1} nil {:a nil}]`.
 - Lib: `clojure.data` gains the `EqualityPartition` and `Diff` protocols with `equality-partition` and `diff-similar` methods; `diff` dispatches through them, so user types can extend how they partition and diff.
 - Lib: `clojure.pprint/pprint` pretty-prints with margin-aware wrapping and logical-block indentation instead of echoing `pr-str`; collections that overflow `*print-right-margin*` (default 72) break across indented lines and maps break between key/value pairs.
@@ -76,7 +77,10 @@
 - Fix: math-round returns a long instead of a double, matching the canon rounding contract; integer inputs pass through unchanged
 - Fix: Worker binding conveyance distinguishes an invalid key type from OOM, so a NULL from dyn_binding_make is no longer silently swallowed
 - Fix: (nth s i) on a string returns a character, consistent with (first s) and (get s i), so char-literal comparisons like (= (nth s i) \~) match. Indexing is codepoint-counted, so multi-byte characters count as one position.
+- Fix: Pin GC roots for keyword values in eval_special_register_vars to prevent use-after-free under conservative GC
+- Fix: Add :doc key to special-form var meta so (:doc (meta (resolve 'when))) returns the docstring
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
+- Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
