@@ -132,7 +132,7 @@ static mino_val *vec_destructure_args(mino_state *S,
             {
                 mino_val *node = mino_cons(S, elt, mino_nil(S));
                 if (head == NULL) { head = node; tail_pin = node; }
-                else { tail_pin->as.cons.cdr = node; tail_pin = node; }
+                else { mino_cons_cdr_set(S, tail_pin, node); tail_pin = node; }
             }
             built++;
         }
@@ -147,7 +147,7 @@ static mino_val *vec_destructure_args(mino_state *S,
                 ? cur : mino_nil(S);
         }
         if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-            tail_pin->as.cons.cdr = cur;
+            mino_cons_cdr_set(S, tail_pin, cur);
         }
         return head;
     }
@@ -1196,6 +1196,11 @@ static mino_val *destr_gensym(mino_state *S, const char *prefix)
     used = snprintf(buf + prefix_len, sizeof(buf) - prefix_len,
                     "%ld__auto__", ++S->gensym_counter);
     if (used < 0) return mino_symbol(S, "G__auto");
+    /* Cap to actual buffer space: snprintf returns the would-be length,
+     * which can exceed sizeof(buf)-prefix_len when the counter is large.
+     * Using the uncapped value as a length would over-read buf. */
+    if ((size_t)used >= sizeof(buf) - prefix_len)
+        used = (int)(sizeof(buf) - prefix_len) - 1;
     return mino_symbol_n(S, buf, prefix_len + (size_t)used);
 }
 
