@@ -912,9 +912,16 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
         if (map_arg->as.map.len > 0) {
             ext_keys = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                 map_arg->as.map.len * sizeof(*ext_keys));
+            if (ext_keys == NULL) {
+                return prim_throw_classified(S, "internal", "MIN001",
+                    "record-from-map: out of memory");
+            }
+            /* Pin ext_keys so the second alloc cannot collect it. */
+            gc_pin((mino_val *)ext_keys);
             ext_vals = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                 map_arg->as.map.len * sizeof(*ext_vals));
-            if (ext_keys == NULL || ext_vals == NULL) {
+            gc_unpin(1);
+            if (ext_vals == NULL) {
                 return prim_throw_classified(S, "internal", "MIN001",
                     "record-from-map: out of memory");
             }
