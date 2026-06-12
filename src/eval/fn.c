@@ -584,12 +584,13 @@ static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
     const char *saved_ambient = S->ns_vars.fn_ambient_ns;
     mino_val *result;
     if (mino_type_of(fn) == MINO_MACRO) {
-        /* &env is a map of {sym <opaque-info>} for every local
-         * in scope at the call site. JVM Clojure binds the values
-         * to LocalBinding objects; mino doesn't have a corresponding
-         * shape, so each entry maps to nil — the truthy check on
-         * (contains? &env sym) and (keys &env) work, which is what
-         * macros that introspect locals actually use.
+        /* &env is a map of {sym nil} for every local in scope at the
+         * call site. DEVIATION from JVM Clojure: JVM binds the values to
+         * LocalBinding objects that carry type and name metadata; mino has
+         * no class layer and no corresponding type, so each entry maps to
+         * nil instead. This is a deliberate simplification — the common
+         * macro idioms (contains? &env sym) and (keys &env) work correctly
+         * with nil values, which is what macros that introspect locals use.
          *
          * &form is the entire macro-call form (head + tail). It
          * comes from the evaluator's "currently expanding" form
