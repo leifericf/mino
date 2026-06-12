@@ -888,11 +888,22 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (mino_type_of(coll) == MINO_STRING) {
-        if ((size_t)idx >= coll->as.s.len) {
-            if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        /* Match Clojure: indexing a string returns a `\char`, consistent
+         * with (first s) and (get s i). The walk is codepoint-counted so
+         * multi-byte characters count as one position. */
+        size_t       pos  = 0;
+        long long    seen = 0;
+        unsigned int cp;
+        size_t       step;
+        while (pos < coll->as.s.len) {
+            coll_utf8_step((const unsigned char *)coll->as.s.data,
+                           coll->as.s.len, pos, &cp, &step);
+            if (seen == idx) return mino_char(S, (int)cp);
+            seen++;
+            pos += step;
         }
-        return mino_string_n(S, coll->as.s.data + idx, 1);
+        if (def_val != NULL) return def_val;
+        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     {
         char msg[96];

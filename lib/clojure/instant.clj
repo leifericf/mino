@@ -31,15 +31,13 @@
                         {:input s :span [start end]})))))
 
 (defn- char-at-eq?
-  "True if the character at idx matches ch. mino's (nth string ...)
-   returns a one-char string rather than a primitive char, so we
-   compare against the string form."
+  "True if the character at idx matches ch."
   [s idx ch]
   (and (< idx (count s))
-       (= (nth s idx) (str ch))))
+       (= (nth s idx) ch)))
 
 (defn- digit? [c]
-  (some? (parse-long c)))
+  (and (char? c) (<= (int \0) (int c) (int \9))))
 
 (defn- ensure-len [s idx need msg]
   (when (> (+ idx need) (count s))
@@ -104,7 +102,7 @@
         (when-not (char-at-eq? s (+ idx 3) \:)
           (throw (ex-info "instant: missing : in zone offset" {:input s})))
         [(-> m
-             (assoc :offset-sign    (if (= (nth s idx) "+") 1 -1))
+             (assoc :offset-sign    (if (char-at-eq? s idx \+) 1 -1))
              (assoc :offset-hours   (parse-int s (+ idx 1) (+ idx 3)))
              (assoc :offset-minutes (parse-int s (+ idx 4) (+ idx 6))))
          (+ idx 6)])

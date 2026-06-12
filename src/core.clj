@@ -3432,10 +3432,10 @@
   [s]
   (and (string? s)
        (= 36 (count s))
-       (= "-" (nth s 8))
-       (= "-" (nth s 13))
-       (= "-" (nth s 18))
-       (= "-" (nth s 23))
+       (= \- (nth s 8))
+       (= \- (nth s 13))
+       (= \- (nth s 18))
+       (= \- (nth s 23))
        (some? (re-matches uuid-hex-pattern
                           (str (subs s 0  8)
                                (subs s 9  13)
