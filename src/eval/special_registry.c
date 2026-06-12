@@ -364,7 +364,7 @@ int eval_is_special_form_name(const char *name, size_t len)
 /* --- Public-form var registry ------------------------------------------- */
 
 /*
- * The eight forms below are public macros in canonical Clojure but are
+ * The eleven forms below are public macros in canonical Clojure but are
  * dispatched here as C special forms (eval_try_special_form wins before
  * any macro lookup, on both the tree-walker and bytecode-compiler
  * paths). Registering a var + clojure.core env binding for each makes
@@ -410,6 +410,18 @@ static const public_form_doc k_public_form_docs[] = {
       "Selects or creates a namespace and applies its require / refer / "
       "import clauses, becoming the current namespace for the forms "
       "that follow." },
+    { "when",
+      "If test is logical true, evaluates body in an implicit do, "
+      "returning the result of the last expression. If test is false "
+      "or nil, returns nil." },
+    { "and",
+      "Evaluates exprs one at a time, from left to right. Returns the "
+      "first logical false value or the last value if none are false. "
+      "Returns true with no args." },
+    { "or",
+      "Evaluates exprs one at a time, from left to right. Returns the "
+      "first logical true value or the last value if none are true. "
+      "Returns nil with no args." },
 };
 
 static const size_t k_public_form_docs_count =
@@ -455,7 +467,11 @@ void eval_special_register_vars(mino_state *S)
         /* :macro is synthesized from var->meta (overlaid on the def-site
          * map by synth_var_meta) since the placeholder root is not a
          * MINO_MACRO; a one-entry {:macro true} map is enough. */
-        var->meta = mino_map(S, &macro_kw, &yes, 1);
+        {
+            mino_val *new_meta = mino_map(S, &macro_kw, &yes, 1);
+            gc_write_barrier(S, var, var->meta, new_meta);
+            var->meta = new_meta;
+        }
         if (doc != NULL) {
             meta_set(S, name, doc, strlen(doc), NULL);
         }
