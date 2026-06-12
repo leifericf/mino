@@ -96,4 +96,22 @@
     (is (= 'macro-flag-keep__mt (:name m)))
     (is (true? (:macro m)))))
 
+(deftest special-form-var-doc-in-meta
+  ;; (:doc (meta (resolve 'when))) must return the docstring string,
+  ;; not nil, because the :doc key is now stored directly in var->meta.
+  (let [m (meta (resolve 'when))]
+    (is (string? (:doc m)))
+    (is (pos? (count (:doc m)))))
+  (let [m (meta (resolve 'and))]
+    (is (string? (:doc m))))
+  (let [m (meta (resolve 'let))]
+    (is (string? (:doc m)))))
+
+(deftest macroexpand-1-special-form-expands
+  ;; when/and/or are also defmacros in core.clj, so macroexpand-1 expands
+  ;; them canonically even though the C dispatcher handles evaluation.
+  (is (not= '(when true 1) (macroexpand-1 '(when true 1))))
+  (is (not= '(and true false) (macroexpand-1 '(and true false))))
+  (is (not= '(or nil 1) (macroexpand-1 '(or nil 1)))))
+
 (run-tests-and-exit)

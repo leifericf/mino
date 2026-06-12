@@ -390,6 +390,11 @@ int eval_is_special_form_name(const char *name, size_t len)
  * how they evaluate. Internal-only spellings (let*, fn*, loop*, def,
  * if, do, quote, ...) are deliberately absent: they are implementation
  * surface, not part of the documented namespace.
+ *
+ * Note: when/and/or are also defined as defmacros in core.clj, so
+ * macroexpand-1 expands them canonically.  The C special-form handler
+ * runs at eval time (before any macro lookup), giving the correct
+ * semantic without going through the macro expansion path.
  */
 typedef struct {
     const char *name;
@@ -473,6 +478,12 @@ void eval_special_register_vars(mino_state *S)
     if (core_env == NULL || placeholder == NULL) {
         return;
     }
+    /* Pin the two keywords allocated above: var_intern (and the other
+     * allocation calls inside the loop) can trigger GC, and a
+     * conservative scanner may miss pointers that the compiler keeps
+     * only in registers. */
+    gc_pin(placeholder);
+    gc_pin(macro_kw);
     for (i = 0; i < k_public_form_docs_count; i++) {
         const char *name = k_public_form_docs[i].name;
         const char *doc  = k_public_form_docs[i].doc;
@@ -484,9 +495,24 @@ void eval_special_register_vars(mino_state *S)
         mino_env_set(S, core_env, name, placeholder);
         /* :macro is synthesized from var->meta (overlaid on the def-site
          * map by synth_var_meta) since the placeholder root is not a
-         * MINO_MACRO; a one-entry {:macro true} map is enough. */
+         * MINO_MACRO.  Include :doc when available so that
+         * (:doc (meta (resolve 'when))) returns the docstring directly. */
         {
-            mino_val *new_meta = mino_map(S, &macro_kw, &yes, 1);
+            mino_val *new_meta;
+            if (doc != NULL) {
+                mino_val *doc_kw  = mino_keyword(S, "doc");
+                gc_pin(doc_kw);
+                mino_val *doc_str = mino_string(S, doc);
+                gc_pin(doc_str);
+                {
+                    mino_val *keys[2] = {macro_kw, doc_kw};
+                    mino_val *vals[2] = {yes,       doc_str};
+                    new_meta = mino_map(S, keys, vals, 2);
+                }
+                gc_unpin(2); /* doc_kw, doc_str */
+            } else {
+                new_meta = mino_map(S, &macro_kw, &yes, 1);
+            }
             gc_write_barrier(S, var, var->meta, new_meta);
             var->meta = new_meta;
         }
@@ -494,4 +520,5 @@ void eval_special_register_vars(mino_state *S)
             meta_set(S, name, doc, strlen(doc), NULL);
         }
     }
+    gc_unpin(2); /* placeholder, macro_kw */
 }
