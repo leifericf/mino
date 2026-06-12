@@ -715,14 +715,25 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
         if (f->building) continue;
         for (b = f->bindings; b != NULL; b = b->next) {
-            char   qbuf[512];
+            char        qbuf[512];
+            char       *heap_key = NULL;
             const char *key_name = b->name;
             size_t i;
             int    dup = 0;
             if (b->var != NULL && b->var->as.var.ns != NULL) {
                 int qn = snprintf(qbuf, sizeof(qbuf), "%s/%s",
                                   b->var->as.var.ns, b->var->as.var.sym);
-                if (qn > 0 && (size_t)qn < sizeof(qbuf)) key_name = qbuf;
+                if (qn > 0 && (size_t)qn < sizeof(qbuf)) {
+                    key_name = qbuf;
+                } else if (qn >= (int)sizeof(qbuf)) {
+                    /* Qualified name overflows the stack buffer; heap-allocate. */
+                    heap_key = (char *)malloc((size_t)qn + 1);
+                    if (heap_key == NULL)
+                        gc_oom_throw(S, "snapshot_thread_bindings: key name");
+                    snprintf(heap_key, (size_t)qn + 1, "%s/%s",
+                             b->var->as.var.ns, b->var->as.var.sym);
+                    key_name = heap_key;
+                }
             }
             for (i = 0; i < len; i++) {
                 if (strcmp(keys[i]->as.s.data, key_name) == 0) {
@@ -730,14 +741,25 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
                     break;
                 }
             }
-            if (dup) continue;
+            if (dup) { free(heap_key); continue; }
             if (len == cap) {
-                size_t       new_cap = cap == 0 ? 8 : cap * 2;
-                mino_val **nk      = (mino_val **)gc_alloc_typed(
-                    S, GC_T_VALARR, new_cap * sizeof(*nk));
-                mino_val **nv      = (mino_val **)gc_alloc_typed(
-                    S, GC_T_VALARR, new_cap * sizeof(*nv));
+                size_t       new_cap;
+                mino_val **nk;
+                mino_val **nv;
                 size_t       j;
+                if (cap == 0) {
+                    new_cap = 8;
+                } else if (!checked_double_sz(cap, &new_cap)) {
+                    free(heap_key);
+                    gc_oom_throw(S, "snapshot_thread_bindings: capacity overflow");
+                }
+                nk = (mino_val **)gc_alloc_typed(
+                    S, GC_T_VALARR, new_cap * sizeof(*nk));
+                /* Pin nk before the second allocation can trigger GC. */
+                gc_pin((mino_val *)nk);
+                nv = (mino_val **)gc_alloc_typed(
+                    S, GC_T_VALARR, new_cap * sizeof(*nv));
+                gc_unpin(1);
                 for (j = 0; j < len; j++) {
                     gc_valarr_set(S, nk, j, keys[j]);
                     gc_valarr_set(S, nv, j, vals[j]);
@@ -746,9 +768,14 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
                 vals = nv;
                 cap  = new_cap;
             }
+            /* mino_symbol can trigger GC; pin keys and vals across the call. */
+            gc_pin((mino_val *)keys);
+            gc_pin((mino_val *)vals);
             gc_valarr_set(S, keys, len, mino_symbol(S, key_name));
+            gc_unpin(2);
             gc_valarr_set(S, vals, len, b->val);
             len++;
+            free(heap_key);
         }
     }
     if (len == 0) return mino_nil(S);
