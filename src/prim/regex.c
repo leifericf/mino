@@ -13,7 +13,11 @@ mino_val *mino_regex_from_source(mino_state *S, mino_val *source)
 {
     mino_val *v;
     if (source == NULL || mino_type_of(source) != MINO_STRING) return NULL;
+    /* Pin source across alloc_val so a GC triggered by the allocation
+     * cannot collect the source string before we store it. */
+    gc_pin(source);
     v = alloc_val(S, MINO_REGEX);
+    gc_unpin(1);
     if (v == NULL) return NULL;
     v->as.regex.source = source;
     return v;
