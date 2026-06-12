@@ -825,9 +825,12 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
             /* Symbol form: (use 'foo) -> (require '[foo :refer :all]) */
             mino_val **buf = (mino_val **)gc_alloc_typed(
                 S, GC_T_VALARR, 3 * sizeof(*buf));
+            /* Pin buf across mino_keyword calls that can trigger GC. */
+            gc_pin((mino_val *)buf);
             gc_valarr_set(S, buf, 0, arg);
             gc_valarr_set(S, buf, 1, mino_keyword(S, "refer"));
             gc_valarr_set(S, buf, 2, mino_keyword(S, "all"));
+            gc_unpin(1);
             libspec = mino_vector(S, buf, 3);
         } else if (arg != NULL && mino_type_of(arg) == MINO_VECTOR
                    && arg->as.vec.len >= 1) {
@@ -843,6 +846,8 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
                 total = arg->as.vec.len;
                 tmp   = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, total * sizeof(*tmp));
+                /* Pin tmp across mino_keyword calls that can trigger GC. */
+                gc_pin((mino_val *)tmp);
                 gc_valarr_set(S, tmp, 0, vec_nth(arg, 0));
                 j = 1;
                 for (vi = 1; vi + 1 < arg->as.vec.len; vi += 2) {
@@ -857,12 +862,15 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
                         gc_valarr_set(S, tmp, j++, v);
                     }
                 }
+                gc_unpin(1);
                 libspec = mino_vector(S, tmp, total);
             } else if (!has_refer) {
                 /* Append :refer :all. */
                 total = arg->as.vec.len + 2;
                 tmp   = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, total * sizeof(*tmp));
+                /* Pin tmp across mino_keyword calls that can trigger GC. */
+                gc_pin((mino_val *)tmp);
                 for (vi = 0; vi < arg->as.vec.len; vi++) {
                     gc_valarr_set(S, tmp, vi, vec_nth(arg, vi));
                 }
@@ -870,6 +878,7 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
                               mino_keyword(S, "refer"));
                 gc_valarr_set(S, tmp, arg->as.vec.len + 1,
                               mino_keyword(S, "all"));
+                gc_unpin(1);
                 libspec = mino_vector(S, tmp, total);
             } else {
                 /* Already has :refer; pass through. */
