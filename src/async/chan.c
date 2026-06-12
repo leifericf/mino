@@ -4,6 +4,11 @@
  * See async/chan.h for the design overview. Each operation mutates the
  * channel's impl struct directly; pending callbacks are routed through
  * the async scheduler (the same FIFO drain that go-blocks ride on).
+ *
+ * TODO(size): This TU is approaching the 1100-LOC qa-arch gate (~861 lines
+ * as of last count). Adding new channel operations or buffer kinds may push
+ * it over. Consider splitting the alts logic (mino_chan_take_alts /
+ * mino_chan_put_alts) into a separate chan_alts.c if the file grows further.
  */
 
 #include "async/chan.h"
@@ -99,6 +104,27 @@ static void drop_committed_takers(mino_chan_impl *impl)
         }
     }
     impl->takers_len = w;
+}
+
+/* Shift the putter/taker at position idx out of the queue by sliding
+ * all later entries one slot left and decrementing the length.
+ * Mirrors the chan_buf_pop pattern for the linear pending-op queues. */
+static void dequeue_putter(mino_chan_impl *impl, size_t idx)
+{
+    size_t i;
+    for (i = idx + 1; i < impl->putters_len; i++) {
+        impl->putters[i - 1] = impl->putters[i];
+    }
+    impl->putters_len--;
+}
+
+static void dequeue_taker(mino_chan_impl *impl, size_t idx)
+{
+    size_t i;
+    for (i = idx + 1; i < impl->takers_len; i++) {
+        impl->takers[i - 1] = impl->takers[i];
+    }
+    impl->takers_len--;
 }
 
 /* Grow the putters / takers queue. The dyn array doubles on demand,
@@ -317,22 +343,15 @@ int mino_chan_offer(mino_state *S, mino_val *ch, mino_val *val,
     drop_committed_takers(impl);
     if (impl->takers_len > 0) {
         mino_chan_op taker = impl->takers[0];
-        size_t i;
         if (op_try_commit(S, &taker)) {
-            for (i = 1; i < impl->takers_len; i++) {
-                impl->takers[i - 1] = impl->takers[i];
-            }
-            impl->takers_len--;
+            dequeue_taker(impl, 0);
             schedule_op_result(S, &taker, val);
             *out_accepted = 1;
             return 0;
         }
         /* The first taker was committed-by-other (shouldn't happen
          * after drop, but safe-guard). Fall through to buffer add. */
-        for (i = 1; i < impl->takers_len; i++) {
-            impl->takers[i - 1] = impl->takers[i];
-        }
-        impl->takers_len--;
+        dequeue_taker(impl, 0);
     }
     /* Buffer add. */
     if (impl->buf_kind == CHAN_BUF_FIXED) {
@@ -388,12 +407,8 @@ mino_val *mino_chan_poll(mino_state *S, mino_val *ch)
         drop_committed_putters(impl);
         if (impl->putters_len > 0) {
             mino_chan_op putter = impl->putters[0];
-            size_t i;
             if (op_try_commit(S, &putter)) {
-                for (i = 1; i < impl->putters_len; i++) {
-                    impl->putters[i - 1] = impl->putters[i];
-                }
-                impl->putters_len--;
+                dequeue_putter(impl, 0);
                 gc_write_barrier(S, ch, NULL, putter.val);
                 chan_buf_push(impl, putter.val);
                 schedule_op_result(S, &putter, mino_true(S));
@@ -405,12 +420,8 @@ mino_val *mino_chan_poll(mino_state *S, mino_val *ch)
     drop_committed_putters(impl);
     if (impl->putters_len > 0) {
         mino_chan_op putter = impl->putters[0];
-        size_t i;
         if (op_try_commit(S, &putter)) {
-            for (i = 1; i < impl->putters_len; i++) {
-                impl->putters[i - 1] = impl->putters[i];
-            }
-            impl->putters_len--;
+            dequeue_putter(impl, 0);
             schedule_op_result(S, &putter, mino_true(S));
             return putter.val == NULL ? mino_nil(S) : putter.val;
         }
@@ -482,12 +493,8 @@ int mino_chan_take(mino_state *S, mino_val *ch, mino_val *callback)
         drop_committed_putters(impl);
         if (impl->putters_len > 0) {
             mino_chan_op putter = impl->putters[0];
-            size_t i;
             if (op_try_commit(S, &putter)) {
-                for (i = 1; i < impl->putters_len; i++) {
-                    impl->putters[i - 1] = impl->putters[i];
-                }
-                impl->putters_len--;
+                dequeue_putter(impl, 0);
                 gc_write_barrier(S, ch, NULL, putter.val);
                 chan_buf_push(impl, putter.val);
                 schedule_op_result(S, &putter, mino_true(S));
@@ -499,12 +506,8 @@ int mino_chan_take(mino_state *S, mino_val *ch, mino_val *callback)
         drop_committed_putters(impl);
         if (impl->putters_len > 0) {
             mino_chan_op putter = impl->putters[0];
-            size_t i;
             if (op_try_commit(S, &putter)) {
-                for (i = 1; i < impl->putters_len; i++) {
-                    impl->putters[i - 1] = impl->putters[i];
-                }
-                impl->putters_len--;
+                dequeue_putter(impl, 0);
                 schedule_op_result(S, &putter, mino_true(S));
                 if (callback != NULL)
                     schedule_cb(S, callback, putter.val == NULL
@@ -552,18 +555,11 @@ void mino_chan_close(mino_state *S, mino_val *ch)
     drop_committed_takers(impl);
     while (impl->buf_len > 0 && impl->takers_len > 0) {
         mino_chan_op taker = impl->takers[0];
-        size_t i;
         if (!op_try_commit(S, &taker)) {
-            for (i = 1; i < impl->takers_len; i++) {
-                impl->takers[i - 1] = impl->takers[i];
-            }
-            impl->takers_len--;
+            dequeue_taker(impl, 0);
             continue;
         }
-        for (i = 1; i < impl->takers_len; i++) {
-            impl->takers[i - 1] = impl->takers[i];
-        }
-        impl->takers_len--;
+        dequeue_taker(impl, 0);
         {
             mino_val *v = chan_buf_pop(impl);
             schedule_op_result(S, &taker, v);
@@ -754,18 +750,11 @@ void mino_chan_flush_buf_to_takers(mino_state *S, mino_val *ch)
     drop_committed_takers(impl);
     while (impl->buf_len > 0 && impl->takers_len > 0) {
         mino_chan_op taker = impl->takers[0];
-        size_t i;
         if (!op_try_commit(S, &taker)) {
-            for (i = 1; i < impl->takers_len; i++) {
-                impl->takers[i - 1] = impl->takers[i];
-            }
-            impl->takers_len--;
+            dequeue_taker(impl, 0);
             continue;
         }
-        for (i = 1; i < impl->takers_len; i++) {
-            impl->takers[i - 1] = impl->takers[i];
-        }
-        impl->takers_len--;
+        dequeue_taker(impl, 0);
         {
             mino_val *v = chan_buf_pop(impl);
             schedule_op_result(S, &taker, v);
@@ -794,12 +783,8 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
             drop_committed_putters(impl);
             if (impl->putters_len > 0) {
                 mino_chan_op putter = impl->putters[0];
-                size_t i;
                 if (op_try_commit(S, &putter)) {
-                    for (i = 1; i < impl->putters_len; i++) {
-                        impl->putters[i - 1] = impl->putters[i];
-                    }
-                    impl->putters_len--;
+                    dequeue_putter(impl, 0);
                     gc_write_barrier(S, ch, NULL, putter.val);
                     chan_buf_push(impl, putter.val);
                     schedule_op_result(S, &putter, mino_true(S));
@@ -815,12 +800,8 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
     if (impl->putters_len > 0) {
         mino_chan_op putter = impl->putters[0];
         if (!flag_is_committed(flag) && op_try_commit(S, &putter)) {
-            size_t i;
             flag_try_commit(S, flag);
-            for (i = 1; i < impl->putters_len; i++) {
-                impl->putters[i - 1] = impl->putters[i];
-            }
-            impl->putters_len--;
+            dequeue_putter(impl, 0);
             schedule_op_result(S, &putter, mino_true(S));
             if (callback != NULL)
                 schedule_alts_pair(S, callback,
