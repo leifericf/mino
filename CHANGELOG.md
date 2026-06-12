@@ -42,6 +42,12 @@
 - Core: Register uuid reader in *data-readers* alongside inst reader
 - Core: Add :type and :at keys to Throwable->map :via entries for canon conformance
 - Core: Update var-get docstring to reflect thread-local binding lookup precedence
+- Core: Add `class` returning the concrete type tag, ignoring `:type` metadata; `(class nil)` is `nil`
+- Core: The special forms `fn`, `let`, `loop`, `lazy-seq`, `binding`, `declare`, `defmacro`, and `ns` are interned as `clojure.core` vars with docstrings and `:macro true` meta, so they appear in `ns-publics`, `resolve`, `doc`, and `apropos`
+- Core: `*ns*` gains its `clojure.core` env binding so `ns-publics` and `resolve` see it, and `pr` is dynamic so `binding` can rebind it
+- Core: Add `refer-clojure` macro honoring `:exclude`, `:only`, and `:rename`
+- Core: Mark `*clojure-version*` as dynamic
+- Core: `vswap!` is now a macro expanding to `vreset!` plus `deref` per canon; behavior unchanged
 - Lib: `clojure.data/diff` now trims trailing nils from the both slot, so `(diff [1 2 3] [1 2 4])` reports both `[1 2]` instead of `[1 2 nil]`. Shared map keys whose values are nil on both sides land in both: `(diff {:a nil :b 1} {:a nil})` returns `[{:b 1} nil {:a nil}]`.
 - Lib: `clojure.data` gains the `EqualityPartition` and `Diff` protocols with `equality-partition` and `diff-similar` methods; `diff` dispatches through them, so user types can extend how they partition and diff.
 - Lib: `clojure.pprint/pprint` pretty-prints with margin-aware wrapping and logical-block indentation instead of echoing `pr-str`; collections that overflow `*print-right-margin*` (default 72) break across indented lines and maps break between key/value pairs.
@@ -58,6 +64,9 @@
 - Lib: clojure.pprint now provides cl-format, a directive-driven format function, plus the formatter and formatter-out compilers that turn a control string into a reusable function. Supported directives include ~a ~s, the integer directives ~d ~x ~o ~b and ~r (radix, cardinal, and ordinal english), the float directives ~f ~e ~$, ~% ~& ~~ ~c, iteration ~{ ~} with ~^ and sublists, the conditional ~[ ~], plural ~p, argument navigation ~* ~?, and column tabulation ~t. Destinations follow the canon: nil returns a string, true writes to *out*, and a writer receives the output.
 - Lib: clojure.pprint now provides code-dispatch, a pretty-print dispatch function that lays out code forms (defn, def, let, loop, binding, doseq, when, if, fn) with the body indented under the head and let-style bindings kept paired. Select it with with-pprint-dispatch or set-pprint-dispatch.
 - Lib: clojure.spec.alpha gains int-in, double-in and inst-in range specs (with in-range generators), int-in-range? and inst-in-range? predicates, fspec and fspec-impl for generative function specs, exercise-fn, explain-data*, explain-printer, explain-out and the *explain-out*, *fspec-iterations*, *coll-check-limit*, *coll-error-limit*, *recursion-limit* and *compile-asserts* dynamic vars; assert* throws ex-info carrying explain-data with ::failure :assertion-failed. double-in defaults :infinite? and :NaN? to false so a plain range spec rejects non-finite values unless opted in.
+- Lib: `clojure.test/run-tests` and `use-fixtures` are functions reading `*ns*` at call time, and `test-var` is dynamic so reporters can rebind it
+- Lib: `clojure.spec.alpha/conformer`, `int-in`, `double-in`, and `inst-in` are macros per canon; behavior unchanged
+- Lib: `clojure.pprint/formatter` and `formatter-out` are macros per canon; behavior unchanged
 - Fix: def now evaluates metadata-map values at definition time, so ^{:k (+ 1 2)} stores 3 and ^{:test (fn [] ...)} stores a callable, matching canon; reader flags (^:dynamic, ^:private), docstrings, and ^Tag type hints keep working unchanged
 - Fix: `binding` rebinds the var itself: a binding established under any spelling (bare, namespace-qualified, or alias-qualified) is now visible to every read of that var from any namespace, including qualified reads, `deref`/`var-get`, and compiled code, and restores correctly on unwind. Previously the dynamic-binding stack matched literal symbol text, so qualified bindings were invisible to bare reads and vice versa.
 - Fix: get-thread-bindings keys var-backed entries by their fully qualified symbol, so replaying a snapshot with with-bindings* or conveying it to another thread installs the binding on the exact same var regardless of the namespace the replay runs in.
