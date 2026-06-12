@@ -165,7 +165,8 @@ void diag_set_span(mino_diag *d, mino_span_t span)
 void diag_add_note(mino_diag *d, const char *message)
 {
     if (d->notes_len >= d->notes_cap) {
-        size_t new_cap = d->notes_cap == 0 ? 4 : d->notes_cap * 2;
+        size_t new_cap = d->notes_cap == 0 ? 4
+                       : (d->notes_cap > SIZE_MAX / 2 ? SIZE_MAX : d->notes_cap * 2);
         mino_diag_note_t *p = (mino_diag_note_t *)realloc(
             d->notes, new_cap * sizeof(*p));
         if (p == NULL) return;
