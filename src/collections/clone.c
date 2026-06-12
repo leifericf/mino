@@ -244,10 +244,13 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
         return out;
     }
     case MINO_RATIO: {
+        mino_state *S = dst; /* alias for gc_pin/gc_unpin macros */
         mino_val *n = clone_val(dst, v->as.ratio.num);
         mino_val *d;
         if (n == NULL) return NULL;
+        gc_pin(n);
         d = clone_val(dst, v->as.ratio.denom);
+        gc_unpin(1);
         if (d == NULL) return NULL;
         return mino_ratio_make_unchecked(dst, n, d);
     }
