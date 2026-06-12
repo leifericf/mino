@@ -263,10 +263,11 @@ void mino_gc_pause_hist(mino_state *S,
  * Returns the number of distinct (fn, pc) pairs written. No-op when
  * the ring is empty.
  *
- * Aggregation uses a fixed-size open-addressed scratch table on the
- * stack so the dump avoids any heap allocation; entries beyond
- * SAMPLER_DUMP_TABLE_MAX (the cap) are folded into a single residual
- * bucket. */
+ * Aggregation uses a fixed-size heap-allocated scratch table per call;
+ * entries beyond SAMPLER_DUMP_TABLE_MAX (the cap) are silently dropped.
+ * Heap allocation is required because the table is ~96 KB and static
+ * storage would race when multiple mino_state instances call this from
+ * different threads simultaneously. */
 typedef struct sampler_agg {
     const mino_bc_fn_t *bc;
     uint32_t            pc;
@@ -289,12 +290,14 @@ static int sampler_agg_cmp(const void *a, const void *b)
 
 unsigned mino_sampler_dump(mino_state *S, FILE *out)
 {
-    static sampler_agg_t agg[SAMPLER_DUMP_TABLE_MAX];
+    sampler_agg_t       *agg;
     unsigned             n_agg = 0;
     unsigned             i;
     unsigned             ring_n;
     if (S == NULL || out == NULL) return 0;
     if (S->sampler_ring == NULL || S->sampler_ring_count == 0) return 0;
+    agg = (sampler_agg_t *)malloc(SAMPLER_DUMP_TABLE_MAX * sizeof(sampler_agg_t));
+    if (agg == NULL) return 0;
     ring_n = S->sampler_ring_count;
     for (i = 0; i < ring_n; i++) {
         const mino_sample_t *s = &S->sampler_ring[i];
@@ -324,6 +327,7 @@ unsigned mino_sampler_dump(mino_state *S, FILE *out)
                 agg[i].count, agg[i].native_count,
                 (void *)agg[i].bc, agg[i].pc, agg[i].op);
     }
+    free(agg);
     return n_agg;
 }
 
@@ -347,15 +351,19 @@ static int alloc_agg_cmp(const void *a, const void *b)
     return 0;
 }
 
+#define ALLOC_DUMP_TABLE_MAX 1024
+
 unsigned mino_alloc_sampler_dump(mino_state *S, FILE *out)
 {
-    static alloc_agg_t agg[1024];
-    unsigned           n_agg = 0;
-    unsigned           i;
-    unsigned           ring_n;
+    alloc_agg_t        *agg;
+    unsigned            n_agg = 0;
+    unsigned            i;
+    unsigned            ring_n;
     if (S == NULL || out == NULL) return 0;
     if (S->alloc_sampler_ring == NULL || S->alloc_sampler_ring_count == 0)
         return 0;
+    agg = (alloc_agg_t *)malloc(ALLOC_DUMP_TABLE_MAX * sizeof(alloc_agg_t));
+    if (agg == NULL) return 0;
     ring_n = S->alloc_sampler_ring_count;
     for (i = 0; i < ring_n; i++) {
         const mino_alloc_sample_t *s = &S->alloc_sampler_ring[i];
@@ -368,7 +376,7 @@ unsigned mino_alloc_sampler_dump(mino_state *S, FILE *out)
                 break;
             }
         }
-        if (!found && n_agg < 1024u) {
+        if (!found && n_agg < ALLOC_DUMP_TABLE_MAX) {
             agg[n_agg].site        = s->site;
             agg[n_agg].tag         = s->tag;
             agg[n_agg].size_bucket = s->size_bucket;
@@ -385,5 +393,6 @@ unsigned mino_alloc_sampler_dump(mino_state *S, FILE *out)
                 agg[i].count, agg[i].site,
                 (unsigned)agg[i].tag, (unsigned)agg[i].size_bucket);
     }
+    free(agg);
     return n_agg;
 }
