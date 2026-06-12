@@ -912,12 +912,13 @@ static int run_repl(mino_state *S, mino_env *env,
                 while (new_cap < len + add + 1) {
                     new_cap *= 2;
                 }
-                buf = (char *)realloc(buf, new_cap);
-                if (buf == NULL) {
+                char *grown = (char *)realloc(buf, new_cap);
+                if (grown == NULL) {
                     fputs("mino: out of memory\n", stderr);
                     exit_code = 1;
                     goto cleanup;
                 }
+                buf = grown;
                 cap = new_cap;
             }
             memcpy(buf + len, line, add + 1);
@@ -933,12 +934,13 @@ static int run_repl(mino_state *S, mino_env *env,
                 while (new_cap < hist_len + add + 1) {
                     new_cap *= 2;
                 }
-                hist_buf = (char *)realloc(hist_buf, new_cap);
-                if (hist_buf == NULL) {
+                char *hgrown = (char *)realloc(hist_buf, new_cap);
+                if (hgrown == NULL) {
                     fputs("mino: out of memory\n", stderr);
                     exit_code = 1;
                     goto cleanup;
                 }
+                hist_buf = hgrown;
                 hist_cap = new_cap;
             }
             memcpy(hist_buf + hist_len, line, add + 1);
