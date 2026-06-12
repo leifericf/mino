@@ -28,10 +28,13 @@ loop around it:
    Resume after a crash: `./mino tools/run_state.clj status` says
    which round was in flight; findings/proposals on disk are not
    redone.
-4. **Report.** Rounds table (the one-line summaries), what was fixed
-   by level, `escalations.edn` contents with both-diff context, and
-   the changelog lines merged. Offer the branch for merge; merging is
-   the maintainer's call.
+4. **Report.** Flatten first:
+   `./mino tools/flatten_branch.clj <run-dir> --repo <dir> --target <branch>`
+   (linear history, tree verified bit-identical, integrated branches
+   deleted). Then: rounds table (the one-line summaries), what was
+   fixed by level, `escalations.edn` contents with both-diff context,
+   and the changelog lines merged. Offer the flat branch for merge;
+   merging is the maintainer's call.
 
 Scope discipline: an audit fixes what reviews find inside the scope.
 Findings outside the scope are recorded

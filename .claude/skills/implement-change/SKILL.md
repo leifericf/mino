@@ -46,7 +46,11 @@ orchestrating — it is the topology, ordering, and conflict law.
    branch scope; repeat until a round returns `dry`
    (`./mino tools/run_state.clj status` tracks rounds). Keep only the
    one-line round summaries in this session.
-7. **Land.** Show the maintainer: branch, commit list, changelog
+7. **Land.** Flatten first:
+   `./mino tools/flatten_branch.clj <run-dir> --repo <dir> --target <branch>`
+   (rebases the feature branch onto main — linear history, tree
+   verified bit-identical, integrated unit/fix branches deleted).
+   Then show the maintainer: flat branch, commit list, changelog
    lines added, round summaries. Merging to main is the maintainer's
    call — offer, don't assume.
 

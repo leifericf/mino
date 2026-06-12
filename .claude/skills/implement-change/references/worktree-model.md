@@ -19,6 +19,15 @@ bookkeeping; this file is the topology and the rules.
 - Expensive lanes run **once per landing wave** on the feature branch,
   not per worktree. Per-worktree verification is the cheap set only
   (build + the tests covering the touched module).
+- The integration merge commits are **working-state scaffolding, not
+  history the maintainer keeps**. When the run is dry, the orchestrator
+  flattens: `./mino tools/flatten_branch.clj <run-dir> --repo <dir>
+  --target <branch>` rebases the feature branch onto main, verifies
+  the flattened tree is bit-identical to the pre-flatten tip (so
+  verified lane results carry over), and deletes the integrated
+  `unit/*`/`fix/*` branches. The branch offered to the maintainer is
+  always flat; unit ordering (tests before implementation) survives
+  the rebase.
 - `main` receives one fast-forward (or PR) at the end. Never force-push.
 
 ## Ordering rules
