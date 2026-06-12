@@ -3344,6 +3344,12 @@
    2-vectors)."
   [x] (and (vector? x) (= 2 (count x))))
 
+;; Uses eval of a full ns form rather than a direct refer call because mino's
+;; :refer-clojure handling (in the C ns special form) additionally detaches the
+;; parent env (clojure.core) before rebuilding the filtered mapping, so excluded
+;; names are truly hidden rather than falling through the parent chain.
+;; The standalone (refer 'clojure.core ...) primitive does not perform this
+;; parent-chain detach, so routing through the ns form is the only correct path.
 (defmacro refer-clojure
   "Refers public vars from clojure.core into the current namespace,
    accepting the same filter options as the ns :refer-clojure clause:

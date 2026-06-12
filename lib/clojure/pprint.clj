@@ -1207,6 +1207,10 @@
     (fn [writer & args]
       (clf-send writer (clf-execute tokens args)))))
 
+;; Divergence from JVM clojure.pprint: formatter is a function (first-class value) on the JVM;
+;; mino uses a macro to parse the format string at expansion time. This means formatter cannot
+;; be passed as a value (e.g. (map formatter strings) fails). Use formatter-impl directly for
+;; higher-order contexts.
 (defmacro formatter
   "Makes a function which can directly run format-in. The returned function
   takes a writer (true, nil or a writer) followed by the format arguments,
@@ -1221,6 +1225,10 @@
     (fn [& args]
       (clf-send true (clf-execute tokens args)))))
 
+;; Divergence from JVM clojure.pprint: formatter-out is a function (first-class value) on the
+;; JVM; mino uses a macro to parse the format string at expansion time. This means formatter-out
+;; cannot be passed as a value (e.g. (map formatter-out strings) fails). Use formatter-out-impl
+;; directly for higher-order contexts.
 (defmacro formatter-out
   "Makes a function which can directly run format-in, writing to *out*. The
   returned function takes the format arguments and always writes to *out*,

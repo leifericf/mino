@@ -2064,6 +2064,9 @@
      (resolve '~mm)
      ~retag))
 
+;; Divergence from JVM clojure.spec.alpha: s/int-in is a function (first-class value) on the
+;; JVM; mino uses a macro. This means int-in cannot be passed as a value in higher-order
+;; contexts. Use int-in-impl directly for higher-order use.
 (defmacro int-in
   "Return a spec validating fixed-precision integers in the range from
   start (inclusive) to end (exclusive)."
@@ -2084,12 +2087,18 @@
   [& opts]
   `(clojure.spec.alpha/double-in-impl ~@opts))
 
+;; Divergence from JVM clojure.spec.alpha: s/inst-in is a function (first-class value) on the
+;; JVM; mino uses a macro. This means inst-in cannot be passed as a value in higher-order
+;; contexts. Use inst-in-impl directly for higher-order use.
 (defmacro inst-in
   "Return a spec validating insts in the range from start (inclusive)
   to end (exclusive)."
   [start end]
   `(clojure.spec.alpha/inst-in-impl ~start ~end))
 
+;; Divergence from JVM clojure.spec.alpha: s/conformer is a function (first-class value) on the
+;; JVM; mino uses a macro. This means conformer cannot be passed as a value in higher-order
+;; contexts. Use conformer-impl directly for higher-order use.
 (defmacro conformer
   "Return a spec that uses cfn as the conform path. cfn takes a value
   and returns the conformed value or :clojure.spec.alpha/invalid.
