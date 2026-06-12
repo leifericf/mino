@@ -46,7 +46,15 @@ void gc_evt_init(mino_state *S)
     }
     S->gc.evt_ring = (gc_evt_t *)calloc(GC_EVT_CAP, sizeof(gc_evt_t));
     if (S->gc.evt_ring == NULL) {
-        abort(); /* Class I: diagnostic init; no recovery path */
+        /* Diagnostic feature only: OOM disables the ring rather than
+         * aborting the host. The ring is not required for correctness;
+         * leaving it NULL causes every gc_evt_record call to no-op via
+         * the macro guard, so collection continues uninstrumented.
+         * Not a Class I abort: the failure is user-triggered (env var)
+         * and the process can run correctly without the event buffer. */
+        fprintf(stderr,
+                "[gc-evt] MINO_GC_EVT=1: calloc failed; event ring disabled\n");
+        return;
     }
     S->gc.evt_seq = 1; /* 0 reserved for "empty" */
 }
