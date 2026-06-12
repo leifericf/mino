@@ -128,9 +128,11 @@ static void gc_minor_sweep(mino_state *S, int saved_phase)
          * The values-side finalizer dispatches across MINO_HANDLE /
          * MINO_BIGINT / MINO_RECORD / MINO_CHUNK / MINO_HOST_ARRAY /
          * MINO_FUTURE; other tags either skip the table or register
-         * NULL. */
+         * NULL. Bounds-check type_tag before indexing gc_finalizers:
+         * a corrupt or unregistered tag must not read past the array. */
         {
-            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
+                                  ? S->gc_finalizers[h->type_tag] : NULL;
             if (fin != NULL) fin(S, h);
         }
         freed_bytes += h->size;
