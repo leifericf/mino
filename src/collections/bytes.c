@@ -27,6 +27,15 @@ mino_val *mino_bytes(mino_state *S, const unsigned char *src, size_t n)
 {
     mino_val *v;
     unsigned char *buf = NULL;
+    /* Allocate the GC object first so that if gc_alloc_typed triggers a
+     * collection or longjmps on OOM, no C-heap buffer has been orphaned. */
+    v = (mino_val *)gc_alloc_typed(S, GC_T_VAL, sizeof(mino_val));
+    v->type             = MINO_BYTES;
+    v->meta             = NULL;
+    v->as.bytes.data    = NULL;
+    v->as.bytes.byte_len = n;
+    v->as.bytes.bit_tail = 0;
+    v->as.bytes.cached_hash = 0;
     if (n > 0) {
         buf = (unsigned char *)calloc(1, n);
         if (buf == NULL) {
@@ -34,14 +43,8 @@ mino_val *mino_bytes(mino_state *S, const unsigned char *src, size_t n)
                 "byte-array: out of memory");
         }
         if (src != NULL) memcpy(buf, src, n);
+        v->as.bytes.data = buf;
     }
-    v = (mino_val *)gc_alloc_typed(S, GC_T_VAL, sizeof(mino_val));
-    v->type             = MINO_BYTES;
-    v->meta             = NULL;
-    v->as.bytes.data    = buf;
-    v->as.bytes.byte_len = n;
-    v->as.bytes.bit_tail = 0;
-    v->as.bytes.cached_hash = 0;
     return v;
 }
 
@@ -162,7 +165,7 @@ mino_val *mino_bytes_seq(mino_state *S, const mino_val *v)
             if (!mino_chunk_append(buf, iv)) return NULL;
         }
         mino_chunk_seal(buf);
-        chunks[c] = buf;
+        gc_valarr_set(S, chunks, c, buf);
     }
     more = mino_nil(S);
     for (c = n_chunks; c-- > 0; ) {
