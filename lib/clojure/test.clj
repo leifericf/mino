@@ -392,25 +392,31 @@
 
 ;; --- use-fixtures ---
 
-(defmacro use-fixtures
+(defn use-fixtures
   "Register fixture functions for the current namespace.
 
   kind is :once (run around the entire batch of tests in this ns) or
   :each (run around each individual test).  Multiple fixtures of the
   same kind compose left-to-right (the first fixture is outermost).
 
-  Implemented as a macro so the calling namespace is captured at
-  expansion time."
+  Reads *ns* at call time so the fixture is registered under the
+  namespace that is current when use-fixtures is called (JVM canon
+  parity)."
   [kind & fixtures]
-  (let [ns-name (str *ns*)]
-    `(do
-       (when-not (or (= ~kind :once) (= ~kind :each))
-         (throw (ex-info "use-fixtures: kind must be :once or :each"
-                         {:kind ~kind})))
-       (swap! fixtures-registry update ~ns-name
-              (fn [m#] (update (or m# {}) ~kind
-                               (fn [existing#]
-                                 (into (or existing# []) [~@fixtures]))))))))
+  (when-not (or (= kind :once) (= kind :each))
+    (throw (ex-info "use-fixtures: kind must be :once or :each"
+                    {:kind kind})))
+  ;; Read *ns* through the var binding stack so dynamic rebinding of *ns*
+  ;; is visible even when the function body falls back to the tree-walker
+  ;; interpreter (which happens when macro calls force bc-compile to decline).
+  ;; (var clojure.core/*ns*) is resolved at read time; var-get consults the
+  ;; thread-binding stack, matching JVM Clojure behavior.
+  (let [ns-name (str (var-get (var clojure.core/*ns*)))]
+    (swap! fixtures-registry update ns-name
+           (fn [m]
+             (update (or m {}) kind
+                     (fn [existing]
+                       (into (or existing []) fixtures)))))))
 
 ;; --- Fixture composition ---
 
@@ -431,10 +437,11 @@
 
 ;; --- Low-level runners ---
 
-(defn test-var
+(defn ^:dynamic test-var
   "If v has a function in its :test metadata, calls that function with
   *testing-vars* bound to (conj *testing-vars* v).  Increments the
-  :test counter in *report-counters*."
+  :test counter in *report-counters*.  Dynamic so that binding can
+  replace the implementation for custom runners (JVM canon parity)."
   [v]
   (when-let [t (:test (meta v))]
     (binding [*testing-vars*     (conj *testing-vars* v)
@@ -642,21 +649,17 @@
   []
   (run-tests-impl @tests-registry))
 
-(defmacro run-tests
+(defn run-tests
   "Run registered tests and return a summary map.
 
-  With no arguments, runs the tests registered in the current namespace
-  (*ns*), matching canonical clojure.test.  Given namespace symbols (or
-  namespace objects), runs only tests registered in those namespaces.
+  With no arguments, runs the tests registered in the namespace that is
+  current when run-tests is called (reads *ns* at call time, per JVM
+  canon).  Given namespace symbols or objects, runs tests registered in
+  those namespaces.
 
-  Prints a summary line and any failure details to stdout.
-
-  A macro rather than a function so the no-arg arity can capture the
-  caller's *ns* at expansion time; mino resolves *ns* inside a function
-  body to that function's defining namespace, so a plain function could
-  not see the caller's namespace."
-  ([] `(run-namespace-tests [(str *ns*)]))
-  ([& nss] `(run-namespace-tests (map str (list ~@nss)))))
+  Prints a summary line and any failure details to stdout."
+  ([] (run-namespace-tests [(str *ns*)]))
+  ([& namespaces] (run-namespace-tests (map str namespaces))))
 
 (defn run-tests-and-exit
   "Runs the whole registry and exits the process with code 0 on no
