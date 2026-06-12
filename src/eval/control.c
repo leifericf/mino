@@ -364,8 +364,8 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_current_ctx(S)->try_stack[is].saved_ambient  = S->ns_vars.fn_ambient_ns;
             mino_current_ctx(S)->try_stack[is].saved_load_len = S->module.load_stack_len;
             mino_current_ctx(S)->try_stack[is].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
-    mino_current_ctx(S)->try_stack[is].saved_bc_cursor =             mino_current_ctx(S)->bc_current_bc;
-    mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc =             mino_current_ctx(S)->bc_current_pc;
+            mino_current_ctx(S)->try_stack[is].saved_bc_cursor    = mino_current_ctx(S)->bc_current_bc;
+            mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
