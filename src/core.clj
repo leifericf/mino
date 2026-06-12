@@ -3668,7 +3668,7 @@
      and 'uuid."
     {'inst inst-reader
      'uuid uuid-reader})
-  (alter-var-root #'*data-readers* assoc 'inst inst-reader))
+  (alter-var-root #'*data-readers* assoc 'inst inst-reader 'uuid uuid-reader))
 
 ;; read: Clojure-compatible reader entry point.
 ;;   (read)        — reads one form from *in*. Atom-bound *in*
