@@ -3690,8 +3690,8 @@
   "Strips leading and trailing ASCII whitespace from s. Local helper
    for read+string; clojure.string is not loaded during core boot."
   [s]
-  (let [ws?   (fn [c] (or (= c " ") (= c "\t") (= c "\n")
-                          (= c "\r") (= c "\f")))
+  (let [ws?   (fn [c] (or (= c \space) (= c \tab) (= c \newline)
+                          (= c \return) (= c \formfeed)))
         n     (count s)
         start (loop [i 0]
                 (if (and (< i n) (ws? (nth s i))) (recur (inc i)) i))
