@@ -45,6 +45,8 @@
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
+- API: Consolidate embedder config knobs into mino_set_option / mino_get_option (step/heap limits, thread limit, thread stack bytes, JIT mode, JIT hot threshold); setter returns 0/-1 like mino_gc_set_param and now rejects invalid JIT modes instead of ignoring them
+- API: Remove mino_set_limit, MINO_LIMIT_STEPS/MINO_LIMIT_HEAP, mino_set_thread_limit, mino_get_thread_limit, mino_state_set_jit_mode, mino_state_jit_mode, mino_state_set_jit_hot_threshold, mino_state_jit_hot_threshold, and mino_set_thread_stack_size (alpha surface, no shims)
 
 ## v0.423.5 — Security Fixes
 
