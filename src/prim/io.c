@@ -8,12 +8,15 @@
 #include "path_buf.h"
 #include <dirent.h>
 #include <sys/stat.h>
-#include <unistd.h>
-
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
-#elif defined(CLOCK_MONOTONIC)
+#  include <direct.h>   /* _getcwd, _chdir */
+#else
+#  include <unistd.h>
+#endif
+
+#if !defined(_WIN32) && defined(CLOCK_MONOTONIC)
 #  include <time.h>
 #endif
 
@@ -828,8 +831,8 @@ static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "getcwd takes no arguments");
     }
-#if defined(_WIN32)
-    if (_getcwd(buf, sizeof(buf)) == NULL) {
+#ifdef _WIN32
+    if (_getcwd(buf, (int)sizeof(buf)) == NULL) {
 #else
     if (getcwd(buf, sizeof(buf)) == NULL) {
 #endif
@@ -853,7 +856,11 @@ static mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "chdir: argument must be a string");
     }
+#ifdef _WIN32
+    if (_chdir(path_val->as.s.data) != 0) {
+#else
     if (chdir(path_val->as.s.data) != 0) {
+#endif
         return prim_throw_classified(S, "io", "MIO001",
                                      "chdir: directory not found");
     }
