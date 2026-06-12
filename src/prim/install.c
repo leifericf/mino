@@ -448,6 +448,9 @@ static void install_floor_vars(mino_state *S, mino_env *core_env)
                 (void)ns_env_ensure(S, "user");
             }
             mino_publish_current_ns(S);
+            /* Add the env binding so ns-publics and resolve can find *ns*.
+             * The root was just set by mino_publish_current_ns above. */
+            mino_env_set(S, core_env, "*ns*", var->as.var.root);
         }
     }
     {
@@ -485,6 +488,13 @@ static void install_floor_vars(mino_state *S, mino_env *core_env)
             mino_env_set(S, core_env, "*default-data-reader-fn*",
                          def_var->as.var.root);
         }
+    }
+    /* Mark clojure.core/pr dynamic so (binding [pr ...] ...) works.
+     * The var was created by prim_install_table in floor_install_prim_tables;
+     * this flag adjustment follows the same pattern used for *out* above. */
+    {
+        mino_val *pr_var = var_find(S, "clojure.core", "pr");
+        if (pr_var != NULL) pr_var->as.var.dynamic = 1;
     }
 }
 
