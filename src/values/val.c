@@ -982,7 +982,7 @@ int mino_to_regex_source(const mino_val *v, const char **out, size_t *len)
 }
 
 /* Public 32-bit canonical hash. Routes through the internal hash_val
- * helper that the HAMT and ratbset paths share, so a value retrieved
+ * helper that the HAMT and rbtree paths share, so a value retrieved
  * via this API hashes identically to one keyed in a collection. */
 uint32_t mino_hash(const mino_val *v)
 {
