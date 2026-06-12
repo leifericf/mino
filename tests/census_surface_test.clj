@@ -48,7 +48,7 @@
   (clojure.core/refer-clojure :rename {inc plus1})
   (is (some? (resolve 'plus1)))
   (is (nil? (resolve 'inc)))
-  (is (= 6 (plus1 5)))
+  (is (= 6 (@(resolve 'plus1) 5)))
   (in-ns 'user))
 
 (deftest cs-refer-clojure-only-limits-to-set

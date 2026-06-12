@@ -68,6 +68,8 @@
   (is (false? (s/valid? (s/double-in :min 0.0 :max 1.0) 1.1)))
   (is (false? (s/valid? (s/double-in :min 0.0 :max 1.0) -0.1))))
 
+;; Divergence from JVM: mino defaults :NaN? to false; JVM Clojure defaults
+;; :NaN? to true (NaN accepted). See double-in-impl in lib/clojure/spec/alpha.clj.
 (deftest double-in-nan-default-invalid
   ;; Without :NaN? true, NaN must be rejected.
   (is (false? (s/valid? (s/double-in :min 0.0 :max 1.0) ##NaN))))
@@ -75,6 +77,8 @@
 (deftest double-in-nan-allowed-when-opted-in
   (is (true? (s/valid? (s/double-in :min 0.0 :max 1.0 :NaN? true) ##NaN))))
 
+;; Divergence from JVM: mino defaults :infinite? to false; JVM Clojure
+;; defaults :infinite? to true (Inf accepted). See double-in-impl.
 (deftest double-in-infinite-default-invalid
   ;; Without :infinite? true, Inf values must be rejected.
   (is (false? (s/valid? (s/double-in :min 0.0 :max 1.0) ##Inf)))

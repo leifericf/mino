@@ -177,6 +177,8 @@
 (deftest intros-macroexpand-1-loop-unchanged
   (is (= '(loop [x 1] x) (macroexpand-1 '(loop [x 1] x)))))
 
+;; Divergence from JVM: JVM binding is a defmacro; macroexpand-1 expands it.
+;; mino binding is a C special form; the form is returned unchanged.
 (deftest intros-macroexpand-1-binding-unchanged
   (is (= '(binding [x 1] x) (macroexpand-1 '(binding [x 1] x)))))
 
