@@ -105,13 +105,6 @@ void gc_major_remark(mino_state *S)
     mino_current_ctx(S)->gc_depth--;
 }
 
-/* Sweep dead OLD objects and return to IDLE. Invariant: mark stack
- * empty (remark drained it). The reset of the remembered set is done
- * BEFORE gc_sweep so sweep cannot free a remembered OLD header and
- * then have the reset walk write dirty=0 through a dangling pointer.
- * Major has traced everything reachable, so the remset is redundant
- * this cycle; the barrier will repopulate it as mutator stores
- * reintroduce old->young edges. */
 /* Pre-sweep tombstone pass for the weak intern tables. Walks every
  * sym / keyword entry and tombstones the slot whose underlying header
  * is unmarked at end-of-mark. Without this, gc_sweep would free the
@@ -157,6 +150,13 @@ static void gc_intern_sweep_tombstones(mino_state *S)
     }
 }
 
+/* Sweep dead OLD objects and return to IDLE. Invariant: mark stack
+ * empty (remark drained it). The reset of the remembered set is done
+ * BEFORE gc_sweep so sweep cannot free a remembered OLD header and
+ * then have the reset walk write dirty=0 through a dangling pointer.
+ * Major has traced everything reachable, so the remset is redundant
+ * this cycle; the barrier will repopulate it as mutator stores
+ * reintroduce old->young edges. */
 void gc_major_sweep_phase(mino_state *S)
 {
     long long t0;
