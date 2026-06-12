@@ -115,7 +115,12 @@ static mino_val *prim_drain_loop(mino_state *S, mino_val *args,
         int progress = async_sched_drain(S, env);
 
         result = mino_call(S, done_thunk, NULL, env);
-        if (result != NULL && mino_type_of(result) != MINO_NIL &&
+        if (result == NULL) {
+            /* done_thunk threw; propagate after releasing the pin. */
+            gc_unpin(1);
+            return NULL;
+        }
+        if (mino_type_of(result) != MINO_NIL &&
             !(mino_type_of(result) == MINO_BOOL && !mino_val_bool_get(result))) {
             gc_unpin(1);
             return mino_true(S);
