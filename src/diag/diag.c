@@ -121,6 +121,11 @@ mino_diag *diag_new(const char *kind, const char *code,
     d->kind    = safe_strdup(kind);
     d->code    = safe_strdup(code);
     d->phase   = safe_strdup(phase);
+    /* summary and message start identical but are owned separately:
+     * diag_free calls free() on each independently, so they must be
+     * distinct heap allocations.  Callers may later replace one field
+     * via diag_set_message / diag_set_summary without disturbing the
+     * other. */
     d->summary = safe_strdup(message);
     d->message = safe_strdup(message);
     return d;
