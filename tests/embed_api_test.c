@@ -12,6 +12,7 @@
 
 #include "mino.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -520,6 +521,247 @@ static void test_predicate_grid(mino_state *S, mino_env *env)
     }
 }
 
+/*
+ * test_options -- cover mino_set_option / mino_get_option / MINO_OPT_*
+ *
+ * The options API (mino_set_option, mino_get_option, mino_option, MINO_OPT_*)
+ * lives in src/mino.h and src/runtime/state.c.  It does NOT exist in the
+ * tree yet; these tests are written spec-first and will fail to compile until
+ * the implementation unit lands.  The only acceptable compile errors while
+ * that unit is absent are undeclared-identifier errors for the new symbols.
+ *
+ * Defaults verified from src/runtime/state.c state_init():
+ *   LIMIT_STEPS       -- 0  (disabled; field: S->module.limit_steps)
+ *   LIMIT_HEAP        -- 0  (disabled; field: S->module.limit_heap)
+ *   THREAD_LIMIT      -- 1  (single-threaded embedder default)
+ *   THREAD_STACK_BYTES -- 0 (use system default; field: threading.thread_stack_size)
+ *   JIT_MODE / JIT_HOT_THRESHOLD -- env-seeded; round-trips only
+ *
+ * GC-sensitive: thread tests spawn workers; run with MINO_GC_STRESS=1 to
+ * exercise GC during future evaluation.
+ */
+static void test_options(mino_state *S, mino_env *env)
+{
+    /*
+     * 1. Defaults on a fresh shared state (S is already set up via
+     *    mino_env_new_default which installs MINO_CAP_DEFAULT).
+     */
+    REQUIRE(mino_get_option(S, MINO_OPT_LIMIT_STEPS) == 0,
+            "options/defaults: LIMIT_STEPS default is 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_LIMIT_HEAP) == 0,
+            "options/defaults: LIMIT_HEAP default is 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_THREAD_LIMIT) == 1,
+            "options/defaults: THREAD_LIMIT default is 1");
+    REQUIRE(mino_get_option(S, MINO_OPT_THREAD_STACK_BYTES) == 0,
+            "options/defaults: THREAD_STACK_BYTES default is 0 (use system)");
+
+    /*
+     * 2. Valid set->get round-trips for every option.
+     *    JIT_MODE and JIT_HOT_THRESHOLD are env-seeded; only round-trip,
+     *    never assert exact defaults.
+     */
+    REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_STEPS, 1000) == 0,
+            "options/roundtrip: LIMIT_STEPS set returns 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_LIMIT_STEPS) == 1000,
+            "options/roundtrip: LIMIT_STEPS reads back 1000");
+    /* Restore to disabled so later tests aren't affected. */
+    REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_STEPS, 0) == 0,
+            "options/roundtrip: LIMIT_STEPS set 0 (disable) returns 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_LIMIT_STEPS) == 0,
+            "options/roundtrip: LIMIT_STEPS reads back 0 after disable");
+
+    REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_HEAP, 64u * 1024u * 1024u) == 0,
+            "options/roundtrip: LIMIT_HEAP set returns 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_LIMIT_HEAP) == 64u * 1024u * 1024u,
+            "options/roundtrip: LIMIT_HEAP reads back set value");
+    REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_HEAP, 0) == 0,
+            "options/roundtrip: LIMIT_HEAP set 0 (disable) returns 0");
+
+    REQUIRE(mino_set_option(S, MINO_OPT_THREAD_LIMIT, 4) == 0,
+            "options/roundtrip: THREAD_LIMIT set returns 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_THREAD_LIMIT) == 4,
+            "options/roundtrip: THREAD_LIMIT reads back 4");
+    REQUIRE(mino_set_option(S, MINO_OPT_THREAD_LIMIT, 1) == 0,
+            "options/roundtrip: THREAD_LIMIT restored to 1");
+
+    REQUIRE(mino_set_option(S, MINO_OPT_THREAD_STACK_BYTES, 2u * 1024u * 1024u) == 0,
+            "options/roundtrip: THREAD_STACK_BYTES set returns 0");
+    REQUIRE(mino_get_option(S, MINO_OPT_THREAD_STACK_BYTES) == 2u * 1024u * 1024u,
+            "options/roundtrip: THREAD_STACK_BYTES reads back set value");
+    REQUIRE(mino_set_option(S, MINO_OPT_THREAD_STACK_BYTES, 0) == 0,
+            "options/roundtrip: THREAD_STACK_BYTES restored to 0");
+
+    {
+        /* JIT_MODE: save current, set to OFF, verify round-trip, restore. */
+        size_t old_mode = mino_get_option(S, MINO_OPT_JIT_MODE);
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_MODE,
+                                (size_t)MINO_JIT_MODE_OFF) == 0,
+                "options/roundtrip: JIT_MODE set OFF returns 0");
+        REQUIRE(mino_get_option(S, MINO_OPT_JIT_MODE)
+                == (size_t)MINO_JIT_MODE_OFF,
+                "options/roundtrip: JIT_MODE reads back OFF");
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_MODE, old_mode) == 0,
+                "options/roundtrip: JIT_MODE restored");
+    }
+
+    {
+        /* JIT_HOT_THRESHOLD: set to 42, verify, restore. */
+        size_t old_thr = mino_get_option(S, MINO_OPT_JIT_HOT_THRESHOLD);
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_HOT_THRESHOLD, 42) == 0,
+                "options/roundtrip: JIT_HOT_THRESHOLD set 42 returns 0");
+        REQUIRE(mino_get_option(S, MINO_OPT_JIT_HOT_THRESHOLD) == 42,
+                "options/roundtrip: JIT_HOT_THRESHOLD reads back 42");
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_HOT_THRESHOLD, old_thr) == 0,
+                "options/roundtrip: JIT_HOT_THRESHOLD restored");
+    }
+
+    /*
+     * 3. Unknown option: set returns -1, get returns 0.
+     *    NULL state: set returns -1, get returns 0.
+     *    Use a value beyond the enum range to hit the unknown-option path.
+     */
+    {
+        mino_option unknown_opt = (mino_option)9999;
+        REQUIRE(mino_set_option(S, unknown_opt, 1) == -1,
+                "options/unknown: set unknown option returns -1");
+        REQUIRE(mino_get_option(S, unknown_opt) == 0,
+                "options/unknown: get unknown option returns 0");
+    }
+    REQUIRE(mino_set_option(NULL, MINO_OPT_LIMIT_STEPS, 1) == -1,
+            "options/null-state: set on NULL state returns -1");
+    REQUIRE(mino_get_option(NULL, MINO_OPT_LIMIT_STEPS) == 0,
+            "options/null-state: get on NULL state returns 0");
+
+    /*
+     * 4. JIT_MODE=3 (invalid): set returns -1 and mode is unchanged.
+     */
+    {
+        size_t mode_before = mino_get_option(S, MINO_OPT_JIT_MODE);
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_MODE, 3) == -1,
+                "options/jit-mode-invalid: set mode=3 returns -1");
+        REQUIRE(mino_get_option(S, MINO_OPT_JIT_MODE) == mode_before,
+                "options/jit-mode-invalid: mode unchanged after reject");
+    }
+
+    /*
+     * 5. THREAD_LIMIT with value > INT_MAX: set returns -1, value unchanged.
+     */
+    {
+        size_t limit_before = mino_get_option(S, MINO_OPT_THREAD_LIMIT);
+        size_t too_large = (size_t)INT_MAX + 1u;
+        REQUIRE(mino_set_option(S, MINO_OPT_THREAD_LIMIT, too_large) == -1,
+                "options/thread-limit-overflow: set > INT_MAX returns -1");
+        REQUIRE(mino_get_option(S, MINO_OPT_THREAD_LIMIT) == limit_before,
+                "options/thread-limit-overflow: value unchanged after reject");
+    }
+
+    /*
+     * 6. JIT_HOT_THRESHOLD=0: clamped to 1.
+     *    Contract: set returns 0 (accepted), getter then reads 1.
+     */
+    {
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_HOT_THRESHOLD, 0) == 0,
+                "options/threshold-clamp: set 0 returns 0 (accepted via clamp)");
+        REQUIRE(mino_get_option(S, MINO_OPT_JIT_HOT_THRESHOLD) == 1,
+                "options/threshold-clamp: getter reads 1 after set 0 (clamped)");
+        /* Restore to a non-interfering value. */
+        mino_set_option(S, MINO_OPT_JIT_HOT_THRESHOLD, 100);
+    }
+
+    /*
+     * 7. LIMIT_STEPS behavior drive-through.
+     *    Set LIMIT_STEPS=50, then evaluate an unbounded loop.  The runtime
+     *    must fail with the "step limit exceeded" diagnostic (from
+     *    src/eval/special.c eval_check_limits).  Then set LIMIT_STEPS=0
+     *    and confirm unbounded evaluation succeeds.
+     */
+    {
+        mino_val *r;
+        const char *err;
+
+        REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_STEPS, 50) == 0,
+                "options/step-drive: set LIMIT_STEPS=50");
+        r = mino_eval_string(S, "(loop [] (recur))", env);
+        REQUIRE(r == NULL,
+                "options/step-drive: unbounded loop returns NULL with limit");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "step limit exceeded") != NULL,
+                "options/step-drive: error mentions \"step limit exceeded\"");
+
+        /* Restore: LIMIT_STEPS=0 re-enables unbounded evaluation. */
+        REQUIRE(mino_set_option(S, MINO_OPT_LIMIT_STEPS, 0) == 0,
+                "options/step-drive: set LIMIT_STEPS=0 (disable)");
+        r = mino_eval_string(S, "(reduce + (range 200))", env);
+        REQUIRE(r != NULL,
+                "options/step-drive: unbounded eval succeeds after disabling limit");
+    }
+
+    /*
+     * 8. JIT_MODE set to OFF is visible via mino_state_jit_capability.
+     *    mino_jit_capability.mode must reflect the new setting.
+     */
+    {
+        mino_jit_capability cap;
+        size_t old_mode = mino_get_option(S, MINO_OPT_JIT_MODE);
+
+        REQUIRE(mino_set_option(S, MINO_OPT_JIT_MODE,
+                                (size_t)MINO_JIT_MODE_OFF) == 0,
+                "options/jit-cap: set JIT_MODE=OFF");
+        cap = mino_state_jit_capability(S);
+        REQUIRE(cap.mode == MINO_JIT_MODE_OFF,
+                "options/jit-cap: mino_state_jit_capability reflects OFF");
+
+        /* Restore original mode. */
+        mino_set_option(S, MINO_OPT_JIT_MODE, old_mode);
+    }
+
+    /*
+     * 9. THREAD_LIMIT threading behavior.
+     *    Uses a DEDICATED state (not the shared S) so the thread-limit
+     *    changes do not affect any other test.  mino_quiesce_threads is
+     *    called before mino_state_free per the embed-API contract.
+     *
+     *    THREAD_LIMIT=1: evaluating (future 1) must fail -- the runtime
+     *    refuses to spawn a worker when the grant is 1 (single-threaded).
+     *
+     *    THREAD_LIMIT=2: evaluating (deref (future 42)) must return 42 --
+     *    one worker slot is sufficient for a single in-flight future.
+     *
+     *    MINO_CAP_ASYNC is required for `future` and `deref` on futures.
+     */
+    {
+        mino_state *TS  = mino_state_new();
+        mino_env   *Tenv = mino_env_new(TS);
+        mino_install(TS, Tenv, MINO_CAP_ASYNC);
+        (void)env; /* suppress unused-param warning inside the block */
+
+        /* THREAD_LIMIT=1: future spawn should be rejected. */
+        REQUIRE(mino_set_option(TS, MINO_OPT_THREAD_LIMIT, 1) == 0,
+                "options/threads: set THREAD_LIMIT=1 returns 0");
+        {
+            mino_val *r = mino_eval_string(TS, "(future 1)", Tenv);
+            REQUIRE(r == NULL,
+                    "options/threads: (future 1) fails when THREAD_LIMIT=1");
+        }
+
+        /* THREAD_LIMIT=2: one worker slot available -- deref succeeds. */
+        REQUIRE(mino_set_option(TS, MINO_OPT_THREAD_LIMIT, 2) == 0,
+                "options/threads: set THREAD_LIMIT=2 returns 0");
+        {
+            mino_val *r = mino_eval_string(TS, "(deref (future 42))", Tenv);
+            long long n = 0;
+            REQUIRE(r != NULL,
+                    "options/threads: (deref (future 42)) returns non-NULL");
+            REQUIRE(r != NULL && mino_to_int(r, &n) && n == 42,
+                    "options/threads: (deref (future 42)) evaluates to 42");
+        }
+
+        mino_quiesce_threads(TS);
+        mino_env_free(TS, Tenv);
+        mino_state_free(TS);
+    }
+}
+
 int main(void)
 {
     mino_state *S = mino_state_new();
@@ -538,6 +780,7 @@ int main(void)
     test_to_int_bignum_round_trip();
     test_atom_reset_tenured();
     test_predicate_grid(S, env);
+    test_options(S, env);
 
     /* Phase 6 -- embed-API ergonomics. */
     {
