@@ -81,6 +81,7 @@
 - Fix: Add :doc key to special-form var meta so (:doc (meta (resolve 'when))) returns the docstring
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
+- Docs: Correct tag_kw and var_promote comments, add *clojure-version* docstring
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
@@ -200,6 +201,7 @@
 - clojure.test: Fix run-tests no-arg arity to read *ns* dynamically; extract current-ns-str helper used by use-fixtures and run-tests
 - Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
 - Tests: Fix ns-resolution for renamed symbol in census_surface_test
+- Tests: Replace spec-first status markers with neutral documentation
 
 ## v0.423.5 — Security Fixes
 
