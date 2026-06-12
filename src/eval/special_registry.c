@@ -472,13 +472,14 @@ void eval_special_register_vars(mino_state *S)
     mino_env *core_env = ns_env_ensure(S, "clojure.core");
     mino_val *placeholder = mino_keyword(S, "mino/special-form");
     mino_val *macro_kw = mino_keyword(S, "macro");
+    mino_val *doc_kw = mino_keyword(S, "doc");
     mino_val *yes = mino_true(S);
     size_t i;
 
     if (core_env == NULL || placeholder == NULL) {
         return;
     }
-    /* Pin the two keywords allocated above: var_intern (and the other
+    /* Pin the three keywords allocated above: var_intern (and the other
      * allocation calls inside the loop) can trigger GC, and a
      * conservative scanner may miss pointers that the compiler keeps
      * only in registers.
@@ -489,6 +490,7 @@ void eval_special_register_vars(mino_state *S)
      * handler will report it via the state's top-level error mechanism. */
     gc_pin(placeholder);
     gc_pin(macro_kw);
+    gc_pin(doc_kw);
     for (i = 0; i < k_public_form_docs_count; i++) {
         const char *name = k_public_form_docs[i].name;
         const char *doc  = k_public_form_docs[i].doc;
@@ -505,8 +507,6 @@ void eval_special_register_vars(mino_state *S)
         {
             mino_val *new_meta;
             if (doc != NULL) {
-                mino_val *doc_kw  = mino_keyword(S, "doc");
-                gc_pin(doc_kw);
                 mino_val *doc_str = mino_string(S, doc);
                 gc_pin(doc_str);
                 {
@@ -514,7 +514,7 @@ void eval_special_register_vars(mino_state *S)
                     mino_val *vals[2] = {yes,       doc_str};
                     new_meta = mino_map(S, keys, vals, 2);
                 }
-                gc_unpin(2); /* doc_kw, doc_str */
+                gc_unpin(1); /* doc_str */
             } else {
                 new_meta = mino_map(S, &macro_kw, &yes, 1);
             }
@@ -525,5 +525,5 @@ void eval_special_register_vars(mino_state *S)
             meta_set(S, name, doc, strlen(doc), NULL);
         }
     }
-    gc_unpin(2); /* placeholder, macro_kw */
+    gc_unpin(3); /* placeholder, macro_kw, doc_kw */
 }
