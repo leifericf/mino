@@ -12,6 +12,7 @@
 
 #include <ctype.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,7 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
             if (!(*expp >= '0' && *expp <= '9')) { free(digits); return NULL; }
             e = strtol(p + 1, &end, 10);
             if (end == p + 1) { free(digits); return NULL; }
+            if (e > INT_MAX || e < INT_MIN) { free(digits); return NULL; }
             exp = (int)e;
             p = end;
             break;
@@ -367,7 +369,9 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
         mino_val *num = mino_bigdec_make(S, x->as.ratio.num, 0);
         mino_val *den;
         if (num == NULL) return NULL;
+        gc_pin(num);
         den = mino_bigdec_make(S, x->as.ratio.denom, 0);
+        gc_unpin(1);
         if (den == NULL) return NULL;
         return mino_bigdec_div(S, num, den);
     }
@@ -448,7 +452,9 @@ mino_val *mino_bigdec_add(mino_state *S, const mino_val *a,
     smax = sa > sb ? sa : sb;
     au = to_bigint(S, a->as.bigdec.unscaled);
     if (au == NULL) return NULL;
+    gc_pin(au);
     bu = to_bigint(S, b->as.bigdec.unscaled);
+    gc_unpin(1);
     if (bu == NULL) return NULL;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
         return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
@@ -861,6 +867,8 @@ mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
 
     q_wrapped = bigint_wrap(S, qz_heap);
     if (q_wrapped == NULL) {
+        mp_int_clear(qz_heap);
+        free(qz_heap);
         return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigdec rounding");
     }
@@ -917,6 +925,10 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
     }
     /* When *math-context* is set, use its precision as the loop cap;
      * otherwise stay at the historical 1024-digit upper bound. */
+    if (mc_active && mc_precision > INT_MAX - 8) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+            "with-precision: precision too large");
+    }
     max_extra = mc_active ? (mc_precision + 8) : 1024;
     sa = a->as.bigdec.scale;
     sb = b->as.bigdec.scale;

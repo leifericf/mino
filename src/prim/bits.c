@@ -29,6 +29,7 @@
 #include "prim/internal.h"
 #include "collections/internal.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -288,6 +289,10 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
                     "bits: :type :bytes :size exceeds source bit length");
             }
         }
+        if ((size_t)opts.size > SIZE_MAX - total_bits) {
+            return prim_throw_classified(S, "eval/bounds", "MBD001",
+                "bits: total bit count overflow");
+        }
         total_bits += (size_t)opts.size;
     }
     total_bytes = (total_bits + 7u) / 8u;
@@ -472,7 +477,7 @@ static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001",
             "bits-get: :size must be non-negative");
     }
-    if ((size_t)(offset + size) > total_bits) {
+    if (size > LLONG_MAX - offset || (size_t)(offset + size) > total_bits) {
         return prim_throw_classified(S, "eval/bounds", "MBD001",
             "bits-get: :offset + :size exceeds bit length");
     }
