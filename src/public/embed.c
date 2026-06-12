@@ -38,7 +38,13 @@ mino_val *mino_throw(mino_state *S, mino_val *ex)
                      (int)ex->as.s.len, ex->as.s.data);
         } else {
             char buf[384];
-            int  written = mino_print_to_buf(S, ex, buf, sizeof(buf));
+            int  written;
+            /* Pin ex: mino_print_to_buf may force lazy seqs, which
+             * allocates GC objects and can trigger a minor collection.
+             * Without the pin, ex could be freed mid-print. */
+            gc_pin(ex);
+            written = mino_print_to_buf(S, ex, buf, sizeof(buf));
+            gc_unpin(1);
             if (written <= 0) {
                 snprintf(msg, sizeof(msg), "uncaught exception");
             } else {
