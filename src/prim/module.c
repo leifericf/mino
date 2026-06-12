@@ -805,7 +805,7 @@ mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env)
  * Each arg may be a symbol (refer-all) or a vector libspec. :only acts as
  * :refer; explicit :refer/:as pass through. Unrecognized options are left
  * for require to surface. */
-mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     mino_val *last = mino_nil(S);
@@ -933,7 +933,7 @@ static mino_val *doc_render_with_capability(mino_state *S,
 }
 
 /* (doc name) -- print the docstring for a def/defmacro binding. */
-mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val   *name_val;
     char          buf[256];
@@ -988,7 +988,7 @@ mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (source name) -- return the source form of a def/defmacro binding. */
-mino_val *prim_source(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_source(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val   *name_val;
     char          buf[256];
@@ -1019,7 +1019,7 @@ mino_val *prim_source(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (apropos substring) -- return a list of bound names containing substring. */
-mino_val *prim_apropos(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_apropos(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pat_val;
     const char *pat;

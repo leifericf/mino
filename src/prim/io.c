@@ -365,22 +365,22 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_println(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_println(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 0, 1);
 }
 
-mino_val *prim_prn(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_prn(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 1, 1);
 }
 
-mino_val *prim_print(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_print(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 0, 0);
 }
 
-mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env)
 {
     return print_args_to_out(S, args, env, 1, 0);
 }
@@ -390,7 +390,7 @@ mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env)
  * default path does not recurse into itself. Routes through *out* so a
  * binding to a string-atom captures, and falls through to stdout
  * otherwise. */
-mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *formatted;
     (void)env;
@@ -410,7 +410,7 @@ mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
 /* (set-print-method! fn) — install a late-binding hook for pr / prn.
  * Calling with nil removes the hook. The hook must be a fn that prints
  * its one argument to stdout. */
-mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
+static mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
                                        mino_env *env)
 {
     mino_val *fn;
@@ -433,7 +433,7 @@ mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
 }
 
 /* (newline) writes a single line separator. Returns nil. */
-mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -451,7 +451,7 @@ mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env)
  *   :mino/stdin / unbound → read a line from stdin via fgets,
  *                           growing as needed for long lines
  * Returns nil on EOF. */
-mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *src;
     (void)env;
@@ -527,7 +527,7 @@ mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
  * cursor: the form is parsed from the head, the atom is updated to
  * the unread tail. Stdin-backed *in* (default) is not supported;
  * use (read-string ...) on a captured input or with-in-str instead. */
-mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *src;
     (void)env;
@@ -569,7 +569,7 @@ mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
  * writes the resulting string to *out*. Equivalent to
  * (print (apply format fmt args)) but lives in C to keep the
  * boot-time core.clj footprint small. */
-mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *formatted;
     (void)env;
@@ -593,7 +593,7 @@ mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
 /* (flush) flushes any pending output on *out* and *err*. For a
  * string-atom binding this is a no-op (writes are immediate); for
  * the FILE* fallback paths it calls fflush. */
-mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -608,7 +608,7 @@ mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env)
 /* (slurp path) — read a file's entire contents as a string. I/O
  * capability; only installed by mino_install(S, env, MINO_CAP_IO),
  * not the floor install. */
-mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     const char *path;
@@ -667,7 +667,7 @@ static int str_ieq_lit(const char *s, size_t len, const char *lit)
     return lit[len] == '\0' ? 0 : 1;
 }
 
-mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     mino_val *content;
@@ -765,7 +765,7 @@ mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env)
  * CPU time. That made `(time (thread-sleep 200))` print "0.194 ms"
  * and any wall-clock benchmarking that built on (time-ms) silently
  * undercounted by however long the thread spent blocked. */
-mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args;
     (void)env;
@@ -787,7 +787,7 @@ mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (getcwd) -- return the current working directory as a string. */
-mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
 {
     char buf[PATH_BUF_CAP];
     (void)env;
@@ -803,7 +803,7 @@ mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (chdir path) -- change current working directory. Returns nil. */
-mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     (void)env;
@@ -888,7 +888,7 @@ static void file_seq_recurse(mino_state *S, const char *dir,
     closedir(d);
 }
 
-mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *dir_val;
     const char *dir;

@@ -4,6 +4,10 @@
 
 #include "prim/internal.h"
 
+/* Forward declaration needed because mino_with_meta calls prim_with_meta
+ * which is defined later in this file. */
+static mino_val *prim_with_meta(mino_state *S, mino_val *args, mino_env *env);
+
 /* Type tags whose meta can be CHANGED through with-meta / vary-meta
  * (which return a copy of the value carrying the new metadata).
  * Identity-tied types are intentionally NOT here:
@@ -139,7 +143,7 @@ mino_val *mino_with_meta(mino_state *S, mino_val *v, mino_val *meta)
     return prim_with_meta(S, args, NULL);
 }
 
-mino_val *prim_meta(mino_state *S, mino_val *args,
+static mino_val *prim_meta(mino_state *S, mino_val *args,
                        mino_env *env)
 {
     mino_val *obj;
@@ -165,7 +169,7 @@ mino_val *prim_meta(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-mino_val *prim_with_meta(mino_state *S, mino_val *args,
+static mino_val *prim_with_meta(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *obj, *m, *copy;
@@ -201,7 +205,7 @@ mino_val *prim_with_meta(mino_state *S, mino_val *args,
     return copy;
 }
 
-mino_val *prim_vary_meta(mino_state *S, mino_val *args,
+static mino_val *prim_vary_meta(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
@@ -243,7 +247,7 @@ mino_val *prim_vary_meta(mino_state *S, mino_val *args,
     return copy;
 }
 
-mino_val *prim_alter_meta(mino_state *S, mino_val *args,
+static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *obj, *f, *extra;

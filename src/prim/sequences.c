@@ -275,7 +275,7 @@ void seq_iter_next(mino_state *S, seq_iter_t *it)
 /* ------------------------------------------------------------------------- */
 
 /* (reduced val) — wrap val to signal early termination in reduce. */
-mino_val *prim_reduced(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reduced(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -288,7 +288,7 @@ mino_val *prim_reduced(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (reduced? x) — true if x is a reduced wrapper. */
-mino_val *prim_reduced_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reduced_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -1281,7 +1281,7 @@ static int coll_is_pipeline_head(const mino_val *coll)
         || lazy_thunk_is_take(coll);
 }
 
-mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn;
     mino_val *acc;
@@ -1391,7 +1391,7 @@ mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (set coll) — create a set from a collection. */
-mino_val *prim_set(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_set(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *result;
@@ -1516,7 +1516,7 @@ static int doall_parse_args(mino_state *S, mino_val *args,
     return -1;
 }
 
-mino_val *prim_doall(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_doall(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll = NULL;
     long long   n    = 0;
@@ -1543,7 +1543,7 @@ static int discard_step(mino_state *S, void *ctx, mino_val *elem,
     return 0;
 }
 
-mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll = NULL;
     long long   n    = 0;
@@ -1574,7 +1574,7 @@ mino_val *prim_dorun(mino_state *S, mino_val *args, mino_env *env)
 
 /* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
  * (rangev end) or (rangev start end) or (rangev start end step). */
-mino_val *prim_rangev(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_rangev(mino_state *S, mino_val *args, mino_env *env)
 {
     long long start = 0, end = 0, step = 1, i;
     size_t n, len;
@@ -1671,7 +1671,7 @@ static int tvec_conj_step(mino_state *S, void *ctx_,
 
 #define MAPV_MAX_COLLS 32
 
-mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn, *coll;
     seq_iter_t  it;
@@ -1795,7 +1795,7 @@ mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env)
 
 /* Eager filter returning a vector. (filterv pred coll). Same precise-GC
  * caveat as prim_mapv: pin a GC-tracked accumulator on the save stack. */
-mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pred, *coll;
     seq_iter_t  it;
@@ -1859,7 +1859,7 @@ mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
-mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *to;
     mino_val *from;
@@ -2045,7 +2045,7 @@ mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn;
     mino_val *last;
@@ -2149,7 +2149,7 @@ mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
     return apply_callable(S, fn, call_args, env);
 }
 
-mino_val *prim_reverse(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reverse(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Per Clojure, (reverse nil) and (reverse <empty>) return the
      * empty list (), not nil. Otherwise iterate the collection and
@@ -2243,7 +2243,7 @@ static void merge_sort_vals(mino_state *S, mino_val **arr, mino_val **tmp, size_
 }
 
 /* (sort coll) or (sort comp coll) */
-mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *comp = NULL;
@@ -2303,7 +2303,7 @@ mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
     return head;
 }
 
-mino_val *prim_peek(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_peek(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     (void)env;
@@ -2380,7 +2380,7 @@ mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_find(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_find(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *m;
     mino_val *k;
@@ -2436,7 +2436,7 @@ mino_val *prim_find(mino_state *S, mino_val *args, mino_env *env)
     return mino_map_entry(S, k, v);
 }
 
-mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     (void)env;
@@ -2489,7 +2489,7 @@ mino_val *prim_empty(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *out;
@@ -2536,7 +2536,7 @@ mino_val *prim_rseq(mino_state *S, mino_val *args, mino_env *env)
     return out;
 }
 
-mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, pairs, i;
     mino_val **ks, **vs, *p;
@@ -2557,7 +2557,7 @@ mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
     return mino_sorted_map(S, ks, vs, pairs);
 }
 
-mino_val *prim_sorted_set(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sorted_set(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, i;
     mino_val **tmp, *p;
@@ -2573,7 +2573,7 @@ mino_val *prim_sorted_set(mino_state *S, mino_val *args, mino_env *env)
     return mino_sorted_set(S, tmp, n);
 }
 
-mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, pairs, i;
     mino_val *comparator, **ks, **vs, *p;
@@ -2601,7 +2601,7 @@ mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env)
     return mino_sorted_map_by(S, comparator, ks, vs, pairs);
 }
 
-mino_val *prim_sorted_set_by(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sorted_set_by(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n, items, i;
     mino_val *comparator, **tmp, *p;
@@ -2811,13 +2811,13 @@ static mino_val *subseq_impl(mino_state *S, mino_val *args, int reverse)
     }
 }
 
-mino_val *prim_subseq(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_subseq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return subseq_impl(S, args, 0);
 }
 
-mino_val *prim_rsubseq(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_rsubseq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     return subseq_impl(S, args, 1);

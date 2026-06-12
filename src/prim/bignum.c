@@ -397,7 +397,7 @@ void mino_bigint_print(mino_state *S, const mino_val *v, FILE *out)
 /* ------------------------------------------------------------------------- */
 
 /* (bigint x) -- coerce int, bigint, or numeric string to a bigint. */
-mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *x;
     (void)env;
@@ -509,13 +509,13 @@ mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
 
 /* (biginteger x) -- alias for (bigint x). In Clojure both exist and
  * return the same underlying arbitrary-precision representation. */
-mino_val *prim_biginteger(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_biginteger(mino_state *S, mino_val *args, mino_env *env)
 {
     return prim_bigint(S, args, env);
 }
 
 /* (bigint? x) */
-mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {

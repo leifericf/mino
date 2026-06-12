@@ -43,7 +43,7 @@ static int regex_source_view(const mino_val *v, const char **data, size_t *len)
 /* (re-pattern s) -- compile a regex from a source string, returning a
  * MINO_REGEX. Accepts a MINO_REGEX too (re-returned identically) so
  * `(re-pattern existing-pattern)` is a no-op. */
-mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *x;
     (void)env;
@@ -89,7 +89,7 @@ static mino_val *match_vector(mino_state *S, mino_val *text_val,
 /* (re-find pattern text) -- find first match of pattern in text.
  * Returns the matched substring (no groups) or [whole g1 g2 ...]
  * (when the pattern has capture groups), or nil if no match. */
-mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pat_val, *text_val;
     re_t        compiled;
@@ -141,7 +141,7 @@ mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
 /* (re-matches pattern text) -- match anchored to whole string.
  * Returns the matched substring (no groups) or [whole g1 g2 ...]
  * (with groups), or nil. */
-mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pat_val, *text_val;
     re_t        compiled;
@@ -192,7 +192,7 @@ mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
  * matched text by substring search (which picks the wrong site when
  * the same text occurs earlier, and cannot represent a zero-width
  * match). */
-mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pat_val, *text_val, *pos_val;
     re_t        compiled;

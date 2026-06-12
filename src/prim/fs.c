@@ -27,7 +27,7 @@
 #include <string.h>
 
 /* (file-exists? path) -- return true if path exists (file or directory). */
-mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
+static mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     mino_val *path_val;
@@ -48,7 +48,7 @@ mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
 }
 
 /* (directory? path) -- return true if path is a directory. */
-mino_val *prim_directory_p(mino_state *S, mino_val *args,
+static mino_val *prim_directory_p(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *path_val;
@@ -100,7 +100,7 @@ static int mkdirp(const char *path)
 }
 
 /* (mkdir-p path) -- create directory and parents. Returns nil. */
-mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     (void)env;
@@ -155,7 +155,7 @@ static int rmrf(const char *path)
 }
 
 /* (rm-rf path) -- recursively remove path. Returns nil. */
-mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *path_val;
     (void)env;

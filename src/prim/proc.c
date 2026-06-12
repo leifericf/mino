@@ -171,7 +171,7 @@ static char *read_all(FILE *fp, size_t *out_len)
 /* ---- primitives ---- */
 
 /* (sh cmd & args) -- run command, return {:exit n :out "..."} */
-mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
 {
     char *cmd;
     FILE *fp;
@@ -247,7 +247,7 @@ mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (sh! cmd & args) -- run command, return stdout; throw on non-zero exit. */
-mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *result = prim_sh(S, args, env);
     mino_val *exit_val;

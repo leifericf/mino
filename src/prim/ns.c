@@ -51,7 +51,7 @@ static int ns_to_name(mino_state *S, mino_val *v, char *buf, size_t cap,
 }
 
 /* --- in-ns ---------------------------------------------------------------- */
-mino_val *prim_in_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_in_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -65,7 +65,7 @@ mino_val *prim_in_ns(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* --- find-ns / the-ns / create-ns / remove-ns ---------------------------- */
-mino_val *prim_find_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_find_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -78,7 +78,7 @@ mino_val *prim_find_ns(mino_state *S, mino_val *args, mino_env *env)
     return ns_symbol_with_meta(S, buf);
 }
 
-mino_val *prim_the_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_the_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -93,7 +93,7 @@ mino_val *prim_the_ns(mino_state *S, mino_val *args, mino_env *env)
     return ns_symbol_with_meta(S, buf);
 }
 
-mino_val *prim_create_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_create_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -104,7 +104,7 @@ mino_val *prim_create_ns(mino_state *S, mino_val *args, mino_env *env)
     return mino_symbol(S, buf);
 }
 
-mino_val *prim_remove_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_remove_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -142,7 +142,7 @@ mino_val *prim_remove_ns(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* --- ns-name -------------------------------------------------------------- */
-mino_val *prim_ns_name(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_name(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -210,7 +210,7 @@ static mino_val *binding_as_var(mino_state *S, const char *ns,
     return var != NULL ? var : b->val;
 }
 
-mino_val *prim_ns_publics(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_publics(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *arg;
     char         buf[256];
@@ -235,7 +235,7 @@ mino_val *prim_ns_publics(mino_state *S, mino_val *args, mino_env *env)
     return mino_map(S, ks, vs, len);
 }
 
-mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *arg;
     char         buf[256];
@@ -259,7 +259,7 @@ mino_val *prim_ns_interns(mino_state *S, mino_val *args, mino_env *env)
     return mino_map(S, ks, vs, len);
 }
 
-mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -276,7 +276,7 @@ mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env)
     return mino_map(S, NULL, NULL, 0);
 }
 
-mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *arg;
     char         buf[256];
@@ -323,7 +323,7 @@ mino_val *prim_ns_refers(mino_state *S, mino_val *args, mino_env *env)
     return mino_map(S, ks, vs, len);
 }
 
-mino_val *prim_ns_map(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_map(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *arg;
     char         buf[256];
@@ -370,7 +370,7 @@ mino_val *prim_ns_map(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* --- ns-aliases ---------------------------------------------------------- */
-mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     char        buf[256];
@@ -540,7 +540,7 @@ static const char *rename_lookup(mino_val *map, const char *name,
     return NULL;
 }
 
-mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ns_arg;
     mino_val *only_v   = NULL;
@@ -623,7 +623,7 @@ mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* --- alias / ns-unalias --------------------------------------------------- */
-mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a;
     mino_val *t;
@@ -652,7 +652,7 @@ mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env)
     return mino_nil(S);
 }
 
-mino_val *prim_ns_unalias(mino_state *S, mino_val *args,
+static mino_val *prim_ns_unalias(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *ns_arg;
@@ -691,7 +691,7 @@ mino_val *prim_ns_unalias(mino_state *S, mino_val *args,
 }
 
 /* --- ns-unmap ------------------------------------------------------------ */
-mino_val *prim_ns_unmap(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ns_unmap(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ns_arg;
     mino_val *sym_arg;
@@ -722,7 +722,7 @@ mino_val *prim_ns_unmap(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* --- all-ns / loaded-libs ------------------------------------------------ */
-mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val **tmp;
     size_t       i;
@@ -738,7 +738,7 @@ mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
     return mino_vector(S, tmp, S->ns_vars.ns_env_len);
 }
 
-mino_val *prim_loaded_libs(mino_state *S, mino_val *args,
+static mino_val *prim_loaded_libs(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     mino_val **tmp;
@@ -778,7 +778,7 @@ static mino_val *resolve_in_ns(mino_state *S, const char *ns_name,
     return NULL;
 }
 
-mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     const char *data;
@@ -824,7 +824,7 @@ mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env)
     return var != NULL ? var : mino_nil(S);
 }
 
-mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
+static mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *ns_arg;
@@ -888,7 +888,7 @@ mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
 /* requiring-resolve = (require ns) then (resolve sym).  Argument is a
  * single qualified symbol like 'foo.bar/baz; if foo.bar isn't loaded we
  * load it lazily and then resolve. */
-mino_val *prim_requiring_resolve(mino_state *S, mino_val *args,
+static mino_val *prim_requiring_resolve(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
     mino_val *arg;
@@ -938,7 +938,7 @@ mino_val *prim_requiring_resolve(mino_state *S, mino_val *args,
 }
 
 /* --- intern / var-get / var-set / var? / bound? -------------------------- */
-mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t      argc;
     mino_val *ns_arg;
@@ -986,7 +986,7 @@ mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
     return var;
 }
 
-mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     (void)env;
@@ -1033,7 +1033,7 @@ static void var_sync_env(mino_state *S, mino_val *var, mino_val *val)
     }
 }
 
-mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *var_arg;
     mino_val *val_arg;
@@ -1054,7 +1054,7 @@ mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env)
     return val_arg;
 }
 
-mino_val *prim_alter_var_root(mino_state *S, mino_val *args,
+static mino_val *prim_alter_var_root(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
     mino_val *var_arg;

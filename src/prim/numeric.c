@@ -715,7 +715,7 @@ static mino_val *prim_inc_impl(mino_state *S, mino_val *args,
     return prim_inc_step(S, args->as.cons.car, env, strict);
 }
 
-mino_val *prim_inc_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_inc_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     if (argc != 1) {
@@ -725,7 +725,7 @@ mino_val *prim_inc_argv(mino_state *S, mino_val **argv, int argc,
     return prim_inc_step(S, argv[0], env, 1);
 }
 
-mino_val *prim_incp_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_incp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     if (argc != 1) {
@@ -787,7 +787,7 @@ static mino_val *prim_dec_impl(mino_state *S, mino_val *args,
     return prim_dec_step(S, args->as.cons.car, env, strict);
 }
 
-mino_val *prim_dec_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_dec_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     if (argc != 1) {
@@ -797,7 +797,7 @@ mino_val *prim_dec_argv(mino_state *S, mino_val **argv, int argc,
     return prim_dec_step(S, argv[0], env, 1);
 }
 
-mino_val *prim_decp_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_decp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     if (argc != 1) {
@@ -1079,7 +1079,7 @@ mino_val *prim_mulp(mino_state *S, mino_val *args, mino_env *env)
     return tower_reduce(S, args, OP_MUL, "*'", 0);
 }
 
-mino_val *prim_add_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_add_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
@@ -1093,14 +1093,14 @@ mino_val *prim_addp_argv(mino_state *S, mino_val **argv, int argc,
     return tower_reduce_argv(S, argv, argc, OP_ADD, "+'", 0);
 }
 
-mino_val *prim_mul_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_mul_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
     return tower_reduce_argv(S, argv, argc, OP_MUL, "*", 1);
 }
 
-mino_val *prim_mulp_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_mulp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     (void)env;
@@ -1120,14 +1120,14 @@ static mino_val *prim_sub_argv_impl(mino_state *S, mino_val **argv,
                                     OP_SUB, opname, strict);
 }
 
-mino_val *prim_sub_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_sub_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
     return prim_sub_argv_impl(S, argv, argc, 1, "-");
 }
 
-mino_val *prim_subp_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_subp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     (void)env;
@@ -1223,7 +1223,7 @@ static int unchecked_two_int(mino_state *S, mino_val *args,
     return 1;
 }
 
-mino_val *prim_unchecked_add(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_add(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1231,7 +1231,7 @@ mino_val *prim_unchecked_add(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_add(a, b));
 }
 
-mino_val *prim_unchecked_sub(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_sub(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1239,7 +1239,7 @@ mino_val *prim_unchecked_sub(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_sub(a, b));
 }
 
-mino_val *prim_unchecked_mul(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_mul(mino_state *S, mino_val *args, mino_env *env)
 {
     long long a, b;
     (void)env;
@@ -1247,7 +1247,7 @@ mino_val *prim_unchecked_mul(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_mul(a, b));
 }
 
-mino_val *prim_unchecked_inc(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_inc(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1260,7 +1260,7 @@ mino_val *prim_unchecked_inc(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_add(x, 1));
 }
 
-mino_val *prim_unchecked_dec(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_dec(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1273,7 +1273,7 @@ mino_val *prim_unchecked_dec(mino_state *S, mino_val *args, mino_env *env)
     return mino_int_wrap(S, uwrap_sub(x, 1));
 }
 
-mino_val *prim_unchecked_negate(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_unchecked_negate(mino_state *S, mino_val *args, mino_env *env)
 {
     long long x;
     (void)env;
@@ -1621,7 +1621,7 @@ mino_val *prim_div(mino_state *S, mino_val *args, mino_env *env)
     return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/", 0);
 }
 
-mino_val *prim_div_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_div_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
@@ -2238,7 +2238,7 @@ static int num_pair_eq(const mino_val *a, const mino_val *b)
     }
 }
 
-mino_val *prim_num_eq(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_num_eq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) return mino_true(S);
@@ -2258,7 +2258,7 @@ mino_val *prim_num_eq(mino_state *S, mino_val *args, mino_env *env)
     return mino_true(S);
 }
 
-mino_val *prim_identical(mino_state *S, mino_val *args,
+static mino_val *prim_identical(mino_state *S, mino_val *args,
                            mino_env *env)
 {
     mino_val *a, *b;
@@ -2450,28 +2450,28 @@ mino_val *prim_lt_argv(mino_state *S, mino_val **argv, int argc,
     return compare_chain_argv(S, argv, argc, "<", 0);
 }
 
-mino_val *prim_lte_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_lte_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
     return compare_chain_argv(S, argv, argc, "<=", 1);
 }
 
-mino_val *prim_gt_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_gt_argv(mino_state *S, mino_val **argv, int argc,
                          mino_env *env)
 {
     (void)env;
     return compare_chain_argv(S, argv, argc, ">", 2);
 }
 
-mino_val *prim_gte_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_gte_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     (void)env;
     return compare_chain_argv(S, argv, argc, ">=", 3);
 }
 
-mino_val *prim_nan_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_nan_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -2486,7 +2486,7 @@ mino_val *prim_nan_p(mino_state *S, mino_val *args, mino_env *env)
            ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_infinite_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_infinite_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;

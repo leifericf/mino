@@ -13,7 +13,7 @@
 static void coll_utf8_step(const unsigned char *data, size_t len, size_t pos,
                            unsigned int *cp_out, size_t *step_out);
 
-mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -22,7 +22,7 @@ mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env)
     return mino_car(args->as.cons.car);
 }
 
-mino_val *prim_cdr(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_cdr(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -491,7 +491,7 @@ static mino_val *prim_cons_step(mino_state *S, mino_val *car,
     return result;
 }
 
-mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -501,7 +501,7 @@ mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env)
                            args->as.cons.cdr->as.cons.car, env);
 }
 
-mino_val *prim_cons_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_cons_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 2) {
@@ -635,7 +635,7 @@ mino_val *prim_count(mino_state *S, mino_val *args, mino_env *env)
     return prim_count_step(S, args->as.cons.car, env);
 }
 
-mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
@@ -665,7 +665,7 @@ static mino_val *prim_queue_p(mino_state *S, mino_val *args, mino_env *env)
     return mino_is_queue(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_vector(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_vector(mino_state *S, mino_val *args, mino_env *env)
 {
     size_t n;
     size_t i;
@@ -1009,7 +1009,7 @@ mino_val *prim_first(mino_state *S, mino_val *args, mino_env *env)
     return prim_first_step(S, args->as.cons.car, env);
 }
 
-mino_val *prim_first_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_first_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
@@ -1254,7 +1254,7 @@ mino_val *prim_rest(mino_state *S, mino_val *args, mino_env *env)
     return prim_rest_step(S, args->as.cons.car, env);
 }
 
-mino_val *prim_rest_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_rest_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
@@ -1760,7 +1760,7 @@ mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *head = mino_nil(S);
@@ -1859,7 +1859,7 @@ mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
     return head;
 }
 
-mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *head = mino_nil(S);
@@ -2079,7 +2079,7 @@ mino_val *prim_hash_set(mino_state *S, mino_val *args, mino_env *env)
     return mino_set(S, tmp, n);
 }
 
-mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *coll;
     mino_val *key;
@@ -2380,7 +2380,7 @@ static long long subvec_to_long(const mino_val *v, int *ok)
     }
 }
 
-mino_val *prim_subvec(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_subvec(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     long long   start, end;

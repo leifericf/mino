@@ -5,7 +5,7 @@
 #include "prim/internal.h"
 #include "imath.h"
 
-mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -48,7 +48,7 @@ mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env)
 {
     double r;
     (void)env;
@@ -94,7 +94,7 @@ static mino_val *prim_random_seed_bang(mino_state *S, mino_val *args,
     return v;
 }
 
-mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env)
 {
     /* eval evaluates in the current namespace, not the calling fn's
      * ambient namespace. Clear fn_ambient_ns for the duration of the
@@ -112,7 +112,7 @@ mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
-mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Read and eval all forms in the given source string; return the
      * last form's value. Evaluates in the current namespace with
@@ -136,7 +136,7 @@ mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
-mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Read and eval all forms in the file at `path`; return the last
      * form's value. Evaluates in the current namespace with ambient
@@ -167,7 +167,7 @@ mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
-mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -247,7 +247,7 @@ mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, keyword, or var");
 }
 
-mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -284,7 +284,7 @@ mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
 }
 
-mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -293,7 +293,7 @@ mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
     return mino_int(S, (long long)hash_val(args->as.cons.car));
 }
 
-mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -447,7 +447,7 @@ DEFINE_TYPE_PRED_NOARGV(prim_bitstring_p,   (v != NULL && mino_type_of(v) == MIN
 
 #undef DEFINE_TYPE_PRED
 
-mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -457,7 +457,7 @@ mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env)
     return mino_is_truthy_inline(args->as.cons.car) ? mino_false(S) : mino_true(S);
 }
 
-mino_val *prim_some_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_some_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -563,21 +563,21 @@ mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env) {
     (void)env; return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
 }
 
-mino_val *prim_zero_p_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_zero_p_argv(mino_state *S, mino_val **argv, int argc,
                              mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "zero? requires one argument");
     return num_pred_step(S, argv[0], "zero?", is_zero_i, is_zero_f);
 }
-mino_val *prim_pos_p_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_pos_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "pos? requires one argument");
     return num_pred_step(S, argv[0], "pos?", is_pos_i, is_pos_f);
 }
-mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env) {
     (void)env;
     if (argc != 1) return prim_throw_classified(
@@ -612,7 +612,7 @@ mino_val *prim_odd_p(mino_state *S, mino_val *args, mino_env *env)
     return odd_p_step(S, args->as.cons.car);
 }
 
-mino_val *prim_odd_p_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_odd_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     (void)env;
@@ -648,7 +648,7 @@ mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env)
     return even_p_step(S, args->as.cons.car);
 }
 
-mino_val *prim_even_p_argv(mino_state *S, mino_val **argv, int argc,
+static mino_val *prim_even_p_argv(mino_state *S, mino_val **argv, int argc,
                              mino_env *env)
 {
     (void)env;
@@ -657,7 +657,7 @@ mino_val *prim_even_p_argv(mino_state *S, mino_val **argv, int argc,
     return even_p_step(S, argv[0]);
 }
 
-mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env)
 {
     int expanded;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -666,7 +666,7 @@ mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env)
     return macroexpand1(S, args->as.cons.car, env, &expanded);
 }
 
-mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "macroexpand requires one argument");
@@ -674,7 +674,7 @@ mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
     return macroexpand_all(S, args->as.cons.car, env);
 }
 
-mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
 {
     const char *prefix_src = "G__";
     size_t      prefix_len = 3;
@@ -962,7 +962,7 @@ static mino_val *prim_record_fields(mino_state *S, mino_val *args,
  * layering. Same pattern as values/val.c's prim_compare extern. */
 void mino_throw_capture_site(mino_state *S);
 
-mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ex;
     (void)env;
@@ -1045,7 +1045,7 @@ mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
     return NULL; /* unreachable */
 }
 
-mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     (void)env;
@@ -1056,7 +1056,7 @@ mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env)
     return (v != NULL && mino_type_of(v) == MINO_VAR) ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_resolve(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_resolve(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *sym;
     char buf[256];
@@ -1135,7 +1135,7 @@ found_ns:
     }
 }
 
-mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
     const char *data;
@@ -1177,14 +1177,14 @@ mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (last-error) -- return the last diagnostic as a map, or nil. */
-mino_val *prim_last_error(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_last_error(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)args; (void)env;
     return mino_last_error_map(S);
 }
 
 /* (error? x) -- true if x is a map with :mino/kind. */
-mino_val *prim_error_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_error_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v, *kind_key;
     (void)env;
@@ -1196,7 +1196,7 @@ mino_val *prim_error_p(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (ex-data e) -- extract :mino/data from a diagnostic map. */
-mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v, *data_key, *result;
     (void)env;
@@ -1212,7 +1212,7 @@ mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (ex-message e) -- extract :mino/message from a diagnostic map. */
-mino_val *prim_ex_message(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ex_message(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v, *msg_key, *result;
     (void)env;
@@ -1581,6 +1581,10 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns the last error as a diagnostic map, or nil."},
     {"error?",    prim_error_p,
      "Returns true if the value is a diagnostic map."},
+    {"ex-data",    prim_ex_data,
+     "Returns the :mino/data entry of a diagnostic map, or nil."},
+    {"ex-message", prim_ex_message,
+     "Returns the :mino/message entry of a diagnostic map, or nil."},
     {"defrecord*", prim_defrecord_star,
      "Runtime constructor for record types. Takes ns name fields-vector and returns the MINO_TYPE value, idempotent across calls."},
     {"record-type?", prim_record_type_p,

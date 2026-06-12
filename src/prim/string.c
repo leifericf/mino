@@ -236,7 +236,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s;
     mino_val *opts = NULL;
@@ -304,7 +304,7 @@ mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
     return result != NULL ? result : mino_nil(S);
 }
 
-mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
 {
     char  *buf = NULL;
     size_t len = 0;
@@ -343,7 +343,7 @@ mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s, *idx_val;
     long long idx;
@@ -407,7 +407,7 @@ long long utf8_codepoint_count(const char *data, size_t bytes)
     return count;
 }
 
-mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s_val;
     long long   start, end_idx;
@@ -453,7 +453,7 @@ mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
                          byte_end - byte_start);
 }
 
-mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *s_val;
     mino_val  *sep_val;
@@ -692,7 +692,7 @@ mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
     return mino_vector(S, buf, len);
 }
 
-mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *sep_val;
     mino_val  *coll;
@@ -1117,7 +1117,7 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
     }
 }
 
-mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s, *prefix;
     (void)env;
@@ -1135,7 +1135,7 @@ mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env)
         ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s, *suffix;
     (void)env;
@@ -1154,7 +1154,7 @@ mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env)
         ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s, *sub;
     const char *p;
@@ -1178,7 +1178,7 @@ mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
     return mino_false(S);
 }
 
-mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s;
     char       *buf;
@@ -1205,7 +1205,7 @@ mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s;
     char       *buf;
@@ -1232,7 +1232,7 @@ mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s;
     const char *start, *end_ptr;
@@ -1640,13 +1640,13 @@ const mino_prim_def k_prims_string[] = {
 const size_t k_prims_string_count =
     sizeof(k_prims_string) / sizeof(k_prims_string[0]);
 
-mino_val *prim_str_replace(mino_state *S, mino_val *args,
+static mino_val *prim_str_replace(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     return str_replace_impl(S, args, env, 0);
 }
 
-mino_val *prim_str_replace_first(mino_state *S, mino_val *args,
+static mino_val *prim_str_replace_first(mino_state *S, mino_val *args,
                                    mino_env *env)
 {
     return str_replace_impl(S, args, env, 1);

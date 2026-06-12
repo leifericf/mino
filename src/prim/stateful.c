@@ -127,7 +127,7 @@ static mino_val *swap_build_args(mino_state *S, mino_val *cur,
 
 /* ---- primitives -------------------------------------------------------- */
 
-mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
 {
     /* (atom x) or (atom x & {:keys [:meta :validator]}) -- options
      * may be supplied as flat keyword args (:meta m :validator f) or
@@ -196,7 +196,7 @@ mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
     return atom;
 }
 
-mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a;
     int         argc;
@@ -292,7 +292,7 @@ mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
 }
 
-mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *val, *old;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -315,7 +315,7 @@ mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
  * path runs the canonical retry loop: load, compute, CAS, retry on loss.
  * The retry path lights up once S->threading.multi_threaded flips after host
  * threads enter the picture. */
-mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *fn, *cur, *call_args, *result, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -400,7 +400,7 @@ static mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_e
     return mino_true(S);
 }
 
-mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -498,7 +498,7 @@ static int watchable_check_state(mino_state *S, mino_val *v)
     return 0;
 }
 
-mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val       *a, *key, *fn, *watches, *new_map;
     mino_val      **watches_slot;
@@ -551,7 +551,7 @@ mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (remove-watch ref key) -- unregister a watch callback. */
-mino_val *prim_remove_watch(mino_state *S, mino_val *args,
+static mino_val *prim_remove_watch(mino_state *S, mino_val *args,
                               mino_env *env)
 {
     mino_val  *a, *key, *watches;
@@ -583,7 +583,7 @@ mino_val *prim_remove_watch(mino_state *S, mino_val *args,
 }
 
 /* (set-validator! ref fn) -- set or remove a validator on an atom or ref. */
-mino_val *prim_set_validator(mino_state *S, mino_val *args,
+static mino_val *prim_set_validator(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     mino_val  *a, *fn;
@@ -634,7 +634,7 @@ mino_val *prim_set_validator(mino_state *S, mino_val *args,
 }
 
 /* (get-validator ref) -- return the current validator fn or nil. */
-mino_val *prim_get_validator(mino_state *S, mino_val *args,
+static mino_val *prim_get_validator(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     mino_val  *a;
@@ -653,7 +653,7 @@ mino_val *prim_get_validator(mino_state *S, mino_val *args,
 }
 
 /* (reset-vals! atom val) -- like reset! but returns [old new]. */
-mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *val, *old;
     mino_val *pair[2];
@@ -674,7 +674,7 @@ mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* (swap-vals! atom f & args) -- like swap! but returns [old new]. */
-mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *fn, *cur, *call_args, *result;
     mino_val *pair[2];
@@ -1053,7 +1053,7 @@ static mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
 
 /* Fault injection: make the n-th GC allocation fail (simulated OOM).
  * Testing only. Pass 0 to disable. */
-mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
+static mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
     mino_val *n;
@@ -1250,7 +1250,7 @@ static mino_val *prim_future_deref(mino_state *S, mino_val *args,
 
 /* ---- volatile primitives ----------------------------------------------- */
 
-mino_val *prim_volatile_bang(mino_state *S, mino_val *args,
+static mino_val *prim_volatile_bang(mino_state *S, mino_val *args,
                                mino_env *env)
 {
     (void)env;
@@ -1261,7 +1261,7 @@ mino_val *prim_volatile_bang(mino_state *S, mino_val *args,
     return mino_volatile(S, args->as.cons.car);
 }
 
-mino_val *prim_volatile_p(mino_state *S, mino_val *args,
+static mino_val *prim_volatile_p(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     (void)env;
@@ -1272,7 +1272,7 @@ mino_val *prim_volatile_p(mino_state *S, mino_val *args,
     return mino_is_volatile(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
+static mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
                              mino_env *env)
 {
     mino_val *v, *val;
@@ -1293,7 +1293,7 @@ mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
     return val;
 }
 
-mino_val *prim_vswap_bang(mino_state *S, mino_val *args,
+static mino_val *prim_vswap_bang(mino_state *S, mino_val *args,
                             mino_env *env)
 {
     mino_val *v, *fn, *cur, *call_args, *result, *extra;
