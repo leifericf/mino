@@ -1354,13 +1354,36 @@
     (set? object) (pp-coll "#{" "}" object)
     :else (pp-pr object)))
 
+(defn- pt-pad
+  "Right-justify s within width columns by prepending spaces."
+  [s width]
+  (let [pad (- width (count s))]
+    (if (pos? pad)
+      (str (apply str (repeat pad " ")) s)
+      s)))
+
 (defn print-table
-  "Print a collection of maps as a text table. ks selects and orders the
-  columns; it defaults to the keys of the first row."
+  "Prints a collection of maps as a textual table. Prints the heading row
+  ks, a separator row, and one row per map, each cell drawn from the
+  corresponding key. ks selects and orders the columns; it defaults to
+  the keys of the first row. Columns are padded to the widest cell and
+  delimited with pipes."
   ([rows] (print-table (keys (first rows)) rows))
   ([ks rows]
-   (doseq [k ks] (print (str k "\t")))
-   (println)
-   (doseq [row rows]
-     (doseq [k ks] (print (str (get row k) "\t")))
-     (println))))
+   (when (seq rows)
+     (let [widths  (map (fn [k]
+                          (apply max (count (str k))
+                                 (map (fn [row] (count (str (get row k)))) rows)))
+                        ks)
+           spacers (map (fn [w] (apply str (repeat w "-"))) widths)
+           fmt-row (fn [leader divider trailer row]
+                     (str leader
+                          (str/join divider
+                                    (map (fn [k w] (pt-pad (str (get row k)) w))
+                                         ks widths))
+                          trailer))]
+       (println)
+       (println (fmt-row "| " " | " " |" (zipmap ks ks)))
+       (println (fmt-row "|-" "-+-" "-|" (zipmap ks spacers)))
+       (doseq [row rows]
+         (println (fmt-row "| " " | " " |" row)))))))
