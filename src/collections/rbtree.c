@@ -552,6 +552,11 @@ mino_val *sorted_map_assoc1(mino_state *S, const mino_val *m,
 {
     int replaced = 0;
     mino_val *nv = alloc_val(S, MINO_SORTED_MAP);
+    /* Deviation from JVM: mino propagates metadata through sorted-map
+     * mutations (assoc/dissoc).  JVM PersistentTreeMap returns a
+     * metadata-free value after every structural change.  mino's
+     * behaviour is intentional: it matches the contract for regular
+     * PersistentHashMap and is more useful in practice. */
     nv->meta = m->meta;
     nv->as.sorted.comparator = m->as.sorted.comparator;
     gc_pin(nv);
@@ -579,7 +584,7 @@ mino_val *sorted_map_dissoc1(mino_state *S, const mino_val *m,
         mino_current_ctx(S)->gc_depth++;
         nv = alloc_val(S, MINO_SORTED_MAP);
         mino_current_ctx(S)->gc_depth--;
-        nv->meta = m->meta;
+        nv->meta = m->meta; /* see sorted_map_assoc1 for deviation note */
         nv->as.sorted.comparator = m->as.sorted.comparator;
         nv->as.sorted.root = nr;
         nv->as.sorted.len = m->as.sorted.len - 1;
@@ -592,6 +597,10 @@ mino_val *sorted_set_conj1(mino_state *S, const mino_val *s,
 {
     int replaced = 0;
     mino_val *nv = alloc_val(S, MINO_SORTED_SET);
+    /* Deviation from JVM: mino propagates metadata through sorted-set
+     * mutations (conj/disj).  JVM PersistentSortedSet returns a
+     * metadata-free value after every structural change.  See
+     * sorted_map_assoc1 for the full rationale. */
     nv->meta = s->meta;
     nv->as.sorted.comparator = s->as.sorted.comparator;
     nv->as.sorted.root = rb_assoc(S, s->as.sorted.root, elem, NULL,
@@ -613,7 +622,7 @@ mino_val *sorted_set_disj1(mino_state *S, const mino_val *s,
         mino_current_ctx(S)->gc_depth++;
         nv = alloc_val(S, MINO_SORTED_SET);
         mino_current_ctx(S)->gc_depth--;
-        nv->meta = s->meta;
+        nv->meta = s->meta; /* see sorted_set_conj1 for deviation note */
         nv->as.sorted.comparator = s->as.sorted.comparator;
         nv->as.sorted.root = nr;
         nv->as.sorted.len = s->as.sorted.len - 1;

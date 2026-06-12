@@ -22,7 +22,7 @@
  * by the node's level during traversal rather than a per-node tag.
  */
 
-/*/* Types and constants in collections_internal.h */
+/* Types and constants in collections/internal.h */
 
 static mino_vec_node_t *vnode_new(mino_state *S, unsigned count, int is_leaf)
 {
