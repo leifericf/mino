@@ -390,6 +390,15 @@
   (when *load-tests*
     `(alter-meta! (var ~name) assoc :test (fn [] ~@body))))
 
+;; --- Namespace helper ---
+
+(defn- current-ns-str
+  "Returns the name of the namespace that is dynamically current at call
+  time. Uses var-get on the *ns* var to bypass the evaluator fast-path
+  that would otherwise resolve to clojure.test (the defining namespace)."
+  []
+  (str (var-get (var clojure.core/*ns*))))
+
 ;; --- use-fixtures ---
 
 (defn use-fixtures
@@ -406,12 +415,7 @@
   (when-not (or (= kind :once) (= kind :each))
     (throw (ex-info "use-fixtures: kind must be :once or :each"
                     {:kind kind})))
-  ;; Read *ns* through the var binding stack so dynamic rebinding of *ns*
-  ;; is visible even when the function body falls back to the tree-walker
-  ;; interpreter (which happens when macro calls force bc-compile to decline).
-  ;; (var clojure.core/*ns*) is resolved at read time; var-get consults the
-  ;; thread-binding stack, matching JVM Clojure behavior.
-  (let [ns-name (str (var-get (var clojure.core/*ns*)))]
+  (let [ns-name (current-ns-str)]
     (swap! fixtures-registry update ns-name
            (fn [m]
              (update (or m {}) kind
@@ -658,7 +662,7 @@
   those namespaces.
 
   Prints a summary line and any failure details to stdout."
-  ([] (run-namespace-tests [(str *ns*)]))
+  ([] (run-namespace-tests [(current-ns-str)]))
   ([& namespaces] (run-namespace-tests (map str namespaces))))
 
 (defn run-tests-and-exit
