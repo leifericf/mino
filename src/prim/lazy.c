@@ -8,10 +8,6 @@
 
 #include "prim/internal.h"
 
-/* Lazy c_thunk for (map f coll): ctx = cons(f, coll_state). Each force
- * walks one element of coll, applies f, and wires the rest as another
- * lazy whose thunk is this same function. Saves one mino-level fn-call
- * frame per element compared to the pure-core implementation. */
 /* Pull the head element and the rest seq from a coll that has already
  * been normalized to one of {CONS, CHUNKED_CONS}. Returns 1 on
  * success (sets *out_head and *out_rest), 0 on end-of-seq. */
@@ -59,6 +55,10 @@ static mino_val *normalize_seq(mino_state *S, mino_val *coll)
     return mino_nil(S);
 }
 
+/* Lazy c_thunk for (map f coll): ctx = cons(f, coll_state). Each force
+ * walks one element of coll, applies f, and wires the rest as another
+ * lazy whose thunk is this same function. Saves one mino-level fn-call
+ * frame per element compared to the pure-core implementation. */
 static mino_val *lazy_map1_thunk(mino_state *S, mino_val *ctx)
 {
     mino_val *fn   = ctx->as.cons.car;
