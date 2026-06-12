@@ -324,7 +324,15 @@ static mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
         if (need > cap) {
             char *newbuf;
             cap = cap == 0 ? 128 : cap;
-            while (cap < need) cap *= 2;
+            while (cap < need) {
+                if (cap > SIZE_MAX / 2) {
+                    free(buf);
+                    print_dynvars_restore(S, &saved_dynvars);
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "pr-str: result size overflow");
+                    return NULL;
+                }
+                cap *= 2;
+            }
             newbuf = (char *)realloc(buf, cap);
             if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); print_dynvars_restore(S, &saved_dynvars); return NULL; }
             buf = newbuf;
@@ -542,8 +550,18 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                 /* Leading zero-width match: no empty first piece. */
                 if (!(index == 0 && abs_start == 0 && mlen <= 0)) {
                     if (len == cap) {
-                        size_t new_cap = cap == 0 ? 8 : cap * 2;
-                        mino_val **nb = (mino_val **)gc_alloc_typed(S,
+                        size_t new_cap;
+                        mino_val **nb;
+                        if (cap > SIZE_MAX / 2) {
+                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                            return NULL;
+                        }
+                        new_cap = cap == 0 ? 8 : cap * 2;
+                        if (new_cap > SIZE_MAX / sizeof(*nb)) {
+                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                            return NULL;
+                        }
+                        nb = (mino_val **)gc_alloc_typed(S,
                             GC_T_VALARR, new_cap * sizeof(*nb));
                         if (nb == NULL) return NULL;
                         if (buf != NULL && len > 0)
@@ -559,8 +577,18 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                 /* Piece count is at limit - 1: the final piece absorbs
                  * everything from the last consumed end. */
                 if (len == cap) {
-                    size_t new_cap = cap == 0 ? 8 : cap * 2;
-                    mino_val **nb = (mino_val **)gc_alloc_typed(S,
+                    size_t new_cap;
+                    mino_val **nb;
+                    if (cap > SIZE_MAX / 2) {
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                        return NULL;
+                    }
+                    new_cap = cap == 0 ? 8 : cap * 2;
+                    if (new_cap > SIZE_MAX / sizeof(*nb)) {
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                        return NULL;
+                    }
+                    nb = (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, new_cap * sizeof(*nb));
                     if (nb == NULL) return NULL;
                     if (buf != NULL && len > 0)
@@ -749,7 +777,14 @@ static mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
         if (need > buf_cap) {
             char *newbuf;
             buf_cap = buf_cap == 0 ? 128 : buf_cap;
-            while (buf_cap < need) buf_cap *= 2;
+            while (buf_cap < need) {
+                if (buf_cap > SIZE_MAX / 2) {
+                    free(buf);
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "join: result size overflow");
+                    return NULL;
+                }
+                buf_cap *= 2;
+            }
             newbuf = (char *)realloc(buf, buf_cap);
             if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
             buf = newbuf;
@@ -1278,7 +1313,14 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
             if (need > cap) {
                 char *newbuf;
                 cap = cap == 0 ? 128 : cap;
-                while (cap < need) cap *= 2;
+                while (cap < need) {
+                    if (cap > SIZE_MAX / 2) {
+                        free(buf);
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "str: result size overflow");
+                        return NULL;
+                    }
+                    cap *= 2;
+                }
                 newbuf = (char *)realloc(buf, cap);
                 if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
                 buf = newbuf;
