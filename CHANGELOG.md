@@ -188,6 +188,9 @@
 - Prim/Stateful: Return integer thread ID instead of raw pointer in prim_mino_thread_id
 - Prim/Stateful: Pin atom pointer across mino_cons/mino_nil in prim_atom
 - Prim/Agent: Pin extra pointer across mino_cons loop in agent_build_call
+- Eval: Add GC write barrier for var->meta in special_register_vars
+- Eval: Expose when, and, or in the public-form registry (ns-publics / doc / apropos)
+- clojure.test: Fix run-tests no-arg arity to read *ns* dynamically; extract current-ns-str helper used by use-fixtures and run-tests
 
 ## v0.423.5 — Security Fixes
 
