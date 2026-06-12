@@ -1,15 +1,14 @@
 (require "tests/test")
 (require '[clojure.pprint :as pp])
 
-;; Spec-first tests for the formatter / formatter-out macro conversion.
+;; Tests for the formatter / formatter-out macro conversion.
 ;;
 ;; The macro-flag assertions (ppmt-formatter-is-macro,
-;; ppmt-formatter-out-is-macro) are RED today: both vars are currently
-;; plain defns.  They must turn GREEN once the impl agent converts them
-;; to macros backed by private -impl fns.
+;; ppmt-formatter-out-is-macro) assert that formatter and formatter-out
+;; carry :macro true metadata once converted to defmacro.
 ;;
-;; The behavior-regression assertions are GREEN today and must stay
-;; GREEN through and after the conversion.
+;; The behavior regression assertions verify behavioral correctness
+;; of both functions across common usage patterns.
 
 ;; ---------------------------------------------------------------------------
 ;; Canonical macro-flag probe (establishes the :macro assertion pattern)
@@ -24,22 +23,22 @@
   (is (true? (:macro (meta (resolve 'clojure.test/deftest))))))
 
 ;; ---------------------------------------------------------------------------
-;; Macro-flag assertions — RED until the impl lands
+;; Macro-flag assertions
 ;; ---------------------------------------------------------------------------
 
 (deftest ppmt-formatter-is-macro
-  ;; After conversion: (formatter ...) must be a macro, not a function.
+  ;; formatter must be a macro, not a function.
   ;; The var's metadata must carry :macro true.
   (is (true? (:macro (meta (resolve 'clojure.pprint/formatter))))
-      "clojure.pprint/formatter must be a macro (currently a defn — expected failure)"))
+      "clojure.pprint/formatter must be a macro"))
 
 (deftest ppmt-formatter-out-is-macro
-  ;; After conversion: (formatter-out ...) must also be a macro.
+  ;; formatter-out must also be a macro.
   (is (true? (:macro (meta (resolve 'clojure.pprint/formatter-out))))
-      "clojure.pprint/formatter-out must be a macro (currently a defn — expected failure)"))
+      "clojure.pprint/formatter-out must be a macro"))
 
 ;; ---------------------------------------------------------------------------
-;; Behavior regressions — GREEN today, must stay GREEN after conversion
+;; Behavior regression assertions
 ;; ---------------------------------------------------------------------------
 
 (deftest ppmt-formatter-nil-stream-returns-string
@@ -66,7 +65,7 @@
     (is (nil? @ret))))
 
 (deftest ppmt-formatter-various-directives
-  ;; Directives beyond ~a must survive the macro conversion.
+  ;; Directives beyond ~a must work correctly.
   (is (= "ff"  ((pp/formatter "~x") nil 255)))
   (is (= "377" ((pp/formatter "~o") nil 255)))
   (is (= "+7"  ((pp/formatter "~@d") nil 7))))

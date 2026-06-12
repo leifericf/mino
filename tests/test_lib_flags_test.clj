@@ -1,21 +1,10 @@
 (require "tests/test")
 
-;; Spec-first tests for three clojure.test canon-alignment items.
-;; These tests describe the INTENDED behavior; some assertions FAIL
-;; today and are expected to start passing once the implementation lands.
+;; Tests for expected behavior of clojure.test and clojure.pprint dynamic vars.
 ;;
-;; Item 1: test-var must be a ^:dynamic var (today: plain defn).
-;;   Failure form: (:dynamic (meta ...)) returns nil instead of true.
-;;
-;; Item 2: run-tests must be a function (today: macro).
-;;   Failure form: (:macro (meta ...)) returns true instead of nil/false.
-;;
-;; Item 3: use-fixtures must be a function (today: macro).
-;;   Failure form: (:macro (meta ...)) returns true instead of nil/false.
-;;
-;; Behavior tests (fixture wrapping, *ns* at call time) that do NOT
-;; depend on the flag changes are written to PASS today and must
-;; continue passing after the implementation.
+;; Item 1: test-var must be a ^:dynamic var.
+;; Item 2: run-tests must be a function (not a macro).
+;; Item 3: use-fixtures must be a function (not a macro).
 
 ;; --- Isolation helpers ---
 ;;
@@ -63,14 +52,10 @@
 ;; Item 1: test-var must be ^:dynamic
 ;; =========================================================================
 
-;; FAILS today: (:dynamic (meta ...)) is nil; must become true.
 (deftest tlf-test-var-is-dynamic
   (is (true? (:dynamic (meta (resolve 'clojure.test/test-var))))
       "test-var must carry ^:dynamic metadata so binding can intercept it"))
 
-;; FAILS today (the wrapper calls the static fn, not the dynamic var).
-;; After implementation: binding clojure.test/test-var should intercept
-;; calls routed through the deftest-generated wrapper fn.
 (deftest tlf-test-var-binding-intercepts-wrapper
   ;; The deftest-generated wrapper for a test-var calls (test-var (var self)).
   ;; When test-var is dynamic, a binding must replace that call.
@@ -94,7 +79,6 @@
     (is (true? @intercepted)
         "binding clojure.test/test-var must intercept calls at the dynamic var site")))
 
-;; PASSES today and must keep passing: default (unbound) test-var behavior.
 (deftest tlf-test-var-unbound-behavior-unchanged
   ;; When test-var is not rebound, it must still count, bind *testing-vars*,
   ;; and run the :test fn.
@@ -124,7 +108,6 @@
 ;; Item 2: run-tests must be a function (not a macro)
 ;; =========================================================================
 
-;; FAILS today: (:macro (meta ...)) is true; must become nil/false.
 (deftest tlf-run-tests-is-not-a-macro
   (let [m (meta (resolve 'clojure.test/run-tests))]
     (is (not (:macro m))
@@ -132,10 +115,6 @@
     (is (fn? (var-get (resolve 'clojure.test/run-tests)))
         "run-tests must be a function value")))
 
-;; FAILS today: as a macro, *ns* is captured at expansion time.
-;; After implementation: the no-arg arity must read *ns* DYNAMICALLY
-;; (at call time), so binding *ns* before the call changes which
-;; namespace's tests are run.
 (deftest tlf-run-tests-reads-ns-at-call-time
   (tlf-save-restore
    (fn []
@@ -160,7 +139,6 @@
 ;; Item 3: use-fixtures must be a function (not a macro)
 ;; =========================================================================
 
-;; FAILS today: (:macro (meta ...)) is true; must become nil/false.
 (deftest tlf-use-fixtures-is-not-a-macro
   (let [m (meta (resolve 'clojure.test/use-fixtures))]
     (is (not (:macro m))
@@ -168,10 +146,6 @@
     (is (fn? (var-get (resolve 'clojure.test/use-fixtures)))
         "use-fixtures must be a function value")))
 
-;; FAILS today: as a macro, *ns* is captured at expansion time.
-;; After implementation: use-fixtures must read *ns* at call time so
-;; that calling it from a different dynamic namespace registers the
-;; fixture there, not at the def site.
 (deftest tlf-use-fixtures-reads-ns-at-call-time
   (tlf-save-restore
    (fn []
@@ -191,8 +165,6 @@
                "use-fixtures must not pollute the calling file's fixture slot")))
        (finally (remove-ns 'tlf.ufnc))))))
 
-;; PASSES today and must keep passing after implementation:
-;; :each fixture wrapping actually wraps each test invocation.
 (deftest tlf-use-fixtures-each-wraps-test-runs
   ;; Strategy: register an :each fixture in a scratch namespace,
   ;; populate it with a test, drive run-namespace-tests, and verify
@@ -226,8 +198,6 @@
              ":each fixture must execute before and after each test body"))
        (finally (remove-ns 'tlf.ufex))))))
 
-;; PASSES today and must keep passing:
-;; use-fixtures rejects invalid kind values.
 (deftest tlf-use-fixtures-rejects-invalid-kind
   (tlf-save-restore
    (fn []

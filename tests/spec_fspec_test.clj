@@ -378,8 +378,8 @@
 ;;
 ;; The probe against clojure.spec.alpha/spec (a confirmed defmacro in
 ;; this file) establishes the canonical assertion shape before testing
-;; the target vars.  The four assertions below FAIL until the
-;; implementation converts the defn bodies to defmacro wrappers.
+;; the target vars.  The following tests assert that conformer, int-in,
+;; double-in, and inst-in carry :macro true metadata.
 ;; ---------------------------------------------------------------------------
 
 (deftest fspec-macro-probe-known-macro
@@ -388,31 +388,25 @@
   (is (true? (:macro (meta (resolve 'clojure.spec.alpha/spec))))))
 
 (deftest fspec-conformer-is-macro
-  ;; Spec-first: conformer must carry :macro true once converted.
-  ;; FAILS until the defn->defmacro conversion lands.
+  ;; assert :macro true
   (is (true? (:macro (meta (resolve 'clojure.spec.alpha/conformer))))))
 
 (deftest fspec-int-in-is-macro
-  ;; Spec-first: int-in must carry :macro true once converted.
-  ;; FAILS until the defn->defmacro conversion lands.
+  ;; assert :macro true
   (is (true? (:macro (meta (resolve 'clojure.spec.alpha/int-in))))))
 
 (deftest fspec-double-in-is-macro
-  ;; Spec-first: double-in must carry :macro true once converted.
-  ;; FAILS until the defn->defmacro conversion lands.
+  ;; assert :macro true
   (is (true? (:macro (meta (resolve 'clojure.spec.alpha/double-in))))))
 
 (deftest fspec-inst-in-is-macro
-  ;; Spec-first: inst-in must carry :macro true once converted.
-  ;; FAILS until the defn->defmacro conversion lands.
+  ;; assert :macro true
   (is (true? (:macro (meta (resolve 'clojure.spec.alpha/inst-in))))))
 
 ;; ---------------------------------------------------------------------------
-;; conformer behavior regression -- call shapes that must survive the
-;; defn->defmacro conversion unchanged.
-;;
-;; spec_test.clj already covers: single-fn conform, explicit unform fn,
-;; unform-default-identity, explain on invalid return.  The tests below
+;; conformer behavior regression -- additional call shapes beyond those in
+;; spec_test.clj (single-fn conform, explicit unform fn,
+;; unform-default-identity, explain on invalid return).  The tests below
 ;; add: s/valid? path, registered spec with conformer, s/explain-data
 ;; shape when the conformer rejects, and conform returning ::s/invalid.
 ;; ---------------------------------------------------------------------------
@@ -441,7 +435,7 @@
     (is (= -1 (-> d ::s/problems first :val)))))
 
 (deftest fspec-conformer-two-arg-call-shape
-  ;; (s/conformer cfn ufn) must work after macro conversion.
+  ;; (s/conformer cfn ufn) two-arity call shape.
   ;; The unform fn must invert the conform transformation.
   (let [spec (s/conformer #(if (string? %) (keyword %) ::s/invalid)
                           name)]
@@ -450,7 +444,7 @@
     (is (= ::s/invalid (s/conform spec 42)))))
 
 (deftest fspec-conformer-one-arg-call-shape
-  ;; (s/conformer cfn) -- single-arity -- must work after macro conversion.
+  ;; (s/conformer cfn) -- single-arity call shape.
   ;; unform defaults to identity when not supplied.
   (let [spec (s/conformer #(if (even? %) % ::s/invalid))]
     (is (= 4  (s/conform spec 4)))
