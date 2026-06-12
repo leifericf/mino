@@ -3191,10 +3191,14 @@
 ;; --- Compatibility vars ---
 
 (def ^:dynamic *clojure-version* {:major 1 :minor 11 :incremental 0 :qualifier nil})
-(defn clojure-version []
-  (str (:major *clojure-version*)
-       "." (:minor *clojure-version*)
-       "." (:incremental *clojure-version*)))
+(defn clojure-version
+  "Returns the version of mino as a string."
+  []
+  (str (:major *clojure-version*) "."
+       (:minor *clojure-version*) "."
+       (:incremental *clojure-version*)
+       (when-let [q (:qualifier *clojure-version*)]
+         (str "-" q))))
 
 ;; JVM Clojure AOT-compiler dynvars. mino has no AOT compiler; these
 ;; are defined so user code that binds them around `load` /
