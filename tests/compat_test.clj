@@ -597,9 +597,14 @@
     (is (not (contains? m '*bf-x*)))))
 
 (deftest get-thread-bindings-snapshots-active-frame
+  ;; JVM Clojure keys this map by vars; mino keys it by symbols. The
+  ;; symbol is fully qualified so the entry names the exact var --
+  ;; required for replay via with-bindings* and cross-thread
+  ;; conveyance to install the binding on the same var regardless of
+  ;; the namespace the replay runs in.
   (binding [*bf-x* 42]
     (let [m (get-thread-bindings)]
-      (is (= 42 (get m '*bf-x*))))))
+      (is (= 42 (get m 'user/*bf-x*))))))
 
 (deftest bound-fn-star-replays-captured-bindings
   (binding [*bf-x* 5]
