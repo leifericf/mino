@@ -1133,7 +1133,7 @@ const mino_prim_def k_prims_ns[] = {
     {"intern",         prim_intern,
      "Intern a value into a namespace by name."},
     {"var-get",        prim_var_get,
-     "Return the root value of a var."},
+     "Return the current value of a var: the thread-local binding if one is active, otherwise the root value."},
     {"var-set",        prim_var_set,
      "Set the root value of a var."},
     {"alter-var-root", prim_alter_var_root,
