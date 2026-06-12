@@ -94,6 +94,11 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
                                       const char *diag_code,
                                       const char *label);
 
+/* special_host.c: host-interop syntax sugar (.method, .-field, new, Foo.) */
+int eval_try_host_syntax(mino_state *S, mino_val *form,
+                         mino_val *head, mino_val *args,
+                         mino_env *env, mino_val **out);
+
 /*
  * Resolve a non-fn callable value (keyword, map, vector, set, sorted
  * map, sorted set) against an already-evaluated argument list.
