@@ -31,9 +31,8 @@ static mino_val *prim_sched_enqueue(mino_state *S, mino_val *args,
 
     if (args == NULL || mino_type_of(args) != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001",
-                      "async-sched-enqueue* requires callback and value");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "async-sched-enqueue* requires callback and value");
     }
     cb  = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
@@ -52,14 +51,12 @@ static mino_val *prim_timer_schedule(mino_state *S, mino_val *args,
 
     if (args == NULL || mino_type_of(args) != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001",
-                      "async-schedule-timer* requires ms and callback");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "async-schedule-timer* requires ms and callback");
     }
     if (!as_double(args->as.cons.car, &ms)) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001",
-                      "async-schedule-timer* first argument must be a number");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "async-schedule-timer* first argument must be a number");
     }
     if (ms < 0) ms = 0;
     cb = args->as.cons.cdr->as.cons.car;
@@ -104,9 +101,8 @@ static mino_val *prim_drain_loop(mino_state *S, mino_val *args,
     mino_val *done_thunk, *result;
 
     if (args == NULL || mino_type_of(args) != MINO_CONS) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001",
-                      "drain-loop! requires a done-check thunk");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "drain-loop! requires a done-check thunk");
     }
     done_thunk = args->as.cons.car;
     gc_pin(done_thunk);
@@ -144,8 +140,7 @@ static int as_chan(mino_state *S, mino_val *v, const char *fn,
     if (v == NULL || mino_type_of(v) != MINO_CHAN) {
         char msg[120];
         snprintf(msg, sizeof(msg), "%s requires a channel", fn);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY001", msg);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     *out = v;
@@ -161,10 +156,8 @@ static mino_val *prim_chan_star(mino_state *S, mino_val *args, mino_env *env)
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL || args->as.cons.cdr->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan* requires (buf-kind buf-cap xform ex-handler)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan* requires (buf-kind buf-cap xform ex-handler)");
     }
     kind_v  = args->as.cons.car;
     cap_v   = args->as.cons.cdr->as.cons.car;
@@ -172,10 +165,8 @@ static mino_val *prim_chan_star(mino_state *S, mino_val *args, mino_env *env)
     exh_v   = args->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (!mino_to_int(kind_v, &buf_kind_l)
         || !mino_to_int(cap_v, &buf_cap_l)) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY001",
-                      "chan* requires integer buf-kind and buf-cap");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "chan* requires integer buf-kind and buf-cap");
     }
     if (buf_cap_l < 0) buf_cap_l = 0;
     if (xform_v != NULL && mino_type_of(xform_v) == MINO_NIL) xform_v = NULL;
@@ -201,18 +192,14 @@ static mino_val *prim_chan_offer(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-offer* requires (chan val)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-offer* requires (chan val)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-offer*", &ch)) return NULL;
     val = args->as.cons.cdr->as.cons.car;
     if (val == NULL || mino_type_of(val) == MINO_NIL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY001",
-                      "cannot put nil on a channel");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "cannot put nil on a channel");
     }
     if (mino_chan_offer(S, ch, val, &accepted) != 0) return NULL;
     return accepted ? mino_true(S) : mino_false(S);
@@ -223,10 +210,8 @@ static mino_val *prim_chan_poll(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ch;
     (void)env;
     if (args == NULL || mino_type_of(args) != MINO_CONS) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-poll* requires (chan)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-poll* requires (chan)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-poll*", &ch)) return NULL;
     return mino_chan_poll(S, ch);
@@ -239,19 +224,15 @@ static mino_val *prim_chan_put(mino_state *S, mino_val *args, mino_env *env)
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-put* requires (chan val cb-or-nil)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-put* requires (chan val cb-or-nil)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-put*", &ch)) return NULL;
     val = args->as.cons.cdr->as.cons.car;
     cb  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (val == NULL || mino_type_of(val) == MINO_NIL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY001",
-                      "cannot put nil on a channel");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "cannot put nil on a channel");
     }
     if (cb != NULL && mino_type_of(cb) == MINO_NIL) cb = NULL;
     if (mino_chan_put(S, ch, val, cb) < 0) return NULL;
@@ -264,10 +245,8 @@ static mino_val *prim_chan_take(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-take* requires (chan cb-or-nil)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-take* requires (chan cb-or-nil)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-take*", &ch)) return NULL;
     cb = args->as.cons.cdr->as.cons.car;
@@ -281,10 +260,8 @@ static mino_val *prim_chan_close(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ch;
     (void)env;
     if (args == NULL || mino_type_of(args) != MINO_CONS) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-close* requires (chan)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-close* requires (chan)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-close*", &ch)) return NULL;
     mino_chan_close(S, ch);
@@ -326,20 +303,16 @@ static mino_val *prim_chan_put_alts(mino_state *S, mino_val *args, mino_env *env
         || args->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-put-alts* requires (chan val cb flag)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-put-alts* requires (chan val cb flag)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-put-alts*", &ch)) return NULL;
     val  = args->as.cons.cdr->as.cons.car;
     cb   = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     flag = args->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (val == NULL || mino_type_of(val) == MINO_NIL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/type", "MTY001",
-                      "cannot put nil on a channel");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "cannot put nil on a channel");
     }
     if (cb != NULL && mino_type_of(cb) == MINO_NIL) cb = NULL;
     if (flag != NULL && mino_type_of(flag) == MINO_NIL) flag = NULL;
@@ -353,10 +326,8 @@ static mino_val *prim_chan_buf_add(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-buf-add* requires (chan val)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-buf-add* requires (chan val)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-buf-add*", &ch)) return NULL;
     val = args->as.cons.cdr->as.cons.car;
@@ -372,10 +343,8 @@ static mino_val *prim_chan_set_xform(mino_state *S, mino_val *args, mino_env *en
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-set-xform* requires (chan rf ex-handler)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-set-xform* requires (chan rf ex-handler)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-set-xform*", &ch)) return NULL;
     rf  = args->as.cons.cdr->as.cons.car;
@@ -441,10 +410,8 @@ static mino_val *prim_chan_take_alts(mino_state *S, mino_val *args, mino_env *en
     if (args == NULL || mino_type_of(args) != MINO_CONS
         || args->as.cons.cdr == NULL
         || args->as.cons.cdr->as.cons.cdr == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR001",
-                      "chan-take-alts* requires (chan cb flag)");
-        return NULL;
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chan-take-alts* requires (chan cb flag)");
     }
     if (!as_chan(S, args->as.cons.car, "chan-take-alts*", &ch)) return NULL;
     cb   = args->as.cons.cdr->as.cons.car;
