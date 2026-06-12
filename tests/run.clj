@@ -127,6 +127,7 @@
 (require "tests/proc_test")
 (require "tests/deps_test")
 (require "tests/introspection_test")
+(require "tests/census_surface_test")
 
 (reset! clojure.test/suite-mode false)
 
