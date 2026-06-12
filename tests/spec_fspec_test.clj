@@ -365,4 +365,92 @@
   ;; Must exist and hold the canon default of 4.
   (is (= 4 s/*recursion-limit*)))
 
+;; ---------------------------------------------------------------------------
+;; Macro-ness: conformer / int-in / double-in / inst-in.
+;;
+;; JVM Clojure declares all four as macros so call sites can be
+;; macro-expanded by tooling and spec instrumentation.  Each var's
+;; metadata must carry :macro true.
+;;
+;; The probe against clojure.spec.alpha/spec (a confirmed defmacro in
+;; this file) establishes the canonical assertion shape before testing
+;; the target vars.  The four assertions below FAIL until the
+;; implementation converts the defn bodies to defmacro wrappers.
+;; ---------------------------------------------------------------------------
+
+(deftest fspec-macro-probe-known-macro
+  ;; clojure.spec.alpha/spec is already a defmacro -- use it to confirm
+  ;; that (:macro (meta (resolve ...))) returns true for a real macro.
+  (is (true? (:macro (meta (resolve 'clojure.spec.alpha/spec))))))
+
+(deftest fspec-conformer-is-macro
+  ;; Spec-first: conformer must carry :macro true once converted.
+  ;; FAILS until the defn->defmacro conversion lands.
+  (is (true? (:macro (meta (resolve 'clojure.spec.alpha/conformer))))))
+
+(deftest fspec-int-in-is-macro
+  ;; Spec-first: int-in must carry :macro true once converted.
+  ;; FAILS until the defn->defmacro conversion lands.
+  (is (true? (:macro (meta (resolve 'clojure.spec.alpha/int-in))))))
+
+(deftest fspec-double-in-is-macro
+  ;; Spec-first: double-in must carry :macro true once converted.
+  ;; FAILS until the defn->defmacro conversion lands.
+  (is (true? (:macro (meta (resolve 'clojure.spec.alpha/double-in))))))
+
+(deftest fspec-inst-in-is-macro
+  ;; Spec-first: inst-in must carry :macro true once converted.
+  ;; FAILS until the defn->defmacro conversion lands.
+  (is (true? (:macro (meta (resolve 'clojure.spec.alpha/inst-in))))))
+
+;; ---------------------------------------------------------------------------
+;; conformer behavior regression -- call shapes that must survive the
+;; defn->defmacro conversion unchanged.
+;;
+;; spec_test.clj already covers: single-fn conform, explicit unform fn,
+;; unform-default-identity, explain on invalid return.  The tests below
+;; add: s/valid? path, registered spec with conformer, s/explain-data
+;; shape when the conformer rejects, and conform returning ::s/invalid.
+;; ---------------------------------------------------------------------------
+
+(s/def ::fspec-positive-conformer
+  (s/conformer (fn [x] (if (and (int? x) (pos? x)) x ::s/invalid))))
+
+(deftest fspec-conformer-valid?-passes-through
+  ;; s/valid? on a conformer spec must accept values the fn accepts.
+  (is (true?  (s/valid? ::fspec-positive-conformer 1)))
+  (is (true?  (s/valid? ::fspec-positive-conformer 99)))
+  (is (false? (s/valid? ::fspec-positive-conformer 0)))
+  (is (false? (s/valid? ::fspec-positive-conformer -5)))
+  (is (false? (s/valid? ::fspec-positive-conformer "x"))))
+
+(deftest fspec-conformer-conform-returns-invalid
+  ;; s/conform must return ::s/invalid when the conform fn returns it.
+  (is (= ::s/invalid (s/conform ::fspec-positive-conformer 0)))
+  (is (= ::s/invalid (s/conform ::fspec-positive-conformer -1))))
+
+(deftest fspec-conformer-explain-data-on-rejection
+  ;; explain-data must produce a problem map when the conformer rejects.
+  (let [d (s/explain-data ::fspec-positive-conformer -1)]
+    (is (some? d))
+    (is (seq (::s/problems d)))
+    (is (= -1 (-> d ::s/problems first :val)))))
+
+(deftest fspec-conformer-two-arg-call-shape
+  ;; (s/conformer cfn ufn) must work after macro conversion.
+  ;; The unform fn must invert the conform transformation.
+  (let [spec (s/conformer #(if (string? %) (keyword %) ::s/invalid)
+                          name)]
+    (is (= :hello (s/conform spec "hello")))
+    (is (= "hello" (s/unform  spec :hello)))
+    (is (= ::s/invalid (s/conform spec 42)))))
+
+(deftest fspec-conformer-one-arg-call-shape
+  ;; (s/conformer cfn) -- single-arity -- must work after macro conversion.
+  ;; unform defaults to identity when not supplied.
+  (let [spec (s/conformer #(if (even? %) % ::s/invalid))]
+    (is (= 4  (s/conform spec 4)))
+    (is (= 4  (s/unform  spec 4)))
+    (is (= ::s/invalid (s/conform spec 3)))))
+
 (run-tests-and-exit)
