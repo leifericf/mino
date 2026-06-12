@@ -338,13 +338,16 @@ static mino_val *eval_vector_literal(mino_state *S, mino_val *form,
         return form;
     }
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    gc_pin((mino_val *)tmp);
     for (i = 0; i < n; i++) {
         mino_val *ev = eval_value(S, vec_nth(form, i), env);
         if (ev == NULL) {
+            gc_unpin(1);
             return NULL;
         }
         gc_valarr_set(S, tmp, i, ev);
     }
+    gc_unpin(1);
     {
         mino_val *result = mino_vector(S, tmp, n);
         if (form->meta != NULL) {
@@ -397,7 +400,9 @@ static mino_val *eval_map_literal(mino_state *S, mino_val *form,
         return form;
     }
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
+    gc_unpin(1);
     for (i = 0; i < n; i++) {
         mino_val *form_key = vec_nth(form->as.map.key_order, i);
         mino_val *form_val = map_get_val(form, form_key);
@@ -439,13 +444,16 @@ static mino_val *eval_set_literal(mino_state *S, mino_val *form,
         return form;
     }
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    gc_pin((mino_val *)tmp);
     for (i = 0; i < n; i++) {
         mino_val *ev = eval_value(S, vec_nth(form->as.set.key_order, i), env);
         if (ev == NULL) {
+            gc_unpin(1);
             return NULL;
         }
         gc_valarr_set(S, tmp, i, ev);
     }
+    gc_unpin(1);
     {
         mino_val *result = mino_set(S, tmp, n);
         if (form->meta != NULL) {
