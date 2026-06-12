@@ -548,6 +548,12 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * confirmed eligibility, so the head guards from the public entry
      * point are not repeated here. */
 
+    /* An empty body has nothing to emit and would size the pc_offsets /
+     * insts side tables at zero bytes; malloc(0) is implementation-
+     * defined, so bail before any allocation rather than write into a
+     * zero-size buffer. */
+    if (bc->code_len == 0) return -1;
+
     /* effective_code_len caps the compile walk at deopt_at_pc when
      * the caller asked for a compile-with-deopt; the deopt stencil is
      * emitted right after the prefix loop below. (size_t)-1 marks a
