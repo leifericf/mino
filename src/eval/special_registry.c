@@ -5,8 +5,8 @@
  * Each entry pairs the cached interned-symbol pointer (looked up at
  * runtime via offsetof, since the cache lives on mino_state) with
  * the handler. Inline handlers for forms small enough to leave their
- * body in the registry (quote, quasiquote, if, do, recur, lazy-seq,
- * when, and, or, var) live here too.
+ * body in the registry (quote, quasiquote, unquote, unquote-splicing,
+ * if, do, recur, lazy-seq, when, and, or, var) live here too.
  *
  * Pointer-eq against the cached symbol is the fast path; symbols
  * that carry metadata are fresh copies (the reader clones them
@@ -54,13 +54,69 @@ static mino_val *eval_unquote_outside(mino_state *S, mino_val *form,
     return NULL;
 }
 
+/* Look up a qualified ns/name symbol (e.g. clojure.core/inc) as a var.
+ * Returns the var if found or successfully auto-promoted, else NULL.
+ * vbuf must be the full NUL-terminated symbol text; vn is its length. */
+static mino_val *var_find_qualified_sym(mino_state *S,
+                                         const char *vbuf, size_t vn)
+{
+    const char *sl = memchr(vbuf, '/', vn);
+    char        ns_buf[256];
+    size_t      ns_len;
+    const char *name;
+    mino_val   *var;
+    mino_env   *target;
+
+    if (sl == NULL || vn <= 1) return NULL;
+    ns_len = (size_t)(sl - vbuf);
+    name   = sl + 1;
+    memcpy(ns_buf, vbuf, ns_len);
+    ns_buf[ns_len] = '\0';
+    var = var_find(S, ns_buf, name);
+    if (var != NULL) return var;
+    /* Auto-promote env binding to var so #'clojure.core/inc works
+     * for primitives that were never explicitly interned. */
+    target = ns_env_lookup(S, ns_buf);
+    if (target != NULL) {
+        env_binding_t *b = env_find_here(target, name);
+        if (b != NULL) {
+            var = var_intern(S, ns_buf, name);
+            if (var != NULL) {
+                var_set_root(S, var, b->val);
+                return var;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Intern a var for a C primitive bound under vbuf in env or the current ns.
+ * Returns the new var if found, else NULL. */
+static mino_val *var_promote_prim_to_var(mino_state *S,
+                                          mino_env *env, const char *vbuf)
+{
+    mino_val *val = mino_env_get(env, vbuf);
+    mino_val *var;
+
+    if (val == NULL) {
+        mino_env *ns_env = current_ns_env(S);
+        if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
+    }
+    if (val == NULL) return NULL;
+    var = var_intern(S, "clojure.core", vbuf);
+    var_set_root(S, var, val);
+    return var;
+}
+
 static mino_val *eval_var(mino_state *S, mino_val *form,
                             mino_val *args, mino_env *env, int tail)
 {
     mino_val *sym_arg;
     mino_val *var;
-    char        vbuf[256];
-    size_t      vn;
+    char      vbuf[256];
+    size_t    vn;
+    size_t    vi;
+    char      msg[300];
     (void)tail;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         set_eval_diag(S, form, "syntax", "MSY001",
@@ -81,38 +137,13 @@ static mino_val *eval_var(mino_state *S, mino_val *form,
     }
     memcpy(vbuf, sym_arg->as.s.data, vn);
     vbuf[vn] = '\0';
-    /* Try qualified (ns/name) lookup. */
-    {
-        const char *sl = memchr(vbuf, '/', vn);
-        if (sl != NULL && vn > 1) {
-            char        ns_buf[256];
-            size_t      ns_len = (size_t)(sl - vbuf);
-            const char *name   = sl + 1;
-            mino_env *target;
-            memcpy(ns_buf, vbuf, ns_len);
-            ns_buf[ns_len] = '\0';
-            var = var_find(S, ns_buf, name);
-            if (var != NULL) return var;
-            /* Auto-promote env binding to var so #'clojure.core/inc works
-             * for primitives that were never explicitly interned. */
-            target = ns_env_lookup(S, ns_buf);
-            if (target != NULL) {
-                env_binding_t *b = env_find_here(target, name);
-                if (b != NULL) {
-                    var = var_intern(S, ns_buf, name);
-                    if (var != NULL) {
-                        var_set_root(S, var, b->val);
-                        return var;
-                    }
-                }
-            }
-        }
-    }
+    /* Try qualified (ns/name) lookup first. */
+    var = var_find_qualified_sym(S, vbuf, vn);
+    if (var != NULL) return var;
     /* Unqualified: try current ns, then "user", then scan all. */
     var = var_find(S, S->ns_vars.current_ns, vbuf);
     if (var == NULL) var = var_find(S, "user", vbuf);
     if (var == NULL) {
-        size_t vi;
         for (vi = 0; vi < S->ns_vars.var_registry_len; vi++) {
             if (strcmp(S->ns_vars.var_registry[vi].name, vbuf) == 0) {
                 var = S->ns_vars.var_registry[vi].var;
@@ -125,24 +156,11 @@ static mino_val *eval_var(mino_state *S, mino_val *form,
      * current ns chain so #'inc works for prim-backed names. The
      * embedder env no longer chains to clojure.core, so we fall through
      * to current_ns_env (which does) to mirror eval_symbol's lookup. */
-    {
-        mino_val *val = mino_env_get(env, vbuf);
-        if (val == NULL) {
-            mino_env *ns_env = current_ns_env(S);
-            if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
-        }
-        if (val != NULL) {
-            var = var_intern(S, "clojure.core", vbuf);
-            var_set_root(S, var, val);
-            return var;
-        }
-    }
-    {
-        char msg[300];
-        snprintf(msg, sizeof(msg), "var: unbound symbol: %s", vbuf);
-        set_eval_diag(S, form, "name", "MNS001", msg);
-        return NULL;
-    }
+    var = var_promote_prim_to_var(S, env, vbuf);
+    if (var != NULL) return var;
+    snprintf(msg, sizeof(msg), "var: unbound symbol: %s", vbuf);
+    set_eval_diag(S, form, "name", "MNS001", msg);
+    return NULL;
 }
 
 static mino_val *eval_if(mino_state *S, mino_val *form,

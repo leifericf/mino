@@ -299,47 +299,47 @@ static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 static mino_val *tag_kw(mino_state *S, mino_val *v)
 {
     switch (mino_type_of(v)) {
-    case MINO_NIL:     return mino_keyword(S, "nil");
-    case MINO_BOOL:    return mino_keyword(S, "bool");
-    case MINO_INT:     return mino_keyword(S, "int");
-    case MINO_FLOAT:   return mino_keyword(S, "float");
-    case MINO_FLOAT32: return mino_keyword(S, "float32");
-    case MINO_CHAR:    return mino_keyword(S, "char");
-    case MINO_STRING:  return mino_keyword(S, "string");
-    case MINO_SYMBOL:  return mino_keyword(S, "symbol");
+    case MINO_NIL:        return mino_keyword(S, "nil");
+    case MINO_BOOL:       return mino_keyword(S, "bool");
+    case MINO_INT:        return mino_keyword(S, "int");
+    case MINO_FLOAT:      return mino_keyword(S, "float");
+    case MINO_FLOAT32:    return mino_keyword(S, "float32");
+    case MINO_CHAR:       return mino_keyword(S, "char");
+    case MINO_STRING:     return mino_keyword(S, "string");
+    case MINO_SYMBOL:     return mino_keyword(S, "symbol");
     case MINO_KEYWORD:    return mino_keyword(S, "keyword");
     case MINO_EMPTY_LIST: return mino_keyword(S, "list");
     case MINO_CONS:       return mino_keyword(S, "list");
-    case MINO_VECTOR:  return mino_keyword(S, "vector");
-    case MINO_MAP:     return mino_keyword(S, "map");
+    case MINO_VECTOR:     return mino_keyword(S, "vector");
+    case MINO_MAP:        return mino_keyword(S, "map");
     case MINO_SET:        return mino_keyword(S, "set");
     case MINO_SORTED_MAP: return mino_keyword(S, "sorted-map");
     case MINO_SORTED_SET: return mino_keyword(S, "sorted-set");
-    case MINO_PRIM:    return mino_keyword(S, "fn");
-    case MINO_FN:      return mino_keyword(S, "fn");
-    case MINO_MACRO:   return mino_keyword(S, "macro");
-    case MINO_HANDLE:  return mino_keyword(S, "handle");
-    case MINO_ATOM:    return mino_keyword(S, "atom");
-    case MINO_VOLATILE: return mino_keyword(S, "volatile");
-    case MINO_LAZY:    return mino_keyword(S, "lazy-seq");
-    case MINO_CHUNK:   return mino_keyword(S, "chunk");
+    case MINO_PRIM:       return mino_keyword(S, "fn");
+    case MINO_FN:         return mino_keyword(S, "fn");
+    case MINO_MACRO:      return mino_keyword(S, "macro");
+    case MINO_HANDLE:     return mino_keyword(S, "handle");
+    case MINO_ATOM:       return mino_keyword(S, "atom");
+    case MINO_VOLATILE:   return mino_keyword(S, "volatile");
+    case MINO_LAZY:       return mino_keyword(S, "lazy-seq");
+    case MINO_CHUNK:      return mino_keyword(S, "chunk");
     case MINO_CHUNKED_CONS: return mino_keyword(S, "list");
-    case MINO_RECUR:     return mino_keyword(S, "recur");
-    case MINO_TAIL_CALL: return mino_keyword(S, "tail-call");
-    case MINO_REDUCED:   return mino_keyword(S, "reduced");
-    case MINO_VAR:       return mino_keyword(S, "var");
-    case MINO_TRANSIENT: return mino_keyword(S, "transient");
-    case MINO_BIGINT:    return mino_keyword(S, "bigint");
-    case MINO_RATIO:     return mino_keyword(S, "ratio");
-    case MINO_BIGDEC:    return mino_keyword(S, "bigdec");
-    case MINO_TYPE:      return mino_keyword(S, "record-type");
+    case MINO_RECUR:      return mino_keyword(S, "recur");
+    case MINO_TAIL_CALL:  return mino_keyword(S, "tail-call");
+    case MINO_REDUCED:    return mino_keyword(S, "reduced");
+    case MINO_VAR:        return mino_keyword(S, "var");
+    case MINO_TRANSIENT:  return mino_keyword(S, "transient");
+    case MINO_BIGINT:     return mino_keyword(S, "bigint");
+    case MINO_RATIO:      return mino_keyword(S, "ratio");
+    case MINO_BIGDEC:     return mino_keyword(S, "bigdec");
+    case MINO_TYPE:       return mino_keyword(S, "record-type");
     case MINO_RECORD:
         /* Unreachable: callers peel the MINO_RECORD case before calling
          * tag_kw so the type pointer is returned directly. */
         return v->as.record.type;
-    case MINO_FUTURE:    return mino_keyword(S, "future");
-    case MINO_UUID:      return mino_keyword(S, "uuid");
-    case MINO_REGEX:     return mino_keyword(S, "regex");
+    case MINO_FUTURE:     return mino_keyword(S, "future");
+    case MINO_UUID:       return mino_keyword(S, "uuid");
+    case MINO_REGEX:      return mino_keyword(S, "regex");
     case MINO_HOST_ARRAY: {
         static const char *kinds[] = {
             "object-array", "int-array", "long-array", "short-array",
@@ -350,12 +350,12 @@ static mino_val *tag_kw(mino_state *S, mino_val *v)
         if (k >= sizeof(kinds) / sizeof(kinds[0])) k = 0;
         return mino_keyword(S, kinds[k]);
     }
-    case MINO_MAP_ENTRY: return mino_keyword(S, "map-entry");
-    case MINO_TX_REF:    return mino_keyword(S, "ref");
-    case MINO_AGENT:     return mino_keyword(S, "agent");
-    case MINO_CHAN:      return mino_keyword(S, "chan");
-    case MINO_QUEUE:     return mino_keyword(S, "queue");
-    case MINO_BYTES:     return mino_keyword(S, "bytes");
+    case MINO_MAP_ENTRY:  return mino_keyword(S, "map-entry");
+    case MINO_TX_REF:     return mino_keyword(S, "ref");
+    case MINO_AGENT:      return mino_keyword(S, "agent");
+    case MINO_CHAN:        return mino_keyword(S, "chan");
+    case MINO_QUEUE:      return mino_keyword(S, "queue");
+    case MINO_BYTES:      return mino_keyword(S, "bytes");
     }
     return mino_keyword(S, "unknown");
 }
