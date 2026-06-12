@@ -101,3 +101,77 @@
       (throw :boom))
     (catch _e nil))
   (is (= :root *bt-dyn-y*)))
+
+;; ---------------------------------------------------------------------------
+;; Var-identity binding: rebinding via any spelling of a var's name must reach
+;; every read of that var -- bare, namespace-qualified, or alias-qualified.
+;; The binding key is the VAR, not the literal symbol text.
+;; ---------------------------------------------------------------------------
+
+;; Establish a home namespace with a dynamic var and a reader fn.
+(ns dyn.bind.home)
+(def ^:dynamic *dbt-v* :root)
+(defn dbt-rd [] *dbt-v*)
+
+(in-ns 'user)
+(alias 'dbt-h 'dyn.bind.home)
+
+(deftest qualified-binding-visible-to-unqualified-reader
+  ;; binding via the qualified name must reach the bare-symbol read
+  ;; inside the var's home namespace.
+  (is (= :bound (binding [dyn.bind.home/*dbt-v* :bound]
+                   (dyn.bind.home/dbt-rd)))))
+
+(deftest alias-binding-visible-to-unqualified-reader
+  ;; binding via an alias-qualified name is the same var; the bare read
+  ;; in the home fn must see it.
+  (is (= :bound2 (binding [dbt-h/*dbt-v* :bound2]
+                    (dyn.bind.home/dbt-rd)))))
+
+(deftest qualified-binding-visible-via-qualified-read
+  ;; a qualified symbol read must also check the dynamic binding stack,
+  ;; not only the var's root.
+  (is (= :b3 (binding [dyn.bind.home/*dbt-v* :b3]
+                dyn.bind.home/*dbt-v*))))
+
+(deftest nested-qualified-bindings-stack-and-restore
+  ;; inner binding shadows outer; both restore correctly.
+  (is (= :b5 (binding [dyn.bind.home/*dbt-v* :b4]
+                (binding [dyn.bind.home/*dbt-v* :b5]
+                  (dyn.bind.home/dbt-rd)))))
+  (is (= :b4 (binding [dyn.bind.home/*dbt-v* :b4]
+                (binding [dyn.bind.home/*dbt-v* :b5])
+                (dyn.bind.home/dbt-rd))))
+  (is (= :root (dyn.bind.home/dbt-rd))))
+
+;; Core vars: a bare read in any namespace and a qualified read must both
+;; see the thread binding regardless of which spelling was used to install it.
+
+(deftest core-var-qualified-binding-bare-read
+  ;; bind via clojure.core/*print-length*; bare *print-length* in user
+  ;; resolves to the same var and must see the thread value.
+  (is (= 3 (binding [clojure.core/*print-length* 3] *print-length*))))
+
+(deftest core-var-bare-binding-qualified-read
+  ;; bind via the bare name; qualified read must see the same thread value.
+  (is (= 3 (binding [*print-length* 3] clojure.core/*print-length*))))
+
+;; Frame cleanup: a qualified binding frame must unwind on throw even
+;; though the lookup is currently broken, leaving the var root intact.
+
+(ns dyn.bind.throw.home)
+(def ^:dynamic *dbt-tv* :root)
+(defn dbt-trd [] *dbt-tv*)
+
+(in-ns 'user)
+
+(deftest qualified-binding-frame-unwinds-on-throw
+  ;; The frame must be popped on throw; the var root is :root after.
+  (try
+    (binding [dyn.bind.throw.home/*dbt-tv* :will-unwind]
+      (throw :boom))
+    (catch _e nil))
+  ;; Read via the home-ns fn (unqualified read in home ns) to confirm root.
+  (is (= :root (dyn.bind.throw.home/dbt-trd))))
+
+(run-tests-and-exit)
