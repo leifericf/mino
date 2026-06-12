@@ -46,8 +46,8 @@ typedef struct {
     const char    *file;
     int            line;
     unsigned char  tag;
-    unsigned long  count;
-    unsigned long  bytes;
+    uint64_t       count;
+    uint64_t       bytes;
 } alloc_site_t;
 
 static alloc_site_t g_sites[ALLOC_PROFILE_CAP];
@@ -78,12 +78,12 @@ void mino_alloc_profile_record(const char *file, int line,
             s->line  = line;
             s->tag   = tag;
             s->count = 1;
-            s->bytes = (unsigned long)size;
+            s->bytes = (uint64_t)size;
             return;
         }
         if (s->file == file && s->line == line && s->tag == tag) {
             s->count++;
-            s->bytes += (unsigned long)size;
+            s->bytes += (uint64_t)size;
             return;
         }
     }
@@ -100,8 +100,8 @@ void mino_alloc_profile_reset(mino_state *S)
 
 static int site_cmp_count_desc(const void *a, const void *b)
 {
-    unsigned long ca = ((const alloc_site_t *)a)->count;
-    unsigned long cb = ((const alloc_site_t *)b)->count;
+    uint64_t ca = ((const alloc_site_t *)a)->count;
+    uint64_t cb = ((const alloc_site_t *)b)->count;
     if (cb > ca) return 1;
     if (cb < ca) return -1;
     return 0;
@@ -127,7 +127,7 @@ void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
 {
     static alloc_site_t copy[ALLOC_PROFILE_CAP];
     int            i, kept = 0;
-    unsigned long  total_count = 0, total_bytes = 0;
+    uint64_t       total_count = 0, total_bytes = 0;
     (void)S;
     if (out == NULL) out = stderr;
     memcpy(copy, g_sites, sizeof(copy));
@@ -140,14 +140,15 @@ void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
     }
     qsort(copy, (size_t)kept, sizeof(*copy), site_cmp_count_desc);
     if (top_n <= 0 || top_n > kept) top_n = kept;
-    fprintf(out, "alloc-profile: %d sites, %lu allocs, %lu bytes\n",
-            kept, total_count, total_bytes);
+    fprintf(out, "alloc-profile: %d sites, %llu allocs, %llu bytes\n",
+            kept, (unsigned long long)total_count,
+            (unsigned long long)total_bytes);
     fprintf(out, "  rank      count        bytes  tag   callsite\n");
     for (i = 0; i < top_n; i++) {
-        fprintf(out, "  %4d  %9lu  %11lu  %-4s  %s:%d\n",
+        fprintf(out, "  %4d  %9llu  %11llu  %-4s  %s:%d\n",
                 i + 1,
-                copy[i].count,
-                copy[i].bytes,
+                (unsigned long long)copy[i].count,
+                (unsigned long long)copy[i].bytes,
                 tag_name(copy[i].tag),
                 copy[i].file,
                 copy[i].line);
