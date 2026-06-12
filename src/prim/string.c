@@ -1286,6 +1286,87 @@ static mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
     return mino_string_n(S, start, (size_t)(end_ptr - start));
 }
 
+/* Grow *buf/*cap to hold at least need bytes. Returns 1 on success, 0 on OOM
+ * (frees *buf and sets *buf to NULL). SIZE_MAX/2 overflow guard included. */
+static int str_buf_grow(mino_state *S, char **buf, size_t *cap, size_t need)
+{
+    char *newbuf;
+    size_t newcap = (*cap == 0) ? 128 : *cap;
+    while (newcap < need) {
+        if (newcap > SIZE_MAX / 2) {
+            free(*buf);
+            *buf = NULL;
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "str: result size overflow");
+            return 0;
+        }
+        newcap *= 2;
+    }
+    newbuf = (char *)realloc(*buf, newcap);
+    if (newbuf == NULL) {
+        free(*buf);
+        *buf = NULL;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", "out of memory");
+        return 0;
+    }
+    *buf = newbuf;
+    *cap = newcap;
+    return 1;
+}
+
+/* Append `nbytes` bytes from `src` to the dynamic buffer *buf/*len/*cap.
+ * Returns 1 on success, 0 on OOM (frees *buf and sets it to NULL). */
+static int str_buf_append(mino_state *S, char **buf, size_t *len, size_t *cap,
+                          const char *src, size_t nbytes)
+{
+    size_t need = *len + nbytes + 1;
+    if (need > *cap && !str_buf_grow(S, buf, cap, need)) return 0;
+    memcpy(*buf + *len, src, nbytes);
+    *len += nbytes;
+    return 1;
+}
+
+/* Render a bigdec value (without the trailing M) into fb[256].
+ * Returns the number of bytes written (0 on error). */
+static int str_fmt_bigdec(const mino_val *a, char *fb, int fbsz)
+{
+    char *digits = mino_bigint_to_cstr(a->as.bigdec.unscaled);
+    int   fn2    = 0;
+    if (digits == NULL) return 0;
+    {
+        int scale        = a->as.bigdec.scale;
+        int neg          = (digits[0] == '-');
+        int dlen         = (int)strlen(digits);
+        int int_part_len = dlen - (neg ? 1 : 0) - scale;
+        if (scale == 0) {
+            fn2 = snprintf(fb, (size_t)fbsz, "%s", digits);
+        } else if (int_part_len > 0) {
+            int j, k = 0;
+            for (j = 0; j < (neg ? 1 : 0) + int_part_len && k < fbsz - 1; j++)
+                fb[k++] = digits[j];
+            if (k < fbsz - 1) fb[k++] = '.';
+            for (; j < dlen && k < fbsz - 1; j++) fb[k++] = digits[j];
+            fb[k] = '\0';
+            fn2 = k;
+        } else {
+            int pad, k = 0;
+            if (neg && k < fbsz - 1) fb[k++] = '-';
+            if (k + 2 < fbsz) { fb[k++] = '0'; fb[k++] = '.'; }
+            for (pad = 0; pad < -int_part_len && k < fbsz - 1; pad++)
+                fb[k++] = '0';
+            {
+                const char *src = digits + (neg ? 1 : 0);
+                while (*src && k < fbsz - 1) fb[k++] = *src++;
+            }
+            fb[k] = '\0';
+            fn2 = k;
+        }
+    }
+    free(digits);
+    return fn2;
+}
+
 /*
  * (str & args) — concatenate printed representations. Strings contribute
  * their raw content (no quotes); everything else uses the printer form.
@@ -1308,25 +1389,8 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
             a = a->as.regex.source;
         }
         if (a != NULL && mino_type_of(a) == MINO_STRING) {
-            /* Append raw string content without quotes. */
-            size_t need = len + a->as.s.len + 1;
-            if (need > cap) {
-                char *newbuf;
-                cap = cap == 0 ? 128 : cap;
-                while (cap < need) {
-                    if (cap > SIZE_MAX / 2) {
-                        free(buf);
-                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "str: result size overflow");
-                        return NULL;
-                    }
-                    cap *= 2;
-                }
-                newbuf = (char *)realloc(buf, cap);
-                if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
-                buf = newbuf;
-            }
-            memcpy(buf + len, a->as.s.data, a->as.s.len);
-            len += a->as.s.len;
+            if (!str_buf_append(S, &buf, &len, &cap,
+                                a->as.s.data, a->as.s.len)) return NULL;
         } else if (a != NULL && mino_type_of(a) == MINO_NIL) {
             /* nil contributes nothing. */
         } else if (a == NULL) {
@@ -1347,94 +1411,19 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
                 char *digits = mino_bigint_to_cstr(a);
                 if (digits != NULL) {
                     size_t plen = strlen(digits);
-                    size_t need2 = len + plen + 1;
-                    if (need2 > cap) {
-                        char *newbuf;
-                        cap = cap == 0 ? 128 : cap;
-                        while (cap < need2) cap *= 2;
-                        newbuf = (char *)realloc(buf, cap);
-                        if (newbuf == NULL) {
-                            free(digits);
-                            free(buf);
-                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                                          "internal", "MIN001", "out of memory");
-                            return NULL;
-                        }
-                        buf = newbuf;
-                    }
-                    memcpy(buf + len, digits, plen);
-                    len += plen;
+                    int ok = str_buf_append(S, &buf, &len, &cap, digits, plen);
                     free(digits);
+                    if (!ok) return NULL;
                 }
                 n = 0;
                 break;
             }
             case MINO_BIGDEC: {
                 /* `str` strips the readable-form M suffix. */
-                char *digits = mino_bigint_to_cstr(a->as.bigdec.unscaled);
-                if (digits != NULL) {
-                    int scale = a->as.bigdec.scale;
-                    int neg = (digits[0] == '-');
-                    int dlen = (int)strlen(digits);
-                    char fb[256];
-                    int fn2 = 0;
-                    if (scale == 0) {
-                        fn2 = snprintf(fb, sizeof(fb), "%s", digits);
-                    } else {
-                        int int_part_len = dlen - (neg ? 1 : 0) - scale;
-                        if (int_part_len > 0) {
-                            int j, k = 0;
-                            for (j = 0; j < (neg ? 1 : 0) + int_part_len &&
-                                        k < (int)sizeof(fb) - 1; j++) {
-                                fb[k++] = digits[j];
-                            }
-                            if (k < (int)sizeof(fb) - 1) fb[k++] = '.';
-                            for (; j < dlen && k < (int)sizeof(fb) - 1; j++) {
-                                fb[k++] = digits[j];
-                            }
-                            fb[k] = '\0';
-                            fn2 = k;
-                        } else {
-                            int pad;
-                            int k = 0;
-                            if (neg && k < (int)sizeof(fb) - 1) fb[k++] = '-';
-                            if (k + 2 < (int)sizeof(fb)) {
-                                fb[k++] = '0'; fb[k++] = '.';
-                            }
-                            for (pad = 0; pad < -int_part_len &&
-                                          k < (int)sizeof(fb) - 1; pad++) {
-                                fb[k++] = '0';
-                            }
-                            {
-                                const char *src = digits + (neg ? 1 : 0);
-                                while (*src && k < (int)sizeof(fb) - 1) {
-                                    fb[k++] = *src++;
-                                }
-                            }
-                            fb[k] = '\0';
-                            fn2 = k;
-                        }
-                    }
-                    free(digits);
-                    if (fn2 > 0) {
-                        size_t need2 = len + (size_t)fn2 + 1;
-                        if (need2 > cap) {
-                            char *newbuf;
-                            cap = cap == 0 ? 128 : cap;
-                            while (cap < need2) cap *= 2;
-                            newbuf = (char *)realloc(buf, cap);
-                            if (newbuf == NULL) {
-                                free(buf);
-                                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                                              "internal", "MIN001", "out of memory");
-                                return NULL;
-                            }
-                            buf = newbuf;
-                        }
-                        memcpy(buf + len, fb, (size_t)fn2);
-                        len += (size_t)fn2;
-                    }
-                }
+                char fb[256];
+                int fn2 = str_fmt_bigdec(a, fb, (int)sizeof(fb));
+                if (fn2 > 0 && !str_buf_append(S, &buf, &len, &cap,
+                                                fb, (size_t)fn2)) return NULL;
                 n = 0;
                 break;
             }
@@ -1515,18 +1504,9 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
                  * produces readable output, not #<?>. */
                 mino_val *printed = print_to_string(S, a);
                 if (printed != NULL && mino_type_of(printed) == MINO_STRING) {
-                    size_t plen = printed->as.s.len;
-                    size_t need2 = len + plen + 1;
-                    if (need2 > cap) {
-                        char *newbuf;
-                        cap = cap == 0 ? 128 : cap;
-                        while (cap < need2) cap *= 2;
-                        newbuf = (char *)realloc(buf, cap);
-                        if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
-                        buf = newbuf;
-                    }
-                    memcpy(buf + len, printed->as.s.data, plen);
-                    len += plen;
+                    if (!str_buf_append(S, &buf, &len, &cap,
+                                        printed->as.s.data,
+                                        printed->as.s.len)) return NULL;
                     n = 0; /* already appended */
                 } else {
                     n = snprintf(tmp, sizeof(tmp), "#<%s>",
@@ -1538,19 +1518,8 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
                 break;
             }
             }
-            if (n > 0) {
-                size_t need = len + (size_t)n + 1;
-                if (need > cap) {
-                    char *newbuf;
-                    cap = cap == 0 ? 128 : cap;
-                    while (cap < need) cap *= 2;
-                    newbuf = (char *)realloc(buf, cap);
-                    if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
-                    buf = newbuf;
-                }
-                memcpy(buf + len, tmp, (size_t)n);
-                len += (size_t)n;
-            }
+            if (n > 0 && !str_buf_append(S, &buf, &len, &cap,
+                                          tmp, (size_t)n)) return NULL;
         }
         args = args->as.cons.cdr;
     }

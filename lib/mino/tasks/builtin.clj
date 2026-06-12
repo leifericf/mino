@@ -85,7 +85,7 @@
    "src/prim/lazy.c"
    "src/prim/string.c" "src/prim/io.c"
    "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
-   "src/prim/stateful.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/module.c"
+   "src/prim/stateful.c" "src/prim/stateful_bindings.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/module.c"
    "src/prim/ns.c"
    "src/prim/fs.c" "src/prim/proc.c"
    "src/prim/host.c" "src/prim/jvm_statics.c" "src/interop/syntax.c"
