@@ -121,18 +121,25 @@
 
 ;; --- report dispatch ---
 
-;; report is a dynamic fn that receives a result map with at least a
-;; :type key.  Rebind it to plug in a custom reporter.  Default
-;; implementations handle :pass, :fail, :error, :summary; all other
-;; types are silently ignored.
+;; report receives a result map with at least a :type key and dispatches
+;; on that key.  Extend it method-by-method with (defmethod report :type
+;; ...) to add a new event handler alongside the built-in set, or rebind
+;; the whole var with binding to swap in a different dispatcher.  The var
+;; is both a multimethod (so defmethod extension takes effect) and
+;; ^:dynamic (so binding-based replacement still works).  Built-in
+;; methods handle :pass, :fail, :error and :summary; every other :type
+;; falls through the :default method and is silently ignored.
 
-(defn- report-pass [m]
+(def ^:dynamic report
+  (create-multimethod :type :default))
+
+(defmethod report :pass [m]
   (with-test-out (inc-report-counter :pass)))
 
-(defn- report-fail [m]
+(defmethod report :fail [m]
   (with-test-out
     (inc-report-counter :fail)
-    ;; Also push into :failures for the legacy run-tests-impl flow.
+    ;; Also push into :failures for the run-tests-impl flow.
     (when *report-counters*
       (swap! *report-counters* update :failures
              (fnil conj []) m))
@@ -142,7 +149,7 @@
     (println "expected:" (pr-str (:expected m)))
     (println "  actual:" (pr-str (:actual m)))))
 
-(defn- report-error [m]
+(defmethod report :error [m]
   (with-test-out
     (inc-report-counter :error)
     (when *report-counters*
@@ -154,22 +161,13 @@
     (println "expected:" (pr-str (:expected m)))
     (println "  actual:" (pr-str (:actual m)))))
 
-(defn- report-summary [m]
+(defmethod report :summary [m]
   (with-test-out
     (println "\nRan" (:test m) "tests containing"
              (+ (or (:pass m) 0) (or (:fail m) 0) (or (:error m) 0)) "assertions.")
     (println (:fail m) "failures," (:error m) "errors.")))
 
-(defn- report-default [m])  ; silently ignore begin-test-ns, end-test-ns, etc.
-
-(def ^:dynamic report
-  (fn [m]
-    (case (:type m)
-      :pass    (report-pass m)
-      :fail    (report-fail m)
-      :error   (report-error m)
-      :summary (report-summary m)
-      (report-default m))))
+(defmethod report :default [m])  ; silently ignore begin-test-ns, end-test-ns, etc.
 
 ;; --- do-report ---
 
@@ -211,11 +209,43 @@
                    :expected '~form :actual value#}))
      value#))
 
+;; --- Internal report helpers shared by the built-in assert-expr methods ---
+
+(defn assert-pass! []
+  (do-report {:type :pass}))
+
+(defn assert-fail! [form msg detail]
+  (do-report {:type :fail
+              :message msg
+              :expected form
+              :actual detail}))
+
+(defn assert-error! [form msg thrown]
+  (do-report {:type :error
+              :message msg
+              :expected form
+              :actual thrown}))
+
+(defn exception-message-for-match [e]
+  ;; Best-effort: pull a string out of the thrown value for regex match.
+  (cond
+    (string? e)            e
+    (and (map? e)
+         (contains? e :mino/message)) (:mino/message e)
+    (and (map? e)
+         (contains? e :message))      (:message e)
+    :else                  (or (try (ex-message e) (catch _ nil))
+                               (pr-str e))))
+
 ;; --- assert-expr multimethod ---
 
-;; assert-expr dispatches on the first element of the test form.
-;; Methods return a quoted form that, when evaluated, calls do-report
-;; with :pass or :fail.  Use defmethod to extend for new assertion kinds.
+;; assert-expr is the single per-form expansion point behind is: for
+;; every test form, (is form msg) expands to (try-expr msg form), which
+;; calls (assert-expr msg form).  assert-expr dispatches on the first
+;; element of the test form and returns a quoted form that, when
+;; evaluated, calls do-report with :pass, :fail or :error.  Extend it
+;; with (defmethod assert-expr 'my-op ...) and the new shape fires for
+;; every is that uses it -- no editing of is itself.
 
 (defmulti assert-expr
   (fn [msg form]
@@ -232,6 +262,57 @@
     (assert-predicate msg form)
     (assert-any msg form)))
 
+;; (is (= a b)) binds both arguments, compares, and reports the evaluated
+;; values on failure.  = is an ordinary function, so :default would route
+;; it through assert-predicate; the explicit method keeps the canonical
+;; per-operator extension point visible and overridable.
+(defmethod assert-expr '= [msg form]
+  (let [gs-exp (gensym) gs-act (gensym) gs-res (gensym)
+        a (first (rest form))
+        b (first (rest (rest form)))]
+    `(let [~gs-exp ~a
+           ~gs-act ~b
+           ~gs-res (= ~gs-exp ~gs-act)]
+       (if ~gs-res
+         (assert-pass!)
+         (assert-fail! '~form ~msg
+                       (str "expected: " (pr-str ~gs-exp)
+                            "\n    actual: " (pr-str ~gs-act))))
+       ~gs-res)))
+
+;; (is (thrown? type body...)) passes when body throws.  The form also
+;; accepts the single-argument shorthand (thrown? body): mino has no
+;; exception class hierarchy, so the type symbol is documentation-only
+;; and any throw counts as a pass.
+(defmethod assert-expr 'thrown? [msg form]
+  (let [args       (rest form)
+        body-forms (if (= 1 (count args)) args (rest args))]
+    `(try
+       (do ~@body-forms
+           (assert-fail! '~form ~msg "expected exception but none thrown"))
+       (catch __e (assert-pass!)))))
+
+;; (is (thrown-with-msg? regex body...)) passes when body throws and the
+;; thrown value's message matches regex.  Accepts an optional leading
+;; type symbol before the regex for canon compatibility.
+(defmethod assert-expr 'thrown-with-msg? [msg form]
+  (let [args      (rest form)
+        first-arg (first args)
+        typed?    (and (symbol? first-arg)
+                       (not (re-find #"^#" (pr-str first-arg))))
+        regex-form (if typed? (second args) first-arg)
+        body-forms (if typed? (rest (rest args)) (rest args))]
+    `(try
+       (do ~@body-forms
+           (assert-fail! '~form ~msg "expected exception but none thrown"))
+       (catch __e
+         (let [m# (exception-message-for-match __e)]
+           (if (and m# (re-find ~regex-form m#))
+             (assert-pass!)
+             (assert-fail! '~form ~msg
+                           (str "thrown message did not match " (pr-str ~regex-form)
+                                "; got: " (pr-str m#)))))))))
+
 ;; --- try-expr ---
 
 (defmacro try-expr
@@ -239,130 +320,16 @@
   [msg form]
   `(try ~(assert-expr msg form)
         (catch __e
-          (do-report {:type :error :message ~msg
-                      :expected '~form :actual __e}))))
-
-;; --- Internal helpers (legacy path used by is macro) ---
-
-(defn assert-pass! []
-  (inc-report-counter :pass))
-
-(defn assert-fail! [form msg detail]
-  (let [ctx   (reverse *testing-contexts*)
-        tname *current-test*
-        entry {:test tname
-               :form form
-               :message msg
-               :detail detail
-               :context ctx}]
-    (inc-report-counter :fail)
-    (when *report-counters*
-      (swap! *report-counters* update :failures (fnil conj []) entry))))
-
-(defn assert-error! [form msg thrown]
-  (let [ctx   (reverse *testing-contexts*)
-        tname *current-test*
-        entry {:test tname
-               :form form
-               :message msg
-               :error (str thrown)
-               :context ctx}]
-    (inc-report-counter :error)
-    (when *report-counters*
-      (swap! *report-counters* update :failures (fnil conj []) entry))))
-
-;; --- Assertion helpers for the is macro ---
-
-(defn- thrown?-form? [sym]
-  (and (symbol? sym) (= "thrown?" (name sym))))
-
-(defn- thrown-with-msg?-form? [sym]
-  (and (symbol? sym) (= "thrown-with-msg?" (name sym))))
-
-(defmacro is-thrown [expr msg]
-  ;; expr matches either of two shapes:
-  ;;   (thrown? <type> <body>...)  -- JVM-clojure compatible
-  ;;   (thrown? <body>)            -- mino single-arg shorthand
-  ;; mino has no exception class hierarchy; the type symbol is
-  ;; documentation-only, so any throw counts as a pass.
-  (let [args        (rest expr)
-        body-forms  (if (= 1 (count args)) args (rest args))]
-    `(try
-       (do ~@body-forms
-           (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
-       (catch __e (assert-pass!)))))
-
-(defn exception-message-for-match [e]
-  ;; Best-effort: pull a string out of the thrown value for regex match.
-  (cond
-    (string? e)            e
-    (and (map? e)
-         (contains? e :mino/message)) (:mino/message e)
-    (and (map? e)
-         (contains? e :message))      (:message e)
-    :else                  (or (try (ex-message e) (catch _ nil))
-                               (pr-str e))))
-
-(defmacro is-thrown-with-msg [expr msg]
-  (let [args (rest expr)
-        first-arg  (first args)
-        regex-form (if (and (symbol? first-arg)
-                            (not (re-find #"^#" (pr-str first-arg))))
-                     (second args)
-                     first-arg)
-        body-forms (if (and (symbol? first-arg)
-                            (not (re-find #"^#" (pr-str first-arg))))
-                     (rest (rest args))
-                     (rest args))]
-    `(try
-       (do ~@body-forms
-           (assert-fail! (pr-str '~expr) ~msg
-                         "expected exception but none thrown"))
-       (catch __e
-         (let [m# (exception-message-for-match __e)]
-           (if (and m# (re-find ~regex-form m#))
-             (assert-pass!)
-             (assert-fail! (pr-str '~expr) ~msg
-                           (str "thrown message did not match " (pr-str ~regex-form)
-                                "; got: " (pr-str m#)))))))))
-
-(defmacro is-eq [expr msg]
-  (let [gs-exp (gensym) gs-act (gensym)
-        a (first (rest expr))
-        b (first (rest (rest expr)))]
-    `(try
-       (let [~gs-exp ~a
-             ~gs-act ~b]
-         (if (= ~gs-exp ~gs-act)
-           (assert-pass!)
-           (assert-fail! (pr-str '~expr) ~msg
-             (str "expected: " (pr-str ~gs-exp) "\n    actual: " (pr-str ~gs-act)))))
-       (catch __e (assert-error! (pr-str '~expr) ~msg __e)))))
-
-(defmacro is-truthy [expr msg]
-  (let [gs (gensym)]
-    `(try
-       (let [~gs ~expr]
-         (if ~gs
-           (assert-pass!)
-           (assert-fail! (pr-str '~expr) ~msg
-             (str "expected truthy, got: " (pr-str ~gs)))))
-       (catch __e (assert-error! (pr-str '~expr) ~msg __e)))))
+          (assert-error! '~form ~msg __e))))
 
 ;; --- Public API macros ---
 
+;; Every form routes through try-expr/assert-expr, so user extensions to
+;; assert-expr take effect for all is forms.
 (defmacro is [& args]
   (let [expr (first args)
         msg  (second args)]
-    (cond
-      (and (cons? expr) (thrown?-form? (first expr)))
-      `(is-thrown ~expr ~msg)
-      (and (cons? expr) (thrown-with-msg?-form? (first expr)))
-      `(is-thrown-with-msg ~expr ~msg)
-      (and (cons? expr) (= (first expr) '=))
-      `(is-eq ~expr ~msg)
-      :else
-      `(is-truthy ~expr ~msg))))
+    `(try-expr ~msg ~expr)))
 
 ;; Uses list construction (not syntax-quote) so *testing-contexts* stays
 ;; as a bare unqualified symbol in the binding form.  Syntax-quote would
@@ -661,26 +628,45 @@
                       passes " passed, " fails " failed, " errors " errors"))
         {:test n :pass passes :fail fails :error errors :failures failures}))))
 
-(defn run-tests
+(defn run-namespace-tests
+  "Runs the registered tests for the given namespace names (strings) and
+  returns a summary map.  An empty collection runs nothing."
+  [ns-names]
+  (let [allowed (set ns-names)]
+    (run-tests-impl (filter (fn [t] (allowed (get t :ns))) @tests-registry))))
+
+(defn run-all-registered-tests
+  "Runs every test in the registry, regardless of namespace, and returns
+  a summary map.  Used by the suite driver (tests/run.clj) and by
+  run-tests-and-exit."
+  []
+  (run-tests-impl @tests-registry))
+
+(defmacro run-tests
   "Run registered tests and return a summary map.
 
-  With no arguments, runs every registered test.  Given namespace
-  symbols (or namespace objects), runs only tests registered in those
-  namespaces.
+  With no arguments, runs the tests registered in the current namespace
+  (*ns*), matching canonical clojure.test.  Given namespace symbols (or
+  namespace objects), runs only tests registered in those namespaces.
 
-  Prints a summary line and any failure details to stdout."
-  ([] (run-tests-impl @tests-registry))
-  ([& nss]
-   (let [allowed (set (map str nss))]
-     (run-tests-impl (filter (fn [t] (allowed (get t :ns))) @tests-registry)))))
+  Prints a summary line and any failure details to stdout.
+
+  A macro rather than a function so the no-arg arity can capture the
+  caller's *ns* at expansion time; mino resolves *ns* inside a function
+  body to that function's defining namespace, so a plain function could
+  not see the caller's namespace."
+  ([] `(run-namespace-tests [(str *ns*)]))
+  ([& nss] `(run-namespace-tests (map str (list ~@nss)))))
 
 (defn run-tests-and-exit
-  "CLI wrapper around run-tests: runs the tests and exits the process
-  with code 0 on no failures or errors, 1 otherwise.  A no-op while
-  suite-mode is true."
-  [& nss]
+  "Runs the whole registry and exits the process with code 0 on no
+  failures or errors, 1 otherwise.  A no-op while suite-mode is true.
+  Used as the bottom-of-file entry point in test files and by the suite
+  driver; it always runs every registered test, independent of the
+  namespace-scoped run-tests."
+  [& _nss]
   (when-not @suite-mode
-    (let [s (apply run-tests nss)]
+    (let [s (run-all-registered-tests)]
       (if (and (= 0 (get s :fail)) (= 0 (get s :error)))
         (exit 0)
         (exit 1)))))
