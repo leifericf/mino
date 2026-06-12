@@ -99,7 +99,10 @@ void mino_bc_check_require(mino_state *S, mino_val *fn)
     if (MINO_BC_RUNNABLE(fn)) return;
     /* Decline mode: report and abort. The fn's params/body are not
      * compilable yet; whoever flipped require_flag should run with
-     * an expanded compiler. */
+     * an expanded compiler.
+     * Class I abort: MINO_BC_REQUIRE was set but the compiler cannot
+     * honour it.  This is a deployment/configuration error, not a
+     * runtime condition; the process state cannot be recovered. */
     fprintf(stderr, "MINO_BC_REQUIRE: fn declined by compiler\n");
     abort();
 }
