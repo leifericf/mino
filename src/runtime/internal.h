@@ -582,7 +582,11 @@ int mino_eval_stack_guard(mino_state *S);
 static inline int mino_eval_stack_guard_fast(mino_state *S)
 {
     char probe;
+#if defined(__GNUC__) || defined(__clang__)
     if (__builtin_expect(&probe < S->eval_stack_limit, 0)) {
+#else
+    if (&probe < S->eval_stack_limit) {
+#endif
         return mino_eval_stack_guard(S);
     }
     return 1;
