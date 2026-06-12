@@ -481,7 +481,12 @@ void eval_special_register_vars(mino_state *S)
     /* Pin the two keywords allocated above: var_intern (and the other
      * allocation calls inside the loop) can trigger GC, and a
      * conservative scanner may miss pointers that the compiler keeps
-     * only in registers. */
+     * only in registers.
+     *
+     * These pins are safe from longjmp-bypass: eval_special_register_vars
+     * is called from sf_init on the first eval, before any user try frame
+     * is active.  OOM here terminates initialization; the embedder's error
+     * handler will report it via the state's top-level error mechanism. */
     gc_pin(placeholder);
     gc_pin(macro_kw);
     for (i = 0; i < k_public_form_docs_count; i++) {
