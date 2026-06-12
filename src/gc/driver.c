@@ -45,11 +45,11 @@ void gc_note_host_frame(mino_state *S, void *addr)
 int gc_freelist_class(size_t size)
 {
     switch (size) {
-    case sizeof(hamt_entry_t):    return 0;  /* 16 bytes */
-    case sizeof(mino_hamt_node_t): return 1; /* 24 bytes */
-    case sizeof(mino_env):      return 2;  /* 32 bytes */
-    case sizeof(mino_val):      return 3;  /* 64 bytes */
-    default:                      return -1;
+    case sizeof(hamt_entry_t):     return 0;  /* 16 bytes */
+    case sizeof(mino_hamt_node_t): return 1;  /* 24 bytes */
+    case sizeof(mino_env):         return 2;  /* 32 bytes */
+    case sizeof(mino_val):         return 3;  /* 64 bytes */
+    default:                       return -1;
     }
 }
 
@@ -372,7 +372,15 @@ static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
 /* gc_oom_throw -- raise the standard OOM mino diagnostic by longjmp'ing
  * into the active try frame, or abort if no try frame exists. Non-static
  * so checked-size paths in env/module/etc. can reach the same throw when
- * they detect overflow before the GC allocator gets a chance. */
+ * they detect overflow before the GC allocator gets a chance.
+ *
+ * Conformance deviation: JVM Clojure surfaces OutOfMemoryError, which
+ * derives from java.lang.Error and is conventionally not caught by user
+ * code (most catch forms only catch Exception subclasses). mino raises a
+ * catchable :internal/MIN001 map via try/catch instead. This is a
+ * deliberate deviation: the embedder model requires that OOM be
+ * recoverable when a try frame is in place, so the host can free
+ * resources and retry rather than crashing the process. */
 void gc_oom_throw(mino_state *S, const char *msg)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
@@ -520,9 +528,8 @@ char *dup_n_inner(mino_state *S, const char *s, size_t len)
 
 /* ------------------------------------------------------------------------- */
 /* Shared trace machinery: mark-stack push, interior-pointer resolve, and    */
-/* per-header trace. Reused by any collector (currently just the full-heap   */
-/* major in gc_major_collect; the minor collector added in a later step will use   */
-/* the same primitives).                                                     */
+/* per-header trace. Reused by both the full-heap major collector            */
+/* (gc_major_collect) and the generational minor collector (minor.c).        */
 /* ------------------------------------------------------------------------- */
 
 #define GC_MARK_STACK_INIT 256
@@ -731,10 +738,8 @@ void gc_register_finalizer(mino_state *S, unsigned char tag,
 }
 
 /* Wire up every built-in tag. Component-owned tracers (collections,
- * eval/bc, values) currently live in driver.c; later cycles move
- * them out to their owning components and the component-side hook
- * (mino_collections_register_gc_handlers etc.) calls
- * gc_register_tracer. */
+ * eval/bc, values) live in their own gc_handlers.c files and register
+ * via mino_<component>_register_gc_handlers called from state_init. */
 void gc_register_default_tracers(mino_state *S)
 {
     /* GC_T_RAW intentionally stays NULL: a POD buffer has nothing to

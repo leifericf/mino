@@ -173,11 +173,11 @@ void   gc_minor_collect(mino_state *S);
 /* Incremental major state machine. gc_major_begin seeds the mark stack
  * from roots and transitions IDLE -> MAJOR_MARK. gc_major_step drains
  * up to budget_words headers (pass SIZE_MAX for an unbounded drain).
- * gc_major_remark performs the final conservative stack rescan and
- * drains any pending SATB-pushed previous values. gc_major_sweep
- * transitions MAJOR_MARK -> MAJOR_SWEEP, sweeps dead OLD, and returns
- * to IDLE. gc_major_collect chains all four back-to-back for a fully
- * STW major cycle. */
+ * gc_major_remark re-walks all precise roots, performs the final
+ * conservative stack rescan, and drains the mark stack to empty.
+ * gc_major_sweep_phase transitions MAJOR_MARK -> IDLE, sweeps dead OLD,
+ * and resets accounting. gc_major_collect chains all four back-to-back
+ * for a fully STW major cycle. */
 void   gc_major_begin(mino_state *S);
 void   gc_major_step(mino_state *S, size_t budget_words);
 void   gc_major_remark(mino_state *S);
