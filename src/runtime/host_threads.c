@@ -353,8 +353,13 @@ static void worker_run(mino_future *impl, char *stack_anchor)
                 mino_val    *key = vec_nth(snap->as.map.key_order, i);
                 mino_val    *val = map_get_val(snap, key);
                 dyn_binding_t *b;
+                /* Skip keys that dyn_binding_make would reject as
+                 * invalid type.  After this guard, a NULL return can
+                 * only mean malloc failure (OOM), not a type mismatch. */
                 if (key == NULL
-                    || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
+                    || (mino_type_of(key) != MINO_SYMBOL
+                        && mino_type_of(key) != MINO_STRING
+                        && mino_type_of(key) != MINO_VAR)) {
                     continue;
                 }
                 /* dyn_binding_make re-resolves the snapshot's
