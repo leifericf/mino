@@ -378,7 +378,10 @@ void gc_oom_throw(mino_state *S, const char *msg)
     if (mino_current_ctx(S)->try_depth > 0) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                       "internal", "MIN001", msg);
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
+        /* Use the pre-allocated singleton so the catch handler receives a
+         * real {:mino/kind :internal :mino/code "MIN001" ...} map instead
+         * of nil.  No allocation at throw time: GC is broken here. */
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = S->oom_exception;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
     abort(); /* Class I: no error frame to recover through */

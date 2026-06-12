@@ -141,3 +141,24 @@
       (vec (range 50)))
     (is (= 43 (my-inc 42)))
     (is (= -7 (my-neg 7)))))
+
+;; Regression: gc_oom_throw stored NULL in the catch-frame exception slot,
+;; so a (catch e ...) handler received nil instead of a proper OOM error
+;; map.  The pre-allocated oom_exception singleton must survive GC and
+;; carry :mino/kind :internal and :mino/code "MIN001".
+(deftest oom-exception-identity
+  ;; Trigger a simulated OOM on the very next allocation and verify the
+  ;; catch handler receives a recognisable MIN001 exception map, not nil.
+  (let [result
+        (try
+          (do (set-fail-alloc-at! 1)
+              ;; Force an allocation so the countdown fires.
+              (vec [])
+              :no-throw)
+          (catch e e))]
+    (is (map? result)
+        "OOM catch handler receives a map, not nil")
+    (is (= :internal (:mino/kind result))
+        "OOM exception carries :mino/kind :internal")
+    (is (= "MIN001" (:mino/code result))
+        "OOM exception carries :mino/code MIN001")))

@@ -266,6 +266,23 @@ mino_state *mino_state_new(void)
         abort(); /* unrecoverable: no state to report error through */
     }
     state_init(st);
+    /* Pre-allocate the OOM exception singleton now, while memory is
+     * plentiful.  gc_oom_throw stores this pointer into the active catch
+     * frame instead of NULL, so a (catch e ...) clause receives a proper
+     * {:mino/kind :internal :mino/code "MIN001" :mino/message "out of
+     * memory"} map rather than nil.  try_depth is 0 here, so any
+     * allocation failure in the four mino_* calls below is unrecoverable
+     * and aborts -- same contract as the calloc above. */
+    {
+        mino_val *keys[3], *vals[3];
+        keys[0] = mino_keyword(st, "mino/kind");
+        vals[0] = mino_keyword(st, "internal");
+        keys[1] = mino_keyword(st, "mino/code");
+        vals[1] = mino_string(st, "MIN001");
+        keys[2] = mino_keyword(st, "mino/message");
+        vals[2] = mino_string(st, "out of memory");
+        st->oom_exception = mino_map(st, keys, vals, 3);
+    }
     return st;
 }
 

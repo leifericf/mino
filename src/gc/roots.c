@@ -499,6 +499,7 @@ static void gc_mark_runtime_globals(mino_state *S)
 {
     gc_mark_interior(S, S->sort_comp_fn);
     gc_mark_interior(S, S->print_method_fn);
+    gc_mark_interior(S, S->oom_exception);
     gc_mark_interior(S, S->recur_sentinel.as.recur.args);
     gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
     gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);

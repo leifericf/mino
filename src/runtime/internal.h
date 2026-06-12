@@ -382,6 +382,12 @@ struct mino_state {
     mino_val     *sort_comp_fn;
     mino_env     *sort_comp_env;
 
+    /* Pre-allocated OOM exception map.  Populated once in mino_state_new
+     * after GC is ready.  Stored here so gc_oom_throw can assign it as the
+     * catch-frame exception without any allocation at throw time.  Marked
+     * as a GC root in gc_mark_runtime_globals. */
+    mino_val     *oom_exception;
+
     /* Late-binding print-method hook. NULL during core bootstrap and any
      * state that never installed one; set via set-print-method! once the
      * multimethod is registered. When non-NULL, prim_pr / prim_prn route
