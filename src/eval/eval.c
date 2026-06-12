@@ -60,6 +60,11 @@ mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
         mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
         if (amb != NULL) mac = mino_env_get(amb, buf);
     }
+    /* A namespace env entry from :refer may be a var wrapping the macro.
+     * Unwrap one level so macros referred via require/use are recognized. */
+    if (mac != NULL && mino_type_of(mac) == MINO_VAR && mac->as.var.bound) {
+        mac = mac->as.var.root;
+    }
     if (mac == NULL || mino_type_of(mac) != MINO_MACRO) {
         return form;
     }

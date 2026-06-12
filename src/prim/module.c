@@ -391,20 +391,26 @@ static int apply_refer_options(mino_state *S, mino_val *mod_sym,
                 && rsym->as.s.len < 256) {
                 char rbuf[256];
                 size_t rn = rsym->as.s.len;
-                mino_val *val = NULL;
+                /* Prefer binding the source var so eval_symbol's auto-deref
+                 * path consults the dyn stack (thread bindings of dynamic
+                 * vars remain visible across refer boundaries). Fall back to
+                 * the raw env value for macro/primitive entries that have no
+                 * interned var. Mirrors prim_refer in ns.c. */
+                mino_val *bind_val = NULL;
                 const char *bind_name = rbuf;
                 size_t      bind_len  = rn;
                 memcpy(rbuf, rsym->as.s.data, rn);
                 rbuf[rn] = '\0';
-                if (src != NULL) {
-                    env_binding_t *b = env_find_here(src, rbuf);
-                    if (b != NULL) val = b->val;
-                }
-                if (val == NULL) {
+                {
                     mino_val *var = var_find(S, modbuf, rbuf);
-                    if (var != NULL) val = var->as.var.root;
+                    if (var != NULL) {
+                        bind_val = var;
+                    } else if (src != NULL) {
+                        env_binding_t *b = env_find_here(src, rbuf);
+                        if (b != NULL) bind_val = b->val;
+                    }
                 }
-                if (val == NULL) {
+                if (bind_val == NULL) {
                     char msg[600];
                     snprintf(msg, sizeof(msg),
                         "require: %s does not refer var %s",
@@ -433,7 +439,7 @@ static int apply_refer_options(mino_state *S, mino_val *mod_sym,
                     char nbuf[256];
                     memcpy(nbuf, bind_name, bind_len);
                     nbuf[bind_len] = '\0';
-                    env_bind(S, target, nbuf, val);
+                    env_bind(S, target, nbuf, bind_val);
                 }
             }
         }
@@ -478,9 +484,18 @@ static int apply_refer_options(mino_state *S, mino_val *mod_sym,
             }
             if (bind_len < 256) {
                 char nbuf[256];
+                mino_val *var;
                 memcpy(nbuf, bind_name, bind_len);
                 nbuf[bind_len] = '\0';
-                env_bind(S, target, nbuf, src->bindings[ri].val);
+                /* Prefer the source var over the raw env value so that
+                 * dynamic-var thread bindings remain visible in the
+                 * consumer namespace (mirrors prim_refer in ns.c). */
+                var = var_find(S, modbuf, bname);
+                if (var != NULL) {
+                    env_bind(S, target, nbuf, var);
+                } else {
+                    env_bind(S, target, nbuf, src->bindings[ri].val);
+                }
             }
         }
     }

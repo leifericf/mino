@@ -300,13 +300,19 @@ static int ns_process_require_spec_ex(mino_state *S, mino_val *spec,
                     if (sym_vec_contains(exclude_vec, rbuf, rn)) {
                         continue;
                     }
-                    if (src != NULL) {
-                        env_binding_t *b = env_find_here(src, rbuf);
-                        if (b != NULL) val = b->val;
-                    }
-                    if (val == NULL) {
+                    /* Prefer binding the source var so eval_symbol's
+                     * auto-deref path consults the dyn stack (thread bindings
+                     * of dynamic vars remain visible across refer boundaries).
+                     * Fall back to the raw value for entries without a var.
+                     * Mirrors prim_refer in ns.c. */
+                    {
                         mino_val *var = var_find(S, modbuf, rbuf);
-                        if (var != NULL) val = var->as.var.root;
+                        if (var != NULL) {
+                            val = var;
+                        } else if (src != NULL) {
+                            env_binding_t *b = env_find_here(src, rbuf);
+                            if (b != NULL) val = b->val;
+                        }
                     }
                     if (val == NULL) continue;
                     renamed = rename_map_lookup(rename_map, rbuf, rn);
@@ -350,14 +356,17 @@ static int ns_process_require_spec_ex(mino_state *S, mino_val *spec,
                 if (mino_type_of(var) == MINO_VAR && var->as.var.is_private) continue;
                 if (sym_vec_contains(exclude_vec, nm, nl)) continue;
                 renamed = rename_map_lookup(rename_map, nm, nl);
+                /* Bind the var (already fetched above) so thread
+                 * bindings of dynamic vars remain visible in the consumer
+                 * namespace. Mirrors prim_refer in ns.c. */
                 if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL
                     && renamed->as.s.len < 256) {
                     char nbuf[256];
                     memcpy(nbuf, renamed->as.s.data, renamed->as.s.len);
                     nbuf[renamed->as.s.len] = '\0';
-                    env_bind(S, target, nbuf, src->bindings[vi].val);
+                    env_bind(S, target, nbuf, var);
                 } else {
-                    env_bind(S, target, nm, src->bindings[vi].val);
+                    env_bind(S, target, nm, var);
                 }
             }
         }

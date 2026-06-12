@@ -3175,6 +3175,12 @@ static mino_val *probe_head_value(compiler_t *c, mino_val *head)
         mino_env *ns_env = ns_env_lookup(S, c->defining_ns);
         if (ns_env != NULL) {
             v = mino_env_get_sym(ns_env, head);
+            /* A :refer may store the source var rather than the raw value
+             * (mirrors prim_refer; see apply_refer_options). Unwrap one
+             * level so callers that test for MINO_MACRO still match. */
+            if (v != NULL && mino_type_of(v) == MINO_VAR && v->as.var.bound) {
+                v = v->as.var.root;
+            }
             if (v != NULL) return v;
         }
     }
