@@ -20,46 +20,58 @@
 
 void gc_mark_child_push_exported(mino_state *S, const void *p);
 
+/* Check whether an alts flag atom is already committed. A NULL flag
+ * (non-alts op) is treated as not-committed (returns 0). */
+static inline int flag_is_committed(const mino_val *flag)
+{
+    mino_val *cur;
+    if (flag == NULL) return 0;
+    /* Flag is an atom holding :pending or :committed. We check the
+     * atom's val pointer-equal to a sentinel keyword. */
+    if (mino_type_of(flag) != MINO_ATOM) return 0;
+    cur = flag->as.atom.val;
+    if (cur == NULL || mino_type_of(cur) != MINO_KEYWORD) return 0;
+    return cur->as.s.len == 9
+        && memcmp(cur->as.s.data, "committed", 9) == 0;
+}
+
 /* The empty op tombstone: all-NULL marks a slot whose alts flag was
  * committed elsewhere; drop-on-next-access. */
 static inline int op_is_committed(const mino_chan_op *op)
 {
-    if (op->flag == NULL) return 0;
-    /* Flag is an atom holding :pending or :committed. We check the
-     * atom's val pointer-equal to a sentinel keyword. */
-    if (mino_type_of(op->flag) != MINO_ATOM) return 0;
-    {
-        mino_val *cur = op->flag->as.atom.val;
-        if (cur == NULL || mino_type_of(cur) != MINO_KEYWORD) return 0;
-        return cur->as.s.len == 9
-            && memcmp(cur->as.s.data, "committed", 9) == 0;
+    return flag_is_committed(op->flag);
+}
+
+/* Try to commit an alts flag atom atomically. Succeeds (returns 1) iff
+ * the flag was not already :committed (then transitions it to :committed).
+ * A NULL flag or a non-atom flag is treated as already-committable (no-op,
+ * returns 1). */
+static int flag_try_commit(mino_state *S, mino_val *flag)
+{
+    mino_val *cur;
+    if (flag == NULL) return 1;
+    if (mino_type_of(flag) != MINO_ATOM) return 1;
+    cur = flag->as.atom.val;
+    if (cur != NULL && mino_type_of(cur) == MINO_KEYWORD
+        && cur->as.s.len == 9
+        && memcmp(cur->as.s.data, "committed", 9) == 0) {
+        return 0;
     }
+    /* Commit. The atom holds the value via gc_write_barrier-friendly
+     * direct write (this is the same pattern reset! uses on atoms). */
+    {
+        mino_val *committed = mino_keyword(S, "committed");
+        gc_write_barrier(S, flag, flag->as.atom.val, committed);
+        flag->as.atom.val = committed;
+    }
+    return 1;
 }
 
 /* Try to commit an alts op atomically. For non-alts ops (flag NULL),
- * always succeeds. For alts ops, succeeds iff the flag was :pending
- * (then transitions it to :committed). */
+ * always succeeds. For alts ops, delegates to flag_try_commit. */
 static int op_try_commit(mino_state *S, mino_chan_op *op)
 {
-    mino_val *flag = op->flag;
-    if (flag == NULL) return 1;
-    if (mino_type_of(flag) != MINO_ATOM) return 1;
-    {
-        mino_val *cur = flag->as.atom.val;
-        if (cur != NULL && mino_type_of(cur) == MINO_KEYWORD
-            && cur->as.s.len == 9
-            && memcmp(cur->as.s.data, "committed", 9) == 0) {
-            return 0;
-        }
-        /* Commit. The atom holds the value via gc_write_barrier-friendly
-         * direct write (this is the same pattern reset! uses on atoms). */
-        {
-            mino_val *committed = mino_keyword(S, "committed");
-            gc_write_barrier(S, flag, flag->as.atom.val, committed);
-            flag->as.atom.val = committed;
-        }
-        return 1;
-    }
+    return flag_try_commit(S, op->flag);
 }
 
 /* Drop committed putters/takers from the head of the queue. The queue
@@ -646,34 +658,16 @@ int mino_chan_put_alts(mino_state *S, mino_val *ch, mino_val *val,
      * the alts side; the actual atomic commit happens in op_try_commit
      * when we hand off. */
     if (impl->closed) {
-        if (callback != NULL) {
-            mino_val *committed = mino_keyword(S, "committed");
-            if (flag != NULL && mino_type_of(flag) == MINO_ATOM
-                && (flag->as.atom.val == NULL
-                    || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                    || flag->as.atom.val->as.s.len != 9
-                    || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)) {
-                gc_write_barrier(S, flag, flag->as.atom.val, committed);
-                flag->as.atom.val = committed;
-                schedule_alts_pair(S, callback, mino_false(S), ch);
-            }
+        if (callback != NULL && flag_try_commit(S, flag)) {
+            schedule_alts_pair(S, callback, mino_false(S), ch);
         }
         return 1;
     }
     rc = mino_chan_offer(S, ch, val, &accepted);
     if (rc != 0) return rc;
     if (accepted) {
-        if (callback != NULL && flag != NULL) {
-            mino_val *committed = mino_keyword(S, "committed");
-            if (mino_type_of(flag) == MINO_ATOM
-                && (flag->as.atom.val == NULL
-                    || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                    || flag->as.atom.val->as.s.len != 9
-                    || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)) {
-                gc_write_barrier(S, flag, flag->as.atom.val, committed);
-                flag->as.atom.val = committed;
-                schedule_alts_pair(S, callback, mino_true(S), ch);
-            }
+        if (callback != NULL && flag_try_commit(S, flag)) {
+            schedule_alts_pair(S, callback, mino_true(S), ch);
         }
         return 1;
     }
@@ -783,34 +777,19 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
                         mino_val *callback, mino_val *flag)
 {
     mino_chan_impl *impl;
-    mino_val *committed;
     if (ch == NULL || mino_type_of(ch) != MINO_CHAN) return -1;
     impl = ch->as.chan.impl;
-    committed = mino_keyword(S, "committed");
     /* Try immediate take. */
     if (impl->buf_kind == CHAN_BUF_PROMISE && impl->promise_set) {
-        if (flag != NULL && mino_type_of(flag) == MINO_ATOM
-            && (flag->as.atom.val == NULL
-                || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                || flag->as.atom.val->as.s.len != 9
-                || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)) {
-            gc_write_barrier(S, flag, flag->as.atom.val, committed);
-            flag->as.atom.val = committed;
+        if (flag_try_commit(S, flag)) {
             if (callback != NULL)
                 schedule_alts_pair(S, callback, impl->promise_val, ch);
         }
         return 1;
     }
     if (impl->buf_len > 0) {
-        if (flag != NULL && mino_type_of(flag) == MINO_ATOM
-            && (flag->as.atom.val == NULL
-                || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                || flag->as.atom.val->as.s.len != 9
-                || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)) {
-            mino_val *v;
-            gc_write_barrier(S, flag, flag->as.atom.val, committed);
-            flag->as.atom.val = committed;
-            v = chan_buf_pop(impl);
+        if (flag_try_commit(S, flag)) {
+            mino_val *v = chan_buf_pop(impl);
             /* Wake a parked putter if any. */
             drop_committed_putters(impl);
             if (impl->putters_len > 0) {
@@ -835,15 +814,9 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
     drop_committed_putters(impl);
     if (impl->putters_len > 0) {
         mino_chan_op putter = impl->putters[0];
-        if (flag != NULL && mino_type_of(flag) == MINO_ATOM
-            && (flag->as.atom.val == NULL
-                || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                || flag->as.atom.val->as.s.len != 9
-                || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)
-            && op_try_commit(S, &putter)) {
+        if (!flag_is_committed(flag) && op_try_commit(S, &putter)) {
             size_t i;
-            gc_write_barrier(S, flag, flag->as.atom.val, committed);
-            flag->as.atom.val = committed;
+            flag_try_commit(S, flag);
             for (i = 1; i < impl->putters_len; i++) {
                 impl->putters[i - 1] = impl->putters[i];
             }
@@ -857,13 +830,7 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
         return 1;
     }
     if (impl->closed) {
-        if (flag != NULL && mino_type_of(flag) == MINO_ATOM
-            && (flag->as.atom.val == NULL
-                || mino_type_of(flag->as.atom.val) != MINO_KEYWORD
-                || flag->as.atom.val->as.s.len != 9
-                || memcmp(flag->as.atom.val->as.s.data, "committed", 9) != 0)) {
-            gc_write_barrier(S, flag, flag->as.atom.val, committed);
-            flag->as.atom.val = committed;
+        if (flag_try_commit(S, flag)) {
             if (callback != NULL) schedule_alts_pair(S, callback, mino_nil(S), ch);
         }
         return 1;
