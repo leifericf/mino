@@ -370,13 +370,19 @@ void mino_lazy_inflight_unwind(mino_state *S, size_t mark)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     while (ctx->lazy_inflight_len > mark) {
-        mino_val *cell     = ctx->lazy_inflight[--ctx->lazy_inflight_len];
-        int       expected = LAZY_REALIZING;
+        mino_val *cell = ctx->lazy_inflight[--ctx->lazy_inflight_len];
+#if defined(_WIN32) && defined(_MSC_VER)
+        (void)InterlockedCompareExchange((volatile LONG *)&cell->as.lazy.realized,
+                                         (LONG)LAZY_UNREALIZED,
+                                         (LONG)LAZY_REALIZING);
+#else
+        int expected = LAZY_REALIZING;
         (void)__atomic_compare_exchange_n(&cell->as.lazy.realized,
                                           &expected, LAZY_UNREALIZED,
                                           0,
                                           __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE);
+#endif
     }
 }
 
