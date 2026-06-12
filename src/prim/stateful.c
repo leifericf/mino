@@ -392,10 +392,12 @@ static mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_e
             "compare-and-set!: first argument must be an atom");
     }
     if (atom_validate(S, a, new_val, env) != 0) return NULL;
-    gc_write_barrier(S, a, expected, new_val);
     if (!atom_cas_ptr(S, a, expected, new_val)) {
         return mino_false(S);
     }
+    /* Write barrier fires only after the CAS succeeds so it reflects an
+     * actual store; a failed CAS must not leave a stale barrier record. */
+    gc_write_barrier(S, a, expected, new_val);
     if (atom_notify_watches(S, a, expected, new_val, env) != 0) return NULL;
     return mino_true(S);
 }
@@ -753,6 +755,9 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
                     free(heap_key);
                     gc_oom_throw(S, "snapshot_thread_bindings: capacity overflow");
                 }
+                /* Pin old arrays before any allocation can trigger GC. */
+                if (keys != NULL) gc_pin((mino_val *)keys);
+                if (vals != NULL) gc_pin((mino_val *)vals);
                 nk = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, new_cap * sizeof(*nk));
                 /* Pin nk before the second allocation can trigger GC. */
@@ -760,6 +765,8 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
                 nv = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, new_cap * sizeof(*nv));
                 gc_unpin(1);
+                if (vals != NULL) gc_unpin(1);
+                if (keys != NULL) gc_unpin(1);
                 for (j = 0; j < len; j++) {
                     gc_valarr_set(S, nk, j, keys[j]);
                     gc_valarr_set(S, nv, j, vals[j]);
