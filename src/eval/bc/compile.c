@@ -104,7 +104,7 @@ void mino_bc_check_require(mino_state *S, mino_val *fn)
      * honour it.  This is a deployment/configuration error, not a
      * runtime condition; the process state cannot be recovered. */
     fprintf(stderr, "MINO_BC_REQUIRE: fn declined by compiler\n");
-    abort();
+    abort(); /* Class I: configuration error, process state unrecoverable */
 }
 
 #define BC_MAX_LOCALS 256
