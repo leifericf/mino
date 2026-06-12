@@ -196,6 +196,7 @@
 - Eval: Expose when, and, or in the public-form registry (ns-publics / doc / apropos)
 - Eval: Document gc_pin longjmp-safety at special form init
 - Eval: Fix var->meta :doc staleness for defmacro-redefined specials
+- Eval: Hoist doc_kw allocation out of registration loop
 - clojure.test: Fix run-tests no-arg arity to read *ns* dynamically; extract current-ns-str helper used by use-fixtures and run-tests
 - Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
 - Tests: Fix ns-resolution for renamed symbol in census_surface_test
