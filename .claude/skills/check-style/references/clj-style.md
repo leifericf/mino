@@ -18,6 +18,55 @@ Applies to everything written in the mino dialect: `src/core.clj`,
   difference** (document at site), or **infrastructure** (test harness
   issue, fix the harness).
 
+## Simplicity (design filter)
+
+- Prefer simple over easy: don't intertwine unrelated concerns —
+  state with time, data with behavior, logic with effects. Choose the
+  design with fewer braided concerns even when it is less familiar.
+- Values are immutable facts; model change as a succession of new
+  values, not in-place mutation. Mutable references (atoms) live at
+  the edges; pure functions take values and return values; `swap!`
+  takes a pure function.
+- Data first: plain maps with keyword keys for entities, options, and
+  configuration. `defrecord` only for protocol dispatch or a measured
+  hotspot — never to imitate classes.
+
+## Idiom checklist
+
+- Sequence library first: `map`/`filter`/`reduce`/`into`/`group-by`/
+  `keep` over manual `loop`/`recur`; `mapv`/`filterv`/`reduce-kv`
+  when a vector is wanted; `vec`, not `(into [] ...)`.
+- Nil punning: `(when (seq coll) ...)`, not
+  `(when-not (empty? coll) ...)`; sets as predicates where natural.
+- `when` for one-armed `if`; `if-let`/`when-let` over `let` + `if`;
+  `if-not`/`not=` over wrapped `not`; `cond` with `:else`; `case`
+  for compile-time constants; threading macros over deep nesting.
+- Multi-arity for defaulting (small arities call the largest,
+  ordered fewest-to-most); an options map instead of more than 3-4
+  positional parameters.
+- Errors: `ex-info` with rich data maps (ids, the relevant input
+  slice) at boundaries; explicit error values inside pure cores when
+  callers branch on outcome. Pick one per area; don't mix
+  arbitrarily.
+
+## Naming and formatting
+
+- Predicates end in `?`; effectful or mutating functions end in `!`;
+  dynamic vars wear earmuffs (`*out*`); conversions use `->`
+  (`row->user`); unused bindings are `_` or `_`-prefixed.
+- 2-space indent, no tabs; align `let` bindings and map values; no
+  commas in sequential literals; gather trailing parens; one blank
+  line between top-level forms.
+
+## What to avoid
+
+- Imperative index-walking where sequence functions suffice.
+- `def` inside functions; vars as hidden mutable state.
+- Macros where functions suffice: write the function first; a macro
+  is for genuine syntactic abstraction, never for a single call site
+  or to save characters.
+- Tacit overuse — `comp`/`partial`/`#()` chains that obscure intent.
+
 ## Tooling lives in the repo, in mino
 
 - Orchestration and tooling scripts are written in mino first
