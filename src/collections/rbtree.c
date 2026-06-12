@@ -154,6 +154,16 @@ int val_compare(const mino_val *a, const mino_val *b)
     if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
         return val_compare_vec_iter(a, b);
     }
+    /* Deviation from JVM Clojure: JVM compare throws ClassCastException when
+     * called on two values of incompatible types (e.g. a number and a string).
+     * mino's val_compare is intentionally a total order across all types:
+     * incompatible-type pairs fall through to type-enum comparison so that
+     * sorted collections can hold heterogeneous keys without error.  This
+     * matches the behaviour expected by sorted-map / sorted-set when no
+     * custom comparator is supplied and the key set is homogeneous in
+     * practice (the user is responsible for keeping keys comparable).
+     * If strict JVM conformance for cross-type compare is required, pass an
+     * explicit comparator that throws on incompatible types. */
     {
         mino_type ta = mino_type_of(a);
         mino_type tb = mino_type_of(b);
