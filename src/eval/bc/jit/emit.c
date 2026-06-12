@@ -630,6 +630,8 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * each carries its own 8-byte target literal. The pool follows
      * trampolines and holds the per-instruction immediate values
      * loaded via GOT-style adrp+ldr pairs. */
+    if (tramp_count > SIZE_MAX / MINO_JIT_TRAMPOLINE_SIZE) return -1;
+    if (pool_slots  > SIZE_MAX / sizeof(uint64_t))         return -1;
     size_t tramp_offset    = (code_size + 15u) & ~(size_t)15u;
     size_t tramp_bytes     = tramp_count * MINO_JIT_TRAMPOLINE_SIZE;
     size_t pool_offset_raw = tramp_offset + tramp_bytes;
@@ -669,6 +671,10 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * during the layout walk below. Held in a malloc'd buffer because
      * the JIT module is the only writer and the GC's value-pointer
      * scan would otherwise treat the integer slots as live edges. */
+    if (bc->code_len > SIZE_MAX / sizeof(unsigned)) {
+        jit_compile_cleanup(slab, region, total_size);
+        return -1;
+    }
     unsigned *pc_offsets = (unsigned *)malloc(bc->code_len * sizeof(unsigned));
     if (pc_offsets == NULL) {
         if (slab != NULL) {
@@ -683,8 +689,14 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * (fusion strictly reduces the count; direct-emit branches each
      * take one entry); every backward branch adds one safepoint
      * instance on top. */
-    inst_t *insts = (inst_t *)malloc((bc->code_len + n_backjumps)
-                                     * sizeof(*insts));
+    if (n_backjumps > SIZE_MAX - bc->code_len
+        || (bc->code_len + n_backjumps) > SIZE_MAX / sizeof(*insts)) {
+        free(pc_offsets);
+        jit_compile_cleanup(slab, region, total_size);
+        return -1;
+    }
+    size_t n_insts_alloc = bc->code_len + n_backjumps;
+    inst_t *insts = (inst_t *)malloc(n_insts_alloc * sizeof(*insts));
     if (insts == NULL) {
         free(pc_offsets);
         jit_compile_cleanup(slab, region, total_size);
