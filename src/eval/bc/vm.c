@@ -1832,6 +1832,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned c = C_OF(ins);
             mino_bc_insn_t step_word = code[pc++];
             unsigned d = Bx_OF(step_word);
+            if (d >= (unsigned)bc->n_regs) { ok = 0; goto dispatch_done; }
             mino_val *vc = regs[a];
             mino_val *vl = regs[b];
             mino_val *vk = regs[c];
@@ -1895,6 +1896,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned c = C_OF(ins);
             mino_bc_insn_t step_word = code[pc++];
             unsigned d = Bx_OF(step_word);
+            if (d >= (unsigned)bc->n_regs) { ok = 0; goto dispatch_done; }
             mino_val *vt = regs[a];
             mino_val *vk = regs[c];
             mino_val *vs = regs[d];
@@ -2466,7 +2468,11 @@ mino_val *mino_bc_run(mino_state *S, mino_val *fn_val,
      * dereferences + two branches per call vs walking the
      * generic loop. Hot for recursion-heavy workloads like fib. */
     const mino_bc_clause_t *match = NULL;
+#if defined(__GNUC__) || defined(__clang__)
     if (__builtin_expect(bc->n_clauses == 1, 1)) {
+#else
+    if (bc->n_clauses == 1) {
+#endif
         const mino_bc_clause_t *cl = &bc->clauses[0];
         if (!cl->has_rest && cl->n_params == argc) {
             match = cl;
