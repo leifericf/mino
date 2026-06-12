@@ -67,6 +67,7 @@
 (require "tests/jit_invalidation_test")
 (require "tests/bc_binding_test")
 (require "tests/bc_destructure_test")
+(require "tests/bc_queue_into_test")
 (require "tests/bc_closure_test")
 (require "tests/reduce_perf_test")
 (require "tests/bc_let_fold_test")
