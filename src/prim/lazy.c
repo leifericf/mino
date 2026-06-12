@@ -4,6 +4,10 @@
  *                lazy's body field and walks it via a static c_thunk,
  *                avoiding the per-element fn-call frame that a pure
  *                mino implementation pays.
+ *
+ * TODO: This TU is approaching the 1100-line limit (~1058 LOC). If new
+ * lazy primitives are added, split chunk helpers or range variants into
+ * a separate lazy_range.c or lazy_chunk.c translation unit.
  */
 
 #include "prim/internal.h"
