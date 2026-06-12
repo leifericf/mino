@@ -304,3 +304,15 @@
   (is (some? (re-find "[A-Ã]" "Ã")))
   ;; The range [A-Z] still works (all-ASCII, no change to behaviour).
   (is (= "H" (re-find "[A-Z]" "Hello"))))
+
+(deftest matchgroup-depth-limit
+  ;; Regression: matchgroup_loop recursed once per consumed input byte,
+  ;; enabling stack exhaustion on long inputs.  A hard depth limit
+  ;; (RE_MATCHGROUP_DEPTH_LIMIT = 10000) now cuts off the recursion and
+  ;; returns no-match rather than crashing the process.
+  ;; Short repetition still works normally:
+  (is (= ["aaaa" "a"] (re-find "(a)+" "aaaa")))
+  (is (= ["foofoofoo" "foo"] (re-find "(foo)+" "foofoofoo")))
+  ;; A 20000-character input must not crash the VM:
+  (let [long-input (apply str (repeat 20000 "a"))]
+    (is (some? (re-find "(a)+" long-input)))))

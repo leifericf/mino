@@ -1232,20 +1232,35 @@ static int find_alt_in_span(regex_t* gopen, int start, int end)
   return -1;
 }
 
+/* Hard recursion limit for matchgroup_loop. Each recursive call
+ * consumes at least one input byte (branch_ml > 0 guard), so depth
+ * is bounded by the input length. 10 000 iterations is generous for
+ * legitimate use and prevents stack exhaustion on adversarial input. */
+#define RE_MATCHGROUP_DEPTH_LIMIT 10000
+
 /* Recursive group-loop driver. Greedy: try one more iteration of the
  * group body first, fall back to matching the suffix on failure.
  * `gopen` points at the GROUP_OPEN slot; gc_idx is the relative index
  * of the matching GROUP_CLOSE; `suffix` is the pattern slot to match
  * after the group plus any quantifier; count_so_far is the number of
  * successful iterations already consumed; min/max are the quantifier
- * bounds (no quantifier => min=1, max=1). */
+ * bounds (no quantifier => min=1, max=1).
+ * rec_depth tracks nesting depth to enforce RE_MATCHGROUP_DEPTH_LIMIT. */
 static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
                             const char* text, int* matchlength,
                             int count_so_far, int min_reps, int max_reps,
-                            int lazy)
+                            int lazy, int rec_depth)
 {
   int ml_before = *matchlength;
   int gid       = (int)gopen[0].u.gid;
+
+  /* Guard against stack exhaustion on very long inputs. Return no-match
+   * so the caller backtracks normally rather than crashing. */
+  if (rec_depth > RE_MATCHGROUP_DEPTH_LIMIT)
+  {
+    *matchlength = ml_before;
+    return 0;
+  }
 
   /* Lazy repetition: try the suffix before growing the count. */
   if (lazy && count_so_far >= min_reps)
@@ -1301,7 +1316,8 @@ static int matchgroup_loop(regex_t* gopen, int gc_idx, regex_t* suffix,
         }
         rec_ml = 0;
         if (matchgroup_loop(gopen, gc_idx, suffix, after, &rec_ml,
-                            count_so_far + 1, min_reps, max_reps, lazy))
+                            count_so_far + 1, min_reps, max_reps, lazy,
+                            rec_depth + 1))
         {
           *matchlength = ml_before + branch_ml + rec_ml;
           return 1;
@@ -1442,7 +1458,7 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
           }
           gml = *matchlength;
           r = matchgroup_loop(pattern, gc_rel, suffix, text, &gml,
-                              0, min_r, max_r, lazy_r);
+                              0, min_r, max_r, lazy_r, 0);
           *matchlength = r ? gml : pre;
           return r;
         }
