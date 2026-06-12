@@ -194,7 +194,11 @@
 - Prim/Agent: Pin extra pointer across mino_cons loop in agent_build_call
 - Eval: Add GC write barrier for var->meta in special_register_vars
 - Eval: Expose when, and, or in the public-form registry (ns-publics / doc / apropos)
+- Eval: Document gc_pin longjmp-safety at special form init
+- Eval: Fix var->meta :doc staleness for defmacro-redefined specials
 - clojure.test: Fix run-tests no-arg arity to read *ns* dynamically; extract current-ns-str helper used by use-fixtures and run-tests
+- Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
+- Tests: Fix ns-resolution for renamed symbol in census_surface_test
 
 ## v0.423.5 — Security Fixes
 
