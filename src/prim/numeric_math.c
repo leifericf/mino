@@ -41,7 +41,24 @@ mino_val *prim_math_ceil(mino_state *S, mino_val *args, mino_env *env)
 { (void)env; return math_unary(S, args, ceil, "math-ceil"); }
 
 mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, round, "math-round"); }
+{
+    char   msg[64];
+    double x;
+    mino_val *a;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "math-round requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
+    a = args->as.cons.car;
+    /* Integer input: Clojure Math.round(long) returns the same long. */
+    if (mino_type_of(a) == MINO_INT) return a;
+    if (!as_double(a, &x)) {
+        snprintf(msg, sizeof(msg), "math-round expects a number");
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    return mino_int(S, (long long)round(x));
+}
 
 mino_val *prim_math_sqrt(mino_state *S, mino_val *args, mino_env *env)
 { (void)env; return math_unary(S, args, sqrt, "math-sqrt"); }

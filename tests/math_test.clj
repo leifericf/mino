@@ -13,9 +13,9 @@
   (is (= -3.0 (math-ceil -3.2))))
 
 (deftest math-round-fn
-  (is (= 4.0 (math-round 3.5)))
-  (is (= 3.0 (math-round 3.4)))
-  (is (= -4.0 (math-round -3.5))))
+  (is (= 4 (math-round 3.5)))
+  (is (= 3 (math-round 3.4)))
+  (is (= -4 (math-round -3.5))))
 
 (deftest math-sqrt-fn
   (is (= 4.0 (math-sqrt 16)))
