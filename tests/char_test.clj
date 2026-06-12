@@ -125,3 +125,28 @@
   (is (= (char 128512) (read-string (pr-str (char 128512)))))
   (is (= "\\💩" (pr-str (char 128169))))
   (is (= "\\u65E5" (pr-str \日))))
+
+(deftest nth-string-returns-char
+  ;; Indexing a string yields a character, consistent with (first s).
+  (is (= \a (nth "ab" 0)))
+  (is (char? (nth "ab" 0)))
+  (is (= \b (nth "ab" 1)))
+  (is (= \~ (nth "a~b" 1)))
+  (is (= true (= (nth "a~b" 1) \~)))
+  (is (not (string? (nth "ab" 0))))
+  ;; Multi-byte characters count as one codepoint position.
+  (is (= \日 (nth "x日y" 1)))
+  (is (= \y (nth "x日y" 2))))
+
+(deftest nth-string-not-found
+  (is (= \z (nth "ab" 5 \z)))
+  (is (nil? (nth "ab" 5 nil)))
+  (is (thrown? (nth "ab" 5))))
+
+(deftest string-accessors-agree-on-char
+  ;; first, nth, get, and seq all surface characters, not one-char strings.
+  (is (= \a (first "ab")))
+  (is (= \a (nth "ab" 0)))
+  (is (= \a (get "ab" 0)))
+  (is (= \a (first (seq "ab"))))
+  (is (= [\a \b] (vec (seq "ab")))))
