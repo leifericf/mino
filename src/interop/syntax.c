@@ -114,6 +114,7 @@ host_member_t *host_member_find(host_type_t *t, const char *name,
                                  int kind, int arity)
 {
     size_t i;
+    if (arity < 0) return NULL;
     for (i = 0; i < t->members_len; i++) {
         host_member_t *m = &t->members[i];
         if (m->kind != kind) continue;
