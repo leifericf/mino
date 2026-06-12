@@ -15,3 +15,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [04](04-curated-lint-set.md) | The lint lane gates a curated warning set, not -Weverything |
 | [05](05-changelog-via-proposal.md) | Changelog lines travel as proposal EDN, serialized at land time |
 | [06](06-drop-docker-ci-matrix.md) | Drop the local Docker CI mirror; zig cross-build + qemu covers it |
+| [07](07-no-aot-compilation.md) | No AOT compilation — the tiers stay interpreter, bytecode VM, and runtime JIT |
