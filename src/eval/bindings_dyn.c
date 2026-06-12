@@ -83,9 +83,9 @@ mino_val *eval_binding(mino_state *S, mino_val *form,
     mino_val *pairs, *body, *result;
     /* Frame is heap-allocated so the pointer remains valid even if a
      * throw inside body unwinds this C frame past the cleanup at the
-     * end. The control.c longjmp handler walks mino_current_ctx(S)->dyn_stack and frees
-     * each frame's bindings; if frame were stack-local, that walk
-     * would read popped stack memory.
+     * end. The src/eval/control.c longjmp handler walks
+     * mino_current_ctx(S)->dyn_stack and frees each frame's bindings;
+     * if frame were stack-local, that walk would read popped stack memory.
      *
      * The frame goes onto the dyn stack BEFORE the value forms run,
      * marked `building`: the GC root walk is the only thing keeping
