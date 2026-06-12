@@ -552,9 +552,12 @@ mino_val *sorted_map_assoc1(mino_state *S, const mino_val *m,
 {
     int replaced = 0;
     mino_val *nv = alloc_val(S, MINO_SORTED_MAP);
+    nv->meta = m->meta;
     nv->as.sorted.comparator = m->as.sorted.comparator;
+    gc_pin(nv);
     nv->as.sorted.root = rb_assoc(S, m->as.sorted.root, key, val,
                                    m->as.sorted.comparator, &replaced);
+    gc_unpin(1);
     nv->as.sorted.len = m->as.sorted.len + (replaced ? 0 : 1);
     return nv;
 }
@@ -572,7 +575,11 @@ mino_val *sorted_map_dissoc1(mino_state *S, const mino_val *m,
         return (mino_val *)m;
     nr = rb_dissoc(S, m->as.sorted.root, key, m->as.sorted.comparator);
     {
-        mino_val *nv = alloc_val(S, MINO_SORTED_MAP);
+        mino_val *nv;
+        mino_current_ctx(S)->gc_depth++;
+        nv = alloc_val(S, MINO_SORTED_MAP);
+        mino_current_ctx(S)->gc_depth--;
+        nv->meta = m->meta;
         nv->as.sorted.comparator = m->as.sorted.comparator;
         nv->as.sorted.root = nr;
         nv->as.sorted.len = m->as.sorted.len - 1;
@@ -585,6 +592,7 @@ mino_val *sorted_set_conj1(mino_state *S, const mino_val *s,
 {
     int replaced = 0;
     mino_val *nv = alloc_val(S, MINO_SORTED_SET);
+    nv->meta = s->meta;
     nv->as.sorted.comparator = s->as.sorted.comparator;
     nv->as.sorted.root = rb_assoc(S, s->as.sorted.root, elem, NULL,
                                    s->as.sorted.comparator, &replaced);
@@ -601,7 +609,11 @@ mino_val *sorted_set_disj1(mino_state *S, const mino_val *s,
         return (mino_val *)s;
     nr = rb_dissoc(S, s->as.sorted.root, elem, s->as.sorted.comparator);
     {
-        mino_val *nv = alloc_val(S, MINO_SORTED_SET);
+        mino_val *nv;
+        mino_current_ctx(S)->gc_depth++;
+        nv = alloc_val(S, MINO_SORTED_SET);
+        mino_current_ctx(S)->gc_depth--;
+        nv->meta = s->meta;
         nv->as.sorted.comparator = s->as.sorted.comparator;
         nv->as.sorted.root = nr;
         nv->as.sorted.len = s->as.sorted.len - 1;
