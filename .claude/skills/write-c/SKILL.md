@@ -19,10 +19,11 @@ Procedure:
    TU end to end before adding to it. New TU only when the
    responsibility is genuinely new — name it after the responsibility
    and add it to the map.
-2. **Follow the rituals.** New primitive: the 5-step "How to Add a
-   Primitive" in the module map (domain file → signature → declare in
-   `prim/internal.h` → `k_prims_<domain>[]` row → tests). New special
-   form: the 5-step ritual below it. Don't improvise registration.
+2. **Follow the rituals.** New primitive: the 4-step "How to Add a
+   Primitive" in the module map (domain file → static signature →
+   `k_prims_<domain>[]` row → tests; add to `prim/internal.h` only when
+   the function crosses a TU boundary). New special form: the 5-step
+   ritual below it. Don't improvise registration.
 3. **GC discipline up front.** Decide ownership of every allocation
    before writing: GC-owned via `gc_alloc_typed` (pin temporaries
    across allocation points) or host-owned malloc (every error path
