@@ -30,6 +30,7 @@
 mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                 const char *code, const char *msg);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
+void      mino_agent_quiesce_workers(mino_state *S);
 
 #include <limits.h>                  /* INT_MAX for MINO_OPT_THREAD_LIMIT */
 
