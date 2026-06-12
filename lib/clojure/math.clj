@@ -83,42 +83,48 @@
 ;; --- Exact (overflow-checked) long arithmetic --------------------------------
 
 (defn add-exact
-  "Returns the sum of x and y; throws on long overflow."
+  "Returns the sum of x and y. Note: unlike Clojure on the JVM, does
+   not throw on long overflow -- promotes to bignum instead."
   [x y]
   (if (and (int? x) (int? y))
     (+ x y)
     (throw (ex-info "add-exact expects longs" {:x x :y y}))))
 
 (defn subtract-exact
-  "Returns the difference of x and y; throws on long overflow."
+  "Returns the difference of x and y. Note: unlike Clojure on the JVM,
+   does not throw on long overflow -- promotes to bignum instead."
   [x y]
   (if (and (int? x) (int? y))
     (- x y)
     (throw (ex-info "subtract-exact expects longs" {:x x :y y}))))
 
 (defn multiply-exact
-  "Returns the product of x and y; throws on long overflow."
+  "Returns the product of x and y. Note: unlike Clojure on the JVM,
+   does not throw on long overflow -- promotes to bignum instead."
   [x y]
   (if (and (int? x) (int? y))
     (* x y)
     (throw (ex-info "multiply-exact expects longs" {:x x :y y}))))
 
 (defn increment-exact
-  "Returns x incremented by 1; throws on long overflow."
+  "Returns x incremented by 1. Note: unlike Clojure on the JVM, does
+   not throw on long overflow -- promotes to bignum instead."
   [x]
   (if (int? x)
     (inc x)
     (throw (ex-info "increment-exact expects a long" {:x x}))))
 
 (defn decrement-exact
-  "Returns x decremented by 1; throws on long overflow."
+  "Returns x decremented by 1. Note: unlike Clojure on the JVM, does
+   not throw on long overflow -- promotes to bignum instead."
   [x]
   (if (int? x)
     (dec x)
     (throw (ex-info "decrement-exact expects a long" {:x x}))))
 
 (defn negate-exact
-  "Returns the negation of x; throws on long overflow."
+  "Returns the negation of x. Note: unlike Clojure on the JVM, does
+   not throw on long overflow -- promotes to bignum instead."
   [x]
   (if (int? x)
     (- x)
