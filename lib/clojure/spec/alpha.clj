@@ -1644,7 +1644,7 @@
           (clojure.core/+ lo (mod (clojure.core/abs n) span)))))
     gen-impl/int))
 
-(defn int-in
+(defn int-in-impl
   "Return a spec validating fixed-precision integers in the range from
   start (inclusive) to end (exclusive)."
   [start end]
@@ -1655,7 +1655,7 @@
         sp (assoc sp ::form (list 'clojure.spec.alpha/int-in start end))]
     (assoc sp ::gen (fn [] (range-int-gen start (dec end))))))
 
-(defn double-in
+(defn double-in-impl
   "Return a spec for a 64-bit floating point number.  Options:
     :infinite? - whether +/- infinity is allowed (default false)
     :NaN?      - whether NaN is allowed (default false)
@@ -1735,7 +1735,7 @@
        :nanoseconds ns :offset-sign 1 :offset-hours 0 :offset-minutes 0}
       {:mino/instant true})))
 
-(defn inst-in
+(defn inst-in-impl
   "Return a spec validating insts in the range from start (inclusive)
   to end (exclusive)."
   [start end]
@@ -1775,11 +1775,11 @@
 ;; not conform, otherwise the returned value is the conformed value.
 ;; ---------------------------------------------------------------------------
 
-(defn conformer
+(defn conformer-impl
   "Return a spec that uses cfn as the conform path. cfn takes a value
   and returns the conformed value or :clojure.spec.alpha/invalid.
   Optionally takes an unform fn; if omitted, unform is identity."
-  ([cfn]      (conformer cfn identity))
+  ([cfn]      (conformer-impl cfn identity))
   ([cfn ufn]
    {::kind ::conformer
     ::form (list 'clojure.spec.alpha/conformer cfn)
@@ -1829,7 +1829,7 @@
 (def ^:private kvs->map-spec
   ;; Conformer threading keys* matches into a map; unform turns the
   ;; map back into the {::k k ::v v} pairs the regex unfolds.
-  (conformer
+  (conformer-impl
     (fn [kvs] (into {} (map (fn [kv] [(get kv ::k) (get kv ::v)]) kvs)))
     (fn [m] (map (fn [[k v]] {::k k ::v v}) m))))
 
@@ -2063,3 +2063,36 @@
      '~mm
      (resolve '~mm)
      ~retag))
+
+(defmacro int-in
+  "Return a spec validating fixed-precision integers in the range from
+  start (inclusive) to end (exclusive)."
+  [start end]
+  `(clojure.spec.alpha/int-in-impl ~start ~end))
+
+(defmacro double-in
+  "Return a spec for a 64-bit floating point number.  Options:
+    :infinite? - whether +/- infinity is allowed (default false)
+    :NaN?      - whether NaN is allowed (default false)
+    :min       - inclusive minimum (default none)
+    :max       - inclusive maximum (default none)
+
+  Divergence: the canonical library defaults :infinite? and :NaN? to
+  true; mino defaults both to false so a plain double-in rejects the
+  non-finite values unless they are explicitly opted in -- the safer
+  default for a range spec."
+  [& opts]
+  `(clojure.spec.alpha/double-in-impl ~@opts))
+
+(defmacro inst-in
+  "Return a spec validating insts in the range from start (inclusive)
+  to end (exclusive)."
+  [start end]
+  `(clojure.spec.alpha/inst-in-impl ~start ~end))
+
+(defmacro conformer
+  "Return a spec that uses cfn as the conform path. cfn takes a value
+  and returns the conformed value or :clojure.spec.alpha/invalid.
+  Optionally takes an unform fn; if omitted, unform is identity."
+  [& args]
+  `(clojure.spec.alpha/conformer-impl ~@args))
