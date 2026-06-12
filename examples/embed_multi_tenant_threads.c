@@ -163,7 +163,7 @@ int main(void)
         mino_state *S = mino_state_new();
         mino_env   *env = mino_env_new(S);
         mino_install_all(S, env);
-        mino_set_thread_limit(S, 4);
+        mino_set_option(S, MINO_OPT_THREAD_LIMIT, 4);
         mino_set_thread_pool(S, &pool);
         tenants[i] = S;
         envs[i]    = env;

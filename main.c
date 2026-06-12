@@ -1166,8 +1166,9 @@ int main(int argc, char **argv)
     }
 
     S = mino_state_new();
-    if (cli_jit_set)       mino_state_set_jit_mode(S, cli_jit);
-    if (cli_threshold_set) mino_state_set_jit_hot_threshold(S, cli_threshold);
+    if (cli_jit_set)       mino_set_option(S, MINO_OPT_JIT_MODE, (size_t)cli_jit);
+    if (cli_threshold_set) mino_set_option(S, MINO_OPT_JIT_HOT_THRESHOLD,
+                                           (size_t)cli_threshold);
 
     /* If the user explicitly requested JIT=ON (CLI or env) but this
      * build has the JIT compiled out or the host isn't supported,
@@ -1254,7 +1255,7 @@ int main(int argc, char **argv)
 
     /* Standalone mode: grant the runtime permission to spawn cpu_count
      * host threads. Embedded users start at thread_limit=1 and opt in
-     * via mino_set_thread_limit. The actual host-thread implementation
+     * via MINO_OPT_THREAD_LIMIT. The actual host-thread implementation
      * lands across upcoming versions; until it does, future/promise/
      * thread/blocking core.async ops throw :mino/unsupported with a
      * message naming the cycle.
@@ -1286,7 +1287,7 @@ int main(int argc, char **argv)
         if (sc > 0) { n = (int)sc; }
 #endif
         if (n < 1) { n = 1; }
-        mino_set_thread_limit(S, n);
+        mino_set_option(S, MINO_OPT_THREAD_LIMIT, (size_t)n);
     }
 
     repl_specials_t specials;

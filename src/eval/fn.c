@@ -473,7 +473,7 @@ mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                 /* MODE_ON -> compile on first call (threshold = 1).
                  * MODE_AUTO -> per-state hot threshold (defaults to
                  * MINO_JIT_THRESHOLD; tunable via the public
-                 * mino_state_set_jit_hot_threshold API). */
+                 * MINO_OPT_JIT_HOT_THRESHOLD option). */
                 unsigned thresh = (S->jit.jit_mode == (int)MINO_JIT_MODE_ON)
                     ? 1u : S->jit.jit_hot_threshold;
                 if (bc_rec->hot_counter >= thresh) {

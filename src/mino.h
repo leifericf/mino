@@ -613,7 +613,7 @@ mino_val *mino_agent_deref(const mino_val *a);
  *   - the agent is failed and its error mode is :fail (MST002),
  *   - the host has not granted enough thread budget to spawn the
  *     pool's worker (MTH001) -- the embedder thread does not count
- *     against the limit; raise via mino_set_thread_limit (>= 1 for
+ *     against the limit; raise via MINO_OPT_THREAD_LIMIT (>= 1 for
  *     one agent worker; >= 2 if both send and send-off are used
  *     concurrently; more if mixing with futures / host threads).
  *
@@ -1116,11 +1116,12 @@ mino_state *mino_state_new(void);
 void mino_state_free(mino_state *S);
 
 /*
- * JIT mode control (per-state).
+ * JIT mode control (per-state). Set via mino_set_option with
+ * MINO_OPT_JIT_MODE; read back via mino_get_option.
  *
  *   AUTO  -- default. Eligible fns JIT after warming past the runtime's
  *            hot threshold (currently 100 calls; tune with
- *            mino_state_set_jit_hot_threshold). Cold fns stay on the
+ *            MINO_OPT_JIT_HOT_THRESHOLD). Cold fns stay on the
  *            interpreter.
  *   OFF   -- never JIT. The interpreter handles every call. Useful for
  *            embedding hosts that need predictable cold-start latency,
@@ -1131,7 +1132,7 @@ void mino_state_free(mino_state *S);
  *            of time that JIT'd execution is wanted everywhere.
  *
  * mino-lean (the no-JIT distributable) ignores the mode and behaves
- * as if OFF; the call exists in both builds so embedders can write
+ * as if OFF; the option exists in both builds so embedders can write
  * portable initialisation code.
  *
  * Initial mode on state_new follows MINO_JIT env var (auto / off / on
@@ -1142,34 +1143,6 @@ typedef enum {
     MINO_JIT_MODE_OFF  = 1,
     MINO_JIT_MODE_ON   = 2
 } mino_jit_mode;
-
-void            mino_state_set_jit_mode(mino_state *S, mino_jit_mode mode);
-mino_jit_mode mino_state_jit_mode(const mino_state *S);
-
-/*
- * JIT hot threshold (call count before AUTO mode triggers a compile).
- * Defaults to a runtime-internal value (currently 100). Embedders
- * tune it per-workload via this setter:
- *
- *   - Lower values JIT sooner (better steady-state throughput at
- *     the cost of more upfront compile time and a larger native
- *     footprint -- short-lived fns may compile then never run
- *     again).
- *   - Higher values delay JIT (less upfront work, but slower to
- *     warm).
- *
- * A value of 0 is clamped to 1 (compile on first call -- the same
- * behaviour as MINO_JIT_MODE_ON, but staying in AUTO so the OFF/ON
- * gate still applies). The threshold is irrelevant when the mode
- * is OFF (no compile happens regardless) or ON (compile fires on
- * call 1).
- *
- * Initial value follows MINO_JIT_HOT_THRESHOLD env var (positive
- * integer); unparseable / non-positive values fall back to the
- * default. NULL state is a no-op.
- */
-void     mino_state_set_jit_hot_threshold(mino_state *S, unsigned threshold);
-unsigned mino_state_jit_hot_threshold(const mino_state *S);
 
 /*
  * JIT capability query. Returns a snapshot of the runtime's JIT
@@ -1608,19 +1581,84 @@ const mino_capability_info *mino_capability_list(void);
 const mino_capability_info *mino_capability_for_symbol(const char *name);
 
 /* ------------------------------------------------------------------------- */
-/* Execution limits                                                          */
+/* Configuration options                                                     */
 /* ------------------------------------------------------------------------- */
 
-#define MINO_LIMIT_STEPS  1   /* max eval steps per mino_eval/mino_eval_string */
-#define MINO_LIMIT_HEAP   2   /* max bytes under GC management                */
+/*
+ * Per-state configuration knobs, set and read through one pair of
+ * calls. mino_set_option returns 0 on an accepted write and -1 on a
+ * NULL state, an unknown option, or an out-of-range value -- the same
+ * convention as mino_gc_set_param -- leaving the previous value
+ * untouched on rejection.
+ *
+ *   LIMIT_STEPS        max eval steps per mino_eval/mino_eval_string.
+ *                      0 (the default) disables the limit. The step
+ *                      counter is reset at the start of each mino_eval
+ *                      or mino_eval_string call. When the limit is
+ *                      exceeded, the current eval returns NULL and
+ *                      mino_last_error() reports the cause.
+ *   LIMIT_HEAP         max bytes under GC management. 0 (the default)
+ *                      disables the limit; exceeding it fails the
+ *                      current eval the same way LIMIT_STEPS does.
+ *   THREAD_LIMIT       per-state host-thread grant. 0 or 1 disables
+ *                      host threads; n > 1 grants the runtime
+ *                      permission to spawn that many concurrent
+ *                      worker threads. Default 1 (single-threaded).
+ *                      Setting it BEFORE any `(future ...)` is in
+ *                      flight is the supported sequence; lowering the
+ *                      limit while threads are running does not
+ *                      interrupt them, but new spawns respect the new
+ *                      ceiling. Values above INT_MAX are rejected.
+ *                      See "Host thread grant" below.
+ *   THREAD_STACK_BYTES per-worker stack size for the spawn-per-future
+ *                      path. 0 (the default) means platform default;
+ *                      ignored when a pool is registered.
+ *                      UNSTABLE: this option belongs to the
+ *                      [MINO_UNSTABLE_THREADPOOL] surface below and
+ *                      stays provisional through the 0.x alpha
+ *                      series; it may change in subsequent releases.
+ *   JIT_MODE           takes mino_jit_mode values (AUTO / OFF / ON;
+ *                      see the enum above). Values outside the enum
+ *                      are rejected with -1. Default AUTO; the
+ *                      initial mode on state_new follows the MINO_JIT
+ *                      env var (auto / off / on, case-insensitive).
+ *   JIT_HOT_THRESHOLD  call count before AUTO mode triggers a
+ *                      compile. Default 100. Lower values JIT sooner
+ *                      (better steady-state throughput at the cost of
+ *                      more upfront compile time and a larger native
+ *                      footprint -- short-lived fns may compile then
+ *                      never run again); higher values delay JIT
+ *                      (less upfront work, but slower to warm). A
+ *                      value of 0 is clamped to 1 (compile on first
+ *                      call -- the same behaviour as MINO_JIT_MODE_ON,
+ *                      but staying in AUTO so the OFF/ON gate still
+ *                      applies); the clamp counts as an accepted
+ *                      write. The threshold is irrelevant when the
+ *                      mode is OFF (no compile happens regardless) or
+ *                      ON (compile fires on call 1). The initial
+ *                      value on state_new follows the
+ *                      MINO_JIT_HOT_THRESHOLD env var (positive
+ *                      integer); unparseable / non-positive values
+ *                      fall back to the default.
+ */
+typedef enum {
+    MINO_OPT_LIMIT_STEPS = 1,
+    MINO_OPT_LIMIT_HEAP,
+    MINO_OPT_THREAD_LIMIT,
+    MINO_OPT_THREAD_STACK_BYTES,   /* [MINO_UNSTABLE_THREADPOOL tier] */
+    MINO_OPT_JIT_MODE,             /* takes mino_jit_mode values */
+    MINO_OPT_JIT_HOT_THRESHOLD
+} mino_option;
+
+int    mino_set_option(mino_state *S, mino_option opt, size_t value);
 
 /*
- * Set a global execution limit. Pass 0 to disable a limit. Step limits
- * are reset at the start of each mino_eval or mino_eval_string call.
- * When a limit is exceeded, the current eval returns NULL and
- * mino_last_error() reports the cause.
+ * Read a configuration option. MINO_OPT_JIT_MODE comes back as the
+ * mino_jit_mode enum widened to size_t. Returns 0 on a NULL state or
+ * an unknown option; use mino_set_option's return value as the
+ * validity probe when 0 is also a legitimate stored value.
  */
-void mino_set_limit(mino_state *S, int kind, size_t value);
+size_t mino_get_option(mino_state *S, mino_option opt);
 
 /*
  * Request interruption of a running eval. Sets a flag that the eval loop
@@ -1643,25 +1681,9 @@ void mino_interrupt(mino_state *S);
  *
  * Standalone `./mino` grants `thread_limit = <cpu_count>` right after
  * `mino_install_all`, so REPL/script users get the canonical surface
- * working out of the box. Embedders opt in per state by calling
- * `mino_set_thread_limit` with a value > 1.
+ * working out of the box. Embedders opt in per state by setting
+ * `MINO_OPT_THREAD_LIMIT` to a value > 1 via `mino_set_option`.
  */
-
-/*
- * Set the per-state thread limit. n=0 or n=1 disables host threads;
- * n>1 grants the runtime permission to spawn that many concurrent
- * worker threads. Calling with the same value twice is a no-op.
- *
- * Calling with n>1 BEFORE any `(future ...)` is in flight is the
- * supported sequence; lowering the limit while threads are running
- * does not interrupt them, but new spawns will respect the new ceiling.
- */
-void mino_set_thread_limit(mino_state *S, int n);
-
-/*
- * Read the current thread limit. Returns 1 by default (single-threaded).
- */
-int  mino_get_thread_limit(mino_state *S);
 
 /*
  * Return the count of host threads currently spawned by this state.
@@ -1705,8 +1727,9 @@ void mino_quiesce_threads(mino_state *S);
  *      Spawn-per-future path only; pool workers are owned by the
  *      pool and run under its own lifecycle hooks.
  *
- *   3. mino_set_thread_stack_size — set the per-worker stack size for
- *      the spawn-per-future path. Pool-managed workers ignore this.
+ *   3. MINO_OPT_THREAD_STACK_BYTES (via mino_set_option) — set the
+ *      per-worker stack size for the spawn-per-future path.
+ *      Pool-managed workers ignore this.
  */
 
 /*
@@ -1748,12 +1771,6 @@ void mino_set_thread_factory(mino_state *S,
                              mino_thread_lifecycle_fn start_fn,
                              mino_thread_lifecycle_fn end_fn,
                              void *ctx);
-
-/*
- * Per-worker stack size for the spawn-per-future path. n=0 means
- * platform default. Ignored when a pool is registered.
- */
-void mino_set_thread_stack_size(mino_state *S, size_t n);
 
 /* ------------------------------------------------------------------------- */
 /* Garbage collector control [MINO_UNSTABLE_GC]                              */

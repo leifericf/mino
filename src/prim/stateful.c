@@ -1073,7 +1073,7 @@ mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
 
 /* (mino-thread-limit) — return the host-granted thread limit for this
  * state. Default is 1 (single-threaded); embedders raise this via
- * mino_set_thread_limit and standalone main.c grants cpu_count after
+ * MINO_OPT_THREAD_LIMIT and standalone main.c grants cpu_count after
  * mino_install_all. The script-side future/promise/thread stubs in
  * core.clj consult this to distinguish "host has not granted threads"
  * from "host granted, runtime impl in flight." */
@@ -1085,7 +1085,7 @@ static mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "mino-thread-limit takes no arguments");
     }
-    return mino_int(S, mino_get_thread_limit(S));
+    return mino_int(S, (long long)mino_get_option(S, MINO_OPT_THREAD_LIMIT));
 }
 
 /* (mino-thread-id*) — a stable identity for the calling thread's

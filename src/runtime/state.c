@@ -24,6 +24,8 @@
 #include "eval/special_internal.h"  /* normalize_exception */
 #include "values/internal.h"        /* mino_val_finalize_teardown */
 
+#include <limits.h>                  /* INT_MAX for MINO_OPT_THREAD_LIMIT */
+
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
@@ -108,7 +110,7 @@ static void state_init(mino_state *S)
     /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /
      * on case-insensitive) for the initial mode, default AUTO. The
      * threshold seed is the compile-time MINO_JIT_THRESHOLD; embedders
-     * change it with mino_state_set_jit_hot_threshold. The fields live
+     * change it via MINO_OPT_JIT_HOT_THRESHOLD. The fields live
      * here unconditionally even in mino-lean (MINO_CPJIT off) so the
      * struct offset and public-API ABI stay identical across builds. */
     S->jit.jit_mode          = (int)MINO_JIT_MODE_AUTO;
@@ -226,7 +228,7 @@ static void state_init(mino_state *S)
     S->ns_vars.current_ns          = "user";
     /* Host-thread grant defaults to single-threaded. Standalone `./mino`
      * raises this to cpu_count after mino_install_all; embedders opt
-     * in per state via mino_set_thread_limit. */
+     * in per state via MINO_OPT_THREAD_LIMIT. */
     S->threading.thread_limit        = 1;
     S->threading.thread_count        = 0;
     S->threading.multi_threaded      = 0;
@@ -533,46 +535,6 @@ static void state_free_heap(mino_state *S)
     S->gc_bump_slabs = NULL;
     S->gc_bump_cur = NULL;
     S->gc_bump_end = NULL;
-}
-
-/* Public JIT mode control. The fields live on mino_state directly
- * (state.jit_mode and state.jit_hot_threshold). Both APIs are no-ops
- * on a NULL state -- consistent with the rest of the embed surface --
- * and validate the mode enum range so a stray int doesn't end up
- * triggering AUTO-class behaviour with an OFF caller. */
-void mino_state_set_jit_mode(mino_state *S, mino_jit_mode mode)
-{
-    if (S == NULL) return;
-    switch (mode) {
-    case MINO_JIT_MODE_AUTO:
-    case MINO_JIT_MODE_OFF:
-    case MINO_JIT_MODE_ON:
-        S->jit.jit_mode = (int)mode;
-        return;
-    }
-    /* Unknown enum value: leave the current mode untouched. */
-}
-
-mino_jit_mode mino_state_jit_mode(const mino_state *S)
-{
-    if (S == NULL) return MINO_JIT_MODE_AUTO;
-    return (mino_jit_mode)S->jit.jit_mode;
-}
-
-void mino_state_set_jit_hot_threshold(mino_state *S, unsigned threshold)
-{
-    if (S == NULL) return;
-    /* Clamp 0 to 1: a zero threshold would let the existing
-     * "hot_counter >= thresh" check fire before the first
-     * increment, which is hostile. The intent of zero is "ASAP",
-     * which is the same as 1 in this gating scheme. */
-    S->jit.jit_hot_threshold = threshold < 1u ? 1u : threshold;
-}
-
-unsigned mino_state_jit_hot_threshold(const mino_state *S)
-{
-    if (S == NULL) return MINO_JIT_THRESHOLD;
-    return S->jit.jit_hot_threshold;
 }
 
 mino_jit_capability mino_state_jit_capability(const mino_state *S)
@@ -1430,16 +1392,78 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
 }
 
 /* ------------------------------------------------------------------------- */
-/* Execution limits, fault injection, interrupt                              */
+/* Configuration options, fault injection, interrupt                         */
 /* ------------------------------------------------------------------------- */
 
-void mino_set_limit(mino_state *S, int kind, size_t value)
+/* One pair of flat switches over the option enum; the backing fields
+ * live on the owning sub-structs (module limits, threading grant, JIT
+ * config) and enforcement sites read them directly. Rejections leave
+ * the previous value untouched, matching mino_gc_set_param. */
+int mino_set_option(mino_state *S, mino_option opt, size_t value)
 {
-    switch (kind) {
-    case MINO_LIMIT_STEPS: S->module.limit_steps = value; break;
-    case MINO_LIMIT_HEAP:  S->module.limit_heap  = value; break;
-    default: break;
+    if (S == NULL) {
+        return -1;
     }
+    switch (opt) {
+    case MINO_OPT_LIMIT_STEPS:
+        S->module.limit_steps = value;
+        return 0;
+    case MINO_OPT_LIMIT_HEAP:
+        S->module.limit_heap = value;
+        return 0;
+    case MINO_OPT_THREAD_LIMIT:
+        /* Backing field is int; anything above INT_MAX is out of
+         * range rather than silently truncated. */
+        if (value > (size_t)INT_MAX) {
+            return -1;
+        }
+        S->threading.thread_limit = (int)value;
+        return 0;
+    case MINO_OPT_THREAD_STACK_BYTES:
+        S->threading.thread_stack_size = value;
+        return 0;
+    case MINO_OPT_JIT_MODE:
+        /* Validate the mode enum range so a stray int doesn't end up
+         * triggering AUTO-class behaviour with an OFF caller. */
+        switch ((mino_jit_mode)value) {
+        case MINO_JIT_MODE_AUTO:
+        case MINO_JIT_MODE_OFF:
+        case MINO_JIT_MODE_ON:
+            S->jit.jit_mode = (int)value;
+            return 0;
+        }
+        return -1;
+    case MINO_OPT_JIT_HOT_THRESHOLD:
+        /* Backing field is unsigned; reject values that don't
+         * round-trip instead of truncating. */
+        if (value != (size_t)(unsigned)value) {
+            return -1;
+        }
+        /* Clamp 0 to 1: a zero threshold would let the existing
+         * "hot_counter >= thresh" check fire before the first
+         * increment, which is hostile. The intent of zero is "ASAP",
+         * which is the same as 1 in this gating scheme. The clamp
+         * counts as an accepted write. */
+        S->jit.jit_hot_threshold = value < 1u ? 1u : (unsigned)value;
+        return 0;
+    }
+    return -1;
+}
+
+size_t mino_get_option(mino_state *S, mino_option opt)
+{
+    if (S == NULL) {
+        return 0;
+    }
+    switch (opt) {
+    case MINO_OPT_LIMIT_STEPS:        return S->module.limit_steps;
+    case MINO_OPT_LIMIT_HEAP:         return S->module.limit_heap;
+    case MINO_OPT_THREAD_LIMIT:       return (size_t)S->threading.thread_limit;
+    case MINO_OPT_THREAD_STACK_BYTES: return S->threading.thread_stack_size;
+    case MINO_OPT_JIT_MODE:           return (size_t)S->jit.jit_mode;
+    case MINO_OPT_JIT_HOT_THRESHOLD:  return (size_t)S->jit.jit_hot_threshold;
+    }
+    return 0;
 }
 
 void mino_set_fail_alloc_at(mino_state *S, long n)
@@ -1471,19 +1495,6 @@ void mino_interrupt(mino_state *S)
 /* ------------------------------------------------------------------------- */
 /* Host-thread grant                                                         */
 /* ------------------------------------------------------------------------- */
-
-void mino_set_thread_limit(mino_state *S, int n)
-{
-    if (S == NULL) { return; }
-    if (n < 0) { n = 0; }
-    S->threading.thread_limit = n;
-}
-
-int mino_get_thread_limit(mino_state *S)
-{
-    if (S == NULL) { return 1; }
-    return S->threading.thread_limit;
-}
 
 /* Relaxed observability read of S->threading.thread_count -- intentionally without
  * state_lock. The only consumer is the "suppress major GC while host
@@ -1528,12 +1539,6 @@ void mino_set_thread_factory(mino_state *S,
     S->threading.thread_start_fn     = start_fn;
     S->threading.thread_end_fn       = end_fn;
     S->threading.thread_factory_ctx  = ctx;
-}
-
-void mino_set_thread_stack_size(mino_state *S, size_t n)
-{
-    if (S == NULL) { return; }
-    S->threading.thread_stack_size = n;
 }
 
 /* ------------------------------------------------------------------------- */

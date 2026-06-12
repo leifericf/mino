@@ -533,7 +533,8 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
         mino_worker_list_lock_release(S);
         return prim_throw_classified(S,
             "mino/thread-limit-exceeded", "MTH001",
-            "thread limit exceeded; raise via mino_set_thread_limit");
+            "thread limit exceeded; raise via "
+            "mino_set_option(S, MINO_OPT_THREAD_LIMIT, n)");
     }
     tc_add(&S->threading.thread_count, 1);
     mino_worker_list_lock_release(S);

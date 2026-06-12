@@ -24,7 +24,7 @@
 /* Hot threshold: a fn warming past this count under the interpreter
  * triggers a single JIT compile attempt. The number is intentionally
  * conservative; subsequent releases tune it through measurement.
- * Embedders override per-state via mino_state_set_jit_hot_threshold. */
+ * Embedders override per-state via MINO_OPT_JIT_HOT_THRESHOLD. */
 #define MINO_JIT_THRESHOLD 100u
 
 /* MINO_CPJIT_HOST_DETECTED: 1 when this build was compiled with

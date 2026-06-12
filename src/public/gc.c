@@ -61,7 +61,7 @@ void mino_gc_collect(mino_state *S, mino_gc_kind kind)
 
 /* Range-validating setters. Each returns 1 on accept, 0 on reject.
  * The outer dispatcher turns the 1/0 result into 0/-1 per the
- * documented mino_set_limit convention. */
+ * documented mino_set_option convention. */
 static int set_nursery_bytes(mino_state *S, size_t v)
 {
     if (v < 64u * 1024u || v > 256u * 1024u * 1024u) {

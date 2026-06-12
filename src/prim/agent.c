@@ -13,7 +13,7 @@
  *
  *  - Each pool's worker counts against S->threading.thread_limit (the embedder
  *    thread does NOT). Default thread_limit is 1, so a host that
- *    hasn't called mino_set_thread_limit can have one agent worker
+ *    hasn't raised MINO_OPT_THREAD_LIMIT can have one agent worker
  *    OR one future OR one host thread alive at a time. send /
  *    send-off throw MTH001 if the host hasn't granted enough thread
  *    budget to spawn the requested pool's worker. Embedders that
@@ -661,10 +661,11 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
         free(n);
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
-            "raise via mino_set_thread_limit (>= 1 for one agent "
-            "worker; >= 2 if both send and send-off are used "
-            "concurrently). The embedder thread does not count "
-            "against the limit -- only spawned workers do.");
+            "raise via mino_set_option(S, MINO_OPT_THREAD_LIMIT, n) "
+            "(>= 1 for one agent worker; >= 2 if both send and "
+            "send-off are used concurrently). The embedder thread "
+            "does not count against the limit -- only spawned "
+            "workers do.");
         return 1;
     }
     agent_runq_push_tail(S, kind, n);

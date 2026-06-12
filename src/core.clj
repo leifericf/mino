@@ -2137,8 +2137,9 @@
 ;;
 ;; Real OS-thread futures and promises. Embedded mode starts at
 ;; thread_limit = 1 (single-threaded) and embedders raise it via
-;; mino_set_thread_limit. Standalone `./mino` grants cpu_count
-;; automatically so the REPL surface matches Clojure canon.
+;; mino_set_option(S, MINO_OPT_THREAD_LIMIT, n). Standalone `./mino`
+;; grants cpu_count automatically so the REPL surface matches Clojure
+;; canon.
 ;;
 ;; When the host has not granted threads (limit <= 1), spawn entry
 ;; points throw :mino/unsupported with a message naming the grant
@@ -2151,8 +2152,9 @@
   not granted in the current state."
   [name]
   (str name ": host threads are not granted in this state. "
-       "Embedders call mino_set_thread_limit(S, n) with n > 1; the "
-       "standalone `./mino` binary grants cpu_count automatically."))
+       "Embedders call mino_set_option(S, MINO_OPT_THREAD_LIMIT, n) "
+       "with n > 1; the standalone `./mino` binary grants cpu_count "
+       "automatically."))
 
 (defmacro future
   "Takes a body of expressions and yields a future object that will
