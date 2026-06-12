@@ -35,10 +35,16 @@ static inline mino_val *math_unary(mino_state *S, mino_val *args,
 }
 
 mino_val *prim_math_floor(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, floor, "math-floor"); }
+{
+    (void)env;
+    return math_unary(S, args, floor, "math-floor");
+}
 
 mino_val *prim_math_ceil(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, ceil, "math-ceil"); }
+{
+    (void)env;
+    return math_unary(S, args, ceil, "math-ceil");
+}
 
 mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -61,22 +67,40 @@ mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env)
 }
 
 mino_val *prim_math_sqrt(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, sqrt, "math-sqrt"); }
+{
+    (void)env;
+    return math_unary(S, args, sqrt, "math-sqrt");
+}
 
 mino_val *prim_math_log(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, log, "math-log"); }
+{
+    (void)env;
+    return math_unary(S, args, log, "math-log");
+}
 
 mino_val *prim_math_exp(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, exp, "math-exp"); }
+{
+    (void)env;
+    return math_unary(S, args, exp, "math-exp");
+}
 
 mino_val *prim_math_sin(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, sin, "math-sin"); }
+{
+    (void)env;
+    return math_unary(S, args, sin, "math-sin");
+}
 
 mino_val *prim_math_cos(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, cos, "math-cos"); }
+{
+    (void)env;
+    return math_unary(S, args, cos, "math-cos");
+}
 
 mino_val *prim_math_tan(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, tan, "math-tan"); }
+{
+    (void)env;
+    return math_unary(S, args, tan, "math-tan");
+}
 
 mino_val *prim_math_pow(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -112,25 +136,55 @@ mino_val *prim_math_atan2(mino_state *S, mino_val *args, mino_env *env)
  * 1.11+). Each is a thin libm bridge identical in shape to the
  * existing math_unary calls above. */
 mino_val *prim_math_asin(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, asin, "math-asin"); }
+{
+    (void)env;
+    return math_unary(S, args, asin, "math-asin");
+}
 mino_val *prim_math_acos(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, acos, "math-acos"); }
+{
+    (void)env;
+    return math_unary(S, args, acos, "math-acos");
+}
 mino_val *prim_math_atan(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, atan, "math-atan"); }
+{
+    (void)env;
+    return math_unary(S, args, atan, "math-atan");
+}
 mino_val *prim_math_sinh(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, sinh, "math-sinh"); }
+{
+    (void)env;
+    return math_unary(S, args, sinh, "math-sinh");
+}
 mino_val *prim_math_cosh(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, cosh, "math-cosh"); }
+{
+    (void)env;
+    return math_unary(S, args, cosh, "math-cosh");
+}
 mino_val *prim_math_tanh(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, tanh, "math-tanh"); }
+{
+    (void)env;
+    return math_unary(S, args, tanh, "math-tanh");
+}
 mino_val *prim_math_log10(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, log10, "math-log10"); }
+{
+    (void)env;
+    return math_unary(S, args, log10, "math-log10");
+}
 mino_val *prim_math_log1p(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, log1p, "math-log1p"); }
+{
+    (void)env;
+    return math_unary(S, args, log1p, "math-log1p");
+}
 mino_val *prim_math_expm1(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, expm1, "math-expm1"); }
+{
+    (void)env;
+    return math_unary(S, args, expm1, "math-expm1");
+}
 mino_val *prim_math_cbrt(mino_state *S, mino_val *args, mino_env *env)
-{ (void)env; return math_unary(S, args, cbrt, "math-cbrt"); }
+{
+    (void)env;
+    return math_unary(S, args, cbrt, "math-cbrt");
+}
 mino_val *prim_math_signum(mino_state *S, mino_val *args, mino_env *env)
 {
     double x;
