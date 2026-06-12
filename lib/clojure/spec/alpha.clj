@@ -1655,6 +1655,15 @@
         sp (assoc sp ::form (list 'clojure.spec.alpha/int-in start end))]
     (assoc sp ::gen (fn [] (range-int-gen start (dec end))))))
 
+;; Divergence from JVM clojure.spec.alpha: s/int-in is a function (first-class value) on the
+;; JVM; mino uses a macro. This means int-in cannot be passed as a value in higher-order
+;; contexts. Use int-in-impl directly for higher-order use.
+(defmacro int-in
+  "Return a spec validating fixed-precision integers in the range from
+  start (inclusive) to end (exclusive)."
+  [start end]
+  `(clojure.spec.alpha/int-in-impl ~start ~end))
+
 (defn double-in-impl
   "Return a spec for a 64-bit floating point number.  Options:
     :infinite? - whether +/- infinity is allowed (default false)
@@ -1704,6 +1713,20 @@
                    (clojure.core/+ lo
                                    (clojure.core/* span (clojure.core/abs r)))))
                gen-impl/double)))))
+
+(defmacro double-in
+  "Return a spec for a 64-bit floating point number.  Options:
+    :infinite? - whether +/- infinity is allowed (default false)
+    :NaN?      - whether NaN is allowed (default false)
+    :min       - inclusive minimum (default none)
+    :max       - inclusive maximum (default none)
+
+  Divergence: the canonical library defaults :infinite? and :NaN? to
+  true; mino defaults both to false so a plain double-in rejects the
+  non-finite values unless they are explicitly opted in -- the safer
+  default for a range spec."
+  [& opts]
+  `(clojure.spec.alpha/double-in-impl ~@opts))
 
 (defn- ms->inst
   "Build an inst component map (recognized by inst?) from epoch
@@ -1759,6 +1782,15 @@
                               (long (clojure.core/double n)))))
                  gen-impl/double))))))
 
+;; Divergence from JVM clojure.spec.alpha: s/inst-in is a function (first-class value) on the
+;; JVM; mino uses a macro. This means inst-in cannot be passed as a value in higher-order
+;; contexts. Use inst-in-impl directly for higher-order use.
+(defmacro inst-in
+  "Return a spec validating insts in the range from start (inclusive)
+  to end (exclusive)."
+  [start end]
+  `(clojure.spec.alpha/inst-in-impl ~start ~end))
+
 ;; ---------------------------------------------------------------------------
 ;; Macros at the bottom of the file.  Before this point, internal defns
 ;; resolve `def`, `and`, `or`, `cat`, `*`, `+`, `?`, `keys`, `nilable`,
@@ -1795,6 +1827,16 @@
 
 (defmethod unform-impl ::conformer [s y]
   ((::unform-fn s) y))
+
+;; Divergence from JVM clojure.spec.alpha: s/conformer is a function (first-class value) on the
+;; JVM; mino uses a macro. This means conformer cannot be passed as a value in higher-order
+;; contexts. Use conformer-impl directly for higher-order use.
+(defmacro conformer
+  "Return a spec that uses cfn as the conform path. cfn takes a value
+  and returns the conformed value or :clojure.spec.alpha/invalid.
+  Optionally takes an unform fn; if omitted, unform is identity."
+  [& args]
+  `(clojure.spec.alpha/conformer-impl ~@args))
 
 ;; ---------------------------------------------------------------------------
 ;; nonconforming -- same acceptance as the wrapped spec, but conform
@@ -2063,45 +2105,3 @@
      '~mm
      (resolve '~mm)
      ~retag))
-
-;; Divergence from JVM clojure.spec.alpha: s/int-in is a function (first-class value) on the
-;; JVM; mino uses a macro. This means int-in cannot be passed as a value in higher-order
-;; contexts. Use int-in-impl directly for higher-order use.
-(defmacro int-in
-  "Return a spec validating fixed-precision integers in the range from
-  start (inclusive) to end (exclusive)."
-  [start end]
-  `(clojure.spec.alpha/int-in-impl ~start ~end))
-
-(defmacro double-in
-  "Return a spec for a 64-bit floating point number.  Options:
-    :infinite? - whether +/- infinity is allowed (default false)
-    :NaN?      - whether NaN is allowed (default false)
-    :min       - inclusive minimum (default none)
-    :max       - inclusive maximum (default none)
-
-  Divergence: the canonical library defaults :infinite? and :NaN? to
-  true; mino defaults both to false so a plain double-in rejects the
-  non-finite values unless they are explicitly opted in -- the safer
-  default for a range spec."
-  [& opts]
-  `(clojure.spec.alpha/double-in-impl ~@opts))
-
-;; Divergence from JVM clojure.spec.alpha: s/inst-in is a function (first-class value) on the
-;; JVM; mino uses a macro. This means inst-in cannot be passed as a value in higher-order
-;; contexts. Use inst-in-impl directly for higher-order use.
-(defmacro inst-in
-  "Return a spec validating insts in the range from start (inclusive)
-  to end (exclusive)."
-  [start end]
-  `(clojure.spec.alpha/inst-in-impl ~start ~end))
-
-;; Divergence from JVM clojure.spec.alpha: s/conformer is a function (first-class value) on the
-;; JVM; mino uses a macro. This means conformer cannot be passed as a value in higher-order
-;; contexts. Use conformer-impl directly for higher-order use.
-(defmacro conformer
-  "Return a spec that uses cfn as the conform path. cfn takes a value
-  and returns the conformed value or :clojure.spec.alpha/invalid.
-  Optionally takes an unform fn; if omitted, unform is identity."
-  [& args]
-  `(clojure.spec.alpha/conformer-impl ~@args))
