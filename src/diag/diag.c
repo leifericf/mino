@@ -341,52 +341,67 @@ int mino_render_diag(mino_state *S, const mino_diag *d,
 /* Map conversion                                                            */
 /* ------------------------------------------------------------------------- */
 
-/* Build a location map from a span. */
+/* Build a location map from a span.
+ * keys/vals are GC-allocated and pinned so that each allocation in the
+ * body cannot collect a pointer that is only on the C stack. */
 static mino_val *span_to_map(mino_state *S, const mino_span_t *sp)
 {
-    mino_val *keys[5], *vals[5];
-    size_t n = 0;
-    keys[n] = mino_keyword(S, "file");
-    vals[n] = sp->file ? mino_string(S, sp->file) : mino_nil(S);
-    n++;
-    keys[n] = mino_keyword(S, "line");
-    vals[n] = mino_int(S, sp->line);
-    n++;
-    keys[n] = mino_keyword(S, "column");
-    vals[n] = mino_int(S, sp->column);
-    n++;
-    keys[n] = mino_keyword(S, "end-line");
-    vals[n] = mino_int(S, sp->end_line);
-    n++;
-    keys[n] = mino_keyword(S, "end-column");
-    vals[n] = mino_int(S, sp->end_column);
-    n++;
-    return mino_map(S, keys, vals, n);
+#define SPAN_N 5
+    mino_val **keys = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, SPAN_N * sizeof(*keys));
+    mino_val **vals = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, SPAN_N * sizeof(*vals));
+    mino_val *result;
+    gc_pin((mino_val *)keys);
+    gc_pin((mino_val *)vals);
+    gc_valarr_set(S, keys, 0, mino_keyword(S, "file"));
+    gc_valarr_set(S, vals, 0, sp->file ? mino_string(S, sp->file) : mino_nil(S));
+    gc_valarr_set(S, keys, 1, mino_keyword(S, "line"));
+    gc_valarr_set(S, vals, 1, mino_int(S, sp->line));
+    gc_valarr_set(S, keys, 2, mino_keyword(S, "column"));
+    gc_valarr_set(S, vals, 2, mino_int(S, sp->column));
+    gc_valarr_set(S, keys, 3, mino_keyword(S, "end-line"));
+    gc_valarr_set(S, vals, 3, mino_int(S, sp->end_line));
+    gc_valarr_set(S, keys, 4, mino_keyword(S, "end-column"));
+    gc_valarr_set(S, vals, 4, mino_int(S, sp->end_column));
+    result = mino_map(S, keys, vals, SPAN_N);
+    gc_unpin(2);
+    return result;
+#undef SPAN_N
 }
 
-/* Build a frame map. */
+/* Build a frame map.
+ * keys/vals are GC-allocated and pinned so that each allocation in the
+ * body cannot collect a pointer that is only on the C stack. */
 static mino_val *frame_to_map(mino_state *S, const mino_diag_frame_t *f)
 {
-    mino_val *keys[4], *vals[4];
-    size_t n = 0;
-    keys[n] = mino_keyword(S, "fn");
-    vals[n] = f->fn_name ? mino_string(S, f->fn_name) : mino_nil(S);
-    n++;
-    keys[n] = mino_keyword(S, "file");
-    vals[n] = f->file ? mino_string(S, f->file) : mino_nil(S);
-    n++;
-    keys[n] = mino_keyword(S, "line");
-    vals[n] = mino_int(S, f->line);
-    n++;
-    keys[n] = mino_keyword(S, "column");
-    vals[n] = mino_int(S, f->column);
-    n++;
-    return mino_map(S, keys, vals, n);
+#define FRAME_N 4
+    mino_val **keys = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, FRAME_N * sizeof(*keys));
+    mino_val **vals = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, FRAME_N * sizeof(*vals));
+    mino_val *result;
+    gc_pin((mino_val *)keys);
+    gc_pin((mino_val *)vals);
+    gc_valarr_set(S, keys, 0, mino_keyword(S, "fn"));
+    gc_valarr_set(S, vals, 0, f->fn_name ? mino_string(S, f->fn_name) : mino_nil(S));
+    gc_valarr_set(S, keys, 1, mino_keyword(S, "file"));
+    gc_valarr_set(S, vals, 1, f->file ? mino_string(S, f->file) : mino_nil(S));
+    gc_valarr_set(S, keys, 2, mino_keyword(S, "line"));
+    gc_valarr_set(S, vals, 2, mino_int(S, f->line));
+    gc_valarr_set(S, keys, 3, mino_keyword(S, "column"));
+    gc_valarr_set(S, vals, 3, mino_int(S, f->column));
+    result = mino_map(S, keys, vals, FRAME_N);
+    gc_unpin(2);
+    return result;
+#undef FRAME_N
 }
 
 mino_val *diag_to_map(mino_state *S, mino_diag *d)
 {
-    mino_val *keys[11], *vals[11];
+#define DIAG_MAP_N 11
+    mino_val **keys;
+    mino_val **vals;
     size_t n = 0;
 
     if (d == NULL) return mino_nil(S);
@@ -394,92 +409,119 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
     /* Return cached map if available. */
     if (d->cached_map != NULL) return d->cached_map;
 
+    /* Allocate key/value staging arrays on the GC heap and pin them so
+     * that the many allocating calls below cannot collect pointers that
+     * have been stored but are not yet reachable through a GC root. */
+    keys = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, DIAG_MAP_N * sizeof(*keys));
+    vals = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, DIAG_MAP_N * sizeof(*vals));
+    gc_pin((mino_val *)keys);
+    gc_pin((mino_val *)vals);
+
     /* :mino/kind */
-    keys[n] = mino_keyword(S, "mino/kind");
-    vals[n] = d->kind ? mino_keyword(S, d->kind) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/kind"));
+    gc_valarr_set(S, vals, n, d->kind ? mino_keyword(S, d->kind) : mino_nil(S));
     n++;
 
     /* :mino/code */
-    keys[n] = mino_keyword(S, "mino/code");
-    vals[n] = d->code ? mino_string(S, d->code) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/code"));
+    gc_valarr_set(S, vals, n, d->code ? mino_string(S, d->code) : mino_nil(S));
     n++;
 
     /* :mino/phase */
-    keys[n] = mino_keyword(S, "mino/phase");
-    vals[n] = d->phase ? mino_keyword(S, d->phase) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/phase"));
+    gc_valarr_set(S, vals, n, d->phase ? mino_keyword(S, d->phase) : mino_nil(S));
     n++;
 
     /* :mino/message */
-    keys[n] = mino_keyword(S, "mino/message");
-    vals[n] = d->message ? mino_string(S, d->message) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/message"));
+    gc_valarr_set(S, vals, n, d->message ? mino_string(S, d->message) : mino_nil(S));
     n++;
 
     /* :mino/summary */
-    keys[n] = mino_keyword(S, "mino/summary");
-    vals[n] = d->summary ? mino_string(S, d->summary) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/summary"));
+    gc_valarr_set(S, vals, n, d->summary ? mino_string(S, d->summary) : mino_nil(S));
     n++;
 
     /* :mino/expected? */
-    keys[n] = mino_keyword(S, "mino/expected?");
-    vals[n] = d->expected ? mino_true(S) : mino_false(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/expected?"));
+    gc_valarr_set(S, vals, n, d->expected ? mino_true(S) : mino_false(S));
     n++;
 
     /* :mino/location */
-    keys[n] = mino_keyword(S, "mino/location");
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/location"));
     if (d->has_primary_span) {
-        vals[n] = span_to_map(S, &d->primary_span);
+        gc_valarr_set(S, vals, n, span_to_map(S, &d->primary_span));
     } else {
-        vals[n] = mino_nil(S);
+        gc_valarr_set(S, vals, n, mino_nil(S));
     }
     n++;
 
     /* :mino/notes */
-    keys[n] = mino_keyword(S, "mino/notes");
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/notes"));
     {
-        mino_val **note_items = NULL;
         size_t i;
         if (d->notes_len > 0) {
+            mino_val **note_items;
+            if (d->notes_len > SIZE_MAX / sizeof(*note_items)) {
+                gc_unpin(2);
+                gc_oom_throw(S, "diag notes array size overflow");
+            }
             note_items = (mino_val **)gc_alloc_typed(
                 S, GC_T_VALARR, d->notes_len * sizeof(*note_items));
+            gc_pin((mino_val *)note_items);
             for (i = 0; i < d->notes_len; i++) {
-                note_items[i] = d->notes[i].message
-                    ? mino_string(S, d->notes[i].message) : mino_nil(S);
+                gc_valarr_set(S, note_items, i,
+                    d->notes[i].message
+                        ? mino_string(S, d->notes[i].message) : mino_nil(S));
             }
-            vals[n] = mino_vector(S, note_items, d->notes_len);
+            gc_valarr_set(S, vals, n, mino_vector(S, note_items, d->notes_len));
+            gc_unpin(1);
         } else {
-            vals[n] = mino_vector(S, NULL, 0);
+            gc_valarr_set(S, vals, n, mino_vector(S, NULL, 0));
         }
     }
     n++;
 
     /* :mino/trace */
-    keys[n] = mino_keyword(S, "mino/trace");
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/trace"));
     {
-        mino_val **frame_items = NULL;
         size_t i;
         if (d->frames_len > 0) {
+            mino_val **frame_items;
+            if (d->frames_len > SIZE_MAX / sizeof(*frame_items)) {
+                gc_unpin(2);
+                gc_oom_throw(S, "diag frames array size overflow");
+            }
             frame_items = (mino_val **)gc_alloc_typed(
                 S, GC_T_VALARR, d->frames_len * sizeof(*frame_items));
+            gc_pin((mino_val *)frame_items);
             for (i = 0; i < d->frames_len; i++) {
-                frame_items[i] = frame_to_map(S, &d->frames[i]);
+                gc_valarr_set(S, frame_items, i,
+                    frame_to_map(S, &d->frames[i]));
             }
-            vals[n] = mino_vector(S, frame_items, d->frames_len);
+            gc_valarr_set(S, vals, n, mino_vector(S, frame_items, d->frames_len));
+            gc_unpin(1);
         } else {
-            vals[n] = mino_vector(S, NULL, 0);
+            gc_valarr_set(S, vals, n, mino_vector(S, NULL, 0));
         }
     }
     n++;
 
     /* :mino/data */
-    keys[n] = mino_keyword(S, "mino/data");
-    vals[n] = d->data ? d->data : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/data"));
+    gc_valarr_set(S, vals, n, d->data ? d->data : mino_nil(S));
     n++;
 
     /* :mino/cause */
-    keys[n] = mino_keyword(S, "mino/cause");
-    vals[n] = d->cause ? diag_to_map(S, d->cause) : mino_nil(S);
+    gc_valarr_set(S, keys, n, mino_keyword(S, "mino/cause"));
+    gc_valarr_set(S, vals, n,
+        d->cause ? diag_to_map(S, d->cause) : mino_nil(S));
     n++;
 
     d->cached_map = mino_map(S, keys, vals, n);
+    gc_unpin(2);
     return d->cached_map;
+#undef DIAG_MAP_N
 }
