@@ -411,7 +411,6 @@ static mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
     return mino_is_atom(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
-/* (add-watch atom key fn) -- register a watch callback. */
 /* Atomically publish new_val to *slot. In single-threaded mode it is
  * a plain compare-and-write (no other writer can interpose, so the
  * implicit expected always matches *slot). In multi-threaded mode it
@@ -500,6 +499,7 @@ static int watchable_check_state(mino_state *S, mino_val *v)
     return 0;
 }
 
+/* (add-watch atom key fn) -- register a watch callback. */
 static mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val       *a, *key, *fn, *watches, *new_map;
