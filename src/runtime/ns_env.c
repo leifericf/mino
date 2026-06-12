@@ -17,9 +17,9 @@ static void ns_env_register_root(mino_state *S, mino_env *env)
 {
     root_env_t *r = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
-        fprintf(stderr, "ns_env: out of memory registering root\n");
-        /* unrecoverable: init-time OOM, no try-frame to recover through */
-        abort();
+        /* gc_oom_throw longjmps to the active try frame (user-code path)
+         * or aborts when no frame exists (init-time Class I OOM). */
+        gc_oom_throw(S, "ns_env: out of memory registering root");
     }
     r->env  = env;
     r->next = S->gc.root_envs;
@@ -32,9 +32,9 @@ static void ns_env_table_grow(mino_state *S)
     ns_env_entry_t *nb = (ns_env_entry_t *)realloc(
         S->ns_vars.ns_env_table, new_cap * sizeof(*nb));
     if (nb == NULL) {
-        fprintf(stderr, "ns_env: out of memory growing table\n");
-        /* unrecoverable: init-time OOM, no try-frame to recover through */
-        abort();
+        /* gc_oom_throw longjmps to the active try frame (user-code path)
+         * or aborts when no frame exists (init-time Class I OOM). */
+        gc_oom_throw(S, "ns_env: out of memory growing table");
     }
     S->ns_vars.ns_env_table = nb;
     S->ns_vars.ns_env_cap   = new_cap;
@@ -122,7 +122,10 @@ mino_val *ns_symbol_with_meta(mino_state *S, const char *name)
     mino_val *sym  = mino_symbol(S, name);
     mino_val *meta = ns_env_get_meta(S, name);
     if (meta != NULL && sym != NULL) {
-        mino_val *copy = alloc_val(S, mino_type_of(sym));
+        mino_val *copy;
+        gc_pin(sym); /* alloc_val can trigger GC; keep sym live */
+        copy = alloc_val(S, mino_type_of(sym));
+        gc_unpin(1);
         copy->as   = sym->as;
         copy->meta = meta;
         return copy;
