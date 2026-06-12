@@ -25,7 +25,36 @@
  * `CHAR` typedef from <windows.h>, which other TUs pull in under
  * _WIN32. In the single-file amalgamation those includes precede this
  * enum, so the unprefixed name breaks a Windows amalgam build. */
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, RE_CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT, WORD_BOUNDARY, NOT_WORD_BOUNDARY, LAZY_QUESTIONMARK, LAZY_STAR, LAZY_PLUS, LAZY_BOUNDED, BACKREF };
+enum {
+    UNUSED,
+    DOT,
+    BEGIN,
+    END,
+    QUESTIONMARK,
+    STAR,
+    PLUS,
+    RE_CHAR,
+    CHAR_CLASS,
+    INV_CHAR_CLASS,
+    DIGIT,
+    NOT_DIGIT,
+    ALPHA,
+    NOT_ALPHA,
+    WHITESPACE,
+    NOT_WHITESPACE,
+    GROUP_OPEN,
+    GROUP_CLOSE,
+    BOUNDED,
+    SET_FLAGS,
+    ALT,
+    WORD_BOUNDARY,
+    NOT_WORD_BOUNDARY,
+    LAZY_QUESTIONMARK,
+    LAZY_STAR,
+    LAZY_PLUS,
+    LAZY_BOUNDED,
+    BACKREF
+};
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its

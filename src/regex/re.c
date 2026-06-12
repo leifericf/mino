@@ -6,6 +6,9 @@
  * shared by both TUs live in re_internal.h. The public API is unchanged
  * in re.h.
  *
- * This file is intentionally empty; it exists only to preserve the
- * file name in git history.
+ * This file exists only to preserve the file name in git history.
+ * ISO C99 requires at least one external declaration per translation
+ * unit; the typedef below satisfies that requirement.
  */
+
+typedef int re_placeholder_t;
