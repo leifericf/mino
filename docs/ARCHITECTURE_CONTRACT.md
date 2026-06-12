@@ -39,7 +39,8 @@ mino is an embeddable runtime. The host drives everything.
 - Values returned from eval are borrowed: they survive until the next GC cycle.
   The host must use `mino_ref`/`mino_unref` to retain values across calls.
 - The host can register C functions as primitives via `mino_register_fn`.
-- The host can set execution limits (steps, heap) and interrupt evaluation.
+- The host can set execution limits (steps, heap) through the options API
+  (`mino_set_option` / `mino_get_option`) and interrupt evaluation.
 - Handles (`MINO_HANDLE`) let the host attach opaque pointers with type tags
   and optional finalizers.
 
@@ -53,8 +54,9 @@ mino is an embeddable runtime. The host drives everything.
   pointers cross state boundaries.
 - There are no C-side concurrency primitives by default. Each
   `mino_state` is single-threaded until the host calls
-  `mino_set_thread_limit(S, n > 1)`; the host may run multiple states
-  from different threads, and each state is independent.
+  `mino_set_option(S, MINO_OPT_THREAD_LIMIT, n)` with `n > 1`; the host
+  may run multiple states from different threads, and each state is
+  independent.
 - `mino_interrupt` is the only function safe to call from a thread other
   than the one running eval.
 

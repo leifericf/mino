@@ -39,7 +39,7 @@ src/
 | `src/eval/bindings.c` | Destructuring (`bind_form`, `bind_params`), `let`, `loop`, `binding` |
 | `src/eval/control.c` | `try`/`catch`/`finally` |
 | `src/eval/fn.c` | `fn`, `apply_callable`, multi-arity dispatch |
-| `src/runtime/state.c` | State lifecycle (`mino_state_new`, `mino_state_free`), limits, interrupt, env public API (`mino_env_new`, `mino_env_free`, `mino_env_clone`, `mino_new`), refs, fault injection setup |
+| `src/runtime/state.c` | State lifecycle (`mino_state_new`, `mino_state_free`), options API (`mino_set_option` / `mino_get_option`), interrupt, env public API (`mino_env_new`, `mino_env_free`, `mino_env_clone`, `mino_new`), refs, fault injection setup |
 | `src/gc/driver.c` | Allocation driver (`gc_alloc_typed`, `alloc_val`, `dup_n`), shared mark-stack primitives, driver tick that picks minor vs. major vs. incremental-major-slice, STW orchestrator (`gc_major_collect`), force-finish helper |
 | `src/gc/roots.c` | Root enumeration, conservative stack scan (`gc_scan_stack`, `gc_mark_roots`), range index over live headers for interior-pointer resolution |
 | `src/gc/minor.c` | Minor (nursery) collector: marks YOUNG-reachable via roots+remset, sweeps dead YOUNG, promotes surviving YOUNG to OLD, nests safely inside an active major |
