@@ -1,12 +1,11 @@
 (require "tests/test")
 
-;; Spec-first tests for three upcoming src/core.clj changes.
+;; Spec-first tests for upcoming src/core.clj changes.
 ;; Most of these FAIL on the current branch (expected): they describe
 ;; the intended behavior and will pass once each implementation lands.
 ;;
 ;; (1) refer-clojure macro  — resolves nil today; all its tests fail
 ;; (2) *clojure-version* ^:dynamic — not dynamic today; binding fails
-;; (3) vswap! becomes a macro — behavior passes; :macro flag fails
 ;;
 ;; GC-stress note: all tests here are allocation-light and pass
 ;; under MINO_GC_STRESS=1 (no large heap builds).
@@ -117,17 +116,18 @@
   (is (re-find #"\d+\.\d+\.\d+" (clojure-version))))
 
 ;; ---------------------------------------------------------------------------
-;; (3) vswap! becomes a macro
+;; (3) vswap! is a macro
 ;;
-;; Behavioral assertions all PASS today (vswap! works as a C function).
-;; Only the :macro flag assertion fails — that is intentional.
+;; All vswap! assertions pass. vswap! is a defmacro matching JVM Clojure.
 ;;
 ;; In JVM Clojure, vswap! is defined as:
 ;;   (defmacro vswap! [vol f & args]
 ;;     (list 'vreset! vol (list* f (list 'clojure.core/deref vol) args)))
 ;;
 ;; The macro form lets the compiler inline the deref+call+vreset! without
-;; boxing the extra args into a variadic apply call.
+;; boxing the extra args into a variadic apply call. Like the JVM macro,
+;; the vol expression appears twice in the expansion (once for vreset!, once
+;; for deref), matching canonical JVM behavior.
 ;; ---------------------------------------------------------------------------
 
 (deftest cs-vswap-behavior-inc

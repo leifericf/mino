@@ -16,7 +16,7 @@
   ;; Clojure 1.11 public surface in clojure.core, sorted, with the
   ;; mino-runnable subset filtered to what's portable. Names that
   ;; are deeply Java-coupled appear in jvm-only-clojure-core below.
-  '#{*' *1 *2 *3 *' *agent* *clojure-version* *command-line-args*
+  '#{*' *1 *2 *3 *agent* *clojure-version* *command-line-args*
      *compile-files* *compile-path* *compiler-options* *e *err* *file*
      *flush-on-newline* *fn-loader* *in* *math-context* *ns* *out*
      *print-dup* *print-length* *print-level* *print-meta*
@@ -67,7 +67,7 @@
      instance? int int-array int? integer? interleave intern interpose
      into into-array ints io! isa? iterate iteration iterator-seq
      juxt
-     keep keep-indexed key keys keyword keyword? keys
+     keep keep-indexed key keys keyword keyword?
      last lazy-cat lazy-seq let letfn line-seq list list* list? load
      load-file load-reader load-string loaded-libs locking long
      long-array long? longs loop
@@ -103,7 +103,7 @@
      satisfies? second select-keys send send-off send-via seq seq?
      seqable? sequence sequential? set set? set-error-handler!
      set-error-mode! set-validator! short short-array shorts
-     short-array shutdown-agents simple-ident? simple-keyword?
+     shutdown-agents simple-ident? simple-keyword?
      simple-symbol? slurp some some-> some->> some-fn some? sort
      sort-by sorted-map sorted-map-by sorted-set sorted-set-by sorted?
      special-symbol? spit split-at split-with splitv-at str string?
@@ -155,7 +155,7 @@
 (def jvm-only
   '#{;; class generation / object system
      proxy gen-class gen-interface definterface
-     bean class supers ancestors-class
+     ancestors-class
      ;; Java-import surface
      import construct-proxy proxy-mappings proxy-name proxy-super
      update-proxy init-proxy get-proxy-class
@@ -183,9 +183,9 @@
      future? promise deliver
      ;; stream + JVM IO
      enumeration-seq iterator-seq line-seq xml-seq file-seq slurp spit
-     read-line print-method print-dup PrintWriter-on
+     read-line PrintWriter-on
      resultset-seq with-precision with-out-str with-in-str with-open
-     io! locking monitor-enter monitor-exit
+     locking monitor-enter monitor-exit
      ;; struct (deprecated, JVM-coupled)
      create-struct defstruct struct struct-map accessor
      ;; bigdec/biginteger (Java types)

@@ -25,7 +25,7 @@
     (is (cons? results))))
 
 (deftest apropos-empty
-  (is (= nil (apropos "zzzznotfound"))))
+  (is (empty? (apropos "zzzznotfound"))))
 
 ;; load-string and load-file: read+eval all forms; return last value.
 
@@ -65,16 +65,18 @@
     (is (some? err))
     (is (some? (re-find #"\[1 2\]" err)))))
 
-;; class: concrete type tag, ignoring :type metadata, nil->nil.
-
-;; Spec-first: class is unimplemented; tests fail with "unbound symbol:
-;; class" until the C primitive lands.
+;; class: returns a keyword type tag, ignoring :type metadata. (class nil) returns nil.
 
 (deftest class-nil-returns-nil
   ;; (class nil) => nil, not :nil.
   ;; Contrast: (type nil) => :nil.
   (is (= nil (class nil)))
   (is (= :nil (type nil))))
+
+;; Divergence from JVM Clojure: JVM (class x) returns a java.lang.Class object
+;; (e.g. java.lang.Long for 42). mino has no Java class objects; (class x)
+;; returns the same keyword tag as (type x) but ignores :type metadata overrides.
+;; (class nil) returns nil, not a keyword.
 
 (deftest class-scalars
   ;; class agrees with type for plain scalar values.

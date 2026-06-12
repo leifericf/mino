@@ -49,6 +49,15 @@
 (deftest intros-ns-in-ns-publics
   (is (contains? (ns-publics 'clojure.core) 'ns)))
 
+(deftest intros-when-in-ns-publics
+  (is (contains? (ns-publics 'clojure.core) 'when)))
+
+(deftest intros-and-in-ns-publics
+  (is (contains? (ns-publics 'clojure.core) 'and)))
+
+(deftest intros-or-in-ns-publics
+  (is (contains? (ns-publics 'clojure.core) 'or)))
+
 ;; (2) *ns* in ns-publics
 
 (deftest intros-star-ns-in-ns-publics
@@ -110,6 +119,15 @@
 
 (deftest intros-ns-has-macro-true
   (is (true? (:macro (meta (resolve 'ns))))))
+
+(deftest intros-when-has-macro-true
+  (is (true? (:macro (meta (resolve 'when))))))
+
+(deftest intros-and-has-macro-true
+  (is (true? (:macro (meta (resolve 'and))))))
+
+(deftest intros-or-has-macro-true
+  (is (true? (:macro (meta (resolve 'or))))))
 
 ;; --- :doc strings are non-empty for all 8 forms ---
 ;; doc-string returns (:doc (meta (resolve name))) via clojure.repl.
@@ -215,11 +233,17 @@
     (is (some? v))
     (is (var? v))))
 
+;; Divergence from JVM Clojure: mino's *ns* var holds the namespace name as a
+;; symbol, not a clojure.lang.Namespace object. On JVM, (deref (resolve '*ns*))
+;; returns a Namespace and would not be = to (ns-name *ns*) which returns a Symbol.
+
 (deftest intros-star-ns-deref-matches-current
   (let [v (resolve '*ns*)]
     (is (= (ns-name *ns*) (deref v)))))
 
 ;; --- (3) pr becomes dynamic ---
+;; In JVM Clojure, clojure.core/pr is not ^:dynamic and cannot be rebound with binding.
+;; mino marks it dynamic as a deliberate extension.
 
 (deftest intros-pr-dynamic-binding-reroutes
   ;; When pr is bound to a custom fn, calling pr invokes that fn.
