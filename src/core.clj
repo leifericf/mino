@@ -2086,7 +2086,7 @@
 ;; Agents: not supported on mino.
 ;;
 ;; Real Clojure agents have asynchronous send semantics, an error-mode
-;; lifecycle, and a thread-pool dispatcher. Mino has none of those, so
+;; lifecycle, and a thread-pool dispatcher. mino has none of those, so
 ;; rather than aliasing agent to atom and pretending the API works, the
 ;; functions throw with a clear message pointing at atoms or
 ;; core.async as the supported alternatives.
@@ -3190,9 +3190,11 @@
 
 ;; --- Compatibility vars ---
 
-(def ^:dynamic *clojure-version* {:major 1 :minor 11 :incremental 0 :qualifier nil})
+(def ^:dynamic *clojure-version*
+  "The Clojure compatibility version for this runtime, as a map with :major :minor :incremental and :qualifier keys."
+  {:major 1 :minor 11 :incremental 0 :qualifier nil})
 (defn clojure-version
-  "Returns the version of mino as a string."
+  "Returns the Clojure compatibility version as a printable string."
   []
   (str (:major *clojure-version*) "."
        (:minor *clojure-version*) "."
@@ -3489,7 +3491,7 @@
    reader-conditional."
   [x] (boolean (some-> x meta :mino/reader-conditional)))
 
-;; Keyword interning probe. Mino interns every keyword on construction,
+;; Keyword interning probe. mino interns every keyword on construction,
 ;; so any keyword we can construct already exists.
 (defn find-keyword
   "Returns the keyword for the given string. In mino keywords are
@@ -3911,7 +3913,7 @@
 
 ;; --- Platform-specific forms (not supported on mino) ---
 ;;
-;; Mino is neither a JVM nor a JavaScript runtime, so forms that
+;; mino is neither a JVM nor a JavaScript runtime, so forms that
 ;; generate Java classes (defrecord, deftype, reify, proxy,
 ;; gen-class, definterface), import Java packages (import), or
 ;; perform Java instance-of checks (instance?) cannot be honored.

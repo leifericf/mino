@@ -293,9 +293,9 @@ static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* tag_kw -- return the keyword for v's concrete tag. Called by both
- * prim_type and prim_class. v must be non-NULL and not MINO_NIL, and
- * not MINO_RECORD (records are handled before this call so their
- * MINO_TYPE pointer is returned directly). */
+ * prim_type and prim_class. v must be non-NULL. MINO_RECORD is
+ * handled by callers before this call so their MINO_TYPE pointer is
+ * returned directly. */
 static mino_val *tag_kw(mino_state *S, mino_val *v)
 {
     switch (mino_type_of(v)) {

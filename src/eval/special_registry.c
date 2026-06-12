@@ -90,8 +90,9 @@ static mino_val *var_find_qualified_sym(mino_state *S,
     return NULL;
 }
 
-/* Intern a var for a C primitive bound under vbuf in env or the current ns.
- * Returns the new var if found, else NULL. */
+/* Look up vbuf in env, falling back to current_ns_env. If found, intern a var
+ * in clojure.core with that value as its root and return it. Returns
+ * NULL if vbuf is not bound in either environment. */
 static mino_val *var_promote_prim_to_var(mino_state *S,
                                           mino_env *env, const char *vbuf)
 {
