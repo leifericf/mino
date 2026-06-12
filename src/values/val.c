@@ -508,6 +508,7 @@ mino_val *mino_host_array_new(mino_state *S, size_t len,
     mino_val  *fill;
     size_t       i;
     if (len > 0) {
+        if (len > SIZE_MAX / sizeof(*vals)) return NULL;
         vals = (mino_val **)malloc(len * sizeof(*vals));
         if (vals == NULL) return NULL;
     }
@@ -576,9 +577,11 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
             if (mino_is_cons(s)) {
                 head = s->as.cons.car;
                 s    = s->as.cons.cdr;
+                gc_pin(head);
             } else {
                 head = s->as.chunked_cons.chunk
                           ->as.chunk.vals[s->as.chunked_cons.off];
+                gc_pin(head);
                 s    = mino_chunked_cons_advance(S, s);
             }
             while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
@@ -586,11 +589,12 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                 size_t ncap = cap == 0 ? 8 : cap * 2;
                 mino_val **nvals = (mino_val **)realloc(vals,
                     ncap * sizeof(*nvals));
-                if (nvals == NULL) { free(vals); return NULL; }
+                if (nvals == NULL) { gc_unpin(1); free(vals); return NULL; }
                 vals = nvals;
                 cap  = ncap;
             }
             vals[len++] = head;
+            gc_unpin(1);
         }
         v = alloc_val(S, MINO_HOST_ARRAY);
         if (v == NULL) { free(vals); return NULL; }
@@ -1137,8 +1141,10 @@ static int eq_stack_push(eq_stack_t *st, const mino_val *a,
                          const mino_val *b)
 {
     if (st->len == st->cap) {
-        size_t     new_cap = st->cap * 2u;
+        size_t     new_cap;
         eq_pair_t *nb;
+        if (st->cap > SIZE_MAX / 2) return 0;
+        new_cap = st->cap * 2u;
         if (st->buf == st->inline_buf) {
             nb = (eq_pair_t *)malloc(new_cap * sizeof(*nb));
             if (nb != NULL) memcpy(nb, st->buf, st->len * sizeof(*nb));
