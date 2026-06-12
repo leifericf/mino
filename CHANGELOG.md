@@ -7,10 +7,18 @@
 - GC: Guard fields_vec pointer across alloc_val in mino_defrecord
 - GC: Pin val and key across the mino_symbol intern call in dyn_binding_make
 - GC: Harden the binding snapshot with checked capacity growth, pinned roots across allocations, and a heap buffer for long qualified names
+- GC: Pre-allocated OOM exception singleton so (catch e ...) receives a {:mino/kind :internal :mino/code "MIN001" :mino/message "out of memory"} map rather than nil when the allocator is exhausted
+- GC: fix MSVC build break — thread_count read now uses tc_load() shim instead of __atomic_load_n directly
+- GC: fix MSVC build break — __builtin_return_address(0) guarded with __GNUC__/__clang__ check, NULL fallback on MSVC
+- GC: fix out-of-bounds finalizer dispatch — type_tag checked against GC_T__COUNT before indexing gc_finalizers[]
+- GC: fix alloc-profile counter overflow on Windows — unsigned long fields replaced with uint64_t
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
 - Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
+- Values: Guard mino_host_array_new against len*sizeof overflow (security-values-002)
+- Values: Pin head across allocating GC calls in mino_host_array_from_coll generic seq path (memory-values-001)
+- Values: Guard eq_stack_push capacity doubling against SIZE_MAX overflow (security-values-001)
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
 - Core: Add \delete to char-name-string and add \delete reader literal support
 - Core: Register uuid reader in *data-readers* alongside inst reader
@@ -47,6 +55,66 @@
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
 - API: Consolidate embedder config knobs into mino_set_option / mino_get_option (step/heap limits, thread limit, thread stack bytes, JIT mode, JIT hot threshold); setter returns 0/-1 like mino_gc_set_param and now rejects invalid JIT modes instead of ignoring them
 - API: Remove mino_set_limit, MINO_LIMIT_STEPS/MINO_LIMIT_HEAP, mino_set_thread_limit, mino_get_thread_limit, mino_state_set_jit_mode, mino_state_jit_mode, mino_state_set_jit_hot_threshold, mino_state_jit_hot_threshold, and mino_set_thread_stack_size (alpha surface, no shims)
+- Async: fix GC hazard when xform/ex_handler stored before alloc_val in chan_new (memory-async-001)
+- Async: fix gc_pin/gc_unpin mismatch and sched_entry leak on throw path in sched_drain (memory-async-002, memory-async-003)
+- Async: guard gc_save overflow in sched_drain to prevent user-triggerable abort in sanitizer builds (security-async-001)
+- Collections: Fix OOM-path buffer leak in mino_bytes (calloc now follows gc_alloc_typed)
+- Collections: Add write-barrier coverage for GC_T_VALARR stores in mino_bytes_seq
+- Collections: Propagate :meta through sorted-map and sorted-set structural mutations
+- Collections: Pin GC values across allocating calls in sorted_map_assoc1, sorted_map_dissoc1, sorted_set_disj1, and clone.c ratio branch
+- Collections: Replace bare __atomic builtins in transient.c with portable MSVC/GCC shim
+- Collections: Pin new_rec and new_ext across allocating calls in prim_assoc and prim_dissoc record branches
+- Collections: Suppress GC in prim_assoc/prim_dissoc while malloc slots[] holds live GC pointers
+- Diag: Guard against snprintf pos overflow in diag_render_pretty (security-diag-001)
+- Diag: Clamp %.*s int precision to INT_MAX in diag_render_pretty (security-diag-002)
+- Diag: Guard notes_cap doubling against size_t overflow in diag_add_note (memory-diag-006)
+- Diag: Pin GC staging arrays in span_to_map, frame_to_map, diag_to_map (memory-diag-001/002/003)
+- Diag: Pin note_items and frame_items GC buffers across allocating loops (memory-diag-004/005)
+- Diag: Guard notes/frames array size multiplication against overflow (security-diag-003)
+- Compiler: Guard GC liveness for scratch VALARR buffers and fresh cons in bc compile pass
+- VM: Bounds-check 16-bit Bx step-register index in OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC
+- VM: Guard __builtin_expect at clause-match fast path with __GNUC__/__clang__ portability check
+- JIT: Guard size-pass arithmetic and table allocations against integer overflow (emit.c)
+- JIT: Pin GC-live locals across allocating calls in nth-vec, closure, make-lazy, and tailcall helpers
+- JIT: Fix signed/unsigned protocol slot bounds check to block wrap-around bypass
+- Eval: Fix snprintf over-read in gensym (security-eval-001)
+- Eval: Fix write-barrier bypass in vec_destructure_args (memory-eval-003)
+- Eval: Pin GC arrays in qq_expand_vector across quasiquote_expand loop (memory-eval-002)
+- Eval: Pin ks/vs arrays in qq_expand_map before second allocation (memory-eval-001)
+- Eval: Guard __atomic_* builtins with compiler check; add MSVC fallback (portability-eval-001)
+- Eval: Document catch-all deviation in try/catch (conformance-eval-001, conformance-eval-002)
+- Eval: Document lazy-seq retry deviation after thunk throw (conformance-eval-004)
+- Eval: Cast stack guard pointer comparison through uintptr_t (portability-eval-003)
+- Eval: Guard __attribute__((always_inline)) with compiler check (portability-eval-002)
+- Eval: Guard argv buffer growth against integer overflow (security-eval-002)
+- Interop: Guard size_t overflow in host registry capacity doubling (memory-interop-001, memory-interop-002)
+- Interop: Reject negative arity in host_member_find to prevent variadic bypass (security-interop-001)
+- IO: Guard getcwd behind _WIN32 for Windows portability
+- Numerics: guard bigdec exponent and mc_precision integer overflow
+- Numerics: guard bits-get offset+size and prim_bits total_bits overflow
+- Numerics: pin GC values across allocating calls in bigdec, numeric, ratio
+- Numerics: exact bigint/bigint comparison in compare (no double precision loss)
+- Numerics: free qz_heap on bigint_wrap NULL path in bigdec rounding
+- Primitives: file-mtime now returns sub-second precision on Linux and macOS
+- Primitives: thread-sleep compiles and runs on Windows (Sleep fallback)
+- Primitives: getcwd and chdir use _getcwd/_chdir on Windows
+- Primitives: Fix GC-window, overflow, and write-barrier ordering bugs across prim-state and prim-misc modules (async, io, stateful, meta, ns, module, install, reflection, regex)
+- Sequences: Guard rangev length arithmetic against signed overflow for extreme start/end values
+- Sequences: Suppress GC in prim_comp while C-heap items[] array holds live GC pointers
+- Sequences: Guard prim_sort alloc-size multiply against SIZE_MAX overflow
+- Strings: Guard cap-doubling loops in prim_pr_str, prim_join, prim_str, and prim_split against size_t overflow
+- Public API: fix GC window in mino_throw when printing non-string exceptions (pin ex across mino_print_to_buf)
+- Public API: fix data race in mino_sampler_dump and mino_alloc_sampler_dump when multiple mino_state instances run concurrently (replace static aggregation tables with per-call malloc)
+- Regex: Fix three process-global statics (re_flags, re_anchor_end, re_g_state) that produced wrong answers under concurrent mino_state use; they are now thread-local (conformance-misc-003, portability-misc-001)
+- Regex: Fix matchrange signed-char comparison so byte ranges with endpoints >= 0x80 work correctly (conformance-misc-002)
+- Regex: Cap matchgroup_loop recursion at 10 000 iterations to prevent stack exhaustion on long inputs (security-regex-001)
+- Runtime: Fix GC window in set_eval_diag_with_data — pin keys/vals arrays across sequential allocating calls
+- Runtime: Replace bare abort() with gc_oom_throw in ns_env OOM paths so (ns ...) OOM is catchable
+- Runtime: Pin sym across alloc_val in ns_symbol_with_meta to close GC window
+- Runtime: Guard __builtin_expect in mino_eval_stack_guard_fast behind GCC/Clang check for MSVC portability
+- Runtime: Guard __atomic_compare_exchange_n in mino_lazy_inflight_unwind with InterlockedCompareExchange fallback for MSVC
+- Stencils: JIT loop stencils now exit the region with a real return NULL on safepoint cancel and cons OOM instead of chaining NULL to the next stencil (memory-stencils-001)
+- Stencils: non-loop stencils guard against NULL regs from slow helpers before chaining to the next stencil (memory-stencils-002)
 
 ## v0.423.5 — Security Fixes
 
