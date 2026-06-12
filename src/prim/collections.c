@@ -1365,18 +1365,25 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
                 return prim_throw_classified(S, "internal", "MIN001",
                     "assoc: failed to allocate record");
             }
+            /* Pin new_rec so it survives mino_cons / map_assoc_pairs allocs. */
+            gc_pin(new_rec);
             new_rec->as.record.type = acc->as.record.type;
             if (n_fields > 0) {
                 size_t j;
                 mino_val **slots = (mino_val **)malloc(
                     n_fields * sizeof(*slots));
                 if (slots == NULL) {
+                    gc_unpin(1);
                     return prim_throw_classified(S, "internal", "MIN001",
                         "assoc: out of memory");
                 }
+                /* Suppress GC while slots[] (C-heap, GC-invisible) holds live
+                 * pointers from acc->as.record.vals. */
+                mino_current_ctx(S)->gc_depth++;
                 for (j = 0; j < n_fields; j++) slots[j] = acc->as.record.vals[j];
                 if (idx >= 0) slots[idx] = v;
                 new_rec->as.record.vals = slots;
+                mino_current_ctx(S)->gc_depth--;
             }
             if (idx < 0) {
                 /* Ext key: build/extend the ext map. */
@@ -1395,6 +1402,7 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
                 new_rec->as.record.ext = acc->as.record.ext;
             }
             new_rec->meta = acc->meta;
+            gc_unpin(1);
             acc = new_rec;
             p = p->as.cons.cdr->as.cons.cdr;
         }
@@ -2309,29 +2317,44 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
                     }
                     new_ext = (ext_n > 0)
                         ? mino_map(S, ek, ev, ext_n) : NULL;
-                    new_rec = alloc_val(S, MINO_RECORD);
-                    if (new_rec == NULL) {
-                        return prim_throw_classified(S, "internal", "MIN001",
-                            "dissoc: failed to allocate record");
-                    }
-                    new_rec->as.record.type = acc->as.record.type;
-                    fields_acc = acc->as.record.type->as.record_type.fields;
-                    n_fields_acc = (fields_acc != NULL)
-                        ? fields_acc->as.vec.len : 0;
-                    if (n_fields_acc > 0) {
-                        slots = (mino_val **)malloc(
-                            n_fields_acc * sizeof(*slots));
-                        if (slots == NULL) {
+                    /* Pin new_ext (when non-NULL) so alloc_val cannot
+                     * collect it; track pin count for matched gc_unpin. */
+                    {
+                        int n_pinned = 0;
+                        if (new_ext != NULL) { gc_pin(new_ext); n_pinned++; }
+                        new_rec = alloc_val(S, MINO_RECORD);
+                        if (new_rec == NULL) {
+                            gc_unpin(n_pinned);
                             return prim_throw_classified(S, "internal",
-                                "MIN001", "dissoc: out of memory");
+                                "MIN001", "dissoc: failed to allocate record");
                         }
-                        for (k = 0; k < n_fields_acc; k++) {
-                            slots[k] = acc->as.record.vals[k];
+                        /* Pin new_rec across the malloc+copy block. */
+                        gc_pin(new_rec); n_pinned++;
+                        new_rec->as.record.type = acc->as.record.type;
+                        fields_acc = acc->as.record.type->as.record_type.fields;
+                        n_fields_acc = (fields_acc != NULL)
+                            ? fields_acc->as.vec.len : 0;
+                        if (n_fields_acc > 0) {
+                            slots = (mino_val **)malloc(
+                                n_fields_acc * sizeof(*slots));
+                            if (slots == NULL) {
+                                gc_unpin(n_pinned);
+                                return prim_throw_classified(S, "internal",
+                                    "MIN001", "dissoc: out of memory");
+                            }
+                            /* Suppress GC while slots[] (C-heap, GC-invisible)
+                             * holds live pointers from acc->as.record.vals. */
+                            mino_current_ctx(S)->gc_depth++;
+                            for (k = 0; k < n_fields_acc; k++) {
+                                slots[k] = acc->as.record.vals[k];
+                            }
+                            new_rec->as.record.vals = slots;
+                            mino_current_ctx(S)->gc_depth--;
                         }
-                        new_rec->as.record.vals = slots;
+                        new_rec->as.record.ext = new_ext;
+                        new_rec->meta          = acc->meta;
+                        gc_unpin(n_pinned);
                     }
-                    new_rec->as.record.ext = new_ext;
-                    new_rec->meta          = acc->meta;
                     acc = new_rec;
                 }
                 /* else: key not in declared fields and not in ext;
