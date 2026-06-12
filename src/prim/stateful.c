@@ -977,30 +977,6 @@ static mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
     return val;
 }
 
-static mino_val *prim_vswap_bang(mino_state *S, mino_val *args,
-                            mino_env *env)
-{
-    mino_val *v, *fn, *cur, *call_args, *result, *extra;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "vswap! requires at least 2 arguments: volatile and function");
-    }
-    v  = args->as.cons.car;
-    fn = args->as.cons.cdr->as.cons.car;
-    if (v == NULL || mino_type_of(v) != MINO_VOLATILE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "vswap!: first argument must be a volatile");
-    }
-    extra     = args->as.cons.cdr->as.cons.cdr;
-    cur       = v->as.volatile_.val;
-    call_args = swap_build_args(S, cur, extra);
-    result    = mino_call(S, fn, call_args, env);
-    if (result == NULL) return NULL;
-    gc_write_barrier(S, v, cur, result);
-    v->as.volatile_.val = result;
-    return result;
-}
-
 const mino_prim_def k_prims_stateful[] = {
     {"atom",           prim_atom,
      "Creates an atom with the given initial value."},
@@ -1020,8 +996,6 @@ const mino_prim_def k_prims_stateful[] = {
      "Returns true if x is a volatile."},
     {"vreset!",        prim_vreset_bang,
      "Sets the value of a volatile to newval and returns newval. No watches, no validators, no atomicity."},
-    {"vswap!",         prim_vswap_bang,
-     "Applies f to the current value of the volatile and any args, sets the result, and returns it. No retry loop — single-thread only."},
     {"add-watch",      prim_add_watch,
      "Adds a watch function to an atom, called on state changes."},
     {"remove-watch",   prim_remove_watch,

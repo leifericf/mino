@@ -218,6 +218,16 @@
 
 ;; swap! is defined as a C primitive; no mino-level fallback needed.
 
+;; vswap! is a macro, not a function: it expands to a vreset! of f applied
+;; to the dereferenced volatile, so the extra args never box into a
+;; variadic apply. vol is referenced twice (deref and vreset!), matching
+;; JVM Clojure, which likewise evaluates the volatile expression twice.
+(defmacro vswap!
+  "Non-atomically swaps the value of the volatile to be:
+   (apply f current-value-of-vol args). Returns the new value."
+  [vol f & args]
+  `(vreset! ~vol (~f (deref ~vol) ~@args)))
+
 ;; --- Lazy sequence operations ---
 
 (def ^:private map1 lazy-map-1)
