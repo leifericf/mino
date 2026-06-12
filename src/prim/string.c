@@ -55,7 +55,20 @@ static inline char *fmt_ensure(mino_state *S, char *buf,
 
 /*
  * (format fmt & args) — simple string formatting.
- * Directives: %s (str of arg), %d (integer), %f (float), %% (literal %).
+ *
+ * Deviation from JVM String.format / Clojure's format:
+ *   Supported specifiers: %s, %d, %x, %o, %f, %e, %g, %%
+ *   Supported flags:      -, +, ' ' (space), 0, #
+ *   Supported modifiers:  width and .precision (integer digits only)
+ *
+ *   NOT supported (JVM has these, mino does not):
+ *     %b (boolean), %c (char), %h (hashCode), %n (newline),
+ *     %a/%A (hex float), %t/%T (date/time), uppercase %E/%G/%X/%O,
+ *     argument index (%1$s), width * from argument, %S (uppercase str).
+ *
+ *   This is a deliberate subset: mino's format covers the common
+ *   printf-style cases. Code that needs the full JVM surface must use
+ *   the host or a wrapper.
  */
 mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 {
