@@ -169,12 +169,18 @@ static int append_kv(mino_state *S, mino_val ***ks_io, mino_val ***vs_io,
 {
     if (*len_io == *cap_io) {
         size_t new_cap = *cap_io == 0 ? 16 : *cap_io * 2;
-        mino_val **nks = (mino_val **)gc_alloc_typed(
-            S, GC_T_VALARR, new_cap * sizeof(*nks));
-        mino_val **nvs = (mino_val **)gc_alloc_typed(
-            S, GC_T_VALARR, new_cap * sizeof(*nvs));
+        mino_val **nks;
+        mino_val **nvs;
         size_t       i;
-        if (nks == NULL || nvs == NULL) return 0;
+        nks = (mino_val **)gc_alloc_typed(
+            S, GC_T_VALARR, new_cap * sizeof(*nks));
+        if (nks == NULL) return 0;
+        /* Pin nks so the second alloc cannot collect it. */
+        gc_pin((mino_val *)nks);
+        nvs = (mino_val **)gc_alloc_typed(
+            S, GC_T_VALARR, new_cap * sizeof(*nvs));
+        gc_unpin(1);
+        if (nvs == NULL) return 0;
         for (i = 0; i < *len_io; i++) {
             gc_valarr_set(S, nks, i, (*ks_io)[i]);
             gc_valarr_set(S, nvs, i, (*vs_io)[i]);
@@ -389,7 +395,12 @@ static mino_val *prim_ns_aliases(mino_state *S, mino_val *args, mino_env *env)
     }
     if (n == 0) return mino_map(S, NULL, NULL, 0);
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
+    if (ks == NULL) return NULL;
+    /* Pin ks so the second alloc cannot collect it. */
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
+    gc_unpin(1);
+    if (vs == NULL) return NULL;
     {
         size_t out = 0;
         for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
