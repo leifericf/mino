@@ -171,18 +171,32 @@ static int append_print_chunk(mino_state *S, mino_val *v,
         src  = formatted->as.s.data;
         slen = formatted->as.s.len;
     }
-    if (*len + slen > *cap) {
-        size_t nc = *cap == 0 ? 64 : *cap;
-        char  *nb;
-        while (nc < *len + slen) nc *= 2;
-        nb = (char *)realloc(*buf, nc);
-        if (nb == NULL) {
+    {
+        size_t need;
+        if (!checked_add_sz(*len, slen, &need)) {
             prim_throw_classified(S, "internal", "MIN001",
-                "print: out of memory");
+                "print: buffer size overflow");
             return -1;
         }
-        *buf = nb;
-        *cap = nc;
+        if (need > *cap) {
+            size_t nc = *cap == 0 ? 64 : *cap;
+            char  *nb;
+            while (nc < need) {
+                if (!checked_double_sz(nc, &nc)) {
+                    prim_throw_classified(S, "internal", "MIN001",
+                        "print: buffer size overflow");
+                    return -1;
+                }
+            }
+            nb = (char *)realloc(*buf, nc);
+            if (nb == NULL) {
+                prim_throw_classified(S, "internal", "MIN001",
+                    "print: out of memory");
+                return -1;
+            }
+            *buf = nb;
+            *cap = nc;
+        }
     }
     memcpy(*buf + *len, src, slen);
     *len += slen;
@@ -241,8 +255,12 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
                 "print: out of memory");
             return NULL;
         }
-        binding->name = mino_symbol(S, "*out*")->as.s.data;
         binding->var  = var_find(S, "clojure.core", "*out*");
+        /* Use the var's interned name when available; fall back to the
+         * literal so the pointer is never into a GC-managed buffer. */
+        binding->name = (binding->var != NULL)
+                        ? binding->var->as.var.sym
+                        : "*out*";
         binding->val  = atom_val;
         binding->next = NULL;
         frame = (dyn_frame_t *)malloc(sizeof(*frame));
@@ -494,18 +512,33 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
             int    has_nl = cl > 0 && chunk[cl - 1] == '\n';
             saw_any = 1;
             if (has_nl) cl -= 1;
-            if (len + cl + 1 > cap) {
-                size_t nc = cap == 0 ? 256 : cap;
-                char  *nb;
-                while (nc < len + cl + 1) nc *= 2;
-                nb = (char *)realloc(buf, nc);
-                if (nb == NULL) {
+            {
+                size_t need;
+                if (!checked_add_sz(len, cl, &need)
+                    || !checked_add_sz(need, 1, &need)) {
                     free(buf);
                     return prim_throw_classified(S, "internal", "MIN001",
-                        "read-line: out of memory");
+                        "read-line: buffer size overflow");
                 }
-                buf = nb;
-                cap = nc;
+                if (need > cap) {
+                    size_t nc = cap == 0 ? 256 : cap;
+                    char  *nb;
+                    while (nc < need) {
+                        if (!checked_double_sz(nc, &nc)) {
+                            free(buf);
+                            return prim_throw_classified(S, "internal", "MIN001",
+                                "read-line: buffer size overflow");
+                        }
+                    }
+                    nb = (char *)realloc(buf, nc);
+                    if (nb == NULL) {
+                        free(buf);
+                        return prim_throw_classified(S, "internal", "MIN001",
+                            "read-line: out of memory");
+                    }
+                    buf = nb;
+                    cap = nc;
+                }
             }
             memcpy(buf + len, chunk, cl);
             len += cl;
@@ -795,7 +828,11 @@ static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "getcwd takes no arguments");
     }
+#if defined(_WIN32)
+    if (_getcwd(buf, sizeof(buf)) == NULL) {
+#else
     if (getcwd(buf, sizeof(buf)) == NULL) {
+#endif
         return prim_throw_classified(S, "io", "MIO001",
                                      "getcwd: failed to get working directory");
     }
@@ -845,6 +882,9 @@ mino_val *prim_getenv(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- file-seq: recursive directory listing ---- */
 
+/* file_seq_recurse -- accumulate file paths into a GC_T_VALARR buffer.
+ * *items is a GC-allocated array (or NULL); the caller pins it before
+ * each call so the GC can trace the already-stored strings. */
 static void file_seq_recurse(mino_state *S, const char *dir,
                              mino_val ***items, size_t *len, size_t *cap)
 {
@@ -855,7 +895,10 @@ static void file_seq_recurse(mino_state *S, const char *dir,
         char path[PATH_BUF_CAP];
         struct stat st;
         if (ent->d_name[0] == '.') continue;
-        snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+        {
+            int sn = snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+            if (sn < 0 || (size_t)sn >= sizeof(path)) continue; /* truncated */
+        }
 #ifdef _WIN32
         if (stat(path, &st) != 0) continue;   /* lstat unavailable on Windows */
 #else
@@ -864,24 +907,33 @@ static void file_seq_recurse(mino_state *S, const char *dir,
         if (S_ISDIR(st.st_mode)) {
             file_seq_recurse(S, path, items, len, cap);
         } else {
+            mino_val *str;
             if (*len == *cap) {
                 size_t nc;
-                size_t alloc_sz;
                 mino_val **nb;
+                size_t j;
                 if (*cap == 0) {
                     nc = 64;
                 } else if (!checked_double_sz(*cap, &nc)) {
                     closedir(d); return;
                 }
-                if (!checked_mul_sz(nc, sizeof(**items), &alloc_sz)) {
-                    closedir(d); return;
-                }
-                nb = (mino_val **)realloc(*items, alloc_sz);
+                /* Pin old array across the allocation so its entries survive. */
+                if (*items != NULL) gc_pin((mino_val *)*items);
+                nb = (mino_val **)gc_alloc_typed(
+                    S, GC_T_VALARR, nc * sizeof(*nb));
+                if (*items != NULL) gc_unpin(1);
                 if (nb == NULL) { closedir(d); return; }
+                for (j = 0; j < *len; j++) nb[j] = (*items)[j];
                 *items = nb;
                 *cap = nc;
             }
-            (*items)[*len] = mino_string(S, path);
+            /* Pin the array across mino_string so already-stored entries
+             * are reachable by the GC if a minor collection fires. */
+            gc_pin((mino_val *)*items);
+            str = mino_string(S, path);
+            gc_unpin(1);
+            if (str == NULL) { closedir(d); return; }
+            gc_valarr_set(S, *items, *len, str);
             (*len)++;
         }
     }
@@ -907,8 +959,8 @@ static mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env)
     }
     dir = dir_val->as.s.data;
     file_seq_recurse(S, dir, &items, &len, &cap);
+    /* items is GC-owned (gc_alloc_typed); do not free it. */
     result = mino_vector(S, items, len);
-    free(items);
     return result;
 }
 
