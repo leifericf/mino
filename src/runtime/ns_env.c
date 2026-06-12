@@ -20,6 +20,7 @@ static void ns_env_register_root(mino_state *S, mino_env *env)
         /* gc_oom_throw longjmps to the active try frame (user-code path)
          * or aborts when no frame exists (init-time Class I OOM). */
         gc_oom_throw(S, "ns_env: out of memory registering root");
+        return; /* unreachable — gc_oom_throw always longjmps or aborts */
     }
     r->env  = env;
     r->next = S->gc.root_envs;

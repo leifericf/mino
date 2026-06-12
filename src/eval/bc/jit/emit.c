@@ -690,7 +690,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
      * take one entry); every backward branch adds one safepoint
      * instance on top. */
     if (n_backjumps > SIZE_MAX - bc->code_len
-        || (bc->code_len + n_backjumps) > SIZE_MAX / sizeof(*insts)) {
+        || (bc->code_len + n_backjumps) > SIZE_MAX / sizeof(inst_t)) {
         free(pc_offsets);
         jit_compile_cleanup(slab, region, total_size);
         return -1;

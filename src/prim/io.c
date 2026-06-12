@@ -540,7 +540,7 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
                     cap = nc;
                 }
             }
-            memcpy(buf + len, chunk, cl);
+            if (buf != NULL && cl > 0) memcpy(buf + len, chunk, cl);
             len += cl;
             if (has_nl) break;
         }
@@ -929,9 +929,9 @@ static void file_seq_recurse(mino_state *S, const char *dir,
             }
             /* Pin the array across mino_string so already-stored entries
              * are reachable by the GC if a minor collection fires. */
-            gc_pin((mino_val *)*items);
+            if (*items != NULL) gc_pin((mino_val *)*items);
             str = mino_string(S, path);
-            gc_unpin(1);
+            if (*items != NULL) gc_unpin(1);
             if (str == NULL) { closedir(d); return; }
             gc_valarr_set(S, *items, *len, str);
             (*len)++;
