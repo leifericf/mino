@@ -116,14 +116,16 @@ static void install_core_mino(mino_state *S, mino_env *env)
                 break;
             }
             if (S->core_forms_len >= cap) {
+                mino_val **tmp;
                 cap *= 2;
-                S->core_forms = realloc(S->core_forms,
-                                        cap * sizeof(mino_val *));
-                if (!S->core_forms) {
+                tmp = (mino_val **)realloc(S->core_forms,
+                                           cap * sizeof(mino_val *));
+                if (!tmp) {
                     fprintf(stderr, "core.clj: out of memory\n");
                     /* Class I: init-time OOM; no try-frame to recover through */
                     abort();
                 }
+                S->core_forms = tmp;
             }
             S->core_forms[S->core_forms_len++] = form;
             if (mino_eval(S, form, env) == NULL) {
