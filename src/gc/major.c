@@ -225,7 +225,8 @@ void gc_sweep(mino_state *S)
          * here, otherwise the impl is leaked rather than freed under
          * it. */
         {
-            gc_finalizer_fn fin = S->gc_finalizers[h->type_tag];
+            gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
+                ? S->gc_finalizers[h->type_tag] : NULL;
             if (fin != NULL) fin(S, h);
         }
         freed_old += h->size;
