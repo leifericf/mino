@@ -334,7 +334,13 @@ static mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
                 cap *= 2;
             }
             newbuf = (char *)realloc(buf, cap);
-            if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); print_dynvars_restore(S, &saved_dynvars); return NULL; }
+            if (newbuf == NULL) {
+                free(buf);
+                print_dynvars_restore(S, &saved_dynvars);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001", "out of memory");
+                return NULL;
+            }
             buf = newbuf;
         }
         if (!first) buf[len++] = ' ';
