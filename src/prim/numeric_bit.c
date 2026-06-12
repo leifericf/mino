@@ -123,10 +123,12 @@ mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001",
             "bit-shift-right shift amount must be in [0, 63]");
     }
-    /* Signed right shift of a negative value is implementation-defined;
-     * all our supported targets (GCC/Clang/MSVC on x86_64 and ARM64)
-     * produce arithmetic shift, which is the Clojure-expected behavior. */
-    return mino_int_wrap(S, a >> b);
+    /* C99 §6.5.7p5: right-shifting a negative signed value is
+     * implementation-defined.  Cast through unsigned to make the shift
+     * well-defined, then sign-extend by casting back — this produces
+     * the arithmetic (sign-preserving) right shift that Clojure specifies
+     * on all two's-complement targets (GCC, Clang, MSVC, x86_64, ARM64). */
+    return mino_int_wrap(S, (long long)((unsigned long long)a >> b));
 }
 
 mino_val *prim_unsigned_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
