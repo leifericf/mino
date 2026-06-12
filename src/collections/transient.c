@@ -24,6 +24,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* Portability shim for the owner-ID CAS loop. Mirrors the tc_load / tc_add
+ * pattern in src/runtime/host_threads.h. */
+#if defined(_MSC_VER)
+#include <windows.h>
+static uint32_t transient_atomic_load_u32(uint32_t volatile *p)
+{
+    return (uint32_t)InterlockedCompareExchange((LONG volatile *)p, 0, 0);
+}
+static int transient_cas_u32(uint32_t volatile *p,
+                              uint32_t *expected, uint32_t desired)
+{
+    uint32_t old = (uint32_t)InterlockedCompareExchange(
+        (LONG volatile *)p, (LONG)desired, (LONG)*expected);
+    if (old == *expected) return 1;
+    *expected = old;
+    return 0;
+}
+#else
+static uint32_t transient_atomic_load_u32(uint32_t volatile *p)
+{
+    return __atomic_load_n(p, __ATOMIC_RELAXED);
+}
+static int transient_cas_u32(uint32_t volatile *p,
+                              uint32_t *expected, uint32_t desired)
+{
+    return __atomic_compare_exchange_n(p, expected, desired, 0,
+                                       __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+}
+#endif
+
 /* ------------------------------------------------------------------------- */
 /* Small helpers                                                             */
 /* ------------------------------------------------------------------------- */
@@ -106,8 +136,8 @@ mino_val *mino_transient(mino_state *S, mino_val *coll)
      * the owner_id is opaque except to the owner check, which
      * compares for identity, not happens-before. */
     {
-        uint32_t prev = __atomic_load_n(&S->ns_vars.transient_owner_next,
-                                        __ATOMIC_RELAXED);
+        uint32_t prev = transient_atomic_load_u32(
+            (uint32_t volatile *)&S->ns_vars.transient_owner_next);
         for (;;) {
             uint32_t next;
             if (prev == 0xFFFFFFFFu) {
@@ -115,10 +145,9 @@ mino_val *mino_transient(mino_state *S, mino_val *coll)
                 break;
             }
             next = prev + 1u;
-            if (__atomic_compare_exchange_n(&S->ns_vars.transient_owner_next,
-                                            &prev, next, 0,
-                                            __ATOMIC_RELAXED,
-                                            __ATOMIC_RELAXED)) {
+            if (transient_cas_u32(
+                    (uint32_t volatile *)&S->ns_vars.transient_owner_next,
+                    &prev, next)) {
                 t->as.transient.owner_id = (uintptr_t)next;
                 break;
             }
