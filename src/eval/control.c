@@ -39,7 +39,13 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
         mino_val *clause = rest->as.cons.car;
         if (mino_is_cons(clause)
             && sym_eq(clause->as.cons.car, "catch")) {
-            /* (catch e handler...) */
+            /* (catch e handler...)
+             * DEVIATION: JVM Clojure requires (catch ExceptionType e handler...)
+             * and filters by type. mino omits the type argument and catches ALL
+             * exceptions unconditionally. This is intentional: mino has a single
+             * exception kind (a diagnostic map) rather than a class hierarchy, so
+             * type-based dispatch has no meaning here. The type argument is
+             * silently absent from the syntax. */
             mino_val *cv;
             size_t      vl;
             if (!mino_is_cons(clause->as.cons.cdr)) {
