@@ -844,13 +844,16 @@ static int matchrange(char c, const char* str)
              && (lc >= lo)
              && (lc <= hi));
   }
+  /* Cast to unsigned char so bytes >= 0x80 compare as positive values;
+   * signed char comparisons for high-byte ranges silently fail because
+   * the values wrap to negative. */
   return (    (c != '-')
            && (str[0] != '\0')
            && (str[0] != '-')
            && (str[1] == '-')
            && (str[2] != '\0')
-           && (    (c >= str[0])
-                && (c <= str[2])));
+           && (    ((unsigned char)c >= (unsigned char)str[0])
+                && ((unsigned char)c <= (unsigned char)str[2])));
 }
 static int matchdot(char c)
 {

@@ -293,3 +293,14 @@
   (is (= "x[\\\"y\\\"]" (str #"x[\"y\"]")))
   (is (= "#\"a\\d+\"" (pr-str #"a\d+")))
   (is (= "prefix-a\\d+" (str "prefix-" #"a\d+"))))
+
+(deftest matchrange-high-byte
+  ;; Regression: matchrange compared range endpoints as signed char, so
+  ;; bytes >= 0x80 wrapped to negative and failed tests against ASCII
+  ;; lower bounds.  E.g. the first byte of "Ã" (0xC3, 195 unsigned,
+  ;; -61 signed) did not match the class [A-Ã] because signed
+  ;; -61 >= 65 is false.  After the fix (unsigned char casts) 195 >= 65
+  ;; is true, and the match succeeds.
+  (is (some? (re-find "[A-Ã]" "Ã")))
+  ;; The range [A-Z] still works (all-ASCII, no change to behaviour).
+  (is (= "H" (re-find "[A-Z]" "Hello"))))
