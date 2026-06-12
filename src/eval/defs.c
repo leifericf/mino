@@ -738,8 +738,8 @@ static mino_val *eval_meta_map(mino_state *S, mino_val *meta, mino_env *env)
     /* eval_value below runs user code that can allocate and collect; pin
      * the accumulating key/value arrays so a mid-loop GC keeps them and
      * the entries already stored. */
-    gc_pin(ks);
-    gc_pin(vs);
+    gc_pin((mino_val *)ks);
+    gc_pin((mino_val *)vs);
     for (i = 0; i < len; i++) {
         mino_val *k = vec_nth(meta->as.map.key_order, i);
         mino_val *v = map_get_val(meta, k);
