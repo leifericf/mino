@@ -525,10 +525,7 @@ static void test_predicate_grid(mino_state *S, mino_env *env)
  * test_options -- cover mino_set_option / mino_get_option / MINO_OPT_*
  *
  * The options API (mino_set_option, mino_get_option, mino_option, MINO_OPT_*)
- * lives in src/mino.h and src/runtime/state.c.  It does NOT exist in the
- * tree yet; these tests are written spec-first and will fail to compile until
- * the implementation unit lands.  The only acceptable compile errors while
- * that unit is absent are undeclared-identifier errors for the new symbols.
+ * lives in src/mino.h and src/runtime/state.c.
  *
  * Defaults verified from src/runtime/state.c state_init():
  *   LIMIT_STEPS       -- 0  (disabled; field: S->module.limit_steps)
