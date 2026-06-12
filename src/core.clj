@@ -3739,15 +3739,11 @@
   "Finds fn at key :test in v's metadata, calls it (presumably with
    no side effects on the wider system), and reports :ok when it
    returns, :no-test when no :test fn is present. An error thrown by
-   the :test fn flows out unwrapped.
-
-   Divergence: mino's def stores var metadata unevaluated, so the
-   :test entry arrives as the literal fn form; it is evaluated here
-   at use. A fn value (e.g. placed via alter-meta!) is called as-is."
+   the :test fn flows out unwrapped."
   [v]
   (let [f (:test (meta v))]
     (if f
-      (do ((if (fn? f) f (eval f))) :ok)
+      (do (f) :ok)
       :no-test)))
 
 ;; bound? / thread-bound?: variadic over vars, true iff every var has a
