@@ -103,7 +103,14 @@ void gc_remset_add(mino_state *S, gc_hdr_t *container)
         }
         nr = (gc_hdr_t **)realloc(S->gc.remset, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            abort(); /* Class I: inside write barrier, no recovery path */
+            /* Class I abort: the write barrier cannot silently drop a
+             * remset entry — doing so would break the GC invariant that
+             * every OLD container holding a YOUNG pointer is in the
+             * remembered set, causing the next minor cycle to miss the
+             * YOUNG referent and collect it while it is still live.
+             * Heap corruption is certain; aborting is safer than
+             * continuing. */
+            abort();
         }
         S->gc.remset     = nr;
         S->gc.remset_cap = new_cap;
