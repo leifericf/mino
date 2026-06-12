@@ -65,6 +65,7 @@
    "src/public/gc.c" "src/public/embed.c"
    "src/values/val.c" "src/values/gc_handlers.c"
    "src/collections/vec.c" "src/collections/map.c"
+   "src/collections/map_hash.c" "src/collections/map_owned.c"
    "src/collections/chunk.c"
    "src/collections/queue.c"
    "src/collections/bytes.c"
