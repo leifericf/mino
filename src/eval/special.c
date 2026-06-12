@@ -403,9 +403,13 @@ static mino_val *eval_map_literal(mino_state *S, mino_val *form,
         mino_val *form_val = map_get_val(form, form_key);
         mino_val *k = eval_value(S, form_key, env);
         mino_val *v;
-        if (k == NULL) { return NULL; }
+        if (k == NULL) {
+            return NULL;
+        }
         v = eval_value(S, form_val, env);
-        if (v == NULL) { return NULL; }
+        if (v == NULL) {
+            return NULL;
+        }
         gc_valarr_set(S, ks, i, k);
         gc_valarr_set(S, vs, i, v);
     }
@@ -787,7 +791,7 @@ static int eval_check_limits(mino_state *S)
     if (mino_current_ctx(S)->interrupted) {
         mino_current_ctx(S)->limit_exceeded = 1;
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
-                      "mino_current_ctx(S)->interrupted");
+                      "eval interrupted");
         return 0;
     }
     mino_safepoint_poll(S);
@@ -949,7 +953,8 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
         return result;
     }
     }
-    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "eval: unknown value type");
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                  "internal", "MIN001", "eval: unknown value type");
     return NULL;
 }
 
