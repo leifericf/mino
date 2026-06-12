@@ -3180,7 +3180,7 @@
 
 ;; --- Compatibility vars ---
 
-(def *clojure-version* {:major 1 :minor 11 :incremental 0 :qualifier nil})
+(def ^:dynamic *clojure-version* {:major 1 :minor 11 :incremental 0 :qualifier nil})
 (defn clojure-version []
   (str (:major *clojure-version*)
        "." (:minor *clojure-version*)
@@ -3322,7 +3322,7 @@
 
 (def ^:private special-symbols-set
   '#{& . case* catch def deftype* do finally fn fn* if let let* letfn*
-     loop loop* new ns quote recur refer-clojure set! throw try var
+     loop loop* new ns quote recur set! throw try var
      binding lazy-seq})
 
 (defn special-symbol?
@@ -3333,6 +3333,17 @@
   "Returns true if x is a map entry (mino represents entries as
    2-vectors)."
   [x] (and (vector? x) (= 2 (count x))))
+
+(defmacro refer-clojure
+  "Refers public vars from clojure.core into the current namespace,
+   accepting the same filter options as the ns :refer-clojure clause:
+   :exclude, :only, :rename.  Exclusions and :only limits are honored
+   by re-applying the ns form on the current namespace, which cuts the
+   clojure.core parent chain and rebuilds the filtered mapping — the
+   same path the (ns ...) special form takes."
+  [& filters]
+  (let [clause (list* :refer-clojure filters)]
+    `(eval (list 'ns *ns* '~clause))))
 
 ;; bytes? / bitstring? predicates are installed as C primitives -- the
 ;; real checks against MINO_BYTES live in src/prim/reflection.c so they
