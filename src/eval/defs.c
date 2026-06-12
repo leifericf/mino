@@ -571,6 +571,11 @@ mino_val *eval_ns(mino_state *S, mino_val *form,
 
 /* --- def, defmacro, declare --- */
 
+/* Forward declaration: defined below, used by eval_defmacro. */
+static void var_attach_user_meta(mino_state *S, mino_val *var,
+                                 mino_val *name_meta,
+                                 const char *doc, size_t doc_len);
+
 mino_val *eval_defmacro(mino_state *S, mino_val *form,
                           mino_val *args, mino_env *env, int tail)
 {
@@ -661,6 +666,13 @@ mino_val *eval_defmacro(mino_state *S, mino_val *form,
             if (var != NULL) {
                 var_set_root(S, var, mac);
                 if (is_priv) var->as.var.is_private = 1;
+                /* Keep var->meta in sync with the docstring so that
+                 * (meta (resolve 'name)) returns the correct :doc entry.
+                 * meta_set updates the C-level table used by (doc ...) but
+                 * not the GC-managed map read by (meta (resolve ...)). */
+                if (doc != NULL) {
+                    var_attach_user_meta(S, var, NULL, doc, doc_len);
+                }
             }
             env_bind(S, current_ns_env(S), buf, mac);
         }
