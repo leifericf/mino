@@ -32,15 +32,15 @@
 #define MINO_TAGGED_INT_MAX \
     ((uintptr_t)((unsigned long long)0x7ffffffffffffff8ull) | (uintptr_t)1)
 
-void stencil_op_loop_int_dec_inc(mino_val **regs,
-                                  mino_val **consts,
-                                  mino_state *S)
+void *stencil_op_loop_int_dec_inc(mino_val **regs,
+                                   mino_val **consts,
+                                   mino_state *S)
 {
     unsigned long ticks = 256;
     for (;;) {
         if (__builtin_expect(--ticks == 0, 0)) {
             if (!mino_bc_safepoint_batch(S, 256)) {
-                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+                return NULL;
             }
             ticks = 256;
         }
@@ -51,27 +51,27 @@ void stencil_op_loop_int_dec_inc(mino_val **regs,
         if (__builtin_expect(((ut ^ 1) | (ui ^ 1)) & 7, 0)) {
             regs = mino_jit_loop_int_dec_inc_slow(S, regs, IMM_A, IMM_B);
             if (regs == NULL) {
-                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+                return NULL;
             }
             if (((uintptr_t)regs & 1) != 0) {
                 regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
-                MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+                MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
             }
             continue;
         }
         long long t = (long long)(intptr_t)ut >> 3;
         if (t == 0) {
-            MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+            MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
         }
         if (__builtin_expect(ut == MINO_TAGGED_INT_MIN
                              || ui == MINO_TAGGED_INT_MAX, 0)) {
             regs = mino_jit_loop_int_dec_inc_slow(S, regs, IMM_A, IMM_B);
             if (regs == NULL) {
-                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+                return NULL;
             }
             if (((uintptr_t)regs & 1) != 0) {
                 regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
-                MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+                MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
             }
             continue;
         }

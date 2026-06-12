@@ -27,15 +27,15 @@
 
 #include "abi.h"
 
-void stencil_op_loop_int_lt(mino_val **regs,
-                             mino_val **consts,
-                             mino_state *S)
+void *stencil_op_loop_int_lt(mino_val **regs,
+                              mino_val **consts,
+                              mino_state *S)
 {
     unsigned long ticks = 256;
     for (;;) {
         if (__builtin_expect(--ticks == 0, 0)) {
             if (!mino_bc_safepoint_batch(S, 256)) {
-                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+                return NULL;
             }
             ticks = 256;
         }
@@ -47,18 +47,18 @@ void stencil_op_loop_int_lt(mino_val **regs,
             /* Slow path: either operand non-int or NULL. */
             regs = mino_jit_loop_int_lt_slow(S, regs, IMM_A, IMM_B);
             if (regs == NULL) {
-                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+                return NULL;
             }
             if (((uintptr_t)regs & 1) != 0) {
                 regs = (mino_val **)((uintptr_t)regs & ~(uintptr_t)1);
-                MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+                MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
             }
             continue;
         }
         long long c = (long long)(intptr_t)uc >> 3;
         long long l = (long long)(intptr_t)ul >> 3;
         if (c >= l) {
-            MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+            MINO_STENCIL_CHAIN_RETURN_PTR(regs, consts, S);
         }
         regs[IMM_A] = (mino_val *)(((uintptr_t)(c + 1) << 3) | (uintptr_t)1);
         /* fall through: continue the for-loop */
