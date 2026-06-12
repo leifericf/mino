@@ -154,11 +154,14 @@ mino_val **mino_jit_nth_vec_slow(mino_state *S, mino_val **regs,
             return regs;
         }
     }
+    gc_pin(coll);
+    gc_pin(idx_v);
     mino_val *list = mino_nil(S);
-    if (list == NULL) return NULL;
+    if (list == NULL) { gc_unpin(2); return NULL; }
     list = mino_cons(S, idx_v, list);
-    if (list == NULL) return NULL;
+    if (list == NULL) { gc_unpin(2); return NULL; }
     list = mino_cons(S, coll, list);
+    gc_unpin(2);
     if (list == NULL) return NULL;
     mino_val *r = prim_nth(S, list, NULL);
     if (r == NULL) return NULL;
@@ -675,9 +678,11 @@ mino_val **mino_jit_closure_slow(mino_state *S, mino_val **regs,
     if (bx >= bc->consts_len) return NULL;
     mino_val *child = bc->consts[bx];
     if (child == NULL || mino_type_of(child) != MINO_FN) return NULL;
+    gc_pin(child);
     mino_val *closure = make_fn(S, child->as.fn.params,
                                    child->as.fn.body,
                                    ctx->jit_invoke_env);
+    gc_unpin(1);
     if (closure == NULL) return NULL;
     closure->as.fn.defining_ns = child->as.fn.defining_ns;
     *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
@@ -741,15 +746,17 @@ mino_val *mino_jit_tailcall_slow(mino_state *S, mino_val **regs,
 {
     ptrdiff_t   base   = regs - S->bc.bc_regs;
     mino_val *callee = S->bc.bc_regs[base + fn_reg];
+    gc_pin(callee);
     mino_val *args   = mino_nil(S);
-    if (args == NULL) return NULL;
+    if (args == NULL) { gc_unpin(1); return NULL; }
     for (int i = (int)argc - 1; i >= 0; i--) {
         mino_val *cell = mino_cons(S,
                                      S->bc.bc_regs[base + fn_reg + 1 + i],
                                      args);
-        if (cell == NULL) return NULL;
+        if (cell == NULL) { gc_unpin(1); return NULL; }
         args = cell;
     }
+    gc_unpin(1);
     S->tail_call_sentinel.as.tail_call.fn   = callee;
     S->tail_call_sentinel.as.tail_call.args = args;
     return &S->tail_call_sentinel;
@@ -1116,7 +1123,7 @@ mino_val **mino_jit_protocol_call_cached_slow(mino_state *S,
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     mino_env        *env  = ctx->jit_invoke_env;
-    if ((int)slot_idx >= bc->ic_slots_len) return NULL;
+    if (bc->ic_slots_len <= 0 || slot_idx >= (unsigned)bc->ic_slots_len) return NULL;
     mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
     if (argn < 1 || slot->atom == NULL
         || mino_type_of(slot->atom) != MINO_ATOM) {
@@ -1148,7 +1155,7 @@ mino_val *mino_jit_protocol_tailcall_cached_slow(mino_state *S,
     ptrdiff_t          base = regs - S->bc.bc_regs;
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     mino_env        *env  = ctx->jit_invoke_env;
-    if ((int)slot_idx >= bc->ic_slots_len) return NULL;
+    if (bc->ic_slots_len <= 0 || slot_idx >= (unsigned)bc->ic_slots_len) return NULL;
     mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
     if (argn < 1 || slot->atom == NULL
         || mino_type_of(slot->atom) != MINO_ATOM) {
@@ -1177,7 +1184,9 @@ mino_val **mino_jit_make_lazy_slow(mino_state *S, mino_val **regs,
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     if (bx >= bc->consts_len) return NULL;
     mino_val *body = bc->consts[bx];
+    gc_pin(body);
     mino_val *lz   = alloc_val(S, MINO_LAZY);
+    gc_unpin(1);
     if (lz == NULL) return NULL;
     lz->as.lazy.body     = body;
     lz->as.lazy.env      = ctx->jit_invoke_env;
