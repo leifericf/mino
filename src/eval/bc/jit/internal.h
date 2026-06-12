@@ -200,6 +200,30 @@ typedef enum {
     CPJIT_REASON__COUNT
 } cpjit_reason_t;
 
+/* Slab-pool constants shared between region.c and emit.c. */
+#define MINO_JIT_SLAB_CUTOFF      ((size_t)4096)
+#define MINO_JIT_SLAB_SLOT_ALIGN  ((size_t)16)
+
+/* Sentinel for jit_region_alloc failure (both POSIX and Windows paths
+ * return NULL on error after the wrapper normalises MAP_FAILED). */
+#define MINO_JIT_REGION_ALLOC_FAILED  NULL
+
+/* OS memory management (defined in region.c). */
+void  *jit_region_alloc(size_t size);
+int    jit_region_make_rx(void *p, size_t size);
+void   jit_region_free(void *p, size_t size);
+long   jit_region_page_size(void);
+
+/* Slab pool management (defined in region.c). */
+struct mino_jit_slab *jit_slab_acquire(mino_state *S, size_t need);
+int    jit_slab_make_rw(struct mino_jit_slab *slab);
+int    jit_slab_make_rx(struct mino_jit_slab *slab);
+void   jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
+                            size_t total_size);
+
+/* Region tracking (defined in region.c). */
+int    region_track(mino_state *S, void *ptr, size_t size, void *aux_ptr);
+
 /* Descriptor table + lookup (defined in entry.c). */
 extern const stencil_desc_t mino_jit_stencils[];
 extern const int            mino_jit_stencils_count;
