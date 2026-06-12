@@ -1200,23 +1200,33 @@
   (let [tokens (if (string? format-in) (clf-parse format-in) format-in)]
     (clf-send writer (clf-execute tokens args))))
 
-(defn formatter
-  "Makes a function which can directly run format-in. The returned function
-  takes a writer (true, nil or a writer) followed by the format arguments,
-  and returns nil or the formatted string the same way cl-format does."
+(defn formatter-impl
+  "Implementation backing the formatter macro; not part of the public API."
   [format-in]
   (let [tokens (clf-parse format-in)]
     (fn [writer & args]
       (clf-send writer (clf-execute tokens args)))))
 
-(defn formatter-out
-  "Makes a function which can directly run format-in, writing to *out*. The
-  returned function takes the format arguments and always writes to *out*,
-  returning nil. Designed for use inside dispatch functions."
+(defmacro formatter
+  "Makes a function which can directly run format-in. The returned function
+  takes a writer (true, nil or a writer) followed by the format arguments,
+  and returns nil or the formatted string the same way cl-format does."
+  [format-in]
+  `(clojure.pprint/formatter-impl ~format-in))
+
+(defn formatter-out-impl
+  "Implementation backing the formatter-out macro; not part of the public API."
   [format-in]
   (let [tokens (clf-parse format-in)]
     (fn [& args]
       (clf-send true (clf-execute tokens args)))))
+
+(defmacro formatter-out
+  "Makes a function which can directly run format-in, writing to *out*. The
+  returned function takes the format arguments and always writes to *out*,
+  returning nil. Designed for use inside dispatch functions."
+  [format-in]
+  `(clojure.pprint/formatter-out-impl ~format-in))
 
 ;; ---------------------------------------------------------------------------
 ;; code-dispatch: a dispatch function that pretty-prints Clojure code
