@@ -421,9 +421,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn get-pretty-writer
-  "Return a pretty-printing writer wrapping base-writer. In mino the
-  engine wraps *out* directly, so this returns a non-nil token usable as
-  *out* for write-out."
+  "Returns a pretty-printing writer wrapping base-writer, or a default
+  output sink when base-writer is nil. The result is usable as *out* for
+  write-out."
   [base-writer]
   (or base-writer :mino/stdout))
 

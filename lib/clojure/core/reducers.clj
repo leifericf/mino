@@ -15,13 +15,12 @@
 ;; types so each wrapper carries its own coll and xf.
 
 (ns clojure.core.reducers
-  "A library for reduction and folding. fold executes sequentially by
-  design: mino ships no parallel task pool, so every fold runs as one
-  left-to-right reduce pass. The fold contract still holds in full —
-  (combinef) seeds the reduction, reducef accumulates, and folding a
-  map feeds reducef the key and value separately as (reducef ret k v).
-  Code written against grouped parallel fold semantics (associative
-  combinef and reducef) therefore produces identical results here."
+  "A library for reduction and folding. The fold contract holds in full:
+  (combinef) seeds the reduction, reducef accumulates, and folding a map
+  feeds reducef the key and value separately as (reducef ret k v). fold
+  reduces the source in one left-to-right pass, so code written against
+  associative combinef and reducef produces the same result whether or
+  not the reduction is partitioned."
   (:refer-clojure :exclude [reduce map mapcat filter remove take take-while
                             drop drop-while flatten cat]))
 
