@@ -11,6 +11,7 @@
  */
 
 #include "runtime/internal.h"
+#include "runtime/host_threads.h"  /* tc_load: MSVC-portable thread_count read */
 #include "eval/bc/internal.h"
 
 /* Record a stack address from a host-called entry point so the collector's
@@ -211,7 +212,7 @@ static int gc_tick_should_suppress(mino_state *S)
      * locking. See internal.h thread_count comment. */
     return mino_current_ctx(S)->gc_depth > 0
         || mino_current_ctx(S)->gc_stack_bottom == NULL
-        || __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0;
+        || tc_load(&S->threading.thread_count) > 0;
 }
 
 /* Stress mode: every alloc forces a full STW major, exercising the
@@ -438,7 +439,12 @@ void *gc_alloc_typed_inner(mino_state *S, unsigned char tag, size_t size)
      * sampler. The fire helper bails fast when disabled, so the
      * builtin call cost is only paid when sampling is on. */
     mino_alloc_sampler_fire(S, tag, size,
-                            __builtin_return_address(0));
+#if defined(__GNUC__) || defined(__clang__)
+                            __builtin_return_address(0)
+#else
+                            NULL
+#endif
+                            );
     if (S->gc.stress == -1) {
         const char *e = getenv("MINO_GC_STRESS");
         S->gc.stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
