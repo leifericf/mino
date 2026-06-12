@@ -89,7 +89,7 @@
    "src/prim/ns.c"
    "src/prim/fs.c" "src/prim/proc.c"
    "src/prim/host.c" "src/prim/jvm_statics.c" "src/interop/syntax.c"
-   "src/collections/clone.c" "src/regex/re.c" "src/collections/transient.c"
+   "src/collections/clone.c" "src/regex/re_compile.c" "src/regex/re_match.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"
    "src/prim/async.c"
    "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
