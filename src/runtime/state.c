@@ -16,13 +16,20 @@
 
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"
-#include "prim/internal.h"
 #include "async/scheduler.h"
 #include "async/timer.h"
 #include "eval/bc/jit.h"
 #include "eval/bc/internal.h"        /* mino_bc_register_gc_handlers */
-#include "eval/special_internal.h"  /* normalize_exception */
 #include "values/internal.h"        /* mino_val_finalize_teardown */
+
+/* Forward declarations for cross-module helpers used here.
+ * prim_throw_classified is defined in prim/prim.c; normalize_exception in
+ * eval/control.c.  Pulling those modules' full internal headers would
+ * violate the runtime -> {prim,eval/special} dependency direction, so we
+ * declare only the two signatures state.c actually needs. */
+mino_val *prim_throw_classified(mino_state *S, const char *kind,
+                                const char *code, const char *msg);
+mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
 #include <limits.h>                  /* INT_MAX for MINO_OPT_THREAD_LIMIT */
 
@@ -759,6 +766,20 @@ void mino_unref(mino_state *S, mino_ref *ref)
 /* Public eval entry points                                                  */
 /* ------------------------------------------------------------------------- */
 
+/* Fill the try-frame slot at `depth` with the current eval-checkpoint
+ * snapshot.  Must be called before setjmp() fires into that slot.  The
+ * jmp_buf itself is not touched here -- setjmp writes it in place. */
+static void try_frame_fill(mino_state *S, mino_thread_ctx_t *ctx, int depth)
+{
+    ctx->try_stack[depth].exception         = NULL;
+    ctx->try_stack[depth].saved_ns          = S->ns_vars.current_ns;
+    ctx->try_stack[depth].saved_ambient     = S->ns_vars.fn_ambient_ns;
+    ctx->try_stack[depth].saved_load_len    = S->module.load_stack_len;
+    ctx->try_stack[depth].saved_lazy_len    = ctx->lazy_inflight_len;
+    ctx->try_stack[depth].saved_bc_cursor   = ctx->bc_current_bc;
+    ctx->try_stack[depth].saved_bc_cursor_pc = ctx->bc_current_pc;
+}
+
 static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
 {
     volatile char probe = 0;
@@ -776,13 +797,7 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
     /* Top-level try frame so that OOM and unhandled throw during eval
      * surface as a NULL return instead of aborting the process. */
     if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+        try_frame_fill(S, mino_current_ctx(S), mino_current_ctx(S)->try_depth);
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
@@ -924,13 +939,7 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
     if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->ns_vars.current_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->ns_vars.fn_ambient_ns;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->module.load_stack_len;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
-        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+        try_frame_fill(S, mino_current_ctx(S), mino_current_ctx(S)->try_depth);
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
             /* Same payload-stash as in mino_eval_inner: outer pcall-style
@@ -1235,13 +1244,7 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
      * lock yields a coherent entry snapshot for the catch-side
      * rewind. */
     mino_lock(S);
-    mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
-    mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
-    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
-    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+    try_frame_fill(S, mino_current_ctx(S), saved_try);
     mino_unlock(S);
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         mino_val *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
@@ -1345,13 +1348,7 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
      * lock yields a coherent entry snapshot for the catch-side
      * rewind. */
     mino_lock(S);
-    mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->ns_vars.current_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->ns_vars.fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->module.load_stack_len;
-    mino_current_ctx(S)->try_stack[saved_try].saved_lazy_len = mino_current_ctx(S)->lazy_inflight_len;
-    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor = mino_current_ctx(S)->bc_current_bc;
-    mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
+    try_frame_fill(S, mino_current_ctx(S), saved_try);
     mino_unlock(S);
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. Restore the
