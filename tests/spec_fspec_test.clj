@@ -312,14 +312,17 @@
               nil
               (catch __e __e))]
     (is (some? err))
-    ;; The thrown value must carry explain-data under ::s/problems.
-    (is (seq (::s/problems err)))))
+    ;; The thrown ex-info carries explain-data under ::s/problems in its
+    ;; ex-data. A caught exception is not itself keyword-accessible in
+    ;; mino (nor in JVM Clojure), so the data is read via ex-data.
+    (is (seq (::s/problems (ex-data err))))))
 
 (deftest assert*-failure-key-in-exception
-  ;; The exception must include ::s/failure :assertion-failed per canon.
+  ;; The exception's ex-data must include ::s/failure :assertion-failed
+  ;; per canon.
   (let [err (try (s/assert* int? "bad") nil (catch __e __e))]
     (is (some? err))
-    (is (= :assertion-failed (::s/failure err)))))
+    (is (= :assertion-failed (::s/failure (ex-data err))))))
 
 ;; ---------------------------------------------------------------------------
 ;; *compile-asserts* -- dynamic var gating assert compilation.
