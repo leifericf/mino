@@ -345,3 +345,119 @@ int eval_try_special_form(mino_state *S, mino_val *form,
     }
     return 0;
 }
+
+int eval_is_special_form_name(const char *name, size_t len)
+{
+    size_t i;
+    if (name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < k_special_forms_count; i++) {
+        const special_form_entry *e = &k_special_forms[i];
+        if (e->name_len == len && memcmp(e->name, name, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* --- Public-form var registry ------------------------------------------- */
+
+/*
+ * The eight forms below are public macros in canonical Clojure but are
+ * dispatched here as C special forms (eval_try_special_form wins before
+ * any macro lookup, on both the tree-walker and bytecode-compiler
+ * paths). Registering a var + clojure.core env binding for each makes
+ * them visible to ns-publics / resolve / doc / apropos without changing
+ * how they evaluate. Internal-only spellings (let*, fn*, loop*, def,
+ * if, do, quote, ...) are deliberately absent: they are implementation
+ * surface, not part of the documented namespace.
+ */
+typedef struct {
+    const char *name;
+    const char *doc;
+} public_form_doc;
+
+static const public_form_doc k_public_form_docs[] = {
+    { "fn",
+      "Defines an anonymous function. Takes an optional name, a vector "
+      "of parameters, and a body; supports multiple arities and a "
+      "variadic & rest parameter." },
+    { "let",
+      "Evaluates the body with a sequence of local bindings established "
+      "left to right from the binding vector; later bindings may refer "
+      "to earlier ones." },
+    { "loop",
+      "Like let, but establishes a recursion point: a recur in tail "
+      "position rebinds the loop locals and jumps back to the top "
+      "without growing the stack." },
+    { "lazy-seq",
+      "Returns a sequence whose body is not evaluated until the first "
+      "element is requested, then caches the realized sequence for "
+      "later traversals." },
+    { "binding",
+      "Establishes thread-local bindings for dynamic vars over the "
+      "extent of the body, restoring the prior roots when the body "
+      "returns or unwinds." },
+    { "declare",
+      "Interns one or more names as unbound vars so they can be "
+      "referred to before their defining form appears." },
+    { "defmacro",
+      "Defines a macro: a named function, invoked at expansion time, "
+      "whose return value replaces the calling form before it is "
+      "evaluated." },
+    { "ns",
+      "Selects or creates a namespace and applies its require / refer / "
+      "import clauses, becoming the current namespace for the forms "
+      "that follow." },
+};
+
+static const size_t k_public_form_docs_count =
+    sizeof(k_public_form_docs) / sizeof(k_public_form_docs[0]);
+
+/*
+ * Register the public C special forms as clojure.core vars.
+ *
+ * For each name: intern a var in clojure.core and give it a safe,
+ * non-macro placeholder root, add the matching clojure.core env binding
+ * (ns-publics requires BOTH a binding and a var), stamp {:macro true}
+ * onto the var's meta slot so (meta (resolve 'let)) reports it as a
+ * macro, and record the docstring through meta_set so (doc let) and
+ * apropos surface it.
+ *
+ * The placeholder root must never be a MINO_MACRO: macroexpand1 and the
+ * bytecode compiler's head_resolves_to_macro both treat a MINO_MACRO
+ * head value as expandable, which would route these forms away from
+ * their special-form handlers. A keyword carries the intent without
+ * that hazard, and evaluation never consults it because special-form
+ * dispatch wins first.
+ */
+void eval_special_register_vars(mino_state *S)
+{
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    mino_val *placeholder = mino_keyword(S, "mino/special-form");
+    mino_val *macro_kw = mino_keyword(S, "macro");
+    mino_val *yes = mino_true(S);
+    size_t i;
+
+    if (core_env == NULL || placeholder == NULL) {
+        return;
+    }
+    for (i = 0; i < k_public_form_docs_count; i++) {
+        const char *name = k_public_form_docs[i].name;
+        const char *doc  = k_public_form_docs[i].doc;
+        mino_val *var  = var_intern(S, "clojure.core", name);
+        if (var == NULL) {
+            continue;
+        }
+        var_set_root(S, var, placeholder);
+        mino_env_set(S, core_env, name, placeholder);
+        /* :macro is synthesized from var->meta (overlaid on the def-site
+         * map by synth_var_meta) since the placeholder root is not a
+         * MINO_MACRO; a one-entry {:macro true} map is enough. */
+        var->meta = mino_map(S, &macro_kw, &yes, 1);
+        if (doc != NULL) {
+            meta_set(S, name, doc, strlen(doc), NULL);
+        }
+    }
+}

@@ -180,6 +180,12 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
         return sym;
     }
     if (qq_locally_bound(S, env, name)) return sym;
+    /* Special-form names stay bare. They now carry clojure.core bindings
+     * (so resolve / ns-publics see them), which would otherwise make the
+     * ns-chain walk below qualify `fn` to `clojure.core/fn` -- a spelling
+     * the special-form registry doesn't recognize, breaking every macro
+     * that syntax-quotes one of these forms. */
+    if (eval_is_special_form_name(name, nlen)) return sym;
     if (qns_name == NULL) return sym;
     for (e = qns_env; e != NULL; e = e->parent) {
         env_binding_t *b = env_find_here(e, name);

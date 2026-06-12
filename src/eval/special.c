@@ -492,6 +492,10 @@ static void sf_init(mino_state *S)
     S->sf_and              = mino_symbol(S, "and");
     S->sf_or               = mino_symbol(S, "or");
     S->sf_initialized      = 1;
+    /* Surface the public C special forms as clojure.core vars so they
+     * appear in ns-publics / resolve / doc. Runs once per state at the
+     * first eval, by which point the clojure.core ns env exists. */
+    eval_special_register_vars(S);
 }
 
 /* --- Main eval dispatch -------------------------------------------------- */

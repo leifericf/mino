@@ -95,6 +95,16 @@ int eval_try_host_syntax(mino_state *S, mino_val *form,
                          mino_val *head, mino_val *args,
                          mino_env *env, mino_val **out);
 
+/* Registers the public C special forms (fn, let, loop, lazy-seq,
+ * binding, declare, defmacro, ns) as clojure.core vars + env bindings
+ * so they appear in ns-publics / resolve / doc. Idempotent per name.
+ * Must run after the clojure.core ns env exists. */
+void eval_special_register_vars(mino_state *S);
+mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
+                                      mino_val *arity_list,
+                                      const char *diag_code,
+                                      const char *label);
+
 /*
  * Resolve a non-fn callable value (keyword, map, vector, set, sorted
  * map, sorted set) against an already-evaluated argument list.

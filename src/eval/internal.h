@@ -59,6 +59,11 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env,
 mino_val *eval(mino_state *S, mino_val *form, mino_env *env);
 mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                            mino_env *env);
+/* special_registry.c: true when `name`/`len` is one of the special-form
+ * spellings the registry dispatches (let, fn, loop, if, do, quote, ...).
+ * Syntax-quote consults it so these names stay bare and special-form
+ * recognition keeps working even after they gain clojure.core bindings. */
+int eval_is_special_form_name(const char *name, size_t len);
 /* True for the reader's meta-flagged record values (tagged-literal
  * fallback, preserved reader conditionals); they self-evaluate. */
 int mino_is_reader_record(mino_state *S, mino_val *form);
