@@ -116,6 +116,7 @@
 (require "tests/spec_fspec_test")
 (require "tests/reducers_test")
 (require "tests/clojure_test_port_test")
+(require "tests/test_lib_flags_test")
 (require "tests/capability_metadata_test")
 (require "tests/async_smoke_test")
 (require "tests/parallel_calls_test")
