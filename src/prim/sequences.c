@@ -1087,7 +1087,8 @@ static int pipeline_apply_stages(mino_state *S,
 {
     mino_val *elem = *elem_io;
     int take_exhausted = 0;
-    for (int i = n_stages - 1; i >= 0; i--) {
+    int i;
+    for (i = n_stages - 1; i >= 0; i--) {
         pipeline_stage_t *st = &stages[i];
         if (st->kind == PIPELINE_STAGE_MAP) {
             pipeline_fast_kind_t k = fast_kinds[i];
@@ -1154,7 +1155,8 @@ static int pipeline_walk(mino_state *S,
         return 0;
     }
     pipeline_fast_kind_t fast_kinds[PIPELINE_MAX_STAGES];
-    for (int i = 0; i < n_stages; i++) {
+    int i;
+    for (i = 0; i < n_stages; i++) {
         if (stages[i].kind == PIPELINE_STAGE_MAP
             || stages[i].kind == PIPELINE_STAGE_FILTER) {
             fast_kinds[i] = pipeline_fast_callable(stages[i].callable);
@@ -1206,7 +1208,8 @@ static int pipeline_walk(mino_state *S,
         const mino_val *ch = src->as.chunked_cons.chunk;
         unsigned          start = src->as.chunked_cons.off;
         unsigned          end   = ch->as.chunk.len;
-        for (unsigned k = start; k < end; k++) {
+        unsigned          k;
+        for (k = start; k < end; k++) {
             mino_val *elem = ch->as.chunk.vals[k];
             int rc = pipeline_apply_stages(S, stages, fast_kinds,
                                            n_stages, &elem, env);
