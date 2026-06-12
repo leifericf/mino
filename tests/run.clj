@@ -124,6 +124,7 @@
 (require "tests/fs_test")
 (require "tests/proc_test")
 (require "tests/deps_test")
+(require "tests/introspection_test")
 
 (reset! clojure.test/suite-mode false)
 
