@@ -74,7 +74,7 @@
    "src/collections/rbtree.c"
    "src/collections/builders.c"
    "src/collections/gc_handlers.c"
-   "src/collections/iter.c" "src/eval/read.c" "src/eval/print.c"
+   "src/collections/iter.c" "src/eval/read.c" "src/eval/read_numeric.c" "src/eval/print.c"
    "src/eval/print_dynvars.c" "src/eval/special_host.c"
    "src/prim/prim.c" "src/prim/install.c" "src/prim/install_stdlib.c"
    "src/prim/numeric.c" "src/prim/numeric_math.c"
