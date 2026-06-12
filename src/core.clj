@@ -3574,10 +3574,11 @@
   "Constructs a data representation of an error value, shaped
    {:cause m :data d :via [...] :trace []}: :cause is the root
    cause's message, :data its ex-data (absent when nil), :via a
-   vector of {:message ... :data ...} maps from the outermost error
-   to the root, and :trace an empty vector (mino error values do not
-   retain call-stack frames). Works on caught diagnostic maps and on
-   ex-info values alike; the cause chain is walked via ex-cause."
+   vector of {:type <symbol> :message <str> :at [] :data <optional>}
+   maps from the outermost error to the root, and :trace an empty
+   vector (mino error values do not retain call-stack frames).
+   Works on caught diagnostic maps and on ex-info values alike;
+   the cause chain is walked via ex-cause."
   [t]
   (let [chain (loop [e t acc []]
                 (let [acc (conj acc e)
@@ -3586,7 +3587,10 @@
         root  (peek chain)
         via   (mapv (fn [e]
                       (let [d (ex-data e)
-                            m {:message (ex-message e)}]
+                            typ (if (some? d)
+                                  'clojure.lang.ExceptionInfo
+                                  'java.lang.Exception)
+                            m {:type typ :message (ex-message e) :at []}]
                         (if (some? d) (assoc m :data d) m)))
                     chain)
         base  {:cause (ex-message root)
