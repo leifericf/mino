@@ -466,7 +466,9 @@ static int tower_apply_ratio(mino_state *S, tower_acc_t *acc,
     acc->vacc = tower_op_at_tier(S, op, TT_RATIO, acc->vacc, operand, opname);
     if (acc->vacc == NULL) return -1;
     if (mino_val_int_p(acc->vacc)) {
-        acc->iacc = mino_val_int_get(acc->vacc); acc->vacc = NULL; acc->tier = TT_INT;
+        acc->iacc = mino_val_int_get(acc->vacc);
+        acc->vacc = NULL;
+        acc->tier = TT_INT;
     } else if (mino_type_of(acc->vacc) == MINO_BIGINT) {
         acc->tier = TT_BIGINT;
     }
