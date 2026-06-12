@@ -241,7 +241,7 @@ Rules:
 ## How to Add a Primitive
 
 1. Choose the domain file (`src/prim/numeric.c`, `src/prim/collections.c`, etc.).
-2. Write the function as `static mino_val *prim_name(...)`. Declare it `extern` (and add a line to `src/prim/internal.h`) only when another TU calls it directly or it appears in a registration table owned by a different TU.
+2. Write the function as `static mino_val *prim_name(...)`. Declare it `extern` (and add a line to `src/prim/internal.h`) only when another TU calls it directly or it appears in a registration table owned by a different TU (ADR 09).
 3. Append a `{"name", prim_name, "docstring..."}` entry to the file's `k_prims_<domain>[]` table at TU bottom. The domain is already wired into `k_core_domains[]` in `src/prim/install.c`; new entries pick up the install loop automatically.
 4. Add tests in `tests/` and run `./mino task test`.
 
