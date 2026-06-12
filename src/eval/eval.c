@@ -242,11 +242,16 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
     if (!has_splice) {
         mino_val **tmp = (mino_val **)gc_alloc_typed(S,
             GC_T_VALARR, nn * sizeof(*tmp));
+        /* Pin tmp: quasiquote_expand can allocate and trigger a GC
+         * cycle, which would lose the array if it is not on the save
+         * stack. */
+        gc_pin((mino_val *)tmp);
         for (i = 0; i < nn; i++) {
             mino_val *e = quasiquote_expand(S, vec_nth(form, i), env);
-            if (e == NULL) { return NULL; }
+            if (e == NULL) { gc_unpin(1); return NULL; }
             gc_valarr_set(S, tmp, i, e);
         }
+        gc_unpin(1);
         return mino_vector(S, tmp, nn);
     }
     /* Slow path: ~@ present, build cons list then convert. */
@@ -351,18 +356,25 @@ static mino_val *qq_expand_map(mino_state *S, mino_val *form,
     size_t       i;
     if (nn == 0) { return form; }
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*ks));
+    /* Pin ks before the second allocation: the vs gc_alloc_typed can
+     * trigger GC and lose ks if it is not on the save stack. Both arrays
+     * stay pinned through the expand loop because quasiquote_expand
+     * allocates on each call. */
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*vs));
+    gc_pin((mino_val *)vs);
     for (i = 0; i < nn; i++) {
         mino_val *key = vec_nth(form->as.map.key_order, i);
         mino_val *val = map_get_val(form, key);
         mino_val *kk  = quasiquote_expand(S, key, env);
         mino_val *vv;
-        if (kk == NULL) { return NULL; }
+        if (kk == NULL) { gc_unpin(2); return NULL; }
         vv = quasiquote_expand(S, val, env);
-        if (vv == NULL) { return NULL; }
+        if (vv == NULL) { gc_unpin(2); return NULL; }
         gc_valarr_set(S, ks, i, kk);
         gc_valarr_set(S, vs, i, vv);
     }
+    gc_unpin(2);
     return mino_map(S, ks, vs, nn);
 }
 
@@ -565,6 +577,46 @@ static void lazy_inflight_pop(mino_state *S)
     mino_current_ctx(S)->lazy_inflight_len--;
 }
 
+/* lazy_realized_load / lazy_realized_cas / lazy_realized_store --
+ * compiler-portable shims for the three atomic operations on
+ * lazy.realized.  GCC/Clang use __atomic_* builtins; MSVC uses the
+ * Interlocked* family (matching the pattern in runtime/host_threads.h).
+ * The field is a plain int and all three operations are only called from
+ * lazy_realize/lazy_inflight paths, so this is the sole site to guard. */
+#if defined(__GNUC__) || defined(__clang__)
+static inline int lazy_realized_load(int *p)
+{
+    return __atomic_load_n(p, __ATOMIC_ACQUIRE);
+}
+static inline int lazy_realized_cas(int *p, int expected, int desired)
+{
+    return __atomic_compare_exchange_n(p, &expected, desired,
+                                       0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+static inline void lazy_realized_store(int *p, int val)
+{
+    __atomic_store_n(p, val, __ATOMIC_RELEASE);
+}
+#elif defined(_MSC_VER)
+#include <windows.h>
+static inline int lazy_realized_load(int *p)
+{
+    return (int)InterlockedCompareExchange((LONG volatile *)p, 0, 0);
+}
+static inline int lazy_realized_cas(int *p, int expected, int desired)
+{
+    return (int)InterlockedCompareExchange((LONG volatile *)p,
+                                           (LONG)desired,
+                                           (LONG)expected) == expected;
+}
+static inline void lazy_realized_store(int *p, int val)
+{
+    (void)InterlockedExchange((LONG volatile *)p, (LONG)val);
+}
+#else
+#error "lazy_realize requires GCC/Clang __atomic_* or MSVC Interlocked* atomics"
+#endif
+
 /*
  * Realize one lazy. Concurrent forcers race on a CAS of `realized`
  * from LAZY_UNREALIZED to LAZY_REALIZING; the CAS winner runs the
@@ -579,25 +631,20 @@ static void lazy_inflight_pop(mino_state *S)
 static mino_val *lazy_realize(mino_state *S, mino_val *v)
 {
     for (;;) {
-        int state = __atomic_load_n(&v->as.lazy.realized, __ATOMIC_ACQUIRE);
+        int state = lazy_realized_load(&v->as.lazy.realized);
         if (state == LAZY_REALIZED) {
             return v->as.lazy.cached;
         }
         if (state == LAZY_UNREALIZED) {
-            int expected = LAZY_UNREALIZED;
-            if (__atomic_compare_exchange_n(&v->as.lazy.realized,
-                                            &expected, LAZY_REALIZING,
-                                            0,
-                                            __ATOMIC_ACQ_REL,
-                                            __ATOMIC_ACQUIRE)) {
+            if (lazy_realized_cas(&v->as.lazy.realized,
+                                   LAZY_UNREALIZED, LAZY_REALIZING)) {
                 /* Track the claim so a throw that longjmps out of the
                  * thunk (try_depth > 0 routes raises through longjmp,
                  * skipping the result==NULL rollback below) gets the
                  * cell flipped back to UNREALIZED at the landing pad
                  * instead of stranding it REALIZING. */
                 if (lazy_inflight_push(S, v) != 0) {
-                    __atomic_store_n(&v->as.lazy.realized,
-                                     LAZY_UNREALIZED, __ATOMIC_RELEASE);
+                    lazy_realized_store(&v->as.lazy.realized, LAZY_UNREALIZED);
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                                   "limit", "MLM003",
                                   "out of memory tracking lazy realization");
@@ -628,10 +675,16 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                     /* Thunk threw. Roll back the claim so a retrying
                      * caller can re-run the thunk; if other threads
                      * are spinning, they'll see UNREALIZED and one of
-                     * them will try the CAS. */
+                     * them will try the CAS.
+                     * DEVIATION: matches JVM clojure.lang.LazySeq#sval()
+                     * which discards state on exception and retries on next
+                     * force. Single-threaded mino behaves identically; in
+                     * multi-threaded mode the next CAS winner re-runs the
+                     * thunk, which differs from JVM where a single forcer
+                     * retries on the same thread -- mino allows a different
+                     * thread to become the realizer after a throw. */
                     lazy_inflight_pop(S);
-                    __atomic_store_n(&v->as.lazy.realized,
-                                     LAZY_UNREALIZED, __ATOMIC_RELEASE);
+                    lazy_realized_store(&v->as.lazy.realized, LAZY_UNREALIZED);
                     return NULL;
                 }
                 /* Per the canonical lazy-seq contract, forcing coerces
@@ -655,9 +708,8 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                         gc_unpin(1);
                         if (result == NULL) {
                             lazy_inflight_pop(S);
-                            __atomic_store_n(&v->as.lazy.realized,
-                                             LAZY_UNREALIZED,
-                                             __ATOMIC_RELEASE);
+                            lazy_realized_store(&v->as.lazy.realized,
+                                                LAZY_UNREALIZED);
                             return NULL;
                         }
                     }
@@ -676,8 +728,7 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                 v->as.lazy.body = NULL;
                 gc_write_barrier(S, v, v->as.lazy.env, NULL);
                 v->as.lazy.env = NULL;
-                __atomic_store_n(&v->as.lazy.realized,
-                                 LAZY_REALIZED, __ATOMIC_RELEASE);
+                lazy_realized_store(&v->as.lazy.realized, LAZY_REALIZED);
                 lazy_inflight_pop(S);
                 return result;
             }
