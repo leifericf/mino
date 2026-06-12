@@ -64,3 +64,76 @@
                  (catch e (if (map? e) (:mino/message e) (str e))))]
     (is (some? err))
     (is (some? (re-find #"\[1 2\]" err)))))
+
+;; class: concrete type tag, ignoring :type metadata, nil->nil.
+
+;; Spec-first: class is unimplemented; tests fail with "unbound symbol:
+;; class" until the C primitive lands.
+
+(deftest class-nil-returns-nil
+  ;; (class nil) => nil, not :nil.
+  ;; Contrast: (type nil) => :nil.
+  (is (= nil (class nil)))
+  (is (= :nil (type nil))))
+
+(deftest class-scalars
+  ;; class agrees with type for plain scalar values.
+  (is (= :int     (class 42)))
+  (is (= :float   (class 3.14)))
+  (is (= :string  (class "hello")))
+  (is (= :bool    (class true)))
+  (is (= :bool    (class false)))
+  (is (= :char    (class \a)))
+  (is (= :keyword (class :foo)))
+  (is (= :symbol  (class 'bar)))
+  (is (= :fn      (class inc)))
+  (is (= :fn      (class (fn [x] x)))))
+
+(deftest class-collections
+  ;; class agrees with type for collection values.
+  (is (= :list    (class '(1 2 3))))
+  (is (= :list    (class '())))
+  (is (= :vector  (class [1 2])))
+  (is (= :vector  (class [])))
+  (is (= :map     (class {:a 1})))
+  (is (= :map     (class {})))
+  (is (= :set     (class #{1 2})))
+  (is (= :set     (class #{}))))
+
+(deftest class-ignores-type-metadata
+  ;; The defining difference from type: :type metadata is invisible to class.
+  (is (= :map     (class (with-meta {} {:type :foo}))))
+  (is (= :vector  (class (with-meta [] {:type :bar}))))
+  (is (= :list    (class (with-meta '(1 2) {:type :custom}))))
+  (is (= :set     (class (with-meta #{} {:type :other}))))
+  ;; type sees the metadata override; class does not.
+  (is (= :foo     (type  (with-meta {} {:type :foo}))))
+  (is (= :map     (class (with-meta {} {:type :foo})))))
+
+(defrecord ClassPt__rt [x y])
+
+(deftest class-record-matches-type
+  ;; For records, class and type agree: both return the record's type symbol.
+  (let [r (->ClassPt__rt 1 2)]
+    (is (= (type r) (class r)))
+    (is (= ClassPt__rt (class r)))))
+
+(deftest class-same-type-comparison
+  ;; (= (class a) (class b)) is a valid same-type predicate.
+  (is (= (class 1)   (class 2)))
+  (is (= (class "x") (class "y")))
+  (is (not= (class 1) (class "x")))
+  (is (= (class [])  (class [1 2])))
+  (is (not= (class []) (class {}))))
+
+(deftest class-resolve-and-doc
+  ;; class must be a named var with a docstring.
+  (is (var? (resolve 'class)))
+  (is (some? (doc-string 'class))))
+
+(deftest class-arity
+  ;; class requires exactly one argument.
+  (is (thrown? (class)))
+  (is (thrown? (class 1 2))))
+
+(run-tests-and-exit)
