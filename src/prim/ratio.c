@@ -89,7 +89,9 @@ mino_val *mino_ratio_make(mino_state *S, mino_val *num,
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "ratio numerator must be an integer");
     }
+    gc_pin(bnum);
     bdenom = to_bigint(S, denom);
+    gc_unpin(1);
     if (bdenom == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "ratio denominator must be an integer");
@@ -454,7 +456,10 @@ mino_val *mino_ratio_add(mino_state *S, const mino_val *a,
     }
     /* a/b + c/d = (a*d + c*b) / (b*d) */
     cross1  = mino_bigint_mul(S, an, bd); if (cross1 == NULL) return NULL;
-    cross2  = mino_bigint_mul(S, bn, ad); if (cross2 == NULL) return NULL;
+    gc_pin(cross1);
+    cross2  = mino_bigint_mul(S, bn, ad);
+    gc_unpin(1);
+    if (cross2 == NULL) return NULL;
     new_num = mino_bigint_add(S, cross1, cross2); if (new_num == NULL) return NULL;
     new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
     return mino_ratio_make(S, new_num, new_den);

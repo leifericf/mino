@@ -212,7 +212,9 @@ static int promote_acc(mino_state *S, tower_acc_t *acc, int new_tier,
                 mino_val *bn = mino_bigint_from_ll(S, acc->iacc);
                 mino_val *bd;
                 if (bn == NULL) return 0;
+                gc_pin(bn);
                 bd = mino_bigint_from_ll(S, 1);
+                gc_unpin(1);
                 if (bd == NULL) return 0;
                 acc->vacc = mino_ratio_make_unchecked(S, bn, bd);
                 if (acc->vacc == NULL) return 0;
@@ -389,8 +391,12 @@ static int tower_apply_int(mino_state *S, tower_acc_t *acc,
             }
             {
                 mino_val *la = mino_bigint_from_ll(S, acc->iacc);
-                mino_val *lb = mino_bigint_from_ll(S, x);
-                if (la == NULL || lb == NULL) return -1;
+                mino_val *lb;
+                if (la == NULL) return -1;
+                gc_pin(la);
+                lb = mino_bigint_from_ll(S, x);
+                gc_unpin(1);
+                if (lb == NULL) return -1;
                 acc->vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
                 if (acc->vacc == NULL) return -1;
                 acc->tier = TT_BIGINT;
@@ -2121,6 +2127,13 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
         }
     }
     if (is_compare_number(a) && is_compare_number(b)) {
+        /* Exact path for bigint/bigint: mp_int_compare is precise for
+         * arbitrarily large integers; the double fallback below loses
+         * precision for values beyond 2^53. */
+        if (mino_type_of(a) == MINO_BIGINT && mino_type_of(b) == MINO_BIGINT) {
+            int cmp = mino_bigint_cmp(a, b);
+            return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+        }
         /* Use the full numeric tower coercion so bigints, ratios, and
          * bigdecs all reduce to a comparable double. as_double only
          * knows about long/double, which would mis-classify e.g.
