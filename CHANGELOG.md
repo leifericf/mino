@@ -5,6 +5,8 @@
 - GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker
 - GC: Guard float/double fill pointer across alloc_val in mino_host_array_new
 - GC: Guard fields_vec pointer across alloc_val in mino_defrecord
+- GC: Pin val and key across the mino_symbol intern call in dyn_binding_make
+- GC: Harden the binding snapshot with checked capacity growth, pinned roots across allocations, and a heap buffer for long qualified names
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
@@ -17,7 +19,7 @@
 - Lib: `clojure.data/diff` now trims trailing nils from the both slot, so `(diff [1 2 3] [1 2 4])` reports both `[1 2]` instead of `[1 2 nil]`. Shared map keys whose values are nil on both sides land in both: `(diff {:a nil :b 1} {:a nil})` returns `[{:b 1} nil {:a nil}]`.
 - Lib: `clojure.data` gains the `EqualityPartition` and `Diff` protocols with `equality-partition` and `diff-similar` methods; `diff` dispatches through them, so user types can extend how they partition and diff.
 - Lib: `clojure.pprint/pprint` pretty-prints with margin-aware wrapping and logical-block indentation instead of echoing `pr-str`; collections that overflow `*print-right-margin*` (default 72) break across indented lines and maps break between key/value pairs.
-- Lib: `clojure.pprint/write` takes the Common-Lisp-style keyword interface (`:stream`, `:pretty`, `:base`, `:radix`, `:right-margin`, `:miser-width`, `:length`, `:suppress-namespaces`); `:stream nil` returns the formatted string.
+- Lib: `clojure.pprint/write` takes the canon keyword-argument interface (`:stream`, `:pretty`, `:base`, `:radix`, `:right-margin`, `:miser-width`, `:length`, `:suppress-namespaces`); `:stream nil` returns the formatted string.
 - Lib: `clojure.pprint` exposes the dispatch-writing surface -- `pprint-logical-block`, `pprint-newline`, `pprint-indent`, `print-length-loop`, `write-out`, `simple-dispatch`, `with-pprint-dispatch`, `set-pprint-dispatch`, `fresh-line`, `get-pretty-writer`, `pp` -- and the printer control vars (`*print-right-margin*`, `*print-miser-width*`, `*print-base*`, `*print-radix*`, `*print-pretty*`, `*print-suppress-namespaces*`, `*print-pprint-dispatch*`).
 - Lib: integer printing under `clojure.pprint` honors `*print-base*` and `*print-radix*`, emitting `#x`, `#o`, `#b`, or `#NNr` radix prefixes.
 - Lib: clojure.core.reducers is complete: the CollFold protocol with coll-fold, the reducer and folder wrappers, and the cat / append! / ->Cat / foldcat catenation machinery are now available; fold honors the seed-and-combine contract in one sequential pass.
@@ -30,19 +32,19 @@
 - Lib: clojure.pprint now provides cl-format, a directive-driven format function, plus the formatter and formatter-out compilers that turn a control string into a reusable function. Supported directives include ~a ~s, the integer directives ~d ~x ~o ~b and ~r (radix, cardinal, and ordinal english), the float directives ~f ~e ~$, ~% ~& ~~ ~c, iteration ~{ ~} with ~^ and sublists, the conditional ~[ ~], plural ~p, argument navigation ~* ~?, and column tabulation ~t. Destinations follow the canon: nil returns a string, true writes to *out*, and a writer receives the output.
 - Lib: clojure.pprint now provides code-dispatch, a pretty-print dispatch function that lays out code forms (defn, def, let, loop, binding, doseq, when, if, fn) with the body indented under the head and let-style bindings kept paired. Select it with with-pprint-dispatch or set-pprint-dispatch.
 - Lib: clojure.spec.alpha gains int-in, double-in and inst-in range specs (with in-range generators), int-in-range? and inst-in-range? predicates, fspec and fspec-impl for generative function specs, exercise-fn, explain-data*, explain-printer, explain-out and the *explain-out*, *fspec-iterations*, *coll-check-limit*, *coll-error-limit*, *recursion-limit* and *compile-asserts* dynamic vars; assert* throws ex-info carrying explain-data with ::failure :assertion-failed. double-in defaults :infinite? and :NaN? to false so a plain range spec rejects non-finite values unless opted in.
-- Fix: def now evaluates metadata-map values at definition time, so ^{:k (+ 1 2)} stores 3 and ^{:test (fn [] ...)} stores a callable, matching Clojure; reader flags (^:dynamic, ^:private), docstrings, and ^Tag type hints keep working unchanged
+- Fix: def now evaluates metadata-map values at definition time, so ^{:k (+ 1 2)} stores 3 and ^{:test (fn [] ...)} stores a callable, matching canon; reader flags (^:dynamic, ^:private), docstrings, and ^Tag type hints keep working unchanged
 - Fix: `binding` rebinds the var itself: a binding established under any spelling (bare, namespace-qualified, or alias-qualified) is now visible to every read of that var from any namespace, including qualified reads, `deref`/`var-get`, and compiled code, and restores correctly on unwind. Previously the dynamic-binding stack matched literal symbol text, so qualified bindings were invisible to bare reads and vice versa.
 - Fix: get-thread-bindings keys var-backed entries by their fully qualified symbol, so replaying a snapshot with with-bindings* or conveying it to another thread installs the binding on the exact same var regardless of the namespace the replay runs in.
 - Fix: Forcing a lazy-seq now coerces the body's value through `seq`, so `(first (lazy-seq [1 2]))` returns `1` and `(seq (lazy-seq [1 2]))` returns the seq instead of the raw vector. Map, set, and string bodies behave like their seqs the same way; a non-seqable body throws seq's type error.
 - Fix: Macro vars now carry :macro true in their metadata, so (meta (resolve 'when)) reports the flag for core macros, bundled-lib macros, and user defmacro definitions alike
 - Fix: require and the ns form's :refer now bind the source namespace's var rather than a copy of its value, so dynamic bindings, alter-var-root, and redefinitions are visible through referred names across namespaces
-- GC: Pin val and key across the mino_symbol intern call in dyn_binding_make
-- GC: Harden the binding snapshot with checked capacity growth, pinned roots across allocations, and a heap buffer for long qualified names
+- Fix: math-round returns a long instead of a double, matching the canon rounding contract; integer inputs pass through unchanged
+- Fix: Worker binding conveyance distinguishes an invalid key type from OOM, so a NULL from dyn_binding_make is no longer silently swallowed
+- Fix: (nth s i) on a string returns a character, consistent with (first s) and (get s i), so char-literal comparisons like (= (nth s i) \~) match. Indexing is codepoint-counted, so multi-byte characters count as one position.
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
-- Fix: math-round returns a long instead of a double, matching the canon rounding contract; integer inputs pass through unchanged
-- Fix: Worker binding conveyance distinguishes an invalid key type from OOM, so a NULL from dyn_binding_make is no longer silently swallowed
+- BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
 
 ## v0.423.5 — Security Fixes
 
