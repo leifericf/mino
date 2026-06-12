@@ -198,8 +198,14 @@ static mino_val *prim_with_meta(mino_state *S, mino_val *args,
     if (m != NULL && mino_type_of(m) != MINO_NIL && mino_type_of(m) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: metadata must be a map or nil");
     }
-    /* Shallow-copy the value and attach the new metadata. */
+    /* Shallow-copy the value and attach the new metadata.
+     * Pin obj and m across alloc_val so a GC triggered by the
+     * allocation cannot collect either live value. */
+    gc_pin(obj);
+    if (m != NULL) gc_pin(m);
     copy = alloc_val(S, mino_type_of(obj));
+    if (m != NULL) gc_unpin(1);
+    gc_unpin(1);
     copy->as = obj->as;
     copy->meta = (m != NULL && mino_type_of(m) == MINO_NIL) ? NULL : m;
     return copy;
@@ -241,7 +247,12 @@ static mino_val *prim_vary_meta(mino_state *S, mino_val *args,
     if (mino_type_of(new_meta) != MINO_NIL && mino_type_of(new_meta) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: f must return a map or nil");
     }
+    /* Pin obj and new_meta across alloc_val so a GC triggered by the
+     * allocation cannot collect either live value. */
+    gc_pin(obj);
+    gc_pin(new_meta);
     copy = alloc_val(S, mino_type_of(obj));
+    gc_unpin(2);
     copy->as = obj->as;
     copy->meta = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
     return copy;
