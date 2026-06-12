@@ -79,6 +79,7 @@
 (require "tests/print_method_test")
 (require "tests/pprint_test")
 (require "tests/cl_format_test")
+(require "tests/pprint_macro_test")
 (require "tests/print_dynvars_test")
 (require "tests/conformance_test")
 (require "tests/var_quote_test")
