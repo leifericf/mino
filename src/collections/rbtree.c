@@ -613,8 +613,10 @@ mino_val *sorted_set_conj1(mino_state *S, const mino_val *s,
      * sorted_map_assoc1 for the full rationale. */
     nv->meta = s->meta;
     nv->as.sorted.comparator = s->as.sorted.comparator;
+    gc_pin(nv);
     nv->as.sorted.root = rb_assoc(S, s->as.sorted.root, elem, NULL,
                                    s->as.sorted.comparator, &replaced);
+    gc_unpin(1);
     nv->as.sorted.len = s->as.sorted.len + (replaced ? 0 : 1);
     return nv;
 }

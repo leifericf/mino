@@ -530,3 +530,22 @@
     (is (= [:b 1] (assoc e 0 :b)))
     (is (= [:a 2] (assoc e 1 2)))
     (is (thrown? (assoc e 3 :y)))))
+
+(deftest sorted-set-conj-stress
+  ;; Regression for memory-collections-r2-001: sorted_set_conj1 must
+  ;; gc_pin nv across rb_assoc so that a GC triggered inside rb_assoc
+  ;; cannot collect the freshly-allocated result.  Build a large set
+  ;; by repeated conj to provoke allocation pressure.
+  (let [s (reduce conj (sorted-set) (range 2000))]
+    (is (= 2000 (count s)))
+    (is (= 0 (first s)))
+    (is (= 1999 (last s)))))
+
+(deftest val-compare-cross-type-is-total
+  ;; Deviation from JVM Clojure documented in conformance-collections-r2-001:
+  ;; mino's compare is a total order across all types; incompatible-type
+  ;; pairs order by type-enum rather than throwing.  Verify that a
+  ;; sorted-set accepts heterogeneous keys without error (user contract
+  ;; -- JVM would throw ClassCastException).
+  (let [s (sorted-set-by compare 1 "a" :k)]
+    (is (= 3 (count s)))))
