@@ -23,8 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#ifndef _WIN32
-#include <sys/wait.h>
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#else
+#  include <sys/wait.h>
 #endif
 
 /* ---- shell-escape and command-string building ---- */
@@ -190,7 +193,10 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
     cmd = build_command(S, args);
     if (cmd == NULL) return NULL; /* error already thrown */
 
-    /* Redirect stderr to stdout so we capture both. */
+    /* Redirect stderr to stdout so we capture both.
+     * On POSIX this uses the shell (sh -c) redirect syntax.
+     * On Windows, _popen passes the command to cmd.exe, which also
+     * supports "2>&1" — so the same string is valid on both platforms. */
     {
         size_t clen = strlen(cmd);
         char *cmd2 = (char *)realloc(cmd, clen + 16);
@@ -310,9 +316,14 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
      * the same yield; this brings thread-sleep into alignment. */
     {
         int depth = mino_yield_lock(S);
+#ifdef _WIN32
+        /* Windows has no nanosleep; Sleep() takes milliseconds. */
+        Sleep((DWORD)(ms < 0 ? 0 : ms));
+#else
         while (nanosleep(&ts, &ts) == -1) {
             /* Restart on EINTR using the residual time written into ts. */
         }
+#endif
         mino_resume_lock(S, depth);
     }
     return mino_nil(S);
