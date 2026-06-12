@@ -621,15 +621,16 @@ static int bigdec_sig_digits(mp_int z)
 static int resolve_math_context(mino_state *S, int *precision_out,
                                 int *rmode_out)
 {
-    mino_val *mc = NULL;
+    mino_val *mc  = NULL;
+    mino_val *var = var_find(S, "clojure.core", "*math-context*");
     mino_val *p_key, *rm_key, *p_v, *rm_v;
     long long ll;
     if (mino_current_ctx(S)->dyn_stack != NULL) {
-        mc = dyn_lookup(S, "*math-context*");
-        if (mc == NULL) mc = dyn_lookup(S, "clojure.core/*math-context*");
+        mc = (var != NULL)
+            ? dyn_lookup_var_or_name(S, var, "*math-context*")
+            : dyn_lookup(S, "*math-context*");
     }
     if (mc == NULL) {
-        mino_val *var = var_find(S, "clojure.core", "*math-context*");
         if (var != NULL && mino_type_of(var) == MINO_VAR
             && var->as.var.bound) {
             mc = var->as.var.root;

@@ -243,9 +243,11 @@ static void agent_apply_action(mino_state *S, mino_val *agent,
     int                pc;
 
     ag_bind.name  = "*agent*";
+    ag_bind.var   = var_find(S, "clojure.core", "*agent*");
     ag_bind.val   = agent;
     ag_bind.next  = NULL;
     ag_frame.bindings = &ag_bind;
+    ag_frame.building = 0;
     ag_frame.prev     = ctx->dyn_stack;
     ctx->dyn_stack    = &ag_frame;
 
@@ -376,18 +378,19 @@ static void agent_worker_run_one(mino_state *S, agent_action_node_t *n)
                 || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
                 continue;
             }
-            b = (dyn_binding_t *)malloc(sizeof(*b));
+            /* dyn_binding_make re-resolves the snapshot's qualified
+             * key to the canonical var so the conveyed binding keys
+             * identically to one pushed by `binding` on this thread. */
+            b = dyn_binding_make(S, key, val, bhead);
             if (b == NULL) { oom = 1; break; }
-            b->name = mino_symbol(S, key->as.s.data)->as.s.data;
-            b->val  = val;
-            b->next = bhead;
-            bhead   = b;
+            bhead = b;
         }
         if (!oom) {
             conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
             if (conveyed == NULL) { dyn_binding_list_free(bhead); bhead = NULL; }
             else {
                 conveyed->bindings = bhead;
+                conveyed->building = 0;
                 conveyed->prev     = ctx->dyn_stack;
                 ctx->dyn_stack     = conveyed;
             }

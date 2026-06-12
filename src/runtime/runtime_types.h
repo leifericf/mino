@@ -64,15 +64,27 @@ struct mino_ref {
     struct mino_ref *prev;
 };
 
-/* Dynamic binding frame. */
+/* Dynamic binding frame. `var` is the canonical var the binding
+ * targets -- pointer identity is the lookup key, so a binding
+ * established under any spelling (bare, ns-qualified, alias-
+ * qualified) is visible to every read of that var. NULL marks a
+ * var-less dynamic-scope name, which falls back to text matching on
+ * `name`. `name` is the var's interned bare name (or the literal
+ * spelling when var == NULL). */
 typedef struct dyn_binding {
     const char          *name;
+    mino_val          *var;
     mino_val          *val;
     struct dyn_binding  *next;
 } dyn_binding_t;
 
+/* `building` is 1 while a `binding` form is still evaluating its
+ * value forms: the GC root walk marks the frame's values (they are
+ * only reachable through it), but lookups skip it so the bindings
+ * install in parallel, not sequentially. */
 typedef struct dyn_frame {
     dyn_binding_t       *bindings;
+    int                  building;
     struct dyn_frame    *prev;
 } dyn_frame_t;
 

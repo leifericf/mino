@@ -268,6 +268,12 @@ mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         return a->as.reduced.val;
     }
     if (a != NULL && mino_type_of(a) == MINO_VAR) {
+        /* Thread binding wins over the root, per canon -- and it
+         * satisfies the deref even when the root is unbound. */
+        if (mino_current_ctx(S)->dyn_stack != NULL) {
+            mino_val *bv = dyn_lookup_var_or_name(S, a, a->as.var.sym);
+            if (bv != NULL) return bv;
+        }
         if (!a->as.var.bound) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "deref: var is unbound");
@@ -691,8 +697,12 @@ mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* Snapshot the current thread's dyn_stack into a map keyed by binding-
- * name symbols. Inner frames shadow outer frames; the first occurrence
- * walking newest-first wins. Returns nil when the stack is empty. */
+ * name symbols. Var-backed bindings key on the fully qualified ns/name
+ * symbol so a replay (with-bindings* / convey-to-worker) resolves the
+ * exact var regardless of the namespace it runs in; var-less names
+ * keep their literal spelling. Inner frames shadow outer frames; the
+ * first occurrence walking newest-first wins. Returns nil when the
+ * stack is empty. */
 mino_val *mino_snapshot_thread_bindings(mino_state *S)
 {
     dyn_frame_t   *f;
@@ -703,11 +713,19 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
     if (mino_current_ctx(S)->dyn_stack == NULL) return mino_nil(S);
 
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        if (f->building) continue;
         for (b = f->bindings; b != NULL; b = b->next) {
+            char   qbuf[512];
+            const char *key_name = b->name;
             size_t i;
             int    dup = 0;
+            if (b->var != NULL && b->var->as.var.ns != NULL) {
+                int qn = snprintf(qbuf, sizeof(qbuf), "%s/%s",
+                                  b->var->as.var.ns, b->var->as.var.sym);
+                if (qn > 0 && (size_t)qn < sizeof(qbuf)) key_name = qbuf;
+            }
             for (i = 0; i < len; i++) {
-                if (strcmp(keys[i]->as.s.data, b->name) == 0) {
+                if (strcmp(keys[i]->as.s.data, key_name) == 0) {
                     dup = 1;
                     break;
                 }
@@ -728,7 +746,7 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
                 vals = nv;
                 cap  = new_cap;
             }
-            gc_valarr_set(S, keys, len, mino_symbol(S, b->name));
+            gc_valarr_set(S, keys, len, mino_symbol(S, key_name));
             gc_valarr_set(S, vals, len, b->val);
             len++;
         }
@@ -775,11 +793,21 @@ static mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
             "set-dyn-binding!: first argument must be a symbol");
     }
     name = name_sym->as.s.data;
-    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
-        for (b = f->bindings; b != NULL; b = b->next) {
-            if (strcmp(b->name, name) == 0) {
-                b->val = new_val;
-                return new_val;
+    /* Match by canonical var identity when the name resolves to a
+     * var (with the var-less text criterion the lookup paths use);
+     * pure dynamic-scope names match by text alone. */
+    {
+        mino_val *var = dyn_resolve_var(S, name, name_sym->as.s.len);
+        const char *bare = (var != NULL) ? var->as.var.sym : name;
+        for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+            if (f->building) continue;
+            for (b = f->bindings; b != NULL; b = b->next) {
+                if ((var != NULL && b->var == var)
+                    || (b->var == NULL && bare != NULL
+                        && strcmp(b->name, bare) == 0)) {
+                    b->val = new_val;
+                    return new_val;
+                }
             }
         }
     }
@@ -834,43 +862,25 @@ static mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
     for (i = 0; i < map_arg->as.map.len; i++) {
         mino_val *key = vec_nth(map_arg->as.map.key_order, i);
         mino_val *val = map_get_val(map_arg, key);
-        const char *name_str;
-        if (key == NULL) {
+        if (key == NULL
+            || (mino_type_of(key) != MINO_VAR
+                && mino_type_of(key) != MINO_SYMBOL
+                && mino_type_of(key) != MINO_STRING)) {
             dyn_binding_list_free(bhead);
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "with-bindings*: keys must be vars, symbols, or strings");
         }
-        if (mino_type_of(key) == MINO_VAR) {
-            /* Clojure-canon: with-bindings/push-thread-bindings map is
-             * keyed by vars. Use the var's unqualified name as the
-             * dyn-frame key so lookup from `binding` / unqualified
-             * symbol reference matches. */
-            name_str = key->as.var.sym;
-            if (name_str == NULL) {
-                dyn_binding_list_free(bhead);
-                return prim_throw_classified(S, "eval/type", "MTY001",
-                    "with-bindings*: var key has no name");
-            }
-        } else if (mino_type_of(key) == MINO_SYMBOL
-                   || mino_type_of(key) == MINO_STRING) {
-            /* Intern the name string through mino_symbol so it shares
-             * storage with the binding-form path at bindings.c. */
-            name_str = mino_symbol(S, key->as.s.data)->as.s.data;
-        } else {
-            dyn_binding_list_free(bhead);
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "with-bindings*: keys must be vars, symbols, or strings");
-        }
-        b = (dyn_binding_t *)malloc(sizeof(*b));
+        /* Clojure-canon: with-bindings/push-thread-bindings map is
+         * keyed by vars. dyn_binding_make keys var entries by var
+         * identity and resolves symbol/string keys to their canonical
+         * var so any read spelling of the var sees the binding. */
+        b = dyn_binding_make(S, key, val, bhead);
         if (b == NULL) {
             dyn_binding_list_free(bhead);
             return prim_throw_classified(S, "eval/contract", "MIN001",
                 "with-bindings*: out of memory");
         }
-        b->name = name_str;
-        b->val  = val;
-        b->next = bhead;
-        bhead   = b;
+        bhead = b;
     }
 
     frame = (dyn_frame_t *)malloc(sizeof(*frame));
@@ -880,6 +890,7 @@ static mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
             "with-bindings*: out of memory");
     }
     frame->bindings = bhead;
+    frame->building = 0;
     frame->prev     = mino_current_ctx(S)->dyn_stack;
     mino_current_ctx(S)->dyn_stack    = frame;
     result          = mino_call(S, fn, mino_nil(S), env);
@@ -924,37 +935,21 @@ static mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
         for (i = 0; i < map_arg->as.map.len; i++) {
             mino_val *key = vec_nth(map_arg->as.map.key_order, i);
             mino_val *val = map_get_val(map_arg, key);
-            const char *name_str;
-            if (key == NULL) {
+            if (key == NULL
+                || (mino_type_of(key) != MINO_VAR
+                    && mino_type_of(key) != MINO_SYMBOL
+                    && mino_type_of(key) != MINO_STRING)) {
                 dyn_binding_list_free(bhead);
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "push-thread-bindings*: keys must be vars, symbols, or strings");
             }
-            if (mino_type_of(key) == MINO_VAR) {
-                name_str = key->as.var.sym;
-                if (name_str == NULL) {
-                    dyn_binding_list_free(bhead);
-                    return prim_throw_classified(S, "eval/type", "MTY001",
-                        "push-thread-bindings*: var key has no name");
-                }
-            } else if (mino_type_of(key) == MINO_SYMBOL
-                       || mino_type_of(key) == MINO_STRING) {
-                name_str = mino_symbol(S, key->as.s.data)->as.s.data;
-            } else {
-                dyn_binding_list_free(bhead);
-                return prim_throw_classified(S, "eval/type", "MTY001",
-                    "push-thread-bindings*: keys must be vars, symbols, or strings");
-            }
-            b = (dyn_binding_t *)malloc(sizeof(*b));
+            b = dyn_binding_make(S, key, val, bhead);
             if (b == NULL) {
                 dyn_binding_list_free(bhead);
                 return prim_throw_classified(S, "eval/contract", "MIN001",
                     "push-thread-bindings*: out of memory");
             }
-            b->name = name_str;
-            b->val  = val;
-            b->next = bhead;
-            bhead   = b;
+            bhead = b;
         }
     }
     frame = (dyn_frame_t *)malloc(sizeof(*frame));
@@ -964,6 +959,7 @@ static mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
             "push-thread-bindings*: out of memory");
     }
     frame->bindings = bhead;
+    frame->building = 0;
     frame->prev     = mino_current_ctx(S)->dyn_stack;
     mino_current_ctx(S)->dyn_stack = frame;
     return mino_nil(S);
@@ -1013,9 +1009,14 @@ static mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
     }
     name = v->as.var.sym;
     if (name == NULL) return mino_false(S);
+    /* Var identity first; the text fallback covers var-less entries
+     * pushed before the var existed (embedder boot order). */
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        if (f->building) continue;
         for (b = f->bindings; b != NULL; b = b->next) {
-            if (b->name != NULL && strcmp(b->name, name) == 0) {
+            if (b->var == v
+                || (b->var == NULL && b->name != NULL
+                    && strcmp(b->name, name) == 0)) {
                 return mino_true(S);
             }
         }

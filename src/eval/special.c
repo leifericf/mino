@@ -97,6 +97,15 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
                 "name", "MNS001", msg);
             return NULL;
         }
+        /* A qualified read names the same var as any other spelling:
+         * consult the thread-binding stack (keyed by var identity,
+         * with the var-less text criterion for referred spellings)
+         * before falling back to the root. */
+        if (mino_current_ctx(S)->dyn_stack != NULL) {
+            mino_val *bv = dyn_lookup_var_or_name(S, var,
+                                                  var->as.var.sym);
+            if (bv != NULL) return bv;
+        }
         return var->as.var.root;
     }
 
@@ -175,7 +184,8 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
      * a var (e.g. `(let [v (resolve 'foo)] ...)`) must preserve the
      * var as the binding value. */
     int from_ns_env = 0;
-    v = (mino_current_ctx(S)->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
+    v = (mino_current_ctx(S)->dyn_stack != NULL)
+        ? dyn_lookup_sym(S, data, n) : NULL;
     if (v == NULL) v = mino_env_get_sym(env, form);
     if (v == NULL) {
         mino_env *ns_env = current_ns_env(S);
@@ -210,6 +220,14 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
      * def'd) throws "Var is unbound" so a reference-before-def bug
      * fails at the use site rather than propagating a silent nil. */
     if (from_ns_env && v != NULL && mino_type_of(v) == MINO_VAR) {
+        /* A var bound into the ns env (refer / declare) reads through
+         * the thread-binding stack like any other access of that var.
+         * Checked before the unbound test: a thread binding satisfies
+         * a read even when the root is unbound, per canon. */
+        if (mino_current_ctx(S)->dyn_stack != NULL) {
+            mino_val *bv = dyn_lookup_var_or_name(S, v, v->as.var.sym);
+            if (bv != NULL) return bv;
+        }
         if (!v->as.var.bound) {
             char msg[300];
             snprintf(msg, sizeof(msg),

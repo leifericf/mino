@@ -995,6 +995,12 @@ mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "var-get: expected a var");
     }
+    /* Thread binding wins over the root, per canon -- and it
+     * satisfies the read even when the root is unbound. */
+    if (mino_current_ctx(S)->dyn_stack != NULL) {
+        mino_val *bv = dyn_lookup_var_or_name(S, arg, arg->as.var.sym);
+        if (bv != NULL) return bv;
+    }
     if (!arg->as.var.bound) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "var-get: var is unbound");

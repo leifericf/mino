@@ -7,25 +7,21 @@
 #include "prim/internal.h"
 
 /* Resolve a print-side dynvar by name. Checks the dynamic binding
- * stack first (where (binding [*print-length* N] ...) lands), then
- * the lexical env, then the var root in clojure.core. Returns the
- * raw mino_val* (NULL when truly unset). The integer / boolean
- * adapters below interpret the result. */
+ * stack first under the clojure.core var's identity (where (binding
+ * [*print-length* N] ...) lands regardless of spelling, with a text
+ * probe for var-less boot-time bindings), then the lexical env, then
+ * the var root in clojure.core. Returns the raw mino_val* (NULL
+ * when truly unset). The integer / boolean adapters below interpret
+ * the result. */
 static mino_val *resolve_print_dynvar(mino_state *S, mino_env *env,
                                        const char *name)
 {
     mino_val *v = NULL;
     mino_val *var;
     if (mino_current_ctx(S)->dyn_stack != NULL) {
-        v = dyn_lookup(S, name);
-        if (v == NULL) {
-            char qualified[64];
-            int  qn = snprintf(qualified, sizeof(qualified),
-                               "clojure.core/%s", name);
-            if (qn > 0 && (size_t)qn < sizeof(qualified)) {
-                v = dyn_lookup(S, qualified);
-            }
-        }
+        var = var_find(S, "clojure.core", name);
+        v = (var != NULL) ? dyn_lookup_var_or_name(S, var, name)
+                          : dyn_lookup(S, name);
     }
     if (v == NULL && env != NULL) {
         v = mino_env_get(env, name);

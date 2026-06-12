@@ -739,7 +739,8 @@ static mino_val *ic_resolve_global(mino_state *S,
 {
     int slot_idx = (int)(slot - bc->ic_slots);
     if (dyn_active && slot->sym != NULL) {
-        mino_val *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
+        mino_val *dyn_v = dyn_lookup_sym(S, slot->sym->as.s.data,
+                                           slot->sym->as.s.len);
         if (dyn_v != NULL) return dyn_v;
     }
     if (env != NULL) {
@@ -1063,34 +1064,44 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         for (size_t i = 0; i < n; i++) {
             mino_val *sym = vec_nth(names, i);
             if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
-                while (bhead != NULL) {
-                    dyn_binding_t *nxt = bhead->next;
-                    free(bhead); bhead = nxt;
-                }
+                dyn_binding_list_free(bhead);
+                *ok = 0; return 0;
+            }
+            /* Mirror the tree-walker's push_dyn_binding: resolve the
+             * name to its canonical var (the dyn stack is keyed by
+             * var identity) and reject rebinding a non-dynamic var. */
+            mino_val *var = dyn_resolve_var(S, sym->as.s.data,
+                                              sym->as.s.len);
+            if (var != NULL && !var->as.var.dynamic) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                    "Can't dynamically bind non-dynamic var: %s/%s",
+                    var->as.var.ns != NULL ? var->as.var.ns : "?",
+                    var->as.var.sym != NULL ? var->as.var.sym
+                                            : sym->as.s.data);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "eval/binding", "MBN001", msg);
+                dyn_binding_list_free(bhead);
                 *ok = 0; return 0;
             }
             dyn_binding_t *b = (dyn_binding_t *)malloc(sizeof(*b));
             if (b == NULL) {
-                while (bhead != NULL) {
-                    dyn_binding_t *nxt = bhead->next;
-                    free(bhead); bhead = nxt;
-                }
+                dyn_binding_list_free(bhead);
                 *ok = 0; return 0;
             }
-            b->name = sym->as.s.data;
+            b->name = (var != NULL) ? var->as.var.sym : sym->as.s.data;
+            b->var  = var;
             b->val  = regs[a + (unsigned)i];
             b->next = bhead;
             bhead   = b;
         }
         dyn_frame_t *frame = (dyn_frame_t *)malloc(sizeof(*frame));
         if (frame == NULL) {
-            while (bhead != NULL) {
-                dyn_binding_t *nxt = bhead->next;
-                free(bhead); bhead = nxt;
-            }
+            dyn_binding_list_free(bhead);
             *ok = 0; return 0;
         }
         frame->bindings = bhead;
+        frame->building = 0;
         frame->prev     = ctx->dyn_stack;
         ctx->dyn_stack  = frame;
         return 1;

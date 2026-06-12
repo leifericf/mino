@@ -357,12 +357,14 @@ static void worker_run(mino_future *impl, char *stack_anchor)
                     || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
                     continue;
                 }
-                b = (dyn_binding_t *)malloc(sizeof(*b));
+                /* dyn_binding_make re-resolves the snapshot's
+                 * qualified key to the canonical var so the conveyed
+                 * binding keys identically to one pushed by `binding`
+                 * on the spawning thread. Runs under state_lock: the
+                 * var-string intern it may touch is shared. */
+                b = dyn_binding_make(S, key, val, bhead);
                 if (b == NULL) { oom = 1; break; }
-                b->name = mino_symbol(S, key->as.s.data)->as.s.data;
-                b->val  = val;
-                b->next = bhead;
-                bhead   = b;
+                bhead = b;
             }
             mino_unlock(S);
             if (!oom) {
@@ -370,6 +372,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
                 if (conveyed == NULL) { dyn_binding_list_free(bhead); }
                 else {
                     conveyed->bindings = bhead;
+                    conveyed->building = 0;
                     conveyed->prev     = NULL;
                     ctx->dyn_stack     = conveyed;
                 }

@@ -27,29 +27,21 @@ void print_str_to(mino_state *S, FILE *out, const mino_val *v)
 }
 
 /* Resolve the current sink for *out* / *err*. Looks up the dynamic-
- * binding stack first under both the bare and `clojure.core/`-
- * qualified names (syntax-quote in user macros tends to expand the
- * bare symbol to the qualified form), then falls back to the var's
- * root value. Returns NULL only when the var has never been interned
- * (the boot-time path before mino_install_clojure_core finishes). */
+ * binding stack by the clojure.core var's identity (the stack is
+ * keyed by canonical var, so any binding spelling lands there), then
+ * falls back to the var's root value. The text probe covers var-less
+ * bindings pushed before the var existed (boot-time embedder path).
+ * Returns NULL only when the var has never been interned (before
+ * mino_install_clojure_core finishes). */
 static mino_val *resolve_io_sink(mino_state *S, const char *name)
 {
     mino_val *v;
-    mino_val *var;
-    char        qualified[64];
+    mino_val *var = var_find(S, "clojure.core", name);
     if (mino_current_ctx(S)->dyn_stack != NULL) {
-        v = dyn_lookup(S, name);
+        v = (var != NULL) ? dyn_lookup_var_or_name(S, var, name)
+                          : dyn_lookup(S, name);
         if (v != NULL) return v;
-        if (strlen(name) + sizeof("clojure.core/") < sizeof(qualified)) {
-            int n = snprintf(qualified, sizeof(qualified),
-                             "clojure.core/%s", name);
-            if (n > 0 && (size_t)n < sizeof(qualified)) {
-                v = dyn_lookup(S, qualified);
-                if (v != NULL) return v;
-            }
-        }
     }
-    var = var_find(S, "clojure.core", name);
     if (var != NULL && mino_type_of(var) == MINO_VAR && var->as.var.bound) {
         return var->as.var.root;
     }
@@ -250,6 +242,7 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
             return NULL;
         }
         binding->name = mino_symbol(S, "*out*")->as.s.data;
+        binding->var  = var_find(S, "clojure.core", "*out*");
         binding->val  = atom_val;
         binding->next = NULL;
         frame = (dyn_frame_t *)malloc(sizeof(*frame));
@@ -260,6 +253,7 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
             return NULL;
         }
         frame->bindings = binding;
+        frame->building = 0;
         frame->prev     = mino_current_ctx(S)->dyn_stack;
         mino_current_ctx(S)->dyn_stack    = frame;
         call_args = mino_cons(S, v, mino_nil(S));

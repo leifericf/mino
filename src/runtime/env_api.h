@@ -30,7 +30,14 @@ int            env_unbind(mino_state *S, mino_env *env,
                         const char *name);                     /* 1 if removed */
 mino_env    *env_child(mino_state *S, mino_env *parent); /* GC-owned */
 mino_env    *env_root(mino_state *S, mino_env *env);     /* borrowed (walks up) */
-mino_val    *dyn_lookup(mino_state *S, const char *name);  /* borrowed */
+mino_val    *dyn_lookup(mino_state *S, const char *name);  /* borrowed; var-less entries only */
+mino_val    *dyn_lookup_var(mino_state *S, const mino_val *var); /* borrowed */
+mino_val    *dyn_lookup_var_or_name(mino_state *S, const mino_val *var,
+                        const char *name);                     /* borrowed */
+mino_val    *dyn_resolve_var(mino_state *S, const char *data, size_t n);
+mino_val    *dyn_lookup_sym(mino_state *S, const char *data, size_t n);
+dyn_binding_t *dyn_binding_make(mino_state *S, mino_val *key,   /* caller owns node */
+                        mino_val *val, dyn_binding_t *next);
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
 
 /* Snapshot the calling thread's dyn_stack into a map (symbol -> value).

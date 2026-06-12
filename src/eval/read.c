@@ -2588,11 +2588,17 @@ static mino_val *read_dispatch_tagged(mino_state *S, const char **p)
     }
 
     /* (1) per-tag reader from *data-readers*. */
-    readers = (mino_current_ctx(S)->dyn_stack != NULL)
-                ? dyn_lookup(S, "*data-readers*") : NULL;
-    if (readers == NULL) {
+    {
         mino_val *var = var_find(S, "clojure.core", "*data-readers*");
-        if (var != NULL && var->as.var.bound) readers = var->as.var.root;
+        readers = NULL;
+        if (mino_current_ctx(S)->dyn_stack != NULL) {
+            readers = (var != NULL)
+                ? dyn_lookup_var_or_name(S, var, "*data-readers*")
+                : dyn_lookup(S, "*data-readers*");
+        }
+        if (readers == NULL && var != NULL && var->as.var.bound) {
+            readers = var->as.var.root;
+        }
     }
     if (readers != NULL && mino_type_of(readers) == MINO_MAP) {
         fn = map_get_val(readers, tag_sym);
@@ -2603,12 +2609,19 @@ static mino_val *read_dispatch_tagged(mino_state *S, const char **p)
     }
 
     /* (2) *default-data-reader-fn*. */
-    fn = (mino_current_ctx(S)->dyn_stack != NULL)
-            ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
-    if (fn == NULL) {
+    {
         mino_val *var = var_find(S, "clojure.core",
                                    "*default-data-reader-fn*");
-        if (var != NULL && var->as.var.bound) fn = var->as.var.root;
+        fn = NULL;
+        if (mino_current_ctx(S)->dyn_stack != NULL) {
+            fn = (var != NULL)
+                ? dyn_lookup_var_or_name(S, var,
+                                         "*default-data-reader-fn*")
+                : dyn_lookup(S, "*default-data-reader-fn*");
+        }
+        if (fn == NULL && var != NULL && var->as.var.bound) {
+            fn = var->as.var.root;
+        }
     }
     if (fn != NULL && mino_type_of(fn) != MINO_NIL && call_env != NULL) {
         mino_val *args = mino_cons(S, tag_sym,

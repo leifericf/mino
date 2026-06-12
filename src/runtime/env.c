@@ -376,16 +376,161 @@ void dyn_binding_list_free(dyn_binding_t *head)
     }
 }
 
-/* Look up a name in the dynamic binding stack.  Returns the value if
- * found, NULL otherwise. */
+/* Look up a var-less dynamic-scope name in the binding stack. Only
+ * entries with no canonical var match by text; var-backed bindings
+ * are keyed by var identity (dyn_lookup_var) so two same-named vars
+ * in different namespaces cannot cross-talk. Frames still building
+ * their bindings (`binding` evaluating its value forms) are skipped
+ * so the install stays parallel. Returns the value or NULL. */
 mino_val *dyn_lookup(mino_state *S, const char *name)
 {
     dyn_frame_t *f;
     dyn_binding_t *b;
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        if (f->building) continue;
         for (b = f->bindings; b != NULL; b = b->next) {
-            if (strcmp(b->name, name) == 0) return b->val;
+            if (b->var == NULL && strcmp(b->name, name) == 0) return b->val;
         }
     }
     return NULL;
+}
+
+/* Look up a var's thread binding by canonical identity. var_intern
+ * dedupes per (ns, name), so pointer equality is the identity test.
+ * Returns the bound value or NULL when the var is not thread-bound. */
+mino_val *dyn_lookup_var(mino_state *S, const mino_val *var)
+{
+    dyn_frame_t *f;
+    dyn_binding_t *b;
+    if (var == NULL) return NULL;
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        if (f->building) continue;
+        for (b = f->bindings; b != NULL; b = b->next) {
+            if (b->var == var) return b->val;
+        }
+    }
+    return NULL;
+}
+
+/* Single-walk lookup for a resolved var: newest frame first, an entry
+ * matches by var identity or -- for var-less entries only -- by
+ * bare-name text. The text criterion bridges the refer gap (a
+ * `binding` on a referred name resolves no var at push time and
+ * lands var-less), and keeping both criteria in ONE walk preserves
+ * shadowing when such an entry sits above a var-keyed one. Var-keyed
+ * entries never match by text, so two same-named vars in different
+ * namespaces cannot cross-talk. */
+mino_val *dyn_lookup_var_or_name(mino_state *S, const mino_val *var,
+                                   const char *name)
+{
+    dyn_frame_t *f;
+    dyn_binding_t *b;
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        if (f->building) continue;
+        for (b = f->bindings; b != NULL; b = b->next) {
+            if (b->var == var
+                || (b->var == NULL && name != NULL
+                    && strcmp(b->name, name) == 0)) {
+                return b->val;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Resolve a binding-form name (bare or ns-qualified) to its canonical
+ * var. Qualified names resolve their alias against the current
+ * namespace, mirroring eval_qualified_symbol. Bare names probe the
+ * current namespace, then the executing fn's defining namespace, then
+ * clojure.core (the referred set) -- the same cascade a root read of
+ * the name walks. Returns NULL when no var exists under any
+ * candidate (pure dynamic-scope names). `data` must be the
+ * NUL-terminated text of an interned symbol. */
+mino_val *dyn_resolve_var(mino_state *S, const char *data, size_t n)
+{
+    const char *cur = S->ns_vars.current_ns != NULL
+        ? S->ns_vars.current_ns : "user";
+    const char *slash = (n > 1) ? memchr(data, '/', n) : NULL;
+    if (slash != NULL && slash != data && (size_t)(slash - data) + 1 < n) {
+        char        ns_buf[256];
+        size_t      ns_len = (size_t)(slash - data);
+        const char *resolved = NULL;
+        size_t      i;
+        if (ns_len >= sizeof(ns_buf)) return NULL;
+        memcpy(ns_buf, data, ns_len);
+        ns_buf[ns_len] = '\0';
+        for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+            if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+                && strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) == 0
+                && strcmp(S->ns_vars.ns_aliases[i].alias, ns_buf) == 0) {
+                resolved = S->ns_vars.ns_aliases[i].full_name;
+                break;
+            }
+        }
+        return var_find(S, resolved != NULL ? resolved : ns_buf, slash + 1);
+    }
+    {
+        mino_val *var = var_find(S, cur, data);
+        if (var == NULL && S->ns_vars.fn_ambient_ns != NULL
+            && strcmp(S->ns_vars.fn_ambient_ns, cur) != 0) {
+            var = var_find(S, S->ns_vars.fn_ambient_ns, data);
+        }
+        if (var == NULL && strcmp(cur, "clojure.core") != 0) {
+            var = var_find(S, "clojure.core", data);
+        }
+        return var;
+    }
+}
+
+/* Combined read-side consult: resolve the symbol text to its
+ * canonical var and run the single-walk var-or-name lookup (var-less
+ * names fall back to pure text matching). The read paths
+ * (eval_symbol, the BC IC resolver) call this only when the dyn
+ * stack is non-empty. */
+mino_val *dyn_lookup_sym(mino_state *S, const char *data, size_t n)
+{
+    mino_val *var;
+    if (mino_current_ctx(S)->dyn_stack == NULL) return NULL;
+    var = dyn_resolve_var(S, data, n);
+    if (var != NULL) {
+        return dyn_lookup_var_or_name(S, var, var->as.var.sym);
+    }
+    return dyn_lookup(S, data);
+}
+
+/* Build one malloc-owned dyn_binding for `key` (var, symbol, or
+ * string) bound to val, resolving symbol/string keys to their
+ * canonical var. Returns NULL on OOM or a non-bindable key type;
+ * the caller distinguishes the two by pre-validating the key. The
+ * node's name borrows interned storage (var-string table for
+ * var-backed entries, the symbol intern for var-less ones), so the
+ * caller never frees it -- dyn_binding_list_free releases the node
+ * only. */
+dyn_binding_t *dyn_binding_make(mino_state *S, mino_val *key,
+                                mino_val *val, dyn_binding_t *next)
+{
+    dyn_binding_t *b;
+    mino_val    *var      = NULL;
+    const char    *name_str = NULL;
+    if (key == NULL) return NULL;
+    if (mino_type_of(key) == MINO_VAR) {
+        var      = key;
+        name_str = key->as.var.sym;
+    } else if (mino_type_of(key) == MINO_SYMBOL
+               || mino_type_of(key) == MINO_STRING) {
+        var = dyn_resolve_var(S, key->as.s.data, key->as.s.len);
+        name_str = (var != NULL)
+            ? var->as.var.sym
+            : mino_symbol(S, key->as.s.data)->as.s.data;
+    } else {
+        return NULL;
+    }
+    if (name_str == NULL) return NULL;
+    b = (dyn_binding_t *)malloc(sizeof(*b));
+    if (b == NULL) return NULL;
+    b->name = name_str;
+    b->var  = var;
+    b->val  = val;
+    b->next = next;
+    return b;
 }

@@ -294,6 +294,10 @@ static void gc_mark_ctx_dyn_stack(mino_state *S, mino_thread_ctx_t *ctx)
     for (f = ctx->dyn_stack; f != NULL; f = f->prev) {
         for (b = f->bindings; b != NULL; b = b->next) {
             gc_mark_interior(S, b->val);
+            /* The canonical var is normally rooted via the var
+             * registry, but an uninterned var can survive only
+             * through a live binding. */
+            if (b->var != NULL) gc_mark_interior(S, b->var);
         }
     }
 }
