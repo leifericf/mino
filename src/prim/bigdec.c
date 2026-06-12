@@ -252,10 +252,14 @@ int mino_bigdec_equals(const mino_val *a, const mino_val *b)
         if (mp_int_mul(&bu, &pw, &bu) != MP_OK) goto fail;
     }
     eq = (mp_int_compare(&au, &bu) == 0);
-    mp_int_clear(&au); mp_int_clear(&bu); mp_int_clear(&pw);
+    mp_int_clear(&au);
+    mp_int_clear(&bu);
+    mp_int_clear(&pw);
     return eq;
 fail:
-    mp_int_clear(&au); mp_int_clear(&bu); mp_int_clear(&pw);
+    mp_int_clear(&au);
+    mp_int_clear(&bu);
+    mp_int_clear(&pw);
     return 0;
 }
 
