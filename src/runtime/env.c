@@ -519,9 +519,17 @@ dyn_binding_t *dyn_binding_make(mino_state *S, mino_val *key,
     } else if (mino_type_of(key) == MINO_SYMBOL
                || mino_type_of(key) == MINO_STRING) {
         var = dyn_resolve_var(S, key->as.s.data, key->as.s.len);
-        name_str = (var != NULL)
-            ? var->as.var.sym
-            : mino_symbol(S, key->as.s.data)->as.s.data;
+        if (var != NULL) {
+            name_str = var->as.var.sym;
+        } else {
+            /* mino_symbol can trigger GC; pin both live GC roots. */
+            mino_val *sym;
+            gc_pin(val);
+            gc_pin(key);
+            sym = mino_symbol(S, key->as.s.data);
+            gc_unpin(2);
+            name_str = sym->as.s.data;
+        }
     } else {
         return NULL;
     }
