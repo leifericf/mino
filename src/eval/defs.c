@@ -700,9 +700,62 @@ mino_val *eval_declare(mino_state *S, mino_val *form,
     return mino_nil(S);
 }
 
+/* Evaluate a def/defmacro name-symbol's metadata map values in the
+ * defining environment, matching canon where the metadata map is an
+ * expression evaluated at definition time. The reader's `^{...}` leaves
+ * each value as an unevaluated form, so `^{:k (+ 1 2)}` arrives here as
+ * the literal list (+ 1 2); canon stores 3. Keys are left untouched
+ * (the reader emits keywords). The `:tag` value is preserved verbatim
+ * when it is a symbol: type hints from `^Tag` shorthand are symbolic in
+ * mino (there are no host classes to resolve against), so evaluating
+ * them would either fail or resolve to an unrelated var.
+ *
+ * Returns a NEW map. Reader-shorthand flags (`^:dynamic`, `^:private`)
+ * desugar to {:dynamic true}/{:private true}; their boolean values
+ * self-evaluate and stay true. Literal values (strings, keywords,
+ * numbers) self-evaluate to themselves, so `:doc`/`:tag :x` pass
+ * through unchanged. Returns NULL on the first evaluation error. */
+static mino_val *eval_meta_map(mino_state *S, mino_val *meta, mino_env *env)
+{
+    size_t       len, i;
+    mino_val **ks;
+    mino_val **vs;
+    mino_val  *out;
+    if (meta == NULL || mino_type_of(meta) != MINO_MAP) return meta;
+    len = meta->as.map.len;
+    if (len == 0) return meta;
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, len * sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, len * sizeof(*vs));
+    /* eval_value below runs user code that can allocate and collect; pin
+     * the accumulating key/value arrays so a mid-loop GC keeps them and
+     * the entries already stored. */
+    gc_pin(ks);
+    gc_pin(vs);
+    for (i = 0; i < len; i++) {
+        mino_val *k = vec_nth(meta->as.map.key_order, i);
+        mino_val *v = map_get_val(meta, k);
+        gc_valarr_set(S, ks, i, k);
+        if (kw_eq(k, "tag") && v != NULL && mino_type_of(v) == MINO_SYMBOL) {
+            gc_valarr_set(S, vs, i, v);
+        } else {
+            mino_val *ev = eval_value(S, v, env);
+            if (ev == NULL) {
+                gc_unpin(2);
+                return NULL;
+            }
+            gc_valarr_set(S, vs, i, ev);
+        }
+    }
+    out = mino_map(S, ks, vs, len);
+    gc_unpin(2);
+    return out;
+}
+
 /* Attach the def name-symbol's metadata map (plus the docstring, when
  * given) to the var so (meta #'x) surfaces user keys like :doc and
- * :deprecated, not just the synthesized :ns/:name/flag entries. */
+ * :deprecated, not just the synthesized :ns/:name/flag entries. The
+ * caller must already have evaluated name_meta's values via
+ * eval_meta_map. */
 static void var_attach_user_meta(mino_state *S, mino_val *var,
                                  mino_val *name_meta,
                                  const char *doc, size_t doc_len)
@@ -767,11 +820,14 @@ mino_val *eval_def(mino_state *S, mino_val *form,
         /* (def name) -- declaration only. Var stays unbound unless previously
          * defined; returns the var. */
         if (!mino_is_cons(args->as.cons.cdr)) {
-            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
+            mino_val *eval_m = eval_meta_map(S, m, env);
+            mino_val *var;
+            if (m != NULL && eval_m == NULL) return NULL;
+            var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
-                var_attach_user_meta(S, var, m, NULL, 0);
+                var_attach_user_meta(S, var, eval_m, NULL, 0);
             }
             meta_set(S, buf, NULL, 0, form);
             return var != NULL ? var : mino_nil(S);
@@ -795,12 +851,20 @@ mino_val *eval_def(mino_state *S, mino_val *form,
         }
         gc_pin(value);
         {
-            mino_val *var = var_intern(S, S->ns_vars.current_ns, buf);
+            /* Evaluate metadata-map values with the value pinned: the
+             * metadata expressions run user code that can collect. */
+            mino_val *eval_m = eval_meta_map(S, m, env);
+            mino_val *var;
+            if (m != NULL && eval_m == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
+            var = var_intern(S, S->ns_vars.current_ns, buf);
             if (var != NULL) {
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
-                var_attach_user_meta(S, var, m, doc, doc_len);
+                var_attach_user_meta(S, var, eval_m, doc, doc_len);
             }
             env_bind(S, current_ns_env(S), buf, value);
             gc_unpin(1);
