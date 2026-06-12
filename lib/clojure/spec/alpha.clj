@@ -27,6 +27,38 @@
 (ns clojure.spec.alpha
   (:require [clojure.walk :as walk]))
 
+;; ---------------------------------------------------------------------------
+;; Dynamic tuning vars.  Defaults match the canonical library.  They are
+;; declared up front so the conform / explain / gen machinery below can
+;; consult them directly.
+;; ---------------------------------------------------------------------------
+
+(def ^:dynamic *recursion-limit*
+  "A soft limit on how many times a branching spec (or / alt / * /
+  opt-keys / multi-spec) can be recursed through during generation.
+  After this a non-recursive branch is chosen."
+  4)
+
+(def ^:dynamic *fspec-iterations*
+  "The number of times an anonymous fn specified by fspec is
+  generatively sampled during conform."
+  21)
+
+(def ^:dynamic *coll-check-limit*
+  "The number of elements validated in a collection spec'ed with
+  every / every-kv."
+  101)
+
+(def ^:dynamic *coll-error-limit*
+  "The number of errors reported by explain in a collection spec'ed
+  with every / every-kv."
+  20)
+
+(def ^:dynamic *compile-asserts*
+  "When true, s/assert is checked at runtime; when false it returns its
+  value unevaluated.  Defaults to true."
+  true)
+
 (def ^:private registry-ref (atom {}))
 
 (def invalid ::invalid)
@@ -173,17 +205,24 @@
   [spec y]
   (unform* (as-spec spec) y))
 
+(defn explain-data*
+  "Lower-level explain entry point: run explain* with the given path,
+  via and in seeds and wrap the resulting problems in the canonical
+  {::problems ::spec ::value} map, or return nil when x conforms.
+  Public callers usually want explain-data."
+  [spec path via in x]
+  (let [problems (explain* (as-spec spec) path via in x)]
+    (when (seq problems)
+      {::problems problems
+       ::spec     spec
+       ::value    x})))
+
 (defn explain-data
   "Return a problem map describing why x fails spec, or nil if it
   passes.  Shape: {::problems [{:path ... :pred ... :val ... :via ...
   :in ...}] ::spec ... ::value ...}."
   [spec x]
-  (let [s        (as-spec spec)
-        problems (explain* s [] [] [] x)]
-    (when (seq problems)
-      {::problems problems
-       ::spec     spec
-       ::value    x})))
+  (explain-data* spec [] [] [] x))
 
 (declare abbrev)
 
@@ -202,22 +241,44 @@
        (when (seq (:path p)) (str " at: " (pr-str (:path p))))
        (when (seq (:via p))  (str " spec: " (pr-str (last (:via p)))))))
 
+(defn explain-printer
+  "Default printer for explain-data: write a human-readable description
+  of each problem to *out*.  nil indicates a successful validation and
+  prints \"Success!\".  Problems are ordered longest-path first, the
+  way Clojure's explain-printer sorts them, so the deepest failure
+  reads first."
+  [ed]
+  (if ed
+    (let [problems (->> (::problems ed)
+                        (sort-by (fn [p] (- (count (:in p)))))
+                        (sort-by (fn [p] (- (count (:path p))))))]
+      (doseq [p problems]
+        (print (problem-str p))
+        (newline)))
+    (println "Success!")))
+
+(def ^:dynamic *explain-out*
+  "The printer explain-out uses to render explain-data.  Defaults to
+  explain-printer; rebind it to redirect explain output."
+  explain-printer)
+
+(defn explain-out
+  "Print explanation data (per explain-data) to *out* using the printer
+  in *explain-out*, by default explain-printer."
+  [ed]
+  (*explain-out* ed))
+
 (defn explain-str
   "Return a string describing why x fails spec, or \"Success!\\n\" if
   it passes. Format follows clojure.spec.alpha: each problem on its
   own line terminated with \\n."
   [spec x]
-  (if-let [data (explain-data spec x)]
-    (apply str
-           (map (fn [p] (str (problem-str p) "\n"))
-                (::problems data)))
-    "Success!\n"))
+  (with-out-str (explain-out (explain-data spec x))))
 
 (defn explain
-  "Print explain-str to *out*."
+  "Print an explanation of why x fails spec to *out* via *explain-out*."
   [spec x]
-  (print (explain-str spec x))
-  (flush))
+  (explain-out (explain-data spec x)))
 
 (defn form
   "Return the form of the spec, or :clojure.spec.alpha/unknown if x is
@@ -500,12 +561,6 @@
 ;; conform to the input collection unchanged.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private coll-check-limit
-  ;; The number of elements every / every-kv validate.  The canonical
-  ;; dynamic var *coll-check-limit* lands in a later wave; until then
-  ;; the canonical default is fixed here.
-  101)
-
 (defn every-impl
   "Build an ::every spec value.  Recognized opts: :kind, :count,
   :min-count, :max-count, :distinct, :into, plus ::conform-all
@@ -550,11 +605,12 @@
                   (set? x)         (set conformed)
                   :else            (apply list conformed)))
               ::invalid))
-          ;; Sampling mode: validate up to coll-check-limit elements and
-          ;; return the input unchanged -- elements are never conformed.
+          ;; Sampling mode: validate up to *coll-check-limit* elements
+          ;; and return the input unchanged -- elements are never
+          ;; conformed.
           (loop [i 0 vs (seq x)]
             (cond
-              (or (nil? vs) (>= i coll-check-limit)) x
+              (or (nil? vs) (>= i *coll-check-limit*)) x
               (= ::invalid (conform* sp (first vs))) ::invalid
               :else (recur (inc i) (next vs)))))))))
 
@@ -599,20 +655,29 @@
       [{:path path :pred (list '>= mx '(count %)) :val x :via via :in in}]
 
       :else
-      (let [sp (as-spec (::spec s))
-            kv (::kv s)]
+      (let [sp        (as-spec (::spec s))
+            kv        (::kv s)
+            ;; coll-of / map-of report every failing element; sampling
+            ;; specs (every / every-kv) cap the report at
+            ;; *coll-error-limit* problem groups, matching the canon.
+            limit-fn  (if (::conform-all s)
+                        identity
+                        (fn [probs] (take *coll-error-limit* probs)))]
         (apply concat
-               (map-indexed
-                 (fn [i v]
-                   (let [r (conform* sp v)
-                         ;; kv entries report the entry key; fall back
-                         ;; to the index when the element isn't a pair.
-                         k (if (and kv (sequential? v) (pos? (count v)))
-                             (nth v 0)
-                             i)]
-                     (when (= ::invalid r)
-                       (explain* sp (conj path i) via (conj in k) v))))
-                 x))))))
+               (limit-fn
+                 (filter some?
+                         (map-indexed
+                           (fn [i v]
+                             (let [r (conform* sp v)
+                                   ;; kv entries report the entry key;
+                                   ;; fall back to the index when the
+                                   ;; element isn't a pair.
+                                   k (if (and kv (sequential? v) (pos? (count v)))
+                                       (nth v 0)
+                                       i)]
+                               (when (= ::invalid r)
+                                 (explain* sp (conj path i) via (conj in k) v))))
+                           x))))))))
 
 (defn coll-of-impl [form spec opts]
   (every-impl (cons 'clojure.spec.alpha/coll-of (cons form (mapcat identity opts)))
@@ -1161,18 +1226,110 @@
       [{:path path :pred (::form spec) :val xs :via via :in in}])))
 
 ;; ---------------------------------------------------------------------------
+;; fspec -- generative function spec.  conform / explain sample the
+;; :args spec, apply the fn, and validate the :ret (and :fn) spec.  The
+;; conformed value is always the fn itself.  fdef builds an fspec value
+;; and registers it under the qualified symbol.
+;; ---------------------------------------------------------------------------
+
+(declare gen)
+
+(defn- fspec-sample-args
+  "Generate up to n argument vectors from an fspec :args spec, drawing
+  growing-size samples through the generator path.  Returns a seq of
+  arg sequences (a cat args-spec yields one value per declared slot)."
+  [args-spec n]
+  (let [g (gen args-spec)]
+    (vec (for [i (range n)]
+           (clojure.test.check.generators/generate
+             g (mod (clojure.core/* (inc i) 5) 40))))))
+
+(defn- fspec-call-valid?
+  "Return true when applying f to one generated arg vector produces a
+  :ret-conforming (and, when present, :fn-conforming) result."
+  [f args-spec ret-spec fn-spec args]
+  (let [cargs (conform* (as-spec args-spec) args)]
+    (if (= ::invalid cargs)
+      true
+      (let [ret  (apply f args)
+            cret (conform* (as-spec ret-spec) ret)]
+        (clojure.core/and
+          (not= ::invalid cret)
+          (if fn-spec
+            (not= ::invalid
+                  (conform* (as-spec fn-spec) {:args cargs :ret cret}))
+            true))))))
+
+(defn- fspec-find-failure
+  "Sample iters argument vectors and return the first that makes f
+  violate :ret / :fn, or nil if all pass.  Sampling stops at the first
+  failure."
+  [f args-spec ret-spec fn-spec iters]
+  (loop [samples (seq (fspec-sample-args args-spec iters))]
+    (when samples
+      (let [args (first samples)]
+        (if (fspec-call-valid? f args-spec ret-spec fn-spec args)
+          (recur (next samples))
+          args)))))
+
+(defn fspec-impl
+  "Build an fspec value from the :args / :ret / :fn specs and their
+  forms.  conform validates a fn by generatively sampling :args (up to
+  *fspec-iterations*) and checking :ret (and :fn); the conformed value
+  is the fn itself.  Callers normally use the fspec macro or fdef."
+  [argspec aform retspec rform fnspec fform gfn]
+  (let [s {::kind ::fspec
+           ::form (list 'clojure.spec.alpha/fspec
+                        :args aform :ret rform :fn fform)
+           ::args argspec ::aform aform
+           ::ret  retspec ::rform rform
+           ::fn   fnspec  ::fform fform
+           ;; Plain keys mirror the canonical ILookup surface so callers
+           ;; can pull the sub-specs with (:args fspec) etc.
+           :args argspec :ret retspec :fn fnspec}]
+    (if gfn (assoc s ::gen gfn) s)))
+
+(defmethod conform-impl ::fspec [s f]
+  (let [argspec (::args s)]
+    (cond
+      (nil? argspec)
+      (throw (ex-info "Can't conform fspec without args spec" {:spec s}))
+
+      (not (ifn? f))
+      ::invalid
+
+      (fspec-find-failure f argspec (::ret s) (::fn s) *fspec-iterations*)
+      ::invalid
+
+      :else f)))
+
+(defmethod unform-impl ::fspec [_s f] f)
+
+(defmethod explain-impl ::fspec [s path via in f]
+  (if-not (ifn? f)
+    [{:path path :pred 'ifn? :val f :via via :in in}]
+    (when-let [args (fspec-find-failure f (::args s) (::ret s) (::fn s)
+                                        *fspec-iterations*)]
+      (let [ret  (apply f args)
+            cret (conform* (as-spec (::ret s)) ret)]
+        (if (= ::invalid cret)
+          (explain* (as-spec (::ret s)) (conj path :ret) via in ret)
+          (let [cargs (conform* (as-spec (::args s)) args)]
+            (explain* (as-spec (::fn s)) (conj path :fn) via in
+                      {:args cargs :ret cret})))))))
+
+;; ---------------------------------------------------------------------------
 ;; fdef / instrument runtime.  Macros at the bottom build the spec
 ;; values; these helpers run them.
 ;; ---------------------------------------------------------------------------
 
 (defn fdef-impl
   [sym args-form ret-form fn-form args-spec ret-spec fn-spec]
-  (let [s {::kind ::fspec
-           ::form (list 'clojure.spec.alpha/fdef sym
-                        :args args-form :ret ret-form :fn fn-form)
-           ::args args-spec
-           ::ret  ret-spec
-           ::fn   fn-spec}]
+  (let [s (assoc (fspec-impl args-spec args-form ret-spec ret-form
+                             fn-spec fn-form nil)
+                 ::form (list 'clojure.spec.alpha/fdef sym
+                              :args args-form :ret ret-form :fn fn-form)
+                 ::name sym)]
     (swap! registry-ref assoc sym s)
     sym))
 
@@ -1215,15 +1372,33 @@
         (swap! instrumented-vars dissoc sym)
         sym))))
 
+(def ^:private check-asserts-flag
+  ;; Runtime toggle for s/assert.  Distinct from *compile-asserts*,
+  ;; which gates compilation; this gates evaluation of compiled asserts.
+  (atom true))
+
 (defn check-asserts
-  "Toggle s/assert checking.  No-op stub; mino asserts always evaluate."
-  [_v]
-  true)
+  "Enable or disable runtime s/assert checking.  Returns the flag."
+  [flag]
+  (reset! check-asserts-flag (boolean flag)))
 
 (defn check-asserts?
-  "Whether s/assert is enabled.  Always true on mino."
+  "Return the current runtime s/assert checking flag."
   []
-  true)
+  @check-asserts-flag)
+
+(defn assert*
+  "Runtime worker behind the assert macro.  Returns x when it conforms
+  to spec, else throws an ex-info carrying explain-data plus
+  ::failure :assertion-failed.  Callers normally use the assert macro."
+  [spec x]
+  (if (valid? spec x)
+    x
+    (let [ed (assoc (explain-data* spec [] [] [] x)
+                    ::failure :assertion-failed)]
+      (throw (ex-info (str "Spec assertion failed\n"
+                           (with-out-str (explain-out ed)))
+                      ed)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Generators: backed by the bundled clojure.test.check generators.
@@ -1335,6 +1510,40 @@
                      (form->generator p overrides)))
                  pairs)))
 
+        ;; Regex ops generate sequences -- the value an fspec :args spec
+        ;; (or a nested regex) consumes.  cat lays each declared pred's
+        ;; value out in order; alt picks one branch; * / + / ? repeat.
+        (= hd "cat")
+        (let [preds (map second (partition 2 tail))
+              gens  (map #(form->generator % overrides) preds)]
+          (gen-impl/fmap (fn [vs] (apply list vs))
+                         (apply gen-impl/tuple gens)))
+
+        (= hd "alt")
+        (let [preds (map second (partition 2 tail))]
+          (gen-impl/one-of
+            (map (fn [p]
+                   (gen-impl/fmap (fn [v] (list v))
+                                  (form->generator p overrides)))
+                 preds)))
+
+        (= hd "*")
+        (gen-impl/fmap seq (gen-impl/vector
+                             (form->generator (first tail) overrides)))
+
+        (= hd "+")
+        (gen-impl/fmap (fn [v] (seq (cons (first v) (second v))))
+                       (gen-impl/tuple
+                         (form->generator (first tail) overrides)
+                         (gen-impl/vector
+                           (form->generator (first tail) overrides))))
+
+        (= hd "?")
+        (gen-impl/one-of
+          [(gen-impl/return ())
+           (gen-impl/fmap (fn [v] (list v))
+                          (form->generator (first tail) overrides))])
+
         :else
         (throw (ex-info (str "s/gen: don't know how to generate from form " form)
                         {:type :mino/unsupported :form form}))))
@@ -1380,6 +1589,175 @@
      (vec (for [i (range n)]
             (let [v (gen-impl/generate g (mod (clojure.core/* (inc i) 7) 50))]
               [v (conform spec v)]))))))
+
+(defn exercise-fn
+  "Exercise the fn named by sym by applying it to n (default 10)
+  generated samples of its registered fdef :args spec.  Returns a
+  sequence of [args ret] tuples.  The three-arity form takes an
+  explicit fspec (or fn): sym-or-f may then be a fn directly."
+  ([sym] (exercise-fn sym 10))
+  ([sym n] (exercise-fn sym n (get-spec sym)))
+  ([sym-or-f n fspec]
+   (let [f        (if (symbol? sym-or-f) (resolve sym-or-f) sym-or-f)
+         arg-spec (clojure.core/and fspec (::args fspec))]
+     (if arg-spec
+       (vec (for [i (range n)]
+              (let [args (gen-impl/generate
+                           (gen arg-spec)
+                           (mod (clojure.core/* (inc i) 7) 50))]
+                [args (apply f args)])))
+       (throw (ex-info "No :args spec found, can't generate"
+                       {:sym sym-or-f}))))))
+
+;; ---------------------------------------------------------------------------
+;; Range specs: int-in / double-in / inst-in and their standalone range
+;; predicates.  The -range? fns are plain predicates; the -in builders
+;; produce specs carrying a range-aware generator on ::gen so gen /
+;; exercise sample only in range.
+;; ---------------------------------------------------------------------------
+
+(defn int-in-range?
+  "Return true when val is a fixed-precision integer with
+  start <= val < end."
+  [start end val]
+  (clojure.core/and (int? val)
+                    (<= start val)
+                    (< val end)))
+
+(defn inst-in-range?
+  "Return true when inst is at or after start and strictly before end."
+  [start end inst]
+  (clojure.core/and (inst? inst)
+                    (let [t (inst-ms inst)]
+                      (clojure.core/and (<= (inst-ms start) t)
+                                        (< t (inst-ms end))))))
+
+(defn- range-int-gen
+  "Generator for integers in [lo, hi] inclusive, drawn by clamping an
+  int sample into the range."
+  [lo hi]
+  (gen-impl/fmap
+    (fn [n]
+      (let [span (inc (- hi lo))]
+        (if (<= span 0)
+          lo
+          (clojure.core/+ lo (mod (clojure.core/abs n) span)))))
+    gen-impl/int))
+
+(defn int-in
+  "Return a spec validating fixed-precision integers in the range from
+  start (inclusive) to end (exclusive)."
+  [start end]
+  (let [sp (and-spec-impl
+             (list 'clojure.core/int?
+                   (list 'clojure.spec.alpha/int-in-range? start end '%))
+             [int? (fn [x] (int-in-range? start end x))])
+        sp (assoc sp ::form (list 'clojure.spec.alpha/int-in start end))]
+    (assoc sp ::gen (fn [] (range-int-gen start (dec end))))))
+
+(defn double-in
+  "Return a spec for a 64-bit floating point number.  Options:
+    :infinite? - whether +/- infinity is allowed (default false)
+    :NaN?      - whether NaN is allowed (default false)
+    :min       - inclusive minimum (default none)
+    :max       - inclusive maximum (default none)
+
+  Divergence: the canonical library defaults :infinite? and :NaN? to
+  true; mino defaults both to false so a plain double-in rejects the
+  non-finite values unless they are explicitly opted in -- the safer
+  default for a range spec."
+  [& opts]
+  ;; The option keys :infinite? and :NaN? collide with the core
+  ;; predicates of the same name; pull them through opts so the core
+  ;; fns stay callable in the bound predicates.  A NaN passes any
+  ;; numeric bound when NaN is allowed -- comparisons against NaN are
+  ;; always false, so the bound preds short-circuit on it.
+  (let [m         (apply hash-map opts)
+        inf-ok?   (clojure.core/get m :infinite? false)
+        nan-ok?   (clojure.core/get m :NaN? false)
+        min       (:min m)
+        max       (:max m)
+        nan-pass? (fn [x] (clojure.core/and nan-ok? (NaN? x)))
+        preds (cond-> [double?]
+                (not inf-ok?) (conj (fn [x] (not (infinite? x))))
+                (not nan-ok?) (conj (fn [x] (not (NaN? x))))
+                max           (conj (fn [x] (clojure.core/or (nan-pass? x)
+                                                            (<= x max))))
+                min           (conj (fn [x] (clojure.core/or (nan-pass? x)
+                                                            (<= min x)))))
+        forms (cond-> ['clojure.core/double?]
+                (not inf-ok?) (conj '(not (infinite? %)))
+                (not nan-ok?) (conj '(not (NaN? %)))
+                max           (conj (list '<= '% max))
+                min           (conj (list '<= min '%)))
+        sp    (and-spec-impl (apply list forms) preds)
+        sp    (assoc sp ::form (list 'clojure.spec.alpha/double-in
+                                     :min min :max max))
+        lo    (clojure.core/double (clojure.core/or min -1000.0))
+        hi    (clojure.core/double (clojure.core/or max 1000.0))]
+    (assoc sp ::gen
+           (fn []
+             (gen-impl/fmap
+               (fn [v]
+                 (let [span (- hi lo)
+                       r    (- v (clojure.core/double (long v)))]
+                   (clojure.core/+ lo
+                                   (clojure.core/* span (clojure.core/abs r)))))
+               gen-impl/double)))))
+
+(defn- ms->inst
+  "Build an inst component map (recognized by inst?) from epoch
+  milliseconds.  Inverse of inst-ms for the UTC civil calendar."
+  [ms]
+  (let [days  (long (Math/floor (/ (clojure.core/double ms) 86400000.0)))
+        rem-ms (- ms (clojure.core/* days 86400000))
+        ;; Howard Hinnant's days-from-civil inverse.
+        z     (clojure.core/+ days 719468)
+        era   (quot (if (>= z 0) z (- z 146096)) 146097)
+        doe   (- z (clojure.core/* era 146097))
+        yoe   (quot (clojure.core/+ doe (- (quot doe 1460))
+                       (quot doe 36524) (- (quot doe 146096)))
+                    365)
+        y     (clojure.core/+ yoe (clojure.core/* era 400))
+        doy   (- doe (- (clojure.core/+ (clojure.core/* 365 yoe) (quot yoe 4))
+                        (quot yoe 100)))
+        mp    (quot (clojure.core/+ (clojure.core/* 5 doy) 2) 153)
+        d     (clojure.core/+ (- doy (quot (clojure.core/+ (clojure.core/* 153 mp) 2) 5)) 1)
+        m     (clojure.core/+ mp (if (< mp 10) 3 -9))
+        yy    (if (<= m 2) (inc y) y)
+        secs  (quot rem-ms 1000)
+        h     (quot secs 3600)
+        mi    (quot (mod secs 3600) 60)
+        s     (mod secs 60)
+        ns    (clojure.core/* (mod rem-ms 1000) 1000000)]
+    (with-meta
+      {:years yy :months m :days d :hours h :minutes mi :seconds s
+       :nanoseconds ns :offset-sign 1 :offset-hours 0 :offset-minutes 0}
+      {:mino/instant true})))
+
+(defn inst-in
+  "Return a spec validating insts in the range from start (inclusive)
+  to end (exclusive)."
+  [start end]
+  (let [st (inst-ms start)
+        et (inst-ms end)
+        sp (and-spec-impl
+             (list 'clojure.core/inst?
+                   (list 'clojure.spec.alpha/inst-in-range? start end '%))
+             [inst? (fn [x] (inst-in-range? start end x))])
+        sp (assoc sp ::form (list 'clojure.spec.alpha/inst-in start end))]
+    (assoc sp ::gen
+           (fn []
+             (gen-impl/fmap
+               (fn [ms-frac]
+                 (let [span (- et st)
+                       off  (long (clojure.core/* span ms-frac))]
+                   (ms->inst (clojure.core/+ st (max 0 (min (dec span) off))))))
+               (gen-impl/fmap
+                 (fn [n] (clojure.core/abs
+                           (- (clojure.core/double n)
+                              (long (clojure.core/double n)))))
+                 gen-impl/double))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Macros at the bottom of the file.  Before this point, internal defns
@@ -1595,6 +1973,21 @@
   `(clojure.spec.alpha/amp-impl '~(res re) '~(mapv res preds)
                                 ~re ~(vec preds)))
 
+(defmacro fspec
+  "Build a function spec from :args :ret and (optional) :fn preds.
+  conform / explain take a fn and validate it via generative testing;
+  the conformed value is always the fn itself.  :ret defaults to any?."
+  [& opts]
+  (let [opts-map (apply hash-map opts)
+        args     (:args opts-map)
+        ret      (clojure.core/or (:ret opts-map) `any?)
+        fn-spec  (get opts-map :fn)]
+    `(clojure.spec.alpha/fspec-impl
+       ~args '~(res args)
+       (clojure.spec.alpha/spec-impl '~(res ret) ~ret) '~(res ret)
+       ~fn-spec '~(res fn-spec)
+       nil)))
+
 (defmacro fdef
   "Register a function spec under the qualified symbol of fn-sym.
   Options: :args, :ret, :fn (each a spec form)."
@@ -1610,13 +2003,17 @@
                                    ~args ~ret ~fn-spec)))
 
 (defmacro assert
-  "Throw on spec violation.  Returns the value if it conforms."
+  "Spec-checking assert.  Returns x when it conforms to spec, else
+  throws an ex-info carrying explain-data plus ::failure of
+  :assertion-failed.  When *compile-asserts* is false at expansion the
+  check compiles away to x; at runtime (check-asserts?) gates whether
+  the compiled check evaluates."
   [spec x]
-  `(let [x# ~x]
-     (if (clojure.spec.alpha/valid? ~spec x#)
-       x#
-       (throw (ex-info (str "Spec assertion failed: " (pr-str ~spec))
-                       (or (clojure.spec.alpha/explain-data ~spec x#) {}))))))
+  (if clojure.spec.alpha/*compile-asserts*
+    `(if (clojure.spec.alpha/check-asserts?)
+       (clojure.spec.alpha/assert* ~spec ~x)
+       ~x)
+    x))
 
 (defmacro every
   "Validate that every element of a collection satisfies pred.  Samples
