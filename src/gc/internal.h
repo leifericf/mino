@@ -193,6 +193,19 @@ void   gc_note_host_frame(mino_state *S, void *addr);
  * (major.c). */
 int    gc_freelist_class(size_t size);
 
+/* Call the per-tag finalizer for h (if registered), then route h to the
+ * freelist (sized class), leave it in its bump slab (no size class,
+ * bump-origin), or release it via free() (no size class, calloc-origin).
+ * Shared between minor sweep (minor.c) and major sweep (major.c). */
+void   gc_hdr_recycle(mino_state *S, gc_hdr_t *h);
+
+/* True iff p lies inside the mino_state struct -- i.e. p is a singleton
+ * or small-int cache entry rather than a GC allocation.  Shared between
+ * barrier.c and driver.c (gc_mark_child_push).
+ * Defined in barrier.c; declared here so driver.c can call it without
+ * duplicating the range check. */
+int gc_ptr_is_state_embedded(const mino_state *S, const void *p);
+
 /* Mark-stack primitives (driver.c). Mark the header live and push it
  * for tracing; interior-pointer variant resolves a heap pointer to its
  * header first and is safe on stale/stack words. gc_drain_mark_stack pops
@@ -307,6 +320,31 @@ void gc_evt_dump_around(mino_state *S, const void *p1, const void *p2,
  * if not reachable at all (bookkeeping corruption). Non-destructive:
  * saves and restores h->mark on every tracked header. */
 int  gc_classify_offender(mino_state *S, gc_hdr_t *offender);
+
+/* Walk both generation lists and apply fn(h, user) to every header.
+ * Used by the trace classifier and by gc_verify_remset_complete to
+ * save, clear, and restore mark bits without duplicating the traversal.
+ * Defined in trace.c; declared here so minor.c can call it. */
+void gc_for_each_hdr(mino_state *S,
+                     void (*fn)(gc_hdr_t *h, void *user),
+                     void *user);
+
+/* Count headers live on both generation lists.  Used to size mark-save
+ * buffers before calling gc_for_each_hdr with save_mark_fn.
+ * Defined in trace.c; declared here so minor.c can call it. */
+size_t gc_count_hdrs(mino_state *S);
+
+/* Context struct and callback for saving/clearing all mark bits in one
+ * gc_for_each_hdr pass.  Restore by writing ctx.marks[i] back into
+ * ctx.hdrs[i]->mark for i in [0, ctx.idx).
+ * Defined in trace.c; declared here so minor.c can call save_mark_fn. */
+struct gc_mark_save_ctx {
+    gc_hdr_t     **hdrs;
+    unsigned char *marks;
+    size_t         idx;
+    size_t         cap;
+};
+void save_mark_fn(gc_hdr_t *h, void *user);
 
 /* Tail-append helper used by every list-building loop. Barriers the
  * store first -- critical because mid-loop minor GC can promote tail

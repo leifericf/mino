@@ -220,31 +220,14 @@ void gc_sweep(mino_state *S)
             continue;
         }
         /* Dead OLD: call any per-tag finalizer, unlink, recycle.
-         * See gc/minor.c for the dispatch shape; quiesce should have
-         * joined any outstanding MINO_FUTURE worker before we get
-         * here, otherwise the impl is leaked rather than freed under
-         * it. */
-        {
-            gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
-                ? S->gc_finalizers[h->type_tag] : NULL;
-            if (fin != NULL) fin(S, h);
-        }
+         * gc_hdr_recycle handles the finalizer dispatch and the
+         * three-arm freelist/bump-slab/free routing; see driver.c.
+         * Quiesce should have joined any outstanding MINO_FUTURE worker
+         * before we get here, otherwise the impl is leaked rather than
+         * freed under it. */
         freed_old += h->size;
         *pp = h->next;
-        {
-            int fc = gc_freelist_class(h->size);
-            if (fc >= 0) {
-                /* See minor.c -- bump-origin and calloc-origin both
-                 * round-trip through the freelist; gc_alloc_raw
-                 * preserves h->bump across the pull-side memset. */
-                h->next = S->gc.freelists[fc];
-                S->gc.freelists[fc] = h;
-            } else if (h->bump) {
-                /* No size class: bump-origin leaks in its slab. */
-            } else {
-                free(h);
-            }
-        }
+        gc_hdr_recycle(S, h);
     }
     S->gc.total_freed   += freed_old;
     S->gc.bytes_young    = live_young;

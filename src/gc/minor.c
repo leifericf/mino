@@ -128,32 +128,13 @@ static void gc_minor_sweep(mino_state *S, int saved_phase)
          * The values-side finalizer dispatches across MINO_HANDLE /
          * MINO_BIGINT / MINO_RECORD / MINO_CHUNK / MINO_HOST_ARRAY /
          * MINO_FUTURE; other tags either skip the table or register
-         * NULL. Bounds-check type_tag before indexing gc_finalizers:
-         * a corrupt or unregistered tag must not read past the array. */
-        {
-            gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
-                                  ? S->gc_finalizers[h->type_tag] : NULL;
-            if (fin != NULL) fin(S, h);
-        }
+         * NULL.  gc_hdr_recycle handles the finalizer dispatch and the
+         * three-arm freelist/bump-slab/free routing; see driver.c. */
         freed_bytes += h->size;
         *pp = h->next;
         gc_evt_record(S, GC_EVT_FREE_YOUNG, h, NULL, NULL,
                       (uintptr_t)h->size, (uint16_t)h->type_tag);
-        {
-            int fc = gc_freelist_class(h->size);
-            if (fc >= 0) {
-                /* Bump and calloc-origin headers both round-trip through
-                 * the freelist; gc_alloc_raw preserves h->bump across
-                 * the memset that resets pulled headers. */
-                h->next            = S->gc.freelists[fc];
-                S->gc.freelists[fc] = h;
-            } else if (h->bump) {
-                /* No size class: bump-origin leaks in its slab until
-                 * state destruction frees the whole slab. */
-            } else {
-                free(h);
-            }
-        }
+        gc_hdr_recycle(S, h);
     }
     /* Accounting: promoted bytes move between generations; freed bytes
      * drop out of both the young tally and the global alloc tally. */
@@ -393,39 +374,27 @@ static void gc_verify_old_hdr(mino_state *S, gc_hdr_t *h)
  * Per-header pointer checking is factored into gc_verify_old_hdr. */
 static void gc_verify_remset_complete(mino_state *S)
 {
-    gc_hdr_t      *h;
-    gc_hdr_t     **saved_hdrs;
-    unsigned char *saved_marks;
-    size_t         n_hdrs, idx;
-    int            saved_phase;
-    size_t         saved_floor;
-    const char    *env = getenv("MINO_GC_VERIFY");
+    gc_hdr_t               *h;
+    struct gc_mark_save_ctx ctx;
+    size_t                  i;
+    int                     saved_phase;
+    size_t                  saved_floor;
+    const char             *env = getenv("MINO_GC_VERIFY");
     if (env == NULL || env[0] == '\0' || env[0] == '0') return;
 
-    /* Count + save + zero every mark bit before our classifying pass. */
-    n_hdrs = 0;
-    for (h = S->gc.all_young; h != NULL; h = h->next) n_hdrs++;
-    for (h = S->gc.all_old;   h != NULL; h = h->next) n_hdrs++;
-    saved_hdrs  = (gc_hdr_t **)calloc(n_hdrs, sizeof(*saved_hdrs));
-    saved_marks = (unsigned char *)calloc(n_hdrs, sizeof(*saved_marks));
-    if (saved_hdrs == NULL || saved_marks == NULL) {
-        free(saved_hdrs); free(saved_marks);
+    /* Count + save + zero every mark bit before our classifying pass.
+     * gc_count_hdrs, gc_for_each_hdr, and save_mark_fn are shared with
+     * gc_classify_offender in trace.c and declared in gc/internal.h. */
+    ctx.cap   = gc_count_hdrs(S);
+    ctx.hdrs  = (gc_hdr_t **)calloc(ctx.cap, sizeof(*ctx.hdrs));
+    ctx.marks = (unsigned char *)calloc(ctx.cap, sizeof(*ctx.marks));
+    ctx.idx   = 0;
+    if (ctx.hdrs == NULL || ctx.marks == NULL) {
+        free(ctx.hdrs); free(ctx.marks);
         fprintf(stderr, "[gc-verify] oom allocating mark-save buffer\n");
         return;
     }
-    idx = 0;
-    for (h = S->gc.all_young; h != NULL; h = h->next) {
-        saved_hdrs[idx]  = h;
-        saved_marks[idx] = h->mark;
-        h->mark          = 0;
-        idx++;
-    }
-    for (h = S->gc.all_old; h != NULL; h = h->next) {
-        saved_hdrs[idx]  = h;
-        saved_marks[idx] = h->mark;
-        h->mark          = 0;
-        idx++;
-    }
+    gc_for_each_hdr(S, save_mark_fn, &ctx);
 
     /* Precise + conservative mark pass under MAJOR_MARK so OLD is not
      * filtered from the frontier. */
@@ -446,14 +415,11 @@ static void gc_verify_remset_complete(mino_state *S)
 
     /* Restore every saved mark so the caller's real mark pass starts
      * from the zero state it expects. */
-    {
-        size_t k;
-        for (k = 0; k < idx; k++) {
-            saved_hdrs[k]->mark = saved_marks[k];
-        }
+    for (i = 0; i < ctx.idx; i++) {
+        ctx.hdrs[i]->mark = ctx.marks[i];
     }
-    free(saved_hdrs);
-    free(saved_marks);
+    free(ctx.hdrs);
+    free(ctx.marks);
 }
 
 void gc_minor_collect(mino_state *S)

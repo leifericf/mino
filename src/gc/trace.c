@@ -160,18 +160,20 @@ void gc_evt_dump_around(mino_state *S, const void *p1, const void *p2,
 /* ---------------------------------------------------------------- */
 
 /* Walk both generation lists and apply fn to every header. Used by
- * the classifier to save, clear, and restore mark bits. */
-static void gc_for_each_hdr(mino_state *S,
-                            void (*fn)(gc_hdr_t *h, void *user),
-                            void *user)
+ * the classifier and by gc_verify_remset_complete to save, clear, and
+ * restore mark bits.  Declared in gc/internal.h so minor.c can call it. */
+void gc_for_each_hdr(mino_state *S,
+                     void (*fn)(gc_hdr_t *h, void *user),
+                     void *user)
 {
     gc_hdr_t *h;
     for (h = S->gc.all_young; h != NULL; h = h->next) fn(h, user);
     for (h = S->gc.all_old;   h != NULL; h = h->next) fn(h, user);
 }
 
-/* Count headers live on both lists, used to size the save buffer. */
-static size_t gc_count_hdrs(mino_state *S)
+/* Count headers live on both lists, used to size mark-save buffers.
+ * Declared in gc/internal.h so minor.c can call it. */
+size_t gc_count_hdrs(mino_state *S)
 {
     size_t    n = 0;
     gc_hdr_t *h;
@@ -180,16 +182,11 @@ static size_t gc_count_hdrs(mino_state *S)
     return n;
 }
 
-struct mark_save_ctx {
-    gc_hdr_t     **hdrs;
-    unsigned char *marks;
-    size_t         idx;
-    size_t         cap;
-};
-
-static void save_mark_fn(gc_hdr_t *h, void *user)
+/* Save callback: copies h->mark into the save buffer and clears h->mark.
+ * Declared in gc/internal.h (as save_mark_fn) so minor.c can call it. */
+void save_mark_fn(gc_hdr_t *h, void *user)
 {
-    struct mark_save_ctx *c = (struct mark_save_ctx *)user;
+    struct gc_mark_save_ctx *c = (struct gc_mark_save_ctx *)user;
     if (c->idx >= c->cap) return;
     c->hdrs[c->idx]  = h;
     c->marks[c->idx] = h->mark;
@@ -199,7 +196,7 @@ static void save_mark_fn(gc_hdr_t *h, void *user)
 
 int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
 {
-    struct mark_save_ctx ctx;
+    struct gc_mark_save_ctx ctx;
     size_t   i, n;
     int      saved_phase = S->gc.phase;
     size_t   saved_floor = S->gc.mark_stack_len;

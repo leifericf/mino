@@ -77,9 +77,11 @@
 
 #include "runtime/internal.h"
 
-/* True iff p lies inside the mino_state struct, i.e. p is a
- * singleton or small-int cache entry rather than a GC allocation. */
-static int gc_ptr_is_state_embedded(const mino_state *S, const void *p)
+/* True iff p lies inside the mino_state struct, i.e. p is a singleton
+ * or small-int cache entry rather than a GC allocation.
+ * Declared in gc/internal.h so driver.c can call it without duplicating
+ * the range check. */
+int gc_ptr_is_state_embedded(const mino_state *S, const void *p)
 {
     uintptr_t u  = (uintptr_t)p;
     uintptr_t lo = (uintptr_t)S;

@@ -53,6 +53,50 @@ int gc_freelist_class(size_t size)
     }
 }
 
+/* Call the per-tag finalizer for h (if any), then route h back to the
+ * freelist (when there is a matching size class), leave it stranded in
+ * its bump slab (no size class, bump-origin -- the slab is released on
+ * state teardown), or free() it (no size class, calloc-origin).
+ * Called from both gc_minor_sweep (minor.c) and gc_sweep (major.c). */
+void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
+{
+    {
+        gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
+                              ? S->gc_finalizers[h->type_tag] : NULL;
+        if (fin != NULL) fin(S, h);
+    }
+    {
+        int fc = gc_freelist_class(h->size);
+        if (fc >= 0) {
+            /* Bump and calloc-origin headers both round-trip through
+             * the freelist; gc_alloc_raw preserves h->bump across
+             * the memset that resets pulled headers. */
+            h->next             = S->gc.freelists[fc];
+            S->gc.freelists[fc] = h;
+        } else if (h->bump) {
+            /* No size class: bump-origin leaks in its slab until
+             * state destruction frees the whole slab. */
+        } else {
+            free(h);
+        }
+    }
+}
+
+/* Compute elapsed nanoseconds since start_ns and charge them to the
+ * three accounting fields: total_ns, max_ns, and the pause ring.
+ * Called from every site that times a GC pause (gc_major_slice,
+ * gc_force_finish_major, gc_major_collect). */
+static void gc_charge_pause(mino_state *S, long long start_ns)
+{
+    long long raw_ns     = mino_monotonic_ns() - start_ns;
+    size_t    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
+    }
+    gc_record_pause(S, elapsed_ns);
+}
+
 /* Record one STW pause sample. Saturates the ring slot at UINT32_MAX
  * ns; bucket-clamps the log2 histogram at index 23 ([8.4ms, ...)). */
 void gc_record_pause(mino_state *S, size_t ns)
@@ -158,8 +202,7 @@ static int gc_should_start_major(const mino_state *S)
 static void gc_major_slice(mino_state *S)
 {
     long long start_ns;
-    long long raw_ns;
-    size_t    elapsed_ns;
+
     if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
@@ -170,13 +213,7 @@ static void gc_major_slice(mino_state *S)
         gc_major_remark(S);
         gc_major_sweep_phase(S);
     }
-    raw_ns     = mino_monotonic_ns() - start_ns;
-    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
-    S->gc.total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc.max_ns) {
-        S->gc.max_ns = elapsed_ns;
-    }
-    gc_record_pause(S, elapsed_ns);
+    gc_charge_pause(S, start_ns);
     gc_adapt_major_budget(S);
 }
 
@@ -187,8 +224,7 @@ static void gc_major_slice(mino_state *S)
 void gc_force_finish_major(mino_state *S)
 {
     long long start_ns;
-    long long raw_ns;
-    size_t    elapsed_ns;
+
     if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
@@ -196,13 +232,7 @@ void gc_force_finish_major(mino_state *S)
     gc_major_step(S, (size_t)-1);
     gc_major_remark(S);
     gc_major_sweep_phase(S);
-    raw_ns     = mino_monotonic_ns() - start_ns;
-    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
-    S->gc.total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc.max_ns) {
-        S->gc.max_ns = elapsed_ns;
-    }
-    gc_record_pause(S, elapsed_ns);
+    gc_charge_pause(S, start_ns);
 }
 
 /* Suppress collection: collection is only safe when this thread holds
@@ -635,7 +665,6 @@ void gc_mark_child_push_exported(mino_state *S, const void *p)
 static void gc_mark_child_push(mino_state *S, const void *p)
 {
     gc_hdr_t *h;
-    uintptr_t u, lo, hi;
     if (p == NULL) return;
     /* Inline-tagged values (low 3 bits non-zero) hold their payload
      * directly in the pointer-sized slot; there's no heap cell to
@@ -650,10 +679,7 @@ static void gc_mark_child_push(mino_state *S, const void *p)
      * is predicted false outside the remset walk and adds one load + one
      * conditional store; both are inside the cache line of S->gc that
      * the surrounding tracer already touches. */
-    u  = (uintptr_t)p;
-    lo = (uintptr_t)S;
-    hi = lo + sizeof(*S);
-    if (u >= lo && u < hi) return;  /* singleton inside state struct */
+    if (gc_ptr_is_state_embedded(S, p)) return; /* singleton inside state struct */
     h = ((gc_hdr_t *)p) - 1;
     if (S->gc_remset_walker_active && h->gen == GC_GEN_YOUNG) {
         S->gc_remset_walker_young_seen = 1;
@@ -791,8 +817,7 @@ void gc_drain_mark_stack(mino_state *S)
 void gc_major_collect(mino_state *S)
 {
     long long start_ns;
-    long long raw_ns;
-    size_t    elapsed_ns;
+
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_IDLE) {
         return;
     }
@@ -808,11 +833,5 @@ void gc_major_collect(mino_state *S)
     gc_major_remark(S);
     gc_major_sweep_phase(S);
     gc_release_stw(S);
-    raw_ns     = mino_monotonic_ns() - start_ns;
-    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
-    S->gc.total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc.max_ns) {
-        S->gc.max_ns = elapsed_ns;
-    }
-    gc_record_pause(S, elapsed_ns);
+    gc_charge_pause(S, start_ns);
 }
