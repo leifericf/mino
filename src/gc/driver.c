@@ -361,6 +361,7 @@ static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
          * Total = header + payload, rounded up to 8 bytes for alignment.
          * Oversized requests (won't fit in a slab) bypass bump and fall
          * through to the calloc arm. */
+        if (size > SIZE_MAX - sizeof(*h)) goto calloc_path;
         size_t total = sizeof(*h) + size;
         total = (total + 7u) & ~(size_t)7u;
         if (total <= MINO_BUMP_SLAB_BYTES - sizeof(gc_bump_slab_t)) {
@@ -550,8 +551,8 @@ mino_val *alloc_val_inner(mino_state *S, mino_type type)
 
 char *dup_n_inner(mino_state *S, const char *s, size_t len)
 {
-    if (len == SIZE_MAX) {
-        abort(); /* Class I: len+1 would overflow size_t */
+    if (len >= SIZE_MAX - sizeof(gc_hdr_t)) {
+        abort(); /* Class I: len+1+sizeof(gc_hdr_t) would overflow size_t */
     }
     char *out = (char *)gc_alloc_typed_inner(S, GC_T_RAW, len + 1);
     if (len > 0) {

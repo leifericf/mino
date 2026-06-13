@@ -237,7 +237,11 @@ void gc_sweep(mino_state *S)
     S->gc.old_baseline   = live_old;
     /* Next major triggers after another threshold's worth of growth
      * above the live set so collection cost stays amortised. */
-    if (S->gc.bytes_live * 2 > S->gc.threshold) {
-        S->gc.threshold = S->gc.bytes_live * 2;
+    {
+        size_t t2 = (S->gc.bytes_live <= SIZE_MAX / 2)
+                    ? S->gc.bytes_live * 2 : SIZE_MAX;
+        if (t2 > S->gc.threshold) {
+            S->gc.threshold = t2;
+        }
     }
 }

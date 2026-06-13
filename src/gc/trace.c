@@ -200,6 +200,7 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
     struct gc_mark_save_ctx ctx;
     size_t   i, n;
     int      saved_phase = S->gc.phase;
+    assert(mino_current_ctx(S)->gc_depth > 0);
     size_t   saved_floor = S->gc.mark_stack_len;
     int      pass1, pass2;
     size_t   saved_ranges_valid = S->gc.ranges_valid;

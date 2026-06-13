@@ -155,13 +155,7 @@ void gc_range_merge_pending(mino_state *S)
         nr      = (gc_range_t *)realloc(
             S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            /* Class I: realloc failure inside a GC-depth-incremented
-             * section; unwinding is not safe because partially-merged
-             * range state would leave gc_ranges inconsistent.  Known
-             * limitation: pre-allocating the range index before
-             * incrementing gc_depth would allow a safe OOM return, but
-             * that requires restructuring the caller. */
-            abort();
+            abort(); /* Class I: realloc inside GC-depth section; partial range merge would leave gc_ranges inconsistent */
         }
         S->gc.ranges     = nr;
         S->gc.ranges_cap = new_cap;
@@ -511,6 +505,18 @@ static void gc_mark_thread_state(mino_state *S)
         gc_mark_ctx_lazy_inflight(S, w);
     }
     mino_worker_list_lock_release(S);
+    /* Pin in-flight try/catch exception values for each worker context.
+     * The main_ctx try_stack is already walked in gc_mark_module_and_meta;
+     * worker ctxs are parallel execution contexts that can hold their own
+     * in-flight exceptions between the throw and the catch longjmp. */
+    mino_worker_list_lock_acquire(S);
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
+        int wi;
+        for (wi = 0; wi < w->try_depth; wi++) {
+            gc_mark_interior(S, w->try_stack[wi].exception);
+        }
+    }
+    mino_worker_list_lock_release(S);
     if (mino_current_ctx(S)->last_diag != NULL) {
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);
@@ -697,6 +703,8 @@ void gc_mark_roots(mino_state *S)
 #  if __has_feature(address_sanitizer)
 __attribute__((no_sanitize_address))
 #  endif
+#elif defined(_MSC_VER) && defined(__SANITIZE_ADDRESS__)
+__declspec(no_sanitize_address)
 #elif defined(__SANITIZE_ADDRESS__)
 __attribute__((no_sanitize_address))
 #endif
