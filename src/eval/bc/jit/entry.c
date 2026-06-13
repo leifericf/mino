@@ -897,6 +897,13 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
      * counter is reentrant-safe) accumulate depth correctly. */
     ctx->jit_invoke_depth++;
     bc->jit_invocations++;
+    /* Capture the register-window base index before f() so the deopt
+     * path can recompute the correct window after f() returns. f() may
+     * trigger a nested bc_push_window (via an OP_CALL stencil that calls
+     * a non-JIT'd fn) which can reallocate S->bc.bc_regs; using the
+     * stale `regs` pointer to compute base after f() would give a wrong
+     * offset into the new allocation. */
+    size_t base = (size_t)(regs - S->bc.bc_regs);
     /* Optional per-fn wall-time: env-gated to keep the default hot
      * path at 1 load + 1 branch on the tri-state when off. Two
      * mino_monotonic_ns() reads add ~5-10 ns/call when on, well within
@@ -926,7 +933,6 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
                 size_t resume_pc = S->jit_deopt_pc;
                 S->jit_deopt_pending = 0;
                 bc->jit_deopt_exits++;
-                size_t base = (size_t)(regs - S->bc.bc_regs);
                 r = mino_bc_run_resume(S, bc, base, env, resume_pc,
                                        saved_try_depth,
                                        saved_bc_catch_depth,
@@ -950,7 +956,6 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
         size_t resume_pc = S->jit_deopt_pc;
         S->jit_deopt_pending = 0;
         bc->jit_deopt_exits++;
-        size_t base = (size_t)(regs - S->bc.bc_regs);
         r = mino_bc_run_resume(S, bc, base, env, resume_pc,
                                saved_try_depth, saved_bc_catch_depth,
                                saved_dyn_stack);
