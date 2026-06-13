@@ -840,6 +840,42 @@
                        (if (seq extra-args) " " "")
                        "tests/run.clj")))))
 
+(def ^:private tsan-concurrency-tests
+  "Test files that exercise real OS threads, atomics, or memory
+   ordering -- the only code ThreadSanitizer can actually find bugs in
+   (futures and parallel fold, core.async, agents/refs/atoms, the JIT
+   worker, and the GC write barrier). The rest of the suite is
+   single-threaded and already covered under UBSan in this same job and
+   under ASan in the release gate, so it is not re-run under TSan: doing
+   so adds a multi-gigabyte shadow footprint with no race-detection
+   value."
+  ["atom_test" "stm_test" "gc_test" "stateful_test"
+   "jit_parity_test" "jit_invalidation_test" "reducers_test"
+   "bc_closure_test" "async_smoke_test" "parallel_calls_test"
+   "parallel_fold_test"])
+
+(defn- run-concurrency-files-with-test-bin
+  "Run each TSan-relevant test file under `bin` in its OWN process,
+   exporting MINO_TEST_BIN so subprocess-spawning tests target the
+   binary under test. One file per process is load-bearing: TSan retains
+   per-thread shadow and synchronization state for every thread a
+   process ever creates, so funnelling the whole concurrency set through
+   one long-lived process accumulates several GB, while one short-lived
+   process per file peaks at a few hundred MB. A single failing file
+   aborts the lane -- sh! throws on a nonzero exit."
+  [bin extra-args]
+  (doseq [t tsan-concurrency-tests]
+    (let [f (str "tests/" t ".clj")]
+      (println (str "  tsan " t (when (seq extra-args)
+                                  (str " " (str/join " " extra-args)))))
+      (if windows?
+        (println (apply sh! bin (concat extra-args [f])))
+        (println (sh! "sh" "-c"
+                      (str "MINO_TEST_BIN=" bin " " bin " "
+                           (str/join " " extra-args)
+                           (if (seq extra-args) " " "")
+                           f)))))))
+
 (defn- aarch64-runnable?
   "True if this host can execute an AArch64 Linux ELF: either it is a
    native arm64 host, or a qemu-user binfmt_misc handler covering
@@ -1003,12 +1039,20 @@
 
 (defn sanitize-zig
   "Reproducible pinned-zig sanitizer lane: build mino under UBSan and
-   under TSan with the version-locked `zig cc`, and run the full test
-   suite under each in BOTH JIT modes -- AUTO (warm-then-compile) and
-   eager (--jit=on). Additive to the host ASan build in release-gate;
-   covers the undefined-behavior and data-race classes with a
-   reproducible compiler-rt. ASan is intentionally absent -- zig ships
-   no ASan runtime; that coverage stays on the host toolchain.
+   under TSan with the version-locked `zig cc`. UBSan runs the full test
+   suite; TSan runs only the concurrency set (`tsan-concurrency-tests`),
+   each file in its own process. Both run in BOTH JIT modes -- AUTO
+   (warm-then-compile) and eager (--jit=on). Additive to the host ASan
+   build in release-gate; covers the undefined-behavior and data-race
+   classes with a reproducible compiler-rt. ASan is intentionally absent
+   -- zig ships no ASan runtime; that coverage stays on the host
+   toolchain.
+
+   TSan scope: data races only exist in multithreaded code, so TSan runs
+   only the files that spin up threads, atomics, or the JIT worker. The
+   single-threaded majority of the suite is covered under UBSan here and
+   ASan in release-gate; running it under TSan would only inflate the
+   shadow footprint past a CI runner's memory.
 
    Instrumentation boundary: the sanitizers cover the JIT's whole C
    side (emit, patcher, helpers, invoke, safepoints, deopt) but NOT
@@ -1021,8 +1065,8 @@
   (run-suite-with-test-bin "./mino_ubsan_zig" [])
   (run-suite-with-test-bin "./mino_ubsan_zig" ["--jit=on"])
   (build-tsan-zig)
-  (run-suite-with-test-bin "./mino_tsan_zig" [])
-  (run-suite-with-test-bin "./mino_tsan_zig" ["--jit=on"])
+  (run-concurrency-files-with-test-bin "./mino_tsan_zig" [])
+  (run-concurrency-files-with-test-bin "./mino_tsan_zig" ["--jit=on"])
   (println "  sanitize-zig: OK"))
 
 ;; ---- Curated strict warning lane (pinned zig cc) ----
