@@ -183,9 +183,10 @@ static inline int  mino_jit_compile(struct mino_state *S, struct mino_val *fn) {
 static inline struct mino_val *mino_jit_invoke(struct mino_state *S,
                                                 struct mino_bc_fn *bc,
                                                 struct mino_val **regs,
-                                                struct mino_val **consts)
+                                                struct mino_val **consts,
+                                                struct mino_env *env)
 {
-    (void)S; (void)bc; (void)regs; (void)consts; return NULL;
+    (void)S; (void)bc; (void)regs; (void)consts; (void)env; return NULL;
 }
 static inline void mino_jit_free_all(struct mino_state *S) { (void)S; }
 static inline void mino_jit_slab_release(struct mino_state *S,

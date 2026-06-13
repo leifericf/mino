@@ -92,18 +92,21 @@ int mino_bc_require_flag = 0;
 
 void mino_bc_check_require(mino_state *S, mino_val *fn)
 {
-    (void)S;
     if (!mino_bc_require_flag) return;
     if (fn == NULL || mino_type_of(fn) != MINO_FN) return;
     if (MINO_BC_RUNNABLE(fn)) return;
-    /* Decline mode: report and abort. The fn's params/body are not
-     * compilable yet; whoever flipped require_flag should run with
-     * an expanded compiler.
-     * Class I abort: MINO_BC_REQUIRE was set but the compiler cannot
-     * honour it.  This is a deployment/configuration error, not a
-     * runtime condition; the process state cannot be recovered. */
+    /* Decline mode: fn was not compiled. Whoever set require_flag should
+     * run with an expanded compiler.  Surface as a catchable mino-level
+     * error so embedders can handle it; gate the hard abort behind
+     * MINO_BC_REQUIRE_ABORT for deployments that truly want to crash. */
     fprintf(stderr, "MINO_BC_REQUIRE: fn declined by compiler\n");
-    abort(); /* Class I: configuration error, process state unrecoverable */
+#ifdef MINO_BC_REQUIRE_ABORT
+    abort(); /* Explicit opt-in: treat decline as unrecoverable. */
+#else
+    /* Surface as a catchable error rather than process termination. */
+    prim_throw_classified(S, "user", "MBC001",
+        "MINO_BC_REQUIRE: fn declined by compiler");
+#endif
 }
 
 #define BC_MAX_LOCALS 256
@@ -3187,6 +3190,8 @@ static int compile_def(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)val_reg, (unsigned)nk);
     }
     emit_abx(c, OP_SETGLOBAL, (unsigned)val_reg, (unsigned)k);
+    /* Deviation: mino returns the bound value, not the Var (#'x);
+     * JVM Clojure returns the Var. */
     emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)val_reg, 0);
     c->next_reg = saved_next;
     return 0;
@@ -4764,6 +4769,12 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
     if (bc == NULL) { fn->as.fn.bc = &mino_bc_declined; return MINO_BC_UNSUPPORTED; }
     memset(bc, 0, sizeof(*bc));
     bc->n_clauses = n_clauses;
+    /* Attach bc to fn immediately so the GC can reach it (and all
+     * subsequent allocations reachable through bc) during the clauses
+     * allocation below.  fn may already be OLD; the write barrier
+     * ensures the next minor GC does not miss the YOUNG bc pointer. */
+    gc_write_barrier(S, fn, NULL, bc);
+    fn->as.fn.bc = bc;
     /* clauses array stored as GC_T_RAW since it contains POD data plus
      * a single pointer field (param_syms) into an already-rooted
      * vector. The GC trace pushes only the bc record and the params
@@ -4783,12 +4794,6 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
         }
         bc->captures = caps;
     }
-    /* Write barrier: fn may already be OLD (top-level defns survive
-     * many minor cycles before the first call triggers compile). The
-     * just-allocated bc is YOUNG. Without the barrier, the next minor
-     * misses bc and frees it from under the field. */
-    gc_write_barrier(S, fn, NULL, bc);
-    fn->as.fn.bc = bc;
 
     compiler_t c;
     memset(&c, 0, sizeof(c));
