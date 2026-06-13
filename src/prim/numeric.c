@@ -420,8 +420,12 @@ static int tower_apply_int(mino_state *S, tower_acc_t *acc,
     }
     {
         mino_val *bn = mino_bigint_from_ll(S, acc->iacc);
-        mino_val *bd = mino_bigint_from_ll(S, x);
-        if (bn == NULL || bd == NULL) return -1;
+        mino_val *bd;
+        if (bn == NULL) return -1;
+        gc_pin(bn);
+        bd = mino_bigint_from_ll(S, x);
+        gc_unpin(1);
+        if (bd == NULL) return -1;
         acc->vacc = mino_ratio_make(S, bn, bd);
         if (acc->vacc == NULL) return -1;
         acc->tier = TT_RATIO;
@@ -870,8 +874,12 @@ static int tower_seeded_step(mino_state *S, tower_acc_t *a, mino_val *x,
                     }
                     {
                         mino_val *la = mino_bigint_from_ll(S, a->iacc);
-                        mino_val *lb = mino_bigint_from_ll(S, mino_val_int_get(x));
-                        if (la == NULL || lb == NULL) return -1;
+                        mino_val *lb;
+                        if (la == NULL) return -1;
+                        gc_pin(la);
+                        lb = mino_bigint_from_ll(S, mino_val_int_get(x));
+                        gc_unpin(1);
+                        if (lb == NULL) return -1;
                         a->vacc = mino_bigint_sub(S, la, lb);
                         if (a->vacc == NULL) return -1;
                         a->tier = TT_BIGINT;
@@ -889,8 +897,12 @@ static int tower_seeded_step(mino_state *S, tower_acc_t *a, mino_val *x,
                     a->iacc /= mino_val_int_get(x);
                 } else {
                     mino_val *bn = mino_bigint_from_ll(S, a->iacc);
-                    mino_val *bd = mino_bigint_from_ll(S, mino_val_int_get(x));
-                    if (bn == NULL || bd == NULL) return -1;
+                    mino_val *bd;
+                    if (bn == NULL) return -1;
+                    gc_pin(bn);
+                    bd = mino_bigint_from_ll(S, mino_val_int_get(x));
+                    gc_unpin(1);
+                    if (bd == NULL) return -1;
                     a->vacc = mino_ratio_make(S, bn, bd);
                     if (a->vacc == NULL) return -1;
                     if (mino_val_int_p(a->vacc)) {
@@ -1701,7 +1713,7 @@ static mino_val *mqr_float(mino_state *S, double a, double b, mqr_op_t op,
     {
         double q_d = a / b;
         if (q_d >= -9.2233720368547758e18 && q_d <= 9.2233720368547758e18) {
-            long q_l = (long)q_d;  /* trunc toward zero */
+            long long q_l = (long long)q_d;  /* trunc toward zero */
             volatile double prod;
             volatile double diff;
             prod = (double)q_l * b;
@@ -1947,8 +1959,12 @@ static mino_val *prim_mqr(mino_state *S, mino_val *args, mqr_op_t op)
         if (a == LLONG_MIN && b == -1) {
             /* Overflow: promote to bigint. */
             mino_val *ba = mino_bigint_from_ll(S, a);
-            mino_val *bb = mino_bigint_from_ll(S, b);
-            if (ba == NULL || bb == NULL) return NULL;
+            mino_val *bb;
+            if (ba == NULL) return NULL;
+            gc_pin(ba);
+            bb = mino_bigint_from_ll(S, b);
+            gc_unpin(1);
+            if (bb == NULL) return NULL;
             if (op == MQR_QUOT) return mino_bigint_quot(S, ba, bb);
             if (op == MQR_REM)  return mino_bigint_rem(S, ba, bb);
             return mino_bigint_mod(S, ba, bb);
@@ -2135,6 +2151,23 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
         if (mino_type_of(a) == MINO_BIGINT && mino_type_of(b) == MINO_BIGINT) {
             int cmp = mino_bigint_cmp(a, b);
             return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+        }
+        /* Exact path for mixed int/bigint: mirrors tower_cmp lines 2333-2349.
+         * Avoids the double fallback which loses precision beyond 2^53. */
+        if ((mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) ||
+            (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b))) {
+            long long ll;
+            if (mino_val_int_p(a)) {
+                if (mino_bigint_equals_ll(b, mino_val_int_get(a))) return mino_int(S, 0);
+                if (mino_as_ll(b, &ll))
+                    return mino_int(S, mino_val_int_get(a) < ll ? -1 : mino_val_int_get(a) > ll ? 1 : 0);
+                return mino_int(S, mino_bigint_to_double(b) > 0 ? -1 : 1);
+            } else {
+                if (mino_bigint_equals_ll(a, mino_val_int_get(b))) return mino_int(S, 0);
+                if (mino_as_ll(a, &ll))
+                    return mino_int(S, ll < mino_val_int_get(b) ? -1 : ll > mino_val_int_get(b) ? 1 : 0);
+                return mino_int(S, mino_bigint_to_double(a) > 0 ? 1 : -1);
+            }
         }
         /* Use the full numeric tower coercion so bigints, ratios, and
          * bigdecs all reduce to a comparable double. as_double only
