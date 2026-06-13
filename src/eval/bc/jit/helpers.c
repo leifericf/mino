@@ -711,9 +711,7 @@ mino_val **mino_jit_push_env_slow(mino_state *S, mino_val **regs)
     mino_thread_ctx_t *ctx   = mino_current_ctx(S);
     mino_env        *child = env_child(S, ctx->jit_invoke_env);
     if (child == NULL) return NULL;
-    gc_pin(child);
     ctx->jit_invoke_env = child;
-    gc_unpin(1);
     return regs;
 }
 
