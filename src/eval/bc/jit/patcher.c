@@ -23,12 +23,13 @@
  *   - `patch_imm19`: 19-bit signed offset for B.cond / CBZ used by the
  *     direct-emit JMPIFNOT template.
  *
- * The direct-emit byte writers (`emit_jmp_bytes`, `emit_jmpifnot_bytes`)
- * synthesise short sequences from scratch instead of memcpy'ing a
- * compiled stencil. The trampoline writer (`write_trampoline`)
- * synthesises a fixed 16-byte slab that loads an absolute helper-fn
- * address and branches into it, sidestepping the bl's 26-bit reach
- * when the host fn is far from the mmap'd region.
+ * The direct-emit byte writers (`mino_jit_emit_jmp_bytes`,
+ * `mino_jit_emit_jmpifnot_bytes`) synthesise short sequences from
+ * scratch instead of memcpy'ing a compiled stencil. The trampoline
+ * writer (`mino_jit_write_trampoline`) synthesises a fixed 16-byte
+ * slab that loads an absolute helper-fn address and branches into it,
+ * sidestepping the bl's 26-bit reach when the host fn is far from the
+ * mmap'd region.
  *
  * Splitting this from the compile pipeline isolates the seam the
  * non-ARM64 patcher cycle will graft onto: a new patcher.c per host

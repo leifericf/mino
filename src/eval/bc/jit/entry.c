@@ -15,6 +15,11 @@
  * patcher.c, emit.c, helpers.c, and stats.c each own a slice of the
  * compile / runtime path; this file glues them together at the public
  * API surface.
+ *
+ * SIZE NOTE: this TU is ~1071 lines (within 3 % of the 1100-line
+ * limit). Adding new stencil-table entries or entry-point variants
+ * should be preceded by a size check; if growth pushes past 1100,
+ * factor the stencil descriptor table into its own TU.
  */
 
 #include "../jit.h"
@@ -637,11 +642,12 @@ const stencil_desc_t *mino_jit_find_stencil(unsigned opcode)
 }
 
 /* Direct-emit ops live alongside the stencil-driven ones in the
- * eligibility list. The compile pipeline produces ARM64 instructions
- * for these by hand (see patcher.c's emit_jmp_bytes / emit_jmpifnot_bytes)
- * instead of memcpy'ing a compiled stencil. The encoded forms are
- * short and free of pool / trampoline slots so the cost of bypassing
- * the generic stencil path is small. */
+ * eligibility list. Instead of memcpy'ing a compiled stencil the
+ * compile pipeline synthesises arch-specific bytes on the fly (see
+ * mino_jit_emit_jmp_bytes / mino_jit_emit_jmpifnot_bytes in
+ * patcher.c / patcher_x86_64.c). The encoded forms are short and
+ * free of pool / trampoline slots so the cost of bypassing the
+ * generic stencil path is small. */
 int mino_jit_is_direct_emit_op(unsigned op)
 {
     return op == OP_JMP || op == OP_JMPIFNOT;

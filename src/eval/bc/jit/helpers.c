@@ -9,8 +9,9 @@
  *
  *   - input regs is the live register-window base on entry.
  *   - the helper may alloc / call prims / trigger GC, so it
- *     re-derives the regs base from `S->bc.bc_regs + (regs - S->bc.bc_regs)`
- *     before any store-through-regs.
+ *     snapshots `base = regs - S->bc.bc_regs` before any call that
+ *     may relocate the regs array, then restores the pointer with
+ *     `regs = S->bc.bc_regs + base` after.
  *   - return value is the (possibly relocated) regs base on success,
  *     NULL on hard failure that the stencil's caller propagates back
  *     up the JIT region as a NULL return.
