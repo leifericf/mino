@@ -644,6 +644,12 @@
               (re-find #"^\s*#\s*line\b" line)
               (recur (+ i 1))
 
+              ;; Strip per-file feature-test macro defines; they are
+              ;; hoisted to the top of the amalgam so they precede every
+              ;; system header in this single TU.
+              (re-find #"^\s*#\s*define\s+(_POSIX_C_SOURCE|_DARWIN_C_SOURCE)\b" stripped)
+              (recur (+ i 1))
+
               ;; Project-local include: inline the referenced file in
               ;; place. If the original directive line opens a multi-
               ;; line block comment, absorb continuation lines until the
@@ -714,7 +720,18 @@
     ;; provides their own entrypoint).
     (doseq [src lib-srcs]
       (amalgam-expand src seen syshdrs chunks))
-    (let [header  "/* mino single-file amalgamation. See dist/README.md for usage. */\n\n"
+    ;; Feature-test macros must precede every system header. In
+    ;; separate-TU builds each source defines them at its own top, but in
+    ;; this single TU an earlier file pulls the system headers first, so
+    ;; hoist them here (the per-file copies are stripped during expand) to
+    ;; keep the POSIX / Darwin surface the sources request.
+    (let [header  (str "/* mino single-file amalgamation. See dist/README.md for usage. */\n\n"
+                       "#if defined(__APPLE__)\n"
+                       "#  define _DARWIN_C_SOURCE 1\n"
+                       "#endif\n"
+                       "#ifndef _POSIX_C_SOURCE\n"
+                       "#  define _POSIX_C_SOURCE 200809L\n"
+                       "#endif\n\n")
           body    (str/join "" @chunks)]
       (spit "dist/mino.c" (str header body))
       (sh! "cp" "src/mino.h" "dist/mino.h")
