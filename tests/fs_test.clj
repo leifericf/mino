@@ -2,6 +2,8 @@
 
 ;; Filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
 
+(def ^:private windows? (some? (getenv "OS")))
+
 (def test-dir "/tmp/mino-fs-test")
 
 (deftest file-exists?-known-file
@@ -54,6 +56,12 @@
   ;; planted inside the removal tree caused rmrf to recurse through it
   ;; and delete the *target* directory's contents (CWE-59).
   ;; The fix changes stat() to lstat() so symlinks are unlinked directly.
+  ;;
+  ;; POSIX-only: builds the symlink with `ln -s`, which Windows has no
+  ;; equivalent for (mklink needs a privileged shell), and tests
+  ;; lstat-based unlink semantics that do not apply to Windows
+  ;; reparse-point handling. Skipped there; full coverage stays on POSIX.
+  (when-not windows?
   (let [sentinel "/tmp/mino-fs-symlink-sentinel"]
     (try (rm-rf test-dir)   (catch _ nil))
     (try (rm-rf sentinel)   (catch _ nil))
@@ -68,6 +76,6 @@
     (is (file-exists? (str sentinel "/victim.txt"))
         "victim file inside symlink target was deleted")
     (try (rm-rf test-dir)   (catch _ nil))
-    (try (rm-rf sentinel)   (catch _ nil))))
+    (try (rm-rf sentinel)   (catch _ nil)))))
 
 (run-tests-and-exit)
