@@ -121,8 +121,10 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
         mino_hamt_node_t *fresh;
         if (slots == NULL) return NULL;
         slots[0] = new_entry;
+        gc_pin((mino_val *)slots);
         fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                     sizeof(*fresh));
+        gc_unpin(1);
         if (fresh == NULL) return NULL;
         fresh->bitmap       = 1u << i;
         fresh->subnode_mask = 0u;
@@ -173,12 +175,16 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                 void            **slots;
                 mino_hamt_node_t *fresh;
                 if (sub == NULL) return NULL;
+                gc_pin((mino_val *)sub);
                 slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
                                                  sizeof(*slots));
+                gc_unpin(1);
                 if (slots == NULL) return NULL;
                 slots[0] = sub;
+                gc_pin((mino_val *)slots);
                 fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                             sizeof(*fresh));
+                gc_unpin(1);
                 if (fresh == NULL) return NULL;
                 fresh->bitmap       = 1u << ib;
                 fresh->subnode_mask = 1u << ib;
@@ -192,8 +198,10 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                 if (slots == NULL) return NULL;
                 if (ib < in) { slots[0] = (void *)n; slots[1] = new_entry; }
                 else         { slots[0] = new_entry; slots[1] = (void *)n; }
+                gc_pin((mino_val *)slots);
                 fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                             sizeof(*fresh));
+                gc_unpin(1);
                 if (fresh == NULL) return NULL;
                 fresh->bitmap       = (1u << ib) | (1u << in);
                 fresh->subnode_mask = 1u << ib;
@@ -220,7 +228,9 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
             for (k = 0; k < phys; k++) slots[k]     = n->slots[k];
             slots[phys] = new_entry;
             for (k = phys; k < pop; k++) slots[k + 1] = n->slots[k];
+            gc_pin((mino_val *)slots);
             ed = hnode_ensure_owned(S, n, 0u, owner);
+            gc_unpin(1);
             if (ed == NULL) return NULL;
             hnode_slots_install(S, ed, slots);
             ed->bitmap       = n->bitmap | bit;
@@ -235,7 +245,9 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                 shift + HAMT_B, replaced, owner);
             mino_hamt_node_t *ed;
             if (new_child == NULL) return NULL;
+            gc_pin((mino_val *)new_child);
             ed = hnode_ensure_owned(S, n, pop, owner);
+            gc_unpin(1);
             if (ed == NULL) return NULL;
             hnode_slot_set(S, ed->slots, phys, new_child);
             return ed;
@@ -259,7 +271,9 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                                                              owner);
                 mino_hamt_node_t *ed;
                 if (sub == NULL) return NULL;
+                gc_pin((mino_val *)sub);
                 ed = hnode_ensure_owned(S, n, pop, owner);
+                gc_unpin(1);
                 if (ed == NULL) return NULL;
                 hnode_slot_set(S, ed->slots, phys, sub);
                 ed->subnode_mask = n->subnode_mask | bit;
@@ -281,8 +295,10 @@ static mino_hamt_node_t *merge_entries_owned(mino_state *S,
         if (slots == NULL) return NULL;
         slots[0] = e1;
         slots[1] = e2;
+        gc_pin((mino_val *)slots);
         fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                     sizeof(*fresh));
+        gc_unpin(1);
         if (fresh == NULL) return NULL;
         fresh->collision_hash  = h1;
         fresh->collision_count = 2u;
@@ -300,11 +316,15 @@ static mino_hamt_node_t *merge_entries_owned(mino_state *S,
             void            **slots;
             mino_hamt_node_t *fresh;
             if (child == NULL) return NULL;
+            gc_pin((mino_val *)child);
             slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+            gc_unpin(1);
             if (slots == NULL) return NULL;
             slots[0] = child;
+            gc_pin((mino_val *)slots);
             fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                         sizeof(*fresh));
+            gc_unpin(1);
             if (fresh == NULL) return NULL;
             fresh->bitmap       = 1u << i1;
             fresh->subnode_mask = 1u << i1;
@@ -318,8 +338,10 @@ static mino_hamt_node_t *merge_entries_owned(mino_state *S,
             if (slots == NULL) return NULL;
             if (i1 < i2) { slots[0] = e1; slots[1] = e2; }
             else         { slots[0] = e2; slots[1] = e1; }
+            gc_pin((mino_val *)slots);
             fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
                                                         sizeof(*fresh));
+            gc_unpin(1);
             if (fresh == NULL) return NULL;
             fresh->bitmap       = (1u << i1) | (1u << i2);
             fresh->subnode_mask = 0u;
@@ -361,7 +383,9 @@ mino_hamt_node_t *hamt_dissoc_owned(mino_state *S, mino_hamt_node_t *n,
                         if (k == j) continue;
                         slots[w++] = n->slots[k];
                     }
+                    gc_pin((mino_val *)slots);
                     ed = hnode_ensure_owned(S, n, 0u, owner);
+                    gc_unpin(1);
                     if (ed == NULL) return NULL;
                     hnode_slots_install(S, ed, slots);
                     ed->collision_count = cc - 1u;
@@ -402,7 +426,9 @@ mino_hamt_node_t *hamt_dissoc_owned(mino_state *S, mino_hamt_node_t *n,
                     if (k == phys) continue;
                     slots[w++] = n->slots[k];
                 }
+                gc_pin((mino_val *)slots);
                 ed = hnode_ensure_owned(S, n, 0u, owner);
+                gc_unpin(1);
                 if (ed == NULL) return NULL;
                 hnode_slots_install(S, ed, slots);
                 ed->bitmap       = n->bitmap       & ~bit;
@@ -425,7 +451,9 @@ mino_hamt_node_t *hamt_dissoc_owned(mino_state *S, mino_hamt_node_t *n,
                     if (k == phys) continue;
                     slots[w++] = n->slots[k];
                 }
+                gc_pin((mino_val *)slots);
                 ed = hnode_ensure_owned(S, n, 0u, owner);
+                gc_unpin(1);
                 if (ed == NULL) return NULL;
                 hnode_slots_install(S, ed, slots);
                 ed->bitmap       = n->bitmap & ~bit;

@@ -205,7 +205,9 @@ mino_val *vec_conj1(mino_state *S, const mino_val *v, mino_val *item)
         /* Root is full at the current height: add a level. */
         mino_vec_node_t *grown = vnode_new(S, 2, 0);
         grown->slots[0] = v->as.vec.root;
+        gc_pin((mino_val *)grown);
         grown->slots[1] = new_path(S, v->as.vec.shift, v->as.vec.tail);
+        gc_unpin(1);
         new_root  = grown;
         new_shift = v->as.vec.shift + MINO_VEC_B;
     } else {
@@ -520,7 +522,9 @@ mino_val *vec_conj1_owned(mino_state *S, mino_val *v,
         mino_vec_node_t *grown = vnode_new_owned(S, 2, 0, owner);
         /* grown is fresh YOUNG; no barrier needed. */
         grown->slots[0] = v->as.vec.root;
+        gc_pin((mino_val *)grown);
         grown->slots[1] = new_path_owned(S, v->as.vec.shift, v->as.vec.tail, owner);
+        gc_unpin(1);
         new_root  = grown;
         new_shift = v->as.vec.shift + MINO_VEC_B;
     } else {
