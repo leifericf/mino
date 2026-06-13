@@ -36,8 +36,13 @@ void gc_build_range_index(mino_state *S)
     for (h = S->gc.all_young; h != NULL; h = h->next) n++;
     for (h = S->gc.all_old;   h != NULL; h = h->next) n++;
     if (n > S->gc.ranges_cap) {
-        size_t      new_cap = n * 2 + 16;
-        gc_range_t *nr      = (gc_range_t *)realloc(
+        size_t      new_cap;
+        gc_range_t *nr;
+        if (n > (SIZE_MAX - 16) / 2) {
+            abort(); /* Class I: overflow computing range index capacity */
+        }
+        new_cap = n * 2 + 16;
+        nr      = (gc_range_t *)realloc(
             S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside GC; no safe recovery path */
@@ -138,8 +143,13 @@ void gc_range_merge_pending(mino_state *S)
     N = S->gc.ranges_len;
     need = N + K;
     if (need > S->gc.ranges_cap) {
-        size_t      new_cap = need * 2 + 16;
-        gc_range_t *nr      = (gc_range_t *)realloc(
+        size_t      new_cap;
+        gc_range_t *nr;
+        if (need > (SIZE_MAX - 16) / 2) {
+            abort(); /* Class I: overflow computing merge capacity */
+        }
+        new_cap = need * 2 + 16;
+        nr      = (gc_range_t *)realloc(
             S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside GC; no safe recovery path */
