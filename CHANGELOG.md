@@ -4,19 +4,19 @@
 
 - Build: The single-file amalgamation (`dist/mino.c`) hoists the `_POSIX_C_SOURCE` / `_DARWIN_C_SOURCE` feature-test macros to the top of the unified translation unit and strips the per-file copies, so the whole TU sees the POSIX/Darwin surface the sources request. Previously an earlier file pulled the system headers before `fs.c` / `proc.c` redefined the macros, which broke the amalgam compile on glibc with a `_POSIX_C_SOURCE` redefinition.
 - Core: `sequence` with a transducer now realizes in O(1) stack per element. It emits each step's buffered outputs as a direct lazy cons-chain instead of `(concat items (step ...))`, so reducing, counting, or seq-walking a large transduced sequence (and `clojure.core.reducers/foldcat` over a reducer, which builds on it) no longer recurses on the C stack proportional to the element count -- which previously tripped the recursion guard under the larger stack frames of sanitizer builds.
+- Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
+- Core: Add \delete to char-name-string and add \delete reader literal support
+- Core: Register uuid reader in *data-readers* alongside inst reader
+- Core: Add :type and :at keys to Throwable->map :via entries for canon conformance
+- Core: Update var-get docstring to reflect thread-local binding lookup precedence
+- Core: Add `class` returning the concrete type tag, ignoring `:type` metadata; `(class nil)` is `nil`
+- Core: The special forms `fn`, `let`, `loop`, `lazy-seq`, `binding`, `declare`, `defmacro`, and `ns` are interned as `clojure.core` vars with docstrings and `:macro true` meta, so they appear in `ns-publics`, `resolve`, `doc`, and `apropos`
+- Core: `*ns*` gains its `clojure.core` env binding so `ns-publics` and `resolve` see it, and `pr` is dynamic so `binding` can rebind it
+- Core: Add `refer-clojure` macro honoring `:exclude`, `:only`, and `:rename`
+- Core: Mark `*clojure-version*` as dynamic
+- Core: `vswap!` is now a macro expanding to `vreset!` plus `deref` per canon; behavior unchanged
+- Core: `clojure-version` now appends `-<qualifier>` when `(:qualifier *clojure-version*)` is non-nil, matching JVM Clojure behavior
 - GC: Restore gc_save_len when a throw unwinds a try/catch frame, so the transient pins made between try entry and the throw no longer leak; previously each exception left the call's pinned callable on the GC save stack, which in release builds silently stopped pinning new roots after 64 leaks (a latent liveness hazard) and aborted sanitizer builds.
-- Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
-- Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.
-- Style: Fix stale filenames in gc/internal.h section headers; update barrier contract comment to Dijkstra insertion-barrier model; remove spurious inline from gc_verify_check
-- Style: Fix ALLOW annotation wrong TU limit, missing error class docs, ADR TBD placeholder, formatting inconsistency in values module
-- Style: Move detached ic_resolve_global comment to its function; rename _pad_ic* struct members to remove leading underscores; remove double blank line in eval-bc module
-- Style: Fix stale fall-through comment, alignment, and duplicate inline comments in eval-bc-jit module
-- Factoring: Expose gc_charge_pause and extract gc_mark_each_ctx/gc_mark_ctx_try_stack to eliminate duplicate lock-walk-unlock pattern in gc_mark_thread_state
-- Factoring: Forward-declare mino_bc_trace_fn_bc and future helpers in values/internal.h to remove eval/bc/internal.h boundary violation from gc_handlers.c
-- Factoring: Extract intern_ns_name helper to deduplicate mino_keyword_ns_n and mino_symbol_ns_n; fix OOM diagnostic inconsistency in symbol variant
-- Factoring: Remove redundant gc/internal.h include from eval/bc/gc_handlers.c (already transitively included)
-- Factoring: Document is_special_form_name duplication with eval/special_registry.c; document bc_protocol_type_disc duplication with prim_type
-- Factoring: Extract jit_extract_form_loc and jit_protocol_resolve helpers to deduplicate source-location extraction and protocol IC resolution in eval-bc-jit
 - GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker
 - GC: Guard float/double fill pointer across alloc_val in mino_host_array_new
 - GC: Guard fields_vec pointer across alloc_val in mino_defrecord
@@ -57,6 +57,21 @@
 - GC: Use uint64_t for nanosecond timing accumulators in gc_state_t and gc_record_pause
 - GC: Fix gc_verify_remset_complete and gc_classify_offender to use GC_PHASE_IDLE so intern-table walk runs during diagnostic passes
 - GC: Guard gc_classify_offender with gc_depth increment/decrement to prevent mutator re-entry during classification
+- GC: Skip minor sweep when mark-stack overflows to prevent freeing live YOUNG objects
+- GC: Add gc_depth guard to gc_verify_remset_complete, mirroring gc_classify_offender
+- GC: Convert remset realloc abort to recoverable OOM via major collect and gc_oom_throw
+- Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
+- Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.
+- Style: Fix stale filenames in gc/internal.h section headers; update barrier contract comment to Dijkstra insertion-barrier model; remove spurious inline from gc_verify_check
+- Style: Fix ALLOW annotation wrong TU limit, missing error class docs, ADR TBD placeholder, formatting inconsistency in values module
+- Style: Move detached ic_resolve_global comment to its function; rename _pad_ic* struct members to remove leading underscores; remove double blank line in eval-bc module
+- Style: Fix stale fall-through comment, alignment, and duplicate inline comments in eval-bc-jit module
+- Factoring: Expose gc_charge_pause and extract gc_mark_each_ctx/gc_mark_ctx_try_stack to eliminate duplicate lock-walk-unlock pattern in gc_mark_thread_state
+- Factoring: Forward-declare mino_bc_trace_fn_bc and future helpers in values/internal.h to remove eval/bc/internal.h boundary violation from gc_handlers.c
+- Factoring: Extract intern_ns_name helper to deduplicate mino_keyword_ns_n and mino_symbol_ns_n; fix OOM diagnostic inconsistency in symbol variant
+- Factoring: Remove redundant gc/internal.h include from eval/bc/gc_handlers.c (already transitively included)
+- Factoring: Document is_special_form_name duplication with eval/special_registry.c; document bc_protocol_type_disc duplication with prim_type
+- Factoring: Extract jit_extract_form_loc and jit_protocol_resolve helpers to deduplicate source-location extraction and protocol IC resolution in eval-bc-jit
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
@@ -81,18 +96,6 @@
 - Values: Guard size_t-to-int cast in record-field-index against overflow
 - Values: Hoist mixed declarations in intern_lookup_or_create_ns to satisfy C99
 - Values: Snapshot gc_depth before suppression guards and restore via saved value
-- Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
-- Core: Add \delete to char-name-string and add \delete reader literal support
-- Core: Register uuid reader in *data-readers* alongside inst reader
-- Core: Add :type and :at keys to Throwable->map :via entries for canon conformance
-- Core: Update var-get docstring to reflect thread-local binding lookup precedence
-- Core: Add `class` returning the concrete type tag, ignoring `:type` metadata; `(class nil)` is `nil`
-- Core: The special forms `fn`, `let`, `loop`, `lazy-seq`, `binding`, `declare`, `defmacro`, and `ns` are interned as `clojure.core` vars with docstrings and `:macro true` meta, so they appear in `ns-publics`, `resolve`, `doc`, and `apropos`
-- Core: `*ns*` gains its `clojure.core` env binding so `ns-publics` and `resolve` see it, and `pr` is dynamic so `binding` can rebind it
-- Core: Add `refer-clojure` macro honoring `:exclude`, `:only`, and `:rename`
-- Core: Mark `*clojure-version*` as dynamic
-- Core: `vswap!` is now a macro expanding to `vreset!` plus `deref` per canon; behavior unchanged
-- Core: `clojure-version` now appends `-<qualifier>` when `(:qualifier *clojure-version*)` is non-nil, matching JVM Clojure behavior
 - Lib: `clojure.data/diff` now trims trailing nils from the both slot, so `(diff [1 2 3] [1 2 4])` reports both `[1 2]` instead of `[1 2 nil]`. Shared map keys whose values are nil on both sides land in both: `(diff {:a nil :b 1} {:a nil})` returns `[{:b 1} nil {:a nil}]`.
 - Lib: `clojure.data` gains the `EqualityPartition` and `Diff` protocols with `equality-partition` and `diff-similar` methods; `diff` dispatches through them, so user types can extend how they partition and diff.
 - Lib: `clojure.pprint/pprint` pretty-prints with margin-aware wrapping and logical-block indentation instead of echoing `pr-str`; collections that overflow `*print-right-margin*` (default 72) break across indented lines and maps break between key/value pairs.
@@ -112,6 +115,11 @@
 - Lib: `clojure.test/run-tests` and `use-fixtures` are functions reading `*ns*` at call time, and `test-var` is dynamic so reporters can rebind it
 - Lib: `clojure.spec.alpha/conformer`, `int-in`, `double-in`, and `inst-in` are macros per canon; behavior unchanged
 - Lib: `clojure.pprint/formatter` and `formatter-out` are macros per canon; behavior unchanged
+- Lib: clojure.core.match is now bundled (capability `match`): the `match`, `matchv`, and `match-let` macros and the full pattern grammar (literals, wildcards, bindings, vectors with `& rest`, `(... :seq)` seqs, maps with `:only`, `(:or ...)`, `(p :guard pred)`, `(p :as name)`, quoted-symbol literals). Clauses compile to a decision structure that binds each occurrence once and threads a shared failure continuation, so the emitted code is linear in the clause set rather than exponential.
+- Lib: clojure.core.logic is now bundled (capability `logic`): relational logic programming with run / run* / fresh / conde / conda / condu, the == unify and != disequality goals, the relation library (membero, appendo, conso, distincto, ...), matche / defne pattern-matching relations, defrel facts, and tabling. Search is complete (interleaving streams), so an answer to the right of a divergent branch is still found.
+- Lib: clojure.core.logic.fd adds finite-domain (CLP(FD)) constraints: in / interval / domain, the arithmetic constraints +, -, *, quot, the relational constraints ==, !=, <, <=, >, >=, the global distinct, and the eq sugar for ordinary arithmetic. A fixpoint propagation engine narrows domains and the run machinery labels the remaining variables to enumerate solutions.
+- Lib: clojure.core.logic.nominal adds nominal logic: nom / nom? / tie, the nom/fresh binder, and the hash freshness goal, so terms with binders unify up to alpha-equivalence.
+- Lib: finite-domain labeling and singleton binding re-check the disequality store, so combining an fd domain with a core != is sound; fd.quot is truncating integer division; and the run machinery labels domain variables in a deterministic (lowest-id-first) order.
 - Fix: def now evaluates metadata-map values at definition time, so ^{:k (+ 1 2)} stores 3 and ^{:test (fn [] ...)} stores a callable, matching canon; reader flags (^:dynamic, ^:private), docstrings, and ^Tag type hints keep working unchanged
 - Fix: `binding` rebinds the var itself: a binding established under any spelling (bare, namespace-qualified, or alias-qualified) is now visible to every read of that var from any namespace, including qualified reads, `deref`/`var-get`, and compiled code, and restores correctly on unwind. Previously the dynamic-binding stack matched literal symbol text, so qualified bindings were invisible to bare reads and vice versa.
 - Fix: get-thread-bindings keys var-backed entries by their fully qualified symbol, so replaying a snapshot with with-bindings* or conveying it to another thread installs the binding on the exact same var regardless of the namespace the replay runs in.
@@ -123,6 +131,8 @@
 - Fix: (nth s i) on a string returns a character, consistent with (first s) and (get s i), so char-literal comparisons like (= (nth s i) \~) match. Indexing is codepoint-counted, so multi-byte characters count as one position.
 - Fix: Pin GC roots for keyword values in eval_special_register_vars to prevent use-after-free under conservative GC
 - Fix: Add :doc key to special-form var meta so (:doc (meta (resolve 'when))) returns the docstring
+- Fix: The bytecode compiler's env-capture pre-scan now recognizes the `clojure.core/`-qualified spelling of `fn` / `fn*` / `lazy-seq`, so a nested syntax-quoted closure that captures an enclosing `let` local resolves it at runtime instead of throwing an unbound-symbol error.
+- Fix: empty? on a lazy-seq that realizes to an empty list now returns true (previously any forced non-nil value was reported non-empty).
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
 - Docs: Correct tag_kw and var_promote comments, add *clojure-version* docstring
@@ -191,6 +201,8 @@
 - JIT: Fix deopt resume to pass accumulated env instead of entry env
 - JIT: Root loop incv/decv values across GC-allocating calls in slow helpers
 - JIT: Change mino_jit_offset_to_pc return type from long to ptrdiff_t
+- JIT: Pin GC roots in slow-path helpers for assoc, assoc!, conj!, dissoc!, disj!, dissoc, and conj-vec fast lanes
+- JIT: Fix slab left in RW state when mprotect re-seal fails after compile
 - Eval: Fix snprintf over-read in gensym (security-eval-001)
 - Eval: Fix write-barrier bypass in vec_destructure_args (memory-eval-003)
 - Eval: Pin GC arrays in qq_expand_vector across quasiquote_expand loop (memory-eval-002)
@@ -203,6 +215,11 @@
 - Eval: Guard argv buffer growth against integer overflow (security-eval-002)
 - Eval: Move print_dynvars declarations from prim/internal.h to eval/internal.h to fix module boundary
 - Eval: Move prim_destructure declaration from prim/internal.h to eval/internal.h
+- Eval: Add GC write barrier for var->meta in special_register_vars
+- Eval: Expose when, and, or in the public-form registry (ns-publics / doc / apropos)
+- Eval: Document gc_pin longjmp-safety at special form init
+- Eval: Fix var->meta :doc staleness for defmacro-redefined specials
+- Eval: Hoist doc_kw allocation out of registration loop
 - Interop: Guard size_t overflow in host registry capacity doubling (memory-interop-001, memory-interop-002)
 - Interop: Reject negative arity in host_member_find to prevent variadic bypass (security-interop-001)
 - Interop: Use size_t counter in host_count_args to eliminate signed-overflow UB
@@ -262,26 +279,26 @@
 - Prim/Stateful: Return integer thread ID instead of raw pointer in prim_mino_thread_id
 - Prim/Stateful: Pin atom pointer across mino_cons/mino_nil in prim_atom
 - Prim/Agent: Pin extra pointer across mino_cons loop in agent_build_call
-- Eval: Add GC write barrier for var->meta in special_register_vars
-- Eval: Expose when, and, or in the public-form registry (ns-publics / doc / apropos)
-- Eval: Document gc_pin longjmp-safety at special form init
-- Eval: Fix var->meta :doc staleness for defmacro-redefined specials
-- Eval: Hoist doc_kw allocation out of registration loop
 - clojure.test: Fix run-tests no-arg arity to read *ns* dynamically; extract current-ns-str helper used by use-fixtures and run-tests
 - Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
 - Tests: Fix ns-resolution for renamed symbol in census_surface_test
 - Tests: Replace spec-first status markers with neutral documentation
-- Lib: clojure.core.match is now bundled (capability `match`): the `match`, `matchv`, and `match-let` macros and the full pattern grammar (literals, wildcards, bindings, vectors with `& rest`, `(... :seq)` seqs, maps with `:only`, `(:or ...)`, `(p :guard pred)`, `(p :as name)`, quoted-symbol literals). Clauses compile to a decision structure that binds each occurrence once and threads a shared failure continuation, so the emitted code is linear in the clause set rather than exponential.
-- Fix: The bytecode compiler's env-capture pre-scan now recognizes the `clojure.core/`-qualified spelling of `fn` / `fn*` / `lazy-seq`, so a nested syntax-quoted closure that captures an enclosing `let` local resolves it at runtime instead of throwing an unbound-symbol error.
-- Lib: clojure.core.logic is now bundled (capability `logic`): relational logic programming with run / run* / fresh / conde / conda / condu, the == unify and != disequality goals, the relation library (membero, appendo, conso, distincto, ...), matche / defne pattern-matching relations, defrel facts, and tabling. Search is complete (interleaving streams), so an answer to the right of a divergent branch is still found.
-- Lib: clojure.core.logic.fd adds finite-domain (CLP(FD)) constraints: in / interval / domain, the arithmetic constraints +, -, *, quot, the relational constraints ==, !=, <, <=, >, >=, the global distinct, and the eq sugar for ordinary arithmetic. A fixpoint propagation engine narrows domains and the run machinery labels the remaining variables to enumerate solutions.
-- Lib: clojure.core.logic.nominal adds nominal logic: nom / nom? / tie, the nom/fresh binder, and the hash freshness goal, so terms with binders unify up to alpha-equivalence.
-- Lib: finite-domain labeling and singleton binding re-check the disequality store, so combining an fd domain with a core != is sound; fd.quot is truncating integer division; and the run machinery labels domain variables in a deterministic (lowest-id-first) order.
-- Fix: empty? on a lazy-seq that realizes to an empty list now returns true (previously any forced non-nil value was reported non-empty).
 - eval-bc: Fix GC window in mino_bc_compile_fn (bc unprotected across clauses allocation)
 - eval-bc: Replace abort() in mino_bc_check_require with catchable mino-level error
 - eval-bc: Document intentional deviation in compile_def (returns bound value, not Var)
 - eval-bc: Add missing env parameter to lean-build stub for mino_jit_invoke
+- Memory: Pin HAMT node pointers across gc_alloc_typed calls in map.c and map_owned.c
+- Memory: Pin chunks array and bytes value across allocation loop in mino_bytes_seq
+- Memory: Allocate new ref before unreffing old in vector/map/set builders to prevent NULL b->ref
+- Memory: Fix GC windows in bytecode compiler (rewrite_recur_args, try_builder_rewrite) and VM (OP_MAKE_LAZY)
+- Memory: Fix 5 GC-window and pin-leak bugs in eval map literal, reader conditional, namespaced map reader, and quasiquote vector expansion
+- Memory: Fix 9 GC-window and regex-leak bugs in prim numeric and string primitives
+- Memory: Fix GC window in set_eval_diag_with_data — unpin keys/vals after mino_map, not before
+- Memory: Pin future object across mino_snapshot_thread_bindings in mino_future_spawn
+- Memory: Break nested mino_cons chain in var watch dispatch into pinned sequential steps
+- Memory: Extend GC depth guard to cover alloc_val in host-array fast path (values/val.c)
+- Memory: Pre-allocate initial members buffer atomically in interop type_ensure (interop/syntax.c)
+- Memory: Guard diag note realloc multiply with checked_mul_sz to prevent size_t overflow (diag/diag.c)
 
 ## v0.423.5 — Security Fixes
 
