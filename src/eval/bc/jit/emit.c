@@ -98,7 +98,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
                          uintptr_t tramp_base)
 {
     if (pos + st->size > code_cap) return -1;
-    if (st->nsymbols > (unsigned long)MINO_JIT_MAX_SYMS_PER_STENCIL) return -1;
+    if (st->nsymbols > (size_t)MINO_JIT_MAX_SYMS_PER_STENCIL) return -1;
     sym_slot_t slots[MINO_JIT_MAX_SYMS_PER_STENCIL];
     size_t new_pool_pos  = pool_pos;
     size_t new_tramp_pos = tramp_pos;
@@ -107,7 +107,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
      * slot. The extractor preserves the order each name was first
      * encountered, so subsequent reloc-driven patches index slots[s]
      * by sym_index directly. */
-    for (unsigned long s = 0; s < st->nsymbols; s++) {
+    for (size_t s = 0; s < st->nsymbols; s++) {
         const char *name = st->symbols[s];
         int k = mino_jit_imm_kind_from_name(name);
         if (k >= 0) {
@@ -136,7 +136,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
         }
     }
     memcpy(code + pos, st->bytes, st->size);
-    for (unsigned long r = 0; r < st->nrelocs; r++) {
+    for (size_t r = 0; r < st->nrelocs; r++) {
         unsigned int  off    = st->relocs[r][0];
         unsigned int  kind   = st->relocs[r][1];
         unsigned int  sym    = st->relocs[r][2];
@@ -243,7 +243,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
 static int stencil_account_syms(const stencil_desc_t *st,
                                 size_t *pool_slots, size_t *tramp_count)
 {
-    for (unsigned long s = 0; s < st->nsymbols; s++) {
+    for (size_t s = 0; s < st->nsymbols; s++) {
         const char *name = st->symbols[s];
         int k = mino_jit_imm_kind_from_name(name);
         if (k >= 0) {
@@ -325,52 +325,63 @@ typedef struct {
     const stencil_desc_t *st;
 } inst_t;
 
-int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
-                            size_t deopt_at_pc)
+/* Compile-pipeline context: bundles the state shared across all five
+ * sub-passes so each sub-function takes one pointer rather than a
+ * dozen individual arguments. Initialised incrementally -- only the
+ * fields relevant to a given pass are valid when that pass runs. */
+typedef struct {
+    /* set by compile_inner before any pass */
+    mino_bc_fn_t         *bc;
+    int                   is_deopt_compile;
+    size_t                effective_code_len;
+    int                   allow_fusion;
+    size_t                deopt_at_pc;
+    const stencil_desc_t *deopt_st;
+    const stencil_desc_t *safepoint_st;
+    /* written by jit_size_pass */
+    size_t code_size;
+    size_t pool_slots;
+    size_t tramp_count;
+    size_t n_backjumps;
+    /* written by jit_layout */
+    struct mino_jit_slab *slab;
+    size_t                slot_offset;
+    size_t                slot_size;
+    void                 *region;
+    size_t                total_size;
+    size_t                need_bytes;
+    unsigned             *pc_offsets;
+    inst_t               *insts;
+    size_t                n_inst;
+    /* derived buffer pointers (set in jit_layout) */
+    unsigned char        *code;
+    unsigned char        *tramp_buf;
+    uint64_t             *pool;
+    uintptr_t             code_base;
+    uintptr_t             tramp_base;
+    uintptr_t             pool_base;
+    size_t                tramp_offset;
+    size_t                pool_offset;
+    size_t                tramp_bytes;
+    size_t                pool_bytes;
+    /* mutable positions written/read by jit_emit_pass */
+    size_t pos;
+    size_t pool_pos;
+    size_t tramp_pos;
+} jit_compile_ctx_t;
+
+/* Size pass: walk every pc in [0, ctx->effective_code_len) and
+ * accumulate code / pool / trampoline budgets. Also validates that
+ * every extern symbol resolves so the mmap below never fails mid-pass.
+ * Returns 0 on success, -1 on unresolvable symbol or overflow. */
+static int jit_size_pass(jit_compile_ctx_t *ctx)
 {
-    mino_bc_fn_t *bc = fn_val->as.fn.bc;
-    /* Caller (mino_jit_compile) has already validated fn_val / bc and
-     * confirmed eligibility, so the head guards from the public entry
-     * point are not repeated here. */
-
-    /* An empty body has nothing to emit and would size the pc_offsets /
-     * insts side tables at zero bytes; malloc(0) is implementation-
-     * defined, so bail before any allocation rather than write into a
-     * zero-size buffer. */
-    if (bc->code_len == 0) return -1;
-
-    /* effective_code_len caps the compile walk at deopt_at_pc when
-     * the caller asked for a compile-with-deopt; the deopt stencil is
-     * emitted right after the prefix loop below. (size_t)-1 marks a
-     * plain full-body compile. */
-    int    is_deopt_compile  = (deopt_at_pc != (size_t)-1);
-    size_t effective_code_len = is_deopt_compile ? deopt_at_pc
-                                                  : bc->code_len;
-
-    /* Fusion fires only on branch-free bodies: a fused LOAD_K + RETURN
-     * is atomic, so any direct-emit branch landing on the RETURN-half
-     * would re-execute the LOAD_K. Disabling the optimisation when
-     * branches are present keeps the case impossible by construction
-     * without a pre-scan of every branch's target. */
-    int allow_fusion = !bc_has_branches(bc);
-
-    /* Locate the deopt stencil descriptor once; the size + symbols are
-     * added to the budget below when is_deopt_compile is set. */
-    const stencil_desc_t *deopt_st = is_deopt_compile
-        ? mino_jit_find_stencil(OP_DEOPT_TO_INTERP) : NULL;
-    if (is_deopt_compile && deopt_st == NULL) return -1;
-
-    /* Safepoint stencil: one instance precedes every backward
-     * direct-emit branch so generic loop back-edges poll
-     * mino_bc_safepoint the way the interpreter does. */
-    const stencil_desc_t *safepoint_st =
-        mino_jit_find_stencil(OP_SAFEPOINT_POLL);
-    if (safepoint_st == NULL) return -1;
-
-    /* First pass: classify every symbol of every stencil to size the
-     * code / trampoline / pool regions. The pass also validates that
-     * every extern fn symbol resolves to a known host helper, so the
-     * mmap below has zero chance of failing partway through. */
+    const mino_bc_fn_t   *bc               = ctx->bc;
+    size_t                effective_code_len = ctx->effective_code_len;
+    int                   is_deopt_compile  = ctx->is_deopt_compile;
+    const stencil_desc_t *deopt_st          = ctx->deopt_st;
+    const stencil_desc_t *safepoint_st      = ctx->safepoint_st;
+    int                   allow_fusion      = ctx->allow_fusion;
     size_t code_size   = 0;
     size_t pool_slots  = 0;
     size_t tramp_count = 0;
@@ -392,29 +403,35 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         const stencil_desc_t *st = pick_stencil(bc, pc, &fused, allow_fusion);
         if (st == NULL) return -1;
         code_size += st->size;
-        if (stencil_account_syms(st, &pool_slots, &tramp_count) != 0) {
-            return -1;
-        }
+        if (stencil_account_syms(st, &pool_slots, &tramp_count) != 0) return -1;
         if (fused) pc++;
         pc += (size_t)mino_jit_op_extra_words(op);
     }
-    /* Account for the deopt stencil (final): same pool / tramp
-     * bookkeeping as a regular stencil. The deopt stencil reads
-     * IMM_BX (one pool slot) and calls mino_jit_deopt_exit (one
-     * trampoline). The marker counts are derived from its symbol
-     * table so a future stencil refactor stays consistent. */
+    /* Account for the deopt stencil when compiling a prefix. */
     if (is_deopt_compile) {
         code_size += deopt_st->size;
-        if (stencil_account_syms(deopt_st, &pool_slots,
-                                 &tramp_count) != 0) return -1;
+        if (stencil_account_syms(deopt_st, &pool_slots, &tramp_count) != 0)
+            return -1;
     }
+    ctx->code_size   = code_size;
+    ctx->pool_slots  = pool_slots;
+    ctx->tramp_count = tramp_count;
+    ctx->n_backjumps = n_backjumps;
+    return 0;
+}
 
-    /* Layout: [code] [trampolines, 16-byte aligned] [pool, 8-byte
-     * aligned]. Trampolines live in the same RX mmap as the code
-     * (they're branched into by the in-stencil bl instructions) and
-     * each carries its own 8-byte target literal. The pool follows
-     * trampolines and holds the per-instruction immediate values
-     * loaded via GOT-style adrp+ldr pairs. */
+/* Layout pass: compute section offsets, pick slab vs mmap, allocate
+ * the region and the two side tables (pc_offsets, insts).
+ * On failure the function tears down whatever it managed to allocate
+ * before returning -1, so the caller needs no cleanup for this phase. */
+static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
+{
+    size_t code_size   = ctx->code_size;
+    size_t pool_slots  = ctx->pool_slots;
+    size_t tramp_count = ctx->tramp_count;
+    size_t n_backjumps = ctx->n_backjumps;
+    const mino_bc_fn_t *bc = ctx->bc;
+
     if (tramp_count > SIZE_MAX / MINO_JIT_TRAMPOLINE_SIZE) return -1;
     if (pool_slots  > SIZE_MAX / sizeof(uint64_t))         return -1;
     size_t tramp_offset    = (code_size + 15u) & ~(size_t)15u;
@@ -423,18 +440,13 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
     size_t pool_offset     = (pool_offset_raw + 7u) & ~(size_t)7u;
     size_t pool_bytes      = pool_slots * sizeof(uint64_t);
     size_t need_bytes      = pool_offset + pool_bytes;
-    if (need_bytes == 0) need_bytes = 1;  /* mmap with size 0 is an error */
+    if (need_bytes == 0) need_bytes = 1;
 
     long page_l = jit_region_page_size();
     if (page_l <= 0) return -1;
     size_t page       = (size_t)page_l;
     size_t total_size = (need_bytes + page - 1) & ~(page - 1);
 
-    /* Allocation: small fns (need_bytes <= MINO_JIT_SLAB_CUTOFF) come
-     * out of the slab pool; the slab is flipped RW for the duration
-     * of this fill and back to RX after the I-cache flush. Larger
-     * fns take the one-page-per-fn mmap path so a single oversized
-     * compile cannot lock a slab into RW for an extended window. */
     struct mino_jit_slab *slab        = NULL;
     size_t                slot_offset = 0;
     size_t                slot_size   = 0;
@@ -452,82 +464,102 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         if (region == MINO_JIT_REGION_ALLOC_FAILED) return -1;
     }
 
-    /* Per-pc → native offset side table. Sized to code_len; written
-     * during the layout walk below. Held in a malloc'd buffer because
-     * the JIT module is the only writer and the GC's value-pointer
-     * scan would otherwise treat the integer slots as live edges. */
     if (bc->code_len > SIZE_MAX / sizeof(unsigned)) {
         jit_compile_cleanup(slab, region, total_size);
         return -1;
     }
     unsigned *pc_offsets = (unsigned *)malloc(bc->code_len * sizeof(unsigned));
     if (pc_offsets == NULL) {
-        if (slab != NULL) {
-            (void)jit_slab_make_rx(slab);
-        } else {
-            jit_compile_cleanup(slab, region, total_size);
-        }
+        if (slab != NULL) (void)jit_slab_make_rx(slab);
+        else              jit_compile_cleanup(slab, region, total_size);
         return -1;
     }
 
-    /* Per-instance tracking. code_len bounds the per-pc instances
-     * (fusion strictly reduces the count; direct-emit branches each
-     * take one entry); every backward branch adds one safepoint
-     * instance on top. */
     if (n_backjumps > SIZE_MAX - bc->code_len
         || (bc->code_len + n_backjumps) > SIZE_MAX / sizeof(inst_t)) {
         free(pc_offsets);
         jit_compile_cleanup(slab, region, total_size);
         return -1;
     }
-    size_t n_insts_alloc = bc->code_len + n_backjumps;
-    inst_t *insts = (inst_t *)malloc(n_insts_alloc * sizeof(*insts));
+    size_t  n_insts_alloc = bc->code_len + n_backjumps;
+    inst_t *insts         = (inst_t *)malloc(n_insts_alloc * sizeof(*insts));
     if (insts == NULL) {
         free(pc_offsets);
         jit_compile_cleanup(slab, region, total_size);
         return -1;
     }
-    size_t n_inst = 0;
 
     unsigned char *code      = (unsigned char *)region;
     unsigned char *tramp_buf = code + tramp_offset;
     uint64_t      *pool      = (uint64_t *)(code + pool_offset);
-    uintptr_t      code_base  = (uintptr_t)code;
-    uintptr_t      tramp_base = (uintptr_t)tramp_buf;
-    uintptr_t      pool_base  = (uintptr_t)pool;
 
-    size_t pos       = 0;
-    size_t pool_pos  = 0;
-    size_t tramp_pos = 0;
+    ctx->slab         = slab;
+    ctx->slot_offset  = slot_offset;
+    ctx->slot_size    = slot_size;
+    ctx->region       = region;
+    ctx->total_size   = total_size;
+    ctx->need_bytes   = need_bytes;
+    ctx->pc_offsets   = pc_offsets;
+    ctx->insts        = insts;
+    ctx->n_inst       = 0;
+    ctx->code         = code;
+    ctx->tramp_buf    = tramp_buf;
+    ctx->pool         = pool;
+    ctx->code_base    = (uintptr_t)code;
+    ctx->tramp_base   = (uintptr_t)tramp_buf;
+    ctx->pool_base    = (uintptr_t)pool;
+    ctx->tramp_offset = tramp_offset;
+    ctx->pool_offset  = pool_offset;
+    ctx->tramp_bytes  = tramp_bytes;
+    ctx->pool_bytes   = pool_bytes;
+    ctx->pos          = 0;
+    ctx->pool_pos     = 0;
+    ctx->tramp_pos    = 0;
+    return 0;
+}
+
+/* Emit pass: copy stencil bytes and direct-emit branch bytes into the
+ * code region, filling insts[] and pc_offsets[] for the chain /
+ * direct-emit passes that follow.  Returns -1 on stencil failure; the
+ * caller must free insts, pc_offsets, and tear down the region. */
+static int jit_emit_pass(jit_compile_ctx_t *ctx)
+{
+    mino_bc_fn_t         *bc               = ctx->bc;
+    size_t                effective_code_len = ctx->effective_code_len;
+    int                   is_deopt_compile  = ctx->is_deopt_compile;
+    int                   allow_fusion      = ctx->allow_fusion;
+    size_t                deopt_at_pc       = ctx->deopt_at_pc;
+    const stencil_desc_t *safepoint_st      = ctx->safepoint_st;
+    const stencil_desc_t *deopt_st          = ctx->deopt_st;
+    unsigned char        *code              = ctx->code;
+    uint64_t             *pool              = ctx->pool;
+    unsigned char        *tramp_buf         = ctx->tramp_buf;
+    uintptr_t             code_base         = ctx->code_base;
+    uintptr_t             pool_base         = ctx->pool_base;
+    uintptr_t             tramp_base        = ctx->tramp_base;
+    size_t                code_size         = ctx->code_size;
+    size_t                pool_slots        = ctx->pool_slots;
+    size_t                tramp_bytes       = ctx->tramp_bytes;
+    unsigned             *pc_offsets        = ctx->pc_offsets;
+    inst_t               *insts             = ctx->insts;
+    size_t pos       = ctx->pos;
+    size_t pool_pos  = ctx->pool_pos;
+    size_t tramp_pos = ctx->tramp_pos;
+    size_t n_inst    = ctx->n_inst;
     for (size_t pc = 0; pc < effective_code_len; pc++) {
         pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
         if (op == OP_JMP || op == OP_JMPIFNOT) {
-            /* Backward branch: a loop back-edge. Place a safepoint
-             * stencil instance ahead of the branch bytes so the edge
-             * polls mino_bc_safepoint, mirroring the interpreter's
-             * poll-on-backward-jump rule. pc_offsets[pc] (set at the
-             * loop head) points at the safepoint instance, so jumps
-             * targeting this pc poll too -- a harmless extra. The
-             * preceding instance's chain branch falls through into
-             * the poll, whose own chain branch continues into the
-             * branch bytes (Pass A patches both). */
             if (branch_is_backward(bc, pc)) {
                 size_t new_pool_pos  = pool_pos;
                 size_t new_tramp_pos = tramp_pos;
                 long n = emit_stencil(code, pos, code_size,
-                                      pool, pool_pos, pool_slots,
-                                      &new_pool_pos,
+                                      pool, pool_pos, pool_slots, &new_pool_pos,
                                       tramp_buf, tramp_pos, tramp_bytes,
-                                      &new_tramp_pos,
-                                      safepoint_st, bc->code[pc], 0, bc,
+                                      &new_tramp_pos, safepoint_st,
+                                      bc->code[pc], 0, bc,
                                       code_base, pool_base, tramp_base);
-                if (n < 0) {
-                    free(insts);
-                    free(pc_offsets);
-                    jit_compile_cleanup(slab, region, total_size);
-                    return -1;
-                }
+                if (n < 0) return -1;
                 insts[n_inst].native_start = pos;
                 insts[n_inst].bc_pc        = pc;
                 insts[n_inst].kind         = INST_STENCIL_NONFINAL;
@@ -556,25 +588,15 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         const stencil_desc_t *st = pick_stencil(bc, pc, &fused, allow_fusion);
         size_t new_pool_pos  = pool_pos;
         size_t new_tramp_pos = tramp_pos;
-        /* insn2 carries the trailing word for two-word ops. Single-
-         * word ops never read insn2 -- their stencil descriptors
-         * declare no IMM_KIND_BX2 symbols -- so the value passed when
-         * pc+1 is out of range is irrelevant. */
         mino_bc_insn_t insn2 = 0;
-        if (mino_jit_op_extra_words(op) > 0 && pc + 1 < bc->code_len) {
+        if (mino_jit_op_extra_words(op) > 0 && pc + 1 < bc->code_len)
             insn2 = bc->code[pc + 1];
-        }
         long n = emit_stencil(code, pos, code_size,
                               pool, pool_pos, pool_slots, &new_pool_pos,
                               tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
                               st, bc->code[pc], insn2, bc,
                               code_base, pool_base, tramp_base);
-        if (n < 0) {
-            free(insts);
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
-            return -1;
-        }
+        if (n < 0) return -1;
         insts[n_inst].native_start = pos;
         insts[n_inst].bc_pc        = pc;
         insts[n_inst].kind         = st->is_final ? INST_STENCIL_FINAL
@@ -584,32 +606,14 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         pos       += (size_t)n;
         pool_pos   = new_pool_pos;
         tramp_pos  = new_tramp_pos;
-        if (fused) {
-            /* Both pcs map to the start of the fused chunk; the fused
-             * stencil is atomic, so deopt mid-fusion is not a
-             * representable state. */
-            pc_offsets[pc + 1] = pc_offsets[pc];
-            pc++;
-        }
+        if (fused) { pc_offsets[pc + 1] = pc_offsets[pc]; pc++; }
         if (mino_jit_op_extra_words(op) > 0) {
-            /* Two-word op: the slot-bearing word shares the stencil's
-             * native span with its primary word. */
             pc_offsets[pc + 1] = pc_offsets[pc];
             pc++;
         }
     }
-
-    /* Emit the deopt stencil at deopt_at_pc when compiling a prefix.
-     * The synthesized insn carries the resume PC in its Bx field; the
-     * stencil's IMM_BX read pulls it out and passes it to the runtime
-     * helper that flags the side-exit. Pass A (chain patch) walks the
-     * prefix's last non-final stencil and patches its chain-marker
-     * relocation to land here automatically. */
     if (is_deopt_compile) {
         pc_offsets[deopt_at_pc] = (unsigned)pos;
-        /* Synthesize (OP_DEOPT_TO_INTERP, Bx=deopt_at_pc). The Bx
-         * field is 16 bits; the caller (mino_jit_compile) gated
-         * eligibility on deopt_at_pc fitting. */
         mino_bc_insn_t deopt_insn =
             (mino_bc_insn_t)(OP_DEOPT_TO_INTERP & 0xFFu)
             | (mino_bc_insn_t)((deopt_at_pc & 0xFFFFu) << 16);
@@ -620,12 +624,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                               tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
                               deopt_st, deopt_insn, 0, bc,
                               code_base, pool_base, tramp_base);
-        if (n < 0) {
-            free(insts);
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
-            return -1;
-        }
+        if (n < 0) return -1;
         insts[n_inst].native_start = pos;
         insts[n_inst].bc_pc        = deopt_at_pc;
         insts[n_inst].kind         = INST_STENCIL_FINAL;
@@ -634,54 +633,36 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         pos       += (size_t)n;
         pool_pos   = new_pool_pos;
         tramp_pos  = new_tramp_pos;
-        /* Initialise pc_offsets for pcs past deopt_at_pc to the same
-         * deopt-stencil offset so mino_jit_offset_to_pc lookups on
-         * uncompiled tails still resolve to something defined; no
-         * code emit reads these slots, but a stack-trace introspection
-         * on an out-of-range native_off shouldn't read uninitialized
-         * memory. */
-        for (size_t pc = deopt_at_pc + 1; pc < bc->code_len; pc++) {
+        for (size_t pc = deopt_at_pc + 1; pc < bc->code_len; pc++)
             pc_offsets[pc] = (unsigned)pos;
-        }
     }
+    ctx->pos      = pos;
+    ctx->pool_pos = pool_pos;
+    ctx->tramp_pos = tramp_pos;
+    ctx->n_inst   = n_inst;
+    return 0;
+}
 
-    /* Pass A: patch each non-final stencil's chain-continue tail
-     * call(s) to branch into the next instance's native_start.
-     *
-     * Every non-final stencil source ends each of its return paths
-     * with `__attribute__((musttail)) return
-     * mino_jit_chain_continue_marker(regs, consts, S)`. clang
-     * lowers the musttail into a single branch instruction
-     * (BRANCH26 on ARM64) whose target field carries a relocation
-     * against the marker symbol; the extractor records one such
-     * relocation per call site. This pass walks each non-final
-     * stencil's reloc table, looks up the symbol name for each
-     * reloc, and -- for every chain-marker relocation -- patches
-     * the branch offset to point at the next instance's
-     * native_start.
-     *
-     * Stencils whose fast path inlines a check before deciding
-     * which slow helper to call produce multiple basic blocks
-     * (e.g., the OP_LOOP_INT_LT slow-path exit vs. its fall-
-     * through). Each block ends with its own musttail call, so
-     * each emits its own chain-marker relocation; the pass patches
-     * them all. Direct-emit instances (INST_JMP / INST_JMPIFNOT)
-     * skip this pass -- their target patching is Pass B's job. */
+/* Chain pass (Pass A): patch each non-final stencil's chain-continue
+ * tail call(s) to branch into the next instance's native_start.
+ * Returns -1 on reloc error; caller frees insts/pc_offsets and tears
+ * down the region. */
+static int jit_chain_pass(jit_compile_ctx_t *ctx)
+{
+    unsigned char        *code      = ctx->code;
+    uintptr_t             code_base = ctx->code_base;
+    const inst_t         *insts     = ctx->insts;
+    size_t                n_inst    = ctx->n_inst;
     for (size_t i = 0; i + 1 < n_inst; i++) {
         if (insts[i].kind != INST_STENCIL_NONFINAL) continue;
         const stencil_desc_t *st = insts[i].st;
         uintptr_t next_addr      = code_base + insts[i + 1].native_start;
         int any                  = 0;
-        for (unsigned long r = 0; r < st->nrelocs; r++) {
+        for (size_t r = 0; r < st->nrelocs; r++) {
             unsigned int off  = st->relocs[r][0];
             unsigned int kind = st->relocs[r][1];
             unsigned int sym  = st->relocs[r][2];
-            if (sym >= st->nsymbols) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
-                return -1;
-            }
+            if (sym >= st->nsymbols) return -1;
             if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0
                 && strcmp(st->symbols[sym],
                           MINO_JIT_CHAIN_RET_MARKER_NAME) != 0) {
@@ -690,205 +671,171 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
             uintptr_t      insn_addr = code_base + insts[i].native_start + off;
             unsigned char *insn_p    = code + insts[i].native_start + off;
 #if defined(MINO_CPJIT_HOST_ARM64)
-            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
-                return -1;
-            }
+            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
             if (mino_jit_patch_b_unconditional((uint32_t *)insn_p, insn_addr,
-                                                next_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
-                return -1;
-            }
+                                                next_addr) != 0) return -1;
 #elif defined(MINO_CPJIT_HOST_X86_64)
-            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
-                return -1;
-            }
+            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) return -1;
             /* The musttail call landed as `e9 <rel32>` (5 bytes).
-             * The reloc offset points at the rel32 field; back up
-             * one byte to land on the opcode so patch_jmp32_to can
-             * rewrite the rel32 in place. */
-            if (mino_jit_patch_jmp32_to(insn_p - 1,
-                                          insn_addr - 1,
-                                          next_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
-                return -1;
-            }
+             * The reloc offset points at the rel32 field; back up one
+             * byte to land on the opcode. Guard against off==0, which
+             * would make insn_p-1 underrun the code buffer. */
+            if (off < 1) return -1;
+            if (mino_jit_patch_jmp32_to(insn_p - 1, insn_addr - 1,
+                                          next_addr) != 0) return -1;
 #endif
             any = 1;
         }
-        if (!any) {
-            free(insts);
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
-            return -1;
-        }
+        if (!any) return -1;
     }
+    return 0;
+}
 
-    /* Pass B: target patching for direct-emit branches. The bytecode
-     * dispatcher reads `code[pc++]` before adding the offset, so the
-     * target_pc is pc + 1 + sBx. Both JMP and JMPIFNOT instances
-     * resolve to a native address via pc_offsets. */
+/* Direct-emit pass (Pass B): resolve JMP / JMPIFNOT target addresses
+ * through the pc_offsets side table and patch each branch in place.
+ * Returns -1 on out-of-range target or patcher error; caller frees
+ * insts/pc_offsets and tears down the region. */
+static int jit_direct_emit_pass(jit_compile_ctx_t *ctx)
+{
+    unsigned char        *code              = ctx->code;
+    uintptr_t             code_base         = ctx->code_base;
+    const inst_t         *insts             = ctx->insts;
+    size_t                n_inst            = ctx->n_inst;
+    const mino_bc_fn_t   *bc               = ctx->bc;
+    size_t                effective_code_len = ctx->effective_code_len;
+    const unsigned       *pc_offsets        = ctx->pc_offsets;
     for (size_t i = 0; i < n_inst; i++) {
-        if (insts[i].kind != INST_JMP && insts[i].kind != INST_JMPIFNOT) {
+        if (insts[i].kind != INST_JMP && insts[i].kind != INST_JMPIFNOT)
             continue;
-        }
-        size_t      bc_pc      = insts[i].bc_pc;
-        mino_bc_insn_t ins     = bc->code[bc_pc];
-        long        target_pc  = (long)bc_pc + 1 + sBx_OF(ins);
-        /* Branches must land inside the compiled prefix. For a plain
-         * compile that's bc->code_len; for a compile-with-deopt the
-         * caller's prefix_has_escaping_branch already validated this,
-         * but the cap also stops mis-compiles cold on the unlikely
-         * path where the input bc is inconsistent. */
-        if (target_pc < 0 || (size_t)target_pc >= effective_code_len) {
-            free(insts);
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
-            return -1;
-        }
+        size_t         bc_pc     = insts[i].bc_pc;
+        mino_bc_insn_t ins       = bc->code[bc_pc];
+        ptrdiff_t      target_pc = (ptrdiff_t)bc_pc + 1 + sBx_OF(ins);
+        if (target_pc < 0 || (size_t)target_pc >= effective_code_len) return -1;
         uintptr_t target_addr = code_base + pc_offsets[target_pc];
         if (insts[i].kind == INST_JMP) {
             uintptr_t      insn_addr = code_base + insts[i].native_start;
             unsigned char *insn_p    = code + insts[i].native_start;
 #if defined(MINO_CPJIT_HOST_ARM64)
             if (mino_jit_patch_b_unconditional((uint32_t *)insn_p,
-                                                insn_addr, target_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
+                                                insn_addr, target_addr) != 0)
                 return -1;
-            }
 #elif defined(MINO_CPJIT_HOST_X86_64)
-            if (mino_jit_patch_jmp32_to(insn_p, insn_addr,
-                                         target_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
+            if (mino_jit_patch_jmp32_to(insn_p, insn_addr, target_addr) != 0)
                 return -1;
-            }
 #endif
         } else { /* INST_JMPIFNOT */
             unsigned char *base_p = code + insts[i].native_start;
             uintptr_t      base_a = code_base + insts[i].native_start;
 #if defined(MINO_CPJIT_HOST_ARM64)
-            /* Two conditional branches share the same target. The CBZ
-             * at offset +4 catches NULL; the B.LS at offset +16
-             * catches the (v - 2) <= 1 nil / false range. */
             uint32_t *cbz_p = (uint32_t *)(base_p + 4);
             uint32_t *bls_p = (uint32_t *)(base_p + 16);
             if (mino_jit_patch_imm19(cbz_p, base_a + 4,  target_addr) != 0
-             || mino_jit_patch_imm19(bls_p, base_a + 16, target_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
+             || mino_jit_patch_imm19(bls_p, base_a + 16, target_addr) != 0)
                 return -1;
-            }
 #elif defined(MINO_CPJIT_HOST_X86_64)
-            /* Two conditional branches share the same target. The JE
-             * at offset +10 catches NULL; the JBE at offset +24
-             * catches the (v - 2) <= 1 nil / false range. Both use
-             * a 6-byte `0f 8X <rel32>` encoding. */
             if (mino_jit_patch_jcc32_to(base_p + 10, base_a + 10,
                                          target_addr) != 0
              || mino_jit_patch_jcc32_to(base_p + 24, base_a + 24,
-                                         target_addr) != 0) {
-                free(insts);
-                free(pc_offsets);
-                jit_compile_cleanup(slab, region, total_size);
+                                         target_addr) != 0)
                 return -1;
-            }
 #endif
         }
     }
-    free(insts);
+    return 0;
+}
 
-    /* Flush the I-cache so the CPU sees the freshly written
-     * instructions. On ARM64 the data and instruction caches are
-     * coherent only after explicit maintenance; clang's builtin
-     * issues `dc cvau` + `dsb ish` + `ic ivau` + `dsb ish` + `isb`
-     * the way the architecture requires. The range is the slot for
-     * slab fns (so a slab past slot 0 doesn't clear past its page)
-     * and the whole region for mmap'd fns. */
+int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
+                            size_t deopt_at_pc)
+{
+    mino_bc_fn_t *bc = fn_val->as.fn.bc;
+    if (bc->code_len == 0) return -1;
+
+    jit_compile_ctx_t ctx;
+    ctx.bc                = bc;
+    ctx.is_deopt_compile  = (deopt_at_pc != (size_t)-1);
+    ctx.effective_code_len = ctx.is_deopt_compile ? deopt_at_pc : bc->code_len;
+    ctx.allow_fusion      = !bc_has_branches(bc);
+    ctx.deopt_at_pc       = deopt_at_pc;
+    ctx.deopt_st          = ctx.is_deopt_compile
+                            ? mino_jit_find_stencil(OP_DEOPT_TO_INTERP) : NULL;
+    if (ctx.is_deopt_compile && ctx.deopt_st == NULL) return -1;
+    ctx.safepoint_st = mino_jit_find_stencil(OP_SAFEPOINT_POLL);
+    if (ctx.safepoint_st == NULL) return -1;
+
+    if (jit_size_pass(&ctx) != 0) return -1;
+    if (jit_layout(S, &ctx)  != 0) return -1;
+
+    /* From here ctx.insts and ctx.pc_offsets are live; any failure
+     * path must free them and tear down the region. */
+#define JIT_FAIL do { \
+    free(ctx.insts); free(ctx.pc_offsets); \
+    jit_compile_cleanup(ctx.slab, ctx.region, ctx.total_size); \
+    return -1; \
+} while (0)
+
+    if (jit_emit_pass(&ctx)        != 0) { JIT_FAIL; }
+    if (jit_chain_pass(&ctx)       != 0) { JIT_FAIL; }
+    if (jit_direct_emit_pass(&ctx) != 0) { JIT_FAIL; }
+    free(ctx.insts);
+
+    /* Flush the I-cache so the CPU sees the freshly written instructions. */
     {
-        size_t flush_bytes = (slab != NULL) ? slot_size : total_size;
-        __builtin___clear_cache((char *)region,
-                                (char *)region + flush_bytes);
+        size_t flush_bytes = (ctx.slab != NULL) ? ctx.slot_size : ctx.total_size;
+#if defined(__GNUC__) || defined(__clang__)
+        __builtin___clear_cache((char *)ctx.region,
+                                (char *)ctx.region + flush_bytes);
+#elif defined(_WIN32)
+        FlushInstructionCache(GetCurrentProcess(), ctx.region, flush_bytes);
+#endif
     }
 
-    /* Re-seal the JIT memory. Slab path: mprotect the whole slab page
-     * back to RX (one syscall covers every slot in the page, so the
-     * cost amortises across compiles). Mmap path: mprotect the fn's
-     * dedicated page to RX. The literal pool is read-only at this
-     * point too -- the patcher already populated it. */
-    if (slab != NULL) {
-        if (jit_slab_make_rx(slab) != 0) {
-            free(pc_offsets);
+    /* Re-seal to RX. */
+    if (ctx.slab != NULL) {
+        if (jit_slab_make_rx(ctx.slab) != 0) {
+            free(ctx.pc_offsets);
             return -1;
         }
     } else {
-        if (jit_region_make_rx(region, total_size) != 0) {
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
+        if (jit_region_make_rx(ctx.region, ctx.total_size) != 0) {
+            free(ctx.pc_offsets);
+            jit_compile_cleanup(ctx.slab, ctx.region, ctx.total_size);
             return -1;
         }
     }
 
-    /* Mmap path: track the region for state-teardown munmap
-     * (region_track also takes ownership of pc_offsets via aux_ptr).
-     * Slab path: track only pc_offsets so state teardown frees it; the
-     * slab page itself is on S->jit_slabs. */
-    if (slab == NULL) {
-        if (region_track(S, region, total_size, pc_offsets) != 0) {
-            free(pc_offsets);
-            jit_compile_cleanup(slab, region, total_size);
+    /* Track the region and commit to bc. */
+    if (ctx.slab == NULL) {
+        if (region_track(S, ctx.region, ctx.total_size, ctx.pc_offsets) != 0) {
+            free(ctx.pc_offsets);
+            jit_compile_cleanup(ctx.slab, ctx.region, ctx.total_size);
             return -1;
         }
     } else {
-        if (region_track(S, NULL, 0, pc_offsets) != 0) {
-            free(pc_offsets);
+        if (region_track(S, NULL, 0, ctx.pc_offsets) != 0) {
+            free(ctx.pc_offsets);
             return -1;
         }
     }
 
-    if (slab != NULL) {
-        slab->bump_offset = slot_offset + slot_size;
-        slab->live_slots++;
+    if (ctx.slab != NULL) {
+        ctx.slab->bump_offset = ctx.slot_offset + ctx.slot_size;
+        ctx.slab->live_slots++;
     }
-    bc->native            = region;
-    bc->native_size       = (slab != NULL) ? slot_size : total_size;
+    bc->native            = ctx.region;
+    bc->native_size       = (ctx.slab != NULL) ? ctx.slot_size : ctx.total_size;
     bc->native_gen        = S->ns_vars.ic_gen;
-    bc->native_slab       = slab;
-    /* The offsets table is owned by the jit_regions node (mmap path)
-     * or the bc record itself (slab path; freed by mino_jit_invalidate).
-     * Pointing bc here to the fresh table is the visible-to-runtime
-     * atomic. */
-    bc->native_pc_offsets = pc_offsets;
-    /* Instrumentation: record the code-stream size (no tramp / pool /
-     * slack) and the dead-byte slack at the end of the region. The
-     * slack is the per-slot intra-alignment padding for slab fns and
-     * the page-rounding waste for mmap'd fns. */
+    bc->native_slab       = ctx.slab;
+    bc->native_pc_offsets = ctx.pc_offsets;
     {
-        size_t used  = pos + tramp_pos + pool_pos;
-        size_t total = (slab != NULL) ? slot_size : total_size;
-        bc->jit_code_bytes        = (pos > UINT32_MAX) ? UINT32_MAX
-                                                       : (uint32_t)pos;
-        bc->jit_code_region_dead  = (total > used)
+        size_t used  = ctx.pos + ctx.tramp_pos + ctx.pool_pos;
+        size_t total = (ctx.slab != NULL) ? ctx.slot_size : ctx.total_size;
+        bc->jit_code_bytes = (ctx.pos > UINT32_MAX) ? UINT32_MAX
+                                                     : (uint32_t)ctx.pos;
+        bc->jit_code_region_dead = (total > used)
             ? ((total - used > UINT32_MAX) ? UINT32_MAX
                                             : (uint32_t)(total - used))
             : 0u;
     }
-    /* Optional diagnostic: emit a stderr line on each compile when
-     * `MINO_CPJIT_TRACE` is set in the environment. The check fires
-     * once per compile, off the hot path. */
     {
         const char *trace = getenv("MINO_CPJIT_TRACE");
         if (trace != NULL && trace[0] != '\0' && trace[0] != '0') {
@@ -896,17 +843,18 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                     "[cpjit] compiled bc (code_len=%zu, region=%p, "
                     "total_size=%zu, code_used=%zu, tramp_used=%zu, "
                     "pool_used=%zu)\n",
-                    bc->code_len, region, total_size, pos,
-                    tramp_pos, pool_pos);
+                    bc->code_len, ctx.region, ctx.total_size, ctx.pos,
+                    ctx.tramp_pos, ctx.pool_pos);
             if (trace[0] == '2') {
-                for (size_t i = 0; i < pos; i += 4) {
+                for (size_t i = 0; i < ctx.pos; i += 4) {
                     uint32_t insn;
-                    memcpy(&insn, (unsigned char *)region + i, 4);
+                    memcpy(&insn, (unsigned char *)ctx.region + i, 4);
                     fprintf(stderr, "  %04zx: %08x\n", i, insn);
                 }
             }
         }
     }
+#undef JIT_FAIL
     return 0;
 }
 
