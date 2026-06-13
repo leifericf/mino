@@ -141,6 +141,9 @@ void gc_range_merge_pending(mino_state *S)
     qsort(S->gc.ranges_pending, K, sizeof(*S->gc.ranges_pending), gc_range_cmp);
 
     N = S->gc.ranges_len;
+    if (K > SIZE_MAX - N) {
+        abort(); /* Class I: overflow computing merge need */
+    }
     need = N + K;
     if (need > S->gc.ranges_cap) {
         size_t      new_cap;
@@ -152,7 +155,13 @@ void gc_range_merge_pending(mino_state *S)
         nr      = (gc_range_t *)realloc(
             S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            abort(); /* Class I: inside GC; no safe recovery path */
+            /* Class I: realloc failure inside a GC-depth-incremented
+             * section; unwinding is not safe because partially-merged
+             * range state would leave gc_ranges inconsistent.  Known
+             * limitation: pre-allocating the range index before
+             * incrementing gc_depth would allow a safe OOM return, but
+             * that requires restructuring the caller. */
+            abort();
         }
         S->gc.ranges     = nr;
         S->gc.ranges_cap = new_cap;
