@@ -173,8 +173,34 @@ jobs:
         # dev pre-commit step; CI correctness is gated by the test
         # suite + ASan + 4-way parity, which catch the actual
         # runtime impact of a stale stencil regardless of compiler.
+        #
+        # Watchdog wrapper (mirrors the Test step). The gate spawns
+        # several mino subprocesses -- the ASan suite and the 4-way
+        # parity binaries -- so a stall here otherwise runs to GHA's
+        # diagnostic-free SIGKILL with no stack. The arm64 runner has
+        # stalled in this step intermittently. We background the gate,
+        # sleep to just under the cap, then SIGABRT every live mino;
+        # mino's crash_handler (main.c) dumps a backtrace + GC stats per
+        # process on SIGABRT, so the next stall leaves a readable stack
+        # in the log instead of a silent wait. pkill matches mino,
+        # mino_asan, and the parity binaries by name, so whichever
+        # process is hung dumps. SIGABRT makes mino exit 134, failing
+        # the step normally.
         if: matrix.os != 'windows-2022'
-        run: ./mino task release-gate
+        run: |
+          set +e
+          ./mino task release-gate &
+          GATE_PID=$!
+          (sleep 660; if kill -0 $GATE_PID 2>/dev/null; then
+             echo "##[warning]Watchdog: release-gate exceeded 11m; SIGABRT mino for a backtrace"
+             pkill -ABRT mino 2>/dev/null
+           fi) &
+          WD_PID=$!
+          wait $GATE_PID
+          RC=$?
+          sleep 2
+          kill $WD_PID 2>/dev/null || true
+          exit $RC
         timeout-minutes: 12
 
   # Stencil determinism, re-armed.
