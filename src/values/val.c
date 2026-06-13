@@ -230,7 +230,11 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
         }
     }
 
-    /* Bootstrap: build hash table on first call. */
+    /* Defer bucket allocation until first lookup: state startup may
+     * bulk-load entries[] directly (GC mark arrays, primitive tables)
+     * before any intern call, so paying for the bucket malloc at
+     * init_table time would waste memory on tables that are never
+     * queried. */
     if (tbl->ht_buckets == NULL) {
         size_t init_cap = INTERN_HT_INIT;
         while (init_cap < tbl->len * 2) init_cap *= 2;
@@ -326,7 +330,9 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
     }
     tbl->len++;
 
-    /* Rehash if load exceeds threshold. */
+    /* Keep average probe chain short: once load passes INTERN_HT_LOAD%
+     * the expected probe count climbs quadratically, so doubling early
+     * preserves O(1) amortized lookup. */
     if (tbl->len * 100 > tbl->ht_cap * INTERN_HT_LOAD) {
         if (tbl->ht_cap <= SIZE_MAX / 2) {
             intern_ht_rebuild(tbl, tbl->ht_cap * 2);
@@ -1329,16 +1335,6 @@ static int eq_child(mino_state *S, eq_stack_t *st,
     return S != NULL ? eq_step_force(S, a, b, st) : eq_step(a, b, st);
 }
 
-/*
- * Compare two sequential values element-by-element (non-forcing version).
- * Handles cons lists, vectors, nil, and realized lazy seqs.
- * Returns 1 if they contain the same elements in the same order.
- */
-/* Per-side step state for eq_seq_like / eq_seq_like_force.
- * For chunked-cons, ia is the offset within the current chunk: the
- * next element is at chunk.vals[ia], and ia transitions to .more once
- * ia == chunk.len. */
-
 /* Extract the current element from a sequential cursor (c, i).
  * Precondition: caller has verified the cursor is not at end-of-seq.
  * Shared between eq_seq_like and eq_seq_like_force so the extraction
@@ -1372,6 +1368,13 @@ static void eq_seq_step(const mino_val **cur, size_t *idx)
     (*idx)++;
 }
 
+/*
+ * Compare two sequential values element-by-element (non-forcing version).
+ * Handles cons lists, vectors, nil, and realized lazy seqs.
+ * Returns 1 if they contain the same elements in the same order.
+ * Per-side step state: ia/ib is the offset within the current chunked-cons
+ * chunk; transitions to .more once ia == chunk.len.
+ */
 static int eq_seq_like(const mino_val *a, const mino_val *b,
                        eq_stack_t *st)
 {
@@ -1603,6 +1606,10 @@ static int eq_set_same_type(const mino_val *a, const mino_val *b)
     return 1;
 }
 
+/* qa-arch NOTE: eq_step is intentionally kept as one function (~230 lines).
+ * Every case shares the lazy-unwrap preamble and the same worklist (st);
+ * splitting by type would duplicate that preamble or require a second
+ * dispatch layer with no gain in readability. */
 static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
 {
     if (a == b) {
