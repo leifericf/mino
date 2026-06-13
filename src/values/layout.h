@@ -80,6 +80,8 @@ struct mino_bc_fn;            /* compiled-fn record */
     ((mino_val *)((uintptr_t)((uint64_t)(long long)(n) << MINO_TAG_BITS) \
                     | MINO_TAG_INT))
 
+/* C99 impl-defined: arithmetic right shift assumed on all supported targets
+ * (clang/gcc/msvc x86_64+arm64); see ADR TBD */
 #define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
 
 #define MINO_IS_BOOL(v) (MINO_TAG(v) == MINO_TAG_BOOL)

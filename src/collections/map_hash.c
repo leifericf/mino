@@ -181,6 +181,9 @@ static uint32_t rb_xor_fold_entries(const mino_rb_node_t *n, int include_val)
  */
 uint32_t hash_val(const mino_val *v)
 {
+    /* Deviation from JVM Clojure: (hash x) uses FNV-1a internally; JVM
+     * uses Murmur3/hasheq.  The equal-implies-equal-hash invariant holds
+     * within mino but hash values are not JVM-compatible. */
     uint32_t h = 2166136261u;   /* FNV-1a offset basis */
     if (v == NULL || mino_type_of(v) == MINO_NIL) {
         return fnv_mix(h, 0x01);
@@ -198,12 +201,19 @@ uint32_t hash_val(const mino_val *v)
         return hash_long_long_bytes(h, mino_val_int_get(v));
     case MINO_FLOAT:
     case MINO_FLOAT32: {
-        double    d  = v->as.f;
-        long long ll = (long long)d;
-        if ((double)ll == d) {
-            /* Same tag as MINO_INT so (= 1 1.0) matches in hash too. */
-            h = fnv_mix(h, 0x03);
-            return hash_long_long_bytes(h, ll);
+        double d = v->as.f;
+        /* Guard the (long long) cast: NaN and infinity have no finite
+         * long-long representation; casting them is undefined behaviour
+         * in C99 (6.3.1.4p1).  Both are non-finite so they can never
+         * round-trip through an integer comparison; fall through to the
+         * raw-bytes path instead. */
+        if (!isnan(d) && !isinf(d)) {
+            long long ll = (long long)d;
+            if ((double)ll == d) {
+                /* Same tag as MINO_INT so (= 1 1.0) matches in hash too. */
+                h = fnv_mix(h, 0x03);
+                return hash_long_long_bytes(h, ll);
+            }
         }
         h = fnv_mix(h, 0x04);
         {
