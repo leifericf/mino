@@ -700,17 +700,6 @@ static unsigned char classify_callable_kind(mino_val *v,
     return MINO_IC_CALLABLE_OTHER;
 }
 
-/* Shared resolve path for the two GLOBAL-kind IC consumers
- * (OP_GETGLOBAL_CACHED and OP_CALL_CACHED). Mirrors eval_symbol's
- * shadowing order: dynamic binding -> lexical env -> cached var ->
- * resolve. The cached lookup is gated on !dyn_active so a live
- * `(binding [*x* ...] ...)` doesn't mask the dyn value with a stale
- * cached var root. Returns the resolved value on hit, NULL on
- * failure (the caller surfaces the error via bc_done).
- *
- * On a fresh resolve the slot is refilled under a write barrier so
- * the slot array, which may be OLD after a minor cycle, keeps a
- * correct remset entry for the freshly resolved YOUNG value. */
 /* Env-gated lazy alloc of the per-IC-site stat buffer. Returns the
  * slot's triple, or NULL if MINO_JIT_IC_STATS is not set. Process-
  * global tri-state so the env probe runs once. */
@@ -746,6 +735,17 @@ static mino_bc_ic_stat_t *ic_stat_for(mino_state *S,
     return &bc->ic_stats[slot_idx];
 }
 
+/* Shared resolve path for the two GLOBAL-kind IC consumers
+ * (OP_GETGLOBAL_CACHED and OP_CALL_CACHED). Mirrors eval_symbol's
+ * shadowing order: dynamic binding -> lexical env -> cached var ->
+ * resolve. The cached lookup is gated on !dyn_active so a live
+ * `(binding [*x* ...] ...)` doesn't mask the dyn value with a stale
+ * cached var root. Returns the resolved value on hit, NULL on
+ * failure (the caller surfaces the error via bc_done).
+ *
+ * On a fresh resolve the slot is refilled under a write barrier so
+ * the slot array, which may be OLD after a minor cycle, keeps a
+ * correct remset entry for the freshly resolved YOUNG value. */
 static mino_val *ic_resolve_global(mino_state *S,
                                       const mino_bc_fn_t *bc,
                                       mino_bc_ic_slot_t *slot,
@@ -2515,7 +2515,6 @@ dispatch_done:
     *retval_out = retval;
     return ok;
 }
-
 
 /* Stack-guarded entry: every bc-executed (and JIT-executed) call frame
  * passes through here, so runaway non-tail recursion raises the MLM004

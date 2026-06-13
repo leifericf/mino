@@ -300,13 +300,13 @@ static int reserve_ic_slot(compiler_t *c)
             grown[i].kind                 = MINO_BC_IC_GLOBAL;
             grown[i].cached_callable_kind = MINO_IC_CALLABLE_NONE;
             grown[i].cached_fn_has_rest   = 0;
-            grown[i]._pad_ic0             = 0;
+            grown[i].pad_ic0             = 0;
             grown[i].atom                 = NULL;
             grown[i].cached_map           = NULL;
             grown[i].cached_type          = NULL;
             grown[i].cached_fn_n_params   = 0;
-            grown[i]._pad_ic1             = 0;
-            grown[i]._pad_ic2             = 0;
+            grown[i].pad_ic1             = 0;
+            grown[i].pad_ic2             = 0;
             grown[i].cached_bc            = NULL;
         }
         gc_write_barrier(c->S, c->bc, c->bc->ic_slots, grown);
@@ -320,13 +320,13 @@ static int reserve_ic_slot(compiler_t *c)
     c->bc->ic_slots[idx].kind                 = MINO_BC_IC_GLOBAL;
     c->bc->ic_slots[idx].cached_callable_kind = MINO_IC_CALLABLE_NONE;
     c->bc->ic_slots[idx].cached_fn_has_rest   = 0;
-    c->bc->ic_slots[idx]._pad_ic0             = 0;
+    c->bc->ic_slots[idx].pad_ic0             = 0;
     c->bc->ic_slots[idx].atom                 = NULL;
     c->bc->ic_slots[idx].cached_map           = NULL;
     c->bc->ic_slots[idx].cached_type          = NULL;
     c->bc->ic_slots[idx].cached_fn_n_params   = 0;
-    c->bc->ic_slots[idx]._pad_ic1             = 0;
-    c->bc->ic_slots[idx]._pad_ic2             = 0;
+    c->bc->ic_slots[idx].pad_ic1             = 0;
+    c->bc->ic_slots[idx].pad_ic2             = 0;
     c->bc->ic_slots[idx].cached_bc            = NULL;
     return idx;
 }

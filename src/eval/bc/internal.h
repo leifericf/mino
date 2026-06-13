@@ -373,14 +373,14 @@ typedef struct mino_bc_ic_slot {
      * the slot hasn't seen a callable yet or kind == PROTOCOL. */
     unsigned char cached_callable_kind;
     unsigned char cached_fn_has_rest;
-    unsigned char _pad_ic0;
+    unsigned char pad_ic0;
     /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
     mino_val   *atom;
     mino_val   *cached_map;
     mino_val   *cached_type;
     unsigned short cached_fn_n_params;
-    unsigned short _pad_ic1;
-    unsigned       _pad_ic2;
+    unsigned short pad_ic1;
+    unsigned       pad_ic2;
     /* MINO_FN_BC_SINGLE-only: the cached fn's bc pointer at fill
      * time. Lets the JIT call-cached stencil hand bc directly to a
      * streamlined invoker that skips invoke_bc_fn_argv's
