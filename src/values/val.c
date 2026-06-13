@@ -153,6 +153,7 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
     /* Reject a new_ht_cap that wrapped (caller overflow) or shrank
      * below the current capacity — either would produce a broken table. */
     if (new_ht_cap <= tbl->ht_cap) return;
+    if (new_ht_cap > SIZE_MAX / sizeof(*buckets)) return; /* overflow guard */
     mask = new_ht_cap - 1;
     buckets = (size_t *)malloc(new_ht_cap * sizeof(*buckets));
     if (buckets == NULL) return;  /* caller handles gracefully */
@@ -558,7 +559,11 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
         if (len > 0) {
             vals = (mino_val **)malloc(len * sizeof(*vals));
             if (vals == NULL) return NULL;
+            /* vals[] is malloc-owned and not a GC root; suppress collection
+             * while accumulating elements so alloc_val cannot sweep them. */
+            mino_current_ctx(S)->gc_depth++;
             for (i = 0; i < len; i++) vals[i] = vec_nth(coll, i);
+            mino_current_ctx(S)->gc_depth--;
         }
         v = alloc_val(S, MINO_HOST_ARRAY);
         if (v == NULL) { free(vals); return NULL; }
@@ -586,9 +591,15 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
             }
             while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
             if (len >= cap) {
-                size_t ncap = cap == 0 ? 8 : cap * 2;
-                mino_val **nvals = (mino_val **)realloc(vals,
-                    ncap * sizeof(*nvals));
+                size_t ncap;
+                mino_val **nvals;
+                if (cap == 0) {
+                    ncap = 8;
+                } else {
+                    if (cap > SIZE_MAX / 2) { gc_unpin(1); free(vals); return NULL; }
+                    ncap = cap * 2;
+                }
+                nvals = (mino_val **)realloc(vals, ncap * sizeof(*nvals));
                 if (nvals == NULL) { gc_unpin(1); free(vals); return NULL; }
                 vals = nvals;
                 cap  = ncap;
@@ -1269,16 +1280,26 @@ static int eq_seq_like(const mino_val *a, const mino_val *b,
 /* In-order walk comparing each sorted-map entry against the HAMT map.
  * Walking the tree needs no comparator, so maps built with
  * sorted-map-by still compare content-wise (equality ignores the
- * comparator; only content matters). */
-static int rb_entries_subset_of_map(const mino_rb_node_t *n,
-                                    const mino_val *hmap)
+ * comparator; only content matters).
+ * depth guards against C-stack exhaustion on adversarially deep trees;
+ * exceeding the limit returns 0 (not-equal). */
+#define RB_WALK_DEPTH_LIMIT 1000
+static int rb_entries_subset_of_map_depth(const mino_rb_node_t *n,
+                                          const mino_val *hmap,
+                                          int depth)
 {
     mino_val *hv;
     if (n == NULL) return 1;
-    if (!rb_entries_subset_of_map(n->left, hmap)) return 0;
+    if (depth >= RB_WALK_DEPTH_LIMIT) return 0;
+    if (!rb_entries_subset_of_map_depth(n->left,  hmap, depth + 1)) return 0;
     hv = map_get_val(hmap, n->key);
     if (hv == NULL || !mino_eq(hv, n->val)) return 0;
-    return rb_entries_subset_of_map(n->right, hmap);
+    return rb_entries_subset_of_map_depth(n->right, hmap, depth + 1);
+}
+static int rb_entries_subset_of_map(const mino_rb_node_t *n,
+                                    const mino_val *hmap)
+{
+    return rb_entries_subset_of_map_depth(n, hmap, 0);
 }
 
 static int eq_map_like_cross(const mino_val *a, const mino_val *b)
@@ -1296,14 +1317,21 @@ static int eq_map_like_cross(const mino_val *a, const mino_val *b)
 /*
  * Cross-type set equality: compare MINO_SET with MINO_SORTED_SET.
  */
+static int rb_elems_subset_of_set_depth(const mino_rb_node_t *n,
+                                        const mino_val *hset,
+                                        int depth)
+{
+    if (n == NULL) return 1;
+    if (depth >= RB_WALK_DEPTH_LIMIT) return 0;
+    if (!rb_elems_subset_of_set_depth(n->left,  hset, depth + 1)) return 0;
+    if (hamt_get(hset->as.set.root, n->key,
+                 hash_val(n->key), 0u) == NULL) return 0;
+    return rb_elems_subset_of_set_depth(n->right, hset, depth + 1);
+}
 static int rb_elems_subset_of_set(const mino_rb_node_t *n,
                                   const mino_val *hset)
 {
-    if (n == NULL) return 1;
-    if (!rb_elems_subset_of_set(n->left, hset)) return 0;
-    if (hamt_get(hset->as.set.root, n->key,
-                 hash_val(n->key), 0u) == NULL) return 0;
-    return rb_elems_subset_of_set(n->right, hset);
+    return rb_elems_subset_of_set_depth(n, hset, 0);
 }
 
 static int eq_set_like_cross(const mino_val *a, const mino_val *b)
