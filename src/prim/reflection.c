@@ -553,32 +553,41 @@ static int is_pos_f(double   x)  { return x > 0.0; }
 static int is_neg_i(long long n)  { return n < 0; }
 static int is_neg_f(double   x)  { return x < 0.0; }
 
-mino_val *prim_zero_p(mino_state *S, mino_val *args, mino_env *env) {
-    (void)env; return num_pred(S, args, "zero?", is_zero_i, is_zero_f);
+mino_val *prim_zero_p(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    return num_pred(S, args, "zero?", is_zero_i, is_zero_f);
 }
-mino_val *prim_pos_p(mino_state *S, mino_val *args, mino_env *env) {
-    (void)env; return num_pred(S, args, "pos?", is_pos_i, is_pos_f);
+mino_val *prim_pos_p(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    return num_pred(S, args, "pos?", is_pos_i, is_pos_f);
 }
-mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env) {
-    (void)env; return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
+mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
 }
 
 static mino_val *prim_zero_p_argv(mino_state *S, mino_val **argv, int argc,
-                             mino_env *env) {
+                             mino_env *env)
+{
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "zero? requires one argument");
     return num_pred_step(S, argv[0], "zero?", is_zero_i, is_zero_f);
 }
 static mino_val *prim_pos_p_argv(mino_state *S, mino_val **argv, int argc,
-                            mino_env *env) {
+                            mino_env *env)
+{
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "pos? requires one argument");
     return num_pred_step(S, argv[0], "pos?", is_pos_i, is_pos_f);
 }
 static mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
-                            mino_env *env) {
+                            mino_env *env)
+{
     (void)env;
     if (argc != 1) return prim_throw_classified(
         S, "eval/arity", "MAR001", "neg? requires one argument");
@@ -716,10 +725,14 @@ static mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
          * Equality on symbols is by string content (see mino_eq), so
          * downstream comparisons still behave correctly. */
         {
-            char       *data = dup_n(S, buf, total_len);
-            mino_val *v    = alloc_val(S, MINO_SYMBOL);
+            char     *data;
+            mino_val *v;
+            mino_current_ctx(S)->gc_depth++;
+            data         = dup_n(S, buf, total_len);
+            v            = alloc_val(S, MINO_SYMBOL);
             v->as.s.data = data;
             v->as.s.len  = total_len;
+            mino_current_ctx(S)->gc_depth--;
             return v;
         }
     }
