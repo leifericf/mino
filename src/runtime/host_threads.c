@@ -566,7 +566,9 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
      * `(future ...)` sees the binding context active at spawn time --
      * matching Clojure JVM's binding-conveyance contract that
      * `bound-fn`, `binding`, and `*ns*` rely on across threads. */
+    gc_pin(fut);
     impl->dyn_snapshot = mino_snapshot_thread_bindings(S);
+    gc_unpin(1);
 
     /* Pool path: the embedder hands us a host pool and we just submit
      * the work item. impl->thread_started stays 0 so the sweep + quiesce

@@ -183,8 +183,8 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
             gc_pin(vals[n]); npin++;
             n++;
         }
-        gc_unpin(npin); /* all keys[] and vals[] entries */
         mino_val *ex = mino_map(S, keys, vals, n);
+        gc_unpin(npin); /* safe: mino_map internalized the pointers */
         (void)note;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);

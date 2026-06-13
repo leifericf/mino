@@ -356,10 +356,12 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
             mino_val *fn  = map_get_val(watches, key);
             mino_val *wargs;
             if (fn == NULL) continue;
-            wargs = mino_cons(S, key,
-                      mino_cons(S, var,
-                        mino_cons(S, old_val,
-                          mino_cons(S, val, mino_nil(S)))));
+            {
+                mino_val *tmp = mino_cons(S, val, mino_nil(S)); gc_pin(tmp);
+                tmp = mino_cons(S, old_val, tmp);               gc_unpin(1); gc_pin(tmp);
+                tmp = mino_cons(S, var, tmp);                   gc_unpin(1); gc_pin(tmp);
+                wargs = mino_cons(S, key, tmp);                 gc_unpin(1);
+            }
             if (mino_call(S, fn, wargs, env) == NULL) { gc_unpin(3); return; }
         }
     }
