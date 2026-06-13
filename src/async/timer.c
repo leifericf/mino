@@ -31,6 +31,7 @@ static double now_ms(void)
     gettimeofday(&tv, NULL);
     return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
 #else
+#  warning "now_ms: unrecognised POSIX target; falling back to 1-second resolution time(). Add a high-resolution clock branch for this platform."
     /* Fallback: ANSI C time() gives seconds resolution. */
     return (double)time(NULL) * 1000.0;
 #endif

@@ -4,11 +4,6 @@
  * See async/chan.h for the design overview. Each operation mutates the
  * channel's impl struct directly; pending callbacks are routed through
  * the async scheduler (the same FIFO drain that go-blocks ride on).
- *
- * TODO(size): This TU is approaching the 1100-LOC qa-arch gate (~861 lines
- * as of last count). Adding new channel operations or buffer kinds may push
- * it over. Consider splitting the alts logic (mino_chan_take_alts /
- * mino_chan_put_alts) into a separate chan_alts.c if the file grows further.
  */
 
 #include "async/chan.h"
@@ -189,6 +184,12 @@ mino_val *mino_chan_new(mino_state *S, int buf_kind, size_t buf_capacity,
             /* Treat 0-capacity buffered as unbuffered. */
             impl->buf_kind = CHAN_BUF_NONE;
         } else {
+            /* Guard against buf_capacity * sizeof(mino_val*) overflow. */
+            if (buf_capacity > SIZE_MAX / sizeof(mino_val *)) {
+                free(impl);
+                gc_oom_throw(S, "chan buffer capacity overflow");
+                return NULL;
+            }
             impl->buf = (mino_val **)calloc(buf_capacity, sizeof(*impl->buf));
             if (impl->buf == NULL) {
                 free(impl);
@@ -197,7 +198,15 @@ mino_val *mino_chan_new(mino_state *S, int buf_kind, size_t buf_capacity,
             impl->buf_capacity = buf_capacity;
         }
     }
+    /* Pin xform and ex_handler: they are GC-owned values stored into
+     * malloc-owned impl, which is not yet reachable from the GC graph.
+     * alloc_val below may trigger a collection; without pinning the GC
+     * would not trace through impl and could collect them. */
+    if (xform      != NULL) gc_pin(xform);
+    if (ex_handler != NULL) gc_pin(ex_handler);
     v = alloc_val(S, MINO_CHAN);
+    if (xform      != NULL) gc_unpin(1);
+    if (ex_handler != NULL) gc_unpin(1);
     if (v == NULL) {
         free(impl->buf);
         free(impl);
@@ -285,6 +294,12 @@ static void schedule_alts_pair(mino_state *S, mino_val *cb,
     items[0] = (val == NULL) ? mino_nil(S) : val;
     items[1] = ch;
     pair = mino_vector(S, items, 2);
+    /* If mino_vector returns NULL (OOM), do not enqueue a NULL pair that
+     * would fire alts callbacks with nil instead of [val ch]. */
+    if (pair == NULL) {
+        gc_oom_throw(S, "schedule_alts_pair: vector allocation failed");
+        return;
+    }
     async_sched_enqueue(S, cb, pair);
 }
 
