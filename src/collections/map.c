@@ -100,7 +100,10 @@ static mino_hamt_node_t *merge_entries(mino_state *S, hamt_entry_t *e1, uint32_t
         if (i1 == i2) {
             mino_hamt_node_t *child = merge_entries(S, e1, h1, e2, h2,
                                                      shift + HAMT_B);
-            void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+            void **slots;
+            gc_pin((mino_val *)child);
+            slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+            gc_unpin(1);
             if (slots == NULL) { return NULL; }
             slots[0] = child;
             return hamt_bitmap_node(S, 1u << i1, 1u << i1, slots);
@@ -168,7 +171,10 @@ mino_hamt_node_t *hamt_assoc(mino_state *S, const mino_hamt_node_t *n,
                 /* Deeper shared prefix: descend. */
                 mino_hamt_node_t *sub   = hamt_assoc(S, n, new_entry, h,
                                                       shift + HAMT_B, replaced);
-                void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+                void            **slots;
+                gc_pin((mino_val *)sub);
+                slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+                gc_unpin(1);
                 if (slots == NULL) { return NULL; }
                 slots[0] = sub;
                 return hamt_bitmap_node(S, 1u << ib, 1u << ib, slots);
@@ -208,8 +214,11 @@ mino_hamt_node_t *hamt_assoc(mino_state *S, const mino_hamt_node_t *n,
             mino_hamt_node_t *new_child = hamt_assoc(S,
                 (const mino_hamt_node_t *)n->slots[phys], new_entry, h,
                 shift + HAMT_B, replaced);
-            void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
+            void **slots;
             unsigned k;
+            gc_pin((mino_val *)new_child);
+            slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
+            gc_unpin(1);
             if (slots == NULL) { return NULL; }
             for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
             slots[phys] = new_child;
@@ -232,8 +241,11 @@ mino_hamt_node_t *hamt_assoc(mino_state *S, const mino_hamt_node_t *n,
                 mino_hamt_node_t *sub  = merge_entries(S, existing, eh,
                                                         new_entry, h,
                                                         shift + HAMT_B);
-                void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
+                void            **slots;
                 unsigned k;
+                gc_pin((mino_val *)sub);
+                slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
+                gc_unpin(1);
                 if (slots == NULL) { return NULL; }
                 for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
                 slots[phys] = sub;

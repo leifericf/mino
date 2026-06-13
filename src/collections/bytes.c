@@ -154,15 +154,17 @@ mino_val *mino_bytes_seq(mino_state *S, const mino_val *v)
     n_chunks = (total + 31u) / 32u;
     chunks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
         n_chunks * sizeof(*chunks));
+    gc_pin((mino_val *)v);
+    gc_pin((mino_val *)chunks);
     for (c = 0; c < n_chunks; c++) {
         size_t base = c * 32u;
         unsigned cap = (unsigned)(total - base < 32u ? total - base : 32u);
         mino_val *buf = mino_chunk_buffer(S, cap);
-        if (buf == NULL) return NULL;
+        if (buf == NULL) { gc_unpin(2); return NULL; }
         for (i = 0; i < cap; i++) {
             mino_val *iv = mino_int(S,
                 (long long)(unsigned)v->as.bytes.data[base + i]);
-            if (!mino_chunk_append(buf, iv)) return NULL;
+            if (!mino_chunk_append(buf, iv)) { gc_unpin(2); return NULL; }
         }
         mino_chunk_seal(buf);
         gc_valarr_set(S, chunks, c, buf);
@@ -170,7 +172,8 @@ mino_val *mino_bytes_seq(mino_state *S, const mino_val *v)
     more = mino_nil(S);
     for (c = n_chunks; c-- > 0; ) {
         more = mino_chunked_cons(S, chunks[c], more);
-        if (more == NULL) return NULL;
+        if (more == NULL) { gc_unpin(2); return NULL; }
     }
+    gc_unpin(2);
     return more;
 }

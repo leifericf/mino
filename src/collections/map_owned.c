@@ -70,8 +70,10 @@ static mino_hamt_node_t *hnode_ensure_owned(mino_state *S,
         n->collision_hash  = node->collision_hash;
         n->collision_count = node->collision_count;
         if (slot_count > 0) {
+            gc_pin((mino_val *)n);
             slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
                                              slot_count * sizeof(*slots));
+            gc_unpin(1);
             if (slots == NULL) return NULL;
             for (k = 0; k < slot_count; k++) slots[k] = node->slots[k];
             n->slots = slots;
@@ -150,7 +152,9 @@ mino_hamt_node_t *hamt_assoc_owned(mino_state *S, mino_hamt_node_t *n,
                 void            **slots = hnode_slots_grow(S, n->slots, cc, cc + 1u);
                 if (slots == NULL) return NULL;
                 slots[cc] = new_entry;
+                gc_pin((mino_val *)slots);
                 ed = hnode_ensure_owned(S, n, 0u, owner);
+                gc_unpin(1);
                 if (ed == NULL) return NULL;
                 hnode_slots_install(S, ed, slots);
                 ed->collision_count = cc + 1u;

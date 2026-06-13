@@ -42,8 +42,10 @@ void mino_vector_builder_push(mino_vec_builder *b, mino_val *v)
     cur  = mino_deref(b->ref);
     next = mino_conj_bang(b->S, cur, v);
     if (next != NULL && next != cur) {
+        mino_ref *new_ref = mino_ref_new(b->S, next);
+        if (new_ref == NULL) return;
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref_new(b->S, next);
+        b->ref = new_ref;
     }
 }
 
@@ -78,8 +80,10 @@ void mino_map_builder_put(mino_map_builder *b, mino_val *k, mino_val *v)
     cur  = mino_deref(b->ref);
     next = mino_assoc_bang(b->S, cur, k, v);
     if (next != NULL && next != cur) {
+        mino_ref *new_ref = mino_ref_new(b->S, next);
+        if (new_ref == NULL) return;
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref_new(b->S, next);
+        b->ref = new_ref;
     }
 }
 
@@ -114,8 +118,10 @@ void mino_set_builder_add(mino_set_builder *b, mino_val *v)
     cur  = mino_deref(b->ref);
     next = mino_conj_bang(b->S, cur, v);
     if (next != NULL && next != cur) {
+        mino_ref *new_ref = mino_ref_new(b->S, next);
+        if (new_ref == NULL) return;
         mino_unref(b->S, b->ref);
-        b->ref = mino_ref_new(b->S, next);
+        b->ref = new_ref;
     }
 }
 
