@@ -200,10 +200,19 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
     struct gc_mark_save_ctx ctx;
     size_t   i, n;
     int      saved_phase = S->gc.phase;
-    assert(mino_current_ctx(S)->gc_depth > 0);
     size_t   saved_floor = S->gc.mark_stack_len;
     int      pass1, pass2;
     size_t   saved_ranges_valid = S->gc.ranges_valid;
+
+    /* Guard: increment gc_depth for the duration of classification so
+     * that any allocation triggered by gc_mark_roots (or transitively
+     * by gc_build_range_index) does not re-enter the collector while
+     * we are mutating phase and mark bits.  The increment is
+     * unconditional: callers already inside a collection have depth
+     * >= 1 and this extra increment is harmless; callers at depth 0
+     * (e.g., a post-abort debug helper) would otherwise allow an
+     * alloc-triggered minor to run and corrupt the temporary state. */
+    mino_current_ctx(S)->gc_depth++;
 
     /* Build a fresh range index so gc_find_header_for_ptr works, then
      * freeze it for the duration of classification. */
@@ -219,6 +228,7 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
     if (ctx.hdrs == NULL || ctx.marks == NULL) {
         free(ctx.hdrs);
         free(ctx.marks);
+        mino_current_ctx(S)->gc_depth--;
         fprintf(stderr, "[gc-classify] oom allocating mark-save buffer\n");
         return -1;
     }
@@ -227,10 +237,16 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
      * mark as it copies it. */
     gc_for_each_hdr(S, gc_save_mark_fn, &ctx);
 
-    /* Flip phase to MAJOR_MARK so gc_mark_push won't filter OLD out of
-     * the frontier (otherwise pass 1 would be minor-scope and never
-     * mark the OLD offender even if it is genuinely reachable). */
-    S->gc.phase = GC_PHASE_MAJOR_MARK;
+    /* Use GC_PHASE_IDLE for both passes.  This satisfies two constraints:
+     * (1) gc_mark_push's OLD filter fires only for GC_PHASE_MINOR, so
+     *     OLD headers are not filtered out of the mark frontier -- the
+     *     offender (an OLD header) will be reached if it is reachable.
+     * (2) gc_mark_intern_table skips its walk only for GC_PHASE_MAJOR_MARK;
+     *     with IDLE it runs in full, ensuring freshly interned YOUNG
+     *     symbols that have no other root are marked and do not generate
+     *     spurious CLASS-A reports (intern-reachable YOUNG appearing to
+     *     be an unmarked OLD->YOUNG edge because the verify missed them). */
+    S->gc.phase = GC_PHASE_IDLE;
 
     /* Pass 1: precise-only. */
     gc_mark_roots(S);
@@ -256,6 +272,7 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
 
     free(ctx.hdrs);
     free(ctx.marks);
+    mino_current_ctx(S)->gc_depth--;
 
     if (pass1) {
         fprintf(stderr,

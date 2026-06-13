@@ -396,11 +396,20 @@ static void gc_verify_remset_complete(mino_state *S)
     }
     gc_for_each_hdr(S, gc_save_mark_fn, &ctx);
 
-    /* Precise + conservative mark pass under MAJOR_MARK so OLD is not
-     * filtered from the frontier. */
+    /* Precise + conservative mark pass.  We need the OLD-generation
+     * filter in gc_mark_push to be inactive (it only fires for
+     * GC_PHASE_MINOR), and we need gc_mark_intern_table to run its
+     * full walk (it skips when phase == GC_PHASE_MAJOR_MARK).
+     * GC_PHASE_IDLE satisfies both constraints: OLD is not filtered,
+     * and the intern table is walked so freshly interned YOUNG symbols
+     * that have no other root are correctly marked and survive the
+     * verification pass.  Using MAJOR_MARK here was the bug: it
+     * skipped the intern walk, causing false "live OLD->YOUNG" reports
+     * for YOUNG intern entries reachable only through the intern table.
+     */
     saved_phase = S->gc.phase;
     saved_floor = S->gc.mark_stack_len;
-    S->gc.phase = GC_PHASE_MAJOR_MARK;
+    S->gc.phase = GC_PHASE_IDLE;
     gc_mark_roots(S);
     gc_drain_mark_stack_to(S, saved_floor);
     gc_scan_stack(S);
