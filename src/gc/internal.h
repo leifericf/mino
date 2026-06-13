@@ -1,5 +1,5 @@
 /*
- * gc_internal.h -- garbage collector internal types and declarations.
+ * gc/internal.h -- garbage collector internal types and declarations.
  *
  * Internal to the runtime; embedders should only use mino.h.
  *
@@ -244,7 +244,7 @@ void gc_register_default_tracers(mino_state *S);
  * runs nested inside MAJOR_MARK. */
 void gc_major_enqueue_promoted(mino_state *S, gc_hdr_t *h);
 
-/* runtime_gc_roots.c: range index over live headers plus root enumeration.
+/* roots.c: range index over live headers plus root enumeration.
  * The range index backs gc_find_header_for_ptr, which resolves a raw
  * machine word to its owning header during conservative stack scans and
  * interior-pointer mark. gc_range_insert buffers new allocations in a
@@ -262,22 +262,18 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state *S, const void *p);
 void      gc_mark_roots(mino_state *S);
 void      gc_scan_stack(mino_state *S);
 
-/* runtime_gc_major.c: full-heap sweep driven by gc_major_collect. Frees every
+/* major.c: full-heap sweep driven by gc_major_collect. Frees every
  * allocation whose mark bit is clear and resets the mark bit on
  * survivors; updates gc_bytes_live and gc_threshold. */
 void gc_sweep(mino_state *S);
 
-/* runtime_gc_barrier.c: write barrier and remembered-set machinery.
+/* barrier.c: write barrier and remembered-set machinery.
  * Call BEFORE storing new_value into a field owned by container. The
- * barrier handles two concerns:
- *   Remset (all phases): when the store creates an old->young edge,
- *     container is appended to the remembered set (deduped via
- *     container->dirty) so the next minor traces it.
- *   SATB (MAJOR_MARK only): old_value -- the previous slot contents
- *     overwritten by this store -- is pushed onto the mark stack so
- *     anything reachable at snapshot time survives the cycle, even if
- *     the mutator unlinks it before mark reaches container. Pass NULL
- *     for old_value when the slot was empty.
+ * barrier implements a Dijkstra insertion barrier: when the store
+ * creates an old->young edge, container is appended to the remembered
+ * set (deduped via container->dirty) so the next minor traces it.
+ * old_value is accepted for call-site symmetry but is not used; pass
+ * NULL when no previous value exists.
  * Pointer arguments are the PAYLOAD start of a GC-allocated object
  * (mino_val*, mino_env*, raw buffer from gc_alloc_typed) or a
  * singleton inside mino_state (nil, true, false, small-int cache,
@@ -287,7 +283,7 @@ void gc_sweep(mino_state *S);
 void gc_write_barrier(mino_state *S, void *container,
                       const void *old_value, const void *new_value);
 
-/* runtime_gc_trace.c: GC event ring buffer + classifier (both opt-in
+/* trace.c: GC event ring buffer + classifier (both opt-in
  * via MINO_GC_EVT=1 at state init). Recording sites call
  * gc_evt_record; when the ring is unallocated the call is a single
  * nullptr-check-and-return. gc_evt_dump_around walks the ring in

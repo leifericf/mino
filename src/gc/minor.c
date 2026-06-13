@@ -150,7 +150,7 @@ static void gc_minor_sweep(mino_state *S, int saved_phase)
  * live YOUNG target while its containing OLD header `h` is not in
  * the remembered set, dump diagnostic context and abort -- the only
  * call path is the verify pass and `MINO_GC_VERIFY=1` opts in. */
-static inline void gc_verify_check(mino_state *S, gc_hdr_t *h, void *p)
+static void gc_verify_check(mino_state *S, gc_hdr_t *h, void *p)
 {
     gc_hdr_t *child;
     int       vt, cvt;
