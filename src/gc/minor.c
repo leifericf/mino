@@ -474,13 +474,13 @@ void gc_minor_collect(mino_state *S)
     mark_start_ns  = mino_monotonic_ns();
     roots_start_ns = mark_start_ns;
     gc_mark_roots(S);
-    S->gc_root_scan_ns += (size_t)(mino_monotonic_ns() - roots_start_ns);
+    { long long raw_ns = mino_monotonic_ns() - roots_start_ns; S->gc_root_scan_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
     gc_drain_mark_stack_to(S, mark_floor);
     gc_mark_remset(S);
     gc_drain_mark_stack_to(S, mark_floor);
     gc_scan_stack(S);
     gc_drain_mark_stack_to(S, mark_floor);
-    S->gc_minor_mark_ns += (size_t)(mino_monotonic_ns() - mark_start_ns);
+    { long long raw_ns = mino_monotonic_ns() - mark_start_ns; S->gc_minor_mark_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
     /* Sweep phase: range-index compaction, remset reset, and the actual
      * young-list sweep. These three are sweep-side housekeeping; lumped
      * together so the phase sum tracks gc_total_ns closely. */
@@ -496,11 +496,11 @@ void gc_minor_collect(mino_state *S)
      * barrier on a container promoted mid-fill. */
     gc_remset_reset(S);
     gc_minor_sweep(S, saved_phase);
-    S->gc_minor_sweep_ns += (size_t)(mino_monotonic_ns() - sweep_start_ns);
+    { long long raw_ns = mino_monotonic_ns() - sweep_start_ns; S->gc_minor_sweep_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
     S->gc.collections_minor++;
     S->gc.phase = saved_phase;
     gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);
-    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    { long long raw_ns = mino_monotonic_ns() - start_ns; elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; }
     S->gc.total_ns += elapsed_ns;
     if (elapsed_ns > S->gc.max_ns) {
         S->gc.max_ns = elapsed_ns;
