@@ -2718,6 +2718,10 @@ typedef struct bc_try_clauses {
     mino_val *catch_var;     /* MINO_SYMBOL: the catch binding name */
 } bc_try_clauses_t;
 
+/* Deviation from JVM: mino catch clauses do not check the exception type
+ * class; all catch clauses catch any throwable. The first element after
+ * `catch` is treated directly as the binding symbol rather than as an
+ * exception type followed by a binding symbol. */
 static int parse_try_clauses(compiler_t *c, mino_val *args,
                              bc_try_clauses_t *out)
 {
