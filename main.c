@@ -806,6 +806,29 @@ const char *__asan_default_options(void)
 }
 #endif
 
+#ifdef _WIN32
+/* mingw / clang-windows do not deliver hardware faults (access
+ * violation, stack overflow) as SIGSEGV through signal(), so the POSIX
+ * crash_handler above never runs on Windows -- a fault just terminates
+ * the process with no diagnostic. This SEH filter catches the fault and
+ * prints the exception code, which alone distinguishes the bug class:
+ * 0xC0000005 is an access violation (wild / freed pointer) and its
+ * faulting address localises it, while 0xC00000FD is a stack overflow
+ * (runaway C recursion). Kept minimal -- only documented
+ * EXCEPTION_RECORD fields and a stack-frugal snprintf/fwrite -- so it
+ * can still run on the near-exhausted stack of an overflow fault. */
+static LONG WINAPI mino_win_seh_filter(EXCEPTION_POINTERS *ep)
+{
+    char buf[160];
+    int  k = snprintf(buf, sizeof(buf),
+        "\n[mino] unhandled Windows exception code=0x%08lX at %p\n",
+        (unsigned long)ep->ExceptionRecord->ExceptionCode,
+        (void *)ep->ExceptionRecord->ExceptionAddress);
+    if (k > 0) { fwrite(buf, 1, (size_t)k, stderr); fflush(stderr); }
+    return EXCEPTION_EXECUTE_HANDLER; /* report, then terminate */
+}
+#endif
+
 static void install_crash_handler(mino_state *S)
 {
     const char *disabled = getenv("MINO_NO_CRASH_HANDLER");
@@ -853,6 +876,14 @@ static void install_crash_handler(mino_state *S)
 #else
     signal(SIGSEGV, crash_handler);
     signal(SIGABRT, crash_handler);
+    /* Reserve stack so the SEH filter can run after a stack-overflow
+     * fault, then install it -- this is what actually surfaces a
+     * Windows crash, since signal() above does not see hardware faults. */
+    {
+        ULONG guarantee = 65536;
+        SetThreadStackGuarantee(&guarantee);
+    }
+    SetUnhandledExceptionFilter(mino_win_seh_filter);
 #endif
 }
 
