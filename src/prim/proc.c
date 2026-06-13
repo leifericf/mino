@@ -287,7 +287,9 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ms_val;
     long long   ms;
+#ifndef _WIN32
     struct timespec ts;
+#endif
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -303,8 +305,6 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/contract", "MCT001",
             "thread-sleep: argument must be non-negative");
     }
-    ts.tv_sec  = (time_t)(ms / 1000);
-    ts.tv_nsec = (long)((ms % 1000) * 1000000L);
     /* Yield state_lock for the duration of the sleep so worker
      * threads (futures, agents) can make progress. Without this,
      * a `(thread-sleep 200)` between a `(future ...)` spawn and a
@@ -320,6 +320,8 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
         /* Windows has no nanosleep; Sleep() takes milliseconds. */
         Sleep((DWORD)(ms < 0 ? 0 : ms));
 #else
+        ts.tv_sec  = (time_t)(ms / 1000);
+        ts.tv_nsec = (long)((ms % 1000) * 1000000L);
         while (nanosleep(&ts, &ts) == -1) {
             /* Restart on EINTR using the residual time written into ts. */
         }
