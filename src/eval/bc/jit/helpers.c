@@ -635,7 +635,7 @@ mino_val **mino_jit_getglobal_cached_slow(mino_state *S,
      * OP_GETGLOBAL_CACHED slots whose resolution path runs through
      * env first; without env, those slots would fail to resolve and
      * surface as spurious "unbound symbol" diagnostics. */
-    mino_env *env = ctx->jit_invoke_env;
+    mino_env        *env = ctx->jit_invoke_env;
     mino_val *v   = mino_bc_ic_global_load(S, bc, (int)slot_idx,
                                              env, dyn_active);
     if (v == NULL) return NULL;

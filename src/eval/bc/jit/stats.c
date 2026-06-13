@@ -31,8 +31,9 @@ typedef struct cpjit_stat_entry {
     int                      column;
     size_t                   code_len;
     cpjit_reason_t           reason;
-    unsigned                 first_unknown_op; /* valid only when reason == UNKNOWN_OP or OK_WITH_DEOPT */
-    size_t                   first_unknown_pc; /* valid only when reason == UNKNOWN_OP or OK_WITH_DEOPT */
+    /* Nonzero when reason is UNKNOWN_OP or OK_WITH_DEOPT; zero otherwise. */
+    unsigned  first_unknown_op;
+    size_t    first_unknown_pc;
     int                      compiled;
     size_t                   native_bytes;
     /* Sealed snapshot of the bc-side runtime counters. The bc record
