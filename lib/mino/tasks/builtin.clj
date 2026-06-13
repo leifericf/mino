@@ -196,6 +196,7 @@
    ["lib/clojure/core/unify.clj"      "clojure.core.unify"      "lib_clojure_core_unify"]
    ["lib/clojure/core/cache.clj"      "clojure.core.cache"      "lib_clojure_core_cache"]
    ["lib/clojure/core/memoize.clj"    "clojure.core.memoize"    "lib_clojure_core_memoize"]
+   ["lib/clojure/core/match.clj"      "clojure.core.match"      "lib_clojure_core_match"]
    ["lib/clojure/test/tap.clj"        "clojure.test.tap"        "lib_clojure_test_tap"]
    ["lib/clojure/test/junit.clj"      "clojure.test.junit"      "lib_clojure_test_junit"]
    ["lib/clojure/test/check/generators.clj" "clojure.test.check.generators" "lib_clojure_test_check_generators"]

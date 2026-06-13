@@ -77,6 +77,7 @@ BUNDLED = \
     lib_clojure_core_unify:lib/clojure/core/unify.clj \
     lib_clojure_core_cache:lib/clojure/core/cache.clj \
     lib_clojure_core_memoize:lib/clojure/core/memoize.clj \
+    lib_clojure_core_match:lib/clojure/core/match.clj \
     lib_clojure_test_tap:lib/clojure/test/tap.clj \
     lib_clojure_test_junit:lib/clojure/test/junit.clj \
     lib_clojure_test_check_generators:lib/clojure/test/check/generators.clj \

@@ -49,6 +49,7 @@
 #include "lib_clojure_core_unify.h"
 #include "lib_clojure_core_cache.h"
 #include "lib_clojure_core_memoize.h"
+#include "lib_clojure_core_match.h"
 #include "lib_clojure_test_tap.h"
 #include "lib_clojure_test_junit.h"
 #include "lib_clojure_test_check_generators.h"
@@ -196,6 +197,15 @@ void mino_install_clojure_cache(mino_state *S, mino_env *env)
                               lib_clojure_core_cache_src);
     mino_register_bundled_lib(S, "clojure.core.memoize",
                               lib_clojure_core_memoize_src);
+}
+
+/* clojure.core.match: pattern matching compiled to a decision structure.
+ * Pure mino with no host dependency, so it stands alone under its bit. */
+void mino_install_clojure_match(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.core.match",
+                              lib_clojure_core_match_src);
 }
 
 /* clojure.test.check + generators + properties: minimal property

@@ -202,6 +202,8 @@
 - Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
 - Tests: Fix ns-resolution for renamed symbol in census_surface_test
 - Tests: Replace spec-first status markers with neutral documentation
+- Lib: clojure.core.match is now bundled (capability `match`): the `match`, `matchv`, and `match-let` macros and the full pattern grammar (literals, wildcards, bindings, vectors with `& rest`, `(... :seq)` seqs, maps with `:only`, `(:or ...)`, `(p :guard pred)`, `(p :as name)`, quoted-symbol literals). Clauses compile to a decision structure that binds each occurrence once and threads a shared failure continuation, so the emitted code is linear in the clause set rather than exponential.
+- Fix: The bytecode compiler's env-capture pre-scan now recognizes the `clojure.core/`-qualified spelling of `fn` / `fn*` / `lazy-seq`, so a nested syntax-quoted closure that captures an enclosing `let` local resolves it at runtime instead of throwing an unbound-symbol error.
 
 ## v0.423.5 — Security Fixes
 

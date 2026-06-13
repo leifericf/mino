@@ -243,6 +243,8 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.core.unify (first-order unification: unify / unifier / subst)." },
     { "cache",        MINO_CAP_CACHE,
       "clojure.core.cache + clojure.core.memoize (cache protocol, memoizers)." },
+    { "match",        MINO_CAP_MATCH,
+      "clojure.core.match (pattern matching: match / matchv / match-let)." },
     { NULL,           0u,                                                NULL },
 };
 
