@@ -231,6 +231,14 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
         size_t init_cap = INTERN_HT_INIT;
         while (init_cap < tbl->len * 2) init_cap *= 2;
         intern_ht_rebuild(tbl, init_cap);
+        /* intern_ht_rebuild returns silently on malloc failure; the
+         * buckets pointer stays NULL.  Propagate OOM before the probe
+         * loop dereferences it. */
+        if (tbl->ht_buckets == NULL) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
     }
 
     h = intern_hash(s, len);
@@ -679,6 +687,7 @@ mino_val *mino_defrecord(mino_state *S,
         mino_val **field_kws = NULL;
         size_t       i;
         if (n_fields > 0) {
+            if (n_fields > SIZE_MAX / sizeof(*field_kws)) return NULL;
             field_kws = (mino_val **)malloc(n_fields * sizeof(*field_kws));
             if (field_kws == NULL) return NULL;
             for (i = 0; i < n_fields; i++) {
@@ -1015,8 +1024,16 @@ int mino_compare(mino_state *S, const mino_val *a, const mino_val *b)
 {
     mino_val *args, *r;
     long long n = 0;
+    /* Suppress collection across the two-alloc window: the first cons
+     * cell is held only in a C local (potentially a register) when the
+     * second mino_cons triggers allocation.  A minor GC between the two
+     * calls would not see the first cons via the conservative stack scan
+     * and could collect it.  gc_depth prevents collection until both
+     * cells are reachable through the rooted `args` spine. */
+    mino_current_ctx(S)->gc_depth++;
     args = mino_cons(S, (mino_val *)b, mino_nil(S));
     args = mino_cons(S, (mino_val *)a, args);
+    mino_current_ctx(S)->gc_depth--;
     r = prim_compare(S, args, NULL);
     if (r == NULL) return 0;
     if (mino_to_int(r, &n)) {

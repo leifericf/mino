@@ -179,6 +179,10 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
     case MINO_CHAN:
         mino_chan_trace(S, v);
         break;
+    case MINO_QUEUE:
+        PUSH(v->as.queue.front);
+        PUSH(v->as.queue.back);
+        break;
     case MINO_BYTES:
         /* The data buffer is malloc-owned raw bytes -- no internal
          * pointers to follow. Nothing to push. */
