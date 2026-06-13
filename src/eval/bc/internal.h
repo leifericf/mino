@@ -303,23 +303,6 @@ typedef struct mino_bc_source_map {
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
  * GC_T_PTRARR of mino_val pointers. */
-/* Inline-cache slot for OP_GETGLOBAL_CACHED / OP_CALL_CACHED, repurposed
- * for OP_PROTOCOL_CALL_CACHED through a `kind` discriminator. Per-fn
- * array indexed by the Bx field of the cached opcode. For the GLOBAL
- * kind: `sym` is the unqualified or qualified MINO_SYMBOL whose
- * resolution this slot stands for, `cached` is the last resolved value
- * (NULL = uninitialized / invalidated), and `gen` is the S->ns_vars.ic_gen
- * snapshot at fill -- when ic_gen advances (def / ns-unmap /
- * var_set_root / var_unintern) the cache misses on its next read. For
- * the PROTOCOL kind: `atom` is the dispatch atom captured at compile
- * time, `cached_map` is the @atom map pointer at fill, `cached_type`
- * is the type-disc pointer (MINO_TYPE for records, interned keyword
- * for built-ins), `cached` is the impl fn, `sym` is the method-name
- * string used in the diagnostic on a missing impl, and `gen` is
- * repurposed as the miss counter (megamorphic at >= 16 misses, after
- * which the slot bails to the slow dispatcher). The fn-value owns the
- * slots array (one bc per fn-value), so env stays constant across
- * calls and does not need to be part of the cache key. */
 typedef enum {
     MINO_BC_IC_GLOBAL   = 0,
     MINO_BC_IC_PROTOCOL = 1
@@ -360,6 +343,23 @@ enum {
     BC_DECLINE__COUNT          = 16
 };
 
+/* Inline-cache slot for OP_GETGLOBAL_CACHED / OP_CALL_CACHED, repurposed
+ * for OP_PROTOCOL_CALL_CACHED through a `kind` discriminator. Per-fn
+ * array indexed by the Bx field of the cached opcode. For the GLOBAL
+ * kind: `sym` is the unqualified or qualified MINO_SYMBOL whose
+ * resolution this slot stands for, `cached` is the last resolved value
+ * (NULL = uninitialized / invalidated), and `gen` is the S->ns_vars.ic_gen
+ * snapshot at fill -- when ic_gen advances (def / ns-unmap /
+ * var_set_root / var_unintern) the cache misses on its next read. For
+ * the PROTOCOL kind: `atom` is the dispatch atom captured at compile
+ * time, `cached_map` is the @atom map pointer at fill, `cached_type`
+ * is the type-disc pointer (MINO_TYPE for records, interned keyword
+ * for built-ins), `cached` is the impl fn, `sym` is the method-name
+ * string used in the diagnostic on a missing impl, and `gen` is
+ * repurposed as the miss counter (megamorphic at >= 16 misses, after
+ * which the slot bails to the slow dispatcher). The fn-value owns the
+ * slots array (one bc per fn-value), so env stays constant across
+ * calls and does not need to be part of the cache key. */
 typedef struct mino_bc_ic_slot {
     mino_val   *sym;
     mino_val   *cached;
