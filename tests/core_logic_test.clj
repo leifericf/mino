@@ -4,7 +4,7 @@
                   succeed fail membero appendo conso firsto resto
                   emptyo distincto everyg project all
                   matche matcha matchu defne fne
-                  defrel fact facts retract
+                  defrel fact facts retract tabled
                   lvar lvar?]])
 
 ;; clojure.core.logic -- relational (logic) programming.  The user-facing
@@ -203,5 +203,27 @@
   (defrel likes a b)
   (facts likes [[:a :b] [:b :c]])
   (is (= '(:b) (run* [q] (likes :a q)))))
+
+;; --------------------------------------------------------------------
+;; Tabling: recursion over a cyclic relation must terminate and yield the
+;; full (finite) answer set, which plain depth-first search cannot.
+;; --------------------------------------------------------------------
+
+(defrel arco x y)
+(fact arco :a :b)
+(fact arco :b :c)
+(fact arco :c :a)   ;; cycle back to :a
+(fact arco :c :d)
+
+(def patho
+  (tabled [x y]
+    (conde
+      [(arco x y)]
+      [(fresh [z] (arco x z) (patho z y))])))
+
+(deftest tabled-reachability
+  (is (= '(:a :b :c :d) (sort (run* [q] (patho :a q)))))
+  ;; From :b the cycle reaches everything too.
+  (is (= '(:a :b :c :d) (sort (run* [q] (patho :b q))))))
 
 (run-tests-and-exit)

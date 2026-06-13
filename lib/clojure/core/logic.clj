@@ -689,3 +689,70 @@
   called (the inverse of asserting it)."
   [rel-var tuple]
   (fn [] (swap! (::facts (meta rel-var)) disj (vec tuple))))
+
+;; --------------------------------------------------------------------
+;; Tabling: tabled memoizes a relation's answers so that recursion over a
+;; cyclic relation (transitive closure, reachability) terminates and is
+;; not recomputed.  A tabled relation keeps a per-call-key answer table;
+;; the first (driver) call solves the table to a fixpoint -- repeatedly
+;; evaluating the body, cutting cycles by yielding the answers found so
+;; far, until a full pass discovers nothing new -- and then yields the
+;; collected answers.  Re-entrant calls during the solve contribute and
+;; read through the same table.
+;; --------------------------------------------------------------------
+
+(defn- answers-stream
+  "Yield every stored answer for a table key, unified against the call
+  arguments under package a."
+  [table key argv a]
+  (mplus* (map (fn [ans] (fn [] ((== argv ans) a)))
+               (get @table key []))))
+
+(defn- tabled-pass
+  "One pass over a tabled call: when the key is already on the solving
+  stack, yield the known answers (cutting the cycle); otherwise run the
+  body, recording each newly discovered answer in the table."
+  [table inprog changed key argv goal a]
+  (if (contains? @inprog key)
+    (answers-stream table key argv a)
+    (do
+      (swap! inprog conj key)
+      (bind (goal a)
+            (fn [a2]
+              (let [ans (walk* argv (:s a2))]
+                (when-not (some #(= % ans) (get @table key))
+                  (swap! table update key (fn [v] (conj (or v []) ans)))
+                  (reset! changed true))
+                (unit a2)))))))
+
+(defn tabled-rel
+  "Build a tabled relation from body-fn, a function from the relation's
+  arguments to its goal."
+  [body-fn]
+  (let [table   (atom {})
+        inprog  (atom #{})
+        changed (atom false)
+        driving (atom false)]
+    (fn [& args]
+      (let [argv (vec args)]
+        (fn [a]
+          (let [key (walk* argv (:s a))]
+            (if @driving
+              (tabled-pass table inprog changed key argv (apply body-fn args) a)
+              (do
+                (reset! driving true)
+                (loop []
+                  (reset! inprog #{})
+                  (reset! changed false)
+                  (doall (take-stream false
+                                      (tabled-pass table inprog changed key argv
+                                                   (apply body-fn args) a)))
+                  (when @changed (recur)))
+                (reset! driving false)
+                (answers-stream table key argv a)))))))))
+
+(defmacro tabled
+  "Define a tabled relation: like fn over args, but the relation's answers
+  are memoized so recursion over a cyclic relation terminates."
+  [args & body]
+  `(tabled-rel (fn [~@args] (all ~@body))))
