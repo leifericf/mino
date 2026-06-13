@@ -7,6 +7,12 @@
 - GC: Restore gc_save_len when a throw unwinds a try/catch frame, so the transient pins made between try entry and the throw no longer leak; previously each exception left the call's pinned callable on the GC save stack, which in release builds silently stopped pinning new roots after 64 leaks (a latent liveness hazard) and aborted sanitizer builds.
 - Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
 - Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.
+- Factoring: Expose gc_charge_pause and extract gc_mark_each_ctx/gc_mark_ctx_try_stack to eliminate duplicate lock-walk-unlock pattern in gc_mark_thread_state
+- Factoring: Forward-declare mino_bc_trace_fn_bc and future helpers in values/internal.h to remove eval/bc/internal.h boundary violation from gc_handlers.c
+- Factoring: Extract intern_ns_name helper to deduplicate mino_keyword_ns_n and mino_symbol_ns_n; fix OOM diagnostic inconsistency in symbol variant
+- Factoring: Remove redundant gc/internal.h include from eval/bc/gc_handlers.c (already transitively included)
+- Factoring: Document is_special_form_name duplication with eval/special_registry.c; document bc_protocol_type_disc duplication with prim_type
+- Factoring: Extract jit_extract_form_loc and jit_protocol_resolve helpers to deduplicate source-location extraction and protocol IC resolution in eval-bc-jit
 - GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker
 - GC: Guard float/double fill pointer across alloc_val in mino_host_array_new
 - GC: Guard fields_vec pointer across alloc_val in mino_defrecord
