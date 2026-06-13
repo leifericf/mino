@@ -30,6 +30,23 @@
 
 #include "../../../prim/internal.h"
 
+/* Compile-time assertions for the pointer-tagging ABI used by
+ * loop_tag_exit.  The implementation round-trips a mino_val **
+ * through uintptr_t and relies on the low bit being free (i.e., the
+ * pointer must be at least 2-byte aligned).  Both conditions hold on
+ * every platform MINO_CPJIT_HOST supports, but we assert them here
+ * so a future port that violates either catches the break at compile
+ * time rather than producing silent wrong results at runtime.
+ *
+ * __alignof__ is a GCC/clang extension; it is always available here
+ * because MINO_CPJIT_HOST is defined only when the compiler is
+ * GCC-compatible (the I-cache flush path uses __builtin___clear_cache
+ * from the same compiler family). */
+typedef char loop_tag_uintptr_size_check[
+    sizeof(uintptr_t) == sizeof(mino_val **) ? 1 : -1];
+typedef char loop_tag_ptr_align_check[
+    __alignof__(mino_val *) >= 2 ? 1 : -1];
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
@@ -127,13 +144,17 @@ mino_val **mino_jit_loop_int_lt_inc_slow(mino_state *S, mino_val **regs,
     if (list2 == NULL) return NULL;
     mino_val *incv = prim_inc(S, list2, NULL);
     if (incv == NULL) return NULL;
+    /* Pin incv before the next allocation sequence so a GC triggered
+     * by mino_nil / mino_cons / prim_inc below doesn't collect it. */
+    gc_pin(incv);
     regs = S->bc.bc_regs + base;
     mino_val *list3 = mino_nil(S);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[c], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     mino_val *incv2 = prim_inc(S, list3, NULL);
-    if (incv2 == NULL) return NULL;
+    if (incv2 == NULL) { gc_unpin(1); return NULL; }
+    gc_unpin(1);
     regs = S->bc.bc_regs + base;
     regs[a] = incv;
     regs[c] = incv2;
@@ -166,13 +187,17 @@ mino_val **mino_jit_loop_int_dec_inc_slow(mino_state *S,
     if (list2 == NULL) return NULL;
     mino_val *decv = prim_dec(S, list2, NULL);
     if (decv == NULL) return NULL;
+    /* Pin decv before the next allocation sequence so a GC triggered
+     * by mino_nil / mino_cons / prim_inc below doesn't collect it. */
+    gc_pin(decv);
     regs = S->bc.bc_regs + base;
     mino_val *list3 = mino_nil(S);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[b], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     mino_val *incv = prim_inc(S, list3, NULL);
-    if (incv == NULL) return NULL;
+    if (incv == NULL) { gc_unpin(1); return NULL; }
+    gc_unpin(1);
     regs = S->bc.bc_regs + base;
     regs[a] = decv;
     regs[b] = incv;
@@ -207,15 +232,19 @@ mino_val **mino_jit_loop_int_lt_acc_slow(mino_state *S,
     if (list2 == NULL) return NULL;
     mino_val *incv = prim_inc(S, list2, NULL);
     if (incv == NULL) return NULL;
+    /* Pin incv before the next allocation sequence so a GC triggered
+     * by mino_nil / mino_cons / prim_add below doesn't collect it. */
+    gc_pin(incv);
     regs = S->bc.bc_regs + base;
     mino_val *list3 = mino_nil(S);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[d], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[c], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     mino_val *addv = prim_add(S, list3, NULL);
-    if (addv == NULL) return NULL;
+    if (addv == NULL) { gc_unpin(1); return NULL; }
+    gc_unpin(1);
     regs = S->bc.bc_regs + base;
     regs[a] = incv;
     regs[c] = addv;
@@ -247,15 +276,19 @@ mino_val **mino_jit_loop_int_dec_acc_slow(mino_state *S,
     if (list2 == NULL) return NULL;
     mino_val *decv = prim_dec(S, list2, NULL);
     if (decv == NULL) return NULL;
+    /* Pin decv before the next allocation sequence so a GC triggered
+     * by mino_nil / mino_cons / prim_add below doesn't collect it. */
+    gc_pin(decv);
     regs = S->bc.bc_regs + base;
     mino_val *list3 = mino_nil(S);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[d], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     list3 = mino_cons(S, regs[c], list3);
-    if (list3 == NULL) return NULL;
+    if (list3 == NULL) { gc_unpin(1); return NULL; }
     mino_val *addv = prim_add(S, list3, NULL);
-    if (addv == NULL) return NULL;
+    if (addv == NULL) { gc_unpin(1); return NULL; }
+    gc_unpin(1);
     regs = S->bc.bc_regs + base;
     regs[a] = decv;
     regs[c] = addv;
