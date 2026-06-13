@@ -506,6 +506,9 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
             "empty? requires one argument");
     }
     v = args->as.cons.car;
+    /* Loop so a lazy-seq is classified by the value it forces to: forcing
+     * may yield an empty list, a cons, or another lazy step. */
+    for (;;) {
     if (v == NULL || mino_type_of(v) == MINO_NIL) return mino_true(S);
     switch (mino_type_of(v)) {
     case MINO_EMPTY_LIST: return mino_true(S);
@@ -517,11 +520,13 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     case MINO_SORTED_SET: return v->as.sorted.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_STRING:     return v->as.s.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_LAZY: {
+        /* A lazy-seq is empty exactly when it forces to nil or an empty
+         * list; re-classify the forced value rather than assuming any
+         * non-nil force is non-empty. */
         mino_val *forced = lazy_force(S, v);
         if (forced == NULL) return NULL;
-        if (forced == NULL || mino_type_of(forced) == MINO_NIL) return mino_true(S);
-        if (mino_type_of(forced) == MINO_CHUNKED_CONS) return mino_false(S);
-        return mino_false(S);
+        v = forced;
+        continue;
     }
     case MINO_CHUNKED_CONS: return mino_false(S);
     case MINO_CHUNK:        return v->as.chunk.len == 0 ? mino_true(S) : mino_false(S);
@@ -532,6 +537,7 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");
+    }
     }
 }
 
