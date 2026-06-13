@@ -522,7 +522,7 @@ static int pc_is_jump_target(const mino_bc_insn_t *code, size_t code_len,
         unsigned op = OP_OF(ins);
         if (op != OP_JMP && op != OP_JMPIFNOT) continue;
         long off = sBx_OF(ins);
-        long target = (long)pc + 1 + off;
+        ptrdiff_t target = (ptrdiff_t)pc + 1 + off;
         if (target >= 0 && (size_t)target == target_pc) return 1;
     }
     return 0;
@@ -2084,8 +2084,11 @@ static mino_val *try_builder_rewrite(mino_state *S, mino_val *form)
         for (i = 0; i < blen - 1; i++) {
             bind_items[i] = vec_nth(bindings, i);
         }
+        /* Pin new_init before vec_from_array can trigger a GC cycle. */
+        gc_pin(new_init);
         bind_items[blen - 1] = new_init;
         new_bindings = vec_from_array(S, bind_items, blen);
+        gc_unpin(1);
         free(bind_items);
         if (new_bindings == NULL) return NULL;
     }
@@ -2095,12 +2098,18 @@ static mino_val *try_builder_rewrite(mino_state *S, mino_val *form)
         mino_val *new_args  = rewrite_recur_args(
             S, recur_args, step_pos, step_kind);
         if (recur_sym == NULL || new_args == NULL) return NULL;
+        gc_pin(recur_sym);
+        gc_pin(new_args);
         new_recur = mino_cons(S, recur_sym, new_args);
+        gc_unpin(2);
+        if (new_recur == NULL) return NULL;
     }
     /* Reassemble the if. */
     {
         mino_val *if_sym = mino_symbol(S, "if");
         if (if_sym == NULL) return NULL;
+        gc_pin(if_sym);
+        gc_pin(new_recur);
         if (is_then_recur) {
             new_if = mino_cons(
                 S, if_sym, mino_cons(
@@ -2114,22 +2123,32 @@ static mino_val *try_builder_rewrite(mino_state *S, mino_val *form)
                         S, acc_sym, mino_cons(
                             S, new_recur, mino_nil(S)))));
         }
+        gc_unpin(2);
+        if (new_if == NULL) return NULL;
     }
     /* Reassemble the loop. */
     {
         mino_val *loop_sym = mino_symbol(S, "loop");
         if (loop_sym == NULL) return NULL;
+        gc_pin(loop_sym);
+        gc_pin(new_bindings);
+        gc_pin(new_if);
         new_loop = mino_cons(
             S, loop_sym, mino_cons(
                 S, new_bindings, mino_cons(
                     S, new_if, mino_nil(S))));
+        gc_unpin(3);
+        if (new_loop == NULL) return NULL;
     }
     /* Wrap in (persistent! ...). */
     {
         mino_val *p_sym = mino_symbol(S, "persistent!");
         if (p_sym == NULL) return NULL;
+        gc_pin(p_sym);
+        gc_pin(new_loop);
         new_persistent = mino_cons(
             S, p_sym, mino_cons(S, new_loop, mino_nil(S)));
+        gc_unpin(2);
     }
     return new_persistent;
 }
@@ -2293,30 +2312,47 @@ static mino_val *try_reduce_rewrite(compiler_t *c, mino_val *form)
         mino_val *new_reduce;
         mino_val *persist_sym;
         if (bang_sym == NULL) return NULL;
+        gc_pin(bang_sym);
         new_step = mino_cons(S, bang_sym, step->as.cons.cdr);
+        gc_unpin(1);
         if (new_step == NULL) return NULL;
+        gc_pin(new_step);
         new_body = mino_cons(S, new_step, mino_nil(S));
+        gc_unpin(1);
         if (new_body == NULL) return NULL;
         fn_sym = mino_symbol(S, "fn");
         if (fn_sym == NULL) return NULL;
+        gc_pin(fn_sym);
+        gc_pin(new_body);
         new_fn = mino_cons(S, fn_sym, mino_cons(S, params, new_body));
+        gc_unpin(2);
         if (new_fn == NULL) return NULL;
         transient_sym = mino_symbol(S, "transient");
         if (transient_sym == NULL) return NULL;
+        gc_pin(transient_sym);
         transient_seed = mino_cons(
             S, transient_sym, mino_cons(S, seed, mino_nil(S)));
+        gc_unpin(1);
         if (transient_seed == NULL) return NULL;
         reduce_sym = mino_symbol(S, "reduce");
         if (reduce_sym == NULL) return NULL;
+        gc_pin(reduce_sym);
+        gc_pin(new_fn);
+        gc_pin(transient_seed);
         new_reduce = mino_cons(
             S, reduce_sym, mino_cons(
                 S, new_fn, mino_cons(
                     S, transient_seed, mino_cons(S, coll, mino_nil(S)))));
+        gc_unpin(3);
         if (new_reduce == NULL) return NULL;
         persist_sym = mino_symbol(S, "persistent!");
         if (persist_sym == NULL) return NULL;
-        return mino_cons(
+        gc_pin(persist_sym);
+        gc_pin(new_reduce);
+        mino_val *result = mino_cons(
             S, persist_sym, mino_cons(S, new_reduce, mino_nil(S)));
+        gc_unpin(2);
+        return result;
     }
 }
 
@@ -2921,17 +2957,22 @@ static int compile_binding(compiler_t *c, mino_val *form, int dst, int tail)
      * eager validation: each name must be a symbol; otherwise
      * decline so the tree-walker can produce its richer diagnostic.
      */
+    mino_state *S = c->S;
     mino_val **names_buf = (mino_val **)gc_alloc_typed(
-        c->S, GC_T_VALARR, (size_t)n_pairs * sizeof(mino_val *));
+        S, GC_T_VALARR, (size_t)n_pairs * sizeof(mino_val *));
     if (names_buf == NULL) { c->ok = 0; return -1; }
+    /* Pin names_buf so mino_vector cannot collect it mid-allocation. */
+    gc_pin((mino_val *)names_buf);
     for (int i = 0; i < n_pairs; i++) {
         mino_val *sym = vec_nth(binds, (size_t)(i * 2));
         if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            gc_unpin(1);
             c->ok = 0; goto fail;
         }
         names_buf[i] = sym;
     }
-    mino_val *names_vec = mino_vector(c->S, names_buf, (size_t)n_pairs);
+    mino_val *names_vec = mino_vector(S, names_buf, (size_t)n_pairs);
+    gc_unpin(1);
     if (names_vec == NULL) { c->ok = 0; goto fail; }
     int names_k = add_const(c, names_vec);
     if (names_k < 0) goto fail;
