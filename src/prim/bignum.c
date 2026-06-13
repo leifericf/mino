@@ -468,14 +468,17 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
+            gc_pin(bd); /* keep bd (and unscaled) alive across alloc */
             out = mino_bigint_from_ll(S, 0);
-            if (out == NULL) { mp_int_clear(&pw); return NULL; }
+            if (out == NULL) { gc_unpin(1); mp_int_clear(&pw); return NULL; }
             if (mp_int_div((mp_int)unscaled->as.bigint.mpz, &pw,
                            (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
+                gc_unpin(1);
                 mp_int_clear(&pw);
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
+            gc_unpin(1);
             mp_int_clear(&pw);
             return out;
         }
@@ -491,14 +494,18 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
     case MINO_RATIO: {
         /* Truncate toward zero: integer-divide numerator by
          * denominator (mp_int_div quotients truncate toward zero). */
-        mino_val *out = mino_bigint_from_ll(S, 0);
-        if (out == NULL) return NULL;
+        mino_val *out;
+        gc_pin((mino_val *)x); /* keep x->ratio.num/denom alive across alloc */
+        out = mino_bigint_from_ll(S, 0);
+        if (out == NULL) { gc_unpin(1); return NULL; }
         if (mp_int_div((mp_int)x->as.ratio.num->as.bigint.mpz,
                        (mp_int)x->as.ratio.denom->as.bigint.mpz,
                        (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
+            gc_unpin(1);
             return prim_throw_classified(S, "eval/out-of-memory",
                                          "MOM001", "out of memory");
         }
+        gc_unpin(1);
         return out;
     }
     default:

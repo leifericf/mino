@@ -347,10 +347,12 @@ mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
                 return prim_throw_classified(S, "eval/out-of-memory",
                     "MOM001", "out of memory");
             }
+            gc_pin((mino_val *)x); /* keep x (and unscaled) alive across alloc */
             out = mino_bigint_from_ll(S, 0);
-            if (out == NULL) { mp_int_clear(&pw); return NULL; }
+            if (out == NULL) { gc_unpin(1); mp_int_clear(&pw); return NULL; }
             mp_int_mul((mp_int)unscaled->as.bigint.mpz, &pw,
                        (mp_int)out->as.bigint.mpz);
+            gc_unpin(1);
             mp_int_clear(&pw);
             return out;
         }
@@ -413,9 +415,11 @@ mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
+            gc_pin(bd); /* keep bd (and unscaled) alive across alloc */
             denom = mino_bigint_from_ll(S, 1);
-            if (denom == NULL) { mp_int_clear(&pw); return NULL; }
+            if (denom == NULL) { gc_unpin(1); mp_int_clear(&pw); return NULL; }
             mp_int_copy(&pw, (mp_int)denom->as.bigint.mpz);
+            gc_unpin(1);
             mp_int_clear(&pw);
             return mino_ratio_make(S, unscaled, denom);
         }
@@ -440,8 +444,10 @@ static mino_val *as_ratio_pair(mino_state *S, const mino_val *v,
     if (mino_val_int_p(v) || mino_type_of(v) == MINO_BIGINT) {
         mino_val *bn = to_bigint(S, v);
         if (bn == NULL) return NULL;
+        gc_pin(bn); /* keep bn alive across alloc for denom */
         *out_num   = bn;
         *out_denom = mino_bigint_from_ll(S, 1);
+        gc_unpin(1);
         return bn;
     }
     return NULL;

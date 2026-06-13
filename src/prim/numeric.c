@@ -1041,10 +1041,14 @@ static mino_val *prim_sub_negate(mino_state *S, mino_val *first,
     if (mino_type_of(first) == MINO_BIGINT) return mino_bigint_neg(S, first);
     if (mino_type_of(first) == MINO_RATIO) {
         mino_val *zero_n = mino_bigint_from_ll(S, 0);
-        mino_val *zero_d = mino_bigint_from_ll(S, 1);
+        mino_val *zero_d;
         mino_val *zero;
-        if (zero_n == NULL || zero_d == NULL) return NULL;
+        if (zero_n == NULL) return NULL;
+        gc_pin(zero_n); /* keep zero_n alive across second alloc */
+        zero_d = mino_bigint_from_ll(S, 1);
+        if (zero_d == NULL) { gc_unpin(1); return NULL; }
         zero = mino_ratio_make_unchecked(S, zero_n, zero_d);
+        gc_unpin(1);
         if (zero == NULL) return NULL;
         return mino_ratio_sub(S, zero, first);
     }

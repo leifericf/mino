@@ -573,23 +573,27 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                         mino_val **nb;
                         if (cap > SIZE_MAX / 2) {
                             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                            re_free(compiled);
                             return NULL;
                         }
                         new_cap = cap == 0 ? 8 : cap * 2;
                         if (new_cap > SIZE_MAX / sizeof(*nb)) {
                             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                            re_free(compiled);
                             return NULL;
                         }
                         nb = (mino_val **)gc_alloc_typed(S,
                             GC_T_VALARR, new_cap * sizeof(*nb));
-                        if (nb == NULL) return NULL;
+                        if (nb == NULL) { re_free(compiled); return NULL; }
                         if (buf != NULL && len > 0)
                             memcpy(nb, buf, len * sizeof(*nb));
                         buf = nb;
                         cap = new_cap;
                     }
+                    gc_pin((mino_val *)buf); /* keep buf alive across string alloc */
                     buf[len++] = mino_string_n(S, s + index,
                                                abs_start - index);
+                    gc_unpin(1);
                     index = abs_end;
                 }
             } else {
@@ -600,22 +604,26 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                     mino_val **nb;
                     if (cap > SIZE_MAX / 2) {
                         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                        re_free(compiled);
                         return NULL;
                     }
                     new_cap = cap == 0 ? 8 : cap * 2;
                     if (new_cap > SIZE_MAX / sizeof(*nb)) {
                         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "split: too many pieces");
+                        re_free(compiled);
                         return NULL;
                     }
                     nb = (mino_val **)gc_alloc_typed(S,
                         GC_T_VALARR, new_cap * sizeof(*nb));
-                    if (nb == NULL) return NULL;
+                    if (nb == NULL) { re_free(compiled); return NULL; }
                     if (buf != NULL && len > 0)
                         memcpy(nb, buf, len * sizeof(*nb));
                     buf = nb;
                     cap = new_cap;
                 }
+                gc_pin((mino_val *)buf); /* keep buf alive across string alloc */
                 buf[len++] = mino_string_n(S, s + index, slen - index);
+                gc_unpin(1);
                 absorbed = 1;
                 break;
             }
@@ -647,7 +655,9 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                 buf = nb;
                 cap = new_cap;
             }
+            gc_pin((mino_val *)buf);
             buf[len++] = mino_string_n(S, s + index, slen - index);
+            gc_unpin(1);
         }
         /* Only limit == 0 trims trailing empty pieces (JVM rule);
          * negative limits keep them. */
@@ -682,11 +692,15 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
                 cap = new_cap;
             }
             if (limit > 0 && (long long)len + 1 == limit) {
+                gc_pin((mino_val *)buf);
                 buf[len++] = mino_string_n(S, s + pos, slen - pos);
+                gc_unpin(1);
                 pos = slen;
                 break;
             }
+            gc_pin((mino_val *)buf);
             buf[len++] = mino_string_n(S, s + pos, step);
+            gc_unpin(1);
             pos += step;
         }
         if (buf == NULL) {
@@ -716,14 +730,20 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
         /* Limit reached: emit one final item that absorbs the rest of
          * the string (matches canon's String.split(re, limit > 0). */
         if (limit > 0 && (long long)len + 1 == limit) {
+            gc_pin((mino_val *)buf);
             buf[len++] = mino_string_n(S, p, (size_t)(s + slen - p));
+            gc_unpin(1);
             break;
         }
         if (found != NULL) {
+            gc_pin((mino_val *)buf);
             buf[len++] = mino_string_n(S, p, (size_t)(found - p));
+            gc_unpin(1);
             p = found + sep_len;
         } else {
+            gc_pin((mino_val *)buf);
             buf[len++] = mino_string_n(S, p, (size_t)(s + slen - p));
+            gc_unpin(1);
             break;
         }
     }

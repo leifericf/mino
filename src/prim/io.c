@@ -259,7 +259,10 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         mino_val   *call_args;
         dyn_frame_t  *frame;
         dyn_binding_t *binding;
+        if (atom_str == NULL) return NULL;
+        gc_pin(atom_str); /* keep atom_str alive across mino_atom alloc */
         atom_val = mino_atom(S, atom_str);
+        gc_unpin(1);
         if (atom_val == NULL) return NULL;
         binding = (dyn_binding_t *)malloc(sizeof(*binding));
         if (binding == NULL) {
