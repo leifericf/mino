@@ -473,6 +473,42 @@ mino_val *mino_mk_var(mino_state *S, const char *ns, const char *name,
     return v;
 }
 
+/* Fn-value constructor (MINO_FN).  Lives here rather than in
+ * collections/map.c (where the other fn-related utilities used to
+ * co-locate) because this is a values-domain object constructor and
+ * values/ is the natural owner of value-type allocation.  The only
+ * runtime-internal state it reads is S->ns_vars.{fn_ambient_ns,
+ * current_ns}, which is available via runtime/internal.h that val.c
+ * already includes. */
+mino_val *make_fn(mino_state *S, mino_val *params, mino_val *body,
+                    mino_env *env)
+{
+    mino_val *v = alloc_val(S, MINO_FN);
+    v->as.fn.params      = params;
+    v->as.fn.body        = body;
+    v->as.fn.env         = env;
+    v->as.fn.shape       = 0;
+    v->as.fn.wraps_prim  = NULL;
+    v->as.fn.template_fn = NULL;
+    /* Inside a macro body, current_ns is still the caller's ns (only
+     * fn_ambient_ns is the macro's defining ns). Closures created here
+     * are artifacts of the macro expansion -- they should resolve free
+     * vars and qualify syntax-quoted symbols against the macro's ns,
+     * not the caller's. Without this, `(fn [...] `(sym ...))` inside
+     * a macro body emits bare `sym` instead of `defining-ns/sym` once
+     * the closure runs, since invoking the closure overwrites
+     * fn_ambient_ns with its (caller-derived) defining_ns. */
+    if (S->ns_vars.fn_ambient_ns != NULL
+        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
+        && (S->ns_vars.current_ns == NULL
+            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
+        v->as.fn.defining_ns = S->ns_vars.fn_ambient_ns;
+    } else {
+        v->as.fn.defining_ns = S->ns_vars.current_ns;
+    }
+    return v;
+}
+
 mino_val *mino_cons(mino_state *S, mino_val *car, mino_val *cdr)
 {
     mino_val *v = alloc_val(S, MINO_CONS);

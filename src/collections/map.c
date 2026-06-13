@@ -916,32 +916,4 @@ void mino_atom_reset(mino_state *S, mino_val *a, mino_val *val)
     }
 }
 
-mino_val *make_fn(mino_state *S, mino_val *params, mino_val *body,
-                    mino_env *env)
-{
-    mino_val *v = alloc_val(S, MINO_FN);
-    v->as.fn.params      = params;
-    v->as.fn.body        = body;
-    v->as.fn.env         = env;
-    v->as.fn.shape       = 0;
-    v->as.fn.wraps_prim  = NULL;
-    v->as.fn.template_fn = NULL;
-    /* Inside a macro body, current_ns is still the caller's ns (only
-     * fn_ambient_ns is the macro's defining ns). Closures created here
-     * are artifacts of the macro expansion -- they should resolve free
-     * vars and qualify syntax-quoted symbols against the macro's ns,
-     * not the caller's. Without this, `(fn [...] `(sym ...))` inside
-     * a macro body emits bare `sym` instead of `defining-ns/sym` once
-     * the closure runs, since invoking the closure overwrites
-     * fn_ambient_ns with its (caller-derived) defining_ns. */
-    if (S->ns_vars.fn_ambient_ns != NULL
-        && S->ns_vars.fn_ambient_ns != S->ns_vars.current_ns
-        && (S->ns_vars.current_ns == NULL
-            || strcmp(S->ns_vars.fn_ambient_ns, S->ns_vars.current_ns) != 0)) {
-        v->as.fn.defining_ns = S->ns_vars.fn_ambient_ns;
-    } else {
-        v->as.fn.defining_ns = S->ns_vars.current_ns;
-    }
-    return v;
-}
 
