@@ -50,7 +50,11 @@
 mino_val **mino_jit_backjump_safepoint(mino_state *S, mino_val **regs)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
+#if defined(__GNUC__) || defined(__clang__)
     if (__builtin_expect(--ctx->jit_backjump_ticks > 0, 1)) {
+#else
+    if (--ctx->jit_backjump_ticks > 0) {
+#endif
         return regs;
     }
     ctx->jit_backjump_ticks = MINO_JIT_BACKJUMP_TICKS;
@@ -706,7 +710,9 @@ mino_val **mino_jit_push_env_slow(mino_state *S, mino_val **regs)
     mino_thread_ctx_t *ctx   = mino_current_ctx(S);
     mino_env        *child = env_child(S, ctx->jit_invoke_env);
     if (child == NULL) return NULL;
+    gc_pin(child);
     ctx->jit_invoke_env = child;
+    gc_unpin(1);
     return regs;
 }
 
