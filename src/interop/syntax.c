@@ -21,6 +21,7 @@ static host_type_t *type_ensure(mino_state *S, const char *type_key)
         size_t nc;
         if (S->host_types_cap > SIZE_MAX / 2) return NULL;
         nc = S->host_types_cap == 0 ? 4 : S->host_types_cap * 2;
+        if (nc > SIZE_MAX / sizeof(host_type_t)) return NULL;
         host_type_t *nb = (host_type_t *)realloc(
             S->host_types, nc * sizeof(*nb));
         if (nb == NULL) return NULL;
@@ -45,6 +46,7 @@ static void member_add(host_type_t *t, const char *name, int arity,
         size_t nc;
         if (t->members_cap > SIZE_MAX / 2) return;
         nc = t->members_cap == 0 ? 4 : t->members_cap * 2;
+        if (nc > SIZE_MAX / sizeof(host_member_t)) return;
         host_member_t *nb = (host_member_t *)realloc(
             t->members, nc * sizeof(*nb));
         if (nb == NULL) return;
