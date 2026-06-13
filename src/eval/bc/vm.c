@@ -490,14 +490,22 @@ mino_val *unop_int_fast(mino_state *S, mino_val *v,
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_saddll_overflow(a, 1, &r)) return NULL;
 #else
-        r = a + 1;
+        {
+            unsigned long long ur = (unsigned long long)a + 1ULL;
+            if (((ur ^ (unsigned long long)a) >> 63) & 1) return NULL;
+            r = (long long)ur;
+        }
 #endif
         return tag_or_box_int(S, r);
     case UNOP_DEC:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_ssubll_overflow(a, 1, &r)) return NULL;
 #else
-        r = a - 1;
+        {
+            unsigned long long ur = (unsigned long long)a - 1ULL;
+            if (((ur ^ (unsigned long long)a) >> 63) & 1) return NULL;
+            r = (long long)ur;
+        }
 #endif
         return tag_or_box_int(S, r);
     case UNOP_ZERO_P:
@@ -828,14 +836,17 @@ mino_val *mino_bc_ic_global_load(mino_state *S,
  * :default fallback, refills the IC under write barriers, and
  * returns. NULL return means the user-visible error was already
  * surfaced via prim_throw_classified (bad dispatch table shape, no
- * impl for type) and the caller should goto bc_done. The atom-NULL
- * / non-atom guard is the caller's responsibility (argn-and-shape
- * validation belongs at the dispatch site). */
+ * impl for type) and the caller should goto bc_done. */
 mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
                                         const mino_bc_fn_t *bc,
                                         mino_bc_ic_slot_t *slot,
                                         mino_val *first_arg)
 {
+    if (slot->atom == NULL || mino_type_of(slot->atom) != MINO_ATOM) {
+        prim_throw_classified(S, "user", "MPR002",
+                              "protocol dispatch atom is not an atom");
+        return NULL;
+    }
     mino_val *atom_map = slot->atom->as.atom.val;
     mino_val *type_disc;
     if (first_arg != NULL
@@ -1400,7 +1411,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
 
         case OP_JMP: {
             int off = sBx_OF(ins);
-            pc = (size_t)((long)pc + off);
+            pc = (size_t)((ptrdiff_t)pc + off);
             /* Backward jump: poll for cancel + auto-yield. Forward
              * jumps skip the poll since they don't form a loop. */
             if (off < 0 && !mino_bc_safepoint(S)) {
@@ -1413,7 +1424,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned a = A_OF(ins);
             int off = sBx_OF(ins);
             if (!mino_is_truthy_inline(regs[a])) {
-                pc = (size_t)((long)pc + off);
+                pc = (size_t)((ptrdiff_t)pc + off);
                 if (off < 0 && !mino_bc_safepoint(S)) {
                     ok = 0; goto dispatch_done;
                 }
@@ -1854,7 +1865,17 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 if (c_ >= l_) break;
                 long long k_ = MINO_INT_VAL(vk);
                 long long s_ = MINO_INT_VAL(vs);
-                long long new_k = k_ + s_;
+                long long new_k;
+#if defined(__GNUC__) || defined(__clang__)
+                if (__builtin_saddll_overflow(k_, s_, &new_k)) goto slow_path_loop_lt;
+#else
+                {
+                    unsigned long long uk = (unsigned long long)k_ + (unsigned long long)s_;
+                    if (((uk ^ (unsigned long long)k_) & (uk ^ (unsigned long long)s_)) >> 63)
+                        goto slow_path_loop_lt;
+                    new_k = (long long)uk;
+                }
+#endif
                 if (c_ != MINO_INT_MAX
                     && new_k >= MINO_INT_MIN && new_k <= MINO_INT_MAX) {
                     regs[a] = MINO_MAKE_INT(c_ + 1);
@@ -1864,6 +1885,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     break;
                 }
             }
+            slow_path_loop_lt:
             {
                 mino_val *list = mino_nil(S);
                 list = mino_cons(S, regs[b], list);
@@ -1916,7 +1938,17 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 if (t_ == 0) break;
                 long long k_ = MINO_INT_VAL(vk);
                 long long s_ = MINO_INT_VAL(vs);
-                long long new_k = k_ + s_;
+                long long new_k;
+#if defined(__GNUC__) || defined(__clang__)
+                if (__builtin_saddll_overflow(k_, s_, &new_k)) goto slow_path_loop_dec;
+#else
+                {
+                    unsigned long long uk = (unsigned long long)k_ + (unsigned long long)s_;
+                    if (((uk ^ (unsigned long long)k_) & (uk ^ (unsigned long long)s_)) >> 63)
+                        goto slow_path_loop_dec;
+                    new_k = (long long)uk;
+                }
+#endif
                 if (t_ != MINO_INT_MIN
                     && new_k >= MINO_INT_MIN && new_k <= MINO_INT_MAX) {
                     regs[a] = MINO_MAKE_INT(t_ - 1);
@@ -1926,6 +1958,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     break;
                 }
             }
+            slow_path_loop_dec:
             {
                 mino_val *list = mino_nil(S);
                 list = mino_cons(S, regs[a], list);
@@ -2275,14 +2308,27 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
 #if defined(__GNUC__) || defined(__clang__)
                     if (__builtin_saddll_overflow(la, imm, &out)) { r = NULL; break; }
 #else
-                    out = la + imm;
+                    {
+                        unsigned long long ua = (unsigned long long)la
+                                              + (unsigned long long)imm;
+                        if (((ua ^ (unsigned long long)la) & (ua ^ (unsigned long long)imm))
+                                >> 63) { r = NULL; break; }
+                        out = (long long)ua;
+                    }
 #endif
                     r = tag_or_box_int(S, out); break;
                 case OP_SUB_IK:
 #if defined(__GNUC__) || defined(__clang__)
                     if (__builtin_ssubll_overflow(la, imm, &out)) { r = NULL; break; }
 #else
-                    out = la - imm;
+                    {
+                        unsigned long long ua = (unsigned long long)la
+                                              - (unsigned long long)imm;
+                        if ((((unsigned long long)la ^ (unsigned long long)imm)
+                                & ((unsigned long long)la ^ ua)) >> 63)
+                            { r = NULL; break; }
+                        out = (long long)ua;
+                    }
 #endif
                     r = tag_or_box_int(S, out); break;
                 case OP_LT_IK: r = (la <  imm) ? mino_true(S) : mino_false(S); break;
@@ -2324,7 +2370,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned a  = A_OF(ins);
             int off     = sBx_OF(ins);
             int td      = ctx->try_depth;
-            size_t hpc  = (size_t)((long)pc + off);
+            size_t hpc  = (size_t)((ptrdiff_t)pc + off);
             if (td >= MAX_TRY_DEPTH
                 || ctx->bc_catch_depth >= MAX_TRY_DEPTH) {
                 /* Surface the same MLM002 diagnostic the tree-walker
