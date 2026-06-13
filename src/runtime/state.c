@@ -32,7 +32,11 @@ mino_val *prim_throw_classified(mino_state *S, const char *kind,
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 void      mino_agent_quiesce_workers(mino_state *S);
 
+#include <errno.h>                   /* errno for strtol in mino_sampler_fire */
 #include <limits.h>                  /* INT_MAX for MINO_OPT_THREAD_LIMIT */
+#if !defined(_MSC_VER) && !defined(__GNUC__) && !defined(__clang__)
+#  include <stdatomic.h>             /* C11 fallback for atomic CAS in mino_lazy_inflight_unwind */
+#endif
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -282,14 +286,23 @@ mino_state *mino_state_new(void)
      * allocation failure in the four mino_* calls below is unrecoverable
      * and aborts -- same contract as the calloc above. */
     {
+        /* gc_pin/gc_unpin macros use the implicit name S; alias st so
+         * they expand correctly inside this block. */
+        mino_state *S = st;
         mino_val *keys[3], *vals[3];
-        keys[0] = mino_keyword(st, "mino/kind");
-        vals[0] = mino_keyword(st, "internal");
-        keys[1] = mino_keyword(st, "mino/code");
-        vals[1] = mino_string(st, "MIN001");
-        keys[2] = mino_keyword(st, "mino/message");
-        vals[2] = mino_string(st, "out of memory");
+        /* Pin each allocation before the next to prevent collection of
+         * earlier GC-owned values during subsequent mino_keyword/mino_string
+         * calls. try_depth is 0 so OOM would abort, but pinning is still
+         * required for correctness when GC stress is active. */
+        keys[0] = mino_keyword(st, "mino/kind");    gc_pin(keys[0]);
+        vals[0] = mino_keyword(st, "internal");     gc_pin(vals[0]);
+        keys[1] = mino_keyword(st, "mino/code");    gc_pin(keys[1]);
+        vals[1] = mino_string(st, "MIN001");        gc_pin(vals[1]);
+        keys[2] = mino_keyword(st, "mino/message"); gc_pin(keys[2]);
+        vals[2] = mino_string(st, "out of memory"); gc_pin(vals[2]);
         st->oom_exception = mino_map(st, keys, vals, 3);
+        gc_unpin(6);
+        (void)S; /* suppress unused warning if S ends up unused */
     }
     return st;
 }
@@ -400,13 +413,22 @@ void mino_lazy_inflight_unwind(mino_state *S, size_t mark)
         (void)InterlockedCompareExchange((volatile LONG *)&cell->as.lazy.realized,
                                          (LONG)LAZY_UNREALIZED,
                                          (LONG)LAZY_REALIZING);
-#else
+#elif defined(__GNUC__) || defined(__clang__)
         int expected = LAZY_REALIZING;
         (void)__atomic_compare_exchange_n(&cell->as.lazy.realized,
                                           &expected, LAZY_UNREALIZED,
                                           0,
                                           __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE);
+#else
+        /* C11 stdatomic fallback. */
+        {
+            int expected = LAZY_REALIZING;
+            (void)atomic_compare_exchange_strong_explicit(
+                (_Atomic int *)&cell->as.lazy.realized,
+                &expected, LAZY_UNREALIZED,
+                memory_order_acq_rel, memory_order_acquire);
+        }
 #endif
     }
 }
@@ -1072,8 +1094,16 @@ static char *read_stream_all(mino_state *S, FILE *f, size_t *out_len)
     for (;;) {
         size_t got;
         if (len + 4096 + 1 > cap) {
-            size_t nc = cap * 2;
-            char  *nb = (char *)realloc(buf, nc);
+            size_t nc;
+            char  *nb;
+            if (!checked_double_sz(cap, &nc)) {
+                free(buf);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "out of memory loading file");
+                return NULL;
+            }
+            nb = (char *)realloc(buf, nc);
             if (nb == NULL) {
                 free(buf);
                 set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -1632,8 +1662,20 @@ static void mino_sampler_fire(mino_state *S)
             S->sampler_enabled = -1;
         } else {
             const char *p = getenv("MINO_SAMPLE_PERIOD");
-            S->sampler_period = (p != NULL && p[0] != '\0')
-                                ? (unsigned)atoi(p) : 1000u;
+            if (p != NULL && p[0] != '\0') {
+                char  *endptr = NULL;
+                long   v;
+                errno = 0;
+                v = strtol(p, &endptr, 10);
+                if (errno != 0 || endptr == p || *endptr != '\0'
+                    || v <= 0 || v > 1000000L) {
+                    S->sampler_period = 1000u;
+                } else {
+                    S->sampler_period = (unsigned)v;
+                }
+            } else {
+                S->sampler_period = 1000u;
+            }
             if (S->sampler_period == 0u) S->sampler_period = 1000u;
             S->sampler_enabled = 1;
         }
@@ -2031,8 +2073,11 @@ int mino_repl_feed(mino_repl *repl, const char *line, mino_val **out)
         repl->len = remaining;
     }
 
-    /* Evaluate the form. */
+    /* Evaluate the form. Pin form across mino_eval: the evaluator may
+     * trigger a collection and form is GC-owned with no other live root. */
+    gc_pin(form);
     result = mino_eval(S, form, repl->env);
+    gc_unpin(1);
     if (result == NULL) {
         return MINO_REPL_ERROR;
     }

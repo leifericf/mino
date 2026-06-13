@@ -32,7 +32,7 @@ static inline void tc_add(int *p, int delta)
 {
     InterlockedExchangeAdd((LONG volatile *)p, (LONG)delta);
 }
-#else
+#elif defined(__GNUC__) || defined(__clang__)
 static inline int tc_load(int *p)
 {
     return __atomic_load_n(p, __ATOMIC_RELAXED);
@@ -40,6 +40,17 @@ static inline int tc_load(int *p)
 static inline void tc_add(int *p, int delta)
 {
     __atomic_fetch_add(p, delta, __ATOMIC_RELAXED);
+}
+#else
+/* C11 stdatomic fallback for compilers that are neither MSVC nor GCC/Clang. */
+#  include <stdatomic.h>
+static inline int tc_load(int *p)
+{
+    return atomic_load_explicit((_Atomic int *)p, memory_order_relaxed);
+}
+static inline void tc_add(int *p, int delta)
+{
+    (void)atomic_fetch_add_explicit((_Atomic int *)p, delta, memory_order_relaxed);
 }
 #endif
 
