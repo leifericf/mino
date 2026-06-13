@@ -29,11 +29,19 @@ static host_type_t *type_ensure(mino_state *S, const char *type_key)
         S->host_types_cap = nc;
     }
     {
+        /* Pre-allocate initial members capacity so the entry is fully
+         * initialised before being committed (host_types_len++).  This
+         * makes the commit atomic: a later member_add realloc failure
+         * can silently drop the member but cannot leave the type with
+         * members == NULL while members_cap > 0. */
+        host_member_t *init_members = (host_member_t *)malloc(
+            4 * sizeof(host_member_t));
+        if (init_members == NULL) return NULL;
         host_type_t *t = &S->host_types[S->host_types_len++];
         t->type_key    = type_key;
-        t->members     = NULL;
+        t->members     = init_members;
         t->members_len = 0;
-        t->members_cap = 0;
+        t->members_cap = 4;
         return t;
     }
 }

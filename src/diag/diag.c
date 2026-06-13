@@ -172,9 +172,10 @@ void diag_add_note(mino_diag *d, const char *message)
 {
     if (d->notes_len >= d->notes_cap) {
         size_t new_cap = d->notes_cap == 0 ? 4
-                       : (d->notes_cap > SIZE_MAX / 2 ? SIZE_MAX : d->notes_cap * 2);
-        mino_diag_note_t *p = (mino_diag_note_t *)realloc(
-            d->notes, new_cap * sizeof(*p));
+                       : (d->notes_cap > SIZE_MAX / 2 ? SIZE_MAX / 2 : d->notes_cap * 2);
+        size_t byte_sz;
+        if (!checked_mul_sz(new_cap, sizeof(*d->notes), &byte_sz)) return;
+        mino_diag_note_t *p = (mino_diag_note_t *)realloc(d->notes, byte_sz);
         if (p == NULL) return;
         d->notes     = p;
         d->notes_cap = new_cap;

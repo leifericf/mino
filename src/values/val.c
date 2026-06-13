@@ -577,12 +577,13 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
             vals = (mino_val **)malloc(len * sizeof(*vals));
             if (vals == NULL) return NULL;
             /* vals[] is malloc-owned and not a GC root; suppress collection
-             * while accumulating elements so alloc_val cannot sweep them. */
+             * while accumulating elements AND during alloc_val so the GC
+             * cannot sweep elements stored only in vals[]. */
             mino_current_ctx(S)->gc_depth++;
             for (i = 0; i < len; i++) vals[i] = vec_nth(coll, i);
-            mino_current_ctx(S)->gc_depth--;
         }
         v = alloc_val(S, MINO_HOST_ARRAY);
+        if (len > 0) mino_current_ctx(S)->gc_depth--;
         if (v == NULL) { free(vals); return NULL; }
         v->as.host_array.vals = vals;
         v->as.host_array.len  = len;
