@@ -12,7 +12,6 @@
 #include "mino_internal.h"
 #include "eval/bc/internal.h"
 #include "eval/bc/jit.h"
-#include "gc/internal.h"
 
 void gc_mark_child_push_exported(mino_state *S, const void *p);
 

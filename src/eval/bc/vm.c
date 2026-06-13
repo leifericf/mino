@@ -359,7 +359,11 @@ static void bc_pop_window(mino_state *S, size_t base)
  * return their MINO_TYPE pointer directly so the cache key stays a
  * pure-pointer compare; non-records hash into the interned keyword
  * table the way prim_type would. Mirrors prim_type's first-arg path
- * but avoids the cons-spine + arity-check wrapper. */
+ * but avoids the cons-spine + arity-check wrapper.
+ *
+ * Mirrors prim_type (prim/reflection.c:prim_type). When adding a new value
+ * type, update BOTH this function and prim_type. Deduplication requires a
+ * cross-module extraction tracked in factoring-eval-bc-r2-003. */
 static mino_val *bc_protocol_type_disc(mino_state *S, mino_val *v)
 {
     if (v == NULL) return mino_keyword(S, "nil");

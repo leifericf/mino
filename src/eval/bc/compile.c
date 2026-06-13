@@ -613,7 +613,15 @@ static int is_core_macro_form(const char *name)
 /* Names of every special form mino's eval recognizes, plus the syntactic
  * sub-forms that only appear as heads inside their parent (catch,
  * finally) but would otherwise look like regular calls. Kept in sync
- * with k_special_forms in src/eval/special_registry.c. */
+ * with k_special_forms in src/eval/special_registry.c.
+ *
+ * DUPLICATION NOTE (factoring-eval-bc-r2-002): this table duplicates the
+ * canonical special-form name list in src/eval/special_registry.c
+ * (k_special_forms). The registry is the authority; update BOTH when
+ * adding or removing a special form name. Deduplication is blocked because
+ * the registry's lookup interface requires a cons-form argument (not a
+ * const char *), so a direct call from here would require touching an
+ * out-of-scope module. */
 static int is_special_form_name(const char *name)
 {
     /* Recognized by the registry (eval_try_special_form). */
