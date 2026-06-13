@@ -40,29 +40,10 @@ size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
 int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
 mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
-/* Print dynvar plumbing. Top-level print entrypoints (pr / prn / print
- * / println / pr-str) call resolve to snapshot *print-length* and
- * *print-level* / *print-readably* / *print-meta* / *print-dup* /
- * *print-namespace-maps* / *flush-on-newline* from the current
- * binding stack into the state's cached fields, do the print, then
- * call restore with the saved values. Both helpers are no-ops when
- * env is NULL or the dynvars are unset.
- *
- * The cached values mean the per-collection printers read a single
- * int field instead of walking the binding stack per nested value. */
-typedef struct {
-    int length;
-    int level;
-    int readably;
-    int meta;
-    int dup;
-    int ns_maps;
-    int flush_nl;
-} print_dynvars_saved_t;
-
-void print_dynvars_resolve(mino_state *S, mino_env *env,
-                           print_dynvars_saved_t *saved);
-void print_dynvars_restore(mino_state *S, const print_dynvars_saved_t *saved);
+/* print_dynvars_saved_t, print_dynvars_resolve, print_dynvars_restore:
+ * Declared in eval/internal.h (implementations live in eval/print_dynvars.c).
+ * Visible here through the transitive include chain:
+ * prim/internal.h -> runtime/internal.h -> eval/internal.h. */
 
 /* Sequence iterator: borrows the collection being iterated.
  * seq_iter_val returns a borrowed pointer into the collection's storage;
@@ -82,19 +63,10 @@ void         seq_iter_next(mino_state *S, seq_iter_t *it);
 /* val_to_seq: coerce a value to a cons-list sequence (GC-owned). */
 mino_val  *val_to_seq(mino_state *S, mino_val *v);
 
-/* set_conj1: return a new set with elem added (GC-owned). */
-mino_val  *set_conj1(mino_state *S, const mino_val *s,
-                       mino_val *elem);
-
-/* Owner-tagged set conj/disj: mirror the persistent path but route
- * the HAMT walk and the key_order conj through the owned variants so
- * a transient batch reuses spine nodes and tail-chunk slots in place
- * after the first touch. The persistent path stays the default;
- * transient.c calls these only when `owner_id != 0`. */
-mino_val  *set_conj1_owned(mino_state *S, mino_val *s,
-                              mino_val *elem, uintptr_t owner);
-mino_val  *set_disj1_owned(mino_state *S, mino_val *s,
-                              const mino_val *elem, uintptr_t owner);
+/* set_conj1, set_conj1_owned, set_disj1_owned:
+ * Declared in collections/internal.h (implementations live in
+ * prim/collections.c). Visible here through the transitive include chain:
+ * prim/internal.h -> runtime/internal.h -> collections/internal.h. */
 
 /* print_str_to: write v to out; strings as raw bytes, others via printer. */
 void         print_str_to(mino_state *S, FILE *out, const mino_val *v);
@@ -260,7 +232,6 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env);
 /* sequences_seq.c calls prim_rest. */
 mino_val *prim_rest(mino_state *S, mino_val *args, mino_env *env);
 
-/* src/collections/transient.c calls prim_disj. */
 mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env);
 
 /* collections_transient.c -- all prims are cross-TU:
@@ -278,7 +249,6 @@ mino_val *prim_transient_p(mino_state *S, mino_val *args, mino_env *env);
 /* sequences.c -- most prims are file-local static.
  * Cross-TU callers: */
 
-/* prim_pop: called by src/collections/transient.c. */
 mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env);
 
 /* sequences_seq.c -- prim_seq is cross-TU: called by lazy.c and sequences.c.
@@ -363,9 +333,11 @@ mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env);
 
-/* DEFINED in src/eval/bindings.c; registered by reflection.c's table.
- * eval/bc/compile.c also calls it at compile time to expand destructuring. */
-mino_val *prim_destructure(mino_state *S, mino_val *args, mino_env *env);
+/* prim_destructure: Declared in eval/internal.h (implementation lives in
+ * eval/bindings_destr.c). Visible here through the transitive include chain:
+ * prim/internal.h -> runtime/internal.h -> eval/internal.h.
+ * Registered by reflection.c's table; eval/bc/compile.c calls it at
+ * compile time to expand destructuring. */
 
 /* argv-ABI variants for numeric predicates are file-local static in
  * reflection.c (prim_zero_p_argv etc.) and numeric.c (prim_inc_argv etc.) --

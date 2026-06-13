@@ -2,8 +2,11 @@
  * print_dynvars.c -- *print-* dynamic variable resolution and restore.
  *
  * Extracted from print.c to keep each translation unit under the 1100-line
- * limit.  The two public functions are declared in prim/internal.h so every
- * caller (prim/io.c, prim/pr.c, etc.) already finds them through that header.
+ * limit.  The two public functions are declared in eval/internal.h; callers
+ * in prim/ (prim/io.c, prim/string.c) see them through the transitive chain
+ * prim/internal.h -> runtime/internal.h -> eval/internal.h.
+ *
+ * prim/internal.h is included here for as_long (defined in prim/prim.c).
  */
 
 #include "runtime/internal.h"

@@ -2,12 +2,12 @@
  * print.c -- value printer.
  *
  * Dynamic-variable resolution (print_dynvars_resolve / print_dynvars_restore)
- * lives in print_dynvars.c; declarations are in prim/internal.h.
+ * lives in print_dynvars.c; declarations are in eval/internal.h (included
+ * transitively via runtime/internal.h).
  */
 
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"
-#include "prim/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */

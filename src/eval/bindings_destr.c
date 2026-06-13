@@ -2,14 +2,13 @@
  * bindings_destr.c -- macro-expander destructuring primitive (prim_destructure).
  *
  * Extracted from bindings.c to keep each translation unit under the
- * 1100-line limit.  prim_destructure is declared in prim/internal.h
- * (it is registered as a primitive callable from prim/install.c).
+ * 1100-line limit.  prim_destructure is declared in eval/internal.h
+ * (registered as a primitive callable from prim/reflection.c's table).
  */
 
 #include "eval/special_internal.h"
 #include "eval/internal.h"
 #include "collections/internal.h"
-#include "prim/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* destructure: emit a flat let-binding vector for macro authors             */
