@@ -60,6 +60,7 @@
 - GC: Skip minor sweep when mark-stack overflows to prevent freeing live YOUNG objects
 - GC: Add gc_depth guard to gc_verify_remset_complete, mirroring gc_classify_offender
 - GC: Convert remset realloc abort to recoverable OOM via major collect and gc_oom_throw
+- GC: Abort with Class I rationale when remset growth fails inside a running collection, preventing gc_oom_throw longjmp from corrupting gc_depth and gc.phase
 - Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
 - Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.
 - Style: Fix stale filenames in gc/internal.h section headers; update barrier contract comment to Dijkstra insertion-barrier model; remove spurious inline from gc_verify_check
@@ -77,6 +78,7 @@
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
 - Security: Propagate OOM when intern table bootstrap malloc fails instead of NULL-dereferencing probe loop
 - Security: Add overflow guard before malloc(n_fields * sizeof(*field_kws)) in mino_defrecord
+- Security: Tighten size_t overflow guards in eq_stack_push and mino_host_array_from_coll to account for element size in capacity doubling check
 - Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
 - Values: Guard mino_host_array_new against len*sizeof overflow (security-values-002)
 - Values: Pin head across allocating GC calls in mino_host_array_from_coll generic seq path (memory-values-001)
@@ -299,6 +301,13 @@
 - Memory: Extend GC depth guard to cover alloc_val in host-array fast path (values/val.c)
 - Memory: Pre-allocate initial members buffer atomically in interop type_ensure (interop/syntax.c)
 - Memory: Guard diag note realloc multiply with checked_mul_sz to prevent size_t overflow (diag/diag.c)
+- Memory: Pin slots arrays and subtree nodes across GC-allocating calls in HAMT and persistent vector owned-path code
+- Memory: Pin params vector in try_reduce_rewrite across allocating calls that precede its use
+- Memory: Pin GC roots in qq_expand_cons, read_namespaced_map, and normalize_percent to prevent collection under GC pressure
+- Memory: Pin accumulating cons list in JIT tailcall_slow to prevent sweep across mino_cons calls
+- Memory: Free per-fn stats entries (file string, ic_stats array, node) in cpjit_stats_dump after printing
+- Memory: Pin first alloc result across second alloc in prim arithmetic, collections, io, and seq GC windows
+- Memory: Fix ns_env_ensure to assign mino_core_env only after GC root registration succeeds
 
 ## v0.423.5 — Security Fixes
 
