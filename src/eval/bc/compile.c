@@ -1945,11 +1945,18 @@ static mino_val *rewrite_recur_args(mino_state *S,
         cur    = cur->as.cons.cdr;
     }
     {
-        mino_val *step      = buf[step_pos];
-        mino_val *step_args = step->as.cons.cdr;  /* skip head sym */
-        mino_val *new_head  = mino_symbol(
-            S, step_kind == 0 ? "conj!" : "assoc!");
-        if (new_head == NULL) { free(buf); return NULL; }
+        mino_val *step     = buf[step_pos];
+        mino_val *new_head;
+        mino_val *step_args;
+        /* Pin step: buf is malloc'd and invisible to the GC; mino_symbol
+         * may trigger a collection that would free step. */
+        gc_pin(step);
+        new_head = mino_symbol(S, step_kind == 0 ? "conj!" : "assoc!");
+        if (new_head == NULL) { gc_unpin(1); free(buf); return NULL; }
+        /* Re-read step_args after the allocation so we hold a live
+         * pointer regardless of any intervening GC cycle. */
+        step_args = buf[step_pos]->as.cons.cdr;  /* skip head sym */
+        gc_unpin(1);
         buf[step_pos] = mino_cons(S, new_head, step_args);
         if (buf[step_pos] == NULL) { free(buf); return NULL; }
         gc_pin(buf[step_pos]);
@@ -2093,22 +2100,33 @@ static mino_val *try_builder_rewrite(mino_state *S, mino_val *form)
     {
         mino_val *transient_sym = mino_symbol(S, "transient");
         if (transient_sym == NULL) return NULL;
+        /* Pin transient_sym and acc_init: mino_nil + inner mino_cons may
+         * trigger GC between their allocations and the outer mino_cons
+         * read of these pointers. */
+        gc_pin(transient_sym);
+        gc_pin(acc_init);
         new_init = mino_cons(
             S, transient_sym, mino_cons(S, acc_init, mino_nil(S)));
+        gc_unpin(2);
     }
     /* Build a fresh vector for bindings. */
     {
         mino_val **bind_items;
         bind_items = (mino_val **)malloc(blen * sizeof(*bind_items));
         if (bind_items == NULL) return NULL;
+        /* Pin bindings: bind_items is malloc'd (GC-invisible) and holds
+         * pointers from vec_nth(bindings, i). Pinning bindings keeps all
+         * elements alive through vec_from_array without pinning each slot
+         * individually. Pin new_init for the same reason (it is the last
+         * slot and was produced by the preceding mino_cons chain). */
+        gc_pin(bindings);
         for (i = 0; i < blen - 1; i++) {
             bind_items[i] = vec_nth(bindings, i);
         }
-        /* Pin new_init before vec_from_array can trigger a GC cycle. */
         gc_pin(new_init);
         bind_items[blen - 1] = new_init;
         new_bindings = vec_from_array(S, bind_items, blen);
-        gc_unpin(1);
+        gc_unpin(2);
         free(bind_items);
         if (new_bindings == NULL) return NULL;
     }

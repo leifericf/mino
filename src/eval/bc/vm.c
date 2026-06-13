@@ -1011,9 +1011,12 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         unsigned a  = A_OF(ins);
         unsigned bx = Bx_OF(ins);
         if (bx >= bc->consts_len) { *ok = 0; return 0; }
-        mino_val *body = bc->consts[bx];
         mino_val *lz = alloc_val(S, MINO_LAZY);
         if (lz == NULL) { *ok = 0; return 0; }
+        /* Reload body after alloc_val: bc->consts is GC-scanned so the
+         * pointer is stable, but a value cached before the allocation
+         * would dangle if GC ran and freed it. */
+        mino_val *body = bc->consts[bx];
         lz->as.lazy.body     = body;
         lz->as.lazy.env      = env;
         lz->as.lazy.cached   = NULL;
