@@ -386,12 +386,15 @@ void gc_mark_interior(mino_state *S, const void *p);
  * (minor.c) to avoid open-coding the same three-field update. */
 void gc_charge_pause(mino_state *S, long long start_ns);
 
-/* Append one pause sample to the 256-ring (saturating at UINT32_MAX
- * ns) and tick the log2 histogram bucket [2^i, 2^(i+1)) ns clamped to
- * bucket 23. Called from each collection / slice site that already
- * computed elapsed_ns. Lifetime histogram + recent-window ring
- * together support both percentile + distribution queries. */
-void gc_record_pause(mino_state *S, uint64_t ns);
+/* Accumulate sub-phase elapsed nanoseconds into a counter field.
+ * start is a long long holding the phase's start time from
+ * mino_monotonic_ns(); field is an lvalue of type size_t in mino_state.
+ * Guards against backwards-clock readings by clamping at zero. */
+#define GC_ACCUM_NS(start, field) \
+    do { \
+        long long _raw_ns = mino_monotonic_ns() - (start); \
+        (field) += (_raw_ns > 0) ? (size_t)_raw_ns : 0; \
+    } while (0)
 
 /* Allocation-site sampler entry. site is the immediate return address
  * captured at gc_alloc_typed_inner (the C-side alloc site, which lets

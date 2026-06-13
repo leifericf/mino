@@ -40,8 +40,8 @@ void gc_major_begin(mino_state *S)
     t0     = mino_monotonic_ns();
     troots = t0;
     gc_mark_roots(S);
-    { long long raw_ns = mino_monotonic_ns() - troots; S->gc_root_scan_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
-    { long long raw_ns = mino_monotonic_ns() - t0; S->gc_major_mark_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
+    GC_ACCUM_NS(troots, S->gc_root_scan_ns);
+    GC_ACCUM_NS(t0,     S->gc_major_mark_ns);
     S->gc.major_step_alloc = 0;
     mino_current_ctx(S)->gc_depth--;
 }
@@ -65,7 +65,7 @@ void gc_major_step(mino_state *S, size_t budget_words)
         gc_trace_children(S, h);
         popped++;
     }
-    { long long raw_ns = mino_monotonic_ns() - t0; S->gc_major_mark_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
+    GC_ACCUM_NS(t0, S->gc_major_mark_ns);
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -101,7 +101,7 @@ void gc_major_remark(mino_state *S)
     gc_mark_roots(S);
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
-    { long long raw_ns = mino_monotonic_ns() - t0; S->gc_major_mark_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
+    GC_ACCUM_NS(t0, S->gc_major_mark_ns);
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -175,7 +175,7 @@ void gc_major_sweep_phase(mino_state *S)
     gc_intern_sweep_tombstones(S);
     gc_remset_purge_dead(S);
     gc_sweep(S);
-    { long long raw_ns = mino_monotonic_ns() - t0; S->gc_major_sweep_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
+    GC_ACCUM_NS(t0, S->gc_major_sweep_ns);
     /* Invalidate the range index. gc_range_compact would filter by
      * mark bit, but gc_sweep leaves YOUNG alive regardless of mark,
      * so compact would wrongly drop unmarked YOUNG survivors from the

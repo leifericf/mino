@@ -14,6 +14,20 @@
 static int  gc_range_cmp(const void *a, const void *b);
 static void gc_mark_intern_table(mino_state *S, const intern_table_t *tbl);
 
+/* Update heap_min / heap_max from the current sorted ranges array.
+ * Called at every point where ranges_len changes so the fast-reject
+ * bounds in gc_find_header_for_ptr stay accurate. */
+static void gc_heap_bounds_update(mino_state *S)
+{
+    if (S->gc.ranges_len > 0) {
+        S->gc.heap_min = S->gc.ranges[0].start;
+        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
+    } else {
+        S->gc.heap_min = 0;
+        S->gc.heap_max = 0;
+    }
+}
+
 static int gc_range_cmp(const void *a, const void *b)
 {
     const gc_range_t *ra = (const gc_range_t *)a;
@@ -66,13 +80,7 @@ void gc_build_range_index(mino_state *S)
     qsort(S->gc.ranges, S->gc.ranges_len, sizeof(*S->gc.ranges), gc_range_cmp);
     S->gc.ranges_valid = 1;
     S->gc.ranges_pending_len = 0;
-    if (S->gc.ranges_len > 0) {
-        S->gc.heap_min = S->gc.ranges[0].start;
-        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
-    } else {
-        S->gc.heap_min = 0;
-        S->gc.heap_max = 0;
-    }
+    gc_heap_bounds_update(S);
 }
 
 /*
@@ -187,10 +195,7 @@ void gc_range_merge_pending(mino_state *S)
     }
     S->gc.ranges_len = need;
     S->gc.ranges_pending_len = 0;
-    if (S->gc.ranges_len > 0) {
-        S->gc.heap_min = S->gc.ranges[0].start;
-        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
-    }
+    gc_heap_bounds_update(S);
 }
 
 /*
@@ -216,13 +221,7 @@ void gc_range_compact_after_minor_mark(mino_state *S)
         }
     }
     S->gc.ranges_len = dst;
-    if (S->gc.ranges_len > 0) {
-        S->gc.heap_min = S->gc.ranges[0].start;
-        S->gc.heap_max = S->gc.ranges[S->gc.ranges_len - 1].end;
-    } else {
-        S->gc.heap_min = 0;
-        S->gc.heap_max = 0;
-    }
+    gc_heap_bounds_update(S);
 }
 
 /*

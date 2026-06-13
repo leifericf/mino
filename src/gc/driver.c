@@ -81,24 +81,9 @@ void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
     }
 }
 
-/* Compute elapsed nanoseconds since start_ns and charge them to the
- * three accounting fields: total_ns, max_ns, and the pause ring.
- * Called from every site that times a GC pause (gc_major_slice,
- * gc_force_finish_major, gc_major_collect, gc_minor_collect). */
-void gc_charge_pause(mino_state *S, long long start_ns)
-{
-    long long raw_ns     = mino_monotonic_ns() - start_ns;
-    uint64_t  elapsed_ns = (raw_ns > 0) ? (uint64_t)raw_ns : 0; /* clamp: backwards-clock guard */
-    S->gc.total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc.max_ns) {
-        S->gc.max_ns = elapsed_ns;
-    }
-    gc_record_pause(S, elapsed_ns);
-}
-
 /* Record one STW pause sample. Saturates the ring slot at UINT32_MAX
  * ns; bucket-clamps the log2 histogram at index 23 ([8.4ms, ...)). */
-void gc_record_pause(mino_state *S, uint64_t ns)
+static void gc_record_pause(mino_state *S, uint64_t ns)
 {
     unsigned idx;
     unsigned bucket;
@@ -120,6 +105,21 @@ void gc_record_pause(mino_state *S, uint64_t ns)
         bucket++;
     }
     S->gc_pause_hist[bucket]++;
+}
+
+/* Compute elapsed nanoseconds since start_ns and charge them to the
+ * three accounting fields: total_ns, max_ns, and the pause ring.
+ * Called from every site that times a GC pause (gc_major_slice,
+ * gc_force_finish_major, gc_major_collect, gc_minor_collect). */
+void gc_charge_pause(mino_state *S, long long start_ns)
+{
+    long long raw_ns     = mino_monotonic_ns() - start_ns;
+    uint64_t  elapsed_ns = (raw_ns > 0) ? (uint64_t)raw_ns : 0; /* clamp: backwards-clock guard */
+    S->gc.total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc.max_ns) {
+        S->gc.max_ns = elapsed_ns;
+    }
+    gc_record_pause(S, elapsed_ns);
 }
 
 /* Adapt gc_major_work_budget toward gc_pause_target_ns. Reads the
