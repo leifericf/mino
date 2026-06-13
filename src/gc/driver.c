@@ -551,6 +551,9 @@ mino_val *alloc_val_inner(mino_state *S, mino_type type)
 
 char *dup_n_inner(mino_state *S, const char *s, size_t len)
 {
+    if (len == SIZE_MAX) {
+        abort(); /* Class I: len+1 would overflow size_t */
+    }
     char *out = (char *)gc_alloc_typed_inner(S, GC_T_RAW, len + 1);
     if (len > 0) {
         memcpy(out, s, len);
