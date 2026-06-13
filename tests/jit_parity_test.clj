@@ -430,4 +430,46 @@
 (deftest loop-lt-inc-1m
   (is (= 1000000 (p-loop-lt-inc 1000000))))
 
+;; ---- Section 6: ACC-variant loop parity ---------------------------
+;;
+;; OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC carry an accumulator
+;; register alongside the loop counter. Both the interpreter and the
+;; JIT stencil must produce the same accumulated result.
+
+(defn p-loop-lt-acc  [n] (loop [i 0 s 0] (if (< i n) (recur (inc i) (+ s i)) s)))
+(defn p-loop-dec-acc [n] (loop [i n s 0] (if (zero? i) s (recur (dec i) (+ s i)))))
+
+(defn- warm-acc-loops []
+  (dotimes [_ +warm+]
+    (p-loop-lt-acc 100)
+    (p-loop-dec-acc 100)))
+
+(deftest -aab-warm-acc-loops
+  (warm-acc-loops)
+  (is true))
+
+(deftest loop-lt-acc-zero
+  (is (= 0 (p-loop-lt-acc 0))))
+
+(deftest loop-lt-acc-one
+  (is (= 0 (p-loop-lt-acc 1))))
+
+(deftest loop-lt-acc-10
+  (is (= 45 (p-loop-lt-acc 10))))
+
+(deftest loop-lt-acc-1m
+  (is (= (reduce + (range 1000000)) (p-loop-lt-acc 1000000))))
+
+(deftest loop-dec-acc-zero
+  (is (= 0 (p-loop-dec-acc 0))))
+
+(deftest loop-dec-acc-one
+  (is (= 1 (p-loop-dec-acc 1))))
+
+(deftest loop-dec-acc-10
+  (is (= 55 (p-loop-dec-acc 10))))
+
+(deftest loop-dec-acc-1m
+  (is (= (reduce + (range 1 1000001)) (p-loop-dec-acc 1000000))))
+
 (run-tests-and-exit)
