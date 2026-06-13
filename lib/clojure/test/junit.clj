@@ -13,11 +13,16 @@
 
 ;; Per-run accumulator holding the open testsuite/testcase state and the
 ;; emitted lines.  Bound to a fresh atom by with-junit-output.  Shape:
-;;   {:lines     [str ...]   ;; emitted XML lines, in order
-;;    :suite     str|nil     ;; name of the open <testsuite>, or nil
-;;    :case-name str|nil     ;; name of the open <testcase>, or nil
-;;    :case-body [str ...]}  ;; nested <failure>/<error> lines for the
-;;                           ;; currently open testcase
+;;   {:lines        [str ...] ;; flushed XML lines, in order
+;;    :suite        str|nil   ;; name of the open <testsuite>, or nil
+;;    :suite-tests  int        ;; test-var count in the open suite
+;;    :suite-fails  int        ;; failing-assertion count in the open suite
+;;    :suite-errors int        ;; error count in the open suite
+;;    :suite-lines  [str ...]  ;; <testcase> lines buffered until the suite
+;;                             ;; closes, so its open tag can carry counts
+;;    :case-name    str|nil    ;; name of the open <testcase>, or nil
+;;    :case-body    [str ...]} ;; nested <failure>/<error> lines for the
+;;                             ;; currently open testcase
 (def ^:dynamic *junit-state* nil)
 
 (defn xml-escape
@@ -44,6 +49,14 @@
   [line]
   (when *junit-state*
     (swap! *junit-state* update :case-body (fnil conj []) line)))
+
+(defn- emit-suite-line!
+  "Appends one <testcase> line to the open testsuite's buffer. The lines
+  are held until :end-test-ns so the <testsuite> open tag can be emitted
+  ahead of them carrying the final tests/failures/errors counts."
+  [line]
+  (when *junit-state*
+    (swap! *junit-state* update :suite-lines (fnil conj []) line)))
 
 (defn- failure-detail
   "Builds the human-readable text body shared by <failure> and <error>
@@ -75,27 +88,36 @@
   (let [t (:type m)]
     (cond
       (= t :begin-test-ns)
-      (do (swap! *junit-state* assoc :suite (str (:ns m)))
-          (emit-line! (str "<testsuite name=\"" (xml-escape (:ns m)) "\">")))
+      (swap! *junit-state* assoc :suite (str (:ns m))
+             :suite-tests 0 :suite-fails 0 :suite-errors 0 :suite-lines [])
 
       (= t :end-test-ns)
-      (do (emit-line! "</testsuite>")
-          (swap! *junit-state* assoc :suite nil))
+      (let [st @*junit-state*]
+        (emit-line! (str "<testsuite name=\"" (xml-escape (:suite st))
+                         "\" tests=\"" (:suite-tests st)
+                         "\" failures=\"" (:suite-fails st)
+                         "\" errors=\"" (:suite-errors st) "\">"))
+        (doseq [line (:suite-lines st)] (emit-line! line))
+        (emit-line! "</testsuite>")
+        (swap! *junit-state* assoc :suite nil :suite-lines []))
 
       (= t :begin-test-var)
       (let [vname (str (:name (meta (:var m))))]
         (inc-report-counter :test)
-        (swap! *junit-state* assoc :case-name vname :case-body []))
+        (swap! *junit-state*
+               (fn [s] (-> s
+                           (update :suite-tests (fnil inc 0))
+                           (assoc :case-name vname :case-body [])))))
 
       (= t :end-test-var)
       (let [st   @*junit-state*
             name (:case-name st)
             body (:case-body st)]
         (if (seq body)
-          (do (emit-line! (str "  <testcase name=\"" (xml-escape name) "\">"))
-              (doseq [line body] (emit-line! line))
-              (emit-line! "  </testcase>"))
-          (emit-line! (str "  <testcase name=\"" (xml-escape name) "\"/>")))
+          (do (emit-suite-line! (str "  <testcase name=\"" (xml-escape name) "\">"))
+              (doseq [line body] (emit-suite-line! line))
+              (emit-suite-line! "  </testcase>"))
+          (emit-suite-line! (str "  <testcase name=\"" (xml-escape name) "\"/>")))
         (swap! *junit-state* assoc :case-name nil :case-body []))
 
       (= t :pass)
@@ -103,6 +125,7 @@
 
       (= t :fail)
       (do (inc-report-counter :fail)
+          (swap! *junit-state* update :suite-fails (fnil inc 0))
           (emit-case-body!
            (str "    <failure message=\""
                 (xml-escape (or (:message m) "assertion failed"))
@@ -110,6 +133,7 @@
 
       (= t :error)
       (do (inc-report-counter :error)
+          (swap! *junit-state* update :suite-errors (fnil inc 0))
           (emit-case-body!
            (str "    <error message=\""
                 (xml-escape (or (:message m) "uncaught exception"))
@@ -142,6 +166,8 @@
   [& body]
   (list 'binding ['clojure.test/report 'clojure.test.junit/junit-report
                   '*junit-state* '(atom {:lines [] :suite nil
+                                         :suite-tests 0 :suite-fails 0
+                                         :suite-errors 0 :suite-lines []
                                          :case-name nil :case-body []})]
         (list 'let ['result# (cons 'do body)]
               '(clojure.test.junit/print-junit-document)
