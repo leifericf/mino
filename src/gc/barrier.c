@@ -105,14 +105,22 @@ void gc_remset_add(mino_state *S, gc_hdr_t *container)
         }
         nr = (gc_hdr_t **)realloc(S->gc.remset, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            /* Class I abort: the write barrier cannot silently drop a
-             * remset entry — doing so would break the GC invariant that
-             * every OLD container holding a YOUNG pointer is in the
-             * remembered set, causing the next minor cycle to miss the
-             * YOUNG referent and collect it while it is still live.
-             * Heap corruption is certain; aborting is safer than
-             * continuing. */
-            abort(); /* Class I: GC remset OOM; skipping would break write barrier invariant */
+            /* memory-gc-003: realloc failure under user-driven memory
+             * pressure (MINO_OPT_HEAP_LIMIT, memory-constrained host).
+             * Strategy: run one full STW major collect to compact and
+             * free OLD garbage, then retry the realloc once.  If the
+             * retry still fails, raise a recoverable OOM via
+             * gc_oom_throw (longjmp into the active try frame) rather
+             * than abort()ing the host process.  This converts the
+             * previous Class I abort into a recoverable OOM consistent
+             * with the embedder contract (no user-triggerable input may
+             * reach a MINO_ERR_CORRUPT path). */
+            gc_major_collect(S);
+            nr = (gc_hdr_t **)realloc(S->gc.remset, new_cap * sizeof(*nr));
+            if (nr == NULL) {
+                gc_oom_throw(S, "out of memory (GC remset growth)");
+                return; /* unreachable when try frame exists; safety guard */
+            }
         }
         S->gc.remset     = nr;
         S->gc.remset_cap = new_cap;

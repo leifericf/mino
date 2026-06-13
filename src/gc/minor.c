@@ -382,6 +382,14 @@ static void gc_verify_remset_complete(mino_state *S)
     const char             *env = getenv("MINO_GC_VERIFY");
     if (env == NULL || env[0] == '\0' || env[0] == '0') return;
 
+    /* memory-gc-002: own the gc_depth guard rather than relying on the
+     * caller (gc_minor_collect) having already set gc_depth=1.  Mirrors
+     * the pattern in gc_classify_offender (trace.c): increment
+     * unconditionally at entry, decrement before every return path so
+     * any alloc triggered by gc_mark_roots cannot re-enter the
+     * collector while we are mutating phase and mark bits. */
+    mino_current_ctx(S)->gc_depth++;
+
     /* Count + save + zero every mark bit before our classifying pass.
      * gc_count_hdrs, gc_for_each_hdr, and gc_save_mark_fn are shared with
      * gc_classify_offender in trace.c and declared in gc/internal.h. */
@@ -392,6 +400,7 @@ static void gc_verify_remset_complete(mino_state *S)
     if (ctx.hdrs == NULL || ctx.marks == NULL) {
         free(ctx.hdrs); free(ctx.marks);
         fprintf(stderr, "[gc-verify] oom allocating mark-save buffer\n");
+        mino_current_ctx(S)->gc_depth--;
         return;
     }
     gc_for_each_hdr(S, gc_save_mark_fn, &ctx);
@@ -429,6 +438,7 @@ static void gc_verify_remset_complete(mino_state *S)
     }
     free(ctx.hdrs);
     free(ctx.marks);
+    mino_current_ctx(S)->gc_depth--;
 }
 
 void gc_minor_collect(mino_state *S)
@@ -440,6 +450,7 @@ void gc_minor_collect(mino_state *S)
     long long sweep_start_ns;
     int       saved_phase;
     size_t    mark_floor;
+    size_t    overflow_before; /* memory-gc-001: mark-stack overflow baseline */
     if (mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
@@ -479,6 +490,9 @@ void gc_minor_collect(mino_state *S)
      * each followed by a drain to floor. gc_root_scan_ns is the sub-
      * timer for the precise-root enumeration; it overlaps with the
      * outer mark_ns rather than adding to it. */
+    /* memory-gc-001: snapshot overflow counter before marking so we can
+     * detect any stack drop that occurred during this cycle's drains. */
+    overflow_before = S->gc_mark_stack_overflows;
     mark_start_ns  = mino_monotonic_ns();
     roots_start_ns = mark_start_ns;
     gc_mark_roots(S);
@@ -503,7 +517,16 @@ void gc_minor_collect(mino_state *S)
      * safety net for any alloc-then-populate pattern that omitted a
      * barrier on a container promoted mid-fill. */
     gc_remset_reset(S);
-    gc_minor_sweep(S, saved_phase);
+    /* memory-gc-001: if the mark stack dropped any entry during this
+     * cycle (realloc failure in gc_mark_stack_push_raw incremented
+     * gc_mark_stack_overflows), some reachable YOUNG objects may be
+     * unmarked.  Sweeping them would free live data.  Skip the sweep
+     * conservatively: all YOUNG objects survive this cycle unchanged.
+     * The next minor runs with a clean overflow baseline and can
+     * collect normally once the mark stack is no longer under pressure. */
+    if (S->gc_mark_stack_overflows == overflow_before) {
+        gc_minor_sweep(S, saved_phase);
+    }
     { long long raw_ns = mino_monotonic_ns() - sweep_start_ns; S->gc_minor_sweep_ns += (raw_ns > 0) ? (size_t)raw_ns : 0; }
     S->gc.collections_minor++;
     S->gc.phase = saved_phase;
