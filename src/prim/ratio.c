@@ -147,7 +147,9 @@ mino_val *mino_ratio_from_ll(mino_state *S, long long num, long long denom)
     mino_val *bn = mino_bigint_from_ll(S, num);
     mino_val *bd;
     if (bn == NULL) return NULL;
+    gc_pin(bn);
     bd = mino_bigint_from_ll(S, denom);
+    gc_unpin(1);
     if (bd == NULL) return NULL;
     return mino_ratio_make(S, bn, bd);
 }
