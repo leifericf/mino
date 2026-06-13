@@ -6,8 +6,10 @@
 #include "prim/internal.h"
 #include "mino.h"
 #include "path_buf.h"
-#include <dirent.h>
-#include <sys/stat.h>
+#if !defined(_MSC_VER)
+#  include <dirent.h>
+#  include <sys/stat.h>
+#endif
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
@@ -66,6 +68,11 @@ static int try_capture_to_atom(mino_state *S, mino_val *sink,
     cur = sink->as.atom.val;
     if (cur == NULL || mino_type_of(cur) != MINO_STRING) return 0;
     cur_len = cur->as.s.len;
+    if (len > SIZE_MAX - cur_len) {
+        prim_throw_classified(S, "internal", "MIN001",
+            "*out*: out of memory");
+        return -1;
+    }
     combined = (char *)malloc(cur_len + len);
     if (combined == NULL) {
         prim_throw_classified(S, "internal", "MIN001",
@@ -497,9 +504,11 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
         }
         llen   = i;
         rstart = (i < cur->as.s.len) ? i + 1 : i;
+        gc_pin(cur);
         line   = mino_string_n(S, cur->as.s.data, llen);
         rem    = mino_string_n(S, cur->as.s.data + rstart,
                                cur->as.s.len - rstart);
+        gc_unpin(1);
         gc_write_barrier(S, src, src->as.atom.val, rem);
         src->as.atom.val = rem;
         return line;
@@ -582,8 +591,10 @@ static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
             || cur->as.s.len == 0) {
             return mino_nil(S);
         }
+        gc_pin(cur);
         form = mino_read(S, cur->as.s.data, &end);
         if (form == NULL) {
+            gc_unpin(1);
             if (mino_last_error(S) != NULL) return NULL;
             /* Empty input or whitespace-only. */
             return mino_nil(S);
@@ -593,6 +604,7 @@ static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
         if (consumed > cur->as.s.len) consumed = cur->as.s.len;
         rem = mino_string_n(S, cur->as.s.data + consumed,
                             cur->as.s.len - consumed);
+        gc_unpin(1);
         gc_write_barrier(S, src, src->as.atom.val, rem);
         src->as.atom.val = rem;
         return form;
@@ -649,7 +661,7 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
     mino_val *path_val;
     const char *path;
     FILE       *f;
-    long        sz;
+    long long   sz;
     size_t      rd;
     char       *buf;
     mino_val *result;
@@ -669,7 +681,11 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "host", "MHO001", msg);
     }
     fseek(f, 0, SEEK_END);
-    sz = ftell(f);
+#if defined(_WIN32) && defined(_MSC_VER)
+    sz = _ftelli64(f);
+#else
+    sz = (long long)ftell(f);
+#endif
     if (sz < 0) {
         fclose(f);
         return prim_throw_classified(S, "host", "MHO001", "slurp: cannot determine file size");
