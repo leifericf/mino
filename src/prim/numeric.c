@@ -223,7 +223,9 @@ static int promote_acc(mino_state *S, tower_acc_t *acc, int new_tier,
             if (new_tier == TT_BIGDEC) {
                 mino_val *u = mino_bigint_from_ll(S, acc->iacc);
                 if (u == NULL) return 0;
+                gc_pin(u);
                 acc->vacc = mino_bigdec_make(S, u, 0);
+                gc_unpin(1);
                 if (acc->vacc == NULL) return 0;
                 acc->tier = TT_BIGDEC;
                 continue;
@@ -265,10 +267,12 @@ static int promote_acc(mino_state *S, tower_acc_t *acc, int new_tier,
                     acc->vacc->as.ratio.num, 0);
                 mino_val *den_bd;
                 if (num_bd == NULL) return 0;
+                gc_pin(num_bd);
                 den_bd = mino_bigdec_make(S,
                     acc->vacc->as.ratio.denom, 0);
-                if (den_bd == NULL) return 0;
+                if (den_bd == NULL) { gc_unpin(1); return 0; }
                 acc->vacc = mino_bigdec_div(S, num_bd, den_bd);
+                gc_unpin(1);
                 if (acc->vacc == NULL) return 0;
                 acc->tier = TT_BIGDEC;
                 continue;
@@ -313,7 +317,9 @@ static mino_val *coerce_at_tier(mino_state *S, mino_val *v, int tier,
         if (mino_val_int_p(v)) {
             bn = mino_bigint_from_ll(S, mino_val_int_get(v));
             if (bn == NULL) return NULL;
+            gc_pin(bn);
             bd = mino_bigint_from_ll(S, 1);
+            gc_unpin(1);
             if (bd == NULL) return NULL;
             return mino_ratio_make_unchecked(S, bn, bd);
         }
@@ -339,9 +345,12 @@ static mino_val *coerce_at_tier(mino_state *S, mino_val *v, int tier,
             mino_val *num_bd, *den_bd;
             num_bd = mino_bigdec_make(S, v->as.ratio.num, 0);
             if (num_bd == NULL) return NULL;
+            gc_pin(num_bd);
             den_bd = mino_bigdec_make(S, v->as.ratio.denom, 0);
-            if (den_bd == NULL) return NULL;
-            return mino_bigdec_div(S, num_bd, den_bd);
+            if (den_bd == NULL) { gc_unpin(1); return NULL; }
+            num_bd = mino_bigdec_div(S, num_bd, den_bd);
+            gc_unpin(1);
+            return num_bd;
         }
         break;
     }
@@ -1728,7 +1737,9 @@ static int as_ratio_pair_bigints(mino_state *S, const mino_val *v,
     if (mino_val_int_p(v)) {
         *num_out = mino_bigint_from_ll(S, mino_val_int_get(v));
         if (*num_out == NULL) return 0;
+        gc_pin(*num_out);
         *denom_out = mino_bigint_from_ll(S, 1);
+        gc_unpin(1);
         return *denom_out != NULL;
     }
     if (mino_type_of(v) == MINO_BIGINT) {

@@ -511,9 +511,13 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
         rstart = (i < cur->as.s.len) ? i + 1 : i;
         gc_pin(cur);
         line   = mino_string_n(S, cur->as.s.data, llen);
+        if (line == NULL) { gc_unpin(1); return NULL; }
+        gc_pin(line);
         rem    = mino_string_n(S, cur->as.s.data + rstart,
                                cur->as.s.len - rstart);
-        gc_unpin(1);
+        gc_unpin(1); /* line */
+        gc_unpin(1); /* cur */
+        if (rem == NULL) return NULL;
         gc_write_barrier(S, src, src->as.atom.val, rem);
         src->as.atom.val = rem;
         return line;
@@ -604,12 +608,15 @@ static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
             /* Empty input or whitespace-only. */
             return mino_nil(S);
         }
+        gc_pin(form);
         consumed = (end != NULL && end >= cur->as.s.data)
                  ? (size_t)(end - cur->as.s.data) : cur->as.s.len;
         if (consumed > cur->as.s.len) consumed = cur->as.s.len;
         rem = mino_string_n(S, cur->as.s.data + consumed,
                             cur->as.s.len - consumed);
-        gc_unpin(1);
+        gc_unpin(1); /* form */
+        gc_unpin(1); /* cur */
+        if (rem == NULL) return NULL;
         gc_write_barrier(S, src, src->as.atom.val, rem);
         src->as.atom.val = rem;
         return form;

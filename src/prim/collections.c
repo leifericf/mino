@@ -706,7 +706,11 @@ mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
     }
     pairs = n / 2;
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    if (ks == NULL) return NULL;
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    gc_unpin(1);
+    if (vs == NULL) return NULL;
     p = args;
     for (i = 0; i < pairs; i++) {
         /* Force lazy seam: callers like `(apply hash-map (rest vec))`

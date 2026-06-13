@@ -542,7 +542,9 @@ static int bigdec_align(mino_state *S, const mino_val *a,
     mino_val *au = to_bigint(S, a->as.bigdec.unscaled);
     mino_val *bu;
     if (au == NULL) return 0;
+    gc_pin(au);
     bu = to_bigint(S, b->as.bigdec.unscaled);
+    gc_unpin(1);
     if (bu == NULL) return 0;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
         prim_throw_classified(S, "eval/out-of-memory", "MOM001",

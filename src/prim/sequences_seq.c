@@ -107,13 +107,18 @@ mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
         n_chunks = (total + 31u) / 32u;
         chunks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             n_chunks * sizeof(*chunks));
+        if (chunks == NULL) return NULL;
+        gc_pin((mino_val *)chunks);
         for (c = 0; c < n_chunks; c++) {
             size_t base = c * 32u;
             unsigned cap = (unsigned)(total - base < 32u ? total - base : 32u);
             mino_val *buf = mino_chunk_buffer(S, cap);
-            if (buf == NULL) return NULL;
+            if (buf == NULL) { gc_unpin(1); return NULL; }
             for (i = 0; i < cap; i++) {
-                if (!mino_chunk_append(buf, vec_nth(coll, base + i))) return NULL;
+                if (!mino_chunk_append(buf, vec_nth(coll, base + i))) {
+                    gc_unpin(1);
+                    return NULL;
+                }
             }
             mino_chunk_seal(buf);
             chunks[c] = buf;
@@ -121,8 +126,9 @@ mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
         more = mino_nil(S);
         for (c = n_chunks; c-- > 0; ) {
             more = mino_chunked_cons(S, chunks[c], more);
-            if (more == NULL) return NULL;
+            if (more == NULL) { gc_unpin(1); return NULL; }
         }
+        gc_unpin(1);
         return more;
     }
     if (mino_type_of(coll) == MINO_MAP_ENTRY) {
