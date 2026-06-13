@@ -1633,7 +1633,7 @@ const mino_prim_def k_prims_reflection[] = {
     {"keyword",   prim_keyword,
      "Returns a keyword with the given name."},
     {"hash",      prim_hash,
-     "Returns the hash code of the value."},
+     "Returns the hash code of the value. Note: mino uses FNV-1a internally; hash values are NOT compatible with JVM Clojure's Murmur3-based hasheq."},
     {"macroexpand-1", prim_macroexpand_1,
      "Expands a macro form once."},
     {"macroexpand",   prim_macroexpand,
