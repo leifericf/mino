@@ -561,7 +561,6 @@ char *dup_n_inner(mino_state *S, const char *s, size_t len)
     return out;
 }
 
-
 /* ------------------------------------------------------------------------- */
 /* Shared trace machinery: mark-stack push, interior-pointer resolve, and    */
 /* per-header trace. Reused by both the full-heap major collector            */
@@ -690,11 +689,6 @@ static void gc_mark_child_push(mino_state *S, const void *p)
     gc_mark_push(S, h);
 }
 
-/* Trace every GC-managed pointer held by h, pushing each target into
- * the mark stack. Used from gc_drain_mark_stack on any header popped
- * for tracing, and directly from the minor collector when seeding the
- * mark stack from remembered-set entries. */
-
 /* ------------------------------------------------------------------------- */
 /* Per-tag tracer functions                                                  */
 /*                                                                           */
@@ -746,6 +740,10 @@ static void trace_pointer_array(mino_state *S, gc_hdr_t *h)
 /* trace_bc lives in src/eval/bc/gc_handlers.c and registers itself
  * via mino_bc_register_gc_handlers(S). */
 
+/* Trace every GC-managed pointer held by h, pushing each target into
+ * the mark stack. Used from gc_drain_mark_stack on any header popped
+ * for tracing, and directly from the minor collector when seeding the
+ * mark stack from remembered-set entries. */
 void gc_trace_children(mino_state *S, gc_hdr_t *h)
 {
     gc_tracer_fn fn;

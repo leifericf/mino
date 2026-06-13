@@ -52,7 +52,7 @@ typedef struct gc_state {
     size_t          collections_minor;
     size_t          collections_major;
     size_t          total_freed;
-    size_t          total_ns;       /* cumulative ns spent in gc_major_collect */
+    size_t          total_ns;       /* cumulative ns spent in minor and major collections */
     size_t          max_ns;         /* largest single-collection ns */
 
     /* Generational bookkeeping: bytes_young + bytes_old == bytes_alloc.

@@ -184,8 +184,8 @@ size_t gc_count_hdrs(mino_state *S)
 }
 
 /* Save callback: copies h->mark into the save buffer and clears h->mark.
- * Declared in gc/internal.h (as save_mark_fn) so minor.c can call it. */
-void save_mark_fn(gc_hdr_t *h, void *user)
+ * Declared in gc/internal.h (as gc_save_mark_fn) so minor.c can call it. */
+void gc_save_mark_fn(gc_hdr_t *h, void *user)
 {
     struct gc_mark_save_ctx *c = (struct gc_mark_save_ctx *)user;
     if (c->idx >= c->cap) return;
@@ -222,9 +222,9 @@ int gc_classify_offender(mino_state *S, gc_hdr_t *offender)
         return -1;
     }
 
-    /* Save + clear all marks. Order matters: save_mark_fn zeros each
+    /* Save + clear all marks. Order matters: gc_save_mark_fn zeros each
      * mark as it copies it. */
-    gc_for_each_hdr(S, save_mark_fn, &ctx);
+    gc_for_each_hdr(S, gc_save_mark_fn, &ctx);
 
     /* Flip phase to MAJOR_MARK so gc_mark_push won't filter OLD out of
      * the frontier (otherwise pass 1 would be minor-scope and never

@@ -383,7 +383,7 @@ static void gc_verify_remset_complete(mino_state *S)
     if (env == NULL || env[0] == '\0' || env[0] == '0') return;
 
     /* Count + save + zero every mark bit before our classifying pass.
-     * gc_count_hdrs, gc_for_each_hdr, and save_mark_fn are shared with
+     * gc_count_hdrs, gc_for_each_hdr, and gc_save_mark_fn are shared with
      * gc_classify_offender in trace.c and declared in gc/internal.h. */
     ctx.cap   = gc_count_hdrs(S);
     ctx.hdrs  = (gc_hdr_t **)calloc(ctx.cap, sizeof(*ctx.hdrs));
@@ -394,7 +394,7 @@ static void gc_verify_remset_complete(mino_state *S)
         fprintf(stderr, "[gc-verify] oom allocating mark-save buffer\n");
         return;
     }
-    gc_for_each_hdr(S, save_mark_fn, &ctx);
+    gc_for_each_hdr(S, gc_save_mark_fn, &ctx);
 
     /* Precise + conservative mark pass under MAJOR_MARK so OLD is not
      * filtered from the frontier. */

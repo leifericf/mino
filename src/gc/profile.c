@@ -126,12 +126,13 @@ static const char *tag_name(unsigned char tag)
 void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
 {
     alloc_site_t copy[ALLOC_PROFILE_CAP];
-    int            i, kept = 0;
+    size_t         i;
+    int            kept = 0;
     uint64_t       total_count = 0, total_bytes = 0;
     (void)S;
     if (out == NULL) out = stderr;
     memcpy(copy, g_sites, sizeof(copy));
-    for (i = 0; i < (int)ALLOC_PROFILE_CAP; i++) {
+    for (i = 0; i < ALLOC_PROFILE_CAP; i++) {
         if (copy[i].file != NULL) {
             copy[kept++]  = copy[i];
             total_count  += copy[i].count;
@@ -144,7 +145,7 @@ void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
             kept, (unsigned long long)total_count,
             (unsigned long long)total_bytes);
     fprintf(out, "  rank      count        bytes  tag   callsite\n");
-    for (i = 0; i < top_n; i++) {
+    for (i = 0; i < (size_t)top_n; i++) {
         fprintf(out, "  %4d  %9llu  %11llu  %-4s  %s:%d\n",
                 i + 1,
                 (unsigned long long)copy[i].count,
