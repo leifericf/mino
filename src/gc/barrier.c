@@ -114,7 +114,20 @@ void gc_remset_add(mino_state *S, gc_hdr_t *container)
              * than abort()ing the host process.  This converts the
              * previous Class I abort into a recoverable OOM consistent
              * with the embedder contract (no user-triggerable input may
-             * reach a MINO_ERR_CORRUPT path). */
+             * reach a MINO_ERR_CORRUPT path).
+             *
+             * memory-gc-r2-001: when gc_depth > 0 we are already inside
+             * a GC cycle (e.g. gc_minor_sweep -> gc_remset_add).
+             * gc_major_collect is a no-op in that case (it guards on
+             * gc_depth == 0), so the retry realloc will also fail and
+             * gc_oom_throw (longjmp) would bypass gc_minor_collect's
+             * cleanup, leaving gc_depth==1 and gc.phase stuck at
+             * GC_PHASE_MINOR permanently.  No safe recovery path exists
+             * for remset growth failure inside a running collection;
+             * abort with a Class I rationale rather than corrupt state. */
+            if (mino_current_ctx(S)->gc_depth > 0) {
+                abort(); /* Class I: remset growth failed inside running collection */
+            }
             gc_major_collect(S);
             nr = (gc_hdr_t **)realloc(S->gc.remset, new_cap * sizeof(*nr));
             if (nr == NULL) {
