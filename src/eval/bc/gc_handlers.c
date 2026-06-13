@@ -32,6 +32,7 @@ void mino_bc_trace_ic_slots(mino_state *S, const struct mino_bc_fn *bc)
     for (i = 0; i < bc->ic_slots_len; i++) {
         PUSH(bc->ic_slots[i].sym);
         PUSH(bc->ic_slots[i].cached);
+        PUSH(bc->ic_slots[i].cached_bc);
         if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
             PUSH(bc->ic_slots[i].atom);
             PUSH(bc->ic_slots[i].cached_map);

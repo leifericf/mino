@@ -318,7 +318,11 @@ static size_t bc_push_window(mino_state *S, int n)
     size_t need = S->bc.bc_top + (size_t)n;
     if (need > S->bc.bc_regs_cap) {
         size_t new_cap = S->bc.bc_regs_cap == 0 ? 256 : S->bc.bc_regs_cap * 2;
-        while (new_cap < need) new_cap *= 2;
+        while (new_cap < need) {
+            if (new_cap > (size_t)-1 / 2) return (size_t)-1;
+            new_cap *= 2;
+        }
+        if (new_cap > (size_t)-1 / sizeof(mino_val *)) return (size_t)-1;
         mino_val **grown = (mino_val **)gc_alloc_typed(
             S, GC_T_VALARR, new_cap * sizeof(*grown));
         if (grown == NULL) return (size_t)-1;
@@ -785,9 +789,13 @@ static mino_val *ic_resolve_global(mino_state *S,
         if (kind == MINO_IC_CALLABLE_MINO_FN_BC_SINGLE) {
             mino_val *fnv = v;
             if (mino_type_of(fnv) == MINO_VAR) fnv = fnv->as.var.root;
-            slot->cached_bc = (fnv != NULL && mino_type_of(fnv) == MINO_FN)
+            struct mino_bc_fn *new_bc = (fnv != NULL
+                                         && mino_type_of(fnv) == MINO_FN)
                 ? fnv->as.fn.bc : NULL;
+            gc_write_barrier(S, bc->ic_slots, slot->cached_bc, new_bc);
+            slot->cached_bc = new_bc;
         } else {
+            gc_write_barrier(S, bc->ic_slots, slot->cached_bc, NULL);
             slot->cached_bc = NULL;
         }
     }
@@ -1830,6 +1838,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned c = C_OF(ins);
+            if (pc >= bc->code_len) { ok = 0; goto dispatch_done; }
             mino_bc_insn_t step_word = code[pc++];
             unsigned d = Bx_OF(step_word);
             if (d >= (unsigned)bc->n_regs) { ok = 0; goto dispatch_done; }
@@ -1894,6 +1903,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
              * Bx field. */
             unsigned a = A_OF(ins);
             unsigned c = C_OF(ins);
+            if (pc >= bc->code_len) { ok = 0; goto dispatch_done; }
             mino_bc_insn_t step_word = code[pc++];
             unsigned d = Bx_OF(step_word);
             if (d >= (unsigned)bc->n_regs) { ok = 0; goto dispatch_done; }
