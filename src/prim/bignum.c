@@ -778,6 +778,51 @@ double mino_bigint_to_double(const mino_val *v)
     return d;
 }
 
+/* Returns non-zero if v (MINO_BIGINT) is odd. Delegates to mp_int_is_odd
+ * so that callers need not include imath.h. */
+int mino_bigint_is_odd(const mino_val *v)
+{
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+        return 0;
+    }
+    return mp_int_is_odd((mp_int)v->as.bigint.mpz);
+}
+
+/* Returns <0 / 0 / >0 for the sign of v (MINO_BIGINT). Delegates to
+ * mp_int_compare_zero so that callers need not include imath.h. */
+int mino_bigint_sign(const mino_val *v)
+{
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+        return 0;
+    }
+    return mp_int_compare_zero((mp_int)v->as.bigint.mpz);
+}
+
+/* Extract the low 64 bits of v (MINO_BIGINT) as a two's-complement uint64_t.
+ * imath stores digits as uint32_t; the low 64 bits are digits[0] (low 32) |
+ * digits[1] << 32. Negative values are returned as their two's-complement
+ * representation, matching unchecked-long wrapping semantics. */
+void mino_bigint_to_bits64(const mino_val *v, uint64_t *out)
+{
+    mp_int   z;
+    uint64_t mag = 0;
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL
+            || out == NULL) {
+        if (out != NULL) *out = 0;
+        return;
+    }
+    z = (mp_int)v->as.bigint.mpz;
+    if (MP_USED(z) >= 1) {
+        mag = (uint64_t)MP_DIGITS(z)[0];
+    }
+    if (MP_USED(z) >= 2) {
+        mag |= ((uint64_t)MP_DIGITS(z)[1]) << 32;
+    }
+    if (MP_SIGN(z) == MP_NEG) {
+        mag = (uint64_t)0 - mag;
+    }
+    *out = mag;
+}
 
 const mino_prim_def k_prims_bignum[] = {
     {"bigint",      prim_bigint,

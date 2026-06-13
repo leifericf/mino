@@ -320,6 +320,13 @@ int mino_bigint_quotrem(mino_state *S, const mino_val *a,
                         const mino_val *b, mino_val **q_out,
                         mino_val **r_out);
 double   mino_bigint_to_double(const mino_val *v);
+/* Returns non-zero if v (MINO_BIGINT) is odd. */
+int      mino_bigint_is_odd(const mino_val *v);
+/* Returns <0 / 0 / >0 for the sign of v (MINO_BIGINT). */
+int      mino_bigint_sign(const mino_val *v);
+/* Extract the low 64 bits of v (MINO_BIGINT) as a two's-complement
+ * uint64_t into *out. Matches unchecked-long wrapping semantics. */
+void     mino_bigint_to_bits64(const mino_val *v, uint64_t *out);
 
 /* MINO_RATIO support. */
 mino_val *mino_ratio_make(mino_state *S, mino_val *num, mino_val *denom);

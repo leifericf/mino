@@ -3,7 +3,6 @@
  */
 
 #include "prim/internal.h"
-#include "imath.h"
 
 static mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -604,7 +603,7 @@ static mino_val *odd_p_step(mino_state *S, mino_val *v)
         return (mino_val_int_get(v) & 1LL) != 0 ? mino_true(S) : mino_false(S);
     }
     if (mino_type_of(v) == MINO_BIGINT) {
-        return mp_int_is_odd((mp_int)v->as.bigint.mpz)
+        return mino_bigint_is_odd(v)
             ? mino_true(S) : mino_false(S);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
@@ -640,7 +639,7 @@ static mino_val *even_p_step(mino_state *S, mino_val *v)
         return (mino_val_int_get(v) & 1LL) == 0 ? mino_true(S) : mino_false(S);
     }
     if (mino_type_of(v) == MINO_BIGINT) {
-        return mp_int_is_odd((mp_int)v->as.bigint.mpz)
+        return mino_bigint_is_odd(v)
             ? mino_false(S) : mino_true(S);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",

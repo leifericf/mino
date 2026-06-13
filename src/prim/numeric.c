@@ -3,7 +3,6 @@
  */
 
 #include "prim/internal.h"
-#include "imath.h"
 
 #include <math.h>
 #include <string.h>
@@ -1354,25 +1353,10 @@ static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
              * returns 9223372036854775807 (the wrap, not the clamp). The
              * earlier clamp-through-double path was a workaround that
              * predates the imath low-digit-extract; deterministic but
-             * not canon-correct.
-             *
-             * imath stores big values as digits[]; with the default
-             * build mp_digit is uint32_t, so the low 64 bits live in
-             * digits[0] (low 32) | digits[1] (high 32). MP_USED tells
-             * us how many digits are populated; values that fit in one
-             * digit get the upper 32 bits as zero. */
+             * not canon-correct. */
             {
-                mp_int   z   = (mp_int)v->as.bigint.mpz;
                 uint64_t mag = 0;
-                if (MP_USED(z) >= 1) {
-                    mag = (uint64_t)MP_DIGITS(z)[0];
-                }
-                if (MP_USED(z) >= 2) {
-                    mag |= ((uint64_t)MP_DIGITS(z)[1]) << 32;
-                }
-                if (MP_SIGN(z) == MP_NEG) {
-                    mag = (uint64_t)0 - mag;
-                }
+                mino_bigint_to_bits64(v, &mag);
                 *out_l = (long long)mag;
                 return 1;
             }
@@ -1848,17 +1832,17 @@ static mino_val *mqr_ratio_inner(mino_state *S, const mino_val *a,
             if (mino_val_int_p(rem)) {
                 sr = (mino_val_int_get(rem) > 0) - (mino_val_int_get(rem) < 0);
             } else if (mino_type_of(rem) == MINO_BIGINT) {
-                sr = mp_int_compare_zero((mp_int)rem->as.bigint.mpz);
+                sr = mino_bigint_sign(rem);
             } else { /* MINO_RATIO: sign matches numerator (denom positive) */
-                sr = mp_int_compare_zero((mp_int)rem->as.ratio.num->as.bigint.mpz);
+                sr = mino_bigint_sign(rem->as.ratio.num);
             }
             /* Sign of b: ratio b sign matches numerator. */
             if (mino_type_of(b) == MINO_RATIO) {
-                sb = mp_int_compare_zero((mp_int)b->as.ratio.num->as.bigint.mpz);
+                sb = mino_bigint_sign(b->as.ratio.num);
             } else if (mino_val_int_p(b)) {
                 sb = (mino_val_int_get(b) > 0) - (mino_val_int_get(b) < 0);
             } else {
-                sb = mp_int_compare_zero((mp_int)b->as.bigint.mpz);
+                sb = mino_bigint_sign(b);
             }
             if (sr == 0 || ((sr < 0) == (sb < 0))) return rem;
             /* rem + b. Promote both to ratio if either is ratio. */
