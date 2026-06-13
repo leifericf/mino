@@ -1,5 +1,12 @@
 /*
  * val.c -- value constructors, predicates, accessors, and equality.
+ *
+ * qa-arch ALLOW: exceeds the 1000 LOC TU guideline.  The value layer
+ * owns allocation, interning, hashing, and equality for every Clojure
+ * value type; splitting across files would scatter type-specific logic
+ * that must stay coherent with the mino_val union layout.  Reviewed
+ * 2026-06-13 -- size is intentional and justified by the domain
+ * cohesion argument; no further split is warranted.
  */
 
 #include "runtime/internal.h"
@@ -1009,38 +1016,162 @@ uint32_t mino_hash(const mino_val *v)
     return hash_val(v);
 }
 
-/* Forward declaration -- prim_compare lives in prim/numeric.c. We
- * don't pull in prim/internal.h from the values layer (which would
- * invert the layering); a focused extern works here. */
-mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env);
+/* 3-way compare for two values of the same numeric family.
+ * Converts each to double for the mixed-tower cases, matching the
+ * promotion rules in prim_compare.  Only reachable when both a and b
+ * classify as numeric (int / bigint / float / float32 / ratio / bigdec). */
+static int compare_numeric(const mino_val *a, const mino_val *b)
+{
+    /* Exact int vs int. */
+    if (mino_val_int_p(a) && mino_val_int_p(b)) {
+        long long la = mino_val_int_get(a);
+        long long lb = mino_val_int_get(b);
+        return la < lb ? -1 : la > lb ? 1 : 0;
+    }
+    /* Exact bigint vs bigint. */
+    if (mino_type_of(a) == MINO_BIGINT && mino_type_of(b) == MINO_BIGINT) {
+        int c = mino_bigint_cmp(a, b);
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
+    /* Exact int vs bigint (or vice-versa). */
+    if (mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) {
+        long long ll;
+        if (mino_bigint_equals_ll(b, mino_val_int_get(a))) return 0;
+        if (mino_as_ll(b, &ll))
+            return mino_val_int_get(a) < ll ? -1 : mino_val_int_get(a) > ll ? 1 : 0;
+        return mino_bigint_to_double(b) > 0 ? -1 : 1;
+    }
+    if (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b)) {
+        long long ll;
+        if (mino_bigint_equals_ll(a, mino_val_int_get(b))) return 0;
+        if (mino_as_ll(a, &ll))
+            return ll < mino_val_int_get(b) ? -1 : ll > mino_val_int_get(b) ? 1 : 0;
+        return mino_bigint_to_double(a) > 0 ? 1 : -1;
+    }
+    /* Ratio vs ratio. */
+    if (mino_type_of(a) == MINO_RATIO && mino_type_of(b) == MINO_RATIO) {
+        int c = mino_ratio_cmp(a, b);
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
+    /* Bigdec vs bigdec. */
+    if (mino_type_of(a) == MINO_BIGDEC && mino_type_of(b) == MINO_BIGDEC) {
+        int c = mino_bigdec_cmp(a, b);
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
+    /* Mixed numeric: promote to double for the remaining combinations
+     * (int/float, bigint/float, ratio/float, etc.). */
+    {
+        double da, db;
+        if (mino_val_int_p(a))          da = (double)mino_val_int_get(a);
+        else if (mino_type_of(a) == MINO_FLOAT
+                 || mino_type_of(a) == MINO_FLOAT32) da = a->as.f;
+        else if (mino_type_of(a) == MINO_BIGINT)     da = mino_bigint_to_double(a);
+        else if (mino_type_of(a) == MINO_RATIO)      da = mino_ratio_to_double(a);
+        else                                          da = mino_bigdec_to_double(a);
+        if (mino_val_int_p(b))          db = (double)mino_val_int_get(b);
+        else if (mino_type_of(b) == MINO_FLOAT
+                 || mino_type_of(b) == MINO_FLOAT32) db = b->as.f;
+        else if (mino_type_of(b) == MINO_BIGINT)     db = mino_bigint_to_double(b);
+        else if (mino_type_of(b) == MINO_RATIO)      db = mino_ratio_to_double(b);
+        else                                          db = mino_bigdec_to_double(b);
+        return da < db ? -1 : da > db ? 1 : 0;
+    }
+}
 
-/* Public 3-way compare. Routes through prim_compare via a one-shot
- * cons-spine arg list; prim_compare throws on cross-type compares the
- * runtime can't order. Returns -1 / 0 / 1 on success; in the throw
- * path the function returns 0 and the runtime's last_error carries
- * the diagnostic (same contract as other mino_* functions that
- * route through prim_*). */
+/* Returns 1 when v participates in the numeric ordering family
+ * (int, bigint, float, float32, ratio, bigdec). */
+static int is_numeric_comparable(const mino_val *v)
+{
+    mino_type t = mino_type_of(v);
+    return mino_val_int_p(v)
+        || t == MINO_FLOAT || t == MINO_FLOAT32
+        || t == MINO_BIGINT || t == MINO_RATIO || t == MINO_BIGDEC;
+}
+
+/* Public 3-way compare. Implements the same ordering as Clojure's
+ * (compare a b): nil is less than everything; booleans, chars, strings,
+ * symbols, keywords, and vectors order within their type; numbers
+ * compare across the numeric tower (int/bigint/float/ratio/bigdec);
+ * UUIDs compare as two signed 64-bit halves. Cross-type pairs that are
+ * not covered raise a type error and return 0 (same contract as other
+ * mino_* functions: last_error carries the diagnostic).
+ *
+ * Implemented entirely in the values layer using helpers declared in
+ * collections/internal.h; does not depend on prim/. */
 int mino_compare(mino_state *S, const mino_val *a, const mino_val *b)
 {
-    mino_val *args, *r;
-    long long n = 0;
-    /* Suppress collection across the two-alloc window: the first cons
-     * cell is held only in a C local (potentially a register) when the
-     * second mino_cons triggers allocation.  A minor GC between the two
-     * calls would not see the first cons via the conservative stack scan
-     * and could collect it.  gc_depth prevents collection until both
-     * cells are reachable through the rooted `args` spine. */
-    mino_current_ctx(S)->gc_depth++;
-    args = mino_cons(S, (mino_val *)b, mino_nil(S));
-    args = mino_cons(S, (mino_val *)a, args);
-    mino_current_ctx(S)->gc_depth--;
-    r = prim_compare(S, args, NULL);
-    if (r == NULL) return 0;
-    if (mino_to_int(r, &n)) {
-        if (n < 0) return -1;
-        if (n > 0) return 1;
+    int a_nil, b_nil;
+    mino_type ta, tb;
+
+    a_nil = (a == NULL || mino_type_of(a) == MINO_NIL);
+    b_nil = (b == NULL || mino_type_of(b) == MINO_NIL);
+    if (a_nil && b_nil) return 0;
+    if (a_nil)          return -1;
+    if (b_nil)          return  1;
+
+    ta = mino_type_of(a);
+    tb = mino_type_of(b);
+
+    /* Boolean compare. */
+    if (ta == MINO_BOOL && tb == MINO_BOOL) {
+        int ab = mino_val_bool_get(a);
+        int bb = mino_val_bool_get(b);
+        return ab < bb ? -1 : ab > bb ? 1 : 0;
+    }
+    /* Numeric tower. */
+    if (is_numeric_comparable(a) && is_numeric_comparable(b)) {
+        return compare_numeric(a, b);
+    }
+    /* Char compare. */
+    if (ta == MINO_CHAR && tb == MINO_CHAR) {
+        int ca = mino_val_char_get(a);
+        int cb = mino_val_char_get(b);
+        return ca < cb ? -1 : ca > cb ? 1 : 0;
+    }
+    /* String compare. */
+    if (ta == MINO_STRING && tb == MINO_STRING) {
+        int c = strcmp(a->as.s.data, b->as.s.data);
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
+    /* Keyword / symbol compare (same family only). */
+    if (ta == tb && (ta == MINO_KEYWORD || ta == MINO_SYMBOL)) {
+        int c = val_compare(a, b);
+        return c < 0 ? -1 : c > 0 ? 1 : 0;
+    }
+    /* UUID: compare as two signed 64-bit halves (matches JVM compareTo). */
+    if (ta == MINO_UUID && tb == MINO_UUID) {
+        int half;
+        for (half = 0; half < 2; half++) {
+            uint64_t ua = 0, ub = 0;
+            int i;
+            for (i = 0; i < 8; i++) {
+                ua = (ua << 8) | a->as.uuid.bytes[half * 8 + i];
+                ub = (ub << 8) | b->as.uuid.bytes[half * 8 + i];
+            }
+            {
+                int64_t sa = (int64_t)ua;
+                int64_t sb = (int64_t)ub;
+                if (sa < sb) return -1;
+                if (sa > sb) return  1;
+            }
+        }
         return 0;
     }
+    /* Vectors and map entries compare lexicographically (matches Clojure). */
+    {
+        int a_vec = (ta == MINO_VECTOR || ta == MINO_MAP_ENTRY);
+        int b_vec = (tb == MINO_VECTOR || tb == MINO_MAP_ENTRY);
+        if (a_vec && b_vec) {
+            int c = val_compare(a, b);
+            return c < 0 ? -1 : c > 0 ? 1 : 0;
+        }
+    }
+    /* Cross-type incompatible pair: raise a type error (same error class
+     * prim_compare uses) and return 0 so callers see a NULL/error outcome
+     * via the diagnostic rather than a silent wrong answer. */
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                  "eval/type", "MTY001",
+                  "compare: cannot compare values of different types");
     return 0;
 }
 
@@ -1210,6 +1341,20 @@ static int eq_child(mino_state *S, eq_stack_t *st,
  * For chunked-cons, ia is the offset within the current chunk: the
  * next element is at chunk.vals[ia], and ia transitions to .more once
  * ia == chunk.len. */
+
+/* Extract the current element from a sequential cursor (c, i).
+ * Precondition: caller has verified the cursor is not at end-of-seq.
+ * Shared between eq_seq_like and eq_seq_like_force so the extraction
+ * logic is maintained in one place. */
+static const mino_val *seq_elem_at(const mino_val *c, size_t i)
+{
+    if (mino_type_of(c) == MINO_CONS)         return c->as.cons.car;
+    if (mino_type_of(c) == MINO_CHUNKED_CONS) return c->as.chunked_cons.chunk->as.chunk.vals[i];
+    if (mino_type_of(c) == MINO_MAP_ENTRY)    return i == 0 ? c->as.map_entry.k : c->as.map_entry.v;
+    if (mino_type_of(c) == MINO_QUEUE)        return mino_queue_nth(c, i);
+    return vec_nth(c, i);
+}
+
 static void eq_seq_step(const mino_val **cur, size_t *idx)
 {
     const mino_val *c = *cur;
@@ -1265,23 +1410,8 @@ static int eq_seq_like(const mino_val *a, const mino_val *b,
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
 
-        if (mino_type_of(ca) == MINO_CONS) ea = ca->as.cons.car;
-        else if (mino_type_of(ca) == MINO_CHUNKED_CONS)
-            ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
-        else if (mino_type_of(ca) == MINO_MAP_ENTRY)
-            ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
-        else if (mino_type_of(ca) == MINO_QUEUE)
-            ea = mino_queue_nth(ca, ia);
-        else ea = vec_nth(ca, ia);
-
-        if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
-        else if (mino_type_of(cb) == MINO_CHUNKED_CONS)
-            eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
-        else if (mino_type_of(cb) == MINO_MAP_ENTRY)
-            eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
-        else if (mino_type_of(cb) == MINO_QUEUE)
-            eb = mino_queue_nth(cb, ib);
-        else eb = vec_nth(cb, ib);
+        ea = seq_elem_at(ca, ia);
+        eb = seq_elem_at(cb, ib);
 
         if (!eq_child(NULL, st, ea, eb)) return 0;
 
@@ -1749,23 +1879,8 @@ static int eq_seq_like_force(mino_state *S, const mino_val *a,
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
 
-        if (mino_type_of(ca) == MINO_CONS) ea = ca->as.cons.car;
-        else if (mino_type_of(ca) == MINO_CHUNKED_CONS)
-            ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
-        else if (mino_type_of(ca) == MINO_MAP_ENTRY)
-            ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
-        else if (mino_type_of(ca) == MINO_QUEUE)
-            ea = mino_queue_nth(ca, ia);
-        else ea = vec_nth(ca, ia);
-
-        if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
-        else if (mino_type_of(cb) == MINO_CHUNKED_CONS)
-            eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
-        else if (mino_type_of(cb) == MINO_MAP_ENTRY)
-            eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
-        else if (mino_type_of(cb) == MINO_QUEUE)
-            eb = mino_queue_nth(cb, ib);
-        else eb = vec_nth(cb, ib);
+        ea = seq_elem_at(ca, ia);
+        eb = seq_elem_at(cb, ib);
 
         if (!eq_child(S, st, ea, eb)) return 0;
 
