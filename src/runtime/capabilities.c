@@ -75,6 +75,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_UNIFY,       mino_install_clojure_unify   },
     { MINO_CAP_CACHE,       mino_install_clojure_cache   },
     { MINO_CAP_MATCH,       mino_install_clojure_match   },
+    { MINO_CAP_LOGIC,       mino_install_clojure_logic   },
     { MINO_CAP_TOOLING,     mino_install_mino_tooling    },
 };
 

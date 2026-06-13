@@ -204,6 +204,10 @@
 - Tests: Replace spec-first status markers with neutral documentation
 - Lib: clojure.core.match is now bundled (capability `match`): the `match`, `matchv`, and `match-let` macros and the full pattern grammar (literals, wildcards, bindings, vectors with `& rest`, `(... :seq)` seqs, maps with `:only`, `(:or ...)`, `(p :guard pred)`, `(p :as name)`, quoted-symbol literals). Clauses compile to a decision structure that binds each occurrence once and threads a shared failure continuation, so the emitted code is linear in the clause set rather than exponential.
 - Fix: The bytecode compiler's env-capture pre-scan now recognizes the `clojure.core/`-qualified spelling of `fn` / `fn*` / `lazy-seq`, so a nested syntax-quoted closure that captures an enclosing `let` local resolves it at runtime instead of throwing an unbound-symbol error.
+- Lib: clojure.core.logic is now bundled (capability `logic`): relational logic programming with run / run* / fresh / conde / conda / condu, the == unify and != disequality goals, the relation library (membero, appendo, conso, distincto, ...), matche / defne pattern-matching relations, defrel facts, and tabling. Search is complete (interleaving streams), so an answer to the right of a divergent branch is still found.
+- Lib: clojure.core.logic.fd adds finite-domain (CLP(FD)) constraints: in / interval / domain, the arithmetic constraints +, -, *, quot, the relational constraints ==, !=, <, <=, >, >=, the global distinct, and the eq sugar for ordinary arithmetic. A fixpoint propagation engine narrows domains and the run machinery labels the remaining variables to enumerate solutions.
+- Lib: clojure.core.logic.nominal adds nominal logic: nom / nom? / tie, the nom/fresh binder, and the hash freshness goal, so terms with binders unify up to alpha-equivalence.
+- Fix: empty? on a lazy-seq that realizes to an empty list now returns true (previously any forced non-nil value was reported non-empty).
 
 ## v0.423.5 — Security Fixes
 

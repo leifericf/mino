@@ -245,6 +245,8 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.core.cache + clojure.core.memoize (cache protocol, memoizers)." },
     { "match",        MINO_CAP_MATCH,
       "clojure.core.match (pattern matching: match / matchv / match-let)." },
+    { "logic",        MINO_CAP_LOGIC,
+      "clojure.core.logic (+ fd, nominal): relational logic programming." },
     { NULL,           0u,                                                NULL },
 };
 

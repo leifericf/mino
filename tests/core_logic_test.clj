@@ -1,6 +1,6 @@
 (require "tests/test")
 (require '[clojure.core.logic :as l
-          :refer [run run* fresh == != conde conda condu
+          :refer [run run* fresh != conde conda condu
                   succeed fail membero appendo conso firsto resto
                   emptyo distincto everyg project all
                   matche matcha matchu defne fne
@@ -8,7 +8,7 @@
                   lvar lvar?]])
 
 ;; clojure.core.logic -- relational (logic) programming.  The user-facing
-;; surface (run / run* / fresh / conde / == / != / the relation library)
+;; surface (run / run* / fresh / conde / / != / the relation library)
 ;; is identical to upstream core.logic; the substitution, stream, and
 ;; constraint engine underneath is built natively for mino.  Upstream's
 ;; own test suite is the behavioral spec.
@@ -18,11 +18,11 @@
 ;; --------------------------------------------------------------------
 
 (deftest run-binds-query
-  (is (= '(1) (run* [q] (== q 1))))
-  (is (= '(:a) (run* [q] (== :a q)))))
+  (is (= '(1) (run* [q] (l/== q 1))))
+  (is (= '(:a) (run* [q] (l/== :a q)))))
 
 (deftest run-fail-yields-nothing
-  (is (= '() (run* [q] (== 1 2))))
+  (is (= '() (run* [q] (l/== 1 2))))
   (is (= '() (run* [q] fail))))
 
 (deftest run-succeed-leaves-fresh
@@ -30,11 +30,11 @@
   (is (= '(_0) (run* [q] succeed))))
 
 (deftest unify-vectors
-  (is (= '([1 2]) (run* [q] (fresh [x y] (== x 1) (== y 2) (== q [x y])))))
-  (is (= '(2) (run* [q] (fresh [x] (== [1 q] [1 2]) (== x q))))))
+  (is (= '([1 2]) (run* [q] (fresh [x y] (l/== x 1) (l/== y 2) (l/== q [x y])))))
+  (is (= '(2) (run* [q] (fresh [x] (l/== [1 q] [1 2]) (l/== x q))))))
 
 (deftest unify-maps
-  (is (= '(1) (run* [q] (== {:a q} {:a 1})))))
+  (is (= '(1) (run* [q] (l/== {:a q} {:a 1})))))
 
 ;; --------------------------------------------------------------------
 ;; conde: disjunction
@@ -43,15 +43,15 @@
 (deftest conde-branches
   (is (= '(1 2 3)
          (run* [q] (conde
-                     [(== q 1)]
-                     [(== q 2)]
-                     [(== q 3)])))))
+                     [(l/== q 1)]
+                     [(l/== q 2)]
+                     [(l/== q 3)])))))
 
 (deftest conde-conjunction-in-branch
   (is (= '([1 2])
          (run* [q] (fresh [x y]
-                     (conde [(== x 1) (== y 2)])
-                     (== q [x y]))))))
+                     (conde [(l/== x 1) (l/== y 2)])
+                     (l/== q [x y]))))))
 
 ;; --------------------------------------------------------------------
 ;; The relation library
@@ -59,7 +59,7 @@
 
 (deftest membero-enumerates
   (is (= '(1 2 3) (run* [q] (membero q [1 2 3]))))
-  (is (= '(:x) (run* [q] (== q :x) (membero q [:a :x :z])))))
+  (is (= '(:x) (run* [q] (l/== q :x) (membero q [:a :x :z])))))
 
 (deftest membero-as-test
   (is (= '(_0) (run* [q] (membero 2 [1 2 3]))))
@@ -81,29 +81,29 @@
            [(1 2 3) ()])
          (run* [q] (fresh [x y]
                      (appendo x y [1 2 3])
-                     (== q [x y]))))))
+                     (l/== q [x y]))))))
 
 ;; --------------------------------------------------------------------
 ;; Disequality
 ;; --------------------------------------------------------------------
 
 (deftest disequality-blocks-unify
-  (is (= '() (run* [q] (!= q 1) (== q 1))))
-  (is (= '(2) (run* [q] (!= q 1) (== q 2) (== q 2) succeed)))
-  (is (= '(2) (run* [q] (!= q 1) (== q 2)))))
+  (is (= '() (run* [q] (!= q 1) (l/== q 1))))
+  (is (= '(2) (run* [q] (!= q 1) (l/== q 2) (l/== q 2) succeed)))
+  (is (= '(2) (run* [q] (!= q 1) (l/== q 2)))))
 
 (deftest disequality-compound
   ;; q must not be [1 2]; binding it to [1 3] is fine.
-  (is (= '([1 3]) (run* [q] (!= q [1 2]) (== q [1 3]))))
-  (is (= '() (run* [q] (!= q [1 2]) (== q [1 2])))))
+  (is (= '([1 3]) (run* [q] (!= q [1 2]) (l/== q [1 3]))))
+  (is (= '() (run* [q] (!= q [1 2]) (l/== q [1 2])))))
 
 ;; --------------------------------------------------------------------
 ;; Committed choice
 ;; --------------------------------------------------------------------
 
 (deftest conda-commits-to-first-success
-  (is (= '(1) (run* [q] (conda [(== q 1)] [(== q 2)]))))
-  (is (= '(2) (run* [q] (conda [fail (== q 1)] [(== q 2)])))))
+  (is (= '(1) (run* [q] (conda [(l/== q 1)] [(l/== q 2)]))))
+  (is (= '(2) (run* [q] (conda [fail (l/== q 1)] [(l/== q 2)])))))
 
 (deftest condu-head-once
   ;; condu commits to the first clause and its head yields a single answer
@@ -115,7 +115,7 @@
 ;; --------------------------------------------------------------------
 
 (deftest project-uses-value
-  (is (= '(2) (run* [q] (fresh [x] (== x 1) (project [x] (== q (inc x))))))))
+  (is (= '(2) (run* [q] (fresh [x] (l/== x 1) (project [x] (l/== q (inc x))))))))
 
 ;; --------------------------------------------------------------------
 ;; Completeness: interleaving search must reach answers on the right of a
@@ -130,7 +130,7 @@
                      ;; A branch that recurses forever without producing x.
                      [(fresh [y] (foundo y) fail)]
                      ;; The productive branch.
-                     [(== x :found)])))]
+                     [(l/== x :found)])))]
     (is (= '(:found) (run 1 [q] (foundo q))))))
 
 (deftest distincto-and-everyg
@@ -151,10 +151,10 @@
   (is (= '(:pair :other)
          (run* [out]
            (fresh [x]
-             (== x [1 2])
+             (l/== x [1 2])
              (matche [x]
-               ([[_ _]] (== out :pair))
-               ([_] (== out :other))))))))
+               ([[_ _]] (l/== out :pair))
+               ([_] (l/== out :other))))))))
 
 (defne my-membero [x l]
   ([_ [x . _]])

@@ -50,6 +50,9 @@
 #include "lib_clojure_core_cache.h"
 #include "lib_clojure_core_memoize.h"
 #include "lib_clojure_core_match.h"
+#include "lib_clojure_core_logic.h"
+#include "lib_clojure_core_logic_fd.h"
+#include "lib_clojure_core_logic_nominal.h"
 #include "lib_clojure_test_tap.h"
 #include "lib_clojure_test_junit.h"
 #include "lib_clojure_test_check_generators.h"
@@ -206,6 +209,20 @@ void mino_install_clojure_match(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "clojure.core.match",
                               lib_clojure_core_match_src);
+}
+
+/* clojure.core.logic + .fd + .nominal: relational logic programming and
+ * its finite-domain and nominal companions ship together under one bit;
+ * fd and nominal require the core, so all three register as a group. */
+void mino_install_clojure_logic(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.core.logic",
+                              lib_clojure_core_logic_src);
+    mino_register_bundled_lib(S, "clojure.core.logic.fd",
+                              lib_clojure_core_logic_fd_src);
+    mino_register_bundled_lib(S, "clojure.core.logic.nominal",
+                              lib_clojure_core_logic_nominal_src);
 }
 
 /* clojure.test.check + generators + properties: minimal property

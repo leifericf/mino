@@ -121,6 +121,7 @@ void mino_install_clojure_spec      (mino_state *S, mino_env *env);
 void mino_install_clojure_unify     (mino_state *S, mino_env *env);
 void mino_install_clojure_cache     (mino_state *S, mino_env *env);
 void mino_install_clojure_match     (mino_state *S, mino_env *env);
+void mino_install_clojure_logic     (mino_state *S, mino_env *env);
 void mino_install_mino_tooling      (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install

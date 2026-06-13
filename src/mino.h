@@ -46,7 +46,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 424
+#define MINO_VERSION_MINOR 425
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -1511,6 +1511,11 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_UNIFY         (1u << 28)  /* clojure.core.unify */
 #define MINO_CAP_CACHE         (1u << 29)  /* clojure.core.cache + clojure.core.memoize */
 #define MINO_CAP_MATCH         (1u << 30)  /* clojure.core.match */
+#define MINO_CAP_LOGIC         (1u << 31)  /* clojure.core.logic (+ fd, nominal) */
+
+/* NOTE: MINO_CAP_LOGIC at bit 31 fills the 32-bit capability field. A
+ * capability added after this point needs a wider type (uint64_t) or a
+ * different scheme; resolve at the v1.0 / ABI-freeze cycle, not before. */
 
 /* The sandbox preset: floor + Clojure-core (multimethods, protocols,
  * transducers, regex, bignum) + the bundled libraries that have no I/O
