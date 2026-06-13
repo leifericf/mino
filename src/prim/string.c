@@ -708,6 +708,7 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
             size_t new_cap = cap == 0 ? 8 : cap * 2;
             mino_val **nb = (mino_val **)gc_alloc_typed(S,
                 GC_T_VALARR, new_cap * sizeof(*nb));
+            if (nb == NULL) return NULL;
             if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
             buf = nb;
             cap = new_cap;
@@ -805,7 +806,11 @@ static mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
                 buf_cap *= 2;
             }
             newbuf = (char *)realloc(buf, buf_cap);
-            if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+            if (newbuf == NULL) {
+                free(buf);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
+                return NULL;
+            }
             buf = newbuf;
         }
         if (!first && sep_len > 0) {
@@ -1122,12 +1127,32 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
                         re_free(compiled); return NULL;
                     }
                 } else if (mino_type_of(call_res) == MINO_CHAR) {
-                    /* Single-codepoint result: render as the literal char
-                     * byte. Avoids forcing every fn-result through `str`
-                     * for the common upper/lower-case style mapping. */
-                    char cb = (char)(call_res->as.ch & 0xff);
+                    /* Single-codepoint result: encode as full UTF-8 (1-4
+                     * bytes) so non-ASCII codepoints are represented
+                     * correctly rather than truncated to one byte. */
+                    char utf8_tmp[4];
+                    int  utf8_n;
+                    unsigned cp = (unsigned)call_res->as.ch;
+                    if (cp <= 0x7F) {
+                        utf8_tmp[0] = (char)cp; utf8_n = 1;
+                    } else if (cp <= 0x7FF) {
+                        utf8_tmp[0] = (char)(0xC0 | (cp >> 6));
+                        utf8_tmp[1] = (char)(0x80 | (cp & 0x3F));
+                        utf8_n = 2;
+                    } else if (cp <= 0xFFFF) {
+                        utf8_tmp[0] = (char)(0xE0 | (cp >> 12));
+                        utf8_tmp[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                        utf8_tmp[2] = (char)(0x80 | (cp & 0x3F));
+                        utf8_n = 3;
+                    } else {
+                        utf8_tmp[0] = (char)(0xF0 | (cp >> 18));
+                        utf8_tmp[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                        utf8_tmp[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                        utf8_tmp[3] = (char)(0x80 | (cp & 0x3F));
+                        utf8_n = 4;
+                    }
                     if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
-                                               &cb, 1) < 0) {
+                                               utf8_tmp, (size_t)utf8_n) < 0) {
                         re_free(compiled); return NULL;
                     }
                 } else {
@@ -1247,7 +1272,8 @@ static mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
+        return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
@@ -1274,7 +1300,8 @@ static mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
+        return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
