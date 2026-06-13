@@ -524,6 +524,19 @@
     "def" "defmacro" "declare" "ns" "fn" "fn*" "binding" "lazy-seq"
     "new" "when" "and" "or" "set!" "go" "go-loop" "when-not" "cond"})
 
+(defn go-head=?
+  "True when form is a list whose head symbol names `sym`, ignoring any
+   namespace qualifier. Syntax-quote qualifies the macro-family special
+   forms (let / loop / when / when-not / cond / ...) to clojure.core/...,
+   so the go transformer -- which both produces such forms from
+   syntax-quote templates and re-inspects them -- must recognize them by
+   bare name. The genuine special forms if / do / recur / try stay bare and
+   are matched directly."
+  [form sym]
+  (and (cons? form)
+       (symbol? (first form))
+       (= (name (first form)) (name sym))))
+
 (defn go-self-eval?
   "True for literals whose evaluation order can never be observed."
   [x]
@@ -654,7 +667,7 @@
   "Returns true if form is (loop [bindings] body) where body contains parks."
   [form]
   (and (cons? form)
-       (= 'loop (first form))
+       (go-head=? form 'loop)
        (vector? (second form))
        (go-contains-park? form)))
 
@@ -670,21 +683,21 @@
            (or (= n "fn") (= n "fn*") (= n "go") (= n "quote"))))
     form
     ;; (when test body...) -> (if test body nil) or (if test (do body...) nil)
-    (= 'when (first form))
+    (go-head=? form 'when)
     (let [body-forms (vec (rest (rest form)))]
       (go-expand-if
         (if (= 1 (count body-forms))
           (list 'if (second form) (first body-forms) nil)
           (list 'if (second form) (cons 'do body-forms) nil))))
     ;; (when-not test body...) -> (if test nil body) or (if test nil (do body...))
-    (= 'when-not (first form))
+    (go-head=? form 'when-not)
     (let [body-forms (vec (rest (rest form)))]
       (go-expand-if
         (if (= 1 (count body-forms))
           (list 'if (second form) nil (first body-forms))
           (list 'if (second form) nil (cons 'do body-forms)))))
     ;; (cond pairs...) -> nested if
-    (= 'cond (first form))
+    (go-head=? form 'cond)
     (let [pairs (vec (rest form))]
       (if (< (count pairs) 2)
         nil
@@ -723,7 +736,7 @@
           new-args  (vec (map :sym pairs))]
       (go-expand-if `(let ~park-lets (recur ~@(seq new-args)))))
     ;; loop with parks in init bindings -> lift to let-park before loop
-    (and (= 'loop (first form))
+    (and (go-head=? form 'loop)
          (vector? (second form))
          (go-bindings-have-park? (second form)))
     (let [bindings (second form)
@@ -764,7 +777,7 @@
            (recur ~@(seq (:exprs sub))))))
 
     ;; loop inits with parks nested in plain calls -> lift before loop
-    (and (= 'loop (first form))
+    (and (go-head=? form 'loop)
          (vector? (second form))
          (boolean (some (fn [pair]
                           (and (go-contains-park? (second pair))
@@ -782,7 +795,7 @@
                ~@(seq (rest (rest form))))))))
 
     ;; let with a binding value holding parks nested in plain calls
-    (and (= 'let (first form))
+    (and (go-head=? form 'let)
          (vector? (second form))
          (some? (go-let-anf-bindings (second form))))
     (go-expand-if
@@ -861,7 +874,7 @@
    value is a park operation."
   [form]
   (and (cons? form)
-       (= 'let (first form))
+       (go-head=? form 'let)
        (vector? (second form))
        (>= (count (second form)) 2)
        (go-bindings-have-park? (second form))))
@@ -1088,7 +1101,7 @@
             ;; Let with non-park bindings but park-containing body:
             ;; wrap the let around the inner body and recurse, preserving
             ;; the let scope by prepending it as pre-bind-lets
-            (and (cons? stmt) (= 'let (first stmt))
+            (and (cons? stmt) (go-head=? stmt 'let)
                  (vector? (second stmt))
                  (not (go-bindings-have-park? (second stmt)))
                  (go-contains-park? stmt))
@@ -1192,7 +1205,7 @@
           `(do ~@(seq init)
                ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))))
     ;; let with park binding → chan-take* callback with continuation
-    (and (cons? form) (= 'let (first form))
+    (and (cons? form) (go-head=? form 'let)
          (vector? (second form))
          (>= (count (second form)) 2)
          (go-park? (nth (second form) 1)))
@@ -1215,7 +1228,7 @@
         `(chan-take* ~(second park-form) (fn [~cb-sym] (let [~sym ~cb-sym] ~cont)))
         `(chan-put* ~(second park-form) ~(nth park-form 2) (fn [~cb-sym] (let [~sym ~cb-sym] ~cont)))))
     ;; let → transform body (no park in bindings)
-    (and (cons? form) (= 'let (first form)))
+    (and (cons? form) (go-head=? form 'let))
     (let [bindings-form (second form)
           body-forms (vec (rest (rest form)))
           init (butlast body-forms)
