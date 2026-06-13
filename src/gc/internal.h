@@ -384,6 +384,12 @@ void gc_remset_purge_dead(mino_state *S);
 /* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state *S, const void *p);
 
+/* Compute elapsed nanoseconds since start_ns and charge them to the
+ * three accounting fields: total_ns, max_ns, and the pause ring.
+ * Shared by all GC collection sites (driver.c) including gc_minor_collect
+ * (minor.c) to avoid open-coding the same three-field update. */
+void gc_charge_pause(mino_state *S, long long start_ns);
+
 /* Append one pause sample to the 256-ring (saturating at UINT32_MAX
  * ns) and tick the log2 histogram bucket [2^i, 2^(i+1)) ns clamped to
  * bucket 23. Called from each collection / slice site that already

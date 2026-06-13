@@ -334,6 +334,33 @@ static void gc_mark_ctx_lazy_inflight(mino_state *S, mino_thread_ctx_t *ctx)
     }
 }
 
+/* gc_mark_ctx_bc_cursor -- mark the active BC fn struct pinned in ctx.
+ * bc_current_bc is a raw pointer to a GC_T_BC allocation. Normally the
+ * fn is also reachable via its enclosing MINO_FN value, but under a
+ * throw that longjmps past a BC frame's normal exit-time restore the
+ * cursor can briefly outlive its only other owner. Marking it here keeps
+ * the BC source map readable for :mino/location attribution on the catch
+ * side without relying on the broader fn val's reachability. */
+static void gc_mark_ctx_bc_cursor(mino_state *S, mino_thread_ctx_t *ctx)
+{
+    if (ctx->bc_current_bc != NULL) {
+        gc_mark_interior(S, (void *)ctx->bc_current_bc);
+    }
+}
+
+/* gc_mark_ctx_try_stack -- mark exception values held in a context's
+ * try_stack.  The main_ctx walk is done in gc_mark_module_and_meta;
+ * worker ctxs need the same treatment so that a caught exception held
+ * in a worker's catch handler body is not collected during a GC cycle
+ * that runs before the handler body finishes. */
+static void gc_mark_ctx_try_stack(mino_state *S, mino_thread_ctx_t *ctx)
+{
+    int i;
+    for (i = 0; i < ctx->try_depth; i++) {
+        gc_mark_interior(S, ctx->try_stack[i].exception);
+    }
+}
+
 /* gc_mark_ctx_tx -- mark the per-ref tentative values and commute log
  * cells held by this thread's active transaction (if any). Without
  * this, a tentative value not yet committed could be collected
@@ -432,6 +459,26 @@ static void gc_mark_module_and_meta(mino_state *S)
     }
 }
 
+/* Function pointer type for the per-ctx marking helpers above. */
+typedef void (*gc_ctx_mark_fn)(mino_state *, mino_thread_ctx_t *);
+
+/* Apply fn to main_ctx (no lock needed -- GC always runs on the main
+ * thread), then acquire worker_list_lock, walk all worker ctxs applying
+ * fn to each, and release the lock.  The lock is held only for the
+ * worker-list walk, not for the marking work itself, to keep the
+ * effective lock window as narrow as possible (see the gc_mark_thread_state
+ * comment for the full rationale). */
+static void gc_mark_each_ctx(mino_state *S, gc_ctx_mark_fn fn)
+{
+    mino_thread_ctx_t *w;
+    fn(S, &S->main_ctx);
+    mino_worker_list_lock_acquire(S);
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
+        fn(S, w);
+    }
+    mino_worker_list_lock_release(S);
+}
+
 /* Pin per-thread-context state: dynamic-binding values, GC save-stack
  * payloads, and current-ctx diagnostic objects. Workers don't publish
  * diagnostics back through this path, so only the current ctx's diag
@@ -459,64 +506,16 @@ static void gc_mark_module_and_meta(mino_state *S)
  * worker ctxs (with lock) without structural divergence. */
 static void gc_mark_thread_state(mino_state *S)
 {
-    mino_thread_ctx_t *w;
-    gc_mark_ctx_dyn_stack(S, &S->main_ctx);
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        gc_mark_ctx_dyn_stack(S, w);
-    }
-    mino_worker_list_lock_release(S);
-    /* bc_current_bc: a raw pointer to the active BC fn struct
-     * (GC_T_BC allocation). Normally the fn is also reachable via
-     * its enclosing MINO_FN value (env binding, closure capture,
-     * etc.) so the GC would already keep it alive. But under a
-     * throw that longjmps past a BC frame's normal exit-time
-     * restore, ctx->bc_current_bc can briefly outlive its only
-     * other reachable owner -- e.g. an anonymous fn invoked once
-     * whose only env binding was the let frame that already
-     * unwound. Marking the cursor pin here makes the BC source
-     * map readable for :mino/location attribution on the catch
-     * side without relying on the broader fn val's reachability. */
-    if (S->main_ctx.bc_current_bc != NULL) {
-        gc_mark_interior(S, (void *)S->main_ctx.bc_current_bc);
-    }
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        if (w->bc_current_bc != NULL) {
-            gc_mark_interior(S, (void *)w->bc_current_bc);
-        }
-    }
-    mino_worker_list_lock_release(S);
-    gc_mark_ctx_gc_save(S, &S->main_ctx);
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        gc_mark_ctx_gc_save(S, w);
-    }
-    mino_worker_list_lock_release(S);
-    gc_mark_ctx_tx(S, &S->main_ctx);
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        gc_mark_ctx_tx(S, w);
-    }
-    mino_worker_list_lock_release(S);
-    gc_mark_ctx_lazy_inflight(S, &S->main_ctx);
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        gc_mark_ctx_lazy_inflight(S, w);
-    }
-    mino_worker_list_lock_release(S);
+    gc_mark_each_ctx(S, gc_mark_ctx_dyn_stack);
+    gc_mark_each_ctx(S, gc_mark_ctx_bc_cursor);
+    gc_mark_each_ctx(S, gc_mark_ctx_gc_save);
+    gc_mark_each_ctx(S, gc_mark_ctx_tx);
+    gc_mark_each_ctx(S, gc_mark_ctx_lazy_inflight);
     /* Pin in-flight try/catch exception values for each worker context.
      * The main_ctx try_stack is already walked in gc_mark_module_and_meta;
      * worker ctxs are parallel execution contexts that can hold their own
      * in-flight exceptions between the throw and the catch longjmp. */
-    mino_worker_list_lock_acquire(S);
-    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
-        int wi;
-        for (wi = 0; wi < w->try_depth; wi++) {
-            gc_mark_interior(S, w->try_stack[wi].exception);
-        }
-    }
-    mino_worker_list_lock_release(S);
+    gc_mark_each_ctx(S, gc_mark_ctx_try_stack);
     if (mino_current_ctx(S)->last_diag != NULL) {
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);

@@ -429,7 +429,6 @@ void gc_minor_collect(mino_state *S)
     long long mark_start_ns;
     long long roots_start_ns;
     long long sweep_start_ns;
-    size_t    elapsed_ns;
     int       saved_phase;
     size_t    mark_floor;
     if (mino_current_ctx(S)->gc_depth > 0) {
@@ -500,11 +499,6 @@ void gc_minor_collect(mino_state *S)
     S->gc.collections_minor++;
     S->gc.phase = saved_phase;
     gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);
-    { long long raw_ns = mino_monotonic_ns() - start_ns; elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; }
-    S->gc.total_ns += elapsed_ns;
-    if (elapsed_ns > S->gc.max_ns) {
-        S->gc.max_ns = elapsed_ns;
-    }
-    gc_record_pause(S, elapsed_ns);
+    gc_charge_pause(S, start_ns);
     mino_current_ctx(S)->gc_depth--;
 }

@@ -84,8 +84,8 @@ void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
 /* Compute elapsed nanoseconds since start_ns and charge them to the
  * three accounting fields: total_ns, max_ns, and the pause ring.
  * Called from every site that times a GC pause (gc_major_slice,
- * gc_force_finish_major, gc_major_collect). */
-static void gc_charge_pause(mino_state *S, long long start_ns)
+ * gc_force_finish_major, gc_major_collect, gc_minor_collect). */
+void gc_charge_pause(mino_state *S, long long start_ns)
 {
     long long raw_ns     = mino_monotonic_ns() - start_ns;
     size_t    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
