@@ -714,9 +714,16 @@ static int contains_env_capture(mino_val *form)
     if (!mino_is_cons(form)) return 0;
     mino_val *head = form->as.cons.car;
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL) {
-        if (sym_is(head, "fn") || sym_is(head, "fn*")) return 1;
-        if (sym_is(head, "lazy-seq")) return 1;
-        if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
+        /* Recognize the clojure.core/-qualified spelling of the
+         * capturing forms (syntax-quote qualifies fn / lazy-seq to
+         * clojure.core/...), so a nested syntax-quoted closure still
+         * forces the enclosing fn to publish its let locals into the
+         * env -- otherwise the closure cannot resolve them at runtime. */
+        const char *hn = head->as.s.data;
+        if (strncmp(hn, "clojure.core/", 13) == 0) hn += 13;
+        if (strcmp(hn, "fn") == 0 || strcmp(hn, "fn*") == 0) return 1;
+        if (strcmp(hn, "lazy-seq") == 0) return 1;
+        if (strcmp(hn, "quote") == 0 || strcmp(hn, "quote*") == 0) return 0;
     }
     while (mino_is_cons(form)) {
         if (contains_env_capture(form->as.cons.car)) return 1;
