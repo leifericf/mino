@@ -742,7 +742,9 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
                                     const char *diag_code,
                                     const char *label);
 
-/* eval/control.c -- exception normaliser used by vm.c's OP_PUSHCATCH path. */
+/* eval/control.c -- exception normaliser and throw-site recorder used by
+ * vm.c's OP_PUSHCATCH / OP_THROW paths. */
+void      mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
 /* prim/prim.c -- error helper used by vm.c's protocol dispatch. */
