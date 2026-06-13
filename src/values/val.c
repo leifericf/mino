@@ -133,14 +133,16 @@ mino_val *mino_string_n(mino_state *S, const char *s, size_t len)
      * conservative stack scan can miss the local `data` pointer when
      * the optimizer keeps it only in a register (not spilled to the
      * C stack). Matches the gc_depth guard in intern_lookup_or_create. */
-    mino_current_ctx(S)->gc_depth++;
     {
-        char *data = dup_n(S, s, len);
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        char *data;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+        data = dup_n(S, s, len);
         v = alloc_val(S, MINO_STRING);
         v->as.s.data = data;
         v->as.s.len  = len;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
     }
-    mino_current_ctx(S)->gc_depth--;
     return v;
 }
 
@@ -322,16 +324,18 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
      * variable when the optimizer keeps it in a register. ASan
      * caught this freed under load; gc_depth is the reliable
      * protection. */
-    mino_current_ctx(S)->gc_depth++;
     {
-        char *data = dup_n(S, s, len);
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        char *data;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+        data = dup_n(S, s, len);
         v = alloc_val(S, type);
         v->as.s.data   = data;
         v->as.s.len    = len;
         v->as.s.hash   = h;
         v->as.s.ns_len = ns_len;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
     }
-    mino_current_ctx(S)->gc_depth--;
     tbl->entries[tbl->len] = v;
 
     /* Insert index into hash table. Prefer the first tombstone slot
@@ -532,8 +536,17 @@ mino_val *mino_host_array_new(mino_state *S, size_t len,
          * collection from here through alloc_val so the conservative
          * scanner cannot miss `fill` while it lives only in a register
          * (vals[] is malloc-owned and not a GC root). */
-        mino_current_ctx(S)->gc_depth++;
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
         fill = mino_float(S, 0.0);
+        for (i = 0; i < len; i++) vals[i] = fill;
+        v = alloc_val(S, MINO_HOST_ARRAY);
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
+        if (v == NULL) { free(vals); return NULL; }
+        v->as.host_array.vals         = vals;
+        v->as.host_array.len          = len;
+        v->as.host_array.element_kind = (unsigned char)kind;
+        return v;
     } else if (kind == HOST_ARRAY_CHAR) {
         fill = mino_char(S, '\0');
     } else {
@@ -541,9 +554,6 @@ mino_val *mino_host_array_new(mino_state *S, size_t len,
     }
     for (i = 0; i < len; i++) vals[i] = fill;
     v = alloc_val(S, MINO_HOST_ARRAY);
-    if (kind == HOST_ARRAY_FLOAT || kind == HOST_ARRAY_DOUBLE) {
-        mino_current_ctx(S)->gc_depth--;
-    }
     if (v == NULL) {
         free(vals);
         return NULL;
@@ -582,11 +592,19 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
     /* Generic seq path: walk the seq into a temp dynamic buffer.
      * vals[] is malloc-owned and not a GC root; suppress collection
      * across the entire loop and the final alloc_val so the GC cannot
-     * sweep elements that are stored only in vals[]. */
+     * sweep elements that are stored only in vals[].
+     *
+     * snapshot / restore gc_depth: all early-return error paths restore
+     * from the saved value rather than blind-decrement, so a re-entrant
+     * or already-elevated depth is not underflowed. The longjmp path
+     * (lazy_force throwing an exception) would leave gc_depth elevated
+     * until the try_frame saves/restores it; that is a known limitation
+     * that requires a try_frame-level fix outside this module. */
     {
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
         size_t cap = 0;
         mino_val *s = coll;
-        mino_current_ctx(S)->gc_depth++;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
         while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
         while (mino_is_cons(s) || (s != NULL && mino_type_of(s) == MINO_CHUNKED_CONS)) {
             mino_val *head;
@@ -605,18 +623,18 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                 if (cap == 0) {
                     ncap = 8;
                 } else {
-                    if (cap > SIZE_MAX / 2) { mino_current_ctx(S)->gc_depth--; free(vals); return NULL; }
+                    if (cap > SIZE_MAX / 2) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
                     ncap = cap * 2;
                 }
                 nvals = (mino_val **)realloc(vals, ncap * sizeof(*nvals));
-                if (nvals == NULL) { mino_current_ctx(S)->gc_depth--; free(vals); return NULL; }
+                if (nvals == NULL) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
                 vals = nvals;
                 cap  = ncap;
             }
             vals[len++] = head;
         }
         v = alloc_val(S, MINO_HOST_ARRAY);
-        mino_current_ctx(S)->gc_depth--;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
         if (v == NULL) { free(vals); return NULL; }
         v->as.host_array.vals = vals;
         v->as.host_array.len  = len;
@@ -711,14 +729,17 @@ mino_val *mino_defrecord(mino_state *S,
      * inside alloc_val(S, MINO_TYPE) would free fields_vec before it is
      * stored into type_val.  Matches the gc_depth guard in
      * intern_lookup_or_create_ns and mino_string_n. */
-    mino_current_ctx(S)->gc_depth++;
-    type_val = alloc_val(S, MINO_TYPE);
-    if (type_val != NULL) {
-        type_val->as.record_type.ns     = ns_interned;
-        type_val->as.record_type.name   = name_interned;
-        type_val->as.record_type.fields = fields_vec;
+    {
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+        type_val = alloc_val(S, MINO_TYPE);
+        if (type_val != NULL) {
+            type_val->as.record_type.ns     = ns_interned;
+            type_val->as.record_type.name   = name_interned;
+            type_val->as.record_type.fields = fields_vec;
+        }
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
     }
-    mino_current_ctx(S)->gc_depth--;
     if (type_val == NULL) return NULL;
 
     e = (record_type_entry_t *)malloc(sizeof(*e));
@@ -760,7 +781,18 @@ mino_val *mino_record(mino_state *S, mino_val *type,
         if (slots == NULL) return NULL;
         for (i = 0; i < n_vals; i++) slots[i] = vals[i];
     }
-    v = alloc_val(S, MINO_RECORD);
+    /* Suppress collection across alloc_val: `type` is a GC-managed
+     * pointer held only in a C local variable.  An optimizing compiler
+     * may keep it in a register without a stack spill; the conservative
+     * scanner would then miss it and a collection triggered inside
+     * alloc_val could free `type` before it is stored.  Matches the
+     * gc_depth guard pattern in mino_defrecord and intern_lookup_or_create_ns. */
+    {
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+        v = alloc_val(S, MINO_RECORD);
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
+    }
     if (v == NULL) {
         free(slots);
         return NULL;
@@ -1912,12 +1944,19 @@ static int eq_step_force(mino_state *S, const mino_val *a,
     /* Force lazy seqs, but preserve the LAZY tag when the forced
      * result is nil/empty-list. A lazy seq that resolves to nothing is
      * still semantically an empty seq; collapsing it to nil here would
-     * make `(= [] (lazy-seq nil))` false, contradicting canon. */
+     * make `(= [] (lazy-seq nil))` false, contradicting canon.
+     *
+     * snapshot / restore gc_depth: restore from the saved value so a
+     * re-entrant or already-elevated depth is not underflowed on the
+     * normal path.  The longjmp path (lazy_force throwing) would leave
+     * gc_depth elevated; fixing that requires a try_frame-level save
+     * outside this module. */
     if (a != NULL && mino_type_of(a) == MINO_LAZY) {
         mino_val *forced;
-        mino_current_ctx(S)->gc_depth++;
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
         forced = lazy_force(S, (mino_val *)a);
-        mino_current_ctx(S)->gc_depth--;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             a = forced;
@@ -1925,9 +1964,10 @@ static int eq_step_force(mino_state *S, const mino_val *a,
     }
     if (b != NULL && mino_type_of(b) == MINO_LAZY) {
         mino_val *forced;
-        mino_current_ctx(S)->gc_depth++;
+        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
         forced = lazy_force(S, (mino_val *)b);
-        mino_current_ctx(S)->gc_depth--;
+        mino_current_ctx(S)->gc_depth = saved_gc_depth;
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             b = forced;
