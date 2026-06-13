@@ -59,14 +59,20 @@
 (defn- lcons? [x] (instance? LCons x))
 
 ;; --------------------------------------------------------------------
-;; The package: substitution map `s` plus disequality constraint store
-;; `cs` (a vector of prefix maps, each a conjunction of bindings that
-;; must not all hold at once).
+;; The package carries four field slots:
+;;   s    -- the substitution map
+;;   cs   -- the disequality store (a vector of prefix maps, each a
+;;           conjunction of bindings that must not all hold at once)
+;;   doms -- the finite-domain map (lvar -> domain), used by the fd
+;;           companion namespace
+;;   fc   -- a vector of constraint functions (a -> a or nil); each is a
+;;           propagator that the fd namespace installs and that run on
+;;           every unification to a fixpoint
 ;; --------------------------------------------------------------------
 
-(defrecord Subst [s cs])
+(defrecord Subst [s cs doms fc])
 
-(defn empty-s [] (->Subst {} []))
+(defn empty-s [] (->Subst {} [] {} []))
 
 ;; --------------------------------------------------------------------
 ;; walk / walk* / unify
@@ -195,7 +201,9 @@
 
 (def mzero nil)
 
-(defn- unit [a] [a nil])
+(defn unit
+  "A mature stream of exactly one package."
+  [a] [a nil])
 
 (defn- mplus
   "Interleave two streams. On a thunk, take one step and swap operands so
@@ -207,7 +215,7 @@
     (fn? s1)  (fn [] (mplus s2 (s1)))
     :else     [(nth s1 0) (mplus (nth s1 1) s2)]))
 
-(defn- bind
+(defn bind
   "Feed every package in stream s to goal g, interleaving the results.
   Thunks defer; mature pairs run g on the head and bind the tail."
   [s g]
@@ -230,18 +238,44 @@
     (if (fn? s) (recur (s)) s)))
 
 ;; --------------------------------------------------------------------
+;; Generic constraint store
+;;
+;; Each constraint in (:fc a) is a propagator (fn [a] -> a or nil). They
+;; run to a fixpoint after every unification, so a domain narrowed by one
+;; constraint feeds the others. Pure relational programs carry no
+;; constraints, so this is a no-op for them.
+;; --------------------------------------------------------------------
+
+(defn run-constraints
+  "Run the package's constraint propagators to a fixpoint. Returns the
+  stabilized package, or nil when any propagator fails."
+  [a]
+  (loop [a a]
+    (if (empty? (:fc a))
+      a
+      (let [a' (reduce (fn [acc c] (when acc (c acc))) a (:fc a))]
+        (cond
+          (nil? a') nil
+          (and (= (:s a') (:s a)) (= (:doms a') (:doms a))) a'
+          :else (recur a'))))))
+
+;; --------------------------------------------------------------------
 ;; Core goals
 ;; --------------------------------------------------------------------
 
 (defn ==
   "Unify goal: succeed when u and v can be made equal, extending the
-  substitution and re-checking disequality constraints."
+  substitution, re-checking disequality constraints, and propagating any
+  finite-domain constraints to a fixpoint."
   [u v]
   (fn [a]
     (let [s (unify u v (:s a))]
       (if s
         (let [a' (verify-constraints (assoc a :s s))]
-          (if a' (unit a') mzero))
+          (if a'
+            (let [a'' (run-constraints a')]
+              (if a'' (unit a'') mzero))
+            mzero))
         mzero))))
 
 (defn !=
@@ -335,6 +369,26 @@
           (seq acc)
           (recur (and n (dec n)) (nth s 1) (conj acc (nth s 0))))))))
 
+(defn force-doms
+  "Labeling goal: bind every variable that still carries a finite domain
+  to a value from it, branching over the choices and propagating after
+  each assignment, so finite-domain queries enumerate their solutions.
+  A no-op for packages without domains."
+  [a]
+  (if (empty? (:doms a))
+    (unit a)
+    (let [[v dom] (first (:doms a))]
+      (mplus*
+       (map (fn [val]
+              (fn []
+                (let [a2 (assoc a :doms (dissoc (:doms a) v))
+                      s  (unify v val (:s a2))]
+                  (if s
+                    (let [a3 (run-constraints (assoc a2 :s s))]
+                      (if a3 (force-doms a3) mzero))
+                    mzero))))
+            dom)))))
+
 (defmacro run
   "Search the goals and reify the first n answers for the query variable
   (n may be false for all answers; see run*)."
@@ -342,7 +396,7 @@
   (let [q (first bindings)]
     `(let [~q (lvar '~q)]
        (map (fn [a#] (reify-out ~q a#))
-            (take-stream ~n ((all ~@goals) (empty-s)))))))
+            (take-stream ~n (bind ((all ~@goals) (empty-s)) force-doms))))))
 
 (defmacro run*
   "Search the goals and reify every answer for the query variable."
