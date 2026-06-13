@@ -742,10 +742,12 @@ static mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
     if (S->ns_vars.ns_env_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                           S->ns_vars.ns_env_len * sizeof(*tmp));
+    gc_pin((mino_val *)tmp);
     for (i = 0; i < S->ns_vars.ns_env_len; i++) {
         gc_valarr_set(S, tmp, i,
                       mino_symbol(S, S->ns_vars.ns_env_table[i].name));
     }
+    gc_unpin(1);
     return mino_vector(S, tmp, S->ns_vars.ns_env_len);
 }
 
@@ -759,10 +761,12 @@ static mino_val *prim_loaded_libs(mino_state *S, mino_val *args,
     if (S->module.module_cache_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                           S->module.module_cache_len * sizeof(*tmp));
+    gc_pin((mino_val *)tmp);
     for (i = 0; i < S->module.module_cache_len; i++) {
         gc_valarr_set(S, tmp, i,
                       mino_symbol(S, S->module.module_cache[i].name));
     }
+    gc_unpin(1);
     return mino_vector(S, tmp, S->module.module_cache_len);
 }
 
