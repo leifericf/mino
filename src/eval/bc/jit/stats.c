@@ -343,6 +343,19 @@ static void cpjit_stats_dump(void)
     if (g_cpjit_stats.enabled == CPJIT_STATS_TRACING) {
         cpjit_stats_dump_tracing_op_table();
     }
+    /* Free the per-fn entry list now that the dump is complete.
+     * Each entry owns its file string and snap_ic_stats array. */
+    {
+        cpjit_stat_entry_t *e = g_cpjit_stats.entries;
+        while (e != NULL) {
+            cpjit_stat_entry_t *next = e->next;
+            free((void *)e->file);
+            free(e->snap_ic_stats);
+            free(e);
+            e = next;
+        }
+        g_cpjit_stats.entries = NULL;
+    }
 }
 
 static int cpjit_stats_enabled(void)

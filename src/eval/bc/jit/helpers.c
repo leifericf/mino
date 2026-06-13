@@ -774,14 +774,17 @@ mino_val *mino_jit_tailcall_slow(mino_state *S, mino_val **regs,
     gc_pin(callee);
     mino_val *args   = mino_nil(S);
     if (args == NULL) { gc_unpin(1); return NULL; }
+    int args_slot = (int)mino_current_ctx(S)->gc_save_len;
+    gc_pin(args);
     for (int i = (int)argc - 1; i >= 0; i--) {
         mino_val *cell = mino_cons(S,
                                      S->bc.bc_regs[base + fn_reg + 1 + i],
                                      args);
-        if (cell == NULL) { gc_unpin(1); return NULL; }
+        if (cell == NULL) { gc_unpin(2); return NULL; }
         args = cell;
+        mino_current_ctx(S)->gc_save[args_slot] = args;
     }
-    gc_unpin(1);
+    gc_unpin(2);
     S->tail_call_sentinel.as.tail_call.fn   = callee;
     S->tail_call_sentinel.as.tail_call.args = args;
     return &S->tail_call_sentinel;
