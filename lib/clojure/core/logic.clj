@@ -74,6 +74,19 @@
 
 (defn empty-s [] (->Subst {} [] {} []))
 
+;; Extension hook for custom logic terms (the nominal namespace's Nom and
+;; Tie). A type that participates in unification, deep-walking, and
+;; reification implements ITerm; plain terms never satisfy it, so the
+;; relational core pays nothing for it.
+(defprotocol ITerm
+  (-unify-term [u v s]
+    "Unify custom term u with v under substitution map s; return the
+    extended map or nil.")
+  (-walk-term [u s]
+    "Deep-walk custom term u under s.")
+  (-reify-term [u names]
+    "Accumulate reification names from custom term u into names."))
+
 ;; --------------------------------------------------------------------
 ;; walk / walk* / unify
 ;; --------------------------------------------------------------------
@@ -107,6 +120,7 @@
       (vector? u) (mapv #(walk* % s) u)
       (map? u)    (into {} (map (fn [[k v]] [(walk* k s) (walk* v s)]) u))
       (sequential? u) (map #(walk* % s) u)
+      (satisfies? ITerm u) (-walk-term u s)
       :else u)))
 
 (declare unify-lcons)
@@ -133,6 +147,8 @@
       (if (= (set (keys u)) (set (keys v)))
         (reduce (fn [s k] (when s (unify (get u k) (get v k) s))) s (keys u))
         nil)
+      (satisfies? ITerm u) (-unify-term u v s)
+      (satisfies? ITerm v) (-unify-term v u s)
       :else nil)))
 
 (defn- unify-lcons
@@ -313,7 +329,7 @@
 ;; Reification
 ;; --------------------------------------------------------------------
 
-(defn- reify-names
+(defn reify-names
   "Walk a fully-resolved term and assign each remaining logic variable a
   reification name _0, _1, ... in first-appearance order."
   [v names]
@@ -325,6 +341,7 @@
     (vector? v) (reduce (fn [n x] (reify-names x n)) names v)
     (map? v) (reduce (fn [n [k val]] (reify-names val (reify-names k n))) names v)
     (sequential? v) (reduce (fn [n x] (reify-names x n)) names v)
+    (satisfies? ITerm v) (-reify-term v names)
     :else names))
 
 (defn reify-out
