@@ -150,11 +150,11 @@
 typedef struct {
     unsigned             opcode;
     const unsigned char *bytes;
-    unsigned long        size;
+    size_t               size;
     const char *const   *symbols;
-    unsigned long        nsymbols;
+    size_t               nsymbols;
     const unsigned int (*relocs)[4];
-    unsigned long        nrelocs;
+    size_t               nrelocs;
     /* Non-zero for the OP_RETURN-class stencil: the trailing `ret` is
      * preserved as the JIT region's exit instead of being rewritten
      * into a chain branch. */

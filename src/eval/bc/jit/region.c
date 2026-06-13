@@ -55,10 +55,13 @@ long jit_region_page_size(void)
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS MAP_ANON
+#endif
 void *jit_region_alloc(size_t size)
 {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANON, -1, 0);
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return p == MAP_FAILED ? NULL : p;
 }
 int jit_region_make_rx(void *p, size_t size)

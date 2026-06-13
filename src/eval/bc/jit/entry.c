@@ -728,7 +728,7 @@ static int prefix_has_escaping_branch(const mino_bc_fn_t *bc, size_t deopt_pc)
     for (size_t pc = 0; pc < deopt_pc; pc++) {
         unsigned op = OP_OF(bc->code[pc]);
         if (op != OP_JMP && op != OP_JMPIFNOT) continue;
-        long target_pc = (long)pc + 1 + sBx_OF(bc->code[pc]);
+        ptrdiff_t target_pc = (ptrdiff_t)pc + 1 + sBx_OF(bc->code[pc]);
         if (target_pc < 0 || (size_t)target_pc >= deopt_pc) return 1;
     }
     return 0;
