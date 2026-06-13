@@ -111,8 +111,12 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
                 return prim_throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
-            mp_int_mul((mp_int)unscaled->as.bigint.mpz, &pw,
-                       (mp_int)unscaled->as.bigint.mpz);
+            if (mp_int_mul((mp_int)unscaled->as.bigint.mpz, &pw,
+                           (mp_int)unscaled->as.bigint.mpz) != MP_OK) {
+                mp_int_clear(&pw);
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
+            }
             mp_int_clear(&pw);
             scale = 0;
         }
@@ -433,8 +437,11 @@ static int bigint_mul_pow10(mino_val *bi, int delta)
             mp_int_clear(&pw);
             return 0;
         }
-        mp_int_mul((mp_int)bi->as.bigint.mpz, &pw,
-                   (mp_int)bi->as.bigint.mpz);
+        if (mp_int_mul((mp_int)bi->as.bigint.mpz, &pw,
+                       (mp_int)bi->as.bigint.mpz) != MP_OK) {
+            mp_int_clear(&pw);
+            return 0;
+        }
         mp_int_clear(&pw);
     }
     return 1;
@@ -482,7 +489,9 @@ mino_val *mino_bigdec_sub(mino_state *S, const mino_val *a,
     smax = sa > sb ? sa : sb;
     au = to_bigint(S, a->as.bigdec.unscaled);
     if (au == NULL) return NULL;
+    gc_pin(au);
     bu = to_bigint(S, b->as.bigdec.unscaled);
+    gc_unpin(1);
     if (bu == NULL) return NULL;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
         return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
@@ -1085,13 +1094,19 @@ int mino_bigdec_cmp(const mino_val *a, const mino_val *b)
         mp_int_copy((mp_int)a->as.bigdec.unscaled->as.bigint.mpz, &lhs);
         mp_int_copy((mp_int)b->as.bigdec.unscaled->as.bigint.mpz, &rhs);
         if (sa < sb) {
-            mp_int_set_value(&pw, 10);
-            mp_int_expt(&pw, sb - sa, &pw);
-            mp_int_mul(&lhs, &pw, &lhs);
+            if (mp_int_set_value(&pw, 10) != MP_OK ||
+                mp_int_expt(&pw, sb - sa, &pw) != MP_OK ||
+                mp_int_mul(&lhs, &pw, &lhs) != MP_OK) {
+                mp_int_clear(&lhs); mp_int_clear(&rhs); mp_int_clear(&pw);
+                return 0;
+            }
         } else {
-            mp_int_set_value(&pw, 10);
-            mp_int_expt(&pw, sa - sb, &pw);
-            mp_int_mul(&rhs, &pw, &rhs);
+            if (mp_int_set_value(&pw, 10) != MP_OK ||
+                mp_int_expt(&pw, sa - sb, &pw) != MP_OK ||
+                mp_int_mul(&rhs, &pw, &rhs) != MP_OK) {
+                mp_int_clear(&lhs); mp_int_clear(&rhs); mp_int_clear(&pw);
+                return 0;
+            }
         }
         r = mp_int_compare(&lhs, &rhs);
         mp_int_clear(&lhs); mp_int_clear(&rhs); mp_int_clear(&pw);
