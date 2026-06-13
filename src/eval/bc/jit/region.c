@@ -75,11 +75,8 @@ long jit_region_page_size(void)
 }
 #endif
 
-/* Sentinel value returned by jit_region_alloc on failure. Both the
- * POSIX (mmap returns MAP_FAILED → NULL via the wrapper) and Windows
- * (VirtualAlloc returns NULL) paths map to NULL, so callers only need
- * to test for NULL. */
-#define MINO_JIT_REGION_ALLOC_FAILED  NULL
+/* Sentinel for alloc failure is defined in internal.h as
+ * MINO_JIT_REGION_ALLOC_FAILED; no local redefinition needed. */
 
 /* ----- region book-keeping ------------------------------------------------ */
 
@@ -98,18 +95,8 @@ int region_track(mino_state *S, void *ptr, size_t size, void *aux_ptr)
 
 /* ----- slab pool ----------------------------------------------------------- */
 
-/* Cutoff for slab-pool eligibility. Fns whose pre-page-rounding
- * `need_bytes` fits under this size go through the slab pool; larger
- * fns keep the one-page-per-fn allocator. Sized just below the
- * smallest host page (Linux x86_64 = 4 KB) so the same cutoff is
- * meaningful across all hosts; on macOS arm64 with a 16 KB page,
- * multiple slots fit per slab. */
-#define MINO_JIT_SLAB_CUTOFF      ((size_t)4096)
-
-/* Per-slot alignment. Stencil-emitted code is read by the host CPU;
- * keeping slots 16-byte-aligned matches the alignment trampoline /
- * pool layout already assumes inside a single fn. */
-#define MINO_JIT_SLAB_SLOT_ALIGN  ((size_t)16)
+/* Slab-pool constants (MINO_JIT_SLAB_CUTOFF and MINO_JIT_SLAB_SLOT_ALIGN)
+ * are defined in internal.h; no local redefinitions needed here. */
 
 static struct mino_jit_slab *jit_slab_alloc_new(mino_state *S, size_t need)
 {

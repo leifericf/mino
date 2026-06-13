@@ -17,6 +17,10 @@
  *
  * The address of each helper is exported to stencil-side machine code
  * through the extern-fn table in entry.c.
+ *
+ * Loop-variant slow-path helpers (mino_jit_loop_int_*_slow, loop_tag_exit,
+ * and mino_jit_deopt_exit) live in helpers_loop.c, which was split out
+ * to keep each TU under the 1100-line limit.
  */
 
 #include "internal.h"

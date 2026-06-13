@@ -16,6 +16,9 @@
  * The loop-exit tagging convention: all loop slow-path helpers share
  * loop_tag_exit(), which sets the low bit of the regs pointer.  The
  * stencil caller tests the low bit before dereferencing.
+ *
+ * Non-loop slow-path helpers (binop, unop, call, collection, closure,
+ * protocol, env, etc.) live in helpers.c.
  */
 
 #include "internal.h"
