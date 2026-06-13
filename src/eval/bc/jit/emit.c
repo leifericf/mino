@@ -43,6 +43,7 @@
 
 #ifdef MINO_CPJIT_HOST
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -390,18 +391,22 @@ static int jit_size_pass(jit_compile_ctx_t *ctx)
         unsigned op = OP_OF(bc->code[pc]);
         if (op == OP_JMP || op == OP_JMPIFNOT) {
             if (branch_is_backward(bc, pc)) {
+                if (code_size > SIZE_MAX - safepoint_st->size) return -1;
                 code_size += safepoint_st->size;
                 if (stencil_account_syms(safepoint_st, &pool_slots,
                                          &tramp_count) != 0) return -1;
                 n_backjumps++;
             }
-            code_size += (op == OP_JMP) ? MINO_JIT_JMP_SIZE
-                                        : MINO_JIT_JMPIFNOT_SIZE;
+            size_t branch_sz = (op == OP_JMP) ? MINO_JIT_JMP_SIZE
+                                               : MINO_JIT_JMPIFNOT_SIZE;
+            if (code_size > SIZE_MAX - branch_sz) return -1;
+            code_size += branch_sz;
             continue;
         }
         int fused;
         const stencil_desc_t *st = pick_stencil(bc, pc, &fused, allow_fusion);
         if (st == NULL) return -1;
+        if (code_size > SIZE_MAX - st->size) return -1;
         code_size += st->size;
         if (stencil_account_syms(st, &pool_slots, &tramp_count) != 0) return -1;
         if (fused) pc++;
@@ -409,6 +414,7 @@ static int jit_size_pass(jit_compile_ctx_t *ctx)
     }
     /* Account for the deopt stencil when compiling a prefix. */
     if (is_deopt_compile) {
+        if (code_size > SIZE_MAX - deopt_st->size) return -1;
         code_size += deopt_st->size;
         if (stencil_account_syms(deopt_st, &pool_slots, &tramp_count) != 0)
             return -1;
@@ -434,11 +440,18 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
 
     if (tramp_count > SIZE_MAX / MINO_JIT_TRAMPOLINE_SIZE) return -1;
     if (pool_slots  > SIZE_MAX / sizeof(uint64_t))         return -1;
+    /* Overflow-checked section-offset arithmetic. Each additive term is
+     * checked before the addition so a pathological bc can never wrap
+     * need_bytes around to a smaller-than-required allocation. */
+    if (code_size > SIZE_MAX - 15u) return -1;
     size_t tramp_offset    = (code_size + 15u) & ~(size_t)15u;
     size_t tramp_bytes     = tramp_count * MINO_JIT_TRAMPOLINE_SIZE;
+    if (tramp_offset > SIZE_MAX - tramp_bytes) return -1;
     size_t pool_offset_raw = tramp_offset + tramp_bytes;
+    if (pool_offset_raw > SIZE_MAX - 7u) return -1;
     size_t pool_offset     = (pool_offset_raw + 7u) & ~(size_t)7u;
     size_t pool_bytes      = pool_slots * sizeof(uint64_t);
+    if (pool_offset > SIZE_MAX - pool_bytes) return -1;
     size_t need_bytes      = pool_offset + pool_bytes;
     if (need_bytes == 0) need_bytes = 1;
 
@@ -454,7 +467,14 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
     if (need_bytes <= MINO_JIT_SLAB_CUTOFF) {
         slab = jit_slab_acquire(S, need_bytes);
         if (slab == NULL) return -1;
-        if (jit_slab_make_rw(slab) != 0) return -1;
+        if (jit_slab_make_rw(slab) != 0) {
+            /* Re-seal to RX so the slab doesn't stay in a writable state
+             * on the failure path (a newly-allocated slab starts RW from
+             * the mmap call; an existing one may have been mid-transition).
+             * Ignore the return value -- this is best-effort cleanup. */
+            (void)jit_slab_make_rx(slab);
+            return -1;
+        }
         slot_offset = slab->bump_offset;
         slot_size   = (need_bytes + MINO_JIT_SLAB_SLOT_ALIGN - 1)
                       & ~(MINO_JIT_SLAB_SLOT_ALIGN - 1);
@@ -547,6 +567,7 @@ static int jit_emit_pass(jit_compile_ctx_t *ctx)
     size_t tramp_pos = ctx->tramp_pos;
     size_t n_inst    = ctx->n_inst;
     for (size_t pc = 0; pc < effective_code_len; pc++) {
+        if (pos > (size_t)UINT_MAX) return -1;
         pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
         if (op == OP_JMP || op == OP_JMPIFNOT) {
@@ -613,6 +634,7 @@ static int jit_emit_pass(jit_compile_ctx_t *ctx)
         }
     }
     if (is_deopt_compile) {
+        if (pos > (size_t)UINT_MAX) return -1;
         pc_offsets[deopt_at_pc] = (unsigned)pos;
         mino_bc_insn_t deopt_insn =
             (mino_bc_insn_t)(OP_DEOPT_TO_INTERP & 0xFFu)
@@ -785,7 +807,10 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         __builtin___clear_cache((char *)ctx.region,
                                 (char *)ctx.region + flush_bytes);
 #elif defined(_WIN32)
+#include <windows.h>
         FlushInstructionCache(GetCurrentProcess(), ctx.region, flush_bytes);
+#else
+#error "MINO_CPJIT_HOST requires an I-cache flush primitive; add one for this compiler"
 #endif
     }
 
