@@ -251,6 +251,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     int           saved_try;
     int           saved_call;
     int           saved_trace;
+    int           saved_gc_save;
     dyn_frame_t  *saved_dyn;
     volatile int       got_exception = 0;
     mino_val * volatile vol_result = NULL;
@@ -263,6 +264,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     saved_try   = mino_current_ctx(S)->try_depth;
     saved_call  = mino_current_ctx(S)->call_depth;
     saved_trace = mino_current_ctx(S)->trace_added;
+    saved_gc_save = mino_current_ctx(S)->gc_save_len;
     saved_dyn   = mino_current_ctx(S)->dyn_stack;
     /* Snapshot bc_top so a longjmp that unwinds through bc_run
      * frames (intermediate fns called by the body) doesn't leave
@@ -321,6 +323,11 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         mino_current_ctx(S)->try_depth   = saved_try;
         mino_current_ctx(S)->call_depth  = saved_call;
         mino_current_ctx(S)->trace_added = saved_trace;
+        /* The throw longjmp'd past the gc_unpin calls in the abandoned
+         * frames; restore the save stack to its try-entry depth so those
+         * transient pins don't leak (the exception is rooted separately
+         * via try_stack[].exception). */
+        mino_current_ctx(S)->gc_save_len = saved_gc_save;
         while (mino_current_ctx(S)->dyn_stack != saved_dyn) {
             dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
             mino_current_ctx(S)->dyn_stack = f->prev;
