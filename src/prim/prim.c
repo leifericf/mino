@@ -145,15 +145,19 @@ int as_long(const mino_val *v, long long *out)
  */
 mino_val *print_to_string(mino_state *S, const mino_val *v)
 {
-    FILE  *f = tmpfile();
-    long   n;
-    char  *buf;
-    mino_val *result;
+    FILE      *f = tmpfile();
+    long long  n;
+    char      *buf;
+    mino_val  *result;
     if (f == NULL) {
         return prim_throw_classified(S, "host", "MHO001", "pr-str: tmpfile failed");
     }
     mino_print_to(S, f, v);
-    n = ftell(f);
+#if defined(_WIN32) && defined(_MSC_VER)
+    n = _ftelli64(f);
+#else
+    n = (long long)ftell(f);
+#endif
     if (n < 0) n = 0;
     rewind(f);
     buf = (char *)malloc((size_t)n + 1);
