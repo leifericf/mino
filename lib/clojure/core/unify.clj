@@ -221,19 +221,23 @@
       ([x y binds] (flatten* (garner x y binds))))))
 
 (defn make-unifier-fn
-  "Build a `unifier`-style fn for the given variable predicate (occurs
-  check enabled): unify x and y, then substitute the resulting bindings
-  back into x, returning the unified term or nil on failure."
-  [variable?]
-  (let [unify* (make-occurs-unify-fn variable?)
-        subst* (make-occurs-subst-fn variable?)]
-    (fn
-      ([x y]
-       (let [binds (unify* x y)]
-         (when binds (subst* x binds))))
-      ([x y binds]
-       (let [binds (unify* x y binds)]
-         (when binds (subst* x binds)))))))
+  "Build a `unifier`-style fn for the given variable predicate: unify x
+  and y, then substitute the resulting bindings back into x, returning
+  the unified term or nil on failure. occurs? (default true) toggles the
+  occurs check on the underlying unify."
+  ([variable?] (make-unifier-fn variable? true))
+  ([variable? occurs?]
+   (let [unify* (if occurs?
+                  (make-occurs-unify-fn variable?)
+                  (make-unify-fn variable?))
+         subst* (make-occurs-subst-fn variable?)]
+     (fn
+       ([x y]
+        (let [binds (unify* x y)]
+          (when binds (subst* x binds))))
+       ([x y binds]
+        (let [binds (unify* x y binds)]
+          (when binds (subst* x binds))))))))
 
 ;; --------------------------------------------------------------------
 ;; Default surface (?-prefixed-symbol variables, occurs check on)
@@ -270,9 +274,14 @@
   (unifier x y) and (unifier x y subst)."
   (make-unifier-fn lvar?))
 
-(def unifier-
-  "The non-occurs-checking unifier constructor's default surface: like
-  unify but with the occurs check disabled. Returns the binding map or
-  nil. Provided for callers that knowingly want to skip the occurs
-  check."
+(def unify-
+  "Like unify but with the occurs check disabled: returns the binding
+  map (or nil), allowing a variable to bind to a term that contains it.
+  Provided for callers that knowingly want to skip the occurs check."
   (make-unify-fn lvar?))
+
+(def unifier-
+  "Like unifier but with the occurs check disabled: unify x and y without
+  the occurs check, then substitute the bindings into x, returning the
+  unified term (or nil)."
+  (make-unifier-fn lvar? false))
