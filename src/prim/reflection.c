@@ -1163,6 +1163,13 @@ found_ns:
             env_binding_t *b = env_find_here(e, buf);
             if (b != NULL) {
                 size_t k;
+                /* A refer'd name binds the source var directly (see
+                 * prim_refer and the ns :refer-clojure handler). Return
+                 * that var so resolve reports the home namespace and deref
+                 * yields the value, not a var wrapping a var. */
+                if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
+                    return b->val;
+                }
                 for (k = 0; k < S->ns_vars.ns_env_len; k++) {
                     if (S->ns_vars.ns_env_table[k].env == e) {
                         const char *src_ns = S->ns_vars.ns_env_table[k].name;

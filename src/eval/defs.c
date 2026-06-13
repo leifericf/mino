@@ -535,16 +535,34 @@ mino_val *eval_ns(mino_state *S, mino_val *form,
                         if (src_var != NULL && src_var->as.var.is_private) {
                             continue;
                         }
-                        renamed = rename_map_lookup(rename_map, nm, nl);
-                        if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL
-                            && renamed->as.s.len < 256) {
-                            char nbuf[256];
-                            memcpy(nbuf, renamed->as.s.data,
-                                   renamed->as.s.len);
-                            nbuf[renamed->as.s.len] = '\0';
-                            env_bind(S, target, nbuf, core->bindings[i].val);
-                        } else {
-                            env_bind(S, target, nm, core->bindings[i].val);
+                        /* Bind the source var, not its raw value, so resolve
+                         * and syntax-quote recover clojure.core as the home
+                         * namespace (a refer'd `let` must qualify to
+                         * clojure.core/let, never <this-ns>/let). Mirrors
+                         * prim_refer; auto-intern when the core env carries a
+                         * primitive with no interned var yet. */
+                        if (src_var == NULL) {
+                            src_var = var_intern(S, "clojure.core", nm);
+                            if (src_var != NULL) {
+                                var_set_root(S, src_var,
+                                             core->bindings[i].val);
+                            }
+                        }
+                        {
+                            mino_val *bind_val = src_var != NULL
+                                ? src_var : core->bindings[i].val;
+                            renamed = rename_map_lookup(rename_map, nm, nl);
+                            if (renamed != NULL
+                                && mino_type_of(renamed) == MINO_SYMBOL
+                                && renamed->as.s.len < 256) {
+                                char nbuf[256];
+                                memcpy(nbuf, renamed->as.s.data,
+                                       renamed->as.s.len);
+                                nbuf[renamed->as.s.len] = '\0';
+                                env_bind(S, target, nbuf, bind_val);
+                            } else {
+                                env_bind(S, target, nm, bind_val);
+                            }
                         }
                     }
                 }
