@@ -1,11 +1,10 @@
 (require "tests/test")
 
-;; Spec-first tests for upcoming src/core.clj changes.
-;; Most of these FAIL on the current branch (expected): they describe
-;; the intended behavior and will pass once each implementation lands.
+;; Tests for src/core.clj surface additions:
 ;;
-;; (1) refer-clojure macro  — resolves nil today; all its tests fail
-;; (2) *clojure-version* ^:dynamic — not dynamic today; binding fails
+;; (1) refer-clojure macro
+;; (2) *clojure-version* ^:dynamic
+;; (3) vswap! macro
 ;;
 ;; GC-stress note: all tests here are allocation-light and pass
 ;; under MINO_GC_STRESS=1 (no large heap builds).
@@ -94,7 +93,8 @@
                                             :incremental 0 :qualifier nil}]
                  *clojure-version*)]
     (is (= 99 (:major result))))
-  ;; Outside the binding, the original value is restored.
+  ;; Outside the binding, the original value is restored. The 1 tracks
+  ;; mino's declared Clojure-compatibility major version.
   (is (= 1 (:major *clojure-version*))))
 
 (deftest cs-clojure-version-binding-does-not-affect-string-fn

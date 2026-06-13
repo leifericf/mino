@@ -1,24 +1,19 @@
 (require "tests/test")
 (require '[clojure.repl :refer [doc-string]])
 
-;; Spec-first tests for upcoming C special-form / var introspection.
-;; Covers three planned changes:
+;; Tests for C special-form / var introspection. Three behaviors:
 ;;
 ;; (1) The C special forms/macros fn, let, loop, lazy-seq, binding,
-;;     declare, defmacro, ns will be registered as clojure.core vars so
+;;     declare, defmacro, ns are registered as clojure.core vars so
 ;;     they appear in (ns-publics 'clojure.core), (resolve '<name>)
 ;;     returns a var with :macro true and a non-empty :doc string.
-;;     Evaluation and macroexpand-1 behavior must be UNCHANGED.
+;;     Evaluation and macroexpand-1 behavior are UNCHANGED.
 ;;
-;; (2) *ns* will gain a clojure.core env binding so it appears in
+;; (2) *ns* has a clojure.core env binding so it appears in
 ;;     (ns-publics 'clojure.core) and (resolve '*ns*) returns its var.
 ;;
-;; (3) clojure.core/pr will become dynamic: (binding [pr ...] ...) must
-;;     work, and normal pr behavior is restored outside the binding.
-;;
-;; These tests are expected to FAIL until the implementation lands.
-;; Failure shape: "missing from ns-publics / resolve nil" rather than
-;; test-code errors.
+;; (3) clojure.core/pr is dynamic: (binding [pr ...] ...) works, and
+;;     normal pr behavior is restored outside the binding.
 
 ;; --- (1) ns-publics coverage: all 9 names must appear ---
 

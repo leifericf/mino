@@ -293,9 +293,10 @@ static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 }
 
 /* tag_kw -- return the keyword for v's concrete tag. Called by both
- * prim_type and prim_class. v must be non-NULL. MINO_RECORD is
- * handled by callers before this call so their MINO_TYPE pointer is
- * returned directly. */
+ * prim_type and prim_class. A NULL v is treated as nil and yields the
+ * :nil keyword; prim_class peels nil off beforehand when it wants a bare
+ * nil instead. MINO_RECORD is handled by callers before this call so
+ * their MINO_TYPE pointer is returned directly. */
 static mino_val *tag_kw(mino_state *S, mino_val *v)
 {
     switch (mino_type_of(v)) {
@@ -388,7 +389,9 @@ static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
 
 /* (class x) -- returns the concrete type tag keyword, like type, except:
  * (class nil) is nil (not :nil), and :type metadata is never consulted.
- * Records return the record's type value, matching type's behavior. */
+ * Records return the record's type value, matching type's behavior.
+ * Deviation from Clojure (JVM): with no host class layer this returns a
+ * keyword tag rather than a java.lang.Class. */
 static mino_val *prim_class(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *v;
@@ -1535,8 +1538,11 @@ const mino_prim_def k_prims_reflection[] = {
     {"type",      prim_type,
      "Returns a keyword indicating the type of the value."},
     {"class",     prim_class,
-     "Returns the concrete type tag of a value, ignoring :type metadata. "
-     "(class nil) is nil."},
+     "Returns the concrete type tag keyword of a value, like type but "
+     "ignoring :type metadata; (class nil) is nil. Records return their "
+     "type descriptor rather than a keyword. Deviation from Clojure (JVM): "
+     "there are no host classes, so this yields a keyword tag, not a "
+     "java.lang.Class."},
     {"nil?",      prim_nil_p,
      "Returns true if x is nil.", prim_nil_p_argv},
     {"cons?",     prim_cons_p,

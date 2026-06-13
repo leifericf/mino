@@ -1,6 +1,6 @@
 ;; clojure.spec.alpha -- spec definitions and predicate composition.
 ;;
-;; Mino port of the canonical surface. Spec values are maps tagged with
+;; mino port of the canonical surface. Spec values are maps tagged with
 ;; ::kind and dispatched via multimethods (conform-impl, explain-impl).
 ;; The canonical Spec / Specize protocols are exposed as descriptor
 ;; values; their methods (conform* unform* explain* gen* with-gen*
