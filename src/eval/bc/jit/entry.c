@@ -734,6 +734,18 @@ static int prefix_has_escaping_branch(const mino_bc_fn_t *bc, size_t deopt_pc)
     return 0;
 }
 
+/* Returns 1 when a function whose classify result is OK_WITH_DEOPT
+ * satisfies both safety gates: the resume PC fits in the 16-bit Bx
+ * slot the stencil reads, and no branch in the prefix has a target
+ * past the deopt point. Used by both mino_jit_eligible and
+ * mino_jit_compile so the gate is not duplicated. */
+static int ok_with_deopt_passes_gates(const mino_bc_fn_t *bc,
+                                      size_t first_unknown_pc)
+{
+    return first_unknown_pc <= 0xFFFFu
+        && !prefix_has_escaping_branch(bc, first_unknown_pc);
+}
+
 int mino_jit_eligible(const mino_bc_fn_t *bc)
 {
     unsigned       first_unknown_op = 0;
@@ -742,8 +754,7 @@ int mino_jit_eligible(const mino_bc_fn_t *bc)
                                                       &first_unknown_pc);
     if (r == CPJIT_REASON_OK) return 1;
     if (r == CPJIT_REASON_OK_WITH_DEOPT
-        && first_unknown_pc <= 0xFFFFu
-        && !prefix_has_escaping_branch(bc, first_unknown_pc)) {
+        && ok_with_deopt_passes_gates(bc, first_unknown_pc)) {
         return 1;
     }
     return 0;
@@ -841,14 +852,11 @@ int mino_jit_compile(mino_state *S, mino_val *fn_val)
         return rc;
     }
     /* OK_WITH_DEOPT -- compile the prefix and plant a deopt stencil
-     * at first_unknown_pc. Two safety gates: the resume PC must fit
-     * in the 16-bit Bx slot the stencil reads, and the prefix must
-     * not contain a branch whose target lands past it. Failures fall
-     * through to the rejection record so the tracing dashboard still
-     * sees the entry attributed to the blocking op. */
+     * at first_unknown_pc. Failures fall through to the rejection
+     * record so the tracing dashboard still sees the entry attributed
+     * to the blocking op. */
     if (reason == CPJIT_REASON_OK_WITH_DEOPT
-        && first_unknown_pc <= 0xFFFFu
-        && !prefix_has_escaping_branch(bc, first_unknown_pc)) {
+        && ok_with_deopt_passes_gates(bc, first_unknown_pc)) {
         long long t0 = mino_monotonic_ns();
         int rc = mino_jit_compile_inner(S, fn_val, first_unknown_pc);
         bc->jit_compile_ns += (uint64_t)(mino_monotonic_ns() - t0);
@@ -860,6 +868,30 @@ int mino_jit_compile(mino_state *S, mino_val *fn_val)
     mino_jit_stats_record(bc, reason, first_unknown_op,
                           first_unknown_pc, 0, 0);
     return -1;
+}
+
+/* Handle a potential side-exit after the native region returns. When
+ * the deopt stencil fires it sets S->jit_deopt_pending = 1 and returns
+ * NULL; this helper clears the flag and resumes the interpreter from
+ * the recorded PC. Returns `r` unchanged when no deopt occurred. */
+static inline mino_val *jit_region_check_deopt(mino_val *r,
+                                                mino_state *S,
+                                                mino_bc_fn_t *bc,
+                                                size_t base,
+                                                mino_env *env,
+                                                int saved_try_depth,
+                                                int saved_bc_catch_depth,
+                                                dyn_frame_t *saved_dyn_stack)
+{
+    if (r == NULL && S->jit_deopt_pending) {
+        size_t resume_pc = S->jit_deopt_pc;
+        S->jit_deopt_pending = 0;
+        bc->jit_deopt_exits++;
+        r = mino_bc_run_resume(S, bc, base, env, resume_pc,
+                               saved_try_depth, saved_bc_catch_depth,
+                               saved_dyn_stack);
+    }
+    return r;
 }
 
 mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
@@ -926,18 +958,10 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
                                         : (uint32_t)dt;
             }
             ctx->jit_invoke_depth--;
-            mino_val *r = r1;
-            /* Side-exit detection is identical to the untimed path;
-             * fall through to the shared block below. */
-            if (r == NULL && S->jit_deopt_pending) {
-                size_t resume_pc = S->jit_deopt_pc;
-                S->jit_deopt_pending = 0;
-                bc->jit_deopt_exits++;
-                r = mino_bc_run_resume(S, bc, base, env, resume_pc,
-                                       saved_try_depth,
-                                       saved_bc_catch_depth,
-                                       saved_dyn_stack);
-            }
+            mino_val *r = jit_region_check_deopt(r1, S, bc, base, env,
+                                                  saved_try_depth,
+                                                  saved_bc_catch_depth,
+                                                  saved_dyn_stack);
             S->jit.jit_invoke_ctx = saved_ctx;
             ctx->jit_invoke_env = saved_env;
             return r;
@@ -945,21 +969,14 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
     }
     mino_val *r = f(regs, consts, S);
     ctx->jit_invoke_depth--;
-    /* Side-exit detection: when the deopt stencil fires, it sets
-     * jit_deopt_pending = 1 and returns NULL. Clear the flag, then
-     * resume the dispatch loop from the recorded PC over the same
-     * regs window. Resume runs inside the same jit_invoke_env /
-     * jit_invoke_ctx publish window the native code held, so an
-     * OP_CALL inside the resumed body that re-enters JIT sees the
-     * same context this call would have. */
-    if (r == NULL && S->jit_deopt_pending) {
-        size_t resume_pc = S->jit_deopt_pc;
-        S->jit_deopt_pending = 0;
-        bc->jit_deopt_exits++;
-        r = mino_bc_run_resume(S, bc, base, env, resume_pc,
+    /* Side-exit detection: jit_region_check_deopt clears jit_deopt_pending
+     * and resumes the interpreter from the recorded PC when the deopt
+     * stencil fired. Resume runs inside the same jit_invoke_env /
+     * jit_invoke_ctx publish window the native code held, so an OP_CALL
+     * inside the resumed body that re-enters JIT sees the same context. */
+    r = jit_region_check_deopt(r, S, bc, base, env,
                                saved_try_depth, saved_bc_catch_depth,
                                saved_dyn_stack);
-    }
     S->jit.jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
     return r;

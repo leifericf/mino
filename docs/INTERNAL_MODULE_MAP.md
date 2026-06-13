@@ -156,7 +156,9 @@ and a four-primitive bridge.
 | `src/eval/bc/jit.h` / `state.h` | JIT entry surface and per-state JIT fields |
 | `src/eval/bc/jit/emit.c` | Copy-and-patch code emission from stencil byte tables |
 | `src/eval/bc/jit/patcher.c` / `patcher_x86_64.c` | Relocation patching per architecture |
-| `src/eval/bc/jit/helpers.c` | C helpers called from emitted code |
+| `src/eval/bc/jit/region.c` | OS memory management (mmap/VirtualAlloc/mprotect wrappers), bump-pointer slab pool for small fns, region tracking list |
+| `src/eval/bc/jit/helpers.c` | Non-loop slow-path helpers (binop, unop, call, collection, closure, protocol, env) called from emitted code; loop-variant helpers live in helpers_loop.c |
+| `src/eval/bc/jit/helpers_loop.c` | Loop-variant slow-path helpers (mino_jit_loop_int_*_slow, loop_tag_exit, mino_jit_deopt_exit); split from helpers.c to keep each TU under the 1100-line limit |
 | `src/eval/bc/jit/entry.c` | JIT entry/exit, safepoints, deopt; per-target opt-in gates |
 | `src/eval/bc/jit/stats.c` | Tracing/blocker statistics |
 | `src/eval/bc/stencils/` | Stencil sources (`*.c`) + committed `generated/stencils_<arch>_<os>.h` byte headers (see `docs/MAINTAINER_TOOLCHAIN.md`) |
