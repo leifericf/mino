@@ -3,8 +3,8 @@
  * hashing, equality, and the first-class var constructor.
  *
  * Implementations:
- *   val.c                  -- constructors, interning, equality, var
- *   collections/map.c      -- hash_val, fnv_mix, fnv_bytes, make_fn
+ *   val.c                  -- constructors, interning, equality, var, make_fn
+ *   collections/map.c      -- hash_val, fnv_mix, fnv_bytes
  *   collections/queue.c    -- mino_queue_eq, mino_queue_nth
  *   collections/bytes.c    -- mino_bytes_eq, mino_bytes_hash, mino_bytes_seq
  *
@@ -109,6 +109,16 @@ void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr);
 void mino_future_trace_impl(mino_state *S, const mino_val *fut);
 void mino_future_gc_sweep(mino_val *fut);
 void mino_future_teardown_free(mino_val *fut);
+
+/* Walk GC-owned pointers inside a MINO_CHAN cell.
+ * Implemented in async/chan.c.  Declared here so gc_handlers.c can call
+ * it without including async/chan.h (which exposes mino_chan_impl, a
+ * layout that values/ must not depend on). */
+void mino_chan_trace(mino_state *S, mino_val *v);
+
+/* Free malloc-owned buffer + queues inside a MINO_CHAN cell.
+ * Implemented in async/chan.c.  Same decoupling rationale as above. */
+void mino_chan_finalize(mino_state *S, mino_val *v);
 
 #ifdef __cplusplus
 }

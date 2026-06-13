@@ -5,21 +5,21 @@
  * trace_val knows the struct mino_val union body and pushes the
  * GC-owned pointers under every type tag. Field accesses for fields
  * that point into downstream-component structs (the bc record under
- * MINO_FN, the future impl under MINO_FUTURE) are delegated to
- * component-owned helpers (mino_bc_trace_fn_bc, mino_future_trace_impl)
- * so values/ never has to import struct mino_bc_fn or
- * struct mino_future layouts.
+ * MINO_FN, the future impl under MINO_FUTURE, the chan impl under
+ * MINO_CHAN) are delegated to component-owned helpers
+ * (mino_bc_trace_fn_bc, mino_future_trace_impl, mino_chan_trace) so
+ * values/ never has to import struct mino_bc_fn, struct mino_future,
+ * or mino_chan_impl layouts.
  *
  * Registered from runtime/state.c::state_init.
  */
 
 #include "mino_internal.h"
 #include "values/layout.h"
-#include "values/internal.h"         /* forward decls: mino_bc_trace_fn_bc, mino_future_* */
+#include "values/internal.h"         /* forward decls: mino_bc_trace_fn_bc, mino_future_*, mino_chan_* */
 #include "gc/internal.h"
 #include "runtime/value_assert.h"   /* mino_type_of */
 #include "collections/internal.h"    /* mino_bigint_free (collections-adjacent bignum) */
-#include "async/chan.h"              /* mino_chan_trace, mino_chan_finalize */
 
 #include <stdlib.h>                  /* free() for malloc-owned slot arrays */
 
