@@ -54,10 +54,8 @@
 
 #include "mino.h"
 #include "runtime/internal.h"
-#include "eval/internal.h"
-#include "eval/special_internal.h"  /* build_multi_arity_clauses */
-#include "eval/bc/internal.h"
-#include "prim/internal.h"         /* prim_destructure for let-pattern flatten */
+#include "eval/internal.h"          /* prim_destructure, eval_impl, apply_callable */
+#include "eval/bc/internal.h"       /* build_multi_arity_clauses, prim_* fwd decls */
 #include "collections/internal.h"   /* make_fn */
 
 extern mino_val *mino_nil(mino_state *S);
@@ -811,12 +809,20 @@ static int compile_do(compiler_t *c, mino_val *form, int dst, int tail)
     return compile_body(c, body, dst, tail);
 }
 
+/* Walk a cons chain and return its length. Used by bc_count_args and
+ * cons_count below; extracting the common loop avoids three copies of
+ * the same traversal. */
+static int bc_cons_len(const mino_val *list)
+{
+    int n = 0;
+    while (mino_is_cons(list)) { n++; list = list->as.cons.cdr; }
+    return n;
+}
+
 /* Count cons args starting at `args` (a cons-list). */
 static int bc_count_args(mino_val *args)
 {
-    int n = 0;
-    while (mino_is_cons(args)) { n++; args = args->as.cons.cdr; }
-    return n;
+    return bc_cons_len(args);
 }
 
 static int compile_when(compiler_t *c, mino_val *form, int dst, int tail)
@@ -1794,12 +1800,7 @@ static mino_val *match_call(mino_val *form, const char *name)
 /* List length of a cons chain. */
 static size_t cons_count(const mino_val *list)
 {
-    size_t n = 0;
-    while (mino_is_cons(list)) {
-        n++;
-        list = list->as.cons.cdr;
-    }
-    return n;
+    return (size_t)bc_cons_len(list);
 }
 
 /* Build a cons list from a NULL-terminated array of mino_val *. */
@@ -3662,10 +3663,7 @@ static int unop_subop_for_name(const char *name)
  * already validated the head; returns the arg count. */
 static int count_call_args(mino_val *form)
 {
-    mino_val *p = form->as.cons.cdr;
-    int n = 0;
-    while (mino_is_cons(p)) { n++; p = p->as.cons.cdr; }
-    return n;
+    return bc_cons_len(form->as.cons.cdr);
 }
 
 /* Speculative unary-arith fast lane (inc, dec, zero?, pos?, neg?, even?,

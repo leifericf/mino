@@ -23,11 +23,9 @@
 #include "mino.h"
 #include "runtime/internal.h"       /* mino_state, gc_alloc_typed, GC_T_VALARR */
 #include "eval/internal.h"          /* eval_impl, apply_callable */
-#include "eval/special_internal.h"  /* normalize_exception for OP_PUSHCATCH */
-#include "eval/bc/internal.h"
+#include "eval/bc/internal.h"       /* normalize_exception, prim_* fwd decls */
 #include "eval/bc/jit.h"
 #include "collections/internal.h"   /* make_fn */
-#include "prim/internal.h"          /* binary arith prim_* on bc fast-lane miss */
 
 extern mino_val *mino_nil(mino_state *S);
 

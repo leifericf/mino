@@ -738,4 +738,70 @@ void mino_bc_trace_ic_slots(mino_state *S, const struct mino_bc_fn *bc);
  * (values/gc_handlers.c) don't need struct mino_bc_fn in scope. */
 void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr);
 
+/* Forward declarations for cross-module symbols needed by compile.c and
+ * vm.c without including their owning module's internal header directly.
+ * These declarations eliminate the forbidden eval/special_internal.h and
+ * prim/internal.h includes from the eval/bc translation units. */
+
+/* eval/fn.c -- multi-arity fn builder used by compile.c. */
+mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
+                                    mino_val *arity_list,
+                                    const char *diag_code,
+                                    const char *label);
+
+/* eval/control.c -- exception normaliser used by vm.c's OP_PUSHCATCH path. */
+mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
+
+/* prim/prim.c -- error helper used by vm.c's protocol dispatch. */
+mino_val *prim_throw_classified(mino_state *S, const char *kind,
+                                const char *code, const char *msg);
+
+/* prim/numeric.c -- arithmetic and predicate prims used as fallbacks in
+ * compile.c's PURE_PRIMS table and vm.c's fast-lane miss paths. */
+mino_val *prim_add(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_sub(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mul(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_addp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_subp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mulp(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_mod(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_rem(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_quot(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_eq(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lte(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gt(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_gte(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_inc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dec(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_zero_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_pos_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_neg_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_odd_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_and(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_or(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_xor(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_not(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_shift_left(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_unsigned_bit_shift_right(mino_state *S, mino_val *args,
+                                        mino_env *env);
+
+/* prim/sequences.c -- collection prims used as fallbacks. */
+mino_val *prim_count(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_first(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env);
+
+/* prim/collections.c -- map/vec/set prims used as fallbacks. */
+mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_assoc_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_conj_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_dissoc_bang(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_disj_bang(mino_state *S, mino_val *args, mino_env *env);
+
 #endif /* MINO_EVAL_BC_INTERNAL_H */
