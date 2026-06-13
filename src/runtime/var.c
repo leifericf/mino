@@ -93,8 +93,12 @@ static void intern_str_hash_insert(mino_state *S, const char *s)
     /* Resize trigger: keep load factor under ~0.7. */
     if (S->reader.interned_var_strs_hash == NULL
         || S->reader.interned_var_strs_len * 10u >= S->reader.interned_var_strs_hash_cap * 7u) {
-        size_t new_cap = (S->reader.interned_var_strs_hash_cap == 0)
-                         ? 128u : (S->reader.interned_var_strs_hash_cap * 2u);
+        size_t new_cap;
+        if (S->reader.interned_var_strs_hash_cap == 0) {
+            new_cap = 128u;
+        } else if (!checked_double_sz(S->reader.interned_var_strs_hash_cap, &new_cap)) {
+            return;  /* overflow: OOM, give up */
+        }
         intern_str_hash_resize(S, new_cap);
         if (S->reader.interned_var_strs_hash == NULL) return;  /* OOM, give up */
     }
@@ -120,10 +124,19 @@ static const char *intern_var_str(mino_state *S, const char *s)
     if (d == NULL) return s;
     memcpy(d, s, n + 1);
     if (S->reader.interned_var_strs_len == S->reader.interned_var_strs_cap) {
-        size_t       new_cap = (S->reader.interned_var_strs_cap == 0)
-                               ? 64u : (S->reader.interned_var_strs_cap * 2u);
-        const char **nb      = (const char **)realloc(
-            S->reader.interned_var_strs, new_cap * sizeof(*nb));
+        size_t       new_cap, byte_sz;
+        const char **nb;
+        if (S->reader.interned_var_strs_cap == 0) {
+            new_cap = 64u;
+        } else if (!checked_double_sz(S->reader.interned_var_strs_cap, &new_cap)) {
+            free(d);
+            return s;
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*nb), &byte_sz)) {
+            free(d);
+            return s;
+        }
+        nb = (const char **)realloc(S->reader.interned_var_strs, byte_sz);
         if (nb == NULL) {
             free(d);
             return s;
@@ -190,7 +203,12 @@ static void var_hash_insert(mino_state *S, const char *i_ns,
     size_t   probe;
     if (S->ns_vars.var_hash == NULL
         || (S->ns_vars.var_hash_len + 1u) * 10u >= S->ns_vars.var_hash_cap * 7u) {
-        size_t new_cap = (S->ns_vars.var_hash_cap == 0) ? 128u : (S->ns_vars.var_hash_cap * 2u);
+        size_t new_cap;
+        if (S->ns_vars.var_hash_cap == 0) {
+            new_cap = 128u;
+        } else if (!checked_double_sz(S->ns_vars.var_hash_cap, &new_cap)) {
+            return;  /* overflow: OOM, give up */
+        }
         var_hash_resize(S, new_cap);
         if (S->ns_vars.var_hash == NULL) return;
     }
@@ -235,10 +253,23 @@ mino_val *var_intern(mino_state *S, const char *ns, const char *name)
 
     /* Grow registry if needed. */
     if (S->ns_vars.var_registry_len == S->ns_vars.var_registry_cap) {
-        size_t       new_cap = (S->ns_vars.var_registry_cap == 0)
-                               ? 64u : (S->ns_vars.var_registry_cap * 2u);
-        var_entry_t *nb      = (var_entry_t *)realloc(
-            S->ns_vars.var_registry, new_cap * sizeof(*nb));
+        size_t       new_cap, byte_sz;
+        var_entry_t *nb;
+        if (S->ns_vars.var_registry_cap == 0) {
+            new_cap = 64u;
+        } else if (!checked_double_sz(S->ns_vars.var_registry_cap, &new_cap)) {
+            gc_unpin(1);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*nb), &byte_sz)) {
+            gc_unpin(1);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        nb = (var_entry_t *)realloc(S->ns_vars.var_registry, byte_sz);
         if (nb == NULL) {
             gc_unpin(1);
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
@@ -281,6 +312,13 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
         return;
     }
 
+    /* Pin the three GC-owned locals before any allocation or call that
+     * could trigger a collection.  validator, watches, and old_val are
+     * live across mino_cons/mino_call sequences below. */
+    gc_pin(old_val);
+    gc_pin(validator);
+    gc_pin(watches);
+
     /* Watches and validators run user code, which means we need an
      * env. Use the current ns's env -- this is the natural one for
      * runtime def / alter-var-root, which always run from inside an
@@ -293,8 +331,9 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     if (validator != NULL) {
         mino_val *vargs  = mino_cons(S, val, mino_nil(S));
         mino_val *result = mino_call(S, validator, vargs, env);
-        if (result == NULL) return;  /* validator threw */
+        if (result == NULL) { gc_unpin(3); return; }  /* validator threw */
         if (!mino_is_truthy(result)) {
+            gc_unpin(3);
             prim_throw_classified(S, "eval/contract", "MCT001",
                 "Invalid reference state");
             return;
@@ -321,9 +360,10 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
                       mino_cons(S, var,
                         mino_cons(S, old_val,
                           mino_cons(S, val, mino_nil(S)))));
-            if (mino_call(S, fn, wargs, env) == NULL) return;
+            if (mino_call(S, fn, wargs, env) == NULL) { gc_unpin(3); return; }
         }
     }
+    gc_unpin(3);
 }
 
 mino_val *var_find(mino_state *S, const char *ns, const char *name)

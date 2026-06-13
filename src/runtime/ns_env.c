@@ -29,9 +29,19 @@ static void ns_env_register_root(mino_state *S, mino_env *env)
 
 static void ns_env_table_grow(mino_state *S)
 {
-    size_t new_cap = S->ns_vars.ns_env_cap == 0 ? 8 : S->ns_vars.ns_env_cap * 2;
-    ns_env_entry_t *nb = (ns_env_entry_t *)realloc(
-        S->ns_vars.ns_env_table, new_cap * sizeof(*nb));
+    size_t new_cap, byte_sz;
+    ns_env_entry_t *nb;
+    if (S->ns_vars.ns_env_cap == 0) {
+        new_cap = 8;
+    } else if (!checked_double_sz(S->ns_vars.ns_env_cap, &new_cap)) {
+        gc_oom_throw(S, "ns_env: out of memory growing table");
+        return; /* unreachable */
+    }
+    if (!checked_mul_sz(new_cap, sizeof(*nb), &byte_sz)) {
+        gc_oom_throw(S, "ns_env: out of memory growing table");
+        return; /* unreachable */
+    }
+    nb = (ns_env_entry_t *)realloc(S->ns_vars.ns_env_table, byte_sz);
     if (nb == NULL) {
         /* gc_oom_throw longjmps to the active try frame (user-code path)
          * or aborts when no frame exists (init-time Class I OOM). */

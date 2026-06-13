@@ -364,9 +364,17 @@ void meta_set(mino_state *S, const char *name, const char *doc,
         return;
     }
     if (S->module.meta_table_len == S->module.meta_table_cap) {
-        size_t new_cap = S->module.meta_table_cap == 0 ? 32 : S->module.meta_table_cap * 2;
-        meta_entry_t *ne = (meta_entry_t *)realloc(
-            S->module.meta_table, new_cap * sizeof(*ne));
+        size_t new_cap, byte_sz;
+        meta_entry_t *ne;
+        if (S->module.meta_table_cap == 0) {
+            new_cap = 32;
+        } else if (!checked_double_sz(S->module.meta_table_cap, &new_cap)) {
+            return;
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*ne), &byte_sz)) {
+            return;
+        }
+        ne = (meta_entry_t *)realloc(S->module.meta_table, byte_sz);
         if (ne == NULL) { return; }
         S->module.meta_table = ne;
         S->module.meta_table_cap = new_cap;
