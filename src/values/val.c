@@ -624,7 +624,7 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                 if (cap == 0) {
                     ncap = 8;
                 } else {
-                    if (cap > SIZE_MAX / 2) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
+                    if (cap > SIZE_MAX / (2u * sizeof(*nvals))) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
                     ncap = cap * 2;
                 }
                 nvals = (mino_val **)realloc(vals, ncap * sizeof(*nvals));
@@ -1337,7 +1337,7 @@ static int eq_stack_push(eq_stack_t *st, const mino_val *a,
     if (st->len == st->cap) {
         size_t     new_cap;
         eq_pair_t *nb;
-        if (st->cap > SIZE_MAX / 2) return 0;
+        if (st->cap > SIZE_MAX / (2u * sizeof(*nb))) return 0;
         new_cap = st->cap * 2u;
         if (st->buf == st->inline_buf) {
             nb = (eq_pair_t *)malloc(new_cap * sizeof(*nb));
