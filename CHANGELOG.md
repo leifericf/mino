@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- GC: Restore gc_save_len when a throw unwinds a try/catch frame, so the transient pins made between try entry and the throw no longer leak; previously each exception left the call's pinned callable on the GC save stack, which in release builds silently stopped pinning new roots after 64 leaks (a latent liveness hazard) and aborted sanitizer builds.
+- Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
+- Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.
 - GC: Trace fn.wraps_prim in MINO_FN/MINO_MACRO GC walker
 - GC: Guard float/double fill pointer across alloc_val in mino_host_array_new
 - GC: Guard fields_vec pointer across alloc_val in mino_defrecord
