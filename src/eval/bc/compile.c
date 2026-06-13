@@ -184,7 +184,14 @@ typedef struct compiler {
      * from the first cons it sees). */
     int                cur_line;
     int                cur_column;
+    /* AST nesting depth. Incremented on compile_expr entry, decremented
+     * on exit. Capped at BC_MAX_COMPILE_DEPTH: when exceeded the
+     * compiler raises a recoverable error so deeply-nested user forms
+     * cannot exhaust the C stack. */
+    int                depth;
 } compiler_t;
+
+#define BC_MAX_COMPILE_DEPTH 1000
 
 /* ------------------------------------------------------------------- */
 /* Buffer growth                                                       */
@@ -3198,8 +3205,10 @@ static int compile_def(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)val_reg, (unsigned)nk);
     }
     emit_abx(c, OP_SETGLOBAL, (unsigned)val_reg, (unsigned)k);
-    /* Deviation: mino returns the bound value, not the Var (#'x);
-     * JVM Clojure returns the Var. */
+    /* Deviation from both JVM Clojure and mino tree-walker (eval_def):
+     * BC path returns the bound value, not the Var (#'x). JVM Clojure
+     * and eval_def both return the Var. Callers inside BC-compiled fns
+     * must not rely on (def ...) returning a Var. */
     emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)val_reg, 0);
     c->next_reg = saved_next;
     return 0;
@@ -4228,6 +4237,13 @@ static int compile_symbol_ref(compiler_t *c, mino_val *sym, int dst)
 
 static int compile_expr(compiler_t *c, mino_val *form, int dst, int tail)
 {
+    if (c->depth >= BC_MAX_COMPILE_DEPTH) {
+        prim_throw_classified(c->S, "user", "MBC002",
+            "form too deeply nested: compile-time recursion limit exceeded");
+        c->ok = 0;
+        return -1;
+    }
+    c->depth++;
     int saved_line = c->cur_line;
     int saved_col  = c->cur_column;
     if (form != NULL && mino_is_cons(form)) {
@@ -4240,6 +4256,7 @@ static int compile_expr(compiler_t *c, mino_val *form, int dst, int tail)
     int rc = compile_expr_dispatch(c, form, dst, tail);
     c->cur_line   = saved_line;
     c->cur_column = saved_col;
+    c->depth--;
     return rc;
 }
 
@@ -4307,12 +4324,19 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
             {
                 mino_state *S = c->S;
                 mino_val *head = mino_symbol(S, "clojure.core/vector");
-                mino_val *args = mino_nil(S);
                 if (head == NULL) return -1;
+                /* Root head across the mino_nil + mino_cons loop: a minor
+                 * GC triggered inside mino_cons would otherwise see head
+                 * only via the C stack, which the conservative scanner may
+                 * miss if the value was spilled to a non-pointer-aligned
+                 * slot.  gc_pin anchors it precisely. */
+                gc_pin(head);
+                mino_val *args = mino_nil(S);
                 for (size_t i = form->as.vec.len; i > 0; i--) {
                     args = mino_cons(S, vec_nth(form, i - 1), args);
-                    if (args == NULL) return -1;
+                    if (args == NULL) { gc_unpin(1); return -1; }
                 }
+                gc_unpin(1);
                 mino_val *call = mino_cons(S, head, args);
                 if (call == NULL) return -1;
                 return compile_expr(c, call, dst, tail);
@@ -4346,19 +4370,23 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
             {
                 mino_state *S = c->S;
                 mino_val *head = mino_symbol(S, "clojure.core/hash-map");
-                mino_val *call_args = mino_nil(S);
                 size_t      i;
                 if (head == NULL) return -1;
+                /* Root head across the mino_cons loop (same pattern as
+                 * the vector lowering above). */
+                gc_pin(head);
+                mino_val *call_args = mino_nil(S);
                 for (i = form->as.map.len; i > 0; i--) {
                     mino_val *kk = vec_nth(form->as.map.key_order, i - 1);
                     mino_val *vv = (form->as.map.val_order != NULL)
                                      ? vec_nth(form->as.map.val_order, i - 1)
                                      : map_get_val(form, kk);
                     call_args = mino_cons(S, vv, call_args);
-                    if (call_args == NULL) return -1;
+                    if (call_args == NULL) { gc_unpin(1); return -1; }
                     call_args = mino_cons(S, kk, call_args);
-                    if (call_args == NULL) return -1;
+                    if (call_args == NULL) { gc_unpin(1); return -1; }
                 }
+                gc_unpin(1);
                 mino_val *call = mino_cons(S, head, call_args);
                 if (call == NULL) return -1;
                 return compile_expr(c, call, dst, tail);
@@ -4376,14 +4404,18 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
             {
                 mino_state *S = c->S;
                 mino_val *head = mino_symbol(S, "clojure.core/hash-set");
-                mino_val *call_args = mino_nil(S);
                 size_t      i;
                 if (head == NULL) return -1;
+                /* Root head across the mino_cons loop (same pattern as
+                 * the vector lowering above). */
+                gc_pin(head);
+                mino_val *call_args = mino_nil(S);
                 for (i = form->as.set.len; i > 0; i--) {
                     mino_val *e = vec_nth(form->as.set.key_order, i - 1);
                     call_args = mino_cons(S, e, call_args);
-                    if (call_args == NULL) return -1;
+                    if (call_args == NULL) { gc_unpin(1); return -1; }
                 }
+                gc_unpin(1);
                 mino_val *call = mino_cons(S, head, call_args);
                 if (call == NULL) return -1;
                 return compile_expr(c, call, dst, tail);

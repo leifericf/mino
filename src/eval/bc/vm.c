@@ -2302,7 +2302,14 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
              * int and reuse the existing prim fallback path. */
             unsigned a    = A_OF(ins);
             unsigned b    = B_OF(ins);
-            long long imm = (long long)(int8_t)C_OF(ins);
+            /* Cast through uint8_t before int8_t: a direct unsigned ->
+             * int8_t cast is implementation-defined in C99 when the
+             * value exceeds INT8_MAX (128..255). uint8_t -> int8_t is
+             * still implementation-defined in the standard but every
+             * supported platform uses two's-complement, making it
+             * well-defined in practice; the explicit intermediate step
+             * documents the intent and satisfies strict-C99 linters. */
+            long long imm = (long long)(int8_t)(uint8_t)C_OF(ins);
             mino_val *lhs = regs[b];
             mino_val *r;
             if (MINO_IS_INT(lhs)) {
