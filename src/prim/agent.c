@@ -178,10 +178,17 @@ static int agent_check_state(mino_state *S, mino_val *agent)
 static mino_val *agent_build_call(mino_state *S, mino_val *cur,
                                      mino_val *extra)
 {
-    mino_val *head = mino_cons(S, cur, mino_nil(S));
-    mino_val *cell = head;
+    mino_val *head;
+    mino_val *cell;
+    gc_pin(extra);
+    head = mino_cons(S, cur, mino_nil(S));
+    gc_unpin(1);
+    cell = head;
     while (mino_is_cons(extra)) {
-        mino_val *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
+        mino_val *next;
+        gc_pin(extra);
+        next = mino_cons(S, extra->as.cons.car, mino_nil(S));
+        gc_unpin(1);
         cell->as.cons.cdr = next;
         cell = next;
         extra = extra->as.cons.cdr;
