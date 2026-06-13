@@ -196,6 +196,18 @@ mino_val *mino_map_dissoc1_owned(mino_state *S, mino_val *m,
                                     mino_val *key,
                                     uintptr_t owner);                  /* GC-owned */
 
+/* Persistent set conj/disj helpers (defined in prim/collections.c).
+ * Declared here so transient.c (collections/) can use them without
+ * pulling in prim/internal.h. Owner-tagged variants accept the editing
+ * transient's monotonic ID; pass 0 for a persistent (path-copy) op.
+ * The persistent set_conj1 uses owner = 0 semantics internally. */
+mino_val *set_conj1(mino_state *S, const mino_val *s,
+                    mino_val *elem);                                   /* GC-owned */
+mino_val *set_conj1_owned(mino_state *S, mino_val *s,
+                          mino_val *elem, uintptr_t owner);            /* GC-owned */
+mino_val *set_disj1_owned(mino_state *S, mino_val *s,
+                          const mino_val *elem, uintptr_t owner);      /* GC-owned */
+
 /* Unified persistent-map ops covering both flatmap (small) and HAMT
  * (large) representations. These are the entry points all map mutators
  * should use; direct hamt_assoc/hamt_get on m->as.map.root is only

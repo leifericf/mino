@@ -8,18 +8,24 @@
  * loop without the (new-vec-per-step) allocation storm that the
  * fully-persistent ops would cause.
  *
- * The current implementation wraps the standard persistent operations
- * -- each mutator calls the matching prim_* entry point and updates
- * the wrapper's inner pointer. This is correct and complete, but it
- * still materialises an intermediate persistent value per step, so
- * the performance win is modest. A follow-up can replace the
- * wrapper with in-place mutation on edit-owned trie nodes (Clojure's
- * real transient path). The C API stays identical.
+ * The owned-path mutators (owner_id != 0) call collection-layer helpers
+ * directly: vec_conj1_owned / vec_assoc1_owned / vec_pop_owned,
+ * mino_map_assoc1_owned / mino_map_dissoc1_owned, and
+ * set_conj1_owned / set_disj1_owned (all in collections/internal.h).
+ *
+ * The owner_id == 0 fallback paths (32-bit ID counter wrapped) use the
+ * persistent collection helpers: vec_conj1, vec_assoc1, vec_pop,
+ * mino_map_assoc1, mino_map_dissoc1, set_conj1_owned(..., 0).
+ * Passing owner = 0 to the _owned variants is safe: no node can have
+ * owner == 0, so all walks degrade to path-copy (persistent) behaviour.
+ *
+ * Error reporting uses set_eval_diag (available via runtime/internal.h),
+ * which longjmps to the active try frame when try_depth > 0, matching
+ * the semantics previously provided by prim_throw_classified.
  */
 
 #include "runtime/internal.h"
-#include "prim/internal.h"
-#include "collections/internal.h"  /* vec_conj1_owned / assoc1_owned / pop_owned */
+#include "collections/internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,18 +66,13 @@ static int transient_cas_u32(uint32_t volatile *p,
 
 static mino_val *transient_error(mino_state *S, const char *msg)
 {
-    return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    set_eval_diag(S, NULL, "eval/type", "MTY001", msg);
+    return NULL;
 }
 
 static void transient_set_current(mino_state *S, mino_val *t,
                                   mino_val *new_inner);
 
-/* Build a one-link cons list (car . cdr). Callers pre-root any
- * values that must survive across the allocation. */
-static mino_val *cons1(mino_state *S, mino_val *car, mino_val *cdr)
-{
-    return mino_cons(S, car, cdr);
-}
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
@@ -256,7 +257,6 @@ mino_val *mino_assoc_bang(mino_state *S, mino_val *t,
 {
     mino_val *inner;
     mino_val *result;
-    mino_val *args;
     if (!require_valid_transient(S, t, "assoc!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
@@ -266,8 +266,8 @@ mino_val *mino_assoc_bang(mino_state *S, mino_val *t,
     }
     /* Vector branch: owner-tagged in-place edit on tail / trie spine.
      * owner_id == 0 means the 32-bit owner space has wrapped; we fall
-     * through to the wrapper-style path so the owner==0 mismatch
-     * never spuriously claims a persistent node. */
+     * through to the persistent-path below so owner==0 never spuriously
+     * claims a persistent node. */
     if (mino_type_of(inner) == MINO_VECTOR
         && t->as.transient.owner_id != 0) {
         if (!mino_val_int_p(key)) {
@@ -290,16 +290,29 @@ mino_val *mino_assoc_bang(mino_state *S, mino_val *t,
      * assoc!'s with owner-matching nodes mutate slot pointers in place
      * (and key_order via vec_conj1_owned when the key is new).
      * owner_id == 0 wraparound falls through to the persistent path. */
-    if (t->as.transient.owner_id != 0) {
+    if (mino_type_of(inner) == MINO_MAP && t->as.transient.owner_id != 0) {
         result = mino_map_assoc1_owned(S, inner, key, val,
                                          t->as.transient.owner_id);
         if (result == NULL) return NULL;
         transient_set_current(S, t, result);
         return t;
     }
-    args = cons1(S, inner,
-                 cons1(S, key, cons1(S, val, mino_nil(S))));
-    result = prim_assoc(S, args, NULL);
+    /* owner_id == 0 fallback: use persistent helpers directly.
+     * Both VEC and MAP can reach here on 32-bit ID counter wraparound. */
+    if (mino_type_of(inner) == MINO_VECTOR) {
+        long long idx;
+        if (!mino_val_int_p(key)) {
+            return transient_error(S,
+                "assoc!: vector key must be an integer index");
+        }
+        idx = mino_val_int_get(key);
+        if (idx < 0 || (size_t)idx > inner->as.vec.len) {
+            return transient_error(S, "assoc!: index out of range");
+        }
+        result = vec_assoc1(S, inner, (size_t)idx, val);
+    } else {
+        result = mino_map_assoc1(S, inner, key, val);
+    }
     if (result == NULL) return NULL;
     transient_set_current(S, t, result);
     return t;
@@ -310,7 +323,6 @@ mino_val *mino_conj_bang(mino_state *S, mino_val *t,
 {
     mino_val *inner;
     mino_val *result;
-    mino_val *args;
     if (!require_valid_transient(S, t, "conj!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
@@ -325,7 +337,7 @@ mino_val *mino_conj_bang(mino_state *S, mino_val *t,
      * subsequent conj!'s within the same 32-slot chunk are a single
      * slot write + count bump with no allocation. owner_id == 0
      * means the 32-bit ID space wrapped; fall through to the
-     * wrapper path so owner==0 nodes are not spuriously claimed. */
+     * persistent path so owner==0 nodes are not spuriously claimed. */
     if (mino_type_of(inner) == MINO_VECTOR
         && t->as.transient.owner_id != 0) {
         result = vec_conj1_owned(S, inner, val, t->as.transient.owner_id);
@@ -333,11 +345,7 @@ mino_val *mino_conj_bang(mino_state *S, mino_val *t,
         transient_set_current(S, t, result);
         return t;
     }
-    /* Set branch: owner-tagged HAMT + key_order. conj! on a map
-     * transient with a 2-element pair value falls through to
-     * mino_assoc_bang via prim_conj's wrapper-style dispatch --
-     * routing here would force a fast/slow split for that uncommon
-     * shape. */
+    /* Set branch: owner-tagged HAMT + key_order. */
     if (mino_type_of(inner) == MINO_SET
         && t->as.transient.owner_id != 0) {
         result = set_conj1_owned(S, inner, val, t->as.transient.owner_id);
@@ -345,10 +353,38 @@ mino_val *mino_conj_bang(mino_state *S, mino_val *t,
         transient_set_current(S, t, result);
         return t;
     }
-    /* Map branch (conj! with a [k v] pair) and owner_id == 0 fallback:
-     * keep the wrapper-style dispatch. */
-    args = cons1(S, inner, cons1(S, val, mino_nil(S)));
-    result = prim_conj(S, args, NULL);
+    /* Map branch: extract [k v] pair or map-entry and call assoc.
+     * Uses the owned variant when owner_id != 0 for in-place HAMT edits;
+     * falls back to persistent mino_map_assoc1 when owner_id == 0. */
+    if (mino_type_of(inner) == MINO_MAP) {
+        mino_val *k;
+        mino_val *v;
+        if (mino_type_of(val) == MINO_VECTOR && val->as.vec.len == 2) {
+            k = vec_nth(val, 0);
+            v = vec_nth(val, 1);
+        } else if (mino_type_of(val) == MINO_MAP_ENTRY) {
+            k = val->as.map_entry.k;
+            v = val->as.map_entry.v;
+        } else {
+            return transient_error(S,
+                "conj!: map transient requires a 2-element vector or map entry");
+        }
+        result = (t->as.transient.owner_id != 0)
+            ? mino_map_assoc1_owned(S, inner, k, v,
+                                      t->as.transient.owner_id)
+            : mino_map_assoc1(S, inner, k, v);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
+    }
+    /* VEC or SET with owner_id == 0 (32-bit ID counter wrapped):
+     * use persistent helpers; owner==0 in _owned is safe (path-copy). */
+    if (mino_type_of(inner) == MINO_VECTOR) {
+        result = vec_conj1(S, inner, val);
+    } else {
+        /* SET */
+        result = set_conj1_owned(S, inner, val, 0);
+    }
     if (result == NULL) return NULL;
     transient_set_current(S, t, result);
     return t;
@@ -359,7 +395,6 @@ mino_val *mino_dissoc_bang(mino_state *S, mino_val *t,
 {
     mino_val *inner;
     mino_val *result;
-    mino_val *args;
     if (!require_valid_transient(S, t, "dissoc!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_MAP) {
@@ -372,8 +407,8 @@ mino_val *mino_dissoc_bang(mino_state *S, mino_val *t,
         transient_set_current(S, t, result);
         return t;
     }
-    args = cons1(S, inner, cons1(S, key, mino_nil(S)));
-    result = prim_dissoc(S, args, NULL);
+    /* owner_id == 0 fallback: use persistent helper directly. */
+    result = mino_map_dissoc1(S, inner, key);
     if (result == NULL) return NULL;
     transient_set_current(S, t, result);
     return t;
@@ -384,20 +419,15 @@ mino_val *mino_disj_bang(mino_state *S, mino_val *t,
 {
     mino_val *inner;
     mino_val *result;
-    mino_val *args;
     if (!require_valid_transient(S, t, "disj!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_SET) {
         return transient_error(S, "disj!: transient must wrap a set");
     }
-    if (t->as.transient.owner_id != 0) {
-        result = set_disj1_owned(S, inner, key, t->as.transient.owner_id);
-        if (result == NULL) return NULL;
-        transient_set_current(S, t, result);
-        return t;
-    }
-    args = cons1(S, inner, cons1(S, key, mino_nil(S)));
-    result = prim_disj(S, args, NULL);
+    /* Owned and owner_id==0 fallback both use set_disj1_owned.
+     * With owner==0, hamt_dissoc_owned degrades to path-copy (no node
+     * has owner==0), giving persistent semantics safely. */
+    result = set_disj1_owned(S, inner, key, t->as.transient.owner_id);
     if (result == NULL) return NULL;
     transient_set_current(S, t, result);
     return t;
@@ -407,7 +437,6 @@ mino_val *mino_pop_bang(mino_state *S, mino_val *t)
 {
     mino_val *inner;
     mino_val *result;
-    mino_val *args;
     if (!require_valid_transient(S, t, "pop!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_VECTOR) {
@@ -419,15 +448,12 @@ mino_val *mino_pop_bang(mino_state *S, mino_val *t)
     if (t->as.transient.owner_id != 0) {
         result = vec_pop_owned(S, inner, t->as.transient.owner_id);
         if (result == NULL) return NULL;
-        (void)args;
         transient_set_current(S, t, result);
         return t;
     }
-    /* owner_id == 0 means the 32-bit ID space wrapped; fall back to
-     * the persistent wrapper path so owner==0 nodes are not
-     * spuriously claimed. */
-    args = cons1(S, inner, mino_nil(S));
-    result = prim_pop(S, args, NULL);
+    /* owner_id == 0 means the 32-bit ID space wrapped; use the
+     * persistent vec_pop so owner==0 nodes are not spuriously claimed. */
+    result = vec_pop(S, inner);
     if (result == NULL) return NULL;
     transient_set_current(S, t, result);
     return t;
