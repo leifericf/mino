@@ -84,6 +84,23 @@ void mino_values_register_gc_handlers(mino_state *S);
  * Called from runtime/state.c::state_free_heap only. */
 void mino_val_finalize_teardown(mino_state *S, gc_hdr_t *h);
 
+/* ------------------------------------------------------------------------- */
+/* GC delegation stubs for downstream components                             */
+/*                                                                           */
+/* gc_handlers.c delegates per-type GC work to these helpers so values/     */
+/* stays decoupled from eval/bc/ and runtime/ struct layouts.  Signatures   */
+/* use only types visible from mino_internal.h.                              */
+/* ------------------------------------------------------------------------- */
+
+/* Walk the bc record under MINO_FN.bc. Implemented in eval/bc/. */
+void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr);
+
+/* Walk, sweep, and free the impl struct under MINO_FUTURE.
+ * Implemented in runtime/ (host_threads.c). */
+void mino_future_trace_impl(mino_state *S, const mino_val *fut);
+void mino_future_gc_sweep(mino_val *fut);
+void mino_future_teardown_free(mino_val *fut);
+
 #ifdef __cplusplus
 }
 #endif

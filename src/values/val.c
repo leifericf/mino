@@ -9,6 +9,16 @@
  * cohesion argument; no further split is warranted.
  */
 
+/* factoring-values-r2-001: known boundary deviation.
+ *
+ * val.c uses runtime/internal.h rather than the narrower per-component
+ * headers because mino_current_ctx() is an inline function defined
+ * inside runtime/internal.h (not in a standalone narrower header), and
+ * MINO_ASSERT_STATE_SAFE (runtime/coordination.h) calls mino_current_ctx,
+ * which requires the full mino_state struct definition.  Moving
+ * mino_current_ctx to a narrower header would require changing
+ * runtime/internal.h and runtime/thread_ctx.h — both outside src/values/.
+ * The mechanical refactor is deferred until those headers are narrowed. */
 #include "runtime/internal.h"
 #include <limits.h>
 
@@ -365,6 +375,51 @@ mino_val *mino_keyword(mino_state *S, const char *s)
     return mino_keyword_n(S, s, strlen(s));
 }
 
+/* Shared helper: build `<ns>/<name>` in a stack or heap buffer, intern
+ * it into `tbl` with the given type and ns_len boundary, then free the
+ * heap buffer if one was needed.  Emits set_eval_diag on overflow or
+ * OOM before returning NULL.  Called only when ns != NULL. */
+static mino_val *intern_ns_name(mino_state *S,
+                                 intern_table_t *tbl, mino_type type,
+                                 const char *ns, size_t ns_len,
+                                 const char *name, size_t name_len)
+{
+    size_t    total;
+    char     *buf;
+    mino_val *v;
+
+    /* Guard against size_t overflow before computing total. */
+    if (ns_len > SIZE_MAX - 1 - name_len) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "arg", "MIN002", "ns+name length overflow");
+        return NULL;
+    }
+    total = ns_len + 1 + name_len;
+
+    /* Fast path: fit in a stack buffer to avoid malloc. */
+    if (total < 256) {
+        char stack_buf[256];
+        buf = stack_buf;
+        memcpy(buf, ns, ns_len);
+        buf[ns_len] = '/';
+        memcpy(buf + ns_len + 1, name, name_len);
+        return intern_lookup_or_create_ns(S, tbl, type, buf, total, ns_len);
+    }
+
+    buf = (char *)malloc(total);
+    if (buf == NULL) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", "out of memory");
+        return NULL;
+    }
+    memcpy(buf, ns, ns_len);
+    buf[ns_len] = '/';
+    memcpy(buf + ns_len + 1, name, name_len);
+    v = intern_lookup_or_create_ns(S, tbl, type, buf, total, ns_len);
+    free(buf);
+    return v;
+}
+
 /* Explicit 2-arg constructors: the caller passes ns and name as two
  * strings; we record the boundary so name/namespace can recover them
  * exactly. (keyword "a/b" "c") interns ns_len=3 even though the flat
@@ -380,47 +435,8 @@ mino_val *mino_keyword_ns_n(mino_state *S,
         return intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
                                           name, name_len, 0);
     }
-    /* ns != NULL but possibly empty. Build data as `<ns>/<name>` and
-     * record ns_len; for ns_len == 0 the data starts with '/', which
-     * the namespace / name accessors detect to distinguish
-     * empty-string ns from nil ns. Matches JVM Clojure where
-     * (keyword "" "hi") prints as ":/hi" and (namespace ...) returns
-     * "" rather than nil. */
-    {
-        size_t total;
-        char  *buf;
-        mino_val *v;
-        /* Guard against size_t overflow before computing total. */
-        if (ns_len > SIZE_MAX - 1 - name_len) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "arg", "MIN002", "keyword ns+name length overflow");
-            return NULL;
-        }
-        total = ns_len + 1 + name_len;
-        if (total < 256) {
-            char stack_buf[256];
-            buf = stack_buf;
-            memcpy(buf, ns, ns_len);
-            buf[ns_len] = '/';
-            memcpy(buf + ns_len + 1, name, name_len);
-            v = intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
-                                           buf, total, ns_len);
-            return v;
-        }
-        buf = (char *)malloc(total);
-        if (buf == NULL) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "internal", "MIN001", "out of memory");
-            return NULL;
-        }
-        memcpy(buf, ns, ns_len);
-        buf[ns_len] = '/';
-        memcpy(buf + ns_len + 1, name, name_len);
-        v = intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
-                                       buf, total, ns_len);
-        free(buf);
-        return v;
-    }
+    return intern_ns_name(S, &S->kw_intern, MINO_KEYWORD,
+                          ns, ns_len, name, name_len);
 }
 
 mino_val *mino_symbol_ns_n(mino_state *S,
@@ -431,39 +447,8 @@ mino_val *mino_symbol_ns_n(mino_state *S,
         return intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
                                           name, name_len, 0);
     }
-    /* ns != NULL but possibly empty -- preserve via the leading-slash
-     * convention; see mino_keyword_ns_n for the encoding rationale. */
-    {
-        size_t total;
-        char  *buf;
-        mino_val *v;
-        /* Guard against size_t overflow before computing total. */
-        if (ns_len > SIZE_MAX - 1 - name_len) {
-            return NULL;
-        }
-        total = ns_len + 1 + name_len;
-        if (total < 256) {
-            char stack_buf[256];
-            buf = stack_buf;
-            memcpy(buf, ns, ns_len);
-            buf[ns_len] = '/';
-            memcpy(buf + ns_len + 1, name, name_len);
-            v = intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
-                                           buf, total, ns_len);
-            return v;
-        }
-        buf = (char *)malloc(total);
-        if (buf == NULL) {
-            return NULL;
-        }
-        memcpy(buf, ns, ns_len);
-        buf[ns_len] = '/';
-        memcpy(buf + ns_len + 1, name, name_len);
-        v = intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
-                                       buf, total, ns_len);
-        free(buf);
-        return v;
-    }
+    return intern_ns_name(S, &S->sym_intern, MINO_SYMBOL,
+                          ns, ns_len, name, name_len);
 }
 
 mino_val *mino_mk_var(mino_state *S, const char *ns, const char *name,

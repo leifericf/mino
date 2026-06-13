@@ -15,11 +15,9 @@
 
 #include "mino_internal.h"
 #include "values/layout.h"
-#include "values/internal.h"
+#include "values/internal.h"         /* forward decls: mino_bc_trace_fn_bc, mino_future_* */
 #include "gc/internal.h"
 #include "runtime/value_assert.h"   /* mino_type_of */
-#include "eval/bc/internal.h"        /* mino_bc_trace_fn_bc */
-#include "runtime/host_threads.h"    /* mino_future_trace_impl, mino_future_gc_sweep */
 #include "collections/internal.h"    /* mino_bigint_free (collections-adjacent bignum) */
 #include "async/chan.h"              /* mino_chan_trace, mino_chan_finalize */
 
