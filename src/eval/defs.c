@@ -787,10 +787,18 @@ static void var_attach_user_meta(mino_state *S, mino_val *var,
     }
     if (doc != NULL) {
         mino_val *dk = mino_keyword(S, "doc");
-        mino_val *dv = mino_string_n(S, doc, doc_len);
-        if (dk == NULL || dv == NULL) return;
+        mino_val *dv;
+        if (dk == NULL) return;
+        /* dk is a weak-interned keyword and dv is freshly allocated; pin
+         * both across the string and map allocations below so a collection
+         * triggered mid-assoc cannot reclaim them. */
+        gc_pin(dk);
+        dv = mino_string_n(S, doc, doc_len);
+        if (dv == NULL) { gc_unpin(1); return; }
+        gc_pin(dv);
         m = mino_map_assoc1(S, m != NULL ? m : mino_map(S, NULL, NULL, 0),
                             dk, dv);
+        gc_unpin(2);
     }
     if (m == NULL) return;
     gc_write_barrier(S, var, var->meta, m);
