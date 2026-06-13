@@ -52,6 +52,11 @@
 - GC: Guard bump-allocator size addition and dup_n_inner length against overflow
 - GC: Use saturating multiply for gc_sweep threshold to prevent overflow on large heaps
 - GC: Assert gc_depth>0 precondition at gc_classify_offender entry in debug builds
+- GC: Guard __has_feature asan suppression against MSVC in gc_scan_stack
+- GC: Invalidate range index instead of aborting on merge-buffer OOM in gc_range_merge_pending
+- GC: Use uint64_t for nanosecond timing accumulators in gc_state_t and gc_record_pause
+- GC: Fix gc_verify_remset_complete and gc_classify_offender to use GC_PHASE_IDLE so intern-table walk runs during diagnostic passes
+- GC: Guard gc_classify_offender with gc_depth increment/decrement to prevent mutator re-entry during classification
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
@@ -74,6 +79,8 @@
 - Values: Close GC window in host-array-from-coll generic seq path
 - Values: Close GC window in eq-force around lazy-force calls
 - Values: Guard size_t-to-int cast in record-field-index against overflow
+- Values: Hoist mixed declarations in intern_lookup_or_create_ns to satisfy C99
+- Values: Snapshot gc_depth before suppression guards and restore via saved value
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
 - Core: Add \delete to char-name-string and add \delete reader literal support
 - Core: Register uuid reader in *data-readers* alongside inst reader
@@ -126,6 +133,9 @@
 - BC: Fix signed-overflow UB in OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC hot paths; add safe non-GCC fallbacks for OP_ADD_IK, OP_SUB_IK, UNOP_INC, and UNOP_DEC
 - BC: Replace (long)pc PC arithmetic with (ptrdiff_t)pc at JMP, JMPIFNOT, and PUSHCATCH sites
 - BC: Guard mino_bc_ic_resolve_protocol against NULL or non-atom slot->atom before dereference
+- BC: Limit compile-time AST nesting to 1000 levels; deeply-nested user forms now raise a recoverable error instead of exhausting the C stack
+- BC: Root vector/hash-map/hash-set lowering head symbol with gc_pin across argument-list construction loop, closing three GC windows in the compiler
+- BC: Cast signed-immediate field through uint8_t before int8_t in the VM to avoid implementation-defined behaviour for values above INT8_MAX
 - API: Consolidate embedder config knobs into mino_set_option / mino_get_option (step/heap limits, thread limit, thread stack bytes, JIT mode, JIT hot threshold); setter returns 0/-1 like mino_gc_set_param and now rejects invalid JIT modes instead of ignoring them
 - API: Remove mino_set_limit, MINO_LIMIT_STEPS/MINO_LIMIT_HEAP, mino_set_thread_limit, mino_get_thread_limit, mino_state_set_jit_mode, mino_state_jit_mode, mino_state_set_jit_hot_threshold, mino_state_jit_hot_threshold, and mino_set_thread_stack_size (alpha surface, no shims)
 - Async: fix GC hazard when xform/ex_handler stored before alloc_val in chan_new (memory-async-001)
@@ -175,6 +185,12 @@
 - JIT: Restore slab to RX when jit_slab_make_rw fails to avoid stranded RW page
 - JIT: Include windows.h for FlushInstructionCache on Windows builds
 - JIT: Use accumulated env (ctx->jit_invoke_env) in deopt resume path
+- JIT: Guard size_t arithmetic in size pass and layout against overflow
+- JIT: Prevent slab page from remaining writable on layout failure
+- JIT: Add I-cache flush compile error for unknown compilers
+- JIT: Fix deopt resume to pass accumulated env instead of entry env
+- JIT: Root loop incv/decv values across GC-allocating calls in slow helpers
+- JIT: Change mino_jit_offset_to_pc return type from long to ptrdiff_t
 - Eval: Fix snprintf over-read in gensym (security-eval-001)
 - Eval: Fix write-barrier bypass in vec_destructure_args (memory-eval-003)
 - Eval: Pin GC arrays in qq_expand_vector across quasiquote_expand loop (memory-eval-002)
