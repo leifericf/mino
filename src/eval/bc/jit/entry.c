@@ -964,7 +964,12 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
                                         : (uint32_t)dt;
             }
             ctx->jit_invoke_depth--;
-            mino_val *r = jit_region_check_deopt(r1, S, bc, base, env,
+            /* Pass ctx->jit_invoke_env (not the entry `env`) to the deopt
+             * resume: OP_PUSH_ENV / OP_POP_ENV slow helpers mutate
+             * ctx->jit_invoke_env during JIT execution, so the accumulated
+             * env may differ from the entry snapshot. */
+            mino_val *r = jit_region_check_deopt(r1, S, bc, base,
+                                                  ctx->jit_invoke_env,
                                                   saved_try_depth,
                                                   saved_bc_catch_depth,
                                                   saved_dyn_stack);
@@ -979,8 +984,11 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
      * and resumes the interpreter from the recorded PC when the deopt
      * stencil fired. Resume runs inside the same jit_invoke_env /
      * jit_invoke_ctx publish window the native code held, so an OP_CALL
-     * inside the resumed body that re-enters JIT sees the same context. */
-    r = jit_region_check_deopt(r, S, bc, base, env,
+     * inside the resumed body that re-enters JIT sees the same context.
+     * Pass ctx->jit_invoke_env (not the entry `env`): OP_PUSH_ENV /
+     * OP_POP_ENV slow helpers mutate it during JIT execution, so the
+     * accumulated env may differ from the entry snapshot. */
+    r = jit_region_check_deopt(r, S, bc, base, ctx->jit_invoke_env,
                                saved_try_depth, saved_bc_catch_depth,
                                saved_dyn_stack);
     S->jit.jit_invoke_ctx = saved_ctx;
@@ -1015,7 +1023,7 @@ void mino_jit_invalidate(mino_state *S, mino_val *fn_val)
  * attribute a native instruction back to its bytecode position (and
  * thus, through source_map, to a source line / column). Returns -1
  * when the offset is out of range or the fn has no offset table. */
-long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
+ptrdiff_t mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
 {
     if (bc == NULL || bc->native_pc_offsets == NULL) return -1;
     if (bc->code_len == 0) return -1;
@@ -1026,12 +1034,12 @@ long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
     for (size_t i = 0; i + 1 < bc->code_len; i++) {
         if (native_off >= bc->native_pc_offsets[i]
             && native_off <  bc->native_pc_offsets[i + 1]) {
-            return (long)i;
+            return (ptrdiff_t)i;
         }
     }
     if (native_off >= bc->native_pc_offsets[bc->code_len - 1]
         && native_off <  bc->native_size) {
-        return (long)(bc->code_len - 1);
+        return (ptrdiff_t)(bc->code_len - 1);
     }
     return -1;
 }
@@ -1076,7 +1084,7 @@ void mino_jit_slab_release(mino_state *S, struct mino_jit_slab *slab)
     (void)S; (void)slab;
 }
 
-long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
+ptrdiff_t mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
 {
     (void)bc; (void)native_off; return -1;
 }

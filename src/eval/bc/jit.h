@@ -146,7 +146,7 @@ void mino_jit_slab_release(struct mino_state *S, struct mino_jit_slab *slab);
  * `native_off` in bc->native? Returns -1 when the offset is out of
  * range or the fn has no offset table. Cold path; intended for stack
  * trace formatting and debugger introspection. */
-long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off);
+ptrdiff_t mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off);
 
 /* Drop the runtime-visible JIT state for `fn` without unmapping the
  * underlying region. The next call falls through to the interpreter;
@@ -193,7 +193,8 @@ static inline void mino_jit_slab_release(struct mino_state *S,
                                           struct mino_jit_slab *slab) {
     (void)S; (void)slab;
 }
-static inline long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned off) {
+static inline ptrdiff_t mino_jit_offset_to_pc(const mino_bc_fn_t *bc,
+                                               unsigned off) {
     (void)bc; (void)off; return -1;
 }
 static inline void mino_jit_invalidate(struct mino_state *S, struct mino_val *fn) {
