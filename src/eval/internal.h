@@ -64,6 +64,13 @@ mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
  * Syntax-quote consults it so these names stay bare and special-form
  * recognition keeps working even after they gain clojure.core bindings. */
 int eval_is_special_form_name(const char *name, size_t len);
+/* special_registry.c: true when `name`/`len` is one of the eleven public
+ * macro-family forms (fn, let, loop, lazy-seq, binding, declare, defmacro,
+ * ns, when, and, or) -- the special forms that canonical Clojure exposes as
+ * clojure.core macros. Syntax-quote qualifies these to clojure.core/X (the
+ * true special forms if/do/def/quote/... stay bare), and the registry
+ * accepts the clojure.core/-qualified spelling for exactly this set. */
+int eval_is_public_form_name(const char *name, size_t len);
 /* True for the reader's meta-flagged record values (tagged-literal
  * fallback, preserved reader conditionals); they self-evaluate. */
 int mino_is_reader_record(mino_state *S, mino_val *form);

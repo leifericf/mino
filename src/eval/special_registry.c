@@ -342,6 +342,17 @@ static mino_val *cached_at(mino_state *S, size_t off)
     return *(mino_val **)((char *)S + off);
 }
 
+/* "clojure.core/" -- the only namespace whose qualified spelling the
+ * registry accepts for a special form. Canonical Clojure exposes the
+ * macro-family members (fn/let/loop/...) as clojure.core macros, so
+ * (clojure.core/let ...) and a syntax-quoted `let must dispatch the same
+ * handler as the bare form. Defined here so eval_try_special_form can
+ * strip it before the suffix match. */
+static const char k_core_prefix[] = "clojure.core/";
+#define K_CORE_PREFIX_LEN (sizeof(k_core_prefix) - 1)
+
+int eval_is_public_form_name(const char *name, size_t len);
+
 int eval_try_special_form(mino_state *S, mino_val *form,
                           mino_val *head, mino_val *args,
                           mino_env *env, int tail,
@@ -360,6 +371,25 @@ int eval_try_special_form(mino_state *S, mino_val *form,
                 && memcmp(head->as.s.data, e->name, e->name_len) == 0)) {
             *out = e->fn(S, form, args, env, tail);
             return 1;
+        }
+    }
+    /* Accept the clojure.core/-qualified spelling of a macro-family form
+     * (e.g. (clojure.core/let ...)), gated to exactly the eleven names
+     * canon exposes as clojure.core macros so the true special forms
+     * (clojure.core/if and friends) keep erroring as they do on the JVM. */
+    if (head->as.s.len > K_CORE_PREFIX_LEN
+        && memcmp(head->as.s.data, k_core_prefix, K_CORE_PREFIX_LEN) == 0) {
+        const char *suffix = head->as.s.data + K_CORE_PREFIX_LEN;
+        size_t      suffix_len = head->as.s.len - K_CORE_PREFIX_LEN;
+        if (eval_is_public_form_name(suffix, suffix_len)) {
+            for (i = 0; i < k_special_forms_count; i++) {
+                const special_form_entry *e = &k_special_forms[i];
+                if (e->name_len == suffix_len
+                    && memcmp(e->name, suffix, suffix_len) == 0) {
+                    *out = e->fn(S, form, args, env, tail);
+                    return 1;
+                }
+            }
         }
     }
     return 0;
@@ -450,6 +480,21 @@ static const public_form_doc k_public_form_docs[] = {
 
 static const size_t k_public_form_docs_count =
     sizeof(k_public_form_docs) / sizeof(k_public_form_docs[0]);
+
+int eval_is_public_form_name(const char *name, size_t len)
+{
+    size_t i;
+    if (name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < k_public_form_docs_count; i++) {
+        const char *n = k_public_form_docs[i].name;
+        if (strlen(n) == len && memcmp(n, name, len) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 /*
  * Register the public C special forms as clojure.core vars.

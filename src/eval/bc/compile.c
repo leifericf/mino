@@ -588,6 +588,26 @@ static int sym_is(const mino_val *v, const char *name)
     return strcmp(v->as.s.data, name) == 0;
 }
 
+/* The eleven macro-family forms that canon exposes as clojure.core macros.
+ * Kept in sync with k_public_form_docs in src/eval/special_registry.c.
+ * A clojure.core/-qualified head naming one of these (produced by
+ * syntax-quote, or written directly) dispatches the same compile handler
+ * as the bare form; the true special forms stay bare. */
+static int is_core_macro_form(const char *name)
+{
+    return strcmp(name, "fn") == 0
+        || strcmp(name, "let") == 0
+        || strcmp(name, "loop") == 0
+        || strcmp(name, "lazy-seq") == 0
+        || strcmp(name, "binding") == 0
+        || strcmp(name, "declare") == 0
+        || strcmp(name, "defmacro") == 0
+        || strcmp(name, "ns") == 0
+        || strcmp(name, "when") == 0
+        || strcmp(name, "and") == 0
+        || strcmp(name, "or") == 0;
+}
+
 /* Names of every special form mino's eval recognizes, plus the syntactic
  * sub-forms that only appear as heads inside their parent (catch,
  * finally) but would otherwise look like regular calls. Kept in sync
@@ -4327,6 +4347,14 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
         const char *name = head->as.s.data;
+        /* Accept the clojure.core/-qualified spelling of a macro-family
+         * form (e.g. (clojure.core/let ...)) by matching on the bare
+         * suffix, so BC-compiled code dispatches it like the tree-walker
+         * and JIT/interpreter parity holds for syntax-quoted expansions. */
+        if (strncmp(name, "clojure.core/", 13) == 0
+            && is_core_macro_form(name + 13)) {
+            name = name + 13;
+        }
         if (strcmp(name, "if") == 0)   return compile_if(c, form, dst, tail);
         if (strcmp(name, "do") == 0)   return compile_do(c, form, dst, tail);
         if (strcmp(name, "let") == 0
