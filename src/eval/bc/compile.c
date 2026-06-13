@@ -2339,7 +2339,7 @@ static mino_val *try_reduce_rewrite(compiler_t *c, mino_val *form)
 
     /* Build the rewritten form. */
     {
-        mino_val *bang_sym = mino_symbol(S, bang_name);
+        mino_val *bang_sym;
         mino_val *new_step;
         mino_val *new_body;
         mino_val *fn_sym;
@@ -2349,21 +2349,25 @@ static mino_val *try_reduce_rewrite(compiler_t *c, mino_val *form)
         mino_val *reduce_sym;
         mino_val *new_reduce;
         mino_val *persist_sym;
-        if (bang_sym == NULL) return NULL;
+        /* Pin params (a GC-managed vector) across all allocating calls
+         * that precede its use in the mino_cons that builds new_fn. */
+        gc_pin(params);
+        bang_sym = mino_symbol(S, bang_name);
+        if (bang_sym == NULL) { gc_unpin(1); return NULL; }
         gc_pin(bang_sym);
         new_step = mino_cons(S, bang_sym, step->as.cons.cdr);
         gc_unpin(1);
-        if (new_step == NULL) return NULL;
+        if (new_step == NULL) { gc_unpin(1); return NULL; }
         gc_pin(new_step);
         new_body = mino_cons(S, new_step, mino_nil(S));
         gc_unpin(1);
-        if (new_body == NULL) return NULL;
+        if (new_body == NULL) { gc_unpin(1); return NULL; }
         fn_sym = mino_symbol(S, "fn");
-        if (fn_sym == NULL) return NULL;
+        if (fn_sym == NULL) { gc_unpin(1); return NULL; }
         gc_pin(fn_sym);
         gc_pin(new_body);
         new_fn = mino_cons(S, fn_sym, mino_cons(S, params, new_body));
-        gc_unpin(2);
+        gc_unpin(3); /* fn_sym, new_body, params */
         if (new_fn == NULL) return NULL;
         transient_sym = mino_symbol(S, "transient");
         if (transient_sym == NULL) return NULL;
