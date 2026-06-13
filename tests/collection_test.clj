@@ -543,9 +543,13 @@
 
 (deftest val-compare-cross-type-is-total
   ;; Deviation from JVM Clojure documented in conformance-collections-r2-001:
-  ;; mino's compare is a total order across all types; incompatible-type
-  ;; pairs order by type-enum rather than throwing.  Verify that a
-  ;; sorted-set accepts heterogeneous keys without error (user contract
-  ;; -- JVM would throw ClassCastException).
-  (let [s (sorted-set-by compare 1 "a" :k)]
-    (is (= 3 (count s)))))
+  ;; mino's DEFAULT sorted-collection comparator (val_compare) is a total
+  ;; order across all types; incompatible-type pairs order by type-enum
+  ;; rather than throwing.  Verify a default sorted-set accepts heterogeneous
+  ;; keys without error (JVM would throw ClassCastException).
+  (let [s (sorted-set 1 "a" :k)]
+    (is (= 3 (count s))))
+  ;; The user-facing `compare` primitive is JVM-conformant and DOES throw on
+  ;; incompatible types -- the total-order deviation is specific to the
+  ;; implicit default comparator, not to `compare`.
+  (is (thrown? (sorted-set-by compare 1 "a" :k))))
