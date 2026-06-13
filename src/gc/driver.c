@@ -158,6 +158,7 @@ static int gc_should_start_major(const mino_state *S)
 static void gc_major_slice(mino_state *S)
 {
     long long start_ns;
+    long long raw_ns;
     size_t    elapsed_ns;
     if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
@@ -169,7 +170,8 @@ static void gc_major_slice(mino_state *S)
         gc_major_remark(S);
         gc_major_sweep_phase(S);
     }
-    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    raw_ns     = mino_monotonic_ns() - start_ns;
+    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
     S->gc.total_ns += elapsed_ns;
     if (elapsed_ns > S->gc.max_ns) {
         S->gc.max_ns = elapsed_ns;
@@ -185,6 +187,7 @@ static void gc_major_slice(mino_state *S)
 void gc_force_finish_major(mino_state *S)
 {
     long long start_ns;
+    long long raw_ns;
     size_t    elapsed_ns;
     if (S->gc.phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
@@ -193,7 +196,8 @@ void gc_force_finish_major(mino_state *S)
     gc_major_step(S, (size_t)-1);
     gc_major_remark(S);
     gc_major_sweep_phase(S);
-    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    raw_ns     = mino_monotonic_ns() - start_ns;
+    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
     S->gc.total_ns += elapsed_ns;
     if (elapsed_ns > S->gc.max_ns) {
         S->gc.max_ns = elapsed_ns;
@@ -787,6 +791,7 @@ void gc_drain_mark_stack(mino_state *S)
 void gc_major_collect(mino_state *S)
 {
     long long start_ns;
+    long long raw_ns;
     size_t    elapsed_ns;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc.phase != GC_PHASE_IDLE) {
         return;
@@ -803,7 +808,8 @@ void gc_major_collect(mino_state *S)
     gc_major_remark(S);
     gc_major_sweep_phase(S);
     gc_release_stw(S);
-    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    raw_ns     = mino_monotonic_ns() - start_ns;
+    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
     S->gc.total_ns += elapsed_ns;
     if (elapsed_ns > S->gc.max_ns) {
         S->gc.max_ns = elapsed_ns;
