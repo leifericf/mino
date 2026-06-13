@@ -212,7 +212,9 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
     uint32_t h;
     size_t mask, idx;
     mino_val *v;
+    mino_val *e;
     size_t ns_len;
+    size_t first_tombstone;
 
     /* Caller-must-hold-state_lock contract: the intern table is shared
      * across host worker threads, but its open-addressing hash, the
@@ -270,14 +272,14 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
      * Tombstone slots (entries[bucket] == NULL after a sweep cleared
      * the underlying header) are skipped during lookup but remembered
      * so the new insert below can reuse them instead of appending. */
-    size_t first_tombstone = INTERN_HT_EMPTY;
+    first_tombstone = INTERN_HT_EMPTY;
     while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
         if (tbl->ht_buckets[idx] == INTERN_HT_TOMBSTONE) {
             if (first_tombstone == INTERN_HT_EMPTY) first_tombstone = idx;
             idx = (idx + 1) & mask;
             continue;
         }
-        mino_val *e = tbl->entries[tbl->ht_buckets[idx]];
+        e = tbl->entries[tbl->ht_buckets[idx]];
         if (e != NULL
             && e->as.s.len == len
             && e->as.s.ns_len == ns_len
