@@ -467,6 +467,7 @@ static mino_val *read_cond_body(mino_state *S, const char **p,
         if (**p == '\0') {
             set_reader_diag(S, MRE005, "unterminated reader conditional",
                             S->reader.reader_line, S->reader.reader_col);
+            if (result != NULL) gc_unpin(1);
             return NULL;
         }
         if (**p == ')') {
@@ -480,12 +481,14 @@ static mino_val *read_cond_body(mino_state *S, const char **p,
                 set_reader_diag(S, MRE005, "unterminated reader conditional",
                             S->reader.reader_line, S->reader.reader_col);
             }
+            if (result != NULL) gc_unpin(1);
             return NULL;
         }
         if (mino_type_of(key) != MINO_KEYWORD) {
             set_reader_diag(S, MRE006,
                             "reader conditional key must be a keyword",
                             S->reader.reader_line, S->reader.reader_col);
+            if (result != NULL) gc_unpin(1);
             return NULL;
         }
         skip_ws(S, p);
@@ -495,6 +498,7 @@ static mino_val *read_cond_body(mino_state *S, const char **p,
             set_reader_diag(S, MRE006,
                 "reader conditional requires an even number of forms",
                 S->reader.reader_line, S->reader.reader_col);
+            if (result != NULL) gc_unpin(1);
             return NULL;
         }
         val = read_form(S, p);
@@ -504,6 +508,7 @@ static mino_val *read_cond_body(mino_state *S, const char **p,
                             "reader conditional: missing value for key",
                             S->reader.reader_line, S->reader.reader_col);
             }
+            if (result != NULL) gc_unpin(1);
             return NULL;
         }
         if (!matched) {
@@ -1877,8 +1882,10 @@ static mino_val *read_namespaced_map(mino_state *S, const char **p)
                 size_t       nc  = cap == 0 ? 8 : cap * 2;
                 mino_val **nk  = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, nc * sizeof(*nk));
+                gc_pin((mino_val *)nk);
                 mino_val **nv  = (mino_val **)gc_alloc_typed(S,
                     GC_T_VALARR, nc * sizeof(*nv));
+                gc_unpin(1);
                 if (rk != NULL && len > 0) {
                     for (i = 0; i < len; i++) {
                         gc_valarr_set(S, nk, i, rk[i]);
@@ -1893,23 +1900,26 @@ static mino_val *read_namespaced_map(mino_state *S, const char **p)
         }
         ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             len > 0 ? len * sizeof(*ks) : sizeof(*ks));
+        gc_pin((mino_val *)ks);
         vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
             len > 0 ? len * sizeof(*vs) : sizeof(*vs));
+        gc_pin((mino_val *)vs);
         for (i = 0; i < len; i++) {
             mino_val *qk = namespaced_map_qualify_key(S, rk[i], prefix,
                                                        prefix_len);
-            if (qk == NULL) return NULL;
+            if (qk == NULL) { gc_unpin(2); return NULL; }
             for (j = 0; j < i; j++) {
                 if (mino_eq(ks[j], qk)) {
                     set_reader_diag(S, MRE008,
                         "namespaced map literal contains duplicate key",
                         S->reader.reader_line, S->reader.reader_col);
-                    return NULL;
+                    gc_unpin(2); return NULL;
                 }
             }
             gc_valarr_set(S, ks, i, qk);
             gc_valarr_set(S, vs, i, rv[i]);
         }
+        gc_unpin(2);
         out = mino_map(S, ks, vs, len);
     }
     return out;

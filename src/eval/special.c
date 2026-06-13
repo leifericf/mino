@@ -402,22 +402,25 @@ static mino_val *eval_map_literal(mino_state *S, mino_val *form,
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
     gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
-    gc_unpin(1);
+    gc_pin((mino_val *)vs);
     for (i = 0; i < n; i++) {
         mino_val *form_key = vec_nth(form->as.map.key_order, i);
         mino_val *form_val = map_get_val(form, form_key);
         mino_val *k = eval_value(S, form_key, env);
         mino_val *v;
         if (k == NULL) {
+            gc_unpin(2);
             return NULL;
         }
         v = eval_value(S, form_val, env);
         if (v == NULL) {
+            gc_unpin(2);
             return NULL;
         }
         gc_valarr_set(S, ks, i, k);
         gc_valarr_set(S, vs, i, v);
     }
+    gc_unpin(2);
     {
         mino_val *result = mino_map(S, ks, vs, n);
         if (form->meta != NULL) {

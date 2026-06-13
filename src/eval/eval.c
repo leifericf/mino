@@ -267,6 +267,12 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
         mino_val  *out  = mino_nil(S);
         mino_val  *tail = NULL;
         size_t       count = 0;
+        int          out_slot;
+        /* Pin out so every mino_cons, lazy_force, quasiquote_expand, and
+         * the final gc_alloc_typed below cannot collect the list head.
+         * out starts as nil; update the pin slot when out is first set. */
+        gc_pin(out);
+        out_slot = (int)mino_current_ctx(S)->gc_save_len - 1;
         for (i = 0; i < nn; i++) {
             mino_val *elem = vec_nth(form, i);
             if (mino_is_cons(elem)
@@ -276,17 +282,19 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                 if (!mino_is_cons(arg)) {
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax",
                         "MSY001", "unquote-splicing requires one argument");
-                    return NULL;
+                    gc_unpin(1); return NULL;
                 }
                 spliced = eval_value(S, arg->as.cons.car, env);
-                if (spliced == NULL) { return NULL; }
+                if (spliced == NULL) { gc_unpin(1); return NULL; }
                 if (mino_type_of(spliced) == MINO_VECTOR) {
                     size_t j;
                     for (j = 0; j < spliced->as.vec.len; j++) {
                         mino_val *cell = mino_cons(S,
                             vec_nth(spliced, j), mino_nil(S));
-                        if (tail == NULL) { out = cell; }
-                        else { mino_cons_cdr_set(S, tail, cell); }
+                        if (tail == NULL) {
+                            out = cell;
+                            mino_current_ctx(S)->gc_save[out_slot] = out;
+                        } else { mino_cons_cdr_set(S, tail, cell); }
                         tail = cell;
                         count++;
                     }
@@ -294,15 +302,17 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                     mino_val *sp = spliced;
                     while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                         sp = lazy_force(S, sp);
-                        if (sp == NULL) return NULL;
+                        if (sp == NULL) { gc_unpin(1); return NULL; }
                     }
                     while (sp != NULL && mino_type_of(sp) != MINO_NIL
                            && mino_type_of(sp) != MINO_EMPTY_LIST) {
                         if (mino_type_of(sp) == MINO_CONS) {
                             mino_val *cell = mino_cons(S,
                                 sp->as.cons.car, mino_nil(S));
-                            if (tail == NULL) { out = cell; }
-                            else { mino_cons_cdr_set(S, tail, cell); }
+                            if (tail == NULL) {
+                                out = cell;
+                                mino_current_ctx(S)->gc_save[out_slot] = out;
+                            } else { mino_cons_cdr_set(S, tail, cell); }
                             tail = cell;
                             count++;
                             sp = sp->as.cons.cdr;
@@ -313,8 +323,10 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                                  k < ch->as.chunk.len; k++) {
                                 mino_val *cell = mino_cons(S,
                                     ch->as.chunk.vals[k], mino_nil(S));
-                                if (tail == NULL) { out = cell; }
-                                else { mino_cons_cdr_set(S, tail, cell); }
+                                if (tail == NULL) {
+                                    out = cell;
+                                    mino_current_ctx(S)->gc_save[out_slot] = out;
+                                } else { mino_cons_cdr_set(S, tail, cell); }
                                 tail = cell;
                                 count++;
                             }
@@ -324,17 +336,19 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                         }
                         while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                             sp = lazy_force(S, sp);
-                            if (sp == NULL) return NULL;
+                            if (sp == NULL) { gc_unpin(1); return NULL; }
                         }
                     }
                 }
             } else {
                 mino_val *expanded = quasiquote_expand(S, elem, env);
                 mino_val *cell;
-                if (expanded == NULL) { return NULL; }
+                if (expanded == NULL) { gc_unpin(1); return NULL; }
                 cell = mino_cons(S, expanded, mino_nil(S));
-                if (tail == NULL) { out = cell; }
-                else { mino_cons_cdr_set(S, tail, cell); }
+                if (tail == NULL) {
+                    out = cell;
+                    mino_current_ctx(S)->gc_save[out_slot] = out;
+                } else { mino_cons_cdr_set(S, tail, cell); }
                 tail = cell;
                 count++;
             }
@@ -344,6 +358,7 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                 GC_T_VALARR, count * sizeof(*tmp));
             mino_val  *p   = out;
             size_t       idx = 0;
+            gc_unpin(1);
             while (mino_is_cons(p)) {
                 tmp[idx++] = p->as.cons.car;
                 p = p->as.cons.cdr;
