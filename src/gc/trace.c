@@ -32,6 +32,7 @@
  */
 
 #include "runtime/internal.h"
+#include <inttypes.h>
 
 /* ---------------------------------------------------------------- */
 /* Ring buffer: init / free / record / dump                         */
@@ -144,12 +145,12 @@ void gc_evt_dump_around(mino_state *S, const void *p1, const void *p2,
         if (e->seq != i) continue; /* overwritten or never committed */
         if (!gc_evt_mentions(e, p1, p2, p3)) continue;
         fprintf(stderr,
-                "  #%llu c=%u ph=%u %-3s a=%p b=%p c=%p aux=0x%lx x=%u\n",
+                "  #%llu c=%u ph=%u %-3s a=%p b=%p c=%p aux=0x%" PRIxPTR " x=%u\n",
                 (unsigned long long)e->seq,
                 (unsigned)e->cycle, (unsigned)e->phase,
                 gc_evt_kind_name(e->kind),
                 e->a, e->b, e->c,
-                (unsigned long)e->aux, (unsigned)e->extra);
+                (uintptr_t)e->aux, (unsigned)e->extra);
         dumped++;
     }
     fprintf(stderr, "[gc-evt] %zu events match filter\n", dumped);
