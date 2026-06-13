@@ -10,6 +10,7 @@
  */
 
 #include "runtime/internal.h"
+#include <limits.h>
 
 /* ------------------------------------------------------------------------- */
 /* Singletons                                                                */
@@ -590,21 +591,23 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
         v->as.host_array.element_kind = (unsigned char)kind;
         return v;
     }
-    /* Generic seq path: walk the seq into a temp dynamic buffer. */
+    /* Generic seq path: walk the seq into a temp dynamic buffer.
+     * vals[] is malloc-owned and not a GC root; suppress collection
+     * across the entire loop and the final alloc_val so the GC cannot
+     * sweep elements that are stored only in vals[]. */
     {
         size_t cap = 0;
         mino_val *s = coll;
+        mino_current_ctx(S)->gc_depth++;
         while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
         while (mino_is_cons(s) || (s != NULL && mino_type_of(s) == MINO_CHUNKED_CONS)) {
             mino_val *head;
             if (mino_is_cons(s)) {
                 head = s->as.cons.car;
                 s    = s->as.cons.cdr;
-                gc_pin(head);
             } else {
                 head = s->as.chunked_cons.chunk
                           ->as.chunk.vals[s->as.chunked_cons.off];
-                gc_pin(head);
                 s    = mino_chunked_cons_advance(S, s);
             }
             while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
@@ -614,18 +617,18 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                 if (cap == 0) {
                     ncap = 8;
                 } else {
-                    if (cap > SIZE_MAX / 2) { gc_unpin(1); free(vals); return NULL; }
+                    if (cap > SIZE_MAX / 2) { mino_current_ctx(S)->gc_depth--; free(vals); return NULL; }
                     ncap = cap * 2;
                 }
                 nvals = (mino_val **)realloc(vals, ncap * sizeof(*nvals));
-                if (nvals == NULL) { gc_unpin(1); free(vals); return NULL; }
+                if (nvals == NULL) { mino_current_ctx(S)->gc_depth--; free(vals); return NULL; }
                 vals = nvals;
                 cap  = ncap;
             }
             vals[len++] = head;
-            gc_unpin(1);
         }
         v = alloc_val(S, MINO_HOST_ARRAY);
+        mino_current_ctx(S)->gc_depth--;
         if (v == NULL) { free(vals); return NULL; }
         v->as.host_array.vals = vals;
         v->as.host_array.len  = len;
@@ -797,7 +800,10 @@ int record_field_index(const mino_val *r, const mino_val *key)
     n = fields->as.vec.len;
     for (i = 0; i < n; i++) {
         mino_val *fk = vec_nth(fields, i);
-        if (fk == key) return (int)i;
+        if (fk == key) {
+            if (i > (size_t)INT_MAX) return -1;
+            return (int)i;
+        }
     }
     for (i = 0; i < n; i++) {
         mino_val *fk = vec_nth(fields, i);
@@ -805,6 +811,7 @@ int record_field_index(const mino_val *r, const mino_val *key)
         if (mino_type_of(fk) == mino_type_of(key)
             && fk->as.s.len == key->as.s.len
             && memcmp(fk->as.s.data, key->as.s.data, key->as.s.len) == 0) {
+            if (i > (size_t)INT_MAX) return -1;
             return (int)i;
         }
     }
@@ -1077,6 +1084,10 @@ static int compare_numeric(const mino_val *a, const mino_val *b)
         else if (mino_type_of(b) == MINO_BIGINT)     db = mino_bigint_to_double(b);
         else if (mino_type_of(b) == MINO_RATIO)      db = mino_ratio_to_double(b);
         else                                          db = mino_bigdec_to_double(b);
+        if (isnan(da) || isnan(db)) {
+            if (isnan(da) && isnan(db)) return 0;
+            return isnan(da) ? 1 : -1;
+        }
         return da < db ? -1 : da > db ? 1 : 0;
     }
 }
@@ -1131,10 +1142,12 @@ int mino_compare(mino_state *S, const mino_val *a, const mino_val *b)
         int cb = mino_val_char_get(b);
         return ca < cb ? -1 : ca > cb ? 1 : 0;
     }
-    /* String compare. */
+    /* String compare. Use memcmp to handle embedded NUL bytes correctly. */
     if (ta == MINO_STRING && tb == MINO_STRING) {
-        int c = strcmp(a->as.s.data, b->as.s.data);
-        return c < 0 ? -1 : c > 0 ? 1 : 0;
+        size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
+        int c = memcmp(a->as.s.data, b->as.s.data, min_len);
+        if (c != 0) return c < 0 ? -1 : 1;
+        return a->as.s.len < b->as.s.len ? -1 : a->as.s.len > b->as.s.len ? 1 : 0;
     }
     /* Keyword / symbol compare (same family only). */
     if (ta == tb && (ta == MINO_KEYWORD || ta == MINO_SYMBOL)) {
@@ -1915,14 +1928,20 @@ static int eq_step_force(mino_state *S, const mino_val *a,
      * still semantically an empty seq; collapsing it to nil here would
      * make `(= [] (lazy-seq nil))` false, contradicting canon. */
     if (a != NULL && mino_type_of(a) == MINO_LAZY) {
-        mino_val *forced = lazy_force(S, (mino_val *)a);
+        mino_val *forced;
+        mino_current_ctx(S)->gc_depth++;
+        forced = lazy_force(S, (mino_val *)a);
+        mino_current_ctx(S)->gc_depth--;
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             a = forced;
         }
     }
     if (b != NULL && mino_type_of(b) == MINO_LAZY) {
-        mino_val *forced = lazy_force(S, (mino_val *)b);
+        mino_val *forced;
+        mino_current_ctx(S)->gc_depth++;
+        forced = lazy_force(S, (mino_val *)b);
+        mino_current_ctx(S)->gc_depth--;
         if (forced != NULL && mino_type_of(forced) != MINO_NIL
             && mino_type_of(forced) != MINO_EMPTY_LIST) {
             b = forced;
