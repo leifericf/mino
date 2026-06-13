@@ -9,6 +9,8 @@
 #if !defined(_MSC_VER)
 #  include <dirent.h>
 #  include <sys/stat.h>
+#else
+#  include "win_dirent.h"
 #endif
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN

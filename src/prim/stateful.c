@@ -6,6 +6,7 @@
  */
 
 #include "prim/internal.h"
+#include "atomic_ptr.h"
 #include "runtime/host_threads.h"
 
 /* mino_tx_ref_deref is declared in mino.h; pulled in via prim/internal.h.
@@ -77,7 +78,7 @@ static int atom_set(mino_state *S, mino_val *atom,
 static mino_val *atom_load(mino_state *S, mino_val *atom)
 {
     if (S->threading.multi_threaded) {
-        return __atomic_load_n(&atom->as.atom.val, __ATOMIC_ACQUIRE);
+        return mino_atomic_load_acquire_ptr(&atom->as.atom.val);
     }
     return atom->as.atom.val;
 }
@@ -94,11 +95,8 @@ static int atom_cas_ptr(mino_state *S, mino_val *atom,
                         mino_val *expected, mino_val *new_val)
 {
     if (S->threading.multi_threaded) {
-        return __atomic_compare_exchange_n(&atom->as.atom.val,
-                                           &expected, new_val,
-                                           0,  /* not weak */
-                                           __ATOMIC_RELEASE,
-                                           __ATOMIC_RELAXED) ? 1 : 0;
+        return mino_atomic_cas_acqrel_ptr(&atom->as.atom.val,
+                                          expected, new_val);
     }
     if (atom->as.atom.val != expected) return 0;
     atom->as.atom.val = new_val;
@@ -428,10 +426,7 @@ static int watchable_slot_cas(mino_state *S, mino_val *container,
                               mino_val *new_val)
 {
     if (S->threading.multi_threaded) {
-        mino_val *witness = expected;
-        if (__atomic_compare_exchange_n(slot, &witness, new_val, 0,
-                                        __ATOMIC_RELEASE,
-                                        __ATOMIC_RELAXED)) {
+        if (mino_atomic_cas_acqrel_ptr(slot, expected, new_val)) {
             gc_write_barrier(S, container, expected, new_val);
             return 1;
         }
@@ -448,7 +443,7 @@ static int watchable_slot_cas(mino_state *S, mino_val *container,
 static mino_val *watchable_slot_load(mino_state *S, mino_val **slot)
 {
     if (S->threading.multi_threaded) {
-        return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
+        return mino_atomic_load_acquire_ptr(slot);
     }
     return *slot;
 }

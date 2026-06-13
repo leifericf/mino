@@ -3,6 +3,7 @@
  */
 
 #include "prim/internal.h"
+#include "atomic_ptr.h"
 
 /* Forward declaration needed because mino_with_meta calls prim_with_meta
  * which is defined later in this file. */
@@ -300,7 +301,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
      * CAS so a losing retry does not pollute the remset with an edge
      * that was never published. */
     for (;;) {
-        mino_val *snap = __atomic_load_n(&obj->meta, __ATOMIC_ACQUIRE);
+        mino_val *snap = mino_atomic_load_acquire_ptr(&obj->meta);
         mino_val *old_meta = (snap != NULL) ? snap : mino_nil(S);
         mino_val *call_args = mino_cons(S, old_meta, extra);
         mino_val *new_meta = mino_call(S, f, call_args, env);
@@ -312,9 +313,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
                 "alter-meta!: f must return a map or nil");
         }
         next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
-        if (__atomic_compare_exchange_n(&obj->meta, &snap, next, 0,
-                                        __ATOMIC_RELEASE,
-                                        __ATOMIC_RELAXED)) {
+        if (mino_atomic_cas_acqrel_ptr(&obj->meta, snap, next)) {
             /* Barrier only on a successful publish: state_lock is held
              * across the CAS-and-barrier pair so no other thread can
              * advance the GC phase between them, and the major-mark

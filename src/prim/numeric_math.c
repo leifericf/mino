@@ -249,7 +249,7 @@ mino_val *prim_math_next_up(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-up requires one argument");
     if (!as_double(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001", "math-next-up expects a number");
-    return mino_float(S, nextafter(x, +1.0/0.0));
+    return mino_float(S, nextafter(x, INFINITY));
 }
 mino_val *prim_math_next_down(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -259,7 +259,7 @@ mino_val *prim_math_next_down(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-down requires one argument");
     if (!as_double(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001", "math-next-down expects a number");
-    return mino_float(S, nextafter(x, -1.0/0.0));
+    return mino_float(S, nextafter(x, -INFINITY));
 }
 mino_val *prim_math_ieee_remainder(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -294,14 +294,14 @@ mino_val *prim_math_ulp(mino_state *S, mino_val *args, mino_env *env)
     if (!as_double(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001", "math-ulp expects a number");
     if (isnan(x)) return mino_float(S, x);
-    if (isinf(x)) return mino_float(S, 1.0 / 0.0);
+    if (isinf(x)) return mino_float(S, INFINITY);
     ax = fabs(x);
     if (ax == DBL_MAX) {
         /* nextafter would step to +Inf; the ulp of MAX_VALUE is the
          * gap below it instead (2^971). */
         return mino_float(S, ax - nextafter(ax, 0.0));
     }
-    return mino_float(S, nextafter(ax, 1.0 / 0.0) - ax);
+    return mino_float(S, nextafter(ax, INFINITY) - ax);
 }
 mino_val *prim_math_scalb(mino_state *S, mino_val *args, mino_env *env)
 {

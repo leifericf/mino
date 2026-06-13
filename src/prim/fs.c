@@ -32,6 +32,8 @@
 #  include <dirent.h>
 #  include <sys/stat.h>
 #  include <unistd.h>
+#else
+#  include "win_dirent.h"
 #endif
 #include <errno.h>
 #include <string.h>
