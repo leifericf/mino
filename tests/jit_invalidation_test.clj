@@ -12,6 +12,21 @@
 
 (def +warm+ 200)
 
+;; Cancellation-latency budget for the JIT loop-cancel tests below.
+;; Cancelling a spinning JIT'd loop must land far below the multi-second
+;; cost of letting it run to completion -- that bounded wake-up is the
+;; property under test. On a native host the wake-up is sub-100ms, so a
+;; tight 500ms budget catches a regression with margin. The per-host JIT
+;; canary, however, runs this suite under a cross-compiled or emulated
+;; binary (Rosetta x86_64-on-arm64, a zig-gnu Windows build) on a shared
+;; runner, where thread scheduling and the cancel handshake run several
+;; times slower; the cancel still lands well under a second, but not
+;; under 500ms. That job exports MINO_SLOW_HOST, which widens the budget
+;; to keep proving boundedness without flapping. Native CI leaves the
+;; flag unset and keeps the strict bound.
+(def ^:private cancel-budget-ms
+  (if (getenv "MINO_SLOW_HOST") 4000 500))
+
 ;; ---- def rebind invalidation -----------------------------------------
 
 (defn caller-of-target [x] (target x))
@@ -139,7 +154,7 @@
     (is (future-cancelled? f))
     (is (future-done? f))
     ;; Full run would take seconds; cancel must land well below that.
-    (is (< (- (time-ms) start) 500))))
+    (is (< (- (time-ms) start) cancel-budget-ms))))
 
 (deftest jit-loop-cancel-lt
   (dotimes [_ +warm+] (long-lt-spin 100))
@@ -150,7 +165,7 @@
     (thread-sleep 100)
     (is (future-cancelled? f))
     (is (future-done? f))
-    (is (< (- (time-ms) start) 500))))
+    (is (< (- (time-ms) start) cancel-budget-ms))))
 
 ;; The bit-xor accumulator keeps this shape out of the fused-loop
 ;; matcher, so the body compiles to generic ops with a direct-emit
@@ -174,7 +189,7 @@
     (thread-sleep 100)
     (is (future-cancelled? f))
     (is (future-done? f))
-    (is (< (- (time-ms) start) 500))))
+    (is (< (- (time-ms) start) cancel-budget-ms))))
 
 ;; ---- stats dump survives state teardown -------------------------------
 

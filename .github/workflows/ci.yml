@@ -453,6 +453,14 @@ jobs:
         shell: bash
     env:
       CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
+      # This canary runs the suite under a cross-compiled or emulated
+      # binary (Rosetta x86_64-on-arm64 on macos-14, a zig-gnu build on
+      # windows) on shared runners, where the JIT loop-cancel handshake
+      # runs several times slower than native. The flag widens only the
+      # cancellation-latency budget in jit_invalidation_test; the strict
+      # bound stays enforced by the blocking native matrix, which runs
+      # the same suite without it.
+      MINO_SLOW_HOST: "1"
     steps:
       - uses: actions/checkout@v4
 
