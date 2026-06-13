@@ -830,15 +830,29 @@
   "Run the full suite under `bin`, exporting MINO_TEST_BIN so
    subprocess-spawning tests target the binary under test rather than
    ./mino. POSIX-only env prefix; on Windows the suite runs without
-   the export and those tests self-skip."
+   the export and those tests self-skip.
+
+   Uses `sh` (not `sh!`) and prints the binary's full combined output
+   before checking the exit code, so a failing test's FAIL / ERROR
+   lines and the run summary are visible in the log. `sh!` truncates
+   captured output to 512 chars in its throw message, which hid which
+   test actually failed."
   [bin extra-args]
-  (if windows?
-    (println (apply sh! bin (concat extra-args ["tests/run.clj"])))
-    (println (sh! "sh" "-c"
+  (let [res (if windows?
+              (apply sh bin (concat extra-args ["tests/run.clj"]))
+              (sh "sh" "-c"
                   (str "MINO_TEST_BIN=" bin " " bin " "
                        (str/join " " extra-args)
                        (if (seq extra-args) " " "")
-                       "tests/run.clj")))))
+                       "tests/run.clj 2>&1")))]
+    (print (:out res))
+    (flush)
+    (when (not= 0 (:exit res))
+      (throw (ex-info (str "run-suite-with-test-bin: " bin
+                           (when (seq extra-args)
+                             (str " " (str/join " " extra-args)))
+                           " exited " (:exit res))
+                      {:bin bin :exit (:exit res)})))))
 
 (def ^:private tsan-concurrency-tests
   "Test files that exercise real OS threads, atomics, or memory
