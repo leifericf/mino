@@ -22,9 +22,11 @@
 #include "prim/internal.h"
 #include "mino.h"
 #include "path_buf.h"
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#if !defined(_MSC_VER)
+#  include <dirent.h>
+#  include <sys/stat.h>
+#  include <unistd.h>
+#endif
 #include <errno.h>
 #include <string.h>
 
