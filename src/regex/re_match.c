@@ -32,6 +32,14 @@ static RE_TLS int re_anchor_end;
 
 static RE_TLS re_g_state_t re_g_state;
 
+/* Total nesting depth of active matchgroup_loop calls across all group
+ * levels in the current match.  Unlike rec_depth (which counts only the
+ * iterations of one group's own loop), this counter increments on every
+ * dispatch from matchpattern into any matchgroup_loop and decrements on
+ * return.  It is reset to 0 by re_g_state_reset at the start of each
+ * top-level match so per-match budgets are independent. */
+static RE_TLS int re_group_nesting;
+
 
 
 /* Private function declarations: */
@@ -72,6 +80,7 @@ static void re_g_state_reset(const char* base, int n)
     re_g_state.starts[i] = -1;
     re_g_state.ends[i]   = -1;
   }
+  re_group_nesting = 0;
 }
 
 int re_matchp_groups_anchored(re_t pattern, const char* text,
@@ -879,9 +888,22 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
             default:
               break;
           }
+          /* Guard the cross-group nesting depth so adversarial patterns
+           * like ((((a*)*)*)*)* cannot exhaust the C stack by resetting
+           * rec_depth to 0 at each new group level.  re_group_nesting
+           * counts the total number of active matchgroup_loop frames
+           * across all levels; it is reset by re_g_state_reset at the
+           * start of each top-level match. */
+          if (re_group_nesting >= RE_MATCHGROUP_DEPTH_LIMIT)
+          {
+            *matchlength = pre;
+            return 0;
+          }
+          re_group_nesting++;
           gml = *matchlength;
           r = matchgroup_loop(pattern, gc_rel, suffix, text, &gml,
                               0, min_r, max_r, lazy_r, 0);
+          re_group_nesting--;
           *matchlength = r ? gml : pre;
           return r;
         }
