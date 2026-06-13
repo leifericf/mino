@@ -3,6 +3,8 @@
           :refer [run run* fresh == != conde conda condu
                   succeed fail membero appendo conso firsto resto
                   emptyo distincto everyg project all
+                  matche matcha matchu defne fne
+                  defrel fact facts retract
                   lvar lvar?]])
 
 ;; clojure.core.logic -- relational (logic) programming.  The user-facing
@@ -135,5 +137,71 @@
   (is (= '(_0) (run* [q] (distincto [1 2 3]))))
   (is (= '() (run* [q] (distincto [1 2 2]))))
   (is (= '(_0) (run* [q] (everyg #(membero % [1 2 3]) [1 2])))))
+
+;; --------------------------------------------------------------------
+;; matche / defne pattern-matching relations
+;; --------------------------------------------------------------------
+
+(deftest matche-basic
+  ;; A matche literal-head clause binds the query var to the literal.
+  (is (= '(:a :b) (run* [q] (matche [q] ([:a]) ([:b])))))
+  ;; Classify a fixed input by structure; the first matching clause wins
+  ;; per branch but conde explores both, so a vector matches the pair
+  ;; clause and the wildcard clause.
+  (is (= '(:pair :other)
+         (run* [out]
+           (fresh [x]
+             (== x [1 2])
+             (matche [x]
+               ([[_ _]] (== out :pair))
+               ([_] (== out :other))))))))
+
+(defne my-membero [x l]
+  ([_ [x . _]])
+  ([_ [_ . tail]] (my-membero x tail)))
+
+(deftest defne-membero
+  (is (= '(1 2 3) (run* [q] (my-membero q [1 2 3]))))
+  (is (= '(_0) (run* [q] (my-membero 2 [1 2 3]))))
+  (is (= '() (run* [q] (my-membero 9 [1 2 3])))))
+
+(defne my-appendo [l1 l2 o]
+  ([() _ l2])
+  ([[a . d] _ [a . r]] (my-appendo d l2 r)))
+
+(deftest defne-appendo
+  (is (= '((1 2 3 4)) (run* [q] (my-appendo [1 2] [3 4] q)))))
+
+(deftest fne-anonymous
+  (let [heado (fne [l x] ([[x . _] _]))]
+    (is (= '(1) (run* [q] (heado [1 2 3] q))))))
+
+;; --------------------------------------------------------------------
+;; Facts database: defrel / fact / facts / retract
+;; --------------------------------------------------------------------
+
+(defrel parent p c)
+(fact parent :gomez :pugsley)
+(fact parent :gomez :wednesday)
+(fact parent :morticia :pugsley)
+
+(deftest defrel-query
+  (is (= '(:pugsley :wednesday)
+         (sort (run* [q] (parent :gomez q)))))
+  (is (= '(:gomez :morticia)
+         (sort (run* [q] (parent q :pugsley))))))
+
+(deftest defrel-retract
+  (defrel edge a b)
+  (fact edge 1 2)
+  (fact edge 2 3)
+  (is (= '(2) (run* [q] (edge 1 q))))
+  (retract edge 1 2)
+  (is (= '() (run* [q] (edge 1 q)))))
+
+(deftest facts-bulk
+  (defrel likes a b)
+  (facts likes [[:a :b] [:b :c]])
+  (is (= '(:b) (run* [q] (likes :a q)))))
 
 (run-tests-and-exit)

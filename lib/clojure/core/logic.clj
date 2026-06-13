@@ -514,3 +514,178 @@
   [v]
   (fn [a]
     (if (lvar? (walk v (:s a))) mzero (unit a))))
+
+;; --------------------------------------------------------------------
+;; Pattern-matching relation sugar: matche / matcha / matchu and the
+;; defne / fne / defna / defnu / defnu definers.  A clause head is a
+;; vector of patterns matched positionally against the goal variables;
+;; symbols become fresh logic variables, `_` is an anonymous fresh
+;; variable, a quoted form is a literal, `[a b]` is a vector term, and a
+;; `.` inside a vector/list pattern introduces a logical-cons tail.
+;; --------------------------------------------------------------------
+
+(defn- match-wildcard? [x] (= x '_))
+
+(defn- rename-wildcards
+  "Replace each `_` in a pattern with a distinct fresh symbol so every
+  wildcard is its own logic variable."
+  [pat]
+  (cond
+    (match-wildcard? pat) (gensym "_wld")
+    (vector? pat) (mapv rename-wildcards pat)
+    (and (seq? pat) (= (first pat) 'quote)) pat
+    (seq? pat) (map rename-wildcards pat)
+    :else pat))
+
+(defn- pattern-symbols
+  "Collect the distinct binding symbols of a pattern (excluding the
+  symbols in `exclude`, the dot marker, and quoted literals)."
+  [pat exclude]
+  (let [acc (atom [])
+        seen (atom #{})
+        add! (fn [s] (when (and (symbol? s) (not= s '.)
+                                (not (contains? exclude s))
+                                (not (@seen s)))
+                       (swap! seen conj s)
+                       (swap! acc conj s)))
+        go (fn go [p]
+             (cond
+               (symbol? p) (add! p)
+               (vector? p) (doseq [x p] (go x))
+               (and (seq? p) (= (first p) 'quote)) nil
+               (seq? p) (doseq [x p] (go x))
+               :else nil))]
+    (go pat)
+    @acc))
+
+(declare pattern->term)
+
+(defn- seq-pattern->term
+  "Build a term from a sequence of element patterns, turning a `.` marker
+  into a logical-cons tail."
+  [elems]
+  (let [v   (vec elems)
+        dot (first (keep-indexed (fn [i x] (when (= x '.) i)) v))]
+    (if dot
+      (let [fixed (subvec v 0 dot)
+            tail  (nth v (inc dot))]
+        (reduce (fn [acc p] `(lcons ~(pattern->term p) ~acc))
+                (pattern->term tail)
+                (reverse fixed)))
+      (reduce (fn [acc p] `(lcons ~(pattern->term p) ~acc))
+              ()
+              (reverse v)))))
+
+(defn- pattern->term
+  "Translate a pattern form into a term-constructing form: symbols stay
+  as locals (the fresh logic variables), quoted forms and scalars are
+  literals, vectors without a `.` are vector terms, and `.`-bearing
+  vectors/lists become logical-cons chains."
+  [pat]
+  (cond
+    (symbol? pat) pat
+    (vector? pat) (if (some #(= % '.) pat)
+                    (seq-pattern->term (seq pat))
+                    (mapv pattern->term pat))
+    (and (seq? pat) (= (first pat) 'quote)) pat
+    (seq? pat) (seq-pattern->term pat)
+    :else pat))
+
+(defn- match-clause
+  "Expand one matche/matcha/matchu clause into a goal vector: a fresh over
+  the clause's new variables, the positional unifications, and the body
+  goals."
+  [vars exclude clause]
+  (let [pats (mapv rename-wildcards (first clause))
+        body (rest clause)
+        fresh-syms (vec (mapcat #(pattern-symbols % exclude) pats))]
+    `[(fresh [~@fresh-syms]
+        ~@(map (fn [v p] `(== ~v ~(pattern->term p))) vars pats)
+        ~@body)]))
+
+(defmacro matche
+  "conde with pattern-matching clause heads: each clause head is a vector
+  of patterns unified positionally against vars."
+  [vars & clauses]
+  (let [vars (vec vars)
+        exclude (set vars)]
+    `(conde ~@(map #(match-clause vars exclude %) clauses))))
+
+(defmacro matcha
+  "conda with pattern-matching clause heads."
+  [vars & clauses]
+  (let [vars (vec vars)
+        exclude (set vars)]
+    `(conda ~@(map #(match-clause vars exclude %) clauses))))
+
+(defmacro matchu
+  "condu with pattern-matching clause heads."
+  [vars & clauses]
+  (let [vars (vec vars)
+        exclude (set vars)]
+    `(condu ~@(map #(match-clause vars exclude %) clauses))))
+
+(defmacro defne
+  "Define a relation by pattern-matching clauses (matche over its args)."
+  [name args & clauses]
+  `(defn ~name ~args (matche ~(vec args) ~@clauses)))
+
+(defmacro fne
+  "Anonymous defne: a relation value with matche clauses."
+  [args & clauses]
+  `(fn ~args (matche ~(vec args) ~@clauses)))
+
+(defmacro defna
+  "Define a relation by committed-choice pattern clauses (matcha)."
+  [name args & clauses]
+  `(defn ~name ~args (matcha ~(vec args) ~@clauses)))
+
+(defmacro defnu
+  "Define a relation by committed-choice once clauses (matchu)."
+  [name args & clauses]
+  `(defn ~name ~args (matchu ~(vec args) ~@clauses)))
+
+;; --------------------------------------------------------------------
+;; Facts database: defrel / fact / facts / retract.  A relation is backed
+;; by an atom holding a set of argument tuples; querying it is a
+;; disjunction over the stored tuples.
+;; --------------------------------------------------------------------
+
+(defn add-fact!
+  "Add one tuple to a relation var's fact store."
+  [rel-var tuple]
+  (swap! (::facts (meta rel-var)) conj (vec tuple)))
+
+(defmacro defrel
+  "Define a relation backed by a fact set. (name a b ...) is a goal that
+  succeeds once for every stored tuple unifying with the arguments."
+  [name & args]
+  `(let [store# (atom #{})]
+     (defn ~name [~@args]
+       (let [argv# [~@args]]
+         (fn [a#]
+           (mplus* (map (fn [tuple#] (fn [] ((== argv# tuple#) a#)))
+                        @store#)))))
+     (alter-meta! (var ~name) assoc ::facts store# ::arity ~(count args))
+     (var ~name)))
+
+(defmacro fact
+  "Add a single fact tuple to relation rel."
+  [rel & vs]
+  `(add-fact! (var ~rel) [~@vs]))
+
+(defmacro facts
+  "Add many fact tuples (a sequence of tuples) to relation rel."
+  [rel rows]
+  `(doseq [row# ~rows] (add-fact! (var ~rel) row#)))
+
+(defmacro retract
+  "Remove a single fact tuple from relation rel."
+  [rel & vs]
+  `(swap! (::facts (meta (var ~rel))) disj [~@vs]))
+
+(defn retractions
+  "Return a function that retracts the given tuple from rel-var when
+  called (the inverse of asserting it)."
+  [rel-var tuple]
+  (fn [] (swap! (::facts (meta rel-var)) disj (vec tuple))))
