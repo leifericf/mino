@@ -2265,6 +2265,7 @@
   {"src/eval/read.c"            "lexer/parser -- inherently sequential, not decomposable"
    "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"
    "src/prim/agent.c"           "agent subsystem -- worker thread, queue, prims kept together"
+   "src/prim/bigdec.c"           "bigdec tower -- mul/sub/cmp share imath helpers, barely over limit"
    "src/prim/bignum.c"          "imath wrapper + numeric tower coercions, barely over limit"
    "src/prim/module.c"          "ns / require / use / load surface kept together"
    "src/prim/ns.c"              "ns primitives -- intern / refer / alias / publics in one module"

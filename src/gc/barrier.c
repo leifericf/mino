@@ -110,7 +110,7 @@ void gc_remset_add(mino_state *S, gc_hdr_t *container)
              * YOUNG referent and collect it while it is still live.
              * Heap corruption is certain; aborting is safer than
              * continuing. */
-            abort();
+            abort(); /* Class I: GC remset OOM; skipping would break write barrier invariant */
         }
         S->gc.remset     = nr;
         S->gc.remset_cap = new_cap;
