@@ -1,6 +1,7 @@
 (require "tests/test")
 
 (require '[clojure.spec.alpha :as s])
+(require '[clojure.spec.test.alpha :as stest])
 (require '[clojure.core.specs.alpha])
 
 ;; ---------------------------------------------------------------------------
@@ -209,16 +210,16 @@
     (is (= :clojure.spec.alpha/fspec (:clojure.spec.alpha/kind s)))))
 
 (deftest instrument-validates-args
-  (s/instrument 'user/add-numbers)
+  (stest/instrument 'user/add-numbers)
   (try
     (is (= 3 (add-numbers 1 2)))
     (is (thrown? (add-numbers 1 "str")))
     (finally
-      (s/unstrument 'user/add-numbers))))
+      (stest/unstrument 'user/add-numbers))))
 
 (deftest unstrument-restores-original
-  (s/instrument 'user/add-numbers)
-  (s/unstrument 'user/add-numbers)
+  (stest/instrument 'user/add-numbers)
+  (stest/unstrument 'user/add-numbers)
   ;; Original (raw) fn does not validate; calling with bad arg fails
   ;; inside + instead of inside spec.
   (is (true? (integer? (add-numbers 1 2)))))

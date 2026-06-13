@@ -1319,8 +1319,9 @@
                       {:args cargs :ret cret})))))))
 
 ;; ---------------------------------------------------------------------------
-;; fdef / instrument runtime.  Macros at the bottom build the spec
-;; values; these helpers run them.
+;; fdef runtime.  Macros at the bottom build the spec values; this helper
+;; registers them.  The instrument / check tooling lives in
+;; clojure.spec.test.alpha.
 ;; ---------------------------------------------------------------------------
 
 (defn fdef-impl
@@ -1332,45 +1333,6 @@
                  ::name sym)]
     (swap! registry-ref assoc sym s)
     sym))
-
-(def ^:private instrumented-vars (atom {}))
-
-(defn- check-fn-args [sym args]
-  (when-let [s (get @registry-ref sym)]
-    (when-let [args-spec (::args s)]
-      (when (= ::invalid (conform* args-spec args))
-        (throw (ex-info (str "Call to " sym " did not conform to spec.")
-                        {:sym  sym
-                         :args args
-                         :problems (::problems
-                                    (explain-data args-spec args))}))))))
-
-(defn instrument
-  "Wrap the var named by sym so its args are validated against the
-  registered fdef on every call.  Returns sym if instrumented, nil
-  if no fdef is registered."
-  [sym]
-  (let [v (resolve sym)]
-    (when (and v (get @registry-ref sym))
-      (when-not (contains? @instrumented-vars sym)
-        (let [orig @v]
-          (swap! instrumented-vars assoc sym orig)
-          (alter-var-root v
-                          (fn [_]
-                            (fn [& args]
-                              (check-fn-args sym args)
-                              (apply orig args))))))
-      sym)))
-
-(defn unstrument
-  "Restore an instrumented var to its original value."
-  [sym]
-  (when-let [orig (get @instrumented-vars sym)]
-    (let [v (resolve sym)]
-      (when v
-        (alter-var-root v (fn [_] orig))
-        (swap! instrumented-vars dissoc sym)
-        sym))))
 
 (def ^:private check-asserts-flag
   ;; Runtime toggle for s/assert.  Distinct from *compile-asserts*,
