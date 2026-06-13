@@ -155,7 +155,15 @@ void gc_range_merge_pending(mino_state *S)
         nr      = (gc_range_t *)realloc(
             S->gc.ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            abort(); /* Class I: realloc inside GC-depth section; partial range merge would leave gc_ranges inconsistent */
+            /* Merge-buffer growth failed under memory pressure.  The
+             * existing ranges[] array still holds the pre-merge sorted
+             * entries; the pending entries are intact too.  Invalidate
+             * ranges_valid so the next collection rebuilds the index
+             * from gc_all via gc_build_range_index rather than leaving
+             * a half-merged, inconsistent state.  The pending entries
+             * are preserved and will be included in the rebuild. */
+            S->gc.ranges_valid = 0;
+            return;
         }
         S->gc.ranges     = nr;
         S->gc.ranges_cap = new_cap;
@@ -697,8 +705,12 @@ void gc_mark_roots(mino_state *S)
  * libsanitizer flags every cross-frame word read in the scan loop --
  * which surfaced as a CI failure on ubuntu-24.04 when release-gate's
  * ASan suite ran on a non-clang host for the first time.
+ * MSVC is excluded from the __has_feature arm so that newer MSVC
+ * versions that expose __has_feature as a compatibility extension
+ * always land on the __declspec arm rather than emitting the
+ * GCC/Clang-only __attribute__ form, which MSVC would reject.
  */
-#if defined(__has_feature)
+#if defined(__has_feature) && !defined(_MSC_VER)
 #  if __has_feature(address_sanitizer)
 __attribute__((no_sanitize_address))
 #  endif
