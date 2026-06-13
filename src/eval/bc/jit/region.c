@@ -16,6 +16,7 @@
  */
 
 #include "internal.h"
+#include "../jit.h"
 
 #ifdef MINO_CPJIT_HOST
 
