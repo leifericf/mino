@@ -1,7 +1,7 @@
 /*
  * val.c -- value constructors, predicates, accessors, and equality.
  *
- * qa-arch ALLOW: exceeds the 1000 LOC TU guideline.  The value layer
+ * qa-arch ALLOW: exceeds the 1100 LOC TU guideline.  The value layer
  * owns allocation, interning, hashing, and equality for every Clojure
  * value type; splitting across files would scatter type-specific logic
  * that must stay coherent with the mino_val union layout.  Reviewed
@@ -300,7 +300,8 @@ static mino_val *intern_lookup_or_create_ns(mino_state *S, intern_table_t *tbl,
         ne = (mino_val **)realloc(
             tbl->entries, new_cap * sizeof(*ne));
         if (ne == NULL) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
             return NULL;
         }
         tbl->entries = ne;
@@ -830,7 +831,6 @@ int mino_is_record(const mino_val *v)
     return v != NULL && mino_type_of(v) == MINO_RECORD;
 }
 
-
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
@@ -1223,7 +1223,6 @@ int mino_is_sorted_set(const mino_val *v) { return mino_type_of(v) == MINO_SORTE
 int mino_is_map_entry(const mino_val *v) { return mino_type_of(v) == MINO_MAP_ENTRY; }
 int mino_is_host_array(const mino_val *v) { return mino_type_of(v) == MINO_HOST_ARRAY; }
 int mino_is_future(const mino_val *v)  { return mino_type_of(v) == MINO_FUTURE; }
-
 
 /* ------------------------------------------------------------------------- */
 /* Equality                                                                  */

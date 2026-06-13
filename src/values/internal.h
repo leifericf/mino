@@ -18,6 +18,15 @@
  *   MINO_ERR_RECOVERABLE -- intern_lookup_or_create emits :internal/MIN001
  *      when the intern-table entries array cannot be grown (OOM).
  *
+ *   MINO_ERR_RECOVERABLE -- intern_ns_name emits :arg/MIN002
+ *      when keyword/symbol ns+name length overflows size_t.
+ *
+ *   MINO_ERR_RECOVERABLE -- intern_lookup_or_create emits :internal/MIN003
+ *      when the intern table is too large to double (cap > SIZE_MAX/2).
+ *
+ *   MINO_ERR_RECOVERABLE -- mino_compare emits :eval/type/MTY001
+ *      when asked to compare values of different types.
+ *
  * Internal to the runtime; embedders should only use mino.h.
  */
 
