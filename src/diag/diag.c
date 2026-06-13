@@ -235,7 +235,10 @@ int diag_render_compact(const mino_diag *d, char *buf, size_t n)
         written = snprintf(buf, n, "%s",
                            d->message ? d->message : "error");
     }
-    return written < 0 ? 0 : written;
+    /* snprintf returns the would-be length on truncation (>= n), not the
+     * number of bytes actually written.  Clamp to actual bytes in buffer. */
+    if (written < 0) return 0;
+    return written < (int)n ? written : (n > 1 ? (int)(n - 1) : 0);
 }
 
 /* Advance pos by w bytes from snprintf, clamped so pos never exceeds n-1.
@@ -328,7 +331,8 @@ int diag_render_pretty(mino_state *S, const mino_diag *d,
 
     if (pos < n) buf[pos] = '\0';
     else if (n > 0) buf[n - 1] = '\0';
-    return (int)pos;
+    /* pos is size_t; clamp to INT_MAX before narrowing to int. */
+    return (pos < (size_t)INT_MAX) ? (int)pos : INT_MAX;
 }
 
 #undef DIAG_POS_ADVANCE
@@ -348,16 +352,19 @@ int mino_render_diag(mino_state *S, const mino_diag *d,
 
 /* Build a location map from a span.
  * keys/vals are GC-allocated and pinned so that each allocation in the
- * body cannot collect a pointer that is only on the C stack. */
+ * body cannot collect a pointer that is only on the C stack.
+ * keys is pinned immediately after allocation so that the subsequent
+ * vals allocation cannot trigger a collection that frees keys. */
 static mino_val *span_to_map(mino_state *S, const mino_span_t *sp)
 {
 #define SPAN_N 5
     mino_val **keys = (mino_val **)gc_alloc_typed(
         S, GC_T_VALARR, SPAN_N * sizeof(*keys));
-    mino_val **vals = (mino_val **)gc_alloc_typed(
-        S, GC_T_VALARR, SPAN_N * sizeof(*vals));
+    mino_val **vals;
     mino_val *result;
     gc_pin((mino_val *)keys);
+    vals = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, SPAN_N * sizeof(*vals));
     gc_pin((mino_val *)vals);
     gc_valarr_set(S, keys, 0, mino_keyword(S, "file"));
     gc_valarr_set(S, vals, 0, sp->file ? mino_string(S, sp->file) : mino_nil(S));
@@ -377,16 +384,19 @@ static mino_val *span_to_map(mino_state *S, const mino_span_t *sp)
 
 /* Build a frame map.
  * keys/vals are GC-allocated and pinned so that each allocation in the
- * body cannot collect a pointer that is only on the C stack. */
+ * body cannot collect a pointer that is only on the C stack.
+ * keys is pinned immediately after allocation so that the subsequent
+ * vals allocation cannot trigger a collection that frees keys. */
 static mino_val *frame_to_map(mino_state *S, const mino_diag_frame_t *f)
 {
 #define FRAME_N 4
     mino_val **keys = (mino_val **)gc_alloc_typed(
         S, GC_T_VALARR, FRAME_N * sizeof(*keys));
-    mino_val **vals = (mino_val **)gc_alloc_typed(
-        S, GC_T_VALARR, FRAME_N * sizeof(*vals));
+    mino_val **vals;
     mino_val *result;
     gc_pin((mino_val *)keys);
+    vals = (mino_val **)gc_alloc_typed(
+        S, GC_T_VALARR, FRAME_N * sizeof(*vals));
     gc_pin((mino_val *)vals);
     gc_valarr_set(S, keys, 0, mino_keyword(S, "fn"));
     gc_valarr_set(S, vals, 0, f->fn_name ? mino_string(S, f->fn_name) : mino_nil(S));
@@ -407,6 +417,7 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
 #define DIAG_MAP_N 11
     mino_val **keys;
     mino_val **vals;
+    int saved_gc_save_len;
     size_t n = 0;
 
     if (d == NULL) return mino_nil(S);
@@ -414,14 +425,25 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
     /* Return cached map if available. */
     if (d->cached_map != NULL) return d->cached_map;
 
+    /* Snapshot gc_save_len before any pin operations so that all exit
+     * paths -- including the explicit gc_oom_throw sites below -- can
+     * restore the pin stack to its entry state rather than relying on
+     * a precise gc_unpin(2) count that could drift if the body changes.
+     * Note: longjmp from within helper calls (mino_keyword, mino_string,
+     * etc.) bypasses this restore; that is a VM try-frame limitation
+     * requiring cross-module support to fix completely. */
+    saved_gc_save_len = mino_current_ctx(S)->gc_save_len;
+
     /* Allocate key/value staging arrays on the GC heap and pin them so
      * that the many allocating calls below cannot collect pointers that
-     * have been stored but are not yet reachable through a GC root. */
+     * have been stored but are not yet reachable through a GC root.
+     * keys is pinned immediately after allocation so that the subsequent
+     * vals allocation cannot trigger a collection that frees keys. */
     keys = (mino_val **)gc_alloc_typed(
         S, GC_T_VALARR, DIAG_MAP_N * sizeof(*keys));
+    gc_pin((mino_val *)keys);
     vals = (mino_val **)gc_alloc_typed(
         S, GC_T_VALARR, DIAG_MAP_N * sizeof(*vals));
-    gc_pin((mino_val *)keys);
     gc_pin((mino_val *)vals);
 
     /* :mino/kind */
@@ -470,7 +492,7 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
         if (d->notes_len > 0) {
             mino_val **note_items;
             if (d->notes_len > SIZE_MAX / sizeof(*note_items)) {
-                gc_unpin(2);
+                mino_current_ctx(S)->gc_save_len = saved_gc_save_len;
                 gc_oom_throw(S, "diag notes array size overflow");
             }
             note_items = (mino_val **)gc_alloc_typed(
@@ -496,7 +518,7 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
         if (d->frames_len > 0) {
             mino_val **frame_items;
             if (d->frames_len > SIZE_MAX / sizeof(*frame_items)) {
-                gc_unpin(2);
+                mino_current_ctx(S)->gc_save_len = saved_gc_save_len;
                 gc_oom_throw(S, "diag frames array size overflow");
             }
             frame_items = (mino_val **)gc_alloc_typed(
@@ -526,7 +548,7 @@ mino_val *diag_to_map(mino_state *S, mino_diag *d)
     n++;
 
     d->cached_map = mino_map(S, keys, vals, n);
-    gc_unpin(2);
+    mino_current_ctx(S)->gc_save_len = saved_gc_save_len;
     return d->cached_map;
 #undef DIAG_MAP_N
 }
