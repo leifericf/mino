@@ -1,11 +1,11 @@
 (require "tests/test")
 (require '[clojure.core.match :refer [match matchv match-let]])
 
-;; clojure.core.match — pattern matching compiled to a decision tree.
+;; clojure.core.match -- pattern matching for mino.
 ;; The public surface (match / matchv / match-let, and the pattern
 ;; grammar below) is identical to upstream; only the compiler internals
 ;; differ.  These tests are the affordance-fidelity gate: every pattern
-;; form, the no-match throw, binding semantics, and a decision-tree
+;; form, the no-match throw, binding semantics, and a wide-dispatch
 ;; regression that asserts no exponential code blow-up.
 
 ;; --------------------------------------------------------------------
@@ -141,7 +141,7 @@
   (is (thrown? Exception (match [99] [1] :one [2] :two))))
 
 ;; --------------------------------------------------------------------
-;; matchv (vector-type tagged match) — surface-compatible with match
+;; matchv (vector-type tagged match) -- surface-compatible with match
 ;; --------------------------------------------------------------------
 
 (deftest matchv-basic
@@ -162,10 +162,11 @@
              x))))
 
 ;; --------------------------------------------------------------------
-;; Decision-tree regression: no exponential blow-up.
+;; Wide-dispatch regression: no exponential blow-up.
 ;; A wide row set with shared column prefixes must compile and run; if
-;; the compiler backtracked naively the expansion would explode.  We
-;; assert correct dispatch across many rows as a behavioral proxy.
+;; the compiler duplicated downstream code per row the expansion would
+;; explode.  We assert correct dispatch across many rows as a behavioral
+;; proxy.
 ;; --------------------------------------------------------------------
 
 (deftest match-wide-dispatch
@@ -183,8 +184,8 @@
     (is (= :a (classify 1 2 3)))))   ;; first matching row wins
 
 (deftest match-many-literal-rows
-  ;; 20 literal rows over one column: the decision tree must dispatch
-  ;; each without falling back to a linear chain that mis-binds.
+  ;; 20 literal rows over one column: the compiler must dispatch each to
+  ;; its own result without mis-binding across the shared occurrence.
   (let [f (fn [x] (match [x]
                     [0] :z0 [1] :z1 [2] :z2 [3] :z3 [4] :z4
                     [5] :z5 [6] :z6 [7] :z7 [8] :z8 [9] :z9

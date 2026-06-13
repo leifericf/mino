@@ -56,8 +56,11 @@
       (integer? w) (if (contains? dom w) a nil)
       (l/lvar? w)
       (if (= (count dom) 1)
-        (assoc a :s    (assoc (:s a) w (first dom))
-                 :doms (dissoc (:doms a) w))
+        ;; Binding the variable extends the substitution directly, so the
+        ;; disequality store must be re-verified (returns nil on conflict).
+        (l/verify-constraints
+         (assoc a :s    (assoc (:s a) w (first dom))
+                  :doms (dissoc (:doms a) w)))
         (assoc a :doms (assoc (:doms a) w dom)))
       :else nil)))
 
@@ -141,10 +144,30 @@
   [x y z]
   (fn [a] (install a (mul-prop x y z))))
 
-(defn quot
-  "Constraint z = x / y (that is, x = z * y)."
+(defn- quot-prop
+  "Propagator for z = (quot x y), truncating toward zero, over enumerated
+  domains. Zero is removed from y's domain (division by zero is excluded)."
   [x y z]
-  (fn [a] (install a (mul-prop z y x))))
+  (fn [a]
+    (let [dx (get-dom a x) dy (get-dom a y)]
+      (if (and dx dy)
+        (let [dy*   (disj dy 0)
+              dz    (get-dom a z)
+              quots (into (sorted-set) (for [i dx j dy*] (clojure.core/quot i j)))
+              dz'   (if dz (intersect dz quots) quots)]
+          (if (or (empty? dy*) (empty? dz'))
+            nil
+            (let [dx' (into (sorted-set)
+                            (filter (fn [i] (some (fn [j] (contains? dz' (clojure.core/quot i j))) dy*)) dx))
+                  dy' (into (sorted-set)
+                            (filter (fn [j] (some (fn [i] (contains? dz' (clojure.core/quot i j))) dx)) dy*))]
+              (some-> a (set-dom z dz') (set-dom x dx') (set-dom y dy')))))
+        a))))
+
+(defn quot
+  "Constraint z = (quot x y), truncating integer division toward zero."
+  [x y z]
+  (fn [a] (install a (quot-prop x y z))))
 
 ;; --------------------------------------------------------------------
 ;; Relational constraints
@@ -236,7 +259,8 @@
 
 (defn distinct
   "Constraint that every variable in the collection takes a different
-  value."
+  value. Pruning is forward-checking (a value is removed from the others
+  once a variable becomes a singleton); labeling completes the search."
   [vars]
   (let [v (vec vars)
         n (count v)]

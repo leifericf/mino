@@ -1,5 +1,5 @@
 (require "tests/test")
-(require '[clojure.core.logic :as l :refer [run run* fresh]])
+(require '[clojure.core.logic :as l :refer [run run* fresh !=]])
 (require '[clojure.core.logic.fd :as fd])
 
 ;; clojure.core.logic.fd -- finite-domain constraints.  The surface (in,
@@ -77,5 +77,22 @@
                            (fd/+ a b c)
                            (fd/distinct [a b c])
                            (l/== q [a b c])))))))
+
+;; Mixing a finite domain with a core disequality is sound: labeling a
+;; domain variable re-checks the disequality store, so a value barred by
+;; (!= q v) is not enumerated.
+(deftest fd-with-core-disequality
+  (is (= '(1 2) (run* [q] (!= q 3) (fd/in q (fd/interval 1 3)))))
+  (is (= '(1 3) (run* [q] (fd/in q (fd/interval 1 3)) (!= q 2)))))
+
+;; quot is truncating integer division, not exact division.
+(deftest fd-quot-truncating
+  (is (= '(3) (run* [q] (fresh [x] (fd/in x (fd/interval 1 9)) (fd/quot 7 2 x) (l/== q x)))))
+  (is (= '([6 3 2])
+         (run* [q] (fresh [x y z]
+                     (fd/in x y z (fd/interval 1 6))
+                     (fd/quot x y z)
+                     (l/== z 2) (l/== y 3)
+                     (l/== q [x y z]))))))
 
 (run-tests-and-exit)

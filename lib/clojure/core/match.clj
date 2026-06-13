@@ -7,8 +7,7 @@
 ;; quoted-symbol literals). Existing match code and documentation
 ;; transfer unchanged.
 ;;
-;; The compiler underneath is built natively for mino rather than
-;; transliterated from the JVM implementation. A clause set compiles to
+;; The compiler underneath is built natively for mino. A clause set compiles to
 ;; a structure that:
 ;;   - binds each occurrence (the matched expression) to a local exactly
 ;;     once, so sub-terms are never recomputed, and
@@ -88,7 +87,7 @@
       (= marker :as)
       {:tag :as :sym (nth form 2) :pat (parse-pattern head)}
 
-      (or (= marker :guard) (= marker :when))
+      (= marker :guard)
       (let [g (nth form 2)]
         {:tag :guard
          :pat (parse-pattern head)

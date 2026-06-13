@@ -6,19 +6,19 @@
 ;; facts, and (in the companion namespaces) CLP(FD) and nominal logic.
 ;; Programs and documentation written for core.logic transfer unchanged.
 ;;
-;; The engine underneath is built natively for mino rather than
-;; transliterated from the JVM implementation:
+;; The engine underneath is built natively for mino:
 ;;   - A logic variable is a defrecord carrying a unique id; the
 ;;     substitution is a persistent map keyed on those variables and the
-;;     constraint store is a persistent vector -- no mutable cells, no
-;;     deftype, no clojure.lang internals.
+;;     constraint store is a persistent vector -- no mutable cells, all
+;;     persistent data.
 ;;   - A goal is a function from a package (substitution + constraints)
-;;     to a stream of packages.  Streams are mino lazy-seqs and the
-;;     disjunction operator interleaves them, so search is complete: an
-;;     answer to the right of a divergent branch is still reached.
-;;   - walk is loop-structured and the relation library is written so
-;;     that realizing one answer recurses only as deep as the relation,
-;;     keeping clear of mino's recursion guard.
+;;     to a stream of packages.  Streams are a trampolined thunk ADT and
+;;     the disjunction operator interleaves them, so search is complete:
+;;     an answer to the right of a divergent branch is still reached.
+;;   - walk is loop-structured and the relation library is written so a
+;;     relation's recursion advances by goal application rather than by
+;;     deep C recursion. (Unifying or reifying a single very long ground
+;;     list still recurses by its length, against mino's recursion guard.)
 ;;
 ;; A logical-cons cell (LCons) lets a list have an unbound tail, which is
 ;; what makes conso / appendo / membero relational in both directions.
@@ -76,8 +76,12 @@
 
 ;; Extension hook for custom logic terms (the nominal namespace's Nom and
 ;; Tie). A type that participates in unification, deep-walking, and
-;; reification implements ITerm; plain terms never satisfy it, so the
-;; relational core pays nothing for it.
+;; reification implements ITerm. The hook is checked last on each path, so
+;; a program that uses no custom terms pays only a single membership test
+;; on the fall-through (non-collection, non-variable) terms. This relies
+;; on records not being maps in mino: a Nom/Tie reaches the ITerm branch
+;; only because (map? a-record) is false, so the map branch never
+;; intercepts it.
 (defprotocol ITerm
   (-unify-term [u v s]
     "Unify custom term u with v under substitution map s; return the
@@ -184,10 +188,12 @@
   [c s]
   (reduce (fn [s [u v]] (when s (unify u v s))) s (seq c)))
 
-(defn- verify-constraints
+(defn verify-constraints
   "Re-check every stored disequality after a unification. Returns the
   package with its constraint store pruned, or nil when a constraint is
-  violated (all of its bindings now hold)."
+  violated (all of its bindings now hold). Any code that extends the
+  substitution directly (finite-domain labeling, singleton binding) must
+  pass the result through here so disequality stays sound."
   [a]
   (loop [cs (:cs a) kept []]
     (if (empty? cs)
@@ -394,15 +400,20 @@
   [a]
   (if (empty? (:doms a))
     (unit a)
-    (let [[v dom] (first (:doms a))]
+    ;; Label the lowest-id domain variable first, for a deterministic
+    ;; answer order independent of map iteration order.
+    (let [[v dom] (apply min-key (fn [[k _]] (:id k)) (seq (:doms a)))]
       (mplus*
        (map (fn [val]
               (fn []
                 (let [a2 (assoc a :doms (dissoc (:doms a) v))
                       s  (unify v val (:s a2))]
                   (if s
-                    (let [a3 (run-constraints (assoc a2 :s s))]
-                      (if a3 (force-doms a3) mzero))
+                    (let [a3 (verify-constraints (assoc a2 :s s))]
+                      (if a3
+                        (let [a4 (run-constraints a3)]
+                          (if a4 (force-doms a4) mzero))
+                        mzero))
                     mzero))))
             dom)))))
 
@@ -478,7 +489,7 @@
 
 (defmacro project
   "Bind the substitution's current values for vars as ordinary locals
-  inside the goals, so non-relational Clojure code can inspect them."
+  inside the goals, so ordinary non-relational code can inspect them."
   [vars & goals]
   (let [a (gensym "a")]
     `(fn [~a]
@@ -550,14 +561,17 @@
 
 (defn everyg
   "Goal that holds when (g elem) succeeds for every element of coll,
-  where g is a one-argument goal constructor."
+  where g is a one-argument goal constructor. coll is an ordinary,
+  fully-realized collection (not a partial logic list)."
   [g coll]
   (if (empty? coll)
     succeed
     (all (g (first coll)) (everyg g (rest coll)))))
 
 (defn distincto
-  "Succeed when every element of l is pairwise distinct."
+  "Succeed when every element of l is pairwise distinct. l is an ordinary,
+  fully-realized collection; the pairwise disequalities are posted up
+  front."
   [l]
   (let [v (vec l)
         n (count v)
@@ -772,11 +786,31 @@
 ;; read through the same table.
 ;; --------------------------------------------------------------------
 
+(defn- refresh-term
+  "Replace every distinct logic variable in a term with a fresh one,
+  consistently. A stored tabled answer may contain variables bound only
+  within the package that produced it; refreshing on retrieval gives each
+  use its own fresh variables, so a non-ground answer reused elsewhere
+  cannot collide by variable identity. Ground answers are returned
+  unchanged."
+  [t]
+  (let [m (atom {})
+        go (fn go [x]
+             (cond
+               (lvar? x) (or (get @m x)
+                             (let [n (lvar)] (swap! m assoc x n) n))
+               (lcons? x) (->LCons (go (:car x)) (go (:cdr x)))
+               (vector? x) (mapv go x)
+               (map? x) (into {} (map (fn [[k v]] [(go k) (go v)]) x))
+               (sequential? x) (map go x)
+               :else x))]
+    (go t)))
+
 (defn- answers-stream
   "Yield every stored answer for a table key, unified against the call
-  arguments under package a."
+  arguments under package a (with fresh variables per retrieval)."
   [table key argv a]
-  (mplus* (map (fn [ans] (fn [] ((== argv ans) a)))
+  (mplus* (map (fn [ans] (fn [] ((== argv (refresh-term ans)) a)))
                (get @table key []))))
 
 (defn- tabled-pass

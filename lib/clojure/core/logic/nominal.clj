@@ -139,13 +139,19 @@
       (assoc names u (symbol (str (:name u) "_" (count names))))))
 
   Tie
+  ;; alpha-equivalence: unify this body against the other body with the
+  ;; two binders swapped. Boundary: this does not propagate the freshness
+  ;; side-condition (a1 # the other body) as a stored constraint, and the
+  ;; swap is applied over the walked term, so a variable still unbound
+  ;; under a binder is not given a suspended permutation. Unification is
+  ;; therefore sound when the tie bodies are ground/determined at unify
+  ;; time (the common case); a name escaping through a later-bound
+  ;; variable is not tracked.
   (-unify-term [u v s]
     (when (tie? v)
       (let [a1 (:binding u) a2 (:binding v)]
         (if (= a1 a2)
           (l/unify (:term u) (:term v) s)
-          ;; alpha-equivalence: unify this body against the other body with
-          ;; the two binders swapped.
           (l/unify (:term u)
                    (swap-term a1 a2 (l/walk* (:term v) s))
                    s)))))
