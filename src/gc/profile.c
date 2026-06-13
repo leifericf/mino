@@ -125,7 +125,7 @@ static const char *tag_name(unsigned char tag)
 
 void mino_alloc_profile_dump_top(mino_state *S, FILE *out, int top_n)
 {
-    static alloc_site_t copy[ALLOC_PROFILE_CAP];
+    alloc_site_t copy[ALLOC_PROFILE_CAP];
     int            i, kept = 0;
     uint64_t       total_count = 0, total_bytes = 0;
     (void)S;
