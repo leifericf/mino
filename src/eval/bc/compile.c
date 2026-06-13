@@ -1,3 +1,4 @@
+/* ALLOW: src/eval/bc/compile.c 4783 LOC — single-pass bytecode compiler; the compilation context (compile_state_t) and all emission helpers are tightly coupled through the context pointer; decomposition would require threading the full context through every helper and does not reduce complexity */
 /*
  * eval/bc/compile.c -- AST-to-bytecode compiler.
  *

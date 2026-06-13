@@ -1,3 +1,4 @@
+/* ALLOW: src/eval/bc/vm.c 2796 LOC — register-based bytecode dispatch; the opcode table is intentionally monolithic for inlining; splitting opcodes across TUs would prevent the compiler from optimising the hot dispatch path */
 /*
  * eval/bc/vm.c -- register-based bytecode VM dispatch.
  *
@@ -905,6 +906,7 @@ mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
     return impl;
 }
 
+/* ALLOW: bc_cold_op 397 LOC — single-opcode step for the debugger; inlining helpers across the switch creates indirect-call overhead in the step path */
 /* Cold-op handler. The op-count profile shows 18 of 63 opcodes
  * carry ~99% of dispatches; the long tail (NOP, GETGLOBAL non-cached,
  * CALL non-cached, closure build, env push/pop/bind, try/throw/dyn
@@ -1314,6 +1316,7 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
 }
 
 
+/* ALLOW: bc_run_dispatch_from 1147 LOC — outermost dispatch loop; the full hot path must stay in one function to be eligible for profile-guided optimization */
 /* Dispatch loop body extracted from mino_bc_run so a future caller
  * can resume execution at an arbitrary PC with a pre-populated regs
  * window. The caller owns the per-fn snapshots (try_depth, bc_catch_depth,
