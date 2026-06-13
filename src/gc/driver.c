@@ -6,7 +6,7 @@
  * live in roots.c; the full-heap sweep lives in major.c. The driver
  * below stitches them together for one mark-and-sweep cycle.
  * Trace primitives (gc_mark_push, gc_drain_mark_stack,
- * gc_process_header) stay here because they are reused by the
+ * gc_trace_children) stay here because they are reused by the
  * generational minor collector in minor.c.
  */
 
@@ -639,7 +639,8 @@ static void gc_mark_interior_push(mino_state *S, const void *p)
     if (h != NULL) gc_mark_push(S, h);
 }
 
-/* Public entry point for conservative scanning and root marking. */
+/* Callers outside this TU must not call gc_mark_interior_push directly;
+ * the static linkage is an intentional boundary. */
 void gc_mark_interior(mino_state *S, const void *p)
 {
     gc_mark_interior_push(S, p);

@@ -287,14 +287,6 @@ static void gc_mark_intern_table(mino_state *S, const intern_table_t *tbl)
     }
 }
 
-/*
- * Seed the mark stack from every source of pinned state: user-registered
- * root envs, symbol/keyword intern tables, try-catch exceptions, module
- * cache, metadata table, var registry, host-retained refs, dynamic
- * binding values, diagnostic cache, sort comparator, GC save stack,
- * cached core forms, async scheduler queue, trampoline sentinels, and
- * async timer channels.
- */
 /* gc_mark_ctx_dyn_stack -- mark every value bound in this ctx's dyn
  * stack. Walks frame -> bindings -> val. */
 static void gc_mark_ctx_dyn_stack(mino_state *S, mino_thread_ctx_t *ctx)
@@ -654,6 +646,14 @@ static void gc_mark_agent_runq(mino_state *S)
     }
 }
 
+/*
+ * Seed the mark stack from every source of pinned state: user-registered
+ * root envs, symbol/keyword intern tables, try-catch exceptions, module
+ * cache, metadata table, var registry, host-retained refs, dynamic
+ * binding values, diagnostic cache, sort comparator, GC save stack,
+ * cached core forms, async scheduler queue, trampoline sentinels, and
+ * async timer channels.
+ */
 void gc_mark_roots(mino_state *S)
 {
     gc_mark_envs_and_interns(S);

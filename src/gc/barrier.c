@@ -164,9 +164,9 @@ void gc_write_barrier(mino_state *S, void *container,
         if (new_value != NULL
             && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
             && !gc_ptr_is_state_embedded(S, new_value)) {
-            gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
-            if (!h_new_satb->mark) {
-                gc_mark_push(S, h_new_satb);
+            h_new = ((gc_hdr_t *)new_value) - 1;
+            if (!h_new->mark) {
+                gc_mark_push(S, h_new);
                 S->gc_barrier_dijkstra_pushes++;
             }
         }
