@@ -128,6 +128,7 @@
 (require "tests/deps_test")
 (require "tests/introspection_test")
 (require "tests/census_surface_test")
+(require "tests/qualified_special_form_test")
 
 (reset! clojure.test/suite-mode false)
 
