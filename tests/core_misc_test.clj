@@ -126,7 +126,12 @@
 ;; with-in-str use; read-line consumes lines from it, so line-seq
 ;; takes the same handle.
 
-(def core-misc-scratch-file "/tmp/mino-core-misc-scratch.txt")
+;; Portable temp path: /tmp does not exist on Windows and spit does not
+;; create parent dirs, so resolve the platform temp dir (TEMP / TMP on
+;; Windows) the way io_test does.
+(def core-misc-scratch-file
+  (str (or (getenv "TMPDIR") (getenv "TEMP") (getenv "TMP") "/tmp")
+       "/mino-core-misc-scratch.txt"))
 
 (deftest line-seq-from-string-cursor
   (is (= ["a" "b" "c"] (into [] (line-seq (atom "a\nb\nc")))))
