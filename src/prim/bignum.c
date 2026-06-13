@@ -20,6 +20,7 @@
 #include "imath.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +33,7 @@
 int mino_double_shortest(double d, char *out, size_t outsz)
 {
     int prec;
-    double pinf = (double)(1.0 / 0.0);
+    double pinf = INFINITY;
     if (d != d)     return snprintf(out, outsz, "NaN");
     if (d == pinf)  return snprintf(out, outsz, "Infinity");
     if (d == -pinf) return snprintf(out, outsz, "-Infinity");
@@ -436,7 +437,7 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
         char        buf[64];
         mino_val *bd, *unscaled;
         int         scale;
-        if (f != f || f == (double)(1.0 / 0.0) || f == -(double)(1.0 / 0.0)) {
+        if (f != f || f == INFINITY || f == -INFINITY) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "cannot convert non-finite double to bigint");
         }
