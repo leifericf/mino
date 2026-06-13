@@ -150,8 +150,10 @@ int eval_try_host_syntax(mino_state *S, mino_val *form,
             }
             {
                 mino_val *a = mino_cons(S, kw, evaled_rest);
-                gc_unpin(2);
+                gc_pin(a);        /* pin a before releasing kw/evaled_rest */
+                gc_unpin(2);      /* release kw and evaled_rest */
                 *out = apply_callable(S, prim, a, env);
+                gc_unpin(1);      /* release a */
                 return 1;
             }
         }
