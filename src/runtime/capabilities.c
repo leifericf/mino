@@ -72,6 +72,8 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_REDUCERS,    mino_install_clojure_reducers},
     { MINO_CAP_INSTANT,     mino_install_clojure_instant },
     { MINO_CAP_SPEC,        mino_install_clojure_spec    },
+    { MINO_CAP_UNIFY,       mino_install_clojure_unify   },
+    { MINO_CAP_CACHE,       mino_install_clojure_cache   },
     { MINO_CAP_TOOLING,     mino_install_mino_tooling    },
 };
 

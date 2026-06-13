@@ -239,6 +239,10 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.math (sqrt / sin / log / floor / etc.)." },
     { "reducers",     MINO_CAP_REDUCERS,
       "clojure.core.reducers (sequential transducer-layer wrapper)." },
+    { "unify",        MINO_CAP_UNIFY,
+      "clojure.core.unify (first-order unification: unify / unifier / subst)." },
+    { "cache",        MINO_CAP_CACHE,
+      "clojure.core.cache + clojure.core.memoize (cache protocol, memoizers)." },
     { NULL,           0u,                                                NULL },
 };
 

@@ -1508,6 +1508,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_TOOLING       (1u << 25)  /* mino.deps + mino.tasks */
 #define MINO_CAP_MATH_LIB      (1u << 26)  /* clojure.math */
 #define MINO_CAP_REDUCERS      (1u << 27)  /* clojure.core.reducers */
+#define MINO_CAP_UNIFY         (1u << 28)  /* clojure.core.unify */
+#define MINO_CAP_CACHE         (1u << 29)  /* clojure.core.cache + clojure.core.memoize */
 
 /* The sandbox preset: floor + Clojure-core (multimethods, protocols,
  * transducers, regex, bignum) + the bundled libraries that have no I/O

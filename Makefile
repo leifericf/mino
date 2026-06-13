@@ -71,7 +71,14 @@ BUNDLED = \
     lib_clojure_core_reducers:lib/clojure/core/reducers.clj \
     lib_clojure_instant:lib/clojure/instant.clj \
     lib_clojure_spec_alpha:lib/clojure/spec/alpha.clj \
+    lib_clojure_spec_gen_alpha:lib/clojure/spec/gen/alpha.clj \
+    lib_clojure_spec_test_alpha:lib/clojure/spec/test/alpha.clj \
     lib_clojure_core_specs_alpha:lib/clojure/core/specs/alpha.clj \
+    lib_clojure_core_unify:lib/clojure/core/unify.clj \
+    lib_clojure_core_cache:lib/clojure/core/cache.clj \
+    lib_clojure_core_memoize:lib/clojure/core/memoize.clj \
+    lib_clojure_test_tap:lib/clojure/test/tap.clj \
+    lib_clojure_test_junit:lib/clojure/test/junit.clj \
     lib_clojure_test_check_generators:lib/clojure/test/check/generators.clj \
     lib_clojure_test_check_properties:lib/clojure/test/check/properties.clj \
     lib_clojure_test_check:lib/clojure/test/check.clj \

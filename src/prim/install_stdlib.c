@@ -43,7 +43,14 @@
 #include "lib_clojure_core_reducers.h"
 #include "lib_clojure_instant.h"
 #include "lib_clojure_spec_alpha.h"
+#include "lib_clojure_spec_gen_alpha.h"
+#include "lib_clojure_spec_test_alpha.h"
 #include "lib_clojure_core_specs_alpha.h"
+#include "lib_clojure_core_unify.h"
+#include "lib_clojure_core_cache.h"
+#include "lib_clojure_core_memoize.h"
+#include "lib_clojure_test_tap.h"
+#include "lib_clojure_test_junit.h"
 #include "lib_clojure_test_check_generators.h"
 #include "lib_clojure_test_check_properties.h"
 #include "lib_clojure_test_check.h"
@@ -113,6 +120,11 @@ void mino_install_clojure_test(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "clojure.test",     lib_clojure_test_src);
     mino_register_bundled_lib(S, "clojure.template", lib_clojure_template_src);
+    /* clojure.test.tap + clojure.test.junit are pure-emission reporters
+     * layered over clojure.test's report multimethod, so they ship with
+     * the TEST capability. */
+    mino_register_bundled_lib(S, "clojure.test.tap",   lib_clojure_test_tap_src);
+    mino_register_bundled_lib(S, "clojure.test.junit", lib_clojure_test_junit_src);
 }
 
 /* clojure.repl + clojure.stacktrace install together: the REPL pair
@@ -158,8 +170,32 @@ void mino_install_clojure_spec(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "clojure.spec.alpha",
                               lib_clojure_spec_alpha_src);
+    mino_register_bundled_lib(S, "clojure.spec.gen.alpha",
+                              lib_clojure_spec_gen_alpha_src);
+    mino_register_bundled_lib(S, "clojure.spec.test.alpha",
+                              lib_clojure_spec_test_alpha_src);
     mino_register_bundled_lib(S, "clojure.core.specs.alpha",
                               lib_clojure_core_specs_alpha_src);
+}
+
+/* clojure.core.unify: a small, pure first-order unifier over ordinary
+ * data. No host dependency, so it stands alone under its own bit. */
+void mino_install_clojure_unify(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.core.unify",
+                              lib_clojure_core_unify_src);
+}
+
+/* clojure.core.cache + clojure.core.memoize: memoize is layered over the
+ * cache protocol, so the dependent pair ships together under one bit. */
+void mino_install_clojure_cache(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.core.cache",
+                              lib_clojure_core_cache_src);
+    mino_register_bundled_lib(S, "clojure.core.memoize",
+                              lib_clojure_core_memoize_src);
 }
 
 /* clojure.test.check + generators + properties: minimal property
