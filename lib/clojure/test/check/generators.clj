@@ -230,6 +230,27 @@
 (def nat
   (gen-record (fn [size] (int-rose (rand-int-in 0 size)))))
 
+(defn choose
+  "Generator for an integer uniformly distributed in the inclusive range
+  [lower upper]. Size-independent (matching the test.check contract) and
+  shrinks toward the in-range value closest to zero."
+  [lower upper]
+  (when (> lower upper)
+    (throw (ex-info "choose: lower bound must not exceed upper bound"
+                    {:lower lower :upper upper})))
+  (gen-record
+    (fn [_size]
+      (let [v (rand-int-in lower upper)]
+        (if (<= lower 0 upper)
+          ;; Range straddles zero: int-rose already shrinks toward 0, in
+          ;; range, with the full shrink tree.
+          (int-rose v)
+          ;; Range excludes zero: shrink toward the near bound (lower for
+          ;; all-positive, upper for all-negative) by offsetting an
+          ;; int-rose that shrinks toward 0.
+          (let [target (if (< upper 0) upper lower)]
+            (rose-fmap (fn [n] (+ target n)) (int-rose (- v target)))))))))
+
 (def s-pos-int
   (gen-record (fn [size] (int-rose (rand-int-in 1 (max 1 size))))))
 

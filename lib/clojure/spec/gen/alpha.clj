@@ -105,36 +105,39 @@
 
 (defn choose
   "Generator that yields integers uniformly in the inclusive range
-  [lower, upper]."
+  [lower, upper], shrinking toward the in-range value closest to zero."
   [lower upper]
-  (let [span (- upper lower)]
-    (when (neg? span)
-      (throw (ex-info "choose: lower must not exceed upper"
-                      {:lower lower :upper upper})))
-    (fmap (fn [_] (+ lower (rand-int (inc span))))
-          (return nil))))
+  (tcgen/choose lower upper))
 
 (defn large-integer*
   "Generator for integers, optionally bounded by :min and :max in the
-  options map. Unbounded sides default to a size-scaled range."
+  options map. Unbounded sides default to a wide range. Shrinks toward
+  zero (or the nearest in-range bound)."
   [{:keys [min max]}]
   (let [lo (or min -1000000)
         hi (or max 1000000)]
-    (choose lo hi)))
+    (tcgen/choose lo hi)))
 
 (def large-integer
   "Generator for integers across a wide range."
   (large-integer* {}))
 
+;; double*: built over an integer generator scaled into the requested
+;; range, so the result carries a shrink tree (toward the low bound) the
+;; way a plain (rand)-based value would not. The :infinite? and :NaN?
+;; options are accepted for surface compatibility but the produced range
+;; is always finite in this port.
+(def ^:private double-resolution 1000000)
+
 (defn double*
   "Generator for doubles, optionally bounded by :min and :max in the
-  options map. The :infinite? and :NaN? options are accepted but the
-  bounded range is always finite in this port."
+  options map. Shrinks toward the low bound."
   [{:keys [min max]}]
-  (let [lo (clojure.core/double (or min -1000000.0))
-        hi (clojure.core/double (or max 1000000.0))
+  (let [lo   (clojure.core/double (or min -1000000.0))
+        hi   (clojure.core/double (or max 1000000.0))
         span (- hi lo)]
-    (fmap (fn [_] (+ lo (* span (rand)))) (return nil))))
+    (fmap (fn [n] (+ lo (* span (/ (clojure.core/double n) double-resolution))))
+          (tcgen/choose 0 double-resolution))))
 
 (defn frequency
   "Generator that picks among the supplied generators weighted by their
@@ -222,7 +225,8 @@
         (tcgen/tuple tcgen/symbol tcgen/symbol)))
 
 (def uuid
-  "Generator for UUIDs."
+  "Generator for random UUIDs. A UUID has no meaningful smaller form, so
+  the values do not shrink (matching the reference generator)."
   (fmap (fn [_] (random-uuid)) (return nil)))
 
 ;; --- mixed-type generators --------------------------------------------------
