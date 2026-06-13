@@ -849,6 +849,26 @@ mino_val **mino_jit_call_known_fn_slow(mino_state *S, mino_val **regs,
     return regs;
 }
 
+/* Read eval_current_form from the current thread context and fill the
+ * three out-params with the source location it carries.  Callers use
+ * this to pass accurate file/line/col to push_frame without repeating
+ * the MINO_CONS guard in every helper that needs stack attribution. */
+static void jit_extract_form_loc(mino_state *S,
+                                  const char **out_file,
+                                  int *out_line,
+                                  int *out_col)
+{
+    const mino_val *form = mino_current_ctx(S)->eval_current_form;
+    *out_file = NULL;
+    *out_line = 0;
+    *out_col  = 0;
+    if (form != NULL && mino_type_of((mino_val *)form) == MINO_CONS) {
+        *out_file = form->as.cons.file;
+        *out_line = form->as.cons.line;
+        *out_col  = form->as.cons.column;
+    }
+}
+
 /* Inline-cached-known-PRIM_ARGV complement. Stencil's inline path
  * verified that slot->cached_callable_kind ==
  * MINO_IC_CALLABLE_PRIM_ARGV, so the callee is a MINO_PRIM with
@@ -880,15 +900,8 @@ mino_val **mino_jit_call_known_prim_slow(mino_state *S,
         goto fallback;
     }
     {
-        const mino_val *form = mino_current_ctx(S)->eval_current_form;
-        const char *file = NULL;
-        int         line = 0;
-        int         col  = 0;
-        if (form != NULL && mino_type_of((mino_val *)form) == MINO_CONS) {
-            file = form->as.cons.file;
-            line = form->as.cons.line;
-            col  = form->as.cons.column;
-        }
+        const char *file; int line; int col;
+        jit_extract_form_loc(S, &file, &line, &col);
         push_frame(S, callee->as.prim.name, file, line, col);
         {
             mino_val *r = callee->as.prim.fn2(S,
@@ -954,15 +967,8 @@ mino_val **mino_jit_call_known_native_slow(mino_state *S,
         S->ns_vars.current_ns    = fn->as.fn.defining_ns;
         S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
     }
-    const mino_val *form = mino_current_ctx(S)->eval_current_form;
-    const char *file = NULL;
-    int         line = 0;
-    int         col  = 0;
-    if (form != NULL && mino_type_of((mino_val *)form) == MINO_CONS) {
-        file = form->as.cons.file;
-        line = form->as.cons.line;
-        col  = form->as.cons.column;
-    }
+    const char *file; int line; int col;
+    jit_extract_form_loc(S, &file, &line, &col);
     push_frame(S, "fn", file, line, col);
     /* Take the JIT-call fast lane when the cached bc + the matched
      * single-arity / no-rest / captures-free / native-ready

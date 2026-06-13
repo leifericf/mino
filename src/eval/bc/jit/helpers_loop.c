@@ -262,6 +262,35 @@ mino_val **mino_jit_loop_int_dec_acc_slow(mino_state *S,
     return regs;
 }
 
+/* Shared validation, IC resolution, and env/base capture for the two
+ * OP_PROTOCOL_*_CACHED slow helpers.  Performs bounds-check on the IC
+ * slot, atom-shape-check, mino_bc_ic_resolve_protocol dispatch, and
+ * snapshots the env and base the caller needs to drive
+ * apply_callable_argv.  Returns the resolved impl on success, NULL on
+ * any validation or resolution failure. */
+static mino_val *jit_protocol_resolve(mino_state *S,
+                                       mino_val **regs,
+                                       unsigned a,
+                                       unsigned argn,
+                                       mino_bc_fn_t *bc,
+                                       unsigned slot_idx,
+                                       mino_env **out_env,
+                                       ptrdiff_t *out_base)
+{
+    ptrdiff_t          base = regs - S->bc.bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    *out_env  = ctx->jit_invoke_env;
+    *out_base = base;
+    if (bc->ic_slots_len <= 0 || slot_idx >= (unsigned)bc->ic_slots_len) return NULL;
+    mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+    if (argn < 1 || slot->atom == NULL
+        || mino_type_of(slot->atom) != MINO_ATOM) {
+        return NULL;
+    }
+    mino_val *first_arg = S->bc.bc_regs[base + a];
+    return mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+}
+
 /* OP_PROTOCOL_CALL_CACHED slow helper. Mirrors the interpreter's
  * handler bit-for-bit: bounds-check the slot, atom-shape-check, run
  * mino_bc_ic_resolve_protocol (handles the dispatch-table lookup, IC
@@ -278,17 +307,10 @@ mino_val **mino_jit_protocol_call_cached_slow(mino_state *S,
                                                  mino_bc_fn_t *bc,
                                                  unsigned slot_idx)
 {
-    ptrdiff_t          base = regs - S->bc.bc_regs;
-    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env        *env  = ctx->jit_invoke_env;
-    if (bc->ic_slots_len <= 0 || slot_idx >= (unsigned)bc->ic_slots_len) return NULL;
-    mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
-    if (argn < 1 || slot->atom == NULL
-        || mino_type_of(slot->atom) != MINO_ATOM) {
-        return NULL;
-    }
-    mino_val *first_arg = S->bc.bc_regs[base + a];
-    mino_val *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    mino_env  *env;
+    ptrdiff_t  base;
+    mino_val *impl = jit_protocol_resolve(S, regs, a, argn, bc, slot_idx,
+                                           &env, &base);
     if (impl == NULL) return NULL;
     mino_val *r = apply_callable_argv(S, impl,
                                          S->bc.bc_regs + base + a,
@@ -310,17 +332,10 @@ mino_val *mino_jit_protocol_tailcall_cached_slow(mino_state *S,
                                                     mino_bc_fn_t *bc,
                                                     unsigned slot_idx)
 {
-    ptrdiff_t          base = regs - S->bc.bc_regs;
-    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
-    mino_env        *env  = ctx->jit_invoke_env;
-    if (bc->ic_slots_len <= 0 || slot_idx >= (unsigned)bc->ic_slots_len) return NULL;
-    mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
-    if (argn < 1 || slot->atom == NULL
-        || mino_type_of(slot->atom) != MINO_ATOM) {
-        return NULL;
-    }
-    mino_val *first_arg = S->bc.bc_regs[base + a];
-    mino_val *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    mino_env  *env;
+    ptrdiff_t  base;
+    mino_val *impl = jit_protocol_resolve(S, regs, a, argn, bc, slot_idx,
+                                           &env, &base);
     if (impl == NULL) return NULL;
     return apply_callable_argv(S, impl,
                                 S->bc.bc_regs + base + a,
