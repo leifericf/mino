@@ -7,17 +7,23 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+#include <limits.h>
 #include <stdarg.h>
 
-/* Count args in a cons list. */
+/* Count args in a cons list.
+ * Uses size_t to avoid signed-integer overflow UB on long lists.
+ * Clamps at INT_MAX so the cast to int is always safe and a crafted
+ * list with > INT_MAX elements cannot wrap negative and match a
+ * variadic member registered with nargs == -1. */
 static int host_count_args(mino_val *args)
 {
-    int n = 0;
+    size_t n = 0;
     while (mino_is_cons(args)) {
+        if (n == (size_t)INT_MAX) return INT_MAX;
         n++;
         args = args->as.cons.cdr;
     }
-    return n;
+    return (int)n;
 }
 
 /* Extract keyword name as C string. Returns NULL if not a keyword. */
