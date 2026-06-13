@@ -817,7 +817,12 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
     /* Re-seal to RX. */
     if (ctx.slab != NULL) {
         if (jit_slab_make_rx(ctx.slab) != 0) {
+            /* mprotect failed: the slab must not stay in RW state.  The
+             * bump cursor has not been advanced yet (that only happens on
+             * the success path below), so the slot is unborn and the
+             * cleanup call's best-effort re-seal is the right teardown. */
             free(ctx.pc_offsets);
+            jit_compile_cleanup(ctx.slab, ctx.region, ctx.total_size);
             return -1;
         }
     } else {

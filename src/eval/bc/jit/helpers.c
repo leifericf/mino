@@ -222,7 +222,9 @@ mino_val **mino_jit_assoc_slow(mino_state *S, mino_val **regs,
         if (t == MINO_VECTOR && MINO_IS_INT(k)) {
             long long idx = MINO_INT_VAL(k);
             if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
+                gc_pin(coll); gc_pin(v);
                 mino_val *r = vec_assoc1(S, coll, (size_t)idx, v);
+                gc_unpin(2);
                 if (r == NULL) return NULL;
                 regs    = S->bc.bc_regs + base;
                 regs[a] = r;
@@ -230,7 +232,9 @@ mino_val **mino_jit_assoc_slow(mino_state *S, mino_val **regs,
             }
         }
         if (t == MINO_MAP) {
+            gc_pin(coll); gc_pin(k); gc_pin(v);
             mino_val *r = mino_map_assoc1(S, coll, k, v);
+            gc_unpin(3);
             if (r == NULL) return NULL;
             regs    = S->bc.bc_regs + base;
             regs[a] = r;
@@ -267,7 +271,9 @@ mino_val **mino_jit_assoc_bang_slow(mino_state *S, mino_val **regs,
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
+        gc_pin(coll); gc_pin(k); gc_pin(v);
         mino_val *r = mino_assoc_bang(S, coll, k, v);
+        gc_unpin(3);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
@@ -300,7 +306,9 @@ mino_val **mino_jit_conj_bang_slow(mino_state *S, mino_val **regs,
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
+        gc_pin(coll); gc_pin(item);
         mino_val *r = mino_conj_bang(S, coll, item);
+        gc_unpin(2);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
@@ -329,7 +337,9 @@ mino_val **mino_jit_dissoc_bang_slow(mino_state *S, mino_val **regs,
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
+        gc_pin(coll); gc_pin(key);
         mino_val *r = mino_dissoc_bang(S, coll, key);
+        gc_unpin(2);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
@@ -358,7 +368,9 @@ mino_val **mino_jit_disj_bang_slow(mino_state *S, mino_val **regs,
     if (coll != NULL
         && mino_type_of(coll) == MINO_TRANSIENT
         && coll->as.transient.valid) {
+        gc_pin(coll); gc_pin(item);
         mino_val *r = mino_disj_bang(S, coll, item);
+        gc_unpin(2);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
@@ -388,7 +400,9 @@ mino_val **mino_jit_dissoc_slow(mino_state *S, mino_val **regs,
     mino_val *coll = S->bc.bc_regs[base + b];
     mino_val *key  = S->bc.bc_regs[base + c];
     if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
+        gc_pin(coll); gc_pin(key);
         mino_val *r = mino_map_dissoc1(S, coll, key);
+        gc_unpin(2);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
@@ -418,7 +432,9 @@ mino_val **mino_jit_conj_vec_slow(mino_state *S, mino_val **regs,
     mino_val *coll = S->bc.bc_regs[base + b];
     mino_val *item = S->bc.bc_regs[base + c];
     if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+        gc_pin(coll); gc_pin(item);
         mino_val *r = vec_conj1(S, coll, item);
+        gc_unpin(2);
         if (r == NULL) return NULL;
         regs    = S->bc.bc_regs + base;
         regs[a] = r;
