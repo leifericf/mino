@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Core: `sequence` with a transducer now realizes in O(1) stack per element. It emits each step's buffered outputs as a direct lazy cons-chain instead of `(concat items (step ...))`, so reducing, counting, or seq-walking a large transduced sequence (and `clojure.core.reducers/foldcat` over a reducer, which builds on it) no longer recurses on the C stack proportional to the element count -- which previously tripped the recursion guard under the larger stack frames of sanitizer builds.
 - GC: Restore gc_save_len when a throw unwinds a try/catch frame, so the transient pins made between try entry and the throw no longer leak; previously each exception left the call's pinned callable on the GC save stack, which in release builds silently stopped pinning new roots after 64 leaks (a latent liveness hazard) and aborted sanitizer builds.
 - Portability: macOS file-mtime build no longer fails -- _DARWIN_C_SOURCE re-enables st_mtimespec under the file's _POSIX_C_SOURCE, and the __APPLE__ branch is selected ahead of the Linux-only st_mtim path.
 - Portability: thread-sleep's timespec is scoped to the non-Windows path, fixing the -Werror=unused-but-set-variable mingw/gcc build break on Windows.

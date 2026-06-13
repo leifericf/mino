@@ -3077,28 +3077,36 @@
          xrf   (xf (fn
                       ([] nil)
                       ([result] result)
-                      ([_ input] (swap! acc conj input) nil)))]
+                      ([_ input] (swap! acc conj input) nil)))
+         ;; Emit the buffered outputs as a direct lazy cons-chain whose
+         ;; final tail is produced by `tail` (a thunk). Building the chain
+         ;; with cons rather than (concat items (step ...)) keeps
+         ;; realization O(1) stack per element: walking a long result no
+         ;; longer descends a growing concat spine, so a large transduced
+         ;; sequence reduces/counts without deep C recursion.
+         emit  (fn emit [items i tail]
+                 (if (< i (count items))
+                   (cons (nth items i) (lazy-seq (emit items (inc i) tail)))
+                   (tail)))]
      ((fn step [s]
         (lazy-seq
           (loop [s s]
             (if-let [s (seq s)]
-              (do
-                (let [ret (xrf nil (first s))]
-                  (if (reduced? ret)
-                    (do (xrf nil)
-                        (let [items @acc]
-                          (reset! acc [])
-                          (when (seq items)
-                            (concat items nil))))
-                    (let [items @acc]
-                      (if (seq items)
-                        (do (reset! acc [])
-                            (concat items (step (rest s))))
-                        (recur (rest s)))))))
+              (let [ret (xrf nil (first s))]
+                (if (reduced? ret)
+                  (do (xrf nil)
+                      (let [items @acc]
+                        (reset! acc [])
+                        (emit items 0 (fn [] nil))))
+                  (let [items @acc]
+                    (if (seq items)
+                      (do (reset! acc [])
+                          (emit items 0 (fn [] (step (rest s)))))
+                      (recur (rest s))))))
               (do (xrf nil)
                   (let [items @acc]
                     (reset! acc [])
-                    (when (seq items) (seq items))))))))
+                    (emit items 0 (fn [] nil))))))))
       coll)))
   ([xf coll & more-colls]
    ;; Multi-coll variant: pull one element per collection per step and
@@ -3113,7 +3121,13 @@
                       ([_ input & more]
                        (swap! acc conj
                               (apply vector input more))
-                       nil)))]
+                       nil)))
+         ;; See the single-coll arity: emit buffered outputs as a direct
+         ;; lazy cons-chain so realization stays O(1) stack per element.
+         emit  (fn emit [items i tail]
+                 (if (< i (count items))
+                   (cons (nth items i) (lazy-seq (emit items (inc i) tail)))
+                   (tail)))]
      ((fn step [ss]
         (lazy-seq
           (loop [ss ss]
@@ -3125,16 +3139,16 @@
                     (do (xrf nil)
                         (let [items @acc]
                           (reset! acc [])
-                          (when (seq items) (concat items nil))))
+                          (emit items 0 (fn [] nil))))
                     (let [items @acc]
                       (if (seq items)
                         (do (reset! acc [])
-                            (concat items (step (map1 rest seqs))))
+                            (emit items 0 (fn [] (step (map1 rest seqs)))))
                         (recur (map1 rest seqs))))))
                 (do (xrf nil)
                     (let [items @acc]
                       (reset! acc [])
-                      (when (seq items) (seq items)))))))))
+                      (emit items 0 (fn [] nil)))))))))
       (cons coll more-colls)))))
 
 (defn halt-when
