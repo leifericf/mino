@@ -391,7 +391,7 @@ void gc_charge_pause(mino_state *S, long long start_ns);
  * bucket 23. Called from each collection / slice site that already
  * computed elapsed_ns. Lifetime histogram + recent-window ring
  * together support both percentile + distribution queries. */
-void gc_record_pause(mino_state *S, size_t ns);
+void gc_record_pause(mino_state *S, uint64_t ns);
 
 /* Allocation-site sampler entry. site is the immediate return address
  * captured at gc_alloc_typed_inner (the C-side alloc site, which lets

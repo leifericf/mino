@@ -88,7 +88,7 @@ void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
 void gc_charge_pause(mino_state *S, long long start_ns)
 {
     long long raw_ns     = mino_monotonic_ns() - start_ns;
-    size_t    elapsed_ns = (raw_ns > 0) ? (size_t)raw_ns : 0; /* clamp: backwards-clock guard */
+    uint64_t  elapsed_ns = (raw_ns > 0) ? (uint64_t)raw_ns : 0; /* clamp: backwards-clock guard */
     S->gc.total_ns += elapsed_ns;
     if (elapsed_ns > S->gc.max_ns) {
         S->gc.max_ns = elapsed_ns;
@@ -98,13 +98,13 @@ void gc_charge_pause(mino_state *S, long long start_ns)
 
 /* Record one STW pause sample. Saturates the ring slot at UINT32_MAX
  * ns; bucket-clamps the log2 histogram at index 23 ([8.4ms, ...)). */
-void gc_record_pause(mino_state *S, size_t ns)
+void gc_record_pause(mino_state *S, uint64_t ns)
 {
     unsigned idx;
     unsigned bucket;
-    size_t   n;
+    uint64_t n;
     uint32_t sample;
-    sample = (ns > (size_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)ns;
+    sample = (ns > (uint64_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)ns;
     idx = S->gc_pause_ring_idx;
     S->gc_pause_ring[idx] = sample;
     S->gc_pause_ring_idx = (idx + 1u) & 0xffu;
