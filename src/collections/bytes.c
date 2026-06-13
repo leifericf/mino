@@ -16,7 +16,6 @@
  */
 
 #include "runtime/internal.h"
-#include "prim/internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -39,8 +38,9 @@ mino_val *mino_bytes(mino_state *S, const unsigned char *src, size_t n)
     if (n > 0) {
         buf = (unsigned char *)calloc(1, n);
         if (buf == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            set_eval_diag(S, NULL, "internal", "MIN001",
                 "byte-array: out of memory");
+            return NULL;
         }
         if (src != NULL) memcpy(buf, src, n);
         v->as.bytes.data = buf;
