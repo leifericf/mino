@@ -76,8 +76,9 @@ mino_env *ns_env_ensure(mino_state *S, const char *name)
     /* clojure.core must exist before any other ns env so we can wire the
      * parent pointer. Create it lazily on first request. */
     if (S->ns_vars.mino_core_env == NULL) {
-        S->ns_vars.mino_core_env = env_alloc(S, NULL);
-        ns_env_register_root(S, S->ns_vars.mino_core_env);
+        mino_env *core_env = env_alloc(S, NULL);
+        ns_env_register_root(S, core_env);   /* may longjmp on OOM; assign only after */
+        S->ns_vars.mino_core_env = core_env;
         if (S->ns_vars.ns_env_len == S->ns_vars.ns_env_cap) ns_env_table_grow(S);
         S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].name = intern_filename(S, "clojure.core");
         S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].env  = S->ns_vars.mino_core_env;
