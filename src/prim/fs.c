@@ -18,6 +18,12 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+/* On macOS, strict _POSIX_C_SOURCE hides the BSD st_mtimespec extension
+ * (and Darwin has no st_mtim), so re-enable the Darwin surface to keep
+ * sub-second file-mtime precision available. */
+#if defined(__APPLE__)
+#define _DARWIN_C_SOURCE 1
+#endif
 
 #include "prim/internal.h"
 #include "mino.h"
@@ -199,15 +205,17 @@ static mino_val *prim_file_mtime(mino_state *S, mino_val *args,
     }
     if (stat(path_val->as.s.data, &st) != 0)
         return mino_nil(S);
-    /* Use sub-second precision where struct stat has st_mtim (POSIX.1-2008).
-     * macOS exposes the same data as st_mtimespec.  Fall back to the
-     * whole-second st_mtime on Windows and other platforms. */
-#if defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L && !defined(_WIN32)
-    return mino_int(S, (long long)st.st_mtim.tv_sec  * 1000LL
-                     + (long long)st.st_mtim.tv_nsec / 1000000LL);
-#elif defined(__APPLE__)
+    /* Use sub-second precision where struct stat carries it. macOS only
+     * ever exposes it as st_mtimespec (it has no st_mtim even though this
+     * file defines _POSIX_C_SOURCE), so check __APPLE__ first; Linux and
+     * other POSIX.1-2008 platforms use st_mtim. Fall back to whole-second
+     * st_mtime on Windows and elsewhere. */
+#if defined(__APPLE__)
     return mino_int(S, (long long)st.st_mtimespec.tv_sec  * 1000LL
                      + (long long)st.st_mtimespec.tv_nsec / 1000000LL);
+#elif defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L && !defined(_WIN32)
+    return mino_int(S, (long long)st.st_mtim.tv_sec  * 1000LL
+                     + (long long)st.st_mtim.tv_nsec / 1000000LL);
 #else
     return mino_int(S, (long long)st.st_mtime * 1000LL);
 #endif
