@@ -12,7 +12,6 @@
 
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"  /* tc_load: MSVC-portable thread_count read */
-#include "eval/bc/internal.h"
 
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the

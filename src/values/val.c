@@ -144,9 +144,6 @@ mino_val *mino_string(mino_state *S, const char *s)
  * Entries live for the life of the process.
  */
 
-#define INTERN_HT_INIT      64
-#define INTERN_HT_LOAD      75  /* percent */
-
 static uint32_t intern_hash(const char *s, size_t len)
 {
     return fnv_bytes(2166136261u, (const unsigned char *)s, len);

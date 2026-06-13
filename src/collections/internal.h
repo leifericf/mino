@@ -36,6 +36,8 @@
  * extending the probe chain. */
 #define INTERN_HT_EMPTY     SIZE_MAX
 #define INTERN_HT_TOMBSTONE (SIZE_MAX - 1)
+#define INTERN_HT_INIT      64          /* initial hash-table capacity (power of 2) */
+#define INTERN_HT_LOAD      75          /* max load factor before rebuild (percent) */
 
 struct intern_table {
     mino_val **entries;
