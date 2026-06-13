@@ -30,9 +30,18 @@
 - GC: Replace narrating comment with constraint comment before gc_mark_interior
 - GC: Rename h_new_satb to h_new in gc_write_barrier to eliminate duplicate naming
 - GC: Move gc_mark_roots block comment to precede the function definition
+- GC: Guard size_t overflow before range-merge N+K addition (memory-gc-001)
+- GC: Guard len+1 overflow in dup_n_inner before GC allocation (security-gc-001)
+- GC: Document Class I realloc-abort limitation in gc_range_merge_pending (security-gc-002)
+- GC: Clamp backwards-clock timing casts in minor and major collectors (memory-gc-002, portability-gc-002)
+- GC: Use PRIxPTR/uintptr_t for aux field in gc_evt_dump to fix LLP64 truncation (portability-gc-001)
+- GC: Trace MINO_QUEUE front and back cons spines in trace_val
+- GC: Guard mino_compare two-alloc window with gc_depth to prevent register-held cons from being collected
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
+- Security: Propagate OOM when intern table bootstrap malloc fails instead of NULL-dereferencing probe loop
+- Security: Add overflow guard before malloc(n_fields * sizeof(*field_kws)) in mino_defrecord
 - Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
 - Values: Guard mino_host_array_new against len*sizeof overflow (security-values-002)
 - Values: Pin head across allocating GC calls in mino_host_array_from_coll generic seq path (memory-values-001)
@@ -42,6 +51,9 @@
 - Values: Guard cap*2 overflow in mino_host_array_from_coll realloc
 - Values: Guard new_ht_cap*sizeof overflow in intern_ht_rebuild
 - Values: Suppress GC across vals[] accumulation in mino_host_array_from_coll vector fast path
+- Values: Fix undefined behaviour in hash_val for NaN and infinity double inputs
+- Values: Document FNV-1a deviation from JVM Clojure Murmur3/hasheq in map_hash.c
+- Values: Note arithmetic-right-shift assumption at MINO_INT_VAL with ADR reference
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
 - Core: Add \delete to char-name-string and add \delete reader literal support
 - Core: Register uuid reader in *data-readers* alongside inst reader
@@ -90,6 +102,10 @@
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
+- BC: Pin GC roots in try_builder_rewrite, try_reduce_rewrite, and compile_binding to prevent use-after-collect under GC stress
+- BC: Fix signed-overflow UB in OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC hot paths; add safe non-GCC fallbacks for OP_ADD_IK, OP_SUB_IK, UNOP_INC, and UNOP_DEC
+- BC: Replace (long)pc PC arithmetic with (ptrdiff_t)pc at JMP, JMPIFNOT, and PUSHCATCH sites
+- BC: Guard mino_bc_ic_resolve_protocol against NULL or non-atom slot->atom before dereference
 - API: Consolidate embedder config knobs into mino_set_option / mino_get_option (step/heap limits, thread limit, thread stack bytes, JIT mode, JIT hot threshold); setter returns 0/-1 like mino_gc_set_param and now rejects invalid JIT modes instead of ignoring them
 - API: Remove mino_set_limit, MINO_LIMIT_STEPS/MINO_LIMIT_HEAP, mino_set_thread_limit, mino_get_thread_limit, mino_state_set_jit_mode, mino_state_jit_mode, mino_state_set_jit_hot_threshold, mino_state_jit_hot_threshold, and mino_set_thread_stack_size (alpha surface, no shims)
 - Async: fix GC hazard when xform/ex_handler stored before alloc_val in chan_new (memory-async-001)
@@ -127,6 +143,13 @@
 - JIT: Pin GC-live locals across allocating calls in nth-vec, closure, make-lazy, and tailcall helpers
 - JIT: Fix signed/unsigned protocol slot bounds check to block wrap-around bypass
 - JIT: Recompute regs from S->bc.bc_regs after native call in deopt path
+- JIT: Guard __builtin___clear_cache and __builtin_expect behind compiler-detection macros for MSVC compatibility
+- JIT: Change stencil_desc_t size/nsymbols/nrelocs fields from unsigned long to size_t; fix LLP64 narrowing casts in entry.c and emit.c
+- JIT: Add MAP_ANONYMOUS fallback for MAP_ANON in region.c for POSIX portability
+- JIT: Add lower-bound check before insn_p-1 pointer arithmetic in x86_64 chain pass
+- JIT: Pin child env with gc_pin/gc_unpin in mino_jit_push_env_slow to close GC window
+- JIT: Decompose mino_jit_compile_inner (584 LOC) into five static sub-functions via jit_compile_ctx_t
+- JIT: Add parity tests for OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC opcodes
 - Eval: Fix snprintf over-read in gensym (security-eval-001)
 - Eval: Fix write-barrier bypass in vec_destructure_args (memory-eval-003)
 - Eval: Pin GC arrays in qq_expand_vector across quasiquote_expand loop (memory-eval-002)
