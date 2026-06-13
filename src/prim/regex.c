@@ -75,6 +75,11 @@ static mino_val *match_vector(mino_state *S, mino_val *text_val,
     mino_val *items[1 + RE_MAX_GROUPS];
     size_t      n = 1;
     int         i;
+    /* Guard: suppress GC across the entire group-string build loop so
+     * items[0..k-1] (already-allocated strings) and text_val's data
+     * pointer are not invalidated by a collection triggered by a later
+     * mino_string_n call inside the loop. */
+    mino_current_ctx(S)->gc_depth++;
     items[0] = mino_string_n(S, text_val->as.s.data + match_idx,
                              (size_t)match_len);
     for (i = 0; i < g->n; i++) {
@@ -87,6 +92,7 @@ static mino_val *match_vector(mino_state *S, mino_val *text_val,
                 (size_t)(g->ends[i] - g->starts[i]));
         }
     }
+    mino_current_ctx(S)->gc_depth--;
     return mino_vector(S, items, n);
 }
 
@@ -257,6 +263,13 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
         long long   cp_m_end = cp_m_start
             + utf8_codepoint_count(base + match_idx, (size_t)match_len);
         mino_val *match;
+        mino_val *result;
+        /* Guard: suppress GC across all allocating calls in the
+         * result-building block so `base` (derived from text_val's
+         * data pointer) and already-allocated items[] entries are not
+         * invalidated by a collection triggered by a later mino_string_n,
+         * mino_int, or mino_vector call. */
+        mino_current_ctx(S)->gc_depth++;
         if (groups.n > 0) {
             /* Group offsets are relative to the scan base; build the
              * vector against that base rather than the text start. */
@@ -277,14 +290,19 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
         } else {
             match = mino_string_n(S, base + match_idx, (size_t)match_len);
         }
-        if (match == NULL) return NULL;
+        if (match == NULL) {
+            mino_current_ctx(S)->gc_depth--;
+            return NULL;
+        }
         {
             mino_val *items[3];
             items[0] = match;
             items[1] = mino_int(S, cp_m_start);
             items[2] = mino_int(S, cp_m_end);
-            return mino_vector(S, items, 3);
+            result = mino_vector(S, items, 3);
         }
+        mino_current_ctx(S)->gc_depth--;
+        return result;
     }
 }
 
