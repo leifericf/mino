@@ -180,8 +180,12 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
         /* Run the validator against the initial value before installing
          * it so a bad initial value is rejected at construction time --
          * mirrors Clojure's contract for atom + :validator. */
-        mino_val *vargs  = mino_cons(S, initial, mino_nil(S));
-        mino_val *result = mino_call(S, validator, vargs, env);
+        mino_val *vargs;
+        mino_val *result;
+        gc_pin(atom);
+        vargs  = mino_cons(S, initial, mino_nil(S));
+        gc_unpin(1);
+        result = mino_call(S, validator, vargs, env);
         if (result == NULL) return NULL;
         if (!mino_is_truthy(result)) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
@@ -743,10 +747,35 @@ static mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
     return mino_int(S, (long long)mino_get_option(S, MINO_OPT_THREAD_LIMIT));
 }
 
-/* (mino-thread-id*) — a stable identity for the calling thread's
- * runtime context (the ctx address as an integer). Used by the
- * cooperative `locking` monitor registry in core.clj to record
- * ownership; nothing dereferences the value. */
+/* (mino-thread-id*) — a stable monotonic integer identity for the calling
+ * thread. Used by the cooperative `locking` monitor registry in core.clj to
+ * record ownership; nothing dereferences the value.
+ *
+ * Each OS thread gets a unique positive integer on first call; the raw
+ * ctx pointer is never exposed so heap layout is not leaked to user code.
+ * IDs start at 1 (the embedder's main thread) and increase monotonically. */
+
+#if defined(_WIN32) && defined(_MSC_VER)
+static volatile LONG s_thread_id_counter = 0;
+__declspec(thread) static long long s_thread_id_tls = 0;
+static long long thread_id_get(void)
+{
+    if (s_thread_id_tls == 0)
+        s_thread_id_tls = (long long)InterlockedIncrement(&s_thread_id_counter);
+    return s_thread_id_tls;
+}
+#else
+static int s_thread_id_counter = 0;  /* written under __atomic, relaxed */
+static __thread long long s_thread_id_tls = 0;
+static long long thread_id_get(void)
+{
+    if (s_thread_id_tls == 0)
+        s_thread_id_tls = (long long)__atomic_add_fetch(&s_thread_id_counter, 1,
+                                                        __ATOMIC_RELAXED);
+    return s_thread_id_tls;
+}
+#endif
+
 static mino_val *prim_mino_thread_id(mino_state *S, mino_val *args,
                                        mino_env *env)
 {
@@ -755,7 +784,7 @@ static mino_val *prim_mino_thread_id(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "mino-thread-id* takes no arguments");
     }
-    return mino_int(S, (long long)(intptr_t)mino_current_ctx(S));
+    return mino_int(S, thread_id_get());
 }
 
 /* (mino-thread-count) — return the live worker count for this state. */
