@@ -37,6 +37,11 @@
 - GC: Use PRIxPTR/uintptr_t for aux field in gc_evt_dump to fix LLP64 truncation (portability-gc-001)
 - GC: Trace MINO_QUEUE front and back cons spines in trace_val
 - GC: Guard mino_compare two-alloc window with gc_depth to prevent register-held cons from being collected
+- GC: Guard MSVC+ASan stack-scan attribute to emit __declspec(no_sanitize_address) on MSVC
+- GC: Root worker-thread try_stack exception values during GC mark phase
+- GC: Guard bump-allocator size addition and dup_n_inner length against overflow
+- GC: Use saturating multiply for gc_sweep threshold to prevent overflow on large heaps
+- GC: Assert gc_depth>0 precondition at gc_classify_offender entry in debug builds
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
@@ -54,6 +59,11 @@
 - Values: Fix undefined behaviour in hash_val for NaN and infinity double inputs
 - Values: Document FNV-1a deviation from JVM Clojure Murmur3/hasheq in map_hash.c
 - Values: Note arithmetic-right-shift assumption at MINO_INT_VAL with ADR reference
+- Values: Fix NaN ordering in numeric compare (compare NaN x) now returns 1/-1
+- Values: Fix string compare to handle embedded NUL bytes via memcmp
+- Values: Close GC window in host-array-from-coll generic seq path
+- Values: Close GC window in eq-force around lazy-force calls
+- Values: Guard size_t-to-int cast in record-field-index against overflow
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
 - Core: Add \delete to char-name-string and add \delete reader literal support
 - Core: Register uuid reader in *data-readers* alongside inst reader
@@ -150,6 +160,11 @@
 - JIT: Pin child env with gc_pin/gc_unpin in mino_jit_push_env_slow to close GC window
 - JIT: Decompose mino_jit_compile_inner (584 LOC) into five static sub-functions via jit_compile_ctx_t
 - JIT: Add parity tests for OP_LOOP_INT_LT_ACC and OP_LOOP_INT_DEC_ACC opcodes
+- JIT: Pin intermediate values in loop slow-path helpers to close GC windows
+- JIT: Add SIZE_MAX overflow guards to code-size accumulator and layout arithmetic
+- JIT: Restore slab to RX when jit_slab_make_rw fails to avoid stranded RW page
+- JIT: Include windows.h for FlushInstructionCache on Windows builds
+- JIT: Use accumulated env (ctx->jit_invoke_env) in deopt resume path
 - Eval: Fix snprintf over-read in gensym (security-eval-001)
 - Eval: Fix write-barrier bypass in vec_destructure_args (memory-eval-003)
 - Eval: Pin GC arrays in qq_expand_vector across quasiquote_expand loop (memory-eval-002)
@@ -237,6 +252,10 @@
 - Lib: clojure.core.logic.nominal adds nominal logic: nom / nom? / tie, the nom/fresh binder, and the hash freshness goal, so terms with binders unify up to alpha-equivalence.
 - Lib: finite-domain labeling and singleton binding re-check the disequality store, so combining an fd domain with a core != is sound; fd.quot is truncating integer division; and the run machinery labels domain variables in a deterministic (lowest-id-first) order.
 - Fix: empty? on a lazy-seq that realizes to an empty list now returns true (previously any forced non-nil value was reported non-empty).
+- eval-bc: Fix GC window in mino_bc_compile_fn (bc unprotected across clauses allocation)
+- eval-bc: Replace abort() in mino_bc_check_require with catchable mino-level error
+- eval-bc: Document intentional deviation in compile_def (returns bound value, not Var)
+- eval-bc: Add missing env parameter to lean-build stub for mino_jit_invoke
 
 ## v0.423.5 — Security Fixes
 
