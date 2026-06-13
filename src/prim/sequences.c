@@ -2308,15 +2308,21 @@ static mino_val *prim_sort(mino_state *S, mino_val *args, mino_env *env)
             "sort: collection too large");
     }
     arr = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*arr));
+    gc_pin((mino_val *)arr);
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*tmp));
+    gc_unpin(1);
     i = 0;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { arr[i++] = seq_iter_val(S, &it); seq_iter_next(S, &it); }
-    S->sort_comp_fn  = comp;
-    S->sort_comp_env = env;
-    merge_sort_vals(S, arr, tmp, n_items);
-    S->sort_comp_fn  = NULL;
-    S->sort_comp_env = NULL;
+    {
+        mino_val *saved_comp_fn  = S->sort_comp_fn;
+        mino_env *saved_comp_env = S->sort_comp_env;
+        S->sort_comp_fn  = comp;
+        S->sort_comp_env = env;
+        merge_sort_vals(S, arr, tmp, n_items);
+        S->sort_comp_fn  = saved_comp_fn;
+        S->sort_comp_env = saved_comp_env;
+    }
     for (i = 0; i < n_items; i++) {
         mino_val *cell = mino_cons(S, arr[i], mino_nil(S));
         if (tail == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail, cell); }
@@ -2570,7 +2576,9 @@ static mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
     pairs = n / 2;
     if (pairs == 0) return mino_sorted_map(S, NULL, NULL, 0);
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    gc_unpin(1);
     p = args;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car; p = p->as.cons.cdr;
@@ -2614,7 +2622,9 @@ static mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env
     pairs = (n - 1) / 2;
     if (pairs == 0) return mino_sorted_map_by(S, comparator, NULL, NULL, 0);
     ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    gc_pin((mino_val *)ks);
     vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    gc_unpin(1);
     p = args->as.cons.cdr;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car; p = p->as.cons.cdr;
