@@ -308,6 +308,11 @@
 - Memory: Free per-fn stats entries (file string, ic_stats array, node) in cpjit_stats_dump after printing
 - Memory: Pin first alloc result across second alloc in prim arithmetic, collections, io, and seq GC windows
 - Memory: Fix ns_env_ensure to assign mino_core_env only after GC root registration succeeds
+- Memory: Pin GC pointers in recur-rewrite buf and fold stack[] in compile.c
+- Memory: Pin GC values in eval_args and normalize_percent to close GC windows under -O2
+- Memory: Pin GC pointers in ratio arithmetic, set operations, stm closure, proc/meta map builders, and str_replace_match_arg
+- Memory: Pin data parameter in set_eval_diag_with_data across allocating calls
+- Memory: Guard mino_defrecord field-keyword loop with gc_depth to prevent symbol buffer sweep
 
 ## v0.423.5 — Security Fixes
 
