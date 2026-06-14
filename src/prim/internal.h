@@ -52,6 +52,8 @@ typedef struct {
     const mino_val *coll;
     size_t            idx;       /* for vectors, maps, sets */
     const mino_val *cons_p;   /* for cons lists */
+    unsigned          step_count; /* cooperative-cancel poll counter */
+    int               cancelled;  /* set once future-cancel is observed */
 } seq_iter_t;
 
 void         seq_iter_init(mino_state *S, seq_iter_t *it,

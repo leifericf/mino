@@ -812,9 +812,26 @@ mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env)
     /* Join outstanding host worker threads before libc teardown so
      * leaked threads don't trip TSan (or, on Windows, DllMain
      * teardown ordering). State teardown via mino_state_free also
-     * calls quiesce, but `(exit ...)` bypasses that path. */
-    mino_quiesce_threads(S);
-    exit(code);
+     * calls quiesce, but `(exit ...)` bypasses that path.
+     *
+     * Use a *bounded* drain: a future whose body is an uninterruptible
+     * tight C loop (e.g. a C-side reduce over a huge range) never
+     * reaches a cooperative-cancel safepoint, so an unbounded join
+     * here hangs the process forever -- the failure the per-host JIT
+     * canary intermittently hit on slow/emulated runners. Well-behaved
+     * workers observe the cancel and drain within milliseconds; only a
+     * genuinely stuck worker hits the grace window. If one does, we
+     * abandon it and _Exit: the process is terminating, so the OS
+     * reclaims the thread, and skipping libc teardown avoids racing a
+     * still-running worker against stdio/atexit teardown. Flush first
+     * since _Exit does not. */
+    if (mino_quiesce_threads_timed(S, 3000)) {
+        mino_quiesce_threads(S); /* all drained; reap joinable threads */
+        exit(code);
+    }
+    fflush(stdout);
+    fflush(stderr);
+    _Exit(code);
     return mino_nil(S); /* unreachable */
 }
 

@@ -1575,6 +1575,12 @@ void mino_quiesce_threads(mino_state *S)
     mino_host_threads_quiesce(S);
 }
 
+int mino_quiesce_threads_timed(mino_state *S, int grace_ms)
+{
+    if (S == NULL) { return 1; }
+    return mino_host_threads_drain_bounded(S, grace_ms);
+}
+
 void mino_set_thread_pool(mino_state *S, mino_thread_pool *pool)
 {
     if (S == NULL) { return; }
@@ -1643,6 +1649,13 @@ __declspec(thread)
 __thread
 #endif
 unsigned int mino_tls_safepoint_count = 0;
+
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+unsigned int mino_tls_lazy_count = 0;
 
 /* CPU sampler hook. Called from mino_bc_safepoint_batch and gc_alloc's
  * safepoint path. Sniffs MINO_SAMPLE on first hit; with the env flag

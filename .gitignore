@@ -107,3 +107,6 @@ dist-cross/
 
 # Audit/review run scaffolding written to repo root by merge_proposals.clj
 changelog-proposals.edn
+
+# Windows debug symbols from the jit-host canary cross-build
+*.pdb

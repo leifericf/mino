@@ -944,8 +944,14 @@ mino_val *eval_loop(mino_state *S, mino_val *form,
         /* Safepoint poll: tight `loop`/`recur` bodies skip
          * eval_impl entry between iterations (the trampoline is
          * pure C), so without this poll a hot loop could starve a
-         * waiting collector. */
+         * waiting collector. The bc_safepoint poll additionally
+         * observes future-cancel: an interpreted `loop`/`recur`
+         * spinning on a worker thread (JIT off, or a shape the BC
+         * compiler doesn't fuse) must unwind on cancel, or the
+         * teardown join in mino_host_threads_quiesce blocks forever.
+         * cancel_ptr is NULL on the embedder thread (free no-op). */
         mino_safepoint_poll(S);
+        if (!mino_bc_safepoint(S)) return NULL;
     }
 }
 

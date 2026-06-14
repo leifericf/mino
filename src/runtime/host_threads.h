@@ -105,6 +105,12 @@ void mino_host_threads_state_destroy(mino_state *S);
  * exposed publicly as mino_quiesce_threads. */
 void mino_host_threads_quiesce(mino_state *S);
 
+/* Bounded process-exit drain: cancel pending futures, then wait up to
+ * grace_ms for workers to exit. Returns 1 if all drained, 0 if a
+ * worker is stuck in an uninterruptible C loop. Used by prim_exit so
+ * `(exit)` cannot hang the process forever on such a worker. */
+int mino_host_threads_drain_bounded(mino_state *S, int grace_ms);
+
 /* GC sweep hook: free the impl struct and destroy mu/cv. Called from
  * minor and major sweep when a MINO_FUTURE val is collected. */
 void mino_future_gc_sweep(mino_val *fut);

@@ -790,6 +790,19 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
  */
 mino_val *lazy_force(mino_state *S, mino_val *v)
 {
+    /* Cooperative-cancel + state_lock yield poll. lazy_force is the
+     * realization choke point for count / doall / dorun / for over a
+     * lazy seq -- C walks with no safepoint of their own. Without this
+     * a `(future (doall (for ...)))` or `(future (count (filter ...)))`
+     * over a huge seq monopolizes state_lock and is uncancellable
+     * (a residual of the per-host JIT canary hang). Poll once per ~8K
+     * forces so the hot per-force path pays only a TLS increment and a
+     * masked branch; cancel_ptr is NULL on the embedder thread. */
+    if (((++mino_tls_lazy_count) & 0x1FFFu) == 0u) {
+        if (!mino_bc_safepoint_batch(S, 0x2000u)) {
+            return NULL;
+        }
+    }
     mino_val *result = lazy_realize(S, v);
     mino_val *first  = result;
     while (result != NULL && mino_type_of(result) == MINO_LAZY) {

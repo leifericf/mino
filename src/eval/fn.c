@@ -675,8 +675,22 @@ static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
         S->ns_vars.fn_ambient_ns = saved_ambient;
         return NULL;
     }
-    for (;;) {
+    for (int iterated = 0; ; iterated = 1) {
         int simple_path = 0;
+        /* Cooperative-cancel poll on every trampoline backward edge
+         * (recur / tail call), not the initial entry. A future whose
+         * body is a tail-recursive loop (`dotimes`, and macros that
+         * expand to self-recursion such as `for` / `doseq`) never
+         * re-enters the BC VM's backward-jump safepoint between
+         * iterations, so without this poll `future-cancel` is never
+         * observed and `mino_host_threads_quiesce` blocks forever in
+         * the teardown join. On the embedder thread mino_tls_cancel_ptr
+         * is NULL, so this is a single predicted-false branch. */
+        if (iterated && !mino_bc_safepoint(S)) {
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
+            return NULL; /* leave frame for trace */
+        }
         if (cur_params != NULL && cur_params == fn->as.fn.params) {
             /* Lazy shape detection on the per-fn cache. dispatch_multi_arity
              * yields per-clause params that are not the cached one; those

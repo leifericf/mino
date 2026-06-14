@@ -344,6 +344,19 @@ __thread
 #endif
 unsigned int mino_tls_safepoint_count;
 
+/* TLS counter for lazy_force's cooperative-cancel poll. lazy_force is
+ * the central realization primitive every lazy walk (count / doall /
+ * dorun / seq force) funnels through; polling once per ~8K forces lets
+ * a worker realizing a huge lazy seq yield state_lock and observe
+ * future-cancel without paying a safepoint on every force. */
+extern
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+unsigned int mino_tls_lazy_count;
+
 /* Forward decl for the embed thread pool surface (mino.h provides
  * the struct definition; struct mino_state stores a pointer). */
 struct mino_thread_pool;

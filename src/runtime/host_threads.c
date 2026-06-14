@@ -884,6 +884,76 @@ void mino_host_threads_quiesce(mino_state *S)
     mino_resume_lock(S, saved_depth);
 }
 
+/* Bounded teardown drain for the process-exit path (prim_exit).
+ *
+ * Runs Pass 1 of quiesce -- cancel every still-pending future cell --
+ * then waits up to grace_ms for the worker threads to observe the
+ * cancel and drain (thread_count -> 0), polling instead of an
+ * unbounded join. Returns 1 if every worker exited, 0 if the grace
+ * elapsed with a worker still live.
+ *
+ * The 0 case happens only when a worker is inside an uninterruptible
+ * tight C loop -- a future body dominated by a C-side reducer over a
+ * huge range, say -- that never reaches a cooperative-cancel safepoint
+ * (the BC VM backward jump, the fn/loop trampolines). Cooperative
+ * loops unwind on cancel within milliseconds; a pure-C loop cannot be
+ * interrupted. prim_exit then abandons the stuck worker via _Exit,
+ * which is safe precisely because the process is terminating and the
+ * OS reclaims the thread. mino_state_free keeps the unbounded
+ * mino_host_threads_quiesce so an embedder tearing down one state of
+ * many never abandons a worker that could still touch live memory. */
+int mino_host_threads_drain_bounded(mino_state *S, int grace_ms)
+{
+    mino_future *impl;
+    int saved_depth;
+    int waited_ms = 0;
+
+    if (S == NULL) { return 1; }
+    saved_depth = mino_yield_lock(S);
+
+    /* Pass 1: cancel every still-pending cell (mirrors quiesce). */
+    impl = S->threading.future_list_head;
+    while (impl != NULL) {
+        mu_lock(&impl->mu);
+        if (impl->state_tag == MINO_FUTURE_PENDING) {
+            impl->cancel_flag = 1;
+            impl->state_tag   = MINO_FUTURE_CANCELLED;
+            cv_broadcast(&impl->cv);
+        }
+        mu_unlock(&impl->mu);
+        impl = impl->next_in_state;
+    }
+
+    /* Bounded drain: workers dec thread_count as they exit. */
+    while (tc_load(&S->threading.thread_count) > 0 && waited_ms < grace_ms) {
+#if defined(_WIN32) && defined(_MSC_VER)
+        Sleep(2);
+#else
+        {
+            struct timespec ts;
+            ts.tv_sec  = 0;
+            ts.tv_nsec = 2000000L; /* 2ms poll interval */
+            nanosleep(&ts, NULL);
+        }
+#endif
+        waited_ms += 2;
+    }
+
+    {
+        int drained = (tc_load(&S->threading.thread_count) == 0);
+        /* Re-acquire state_lock only when every worker has exited. A
+         * worker stuck in an uninterruptible C loop still holds
+         * state_lock (it never reached a yield point), so resuming
+         * here would block forever -- the very hang we are bounding.
+         * On the !drained path the caller (prim_exit) _Exits
+         * immediately, so leaving the lock yielded is harmless. */
+        if (drained) {
+            mino_resume_lock(S, saved_depth);
+        }
+        return drained;
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* GC                                                                        */
 /* ------------------------------------------------------------------------- */

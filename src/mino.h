@@ -1708,6 +1708,19 @@ int  mino_thread_count(mino_state *S);
  */
 void mino_quiesce_threads(mino_state *S);
 
+/*
+ * Process-exit variant of mino_quiesce_threads: cancel in-flight
+ * futures, then wait up to grace_ms for their worker threads to drain.
+ * Returns 1 if every worker exited, 0 if the grace elapsed with a
+ * worker still running -- which happens only when a worker is inside an
+ * uninterruptible tight loop (a C-side reducer over a huge range, say)
+ * that never reaches a cooperative-cancel safepoint. Intended for a
+ * host that is about to terminate the process and must not block
+ * forever on such a worker; a 0 return means the caller should _Exit
+ * rather than free the state (a still-running worker may touch it).
+ */
+int mino_quiesce_threads_timed(mino_state *S, int grace_ms);
+
 /* ------------------------------------------------------------------------- */
 /* Host thread pool, factory, stack-size knobs [MINO_UNSTABLE_THREADPOOL]    */
 /* ------------------------------------------------------------------------- */

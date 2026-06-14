@@ -120,6 +120,8 @@ void seq_iter_init(mino_state *S, seq_iter_t *it, const mino_val *coll)
     }
     it->coll  = coll;
     it->idx   = 0;
+    it->step_count = 0;
+    it->cancelled  = 0;
     it->cons_p = (coll != NULL && mino_type_of(coll) == MINO_CONS) ? coll : NULL;
     if (coll != NULL && mino_type_of(coll) == MINO_CHUNKED_CONS) {
         it->cons_p = coll;
@@ -130,6 +132,11 @@ void seq_iter_init(mino_state *S, seq_iter_t *it, const mino_val *coll)
 int seq_iter_done(const seq_iter_t *it)
 {
     const mino_val *c = it->coll;
+    /* A worker that observed future-cancel mid-walk reports done so
+     * every `while (!seq_iter_done(...))` reducer/aggregate loop
+     * unwinds, the worker body returns, and the teardown join can
+     * reap it instead of blocking forever. */
+    if (it->cancelled) return 1;
     if (c == NULL || mino_type_of(c) == MINO_NIL) return 1;
     switch (mino_type_of(c)) {
     case MINO_CONS:   return it->cons_p == NULL || mino_type_of(it->cons_p) != MINO_CONS;
@@ -218,6 +225,22 @@ mino_val *seq_iter_val(mino_state *S, const seq_iter_t *it)
 
 void seq_iter_next(mino_state *S, seq_iter_t *it)
 {
+    /* Cooperative-cancel + state_lock yield poll. seq_iter drives every
+     * reduce / into / mapv / doseq / aggregate walk, none of which has
+     * a safepoint of its own; without this a `(future (reduce ...))`
+     * over a huge seq monopolizes state_lock (starving the embedder
+     * thread) and is uncancellable -- the deadlock the per-host JIT
+     * canary intermittently hit on slow runners. Poll once per 8192
+     * elements: mino_bc_safepoint_batch checks cancel every call and
+     * (only when multi-threaded) yields state_lock on its ~64K-element
+     * cadence. On the embedder thread cancel_ptr is NULL and the
+     * batch is a no-op beyond the counter, so single-threaded walks
+     * are unaffected. */
+    if (((++it->step_count) & 0x1FFFu) == 0u) {
+        if (!mino_bc_safepoint_batch(S, 0x2000u)) {
+            it->cancelled = 1;
+        }
+    }
     if (it->coll != NULL && mino_type_of(it->coll) == MINO_CONS) {
         if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CONS) {
             const mino_val *next = it->cons_p->as.cons.cdr;
@@ -519,16 +542,38 @@ static mino_val *reduce_int_range(mino_state *S, mino_val *fn,
         acc   = start;
         start = start + step;
     }
-    switch (kind) {
-    case REDUCE_KIND_ADD:  rc = reduce_int_range_add (start, end, step, &acc); break;
-    case REDUCE_KIND_MUL:  rc = reduce_int_range_mul (start, end, step, &acc); break;
-    case REDUCE_KIND_SUB:  rc = reduce_int_range_sub (start, end, step, &acc); break;
-    case REDUCE_KIND_BAND: rc = reduce_int_range_band(start, end, step, &acc); break;
-    case REDUCE_KIND_BOR:  rc = reduce_int_range_bor (start, end, step, &acc); break;
-    case REDUCE_KIND_BXOR: rc = reduce_int_range_bxor(start, end, step, &acc); break;
-    default:               return NULL;
+    /* Chunk the reduction so a long range yields state_lock and
+     * observes future-cancel between chunks. The inner loops are tight
+     * C with no safepoint of their own, so an unchunked reduce over a
+     * huge range monopolizes state_lock (starving the embedder thread
+     * and sibling workers) and is uncancellable -- which is how a
+     * `(future (reduce + (range huge)))` wedged the per-host JIT canary
+     * on slow runners. ~1M elements per chunk keeps the per-chunk poll
+     * overhead negligible while bounding cancel/yield latency. */
+    {
+        const long long CHUNK = 1LL << 20;
+        long long cur = start;
+        while ((step > 0) ? (cur < end) : (cur > end)) {
+            long long sub_end = cur + CHUNK * step;
+            if (step > 0) { if (sub_end > end) sub_end = end; }
+            else          { if (sub_end < end) sub_end = end; }
+            switch (kind) {
+            case REDUCE_KIND_ADD:  rc = reduce_int_range_add (cur, sub_end, step, &acc); break;
+            case REDUCE_KIND_MUL:  rc = reduce_int_range_mul (cur, sub_end, step, &acc); break;
+            case REDUCE_KIND_SUB:  rc = reduce_int_range_sub (cur, sub_end, step, &acc); break;
+            case REDUCE_KIND_BAND: rc = reduce_int_range_band(cur, sub_end, step, &acc); break;
+            case REDUCE_KIND_BOR:  rc = reduce_int_range_bor (cur, sub_end, step, &acc); break;
+            case REDUCE_KIND_BXOR: rc = reduce_int_range_bxor(cur, sub_end, step, &acc); break;
+            default:               return NULL;
+            }
+            if (rc < 0) return NULL;
+            cur = sub_end;
+            /* Cooperative yield + cancel poll between chunks. On the
+             * embedder thread cancel_ptr is NULL, so this only yields
+             * state_lock on the ~64K-jump cadence (negligible here). */
+            if (!mino_bc_safepoint(S)) return NULL;
+        }
     }
-    if (rc < 0) return NULL;
     return mino_int(S, acc);
 }
 
