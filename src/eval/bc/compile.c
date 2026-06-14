@@ -1961,8 +1961,19 @@ static mino_val *rewrite_recur_args(mino_state *S,
         if (buf[step_pos] == NULL) { free(buf); return NULL; }
         gc_pin(buf[step_pos]);
     }
+    /* Pin all remaining buf entries: list_from_array calls mino_cons
+     * repeatedly and each call may trigger a GC cycle.  buf is
+     * malloc-owned so the collector cannot see it; every slot must be
+     * rooted before we enter the cons loop. buf[step_pos] is already
+     * pinned above (count = 1); pin the rest now. */
+    {
+        size_t j;
+        for (j = 0; j < n; j++) {
+            if ((int)j != step_pos) gc_pin(buf[j]);
+        }
+    }
     result = list_from_array(S, buf, n);
-    gc_unpin(1);
+    gc_unpin(n); /* unpin all n entries (step_pos + the n-1 others) */
     free(buf);
     return result;
 }
@@ -3570,6 +3581,7 @@ static int try_fold_arg(compiler_t *c, mino_val *v, mino_val **out)
         return 0;
     }
     if (mino_type_of(v) == MINO_CONS) {
+        mino_state      *S    = c->S; /* needed for gc_pin / gc_unpin macros */
         mino_val        *head = v->as.cons.car;
         const pure_prim_t *pp;
         mino_val        *src;
@@ -3590,11 +3602,19 @@ static int try_fold_arg(compiler_t *c, mino_val *v, mino_val **out)
         }
         if (pp->min_arity >= 0 && argc < pp->min_arity) return 0;
         if (pp->max_arity >= 0 && argc > pp->max_arity) return 0;
+        /* Pin every stack[] entry before building the cons-spine:
+         * mino_cons may trigger a GC cycle and stack[] lives on the C
+         * stack, which is invisible to the collector under -O2. */
+        {
+            int pi;
+            for (pi = 0; pi < argc; pi++) gc_pin(stack[pi]);
+        }
         args = mino_nil(c->S);
         for (int i = argc - 1; i >= 0; i--) {
             args = mino_cons(c->S, stack[i], args);
-            if (args == NULL) return 0;
+            if (args == NULL) { gc_unpin(argc); return 0; }
         }
+        gc_unpin(argc);
         /* The speculative fold contract requires prim_throw_classified
          * to take the "set diag + return NULL" branch on error, not the
          * "longjmp to active try-frame" branch. If the compile is
@@ -3622,6 +3642,7 @@ static int try_fold_arg(compiler_t *c, mino_val *v, mino_val **out)
 static int try_fold_call(compiler_t *c, mino_val *form, int dst,
                          const pure_prim_t *pp)
 {
+    mino_state *S    = c->S; /* needed for gc_pin / gc_unpin macros */
     int    argc      = 0;
     mino_val *p    = form->as.cons.cdr;
     mino_val *stack[64];
@@ -3638,11 +3659,19 @@ static int try_fold_call(compiler_t *c, mino_val *form, int dst,
     /* Rebuild the args list as a fresh cons-spine the prim can walk.
      * Substituted args replace any symbol references that folded
      * through a let binding. */
+    /* Pin every stack[] entry before building the cons-spine:
+     * mino_cons may trigger a GC cycle and stack[] lives on the C
+     * stack, which is invisible to the collector under -O2. */
+    {
+        int pi;
+        for (pi = 0; pi < argc; pi++) gc_pin(stack[pi]);
+    }
     mino_val *args = mino_nil(c->S);
     for (int i = argc - 1; i >= 0; i--) {
         args = mino_cons(c->S, stack[i], args);
-        if (args == NULL) return 1;
+        if (args == NULL) { gc_unpin(argc); return 1; }
     }
+    gc_unpin(argc);
 
     /* Same try_depth suppression as try_fold_arg: the speculative
      * fold needs prim_throw_classified to take the diag-return-NULL

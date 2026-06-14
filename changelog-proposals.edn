@@ -1,1 +1,3 @@
-[{:category "Memory" :summary "Pin GC values in eval_args and normalize_percent to close GC windows under -O2" :level :correctness}]
+[{:category "Memory" :summary "Pin GC values in eval_args and normalize_percent to close GC windows under -O2" :level :correctness}
+ {:category "Memory" :summary "Pin GC pointers in recur-rewrite buf and fold stack[] in compile.c" :level :correctness}
+ {:category "Memory" :summary "Guard mino_defrecord field-keyword loop with gc_depth to prevent symbol buffer sweep" :level :correctness}]
