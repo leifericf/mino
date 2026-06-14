@@ -242,11 +242,16 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
                                      "sh: out of memory reading output");
     }
 
-    keys[0] = mino_keyword(S, "exit");
-    keys[1] = mino_keyword(S, "out");
-    vals[0] = mino_int(S, status);
-    vals[1] = mino_string_n(S, out, out_len);
-    free(out);
+    {
+        mino_val *exit_kw = mino_keyword(S, "exit"); gc_pin(exit_kw);
+        mino_val *out_kw  = mino_keyword(S, "out");  gc_pin(out_kw);
+        mino_val *exit_v  = mino_int(S, status);     gc_pin(exit_v);
+        mino_val *out_v   = mino_string_n(S, out, out_len);
+        free(out);
+        keys[0] = exit_kw; keys[1] = out_kw;
+        vals[0] = exit_v;  vals[1] = out_v;
+        gc_unpin(3);
+    }
 
     result = mino_map(S, keys, vals, 2);
     return result;

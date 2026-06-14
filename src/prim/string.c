@@ -963,6 +963,7 @@ static mino_val *str_replace_match_arg(mino_state *S,
         mino_val *items[1 + RE_MAX_GROUPS];
         size_t      n = 1;
         int         i;
+        mino_current_ctx(S)->gc_depth++;
         items[0] = mino_string_n(S, text_base + match_idx, (size_t)match_len);
         for (i = 0; i < g->n; i++) {
             if (g->starts[i] < 0 || g->ends[i] < 0
@@ -973,6 +974,7 @@ static mino_val *str_replace_match_arg(mino_state *S,
                                            (size_t)(g->ends[i] - g->starts[i]));
             }
         }
+        mino_current_ctx(S)->gc_depth--;
         return mino_vector(S, items, n);
     }
 }

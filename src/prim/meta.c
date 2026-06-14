@@ -58,17 +58,18 @@ static mino_val *synth_cons_meta(mino_state *S, const mino_val *cell)
     size_t      n = 0;
     if (cell->as.cons.not_list) return NULL;
     if (cell->as.cons.line <= 0) return NULL;
-    keys[n] = mino_keyword(S, "line");
+    keys[n] = mino_keyword(S, "line");   gc_pin(keys[n]);
     vals[n] = mino_int(S, cell->as.cons.line);
     n++;
-    keys[n] = mino_keyword(S, "column");
+    keys[n] = mino_keyword(S, "column"); gc_pin(keys[n]);
     vals[n] = mino_int(S, cell->as.cons.column);
     n++;
     if (cell->as.cons.file != NULL) {
-        keys[n] = mino_keyword(S, "file");
+        keys[n] = mino_keyword(S, "file"); gc_pin(keys[n]);
         vals[n] = mino_string(S, cell->as.cons.file);
         n++;
     }
+    gc_unpin(n);
     return mino_map(S, keys, vals, n);
 }
 
@@ -81,23 +82,24 @@ static mino_val *synth_var_meta(mino_state *S, mino_val *var)
     mino_val *keys[5];
     mino_val *vals[5];
     size_t      n = 0;
-    keys[n] = mino_keyword(S, "ns");
+    size_t      pinned = 0;
+    keys[n] = mino_keyword(S, "ns");   gc_pin(keys[n]); pinned++;
     vals[n] = var->as.var.ns != NULL
               ? mino_symbol(S, var->as.var.ns)
               : mino_nil(S);
     n++;
-    keys[n] = mino_keyword(S, "name");
+    keys[n] = mino_keyword(S, "name"); gc_pin(keys[n]); pinned++;
     vals[n] = var->as.var.sym != NULL
               ? mino_symbol(S, var->as.var.sym)
               : mino_nil(S);
     n++;
     if (var->as.var.is_private) {
-        keys[n] = mino_keyword(S, "private");
+        keys[n] = mino_keyword(S, "private"); gc_pin(keys[n]); pinned++;
         vals[n] = mino_true(S);
         n++;
     }
     if (var->as.var.dynamic) {
-        keys[n] = mino_keyword(S, "dynamic");
+        keys[n] = mino_keyword(S, "dynamic"); gc_pin(keys[n]); pinned++;
         vals[n] = mino_true(S);
         n++;
     }
@@ -108,10 +110,11 @@ static mino_val *synth_var_meta(mino_state *S, mino_val *var)
      * runtime defmacro through the one synthesis path. */
     if (var->as.var.bound && var->as.var.root != NULL
         && mino_type_of(var->as.var.root) == MINO_MACRO) {
-        keys[n] = mino_keyword(S, "macro");
+        keys[n] = mino_keyword(S, "macro"); gc_pin(keys[n]); pinned++;
         vals[n] = mino_true(S);
         n++;
     }
+    gc_unpin(pinned);
     /* User metadata from the def site (the name symbol's map, plus
      * :doc) lives on the var's meta slot; the synthesized entries
      * overlay it so :ns/:name/flags stay authoritative. */

@@ -675,8 +675,12 @@ static mino_val *make_c_log_entry(mino_state *S, void *ctx)
     }
     closure->fn   = c->fn;
     closure->user = c->user;
-    return mino_handle_ex(S, closure, TX_C_CLOSURE_TAG,
-                           tx_c_closure_finalize);
+    {
+        mino_val *h = mino_handle_ex(S, closure, TX_C_CLOSURE_TAG,
+                                      tx_c_closure_finalize);
+        if (h == NULL) { free(closure); return NULL; }
+        return h;
+    }
 }
 
 typedef mino_val *(*tx_log_entry_fn)(mino_state *S, void *ctx);

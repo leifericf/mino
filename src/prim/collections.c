@@ -1994,6 +1994,7 @@ mino_val *set_conj1(mino_state *S, const mino_val *s, mino_val *elem)
         return (mino_val *)s;
     }
     v        = alloc_val(S, MINO_SET);
+    gc_pin(v);
     sentinel = mino_true(S);
     e        = hamt_entry_new(S, elem, sentinel);
     h        = hash_val(elem);
@@ -2007,6 +2008,7 @@ mino_val *set_conj1(mino_state *S, const mino_val *s, mino_val *elem)
         v->as.set.key_order = vec_conj1(S, s->as.set.key_order, elem);
         v->as.set.len       = s->as.set.len + 1;
     }
+    gc_unpin(1);
     return v;
 }
 
@@ -2028,12 +2030,13 @@ mino_val *set_conj1_owned(mino_state *S, mino_val *s, mino_val *elem,
         return s;
     }
     v        = alloc_val(S, MINO_SET);
+    gc_pin(v);
     sentinel = mino_true(S);
     e        = hamt_entry_new(S, elem, sentinel);
-    if (e == NULL) return NULL;
+    if (e == NULL) { gc_unpin(1); return NULL; }
     h        = hash_val(elem);
     root     = hamt_assoc_owned(S, s->as.set.root, e, h, 0u, &replaced, owner);
-    if (root == NULL) return NULL;
+    if (root == NULL) { gc_unpin(1); return NULL; }
     v->as.set.root      = root;
     v->meta             = s->meta;
     if (replaced) {
@@ -2044,6 +2047,7 @@ mino_val *set_conj1_owned(mino_state *S, mino_val *s, mino_val *elem,
                                                 owner);
         v->as.set.len       = s->as.set.len + 1;
     }
+    gc_unpin(1);
     return v;
 }
 
@@ -2060,12 +2064,14 @@ mino_val *set_disj1_owned(mino_state *S, mino_val *s,
     root = hamt_dissoc_owned(S, s->as.set.root, elem, hash_val(elem), 0u,
                               &removed, owner);
     if (!removed) return s;
+    gc_pin((mino_val *)root);
     order = mino_vector(S, NULL, 0);
     for (i = 0; i < s->as.set.len; i++) {
         mino_val *cur = vec_nth(s->as.set.key_order, i);
         if (mino_eq(cur, elem)) continue;
         order = vec_conj1_owned(S, order, cur, owner);
     }
+    gc_unpin(1);
     v = alloc_val(S, MINO_SET);
     v->as.set.root      = root;
     v->as.set.key_order = order;
@@ -2197,6 +2203,7 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
         if (hamt_get(coll->as.set.root, key, h, 0u) != NULL) {
             /* Element exists; rebuild without it. */
             mino_val *new_set = alloc_val(S, MINO_SET);
+            gc_pin(new_set);
             mino_val *order   = mino_vector(S, NULL, 0);
             mino_hamt_node_t *root = NULL;
             size_t i;
@@ -2212,6 +2219,7 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
                     new_len++;
                 }
             }
+            gc_unpin(1);
             new_set->as.set.root      = root;
             new_set->as.set.key_order = order;
             new_set->as.set.len       = new_len;

@@ -468,7 +468,10 @@ mino_val *mino_ratio_add(mino_state *S, const mino_val *a,
     cross2  = mino_bigint_mul(S, bn, ad);
     gc_unpin(1);
     if (cross2 == NULL) return NULL;
-    new_num = mino_bigint_add(S, cross1, cross2); if (new_num == NULL) return NULL;
+    gc_pin(cross1); gc_pin(cross2);
+    new_num = mino_bigint_add(S, cross1, cross2);
+    gc_unpin(2);
+    if (new_num == NULL) return NULL;
     new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
     return mino_ratio_make(S, new_num, new_den);
 }
@@ -483,7 +486,10 @@ mino_val *mino_ratio_sub(mino_state *S, const mino_val *a,
         return NULL;
     }
     cross1  = mino_bigint_mul(S, an, bd); if (cross1 == NULL) return NULL;
-    cross2  = mino_bigint_mul(S, bn, ad); if (cross2 == NULL) return NULL;
+    gc_pin(cross1);
+    cross2  = mino_bigint_mul(S, bn, ad);
+    gc_unpin(1);
+    if (cross2 == NULL) return NULL;
     new_num = mino_bigint_sub(S, cross1, cross2); if (new_num == NULL) return NULL;
     new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
     return mino_ratio_make(S, new_num, new_den);
@@ -499,7 +505,10 @@ mino_val *mino_ratio_mul(mino_state *S, const mino_val *a,
         return NULL;
     }
     new_num = mino_bigint_mul(S, an, bn); if (new_num == NULL) return NULL;
-    new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
+    gc_pin(new_num);
+    new_den = mino_bigint_mul(S, ad, bd);
+    gc_unpin(1);
+    if (new_den == NULL) return NULL;
     return mino_ratio_make(S, new_num, new_den);
 }
 
@@ -518,6 +527,9 @@ mino_val *mino_ratio_div(mino_state *S, const mino_val *a,
     }
     /* a/b / c/d = (a*d) / (b*c) */
     new_num = mino_bigint_mul(S, an, bd); if (new_num == NULL) return NULL;
-    new_den = mino_bigint_mul(S, ad, bn); if (new_den == NULL) return NULL;
+    gc_pin(new_num);
+    new_den = mino_bigint_mul(S, ad, bn);
+    gc_unpin(1);
+    if (new_den == NULL) return NULL;
     return mino_ratio_make(S, new_num, new_den);
 }
