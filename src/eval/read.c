@@ -1293,7 +1293,9 @@ static mino_val *normalize_percent(mino_state *S, mino_val *form)
     }
     if (mino_is_cons(form)) {
         mino_val *car = normalize_percent(S, form->as.cons.car);
+        gc_pin(car);
         mino_val *cdr = normalize_percent(S, form->as.cons.cdr);
+        gc_unpin(1);
         if (car == form->as.cons.car && cdr == form->as.cons.cdr)
             return form;
         {
@@ -1320,7 +1322,7 @@ static mino_val *normalize_percent(mino_state *S, mino_val *form)
                                 S->reader.reader_line, S->reader.reader_col);
                 return NULL;
             }
-            items = (mino_val **)malloc(alloc_sz);
+            items = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, alloc_sz);
             if (items == NULL) {
                 set_reader_diag(S, MRE004,
                                 "out of memory in anonymous fn expansion",
@@ -1334,7 +1336,6 @@ static mino_val *normalize_percent(mino_state *S, mino_val *form)
         }
         {
             mino_val *result = changed ? mino_vector(S, items, len) : form;
-            if (items != stack_items) free(items);
             return result;
         }
     }

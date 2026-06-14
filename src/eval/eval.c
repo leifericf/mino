@@ -818,6 +818,7 @@ mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env)
         mino_val *v = eval_value(S, args->as.cons.car, env);
         mino_val *cell;
         if (v == NULL) {
+            if (tail != NULL) gc_unpin(1);
             return NULL;
         }
         gc_pin(v);
@@ -825,12 +826,14 @@ mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env)
         gc_unpin(1);
         if (tail == NULL) {
             head = cell;
+            gc_pin(head);
         } else {
             mino_cons_cdr_set(S, tail, cell);
         }
         tail = cell;
         args = args->as.cons.cdr;
     }
+    if (tail != NULL) gc_unpin(1);
     return head;
 }
 
