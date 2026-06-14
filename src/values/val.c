@@ -702,25 +702,45 @@ mino_val *mino_defrecord(mino_state *S,
     /* Build the fields vector first, then the type cell, then the
      * registry entry. Allocator order is YOUNG-front so a minor
      * collection mid-build cannot drop the fields vector before the
-     * type points at it. */
+     * type points at it.
+     *
+     * Guard ns_sym/name_sym data buffers: ns_interned and name_interned
+     * are raw char* pointers into GC-owned symbol data.  Every allocating
+     * call below (mino_keyword, mino_vector, alloc_val) can trigger an
+     * incremental major-mark tick that would sweep ns_sym/name_sym and
+     * free those buffers, leaving dangling pointers.  Holding gc_depth
+     * elevated across the whole build window prevents any collection.
+     * Matches the gc_depth pattern in intern_lookup_or_create_ns and
+     * mino_string_n. */
+    mino_current_ctx(S)->gc_depth++;
     {
         mino_val **field_kws = NULL;
         size_t       i;
         if (n_fields > 0) {
-            if (n_fields > SIZE_MAX / sizeof(*field_kws)) return NULL;
+            if (n_fields > SIZE_MAX / sizeof(*field_kws)) {
+                mino_current_ctx(S)->gc_depth--;
+                return NULL;
+            }
             field_kws = (mino_val **)malloc(n_fields * sizeof(*field_kws));
-            if (field_kws == NULL) return NULL;
+            if (field_kws == NULL) {
+                mino_current_ctx(S)->gc_depth--;
+                return NULL;
+            }
             for (i = 0; i < n_fields; i++) {
                 field_kws[i] = mino_keyword(S, field_names[i]);
                 if (field_kws[i] == NULL) {
                     free(field_kws);
+                    mino_current_ctx(S)->gc_depth--;
                     return NULL;
                 }
             }
         }
         fields_vec = mino_vector(S, field_kws, n_fields);
         free(field_kws);
-        if (fields_vec == NULL) return NULL;
+        if (fields_vec == NULL) {
+            mino_current_ctx(S)->gc_depth--;
+            return NULL;
+        }
     }
 
     /* Suppress collection across the two-alloc window: fields_vec is a
@@ -741,6 +761,7 @@ mino_val *mino_defrecord(mino_state *S,
         }
         mino_current_ctx(S)->gc_depth = saved_gc_depth;
     }
+    mino_current_ctx(S)->gc_depth--;
     if (type_val == NULL) return NULL;
 
     e = (record_type_entry_t *)malloc(sizeof(*e));
