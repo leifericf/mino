@@ -149,6 +149,10 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
         mino_val *keys[7], *vals[7];
         size_t      n = 0;
         int         npin = 0; /* tracks live gc_pin count for gc_unpin */
+        /* Pin the caller-supplied data pointer before the first allocating
+         * call so it survives any GC triggered during key/value allocation.
+         * The pin is released by the gc_unpin(npin) below. */
+        if (data != NULL) { gc_pin(data); npin++; }
         /* Each mino_keyword/mino_string/mino_int/mino_map call can trigger
          * GC.  Pin every key/val as it is produced so earlier entries are
          * not swept while later ones are being allocated.  All pins are
