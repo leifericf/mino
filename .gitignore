@@ -104,3 +104,6 @@ embed_api_test
 crash_handler_test
 dist/
 dist-cross/
+
+# Audit/review run scaffolding written to repo root by merge_proposals.clj
+changelog-proposals.edn
