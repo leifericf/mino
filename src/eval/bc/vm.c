@@ -1331,6 +1331,27 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
  * on a normal completion (with *retval_out set), 0 on error. The env
  * pointer is in/out because OP_PUSH_ENV / OP_POP_ENV mutate it via
  * bc_cold_op's env_p. */
+/* Interpreter backward-jump poll batch size. Mirrors the JIT's
+ * MINO_JIT_BACKJUMP_TICKS (jit/internal.h) so both tiers poll the
+ * cooperative safepoint at the same granularity. */
+#define MINO_BC_SAFEPOINT_BATCH 256u
+
+/* Account one backward jump and poll the cooperative safepoint once per
+ * batch. On a cancel signal, unwind via the dispatch_done path exactly
+ * as the unbatched per-jump call did. Relies on `S`, `ok`, `bj_acc`, and
+ * the `dispatch_done` label being in scope (all live in
+ * bc_run_dispatch_from). */
+#define MINO_BC_BACKJUMP_POLL()                                         \
+    do {                                                                \
+        if (++bj_acc >= MINO_BC_SAFEPOINT_BATCH) {                      \
+            unsigned bj_pending = bj_acc;                               \
+            bj_acc = 0;                                                 \
+            if (!mino_bc_safepoint_batch(S, bj_pending)) {              \
+                ok = 0; goto dispatch_done;                             \
+            }                                                           \
+        }                                                               \
+    } while (0)
+
 static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                                 size_t base, mino_thread_ctx_t *ctx,
                                 mino_env **env_p, size_t start_pc,
@@ -1345,6 +1366,17 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
     size_t pc = start_pc;
     mino_val *retval = NULL;
     int ok = 1;
+    /* Backward-jump poll accumulator. The interpreter used to call the
+     * cooperative-safepoint on every backward jump (cancel poll +
+     * auto-yield); measured at ~24% of a tight integer loop. We batch
+     * the call the same way the JIT's loop stencils already do
+     * (MINO_JIT_BACKJUMP_TICKS): count backward jumps locally and poll
+     * once per MINO_BC_SAFEPOINT_BATCH, passing the accumulated count so
+     * the auto-yield window math (state.c) is unchanged. The only
+     * behavioural change is cooperative-cancellation latency, now bounded
+     * by MINO_BC_SAFEPOINT_BATCH backward jumps instead of 1 -- the same
+     * bound the JIT path has always accepted. */
+    unsigned bj_acc = 0;
 #ifdef MINO_BC_OP_COUNTS
     /* Per-frame previous-op tracker so bigram counts only span adjacent
      * dispatches within the same bytecode stream. Sentinel = OP__COUNT. */
@@ -1422,9 +1454,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             pc = (size_t)((ptrdiff_t)pc + off);
             /* Backward jump: poll for cancel + auto-yield. Forward
              * jumps skip the poll since they don't form a loop. */
-            if (off < 0 && !mino_bc_safepoint(S)) {
-                ok = 0; goto dispatch_done;
-            }
+            if (off < 0) { MINO_BC_BACKJUMP_POLL(); }
             break;
         }
 
@@ -1433,9 +1463,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             int off = sBx_OF(ins);
             if (!mino_is_truthy_inline(regs[a])) {
                 pc = (size_t)((ptrdiff_t)pc + off);
-                if (off < 0 && !mino_bc_safepoint(S)) {
-                    ok = 0; goto dispatch_done;
-                }
+                if (off < 0) { MINO_BC_BACKJUMP_POLL(); }
             }
             break;
         }
@@ -1663,7 +1691,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 if (t != MINO_INT_MIN) {
                     regs[a] = MINO_MAKE_INT(t - 1);
                     pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
                 /* MIN_INT: fall through to the prim_dec slow path so
@@ -1691,7 +1719,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs = S->bc.bc_regs + base;
                 regs[a] = decv;
                 pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -1714,7 +1742,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     regs[a] = MINO_MAKE_INT(t - 1);
                     regs[b] = MINO_MAKE_INT(i + 1);
                     pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
                 /* Overflow on dec or inc: fall through to the prim
@@ -1743,7 +1771,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs[a] = decv;
                 regs[b] = incv;
                 pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -1767,7 +1795,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 if (c_ != MINO_INT_MAX) {
                     regs[a] = MINO_MAKE_INT(c_ + 1);
                     pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
                 /* MAX_INT: fall through to the prim_inc slow path so
@@ -1790,7 +1818,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs = S->bc.bc_regs + base;
                 regs[a] = incv;
                 pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -1815,7 +1843,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     regs[a] = MINO_MAKE_INT(c_ + 1);
                     regs[c] = MINO_MAKE_INT(k_ + 1);
                     pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
             }
@@ -1843,7 +1871,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs[a] = incv;
                 regs[c] = incv2;
                 pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -1889,7 +1917,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     regs[a] = MINO_MAKE_INT(c_ + 1);
                     regs[c] = MINO_MAKE_INT(new_k);
                     pc -= 2;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
             }
@@ -1919,7 +1947,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs[a] = incv;
                 regs[c] = addv;
                 pc -= 2;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -1962,7 +1990,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                     regs[a] = MINO_MAKE_INT(t_ - 1);
                     regs[c] = MINO_MAKE_INT(new_k);
                     pc -= 2;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    MINO_BC_BACKJUMP_POLL();
                     break;
                 }
             }
@@ -1991,7 +2019,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 regs[a] = decv;
                 regs[c] = addv;
                 pc -= 2;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                MINO_BC_BACKJUMP_POLL();
                 break;
             }
         }
@@ -2515,6 +2543,9 @@ dispatch_done:
     *retval_out = retval;
     return ok;
 }
+
+#undef MINO_BC_BACKJUMP_POLL
+#undef MINO_BC_SAFEPOINT_BATCH
 
 /* Stack-guarded entry: every bc-executed (and JIT-executed) call frame
  * passes through here, so runaway non-tail recursion raises the MLM004
