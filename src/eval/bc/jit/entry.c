@@ -682,10 +682,26 @@ cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
                                               size_t   *first_unknown_pc)
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
-    /* captures no longer blocks: OP_CLOSURE / OP_PUSH_ENV / OP_POP_ENV /
-     * OP_ENV_BIND all have stencils that route through the
-     * jit_invoke_env publish point so closures pick up the right
-     * lexical chain. */
+    /* captures blocks native JIT. The OP_CLOSURE / OP_PUSH_ENV /
+     * OP_POP_ENV / OP_ENV_BIND stencils route through the jit_invoke_env
+     * publish point, and simple env-capturing fns JIT correctly in
+     * isolation -- but under deep nesting (a captures fn whose JIT'd body
+     * calls into further JIT'd fns, with throws unwinding between them)
+     * the native captures path corrupts the call frame and faults in a
+     * slow helper (ASan: SEGV reading a wild jit_invoke_env / clobbered
+     * argument register). The bytecode tier handles captures fns
+     * correctly, so declining them here keeps the interpreter+BC tiers --
+     * which already give the large win over the tree-walker -- while
+     * leaving the native tier for the non-capturing majority.
+     *
+     * This became reachable when the BC compiler started baking
+     * macroexpansions into fn bodies (compile_macro_call): macros like
+     * dotimes / doseq / for / delay / letfn expand to closures, so many
+     * more fns now carry captures and warm into the JIT. Re-enabling the
+     * native captures path needs the underlying stencil/native-frame bug
+     * fixed first (tracked as an escalation), at which point this gate
+     * lifts. */
+    if (bc->captures) return CPJIT_REASON_CAPTURES;
     /* ic_slots_len > 0 no longer blocks: OP_GETGLOBAL_CACHED has a
      * stencil. PROTOCOL-kind slots are still rejected via their
      * unstencilised ops (OP_PROTOCOL_*_CACHED) in the loop below.

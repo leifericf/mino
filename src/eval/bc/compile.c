@@ -175,6 +175,22 @@ typedef struct compiler {
                                        * mino_bc_run's per-call try-state
                                        * snapshot + cleanup (saved in
                                        * bc->has_try). */
+    int                has_macros;     /* 1 iff any macro head was
+                                       * macroexpanded into the body during
+                                       * this compile. Propagates to
+                                       * bc->has_macros so apply_callable
+                                       * recompiles (re-expanding) on an
+                                       * ic_gen bump -- a redefined macro
+                                       * then reaches compiled callers
+                                       * exactly as it reaches tree-walked
+                                       * ones. Same model as has_folds. */
+    int                macro_budget;   /* remaining compile-time macro
+                                       * expansions (compile_macro_call).
+                                       * Bounds macro-to-macro expansion
+                                       * chains independently of the AST
+                                       * `depth` guard; exhaustion declines
+                                       * gracefully (BC_DECLINE_NESTING_LIMIT)
+                                       * rather than crashing. */
     loop_target_t     *loop;          /* innermost loop or NULL */
     /* The form being compiled right now; emit_* reads (line, column)
      * out of its cons metadata and stores the values per-pc in the
@@ -192,6 +208,14 @@ typedef struct compiler {
 } compiler_t;
 
 #define BC_MAX_COMPILE_DEPTH 1000
+
+/* Per-compile cap on compile-time macro expansions. Bounds macro chains
+ * (a macro expanding to a call of another macro, ...) before the
+ * throwing BC_MAX_COMPILE_DEPTH guard would fire; exhaustion declines the
+ * fn to the tree-walker via BC_DECLINE_NESTING_LIMIT. Generous: real
+ * macro-dense fns expand a few dozen times, so 4096 only catches runaway
+ * / self-referential expansions. */
+#define MINO_BC_MACRO_BUDGET 4096
 
 /* ------------------------------------------------------------------- */
 /* Buffer growth                                                       */
@@ -645,6 +669,7 @@ static int is_special_form_name(const char *name)
     if (strcmp(name, "if") == 0) return 1;
     if (strcmp(name, "do") == 0) return 1;
     if (strcmp(name, "let") == 0 || strcmp(name, "let*") == 0) return 1;
+    if (strcmp(name, "letfn*") == 0) return 1;
     if (strcmp(name, "fn") == 0 || strcmp(name, "fn*") == 0) return 1;
     if (strcmp(name, "recur") == 0) return 1;
     if (strcmp(name, "loop") == 0 || strcmp(name, "loop*") == 0) return 1;
@@ -700,6 +725,7 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
                                  int dst, int tail);
 static int compile_body(compiler_t *c, mino_val *body, int dst, int tail);
 static mino_val *probe_head_value(compiler_t *c, mino_val *head);
+static int head_resolves_to_macro(compiler_t *c, mino_val *head);
 /* Forward decl: defined alongside try_fold_call further down. Used by
  * compile_let to compute the compile-time-known value of a binding's
  * right-hand side, if any. */
@@ -715,17 +741,57 @@ static const pure_prim_t *should_fold_call(compiler_t *c, mino_val *head);
  * fn sets bc->captures = 1, which forces env-binding of params and
  * bracketing of let scopes with OP_PUSH_ENV / OP_POP_ENV so any
  * captured shape sees the right lexical chain. Quote-forms are data,
- * not code, and don't count. */
-static int contains_env_capture(mino_val *form)
+ * not code, and don't count.
+ *
+ * Macro-aware: a macro call (dotimes / doseq / for / letfn / user macros)
+ * may *expand* to a closure that is invisible in the unexpanded body. The
+ * compiler now bakes such expansions into the bytecode
+ * (compile_macro_call), so this pre-scan must see through the same one-
+ * step expansion -- otherwise the enclosing fn skips publishing its
+ * locals and the macro-introduced closure fails to resolve them at
+ * runtime ("unbound symbol"). Expanding here is one step then recurse, so
+ * nested and macro-to-macro cases fall out; pure non-capturing macros
+ * (-> / when / cond / ...) correctly yield 0 and keep their register-only
+ * fast path. The expansion runs under the same try-state suppression and
+ * defining-ns context as compile_macro_call. mino's tree-walker already
+ * re-expands macros on every call, so expanding once more at compile time
+ * is strictly fewer expansions than the status quo -- no new side-effect
+ * exposure for the (anti-pattern) impure macro. *macro_budget bounds
+ * runaway / self-referential expansion. */
+static int contains_env_capture(compiler_t *c, mino_val *form,
+                                int *macro_budget)
 {
     if (form == NULL) return 0;
     if (mino_type_of(form) == MINO_VECTOR) {
         for (size_t i = 0; i < form->as.vec.len; i++) {
-            if (contains_env_capture(vec_nth(form, i))) return 1;
+            if (contains_env_capture(c, vec_nth(form, i), macro_budget))
+                return 1;
         }
         return 0;
     }
-    if (mino_type_of(form) == MINO_MAP || mino_type_of(form) == MINO_SET) {
+    if (mino_type_of(form) == MINO_MAP) {
+        /* A non-empty map literal is lowered to a (hash-map k0 v0 ...)
+         * call whose keys and values are evaluated as code (see the
+         * MINO_MAP constructor lane in compile_expr_dispatch), so a
+         * closure inside a literal value (or key) captures the enclosing
+         * scope just like one in a plain call argument. Scan both. */
+        for (size_t i = 0; i < form->as.map.len; i++) {
+            mino_val *kk = vec_nth(form->as.map.key_order, i);
+            mino_val *vv = (form->as.map.val_order != NULL)
+                             ? vec_nth(form->as.map.val_order, i)
+                             : map_get_val(form, kk);
+            if (contains_env_capture(c, kk, macro_budget)) return 1;
+            if (contains_env_capture(c, vv, macro_budget)) return 1;
+        }
+        return 0;
+    }
+    if (mino_type_of(form) == MINO_SET) {
+        /* Same lowering for #{...} -> (hash-set e0 e1 ...). */
+        for (size_t i = 0; i < form->as.set.len; i++) {
+            if (contains_env_capture(c, vec_nth(form->as.set.key_order, i),
+                                     macro_budget))
+                return 1;
+        }
         return 0;
     }
     if (!mino_is_cons(form)) return 0;
@@ -741,9 +807,36 @@ static int contains_env_capture(mino_val *form)
         if (strcmp(hn, "fn") == 0 || strcmp(hn, "fn*") == 0) return 1;
         if (strcmp(hn, "lazy-seq") == 0) return 1;
         if (strcmp(hn, "quote") == 0 || strcmp(hn, "quote*") == 0) return 0;
+        /* Macro head: expand one step and inspect the result rather than
+         * the unexpanded args (a closure may be introduced by the
+         * expansion, or hidden in a data position of the raw args). */
+        if (*macro_budget > 0 && head_resolves_to_macro(c, head)) {
+            mino_state *S = c->S; /* needed for gc_pin / gc_unpin macros */
+            int expanded = 0;
+            (*macro_budget)--;
+            int saved_td = mino_current_ctx(S)->try_depth;
+            mino_current_ctx(S)->try_depth = 0;
+            mino_val *e = macroexpand1(S, form, c->env, &expanded);
+            mino_current_ctx(S)->try_depth = saved_td;
+            if (e == NULL || !expanded) {
+                /* Expansion raised (or no longer a macro): clear any diag
+                 * and assume capture -- compile_macro_call will likewise
+                 * fail/decline, so over-publishing locals is harmless and
+                 * keeps any tree-walk fallback correct. */
+                clear_error(S);
+                return 1;
+            }
+            /* e lives only on the C stack; pin it across the recursive
+             * scan, whose nested expansions allocate (and may GC). */
+            gc_pin(e);
+            int r = contains_env_capture(c, e, macro_budget);
+            gc_unpin(1);
+            return r;
+        }
     }
     while (mino_is_cons(form)) {
-        if (contains_env_capture(form->as.cons.car)) return 1;
+        if (contains_env_capture(c, form->as.cons.car, macro_budget))
+            return 1;
         form = form->as.cons.cdr;
     }
     return 0;
@@ -3382,6 +3475,74 @@ static int head_resolves_to_macro(compiler_t *c, mino_val *head)
     return v != NULL && mino_type_of(v) == MINO_MACRO;
 }
 
+/* `form`'s head resolves to a macro: expand it one step and compile the
+ * result, baking the expansion into the body instead of declining the
+ * whole fn to the tree-walker (which re-expands on every call). The
+ * compiler descends only into code positions, so it IS the special-form-
+ * aware walker -- nested macros, macros expanding to macros, and macros
+ * in argument positions all fall out of the recursive compile_expr.
+ *
+ * macroexpand1 here is the *same* expander the tree-walker uses (special.c
+ * applies macros via the identical apply_callable(mac, cdr, env) path,
+ * with no &form/&env injection on either side), so the baked expansion is
+ * byte-identical to what the tree-walker would produce -- the
+ * tier-transparency invariant. The two compile-time concerns are: doing
+ * it under the fn's defining ns (handled by the ns-context swap in
+ * mino_bc_compile_fn so syntax-quote auto-qualification matches), and
+ * picking up macro *redefinition* (handled by c->has_macros ->
+ * bc->has_macros -> the ic_gen recompile path, mirroring has_folds).
+ *
+ * Returns the usual compile_expr contract (0 ok, -1 decline/error). */
+static int compile_macro_call(compiler_t *c, mino_val *form, int dst, int tail)
+{
+    mino_state *S = c->S; /* needed for gc_pin / gc_unpin macros */
+
+    /* Bound macro-to-macro expansion chains independently of the AST
+     * `depth` guard (a macro re-expanding to its own head would not grow
+     * AST depth). Decline gracefully when the budget is spent. */
+    if (c->macro_budget <= 0) {
+        S->bc_declines[BC_DECLINE_NESTING_LIMIT]++;
+        c->ok = 0;
+        return -1;
+    }
+    c->macro_budget--;
+
+    /* Expand one step with try-state suppressed so a throwing macro body
+     * returns NULL (via the diag path) instead of longjmp-ing out of the
+     * compiler -- the same speculative-eval discipline as try_fold_call.
+     * Compile happens under the fn's defining ns (set by the caller), so
+     * macroexpand1 resolves the macro and qualifies syntax-quoted symbols
+     * exactly as the tree-walker would at dispatch time. */
+    int expanded = 0;
+    int saved_td = mino_current_ctx(S)->try_depth;
+    mino_current_ctx(S)->try_depth = 0;
+    mino_val *e = macroexpand1(S, form, c->env, &expanded);
+    mino_current_ctx(S)->try_depth = saved_td;
+
+    if (e == NULL || !expanded) {
+        /* Expansion raised at compile time (e == NULL), or -- defensively
+         * -- the head no longer resolves to a macro (!expanded). Clear any
+         * diagnostic and decline so the tree-walker re-expands in the
+         * right execution context with the right stack trace, matching
+         * try_fold_call's fallback. No throw escapes the compiler. */
+        clear_error(S);
+        S->bc_declines[BC_DECLINE_MACRO]++;
+        c->ok = 0;
+        return -1;
+    }
+
+    /* The expansion is a freshly-allocated cons tree rooted only on the C
+     * stack; pin it across the recursive compile, whose allocations
+     * (consts, code, child fns) may trigger a GC cycle invisible to the
+     * collector under -O2. The existing c->depth + macro_budget bounds
+     * the recursion. */
+    gc_pin(e);
+    c->has_macros = 1;
+    int rc = compile_expr(c, e, dst, tail);
+    gc_unpin(1);
+    return rc;
+}
+
 /* Compile `form` so its value lands in some register, preferring to
  * reuse an existing register without emitting code. Returns the
  * register, or -1 on error.
@@ -4521,21 +4682,18 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
         }
     }
 
-    /* If the call head resolves to a macro at compile time, decline so
-     * the tree-walker macroexpands it. Checked AFTER the special-form
-     * dispatch above: `when`, `and`, and `or` carry `:macro true` vars
-     * for introspection (resolve/doc/ns-publics) yet are true special
-     * forms with dedicated compile handlers -- if the macro check ran
-     * first it would decline the whole fn to the tree-walker, which is
-     * how a `when`/`and`/`or`-gated hot loop silently lost bytecode
-     * compilation (and, via the generic recur env-push, allocated a
-     * frame per iteration). The full resolution cascade (lexical ->
+    /* If the call head resolves to a macro at compile time, macroexpand
+     * it one step and compile the result (compile_macro_call), baking the
+     * expansion into the body. Checked AFTER the special-form dispatch
+     * above: `when`, `and`, and `or` carry `:macro true` vars for
+     * introspection (resolve/doc/ns-publics) yet are true special forms
+     * with dedicated compile handlers -- if the macro check ran first it
+     * would route the whole fn through expansion rather than the
+     * purpose-built handlers. The full resolution cascade (lexical ->
      * defining-ns env, aliases for qualified heads) is required; a
      * lexical-only check misses macros that live in the ns env. */
     if (head_resolves_to_macro(c, form->as.cons.car)) {
-        c->S->bc_declines[BC_DECLINE_MACRO]++;
-        c->ok = 0;
-        return -1;
+        return compile_macro_call(c, form, dst, tail);
     }
 
     return compile_call_impl(c, form, dst, tail);
@@ -4885,15 +5043,6 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
     memset(clauses, 0, sizeof(*clauses) * (size_t)n_clauses);
     gc_write_barrier(S, bc, NULL, clauses);
     bc->clauses = clauses;
-    /* captures reflects any clause's body needing env capture. */
-    {
-        int caps = 0;
-        for (int i = 0; i < n_clauses; i++) {
-            if (contains_env_capture(clause_body_arr[i])) { caps = 1; break; }
-        }
-        bc->captures = caps;
-    }
-
     compiler_t c;
     memset(&c, 0, sizeof(c));
     c.S           = S;
@@ -4902,11 +5051,51 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
     c.bc          = bc;
     c.ok          = 1;
     c.n_regs      = 0;
+    c.macro_budget = MINO_BC_MACRO_BUDGET;
+
+    /* Compile-time macroexpansion (compile_macro_call), the capture
+     * pre-scan below, and syntax-quote auto-qualification all resolve
+     * through S->ns_vars.current_ns / fn_ambient_ns. Compilation is lazy
+     * (first call), so right now those still hold the *caller's* ns, not
+     * this fn's -- apply_fn_bc_cons installs defining_ns only *after* this
+     * compile returns. Install the fn's defining ns around both the
+     * capture pre-scan and the clause loop so the one-step expansions are
+     * byte-identical to the tree-walker (which runs with defining_ns
+     * ambient at dispatch), then restore on every exit: the success path
+     * below, and the decline label, which the in-loop `goto decline`
+     * reaches with the context still swapped. The non-macro path is
+     * unaffected -- the compiler's own symbol resolution keys on
+     * c.defining_ns, and folds call only pure prims that ignore *ns*. */
+    const char *saved_current_ns = S->ns_vars.current_ns;
+    const char *saved_ambient_ns = S->ns_vars.fn_ambient_ns;
+    S->ns_vars.current_ns    = fn->as.fn.defining_ns;
+    S->ns_vars.fn_ambient_ns = fn->as.fn.defining_ns;
+
+    /* captures reflects any clause's body needing env capture. Macro-aware
+     * (see contains_env_capture): a body whose macros expand to a closure
+     * (dotimes / for / doseq / letfn / user macros) must publish its
+     * locals to the env exactly as a body with a literal (fn ...) does --
+     * otherwise the macro-introduced closure cannot resolve them. Runs
+     * under the ns swap so its one-step expansions match what
+     * compile_macro_call bakes in. */
+    {
+        int caps = 0;
+        for (int i = 0; i < n_clauses; i++) {
+            int macro_budget = MINO_BC_MACRO_BUDGET;
+            if (contains_env_capture(&c, clause_body_arr[i], &macro_budget)) {
+                caps = 1;
+                break;
+            }
+        }
+        bc->captures = caps;
+    }
 
     /* Decline-bucket snapshot: if no specific reason ticks during this
      * fn's compile but it still declines, the residual gets attributed
      * to BC_DECLINE_OTHER at the decline label below. Sums every
-     * specific reason in the [1..OTHER) range. */
+     * specific reason in the [1..OTHER) range. Taken after the capture
+     * pre-scan so unrelated declines from macro-body fns expanded above
+     * do not skew this fn's attribution. */
     uint64_t decline_snapshot = 0;
     {
         int i;
@@ -4921,6 +5110,9 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
             goto decline;
         }
     }
+
+    S->ns_vars.current_ns    = saved_current_ns;
+    S->ns_vars.fn_ambient_ns = saved_ambient_ns;
 
     /* Mirror the first clause into the top-level n_params/has_rest
      * fields. Old call sites that look at these directly (the single-
@@ -4938,6 +5130,7 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
      * recompiles from source. */
     bc->has_folds      = c.has_folds;
     bc->has_try        = c.has_try;
+    bc->has_macros     = c.has_macros;
     bc->compile_ic_gen = S->ns_vars.ic_gen;
     /* Tighten the source-map length: keep only the slots that match
      * actual emitted instructions. Over-allocated tail entries are
@@ -4949,6 +5142,10 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
     return MINO_BC_OK;
 
 decline:
+    /* Reached from the in-loop clause failure with the ns context still
+     * swapped to the defining ns; restore the caller's before returning. */
+    S->ns_vars.current_ns    = saved_current_ns;
+    S->ns_vars.fn_ambient_ns = saved_ambient_ns;
     /* If no specific decline bucket ticked during this compile, route
      * the bail to OTHER so the histogram still records the event. */
     {

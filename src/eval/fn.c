@@ -845,28 +845,38 @@ mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
                               || tt == MINO_CHUNKED_CONS
                               || tt == MINO_CHUNK);
         }
-        /* Lazy compile-on-first-call. Macros stay tree-walked; their
-         * call frequency is low and the bc compiler doesn't handle
-         * macro bodies. Plain fns get one compile attempt the first
-         * time they're invoked; the attempt either populates
-         * fn->as.fn.bc with a runnable program or leaves the declined
-         * sentinel so the next call skips the retry. */
+        /* Lazy compile-on-first-call. Macro *values* (MINO_MACRO) stay
+         * tree-walked; only MINO_FN bodies compile. A fn body that
+         * *calls* a macro now compiles by baking the one-step expansion
+         * into the bytecode (compile_macro_call) instead of declining --
+         * see the has_macros stale-check below for the redefinition
+         * semantics. Plain fns get one compile attempt the first time
+         * they're invoked; the attempt either populates fn->as.fn.bc with
+         * a runnable program or leaves the declined sentinel so the next
+         * call skips the retry. */
         if (mino_type_of(fn) == MINO_FN && fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, fn);
         }
-        /* Stale-fold check. Literal-arg pure-fn fold caches a folded
-         * result in the const pool; if the compiled fn observed any
-         * such fold (has_folds) AND the global IC generation has
-         * bumped since the compile (a `def` / `ns-unmap` / `set!` of
-         * SOME var has fired in between), one of the deps may now
-         * resolve differently. Drop the bc back to NULL so the next
-         * compile observes the current bindings. The recompile fires
-         * lazily on the very next call, so we don't pay the cost on
-         * fns that aren't reached again. */
+        /* Stale-compile check. Two compile-time bindings get baked into
+         * the bytecode and must be invalidated when the world changes
+         * under them, so the compiled tier stays a transparent
+         * optimization of the tree-walker:
+         *   - has_folds: a literal-arg pure-fn fold cached a result in the
+         *     const pool (depends on the folded var's binding).
+         *   - has_macros: a macro call was expanded into the body (depends
+         *     on the macro's current definition).
+         * If either fired AND the global IC generation has bumped since
+         * the compile (a `def` / `defmacro` / `ns-unmap` / `set!` of SOME
+         * var has fired in between), a dep may now resolve differently --
+         * a redefined macro most notably. Drop the bc back to NULL so the
+         * next compile re-folds and re-expands against the current
+         * bindings, matching what the tree-walker would do. The recompile
+         * fires lazily on the very next call, so unreached fns pay
+         * nothing. */
         if (mino_type_of(fn) == MINO_FN
             && fn->as.fn.bc != NULL
             && fn->as.fn.bc != &mino_bc_declined
-            && fn->as.fn.bc->has_folds
+            && (fn->as.fn.bc->has_folds || fn->as.fn.bc->has_macros)
             && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
             fn->as.fn.bc = NULL;
             (void)mino_bc_compile_fn(S, fn);

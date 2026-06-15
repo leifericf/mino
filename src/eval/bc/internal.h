@@ -540,6 +540,20 @@ typedef struct mino_bc_fn {
     uint64_t         jit_compile_ns;
     uint32_t         jit_code_bytes;
     uint32_t         jit_code_region_dead;
+    /* 1 iff the compile macroexpanded any call head and baked the
+     * expansion into the body. Soundness tracker (mirrors has_folds): a
+     * redefined macro must affect compiled callers identically to tree-
+     * walked ones, so this -- like has_folds -- forces the compile_ic_gen
+     * recompile on any ns_vars.ic_gen bump, preserving tier transparency.
+     *
+     * Placed at the struct tail on purpose: the copy-and-patch JIT bakes
+     * the byte offset of ic_slots (MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS) into
+     * its precompiled stencils, and a compile-time layout assertion in
+     * jit/entry.c enforces it. Inserting this field before ic_slots would
+     * shift that offset and require a full stencil regen; appending here
+     * leaves every JIT-observed offset untouched. The field is read only
+     * on the C dispatch path (apply_callable), never by a stencil. */
+    int              has_macros;
 } mino_bc_fn_t;
 
 typedef struct mino_bc_ic_stat {
