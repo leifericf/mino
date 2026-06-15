@@ -46,6 +46,16 @@ typedef struct {
      * then attributes to its own form instead of the stale BC fn. */
     const struct mino_bc_fn *saved_bc_cursor;
     size_t      saved_bc_cursor_pc;
+    /* jit_invoke_depth at frame entry. mino_jit_invoke increments the
+     * counter on entry and decrements on its normal exits, but a throw
+     * longjmps past those decrements, so every JIT region the unwind
+     * tears through leaks +1. Left unrewound, the counter ratchets up
+     * across a session and, once it is permanently > 0, collapses the
+     * adaptive-tiering threshold to 1 (fn_argv.c) -- every function then
+     * JIT-compiles on first call instead of when genuinely hot. Each
+     * landing pad rewinds the counter to its frame-entry value so the
+     * leak cannot accumulate. */
+    int         saved_jit_invoke_depth;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live

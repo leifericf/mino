@@ -682,25 +682,30 @@ cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
                                               size_t   *first_unknown_pc)
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
-    /* captures blocks native JIT. The OP_CLOSURE / OP_PUSH_ENV /
-     * OP_POP_ENV / OP_ENV_BIND stencils route through the jit_invoke_env
-     * publish point, and simple env-capturing fns JIT correctly in
-     * isolation -- but under deep nesting (a captures fn whose JIT'd body
-     * calls into further JIT'd fns, with throws unwinding between them)
-     * the native captures path corrupts the call frame and faults in a
-     * slow helper (ASan: SEGV reading a wild jit_invoke_env / clobbered
-     * argument register). The bytecode tier handles captures fns
-     * correctly, so declining them here keeps the interpreter+BC tiers --
-     * which already give the large win over the tree-walker -- while
-     * leaving the native tier for the non-capturing majority.
+    /* captures blocks native JIT. Simple env-capturing fns JIT correctly
+     * in isolation, but a copy-and-patch chain-register-flow defect on the
+     * captures path corrupts the state pointer: the OP_GETGLOBAL_CACHED
+     * slow-call marshaling sources `S` from the chain's rdx, but a
+     * preceding captures stencil (OP_PUSH_ENV / OP_POP_ENV / OP_ENV_BIND /
+     * OP_CLOSURE) leaves rdx holding the A-operand value rather than S, so
+     * the helper is entered with S = the dst register index (observed
+     * S = 0xa) and faults dereferencing it. It is NOT a stack overflow
+     * (the fault is at ~16 KB of stack use) -- it is a per-invocation
+     * register clobber. The bytecode tier handles captures fns correctly,
+     * so declining them here keeps the interpreter + BC tiers -- which
+     * already give the large win over the tree-walker -- while leaving the
+     * native tier for the non-capturing majority.
      *
      * This became reachable when the BC compiler started baking
      * macroexpansions into fn bodies (compile_macro_call): macros like
      * dotimes / doseq / for / delay / letfn expand to closures, so many
-     * more fns now carry captures and warm into the JIT. Re-enabling the
-     * native captures path needs the underlying stencil/native-frame bug
-     * fixed first (tracked as an escalation), at which point this gate
-     * lifts. */
+     * more fns now carry captures and warm into the JIT (the now-fixed
+     * jit_invoke_depth leak compounded it by collapsing the tiering
+     * threshold to 1 after the first exception, JIT-compiling even cold
+     * captures fns). Re-enabling the native captures path needs the
+     * stencil chain-register defect fixed first (tracked as an
+     * escalation); it wants live disassembly of the emitted region to
+     * land correctly, at which point this gate lifts. */
     if (bc->captures) return CPJIT_REASON_CAPTURES;
     /* ic_slots_len > 0 no longer blocks: OP_GETGLOBAL_CACHED has a
      * stencil. PROTOCOL-kind slots are still rejected via their

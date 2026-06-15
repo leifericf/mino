@@ -2448,6 +2448,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_lazy_len = ctx->lazy_inflight_len;
             ctx->try_stack[td].saved_bc_cursor =             ctx->bc_current_bc;
             ctx->try_stack[td].saved_bc_cursor_pc =             ctx->bc_current_pc;
+            ctx->try_stack[td].saved_jit_invoke_depth = ctx->jit_invoke_depth;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
@@ -2479,6 +2480,11 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 S->ns_vars.fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
                 load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
                 mino_lazy_inflight_unwind(S, ctx->try_stack[my_td].saved_lazy_len);
+                /* Rewind jit_invoke_depth: the throw unwound any JIT
+                 * region between the PUSHCATCH and the throw site,
+                 * skipping mino_jit_invoke's decrement, so without this
+                 * the counter leaks +1 per torn-through region. */
+                ctx->jit_invoke_depth = ctx->try_stack[my_td].saved_jit_invoke_depth;
                 ctx->try_depth = my_td;
                 /* Pop the register-window stack back down to this fn's
                  * own window. A throw from a deeper bc_run frame
