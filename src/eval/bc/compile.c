@@ -4479,16 +4479,6 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
         return -1;
     }
 
-    /* If the call head resolves to a macro at compile time, decline.
-     * The full resolution cascade (lexical -> defining-ns env, aliases
-     * for qualified heads) is required; a lexical-only check misses
-     * macros that live in the ns env, which is where most macros sit. */
-    if (head_resolves_to_macro(c, form->as.cons.car)) {
-        c->S->bc_declines[BC_DECLINE_MACRO]++;
-        c->ok = 0;
-        return -1;
-    }
-
     mino_val *head = form->as.cons.car;
 
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL
@@ -4530,6 +4520,24 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
             return -1;
         }
     }
+
+    /* If the call head resolves to a macro at compile time, decline so
+     * the tree-walker macroexpands it. Checked AFTER the special-form
+     * dispatch above: `when`, `and`, and `or` carry `:macro true` vars
+     * for introspection (resolve/doc/ns-publics) yet are true special
+     * forms with dedicated compile handlers -- if the macro check ran
+     * first it would decline the whole fn to the tree-walker, which is
+     * how a `when`/`and`/`or`-gated hot loop silently lost bytecode
+     * compilation (and, via the generic recur env-push, allocated a
+     * frame per iteration). The full resolution cascade (lexical ->
+     * defining-ns env, aliases for qualified heads) is required; a
+     * lexical-only check misses macros that live in the ns env. */
+    if (head_resolves_to_macro(c, form->as.cons.car)) {
+        c->S->bc_declines[BC_DECLINE_MACRO]++;
+        c->ok = 0;
+        return -1;
+    }
+
     return compile_call_impl(c, form, dst, tail);
 }
 
