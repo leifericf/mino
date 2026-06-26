@@ -125,6 +125,7 @@
 (require "tests/core_logic_test")
 (require "tests/core_logic_fd_test")
 (require "tests/core_logic_nominal_test")
+(require "tests/store_test")
 (require "tests/test_tap_junit_test")
 (require "tests/clojure_test_port_test")
 (require "tests/test_lib_flags_test")
