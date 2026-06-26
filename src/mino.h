@@ -255,6 +255,22 @@ typedef enum {
                      * compatible with the bit-syntax surface (bits
                      * constructor + destructure) that ships in a
                      * follow-on cycle. */
+    ,
+    MINO_STORE      /* EAVT fact store connection: an identity cell
+                      * holding the current immutable db value (a
+                      * persistent map of {:entities, :log, :tx, ...})
+                      * plus optional host-owned state (file handle,
+                      * WAL, lock) accessed via an opaque handle
+                      * pointer. Per-state isolated: cross-state access
+                      * throws MST007, matching the agent/ref pattern.
+                      * Cross-state transfer via mino_clone copies the
+                      * db value and creates a fresh in-memory store;
+                      * host-owned resources stay with the source.
+                      * Derefs to the current db value via @conn.
+                      * Watches fire on every transact. Constructed via
+                      * (mino.store/open ...) after installing
+                      * MINO_CAP_STORE. Equality is identity. Print
+                      * form is #store[ID db-val]. */
 } mino_type;
 
 typedef struct mino_val    mino_val;   /* opaque */
@@ -742,6 +758,49 @@ typedef mino_val *(*mino_tx_body_fn)(mino_state *S, void *user,
  * (dosync (body)). */
 mino_val *mino_tx_run(mino_state *S, mino_tx_body_fn body,
                         void *user, mino_env *env);
+
+/* ------------------------------------------------------------------------- */
+/* Store (EAVT fact store)                                                   */
+/* ------------------------------------------------------------------------- */
+
+/* Clock callback: returns the current instant as a monotonic-ish
+ * integer (typically milliseconds or nanoseconds). NULL clock uses
+ * wall-clock milliseconds. The host installs a deterministic clock
+ * for reproducible tests. */
+typedef long long (*mino_store_clock_fn)(void *ctx);
+
+/* Construct a store connection from an initial db value (a persistent
+ * map). The store is in-memory by default; pass a non-NULL path to
+ * make it durable (snapshot file + append-only EDN WAL). clock /
+ * clock_ctx install a custom time source (NULL/NULL = wall-clock ms).
+ * The returned MINO_STORE is GC-managed with a finalizer that flushes-
+ * if-durable on sweep or state_free. */
+mino_val *mino_store_val(mino_state *S, mino_val *db_val,
+                           const char *path,
+                           mino_store_clock_fn clock,
+                           void *clock_ctx);
+
+/* Return 1 if v is a store connection (MINO_STORE), 0 otherwise. */
+int         mino_is_store(const mino_val *v);
+
+/* Return the store's current immutable db value (the snapshot).
+ * Equivalent to @conn / (store/db conn). NULL if v is not a store. */
+mino_val *mino_store_deref(const mino_val *v);
+
+/* Atomically publish a new db value: write barrier, set the val, fire
+ * watches. If the store is durable, the caller (store-commit* primitive)
+ * is responsible for WAL append BEFORE calling this. Returns the new
+ * value on success, NULL on type mismatch or cross-state violation. */
+mino_val *mino_store_publish(mino_state *S, mino_val *conn,
+                               mino_val *new_db);
+
+/* Host-facing lifecycle: open a durable store at path, flush WAL
+ * (checkpoint), close file and release lock (close). Return 0 on
+ * success, -1 on error (see mino_last_error). */
+mino_val *mino_store_open (mino_state *S, const char *path,
+                             mino_store_clock_fn clock, void *clock_ctx);
+int       mino_store_checkpoint (mino_state *S, mino_val *conn);
+int       mino_store_close      (mino_state *S, mino_val *conn);
 
 /* ------------------------------------------------------------------------- */
 /* Record types                                                              */
@@ -1513,9 +1572,11 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_MATCH         (1u << 30)  /* clojure.core.match */
 #define MINO_CAP_LOGIC         (1u << 31)  /* clojure.core.logic (+ fd, nominal) */
 
-/* NOTE: MINO_CAP_LOGIC at bit 31 fills the 32-bit capability field. A
- * capability added after this point needs a wider type (uint64_t) or a
- * different scheme; resolve at the v1.0 / ABI-freeze cycle, not before. */
+#define MINO_CAP_STORE         (1ull << 32) /* mino.store: EAVT fact store */
+
+/* The capability field is uint64_t, accommodating capabilities at bits
+ * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
+ * unsigned and widen implicitly when combined with 64-bit caps. */
 
 /* The sandbox preset: floor + Clojure-core (multimethods, protocols,
  * transducers, regex, bignum) + the bundled libraries that have no I/O
@@ -1529,7 +1590,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_MATH_LIB | MINO_CAP_REDUCERS)
 
 /* Every defined capability bit. */
-#define MINO_CAP_ALL     0xFFFFFFFFu
+#define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull
 
 /*
  * Install the given set of capabilities into env. FLOOR is always
@@ -1537,7 +1598,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * matching mino_install_minimal. Idempotent: bits already installed are
  * skipped silently.
  */
-void mino_install(mino_state *S, mino_env *env, unsigned int caps);
+void mino_install(mino_state *S, mino_env *env, uint64_t caps);
 
 /*
  * Floor-only convenience. Installs the foundational C primitives plus
@@ -1563,8 +1624,8 @@ void mino_install_sandbox(mino_state *S, mino_env *env);
 void mino_install_all(mino_state *S, mino_env *env);
 
 /* Inspect installed capabilities. Bit set per MINO_CAP_*. */
-unsigned int mino_capabilities(const mino_state *S);
-int          mino_capability_installed(const mino_state *S, unsigned int cap);
+uint64_t    mino_capabilities(const mino_state *S);
+int         mino_capability_installed(const mino_state *S, uint64_t cap);
 
 /*
  * Enumerate the full capability registry. The returned array is static,
@@ -1574,7 +1635,7 @@ int          mino_capability_installed(const mino_state *S, unsigned int cap);
  */
 typedef struct {
     const char  *name;     /* canonical label ("io", "regex", ...) */
-    unsigned int bit;      /* MINO_CAP_* */
+    uint64_t       bit;      /* MINO_CAP_* */
     const char  *summary;  /* one-line UX description */
 } mino_capability_info;
 

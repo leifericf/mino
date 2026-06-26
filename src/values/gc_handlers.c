@@ -237,6 +237,9 @@ static void finalize_val_impl(mino_state *S, gc_hdr_t *h, int teardown)
     case MINO_CHAN:
         mino_chan_finalize(S, v);
         break;
+    case MINO_STORE:
+        mino_store_gc_finalize(v);
+        break;
     case MINO_BYTES:
         free(v->as.bytes.data);
         v->as.bytes.data = NULL;

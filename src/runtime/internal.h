@@ -207,12 +207,13 @@ struct mino_state {
      * with the capability that would enable the name. Defaults to 0
      * so a bare `mino_state_new` + `mino_install_minimal` runtime sees
      * no capabilities until the embedder opts in. */
-    unsigned int    caps_installed;
+    uint64_t        caps_installed;
 
     /* === Printer, reader, source diagnostics =========================== */
-    /* print_depth stays inline so it packs with caps_installed (both
-     * 4-byte ints) before the sub-struct, leaving the sub-struct at
-     * an 8-aligned offset with no outer padding. */
+    /* print_depth stays inline after caps_installed. caps_installed is
+     * now uint64_t (widened from unsigned int for MINO_CAP_STORE at
+     * bit 32); print_depth is int. The struct layout naturally pads
+     * print_depth to 8-byte alignment after the 8-byte caps_installed. */
     int             print_depth;
     /* Reader / source-cache state lives in
      * src/runtime/reader_printer_state.h. The block is embedded at

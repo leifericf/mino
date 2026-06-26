@@ -31,7 +31,7 @@ typedef void (*mino_install_fn)(mino_state *S, mino_env *env);
  * `caps` is a bitmask; iteration walks this array in declaration order
  * and installs each capability whose bit is set in caps. */
 typedef struct {
-    unsigned int    bit;
+    uint64_t        bit;
     mino_install_fn install;
 } cap_dispatch_t;
 
@@ -77,15 +77,16 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_MATCH,       mino_install_clojure_match   },
     { MINO_CAP_LOGIC,       mino_install_clojure_logic   },
     { MINO_CAP_TOOLING,     mino_install_mino_tooling    },
+    { MINO_CAP_STORE,       mino_install_store           },
 };
 
 #define K_CAP_DISPATCH_COUNT \
     (sizeof(k_cap_dispatch) / sizeof(k_cap_dispatch[0]))
 
-void mino_install(mino_state *S, mino_env *env, unsigned int caps)
+void mino_install(mino_state *S, mino_env *env, uint64_t caps)
 {
     size_t i;
-    unsigned int wanted;
+    uint64_t wanted;
     int first_non_floor_install;
 
     if (S == NULL || env == NULL) return;

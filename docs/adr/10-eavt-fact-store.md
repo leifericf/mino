@@ -40,9 +40,12 @@ The store model:
 - **In-memory by default; durability opt-in per store.** Most stores
   never touch disk. Durable stores use snapshot file + append-only EDN
   WAL with host-driven checkpoint cadence (never auto-fsync).
-- **Direct install, no capability bit.** The 32-bit `MINO_CAP_*` field
-  is full (ADR 09). The host calls `mino_install_store(S, env)`
-  directly.
+- **Capability-gated install.** The `caps_installed` field is widened
+  from 32-bit to 64-bit (`uint64_t`) to accommodate `MINO_CAP_STORE`
+  at bit 32. The store installs via the standard `mino_install(S, env,
+  MINO_CAP_STORE)` path through `k_cap_dispatch[]`, consistent with
+  IO/FS/STM/AGENT. Not in `MINO_CAP_DEFAULT` (it is a heavier feature
+  with optional file I/O); included in `MINO_CAP_ALL`.
 
 ## Consequences
 
@@ -82,7 +85,9 @@ The store model:
   needs direct struct access to the connection's current-value field.
   A tag makes `mino_is_store` a fast check and the clone path
   efficient. Rejected because the C surface is part of the contract.
-- **Widen capability field to 64 bits.** Would allow a `MINO_CAP_STORE`
-  bit. Rejected as premature: the direct-install path is simpler, Lua-
-  shaped, and can be promoted to a bit at the v1.0 ABI freeze without
-  rewriting the surface.
+- **No capability bit.** The 32-bit `MINO_CAP_*` field is full (ADR
+  09). Rejected: consistency with how other features are granted
+  matters more than avoiding a field widening. The field is widened
+  to 64-bit (`uint64_t`), which is source-compatible for embedders
+  using named `MINO_CAP_*` constants, and the ABI is not frozen
+  pre-v1.0.

@@ -120,6 +120,11 @@ void mino_chan_trace(mino_state *S, mino_val *v);
  * Implemented in async/chan.c.  Same decoupling rationale as above. */
 void mino_chan_finalize(mino_state *S, mino_val *v);
 
+/* store.c -- finalizer for MINO_STORE handle cleanup on GC sweep.
+ * Releases the malloc'd mino_store_handle (path + clock slots) if the
+ * host did not call mino_store_close explicitly. */
+void mino_store_gc_finalize(mino_val *v);
+
 #ifdef __cplusplus
 }
 #endif

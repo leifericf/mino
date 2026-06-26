@@ -255,14 +255,14 @@ const mino_capability_info *mino_capability_list(void)
     return k_capability_info;
 }
 
-unsigned int mino_capabilities(const mino_state *S)
+uint64_t mino_capabilities(const mino_state *S)
 {
-    return (S != NULL) ? S->caps_installed : 0u;
+    return (S != NULL) ? S->caps_installed : 0ull;
 }
 
-int mino_capability_installed(const mino_state *S, unsigned int cap)
+int mino_capability_installed(const mino_state *S, uint64_t cap)
 {
-    if (S == NULL || cap == 0u) return 0;
+    if (S == NULL || cap == 0ull) return 0;
     return (S->caps_installed & cap) == cap;
 }
 

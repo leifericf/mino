@@ -393,6 +393,31 @@ struct mino_val {
             uint8_t        bit_tail;
             uint32_t       cached_hash; /* hash_val of this bytes; 0 = uncomputed. */
         } bytes;
+        struct {          /* MINO_STORE: EAVT fact store connection.
+                            *
+                            * Identity cell wrapping an immutable db
+                            * value (a persistent map carrying :entities,
+                            * :log, :tx, :schema, :options). The db value
+                            * is GC-traced via `val`. `watches` follows
+                            * the atom convention (a MINO_MAP of
+                            * key -> fn(key, conn, old, new)).
+                            *
+                            * `handle` points to a malloc'd
+                            * mino_store_handle (file handle, WAL, lock,
+                            * clock) — NOT GC-traced; freed by the
+                            * finalizer on GC sweep or state teardown.
+                            * NULL for in-memory stores.
+                            *
+                            * `owning_state` is the cross-state defense
+                            * (MST007 on mismatch, matching agent/ref).
+                            * `store_id` is a monotonic per-state
+                            * identity counter for printing. */
+            mino_val    *val;
+            mino_val    *watches;
+            void        *handle;
+            uint64_t       store_id;
+            mino_state  *owning_state;
+        } store;
     } as;
 };
 
