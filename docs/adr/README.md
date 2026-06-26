@@ -18,3 +18,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [07](07-no-aot-compilation.md) | No AOT compilation — the tiers stay interpreter, bytecode VM, and runtime JIT |
 | [08](08-one-options-entry-point.md) | One options entry point for per-state config knobs |
 | [09](09-prims-are-static-tables-are-the-registry.md) | Primitives are static; the registration tables are the registry |
+| [10](10-eavt-fact-store.md) | EAVT fact store, per-state isolated, no cross-runtime shared state |
