@@ -2280,6 +2280,7 @@
   ["examples/embed_gc.c"
    "examples/embed_gc_stress.c"
    "examples/embed_record.c"
+   "examples/embed_store.c"
    "examples/embed_multi_tenant_threads.c"])
 
 (defn- compile-and-run-example
