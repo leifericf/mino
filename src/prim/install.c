@@ -247,6 +247,8 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.core.match (pattern matching: match / matchv / match-let)." },
     { "logic",        MINO_CAP_LOGIC,
       "clojure.core.logic (+ fd, nominal): relational logic programming." },
+    { "store",        MINO_CAP_STORE,
+      "mino.store: EAVT fact store (open / transact / query / merge)." },
     { NULL,           0u,                                                NULL },
 };
 

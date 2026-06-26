@@ -61,6 +61,7 @@
 #include "lib_mino_deps.h"
 #include "lib_mino_tasks.h"
 #include "lib_mino_tasks_builtin.h"
+#include "lib_mino_store.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -249,6 +250,12 @@ void mino_install_mino_tooling(mino_state *S, mino_env *env)
     mino_register_bundled_lib(S, "mino.deps",          lib_mino_deps_src);
     mino_register_bundled_lib(S, "mino.tasks",         lib_mino_tasks_src);
     mino_register_bundled_lib(S, "mino.tasks.builtin", lib_mino_tasks_builtin_src);
+}
+
+void mino_install_mino_store(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.store", lib_mino_store_src);
 }
 
 void mino_install_all(mino_state *S, mino_env *env)

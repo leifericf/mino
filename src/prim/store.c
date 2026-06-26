@@ -148,47 +148,43 @@ mino_val *mino_store_publish(mino_state *S, mino_val *conn,
 
 /* --- C API: open / checkpoint / close ------------------------------------- */
 
+/* Read a snapshot file as EDN. Returns the parsed db value, or NULL
+ * if the file does not exist or cannot be read/parsed. Used by both
+ * the C API mino_store_open and the store-open* primitive. */
+static mino_val *store_read_snapshot(mino_state *S, const char *path,
+                                        mino_env *env)
+{
+    FILE     *f;
+    long       sz;
+    char      *buf;
+    mino_val *db;
+    if (path == NULL) return NULL;
+    f = fopen(path, "rb");
+    if (f == NULL) return NULL;
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    if (sz < 0) { fclose(f); return NULL; }
+    fseek(f, 0, SEEK_SET);
+    buf = (char *)malloc((size_t)sz + 1);
+    if (buf == NULL) { fclose(f); return NULL; }
+    if (sz > 0) {
+        size_t got = fread(buf, 1, (size_t)sz, f);
+        if (got != (size_t)sz) { free(buf); fclose(f); return NULL; }
+    }
+    buf[sz] = '\0';
+    fclose(f);
+    db = mino_eval_string(S, buf, env);
+    free(buf);
+    return db;
+}
+
 mino_val *mino_store_open(mino_state *S, const char *path,
                            mino_store_clock_fn clock, void *clock_ctx)
 {
     mino_env  *env = ns_env_ensure(S, "clojure.core");
     mino_val *db  = NULL;
     if (path != NULL) {
-        FILE *f = fopen(path, "rb");
-        if (f != NULL) {
-            long   sz;
-            char  *buf;
-            fseek(f, 0, SEEK_END);
-            sz = ftell(f);
-            if (sz < 0) {
-                fclose(f);
-                set_eval_diag(S, NULL, "io", "MIO001",
-                    "store-open: cannot size file");
-                return NULL;
-            }
-            fseek(f, 0, SEEK_SET);
-            buf = (char *)malloc((size_t)sz + 1);
-            if (buf == NULL) {
-                fclose(f);
-                gc_oom_throw(S, "store: out of memory");
-                return NULL;
-            }
-            if (sz > 0) {
-                size_t got = fread(buf, 1, (size_t)sz, f);
-                if (got != (size_t)sz) {
-                    free(buf);
-                    fclose(f);
-                    set_eval_diag(S, NULL, "io", "MIO001",
-                        "store-open: short read");
-                    return NULL;
-                }
-            }
-            buf[sz] = '\0';
-            fclose(f);
-            db = mino_eval_string(S, buf, env);
-            free(buf);
-            if (db == NULL) return NULL;
-        }
+        db = store_read_snapshot(S, path, env);
     }
     if (db == NULL) {
         db = mino_eval_string(S, "{:entities {} :log [] :tx 0}", env);
@@ -257,12 +253,11 @@ void mino_store_gc_finalize(mino_val *v)
 
 /* (store-open* initial-db path) -> store connection */
 static mino_val *prim_store_open(mino_state *S, mino_val *args,
-                                    mino_env *env)
+                                     mino_env *env)
 {
-    mino_val  *db;
-    mino_val  *path_val;
+    mino_val   *db;
+    mino_val   *path_val;
     const char *path_str = NULL;
-    (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -276,6 +271,10 @@ static mino_val *prim_store_open(mino_state *S, mino_val *args,
                 "store-open*: path must be a string or nil");
         }
         path_str = path_val->as.s.data;
+    }
+    if (path_str != NULL) {
+        mino_val *snapshot = store_read_snapshot(S, path_str, env);
+        if (snapshot != NULL) db = snapshot;
     }
     return mino_store_val(S, db, path_str, NULL, NULL);
 }
@@ -413,5 +412,6 @@ void mino_install_store(mino_state *S, mino_env *env)
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_store, k_prims_store_count,
                                        "store");
+    mino_install_mino_store(S, env);
     S->caps_installed |= MINO_CAP_STORE;
 }

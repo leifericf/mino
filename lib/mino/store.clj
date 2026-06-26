@@ -114,6 +114,9 @@
     (seq? tx-data)
     (mapcat parse-tx-data tx-data)
 
+    (vector? tx-data)
+    (mapcat parse-tx-data tx-data)
+
     :else
     (throw (ex-info "Invalid tx-data format" {:tx-data tx-data}))))
 

@@ -88,7 +88,8 @@ BUNDLED = \
     lib_clojure_test_check:lib/clojure/test/check.clj \
     lib_mino_deps:lib/mino/deps.clj \
     lib_mino_tasks:lib/mino/tasks.clj \
-    lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj
+    lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj \
+    lib_mino_store:lib/mino/store.clj
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 
