@@ -190,6 +190,11 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
         if (clone_meta(dst, v, result) != 0) return NULL;
         return result;
     }
+    case MINO_STORE: {
+        mino_val *db = clone_val(dst, v->as.store.val);
+        if (db == NULL) return NULL;
+        return mino_store_val(dst, db, NULL, NULL, NULL);
+    }
     /* Sorted collections with custom comparators hold function refs and
      * cannot be safely cloned across runtimes. Natural-order ones could
      * be rebuilt, but for now treat all as non-transferable. */
@@ -388,6 +393,8 @@ static int can_clone_walk(const mino_val *v, const char **reason)
         free(it);
         return ok;
     }
+    case MINO_STORE:
+        return can_clone_walk(v->as.store.val, reason);
     default:
         if (reason != NULL) *reason = non_transferable_name(t);
         return 0;

@@ -380,6 +380,9 @@ uint32_t hash_val(const mino_val *v)
     case MINO_BYTES:
         h = fnv_mix(h, 0x18);
         return hash_uint32_bytes(h, mino_bytes_hash(v));
+    case MINO_STORE:
+        h = fnv_mix(h, 0x19);
+        return hash_pointer_bytes(h, (uintptr_t)v);
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);

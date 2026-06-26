@@ -291,7 +291,8 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
     if (a != NULL && mino_type_of(a) == MINO_AGENT) {
         return a->as.agent.val;
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
+    if (a != NULL && mino_type_of(a) == MINO_STORE)  return a->as.store.val;
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, store, or reduced");
 }
 
 static mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)

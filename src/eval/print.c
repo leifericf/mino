@@ -1012,6 +1012,14 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         S->print_depth--;
         fputc(']', out);
         return;
+    case MINO_STORE:
+        fprintf(out, "#store[0x%llx ",
+                (unsigned long long)v->as.store.store_id);
+        S->print_depth++;
+        mino_print_to(S, out, v->as.store.val);
+        S->print_depth--;
+        fputc(']', out);
+        return;
     case MINO_HOST_ARRAY:
         print_host_array(S, out, v);
         return;

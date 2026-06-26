@@ -291,6 +291,10 @@ static void gc_verify_old_hdr(mino_state *S, gc_hdr_t *h)
             gc_verify_check(S, h, v->as.agent.err);
             gc_verify_check(S, h, v->as.agent.err_handler);
             break;
+        case MINO_STORE:
+            gc_verify_check(S, h, v->as.store.val);
+            gc_verify_check(S, h, v->as.store.watches);
+            break;
         default: break;
         }
         break;

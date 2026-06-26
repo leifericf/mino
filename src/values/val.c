@@ -1854,6 +1854,7 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
     case MINO_HOST_ARRAY:
     case MINO_TX_REF:
     case MINO_AGENT:
+    case MINO_STORE:
     case MINO_CHAN:
         return a == b;
     case MINO_HANDLE:

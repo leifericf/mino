@@ -174,6 +174,10 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
         PUSH(v->as.agent.err);
         PUSH(v->as.agent.err_handler);
         break;
+    case MINO_STORE:
+        PUSH(v->as.store.val);
+        PUSH(v->as.store.watches);
+        break;
     case MINO_CHAN:
         mino_chan_trace(S, v);
         break;

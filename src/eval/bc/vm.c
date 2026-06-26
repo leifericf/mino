@@ -429,6 +429,7 @@ static mino_val *bc_protocol_type_disc(mino_state *S, mino_val *v)
     case MINO_MAP_ENTRY:  return mino_keyword(S, "map-entry");
     case MINO_TX_REF:     return mino_keyword(S, "ref");
     case MINO_AGENT:      return mino_keyword(S, "agent");
+    case MINO_STORE:      return mino_keyword(S, "store");
     case MINO_CHAN:       return mino_keyword(S, "chan");
     case MINO_QUEUE:      return mino_keyword(S, "queue");
     case MINO_BYTES:      return mino_keyword(S, "bytes");

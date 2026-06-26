@@ -283,6 +283,7 @@ const char *type_tag_str(const mino_val *v)
     case MINO_MAP_ENTRY: return "map-entry";
     case MINO_TX_REF:    return "ref";
     case MINO_AGENT:     return "agent";
+    case MINO_STORE:     return "store";
     case MINO_CHAN:      return "chan";
     case MINO_QUEUE:     return "queue";
     case MINO_BYTES:     return "bytes";
