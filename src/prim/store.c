@@ -371,6 +371,12 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
             "store-clock* requires one argument");
     }
     conn = args->as.cons.car;
+    /* nil means "no connection": the pure (store/with ...) variant has no
+       conn to read a clock from, so fall back to the wall clock, mirroring
+       the NULL-clock path below. Any other non-store value is a type error. */
+    if (mino_is_nil(conn)) {
+        return mino_int(S, mino_monotonic_ns() / 1000000);
+    }
     if (!mino_is_store(conn)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "store-clock* requires a store connection");
