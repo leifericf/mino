@@ -762,7 +762,7 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         if (mino_to_bigint_str(v, buf, sizeof buf, &written) && written > 0)
             fprintf(f, "%u BI %s\n", id, buf);
         else
-            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_BIGINT);
+            fprintf(f, "%u N\n", id);
         break;
     }
     case MINO_BIGDEC:
@@ -781,7 +781,7 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
             }
             fputc('\n', f);
         } else {
-            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_UUID);
+            fprintf(f, "%u N\n", id);
         }
         break;
     }
@@ -846,7 +846,7 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
             fprintf(f, " %s\n",
                     v->as.lazy.defining_ns ? v->as.lazy.defining_ns : "-");
         } else {
-            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_LAZY);
+            fprintf(f, "%u N\n", id);
         }
         break;
     case MINO_QUEUE:
@@ -919,7 +919,10 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         fputc('\n', f);
         break;
     default:
-        fprintf(f, "%u UNSUPPORTED %d\n", id, (int)mino_type_of(v));
+        /* Unserializable types (handle, future, chan, agent, host-array,
+         * recur/tail-call/reduced sentinels): substitute nil so the load
+         * doesn't fail. The host should re-create these after loading. */
+        fprintf(f, "%u N\n", id);
         break;
     }
 }

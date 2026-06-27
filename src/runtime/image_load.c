@@ -375,7 +375,7 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         } else if (strcmp(type_tag, "TR") == 0) {
             v = alloc_val(S, MINO_TRANSIENT);
         } else {
-            return 0; /* unsupported type */
+            v = mino_nil(S); /* unsupported type → nil */
         }
     }
 
@@ -1139,6 +1139,34 @@ int mino_load_image_into(mino_state *S, const char *path)
                 }
                 free(ns_str);
                 free(name_str);
+            }
+            if (saw_roots && strncmp(l, "ALIAS ", 6) == 0) {
+                const char *cp = l + 6;
+                char *owning = img_parse_token(&cp);
+                char *alias = img_parse_token(&cp);
+                char *full = img_parse_token(&cp);
+                if (owning != NULL && alias != NULL && full != NULL) {
+                    if (S->ns_vars.ns_alias_len >=
+                        S->ns_vars.ns_alias_cap) {
+                        S->ns_vars.ns_alias_cap =
+                            S->ns_vars.ns_alias_cap > 0
+                            ? S->ns_vars.ns_alias_cap * 2 : 16;
+                        S->ns_vars.ns_aliases =
+                            (ns_alias_t *)realloc(
+                                S->ns_vars.ns_aliases,
+                                S->ns_vars.ns_alias_cap *
+                                sizeof(ns_alias_t));
+                    }
+                    S->ns_vars.ns_aliases[
+                        S->ns_vars.ns_alias_len].owning_ns = owning;
+                    S->ns_vars.ns_aliases[
+                        S->ns_vars.ns_alias_len].alias = alias;
+                    S->ns_vars.ns_aliases[
+                        S->ns_vars.ns_alias_len].full_name = full;
+                    S->ns_vars.ns_alias_len++;
+                } else {
+                    free(owning); free(alias); free(full);
+                }
             }
 
             if (nl) { *nl = saved2; l = nl + 1; } else break;
