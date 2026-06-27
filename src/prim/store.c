@@ -325,19 +325,79 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     return db;
 }
 
+/* Escape a C string for safe embedding in a Clojure string literal.
+ * Doubles backslashes and double-quotes. Returns malloc'd storage;
+ * caller frees. Returns NULL on allocation failure. */
+static char *store_escape_clj_str(const char *s)
+{
+    size_t      raw_len, esc_len, i, j;
+    const char *p;
+    char       *out;
+    raw_len = strlen(s);
+    esc_len = raw_len;
+    for (p = s; *p; p++)
+        if (*p == '"' || *p == '\\') esc_len++;
+    out = (char *)malloc(esc_len + 1);
+    if (out == NULL) return NULL;
+    for (i = 0, j = 0; i < raw_len; i++) {
+        if (s[i] == '"' || s[i] == '\\') out[j++] = '\\';
+        out[j++] = s[i];
+    }
+    out[j] = '\0';
+    return out;
+}
+
 mino_val *mino_store_open(mino_state *S, const char *path,
                            mino_store_clock_fn clock, void *clock_ctx)
 {
     mino_env  *env = ns_env_ensure(S, "clojure.core");
     mino_val *db  = NULL;
-    if (path != NULL) {
-        db = store_read_snapshot(S, path, env);
-    }
-    if (db == NULL) {
+    if (path == NULL) {
         db = mino_eval_string(S, "{:entities {} :log [] :tx 0}", env);
         if (db == NULL) return NULL;
+        return mino_store_val(S, db, NULL, clock, clock_ctx);
     }
-    return mino_store_val(S, db, path, clock, clock_ctx);
+    /* For durable stores, delegate to the Clojure layer which handles
+     * snapshot read + WAL replay (including schema, indexes, retention).
+     * The returned store has a NULL clock; extract the db and re-wrap
+     * with the caller's clock so C-side transacts see the right time. */
+    {
+        char       *escaped;
+        char       *buf;
+        int          n;
+        mino_val   *conn;
+        escaped = store_escape_clj_str(path);
+        if (escaped == NULL) {
+            gc_oom_throw(S, "store: out of memory");
+            return NULL;
+        }
+        n = snprintf(NULL, 0,
+            "(require 'mino.store)"
+            "(mino.store/open \"%s\")", escaped);
+        if (n < 0) {
+            free(escaped);
+            set_eval_diag(S, NULL, "io", "MIO001",
+                "store-open: path encoding failed");
+            return NULL;
+        }
+        buf = (char *)malloc((size_t)n + 1);
+        if (buf == NULL) {
+            free(escaped);
+            gc_oom_throw(S, "store: out of memory");
+            return NULL;
+        }
+        snprintf(buf, (size_t)n + 1,
+            "(require 'mino.store)"
+            "(mino.store/open \"%s\")", escaped);
+        free(escaped);
+        conn = mino_eval_string(S, buf, env);
+        free(buf);
+        if (conn == NULL || !mino_is_store(conn)) return NULL;
+        db = mino_store_deref(conn);
+        /* conn will be collected by GC; its handle freed by the
+         * finalizer. The db value survives because we reference it. */
+        return mino_store_val(S, db, path, clock, clock_ctx);
+    }
 }
 
 int mino_store_checkpoint(mino_state *S, mino_val *conn)

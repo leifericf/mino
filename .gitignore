@@ -98,6 +98,8 @@ examples/embed_multi_tenant_threads
 examples/embed_multi_tenant_threads_amalgam
 examples/embed_record
 examples/embed_record_amalgam
+examples/embed_store
+examples/embed_store_amalgam
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test

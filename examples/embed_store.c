@@ -127,6 +127,46 @@ int main(void)
 
     remove(SNAP_PATH);
 
+    /* C-API WAL replay: transact via the script layer (which appends
+     * to the WAL), do NOT checkpoint, then reopen via the C API
+     * mino_store_open. The C API must replay the WAL — if it only
+     * reads the snapshot, the entity will be absent. */
+    #define WAL_PATH "embed_store_wal.edn"
+    remove(WAL_PATH);
+    remove(WAL_PATH ".wal");
+
+    result = mino_eval_string(S,
+        "(do (require 'mino.store)"
+        "    (mino.store/transact"
+        "      (mino.store/open \"" WAL_PATH "\")"
+        "      {:dave {:role :dev}})"
+        "    nil)", env);
+    if (result == NULL) {
+        fprintf(stderr, "WAL setup failed: %s\n", mino_last_error(S));
+        return 1;
+    }
+    /* Reopen via C API — WAL must be replayed. */
+    conn = mino_store_open(S, WAL_PATH, NULL, NULL);
+    if (conn == NULL || !mino_is_store(conn)) {
+        fprintf(stderr, "mino_store_open WAL replay failed: %s\n",
+                mino_last_error(S));
+        return 1;
+    }
+    mino_env_set(S, env, "cconn", conn);
+    result = mino_eval_string(S,
+        "(mino.store/read (mino.store/db cconn) :dave :role)", env);
+    if (result == NULL) {
+        fprintf(stderr, "C-API WAL replay read failed: %s\n",
+                mino_last_error(S));
+        return 1;
+    }
+    printf("C-API WAL replay: :dave :role = ");
+    mino_print(S, result);
+    printf(" (expected :dev)\n");
+
+    remove(WAL_PATH);
+    remove(WAL_PATH ".wal");
+
     printf("ok\n");
     mino_env_free(S, env);
     mino_state_free(S);
