@@ -304,6 +304,7 @@
 - Tests: Add deviation notes for spec double-in defaults and macroexpand-1/binding
 - Tests: Fix ns-resolution for renamed symbol in census_surface_test
 - Tests: Replace spec-first status markers with neutral documentation
+- Tests: Expand embed_slad into a cross-state save/load round-trip E2E covering the full value-type matrix (scalars incl. bigint/ratio/bigdec, escaped strings, all collections incl. sorted/queue, fn + closure + multi-arity, atom/volatile, records, bytes, uuid, regex, metadata) -- the regression net for the SLAD deserializer, gated under release-gate step 6
 - eval-bc: Fix GC window in mino_bc_compile_fn (bc unprotected across clauses allocation)
 - eval-bc: Replace abort() in mino_bc_check_require with catchable mino-level error
 - eval-bc: Document intentional deviation in compile_def (returns bound value, not Var)
