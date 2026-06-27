@@ -19,3 +19,5 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [08](08-one-options-entry-point.md) | One options entry point for per-state config knobs |
 | [09](09-prims-are-static-tables-are-the-registry.md) | Primitives are static; the registration tables are the registry |
 | [10](10-eavt-fact-store.md) | EAVT fact store, per-state isolated, no cross-runtime shared state |
+| [11](11-store-on-disk-format.md) | Store on-disk format — EDN text with version header, line-delimited WAL |
+| [12](12-save-lisp-and-die.md) | Save-lisp-and-die — value-serialization image with identity table |
