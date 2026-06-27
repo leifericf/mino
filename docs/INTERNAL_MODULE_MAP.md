@@ -57,6 +57,8 @@ src/
 | `src/runtime/path_buf.c` | Bounded-buffer path helper used by the resolver |
 | `src/runtime/capabilities.c` | Data-driven capability install (`mino_install` + `MINO_CAP_*` tiers) |
 | `src/runtime/host_threads.c` | pthread/Win32 worker threads for futures + promises |
+| `src/runtime/image.c` | SLAD image serializer (`mino_save_image`): BFS root walk, ID table, per-type emission, CRC32, quiesce checks |
+| `src/runtime/image_load.c` | SLAD image deserializer (`mino_load_image_into`): two-pass allocate+patch, namespace/var splice, parent reconnection |
 
 ## Primitives
 
@@ -86,6 +88,7 @@ src/
 | `src/prim/stm.c` | Software transactional memory: refs and `dosync` |
 | `src/prim/store.c` | EAVT fact store: `MINO_STORE` connection lifecycle (`store-open*`, `store-commit*`, `store-checkpoint*`, `store-close*`, `store?`, `store-clock*`, `store-read-snapshot*`, `store-read-wal*`), WAL append/replay with format-version header, C API (`mino_store_open`/`mino_store_checkpoint`/`mino_store_close`), GC finalizer for handle cleanup |
 | `src/prim/bits.c` | Bit-syntax surface over `MINO_BYTES` (`bits` constructor/matcher) |
+| `src/prim/image.c` | SLAD Clojure-level primitives: `save-image`, `load-image-into` (thin wrappers around the C API) |
 | `src/prim/ns.c` | Namespace and var introspection primitives (Clojure namespace API parity) |
 | `src/prim/jvm_statics.c` | JVM-Clojure surface-parity statics layer |
 | `src/prim/install_stdlib.c` | Per-namespace install hooks for the bundled `clojure.*` stdlib sources |
@@ -195,6 +198,7 @@ and a four-primitive bridge.
 | `src/async/timer.h` | Timer types and public surface |
 | `src/prim/internal.h` | Shared primitive helpers, `seq_iter_t`, install-table types (`mino_prim_def`, `mino_prim_domain`), per-domain table externs, per-prim function declarations, "Error classes emitted" contract block |
 | `src/regex/re.h` | Regex public header |
+| `src/runtime/image_internal.h` | Shared SLAD declarations: image format constants (`IMG_MAGIC`), CRC32 function, `img_is_stdlib_ns` |
 
 ## Entry Point
 
