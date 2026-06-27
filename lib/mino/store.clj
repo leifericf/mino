@@ -7,13 +7,17 @@
 ;; The db value is a persistent map:
 ;;   {:entities {}   ;; entity-id -> {attr -> value}
 ;;    :log []        ;; flat vector of fact maps {:e :a :v :tx :instant :op}
-;;    :tx 0}         ;; next transaction number (monotonic per-store)
+;;    :tx 0          ;; next transaction number (monotonic per-store)
+;;    :schema {}      ;; attribute -> {:type :string :cardinality :one}
+;;    :closed? false} ;; when true, reject attributes not in :schema
 ;;
-;; In-memory by default; durability via snapshot-on-checkpoint. The C
-;; primitives store-open*, store-commit*, store-checkpoint*, store-close*,
-;; store?, and store-clock* are installed in clojure.core by the runtime;
-;; this namespace wraps them with the query, transaction, and aggregation
-;; API.
+;; In-memory by default. Durability uses snapshot + WAL (see ADR 11):
+;; each transact on a durable store appends a tx-info map to the WAL at
+;; <path>.wal; checkpoint writes the snapshot and deletes the WAL; open
+;; reads the snapshot then replays the WAL.
+;;
+;; Schema validation is opt-in via the :schema option on open. With
+;; :closed true, only declared attributes are accepted.
 
 (ns mino.store
   "EAVT fact store for embedded per-runtime memory.
@@ -35,10 +39,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- empty-db
-  "Returns a fresh db value with no entities, an empty log, and a zero
-  transaction counter."
-  []
-  {:entities {} :log [] :tx 0})
+  "Returns a fresh db value with no entities, an empty log, a zero
+  transaction counter, and an empty open schema."
+  ([] {:entities {} :log [] :tx 0 :schema {} :closed? false})
+  ([schema] {:entities {} :log [] :tx 0 :schema (or schema {}) :closed? false})
+  ([schema closed?]
+   {:entities {} :log [] :tx 0 :schema (or schema {}) :closed? (or closed? false)}))
 
 (defn- make-fact
   "Builds a single fact map from its EAVT coordinates plus the tx number,
@@ -47,17 +53,69 @@
   {:e e :a a :v v :tx tx :instant instant :op op})
 
 ;; ---------------------------------------------------------------------------
+;; Schema validation
+;; ---------------------------------------------------------------------------
+
+(defn- check-type
+  "Returns nil if v matches type-spec, throws ex-info otherwise.
+  Supported types: :string, :keyword, :long, :double, :boolean,
+  :instant (treated as :long), :any (no check, default)."
+  [attr v type-spec]
+  (let [ok? (case type-spec
+              :string  (string? v)
+              :keyword (keyword? v)
+              :long    (integer? v)
+              :double  (float? v)
+              :boolean (boolean? v)
+              :instant (integer? v)
+              :any     true
+              true)]
+    (when-not ok?
+      (throw
+        (ex-info (str "Type mismatch for attribute " attr
+                      ": expected " type-spec)
+                 {:attribute attr :value v :expected type-spec})))))
+
+(defn- validate-fact
+  "Validates a single fact against the schema. Throws ex-info on
+  violation: unknown attribute in a closed schema, or type mismatch
+  on :db/add. No-op when schema is empty."
+  [schema closed? {:keys [e a v op]}]
+  (let [spec (get schema a)]
+    (when (and closed? (not spec))
+      (throw
+        (ex-info (str "Unknown attribute in closed schema: " a)
+                 {:attribute a :entity e})))
+    (when (and spec (:type spec) (not= (:type spec) :any)
+               (= op :db/add))
+      (check-type a v (:type spec)))))
+
+;; ---------------------------------------------------------------------------
 ;; Lifecycle
 ;; ---------------------------------------------------------------------------
 
 (defn open
   "Opens a store connection. With no args, opens an in-memory store.
-  With a path string, opens a durable store (the C side reads the
-  snapshot if the file exists). The options map is reserved for future
-  use (schema, indexes, history config) and ignored in v1."
+  With a path string, opens a durable store (reads snapshot + replays
+  WAL if files exist). The options map may carry:
+    :schema   map of attribute -> {:type :cardinality} spec
+    :closed   when true, reject attributes not in :schema (default false)
+  Schema is set at first open and stored in the db value; on reopen the
+  snapshot's schema takes precedence."
   ([] (store-open* (empty-db) nil))
-  ([path] (store-open* (empty-db) path))
-  ([path opts] (store-open* (empty-db) path)))
+  ([path] (open path nil))
+  ([path opts]
+   (let [snap-db (when path (store-read-snapshot* path))
+         base (or snap-db
+                    (empty-db (:schema opts) (:closed opts)))
+         entries (when path (store-read-wal* path))
+         db (if (seq entries)
+              (reduce (fn [d entry]
+                        (apply-tx d (:tx entry) (:instant entry)
+                                  (:tx-data entry)))
+                      base entries)
+              base)]
+     (store-open* db path))))
 
 (defn close
   "Flushes (if durable) and closes the store. Idempotent."
@@ -135,47 +193,62 @@
 
 (defn- apply-fact
   "Applies a single fact to the entities map, returning the updated
-  entities. :db/add overwrites the attribute (single-valued in v1).
-  :db/retract with a nil value drops the whole attribute; with a
-  concrete value it drops the attribute when the current value matches
-  (single-valued) or disj's the value from a multi-valued set, removing
-  the attribute when the set becomes empty."
-  [entities {:keys [e a v op]}]
-  (let [entity (or (get entities e) {})]
-    (case op
-      :db/add
-      (assoc entities e (assoc entity a v))
+  entities. :db/add overwrites the attribute (single-valued) or conjs
+  into a set (:many cardinality from schema). :db/retract with a nil
+  value drops the whole attribute; with a concrete value it drops the
+  attribute when the current value matches (single-valued) or disj's
+  the value from a multi-valued set, removing the attribute when the
+  set becomes empty."
+  ([entities fact] (apply-fact entities fact nil))
+  ([entities {:keys [e a v op]} schema]
+   (let [entity  (or (get entities e) {})
+         spec    (get schema a)
+         many?   (= :many (:cardinality spec))]
+     (case op
+       :db/add
+       (if many?
+         (let [cur (get entity a)]
+           (assoc entities e (assoc entity a (conj (or cur #{}) v))))
+         (assoc entities e (assoc entity a v)))
 
-      :db/retract
-      (if (nil? v)
-        (retract-attr entities e entity a)
-        (let [cur (get entity a)]
-          (cond
-            (nil? cur) entities
-            (set? cur)
-            (if (contains? cur v)
-              (let [cur' (disj cur v)]
-                (if (empty? cur')
-                  (retract-attr entities e entity a)
-                  (assoc entities e (assoc entity a cur'))))
-              entities)
-            (= cur v)
-            (retract-attr entities e entity a)
-            :else entities))))))
+       :db/retract
+       (if (nil? v)
+         (retract-attr entities e entity a)
+         (let [cur (get entity a)]
+           (cond
+             (nil? cur) entities
+             (set? cur)
+             (if (contains? cur v)
+               (let [cur' (disj cur v)]
+                 (if (empty? cur')
+                   (retract-attr entities e entity a)
+                   (assoc entities e (assoc entity a cur'))))
+               entities)
+              (= cur v)
+             (retract-attr entities e entity a)
+             :else entities)))))))
 
 (defn- apply-tx
   "Applies a parsed transaction to the db value, returning a new db
   value. Each op becomes a fact tagged with tx-num and instant; the
   materialized view is rebuilt by folding the facts, and the flat log
-  grows by the new facts. The tx counter advances by one."
+  grows by the new facts. The tx counter advances by one. Schema and
+  closed? are preserved from the input db. Each fact is validated
+  against the schema before application."
   [db tx-num instant tx-data]
-  (let [ops (parse-tx-data tx-data)
-        facts (vec (for [[op e a v] ops]
-                     (make-fact e a v tx-num instant op)))
-        entities (reduce apply-fact (:entities db) facts)]
-    {:entities entities
-     :log (into (:log db) facts)
-     :tx (inc tx-num)}))
+  (let [schema  (get db :schema {})
+        closed? (get db :closed? false)
+        ops     (parse-tx-data tx-data)
+        facts   (vec (for [[op e a v] ops]
+                       (make-fact e a v tx-num instant op)))]
+    (doseq [f facts] (validate-fact schema closed? f))
+    (let [entities (reduce (fn [acc f] (apply-fact acc f schema))
+                           (:entities db) facts)]
+      {:entities entities
+       :log (into (:log db) facts)
+       :tx (inc tx-num)
+       :schema schema
+       :closed? closed?})))
 
 ;; ---------------------------------------------------------------------------
 ;; Public transaction API
@@ -184,13 +257,16 @@
 (defn transact
   "Transacts facts against the store connection. Atomic: all-or-nothing.
   tx-data accepts any of the parse-tx-data forms. Returns a map of the
-  tx number just applied and the resulting db value under :db-after."
+  tx number just applied and the resulting db value under :db-after.
+  On a durable store, the transaction is appended to the WAL before
+  the in-memory publish."
   [conn tx-data]
   (let [cur @conn
         tx-num (:tx cur)
         instant (store-clock* conn)
-        new-db (apply-tx cur tx-num instant tx-data)]
-    (store-commit* conn new-db)
+        new-db (apply-tx cur tx-num instant tx-data)
+        tx-info {:tx tx-num :instant instant :tx-data tx-data}]
+    (store-commit* conn new-db tx-info)
     {:tx tx-num :db-after new-db}))
 
 (defn with
@@ -286,17 +362,21 @@
 (defn as-of
   "Returns the db value as it was at tx N or instant T. Replays the log
   up to (but not including) the point, rebuilding the materialized view
-  in tx order. The returned :tx is preserved from the input."
+  in tx order. The returned :tx and :schema/:closed? are preserved from
+  the input."
   [db-val point]
-  (let [instant? (point-as-instant? point)
+  (let [schema (get db-val :schema {})
+        instant? (point-as-instant? point)
         facts-before (filter (fn [f]
                                 (if instant?
                                   (< (:instant f) point)
                                   (< (:tx f) point)))
                               (:log db-val))
         ordered (sort-by :tx facts-before)
-        entities (reduce apply-fact {} ordered)]
-    {:entities entities :log (vec ordered) :tx (:tx db-val)}))
+        entities (reduce (fn [acc f] (apply-fact acc f schema))
+                         {} ordered)]
+    {:entities entities :log (vec ordered) :tx (:tx db-val)
+     :schema schema :closed? (get db-val :closed? false)}))
 
 (defn since
   "Returns the seq of facts asserted at or after tx N (or instant T),
@@ -361,13 +441,18 @@
 (defn merge
   "Merges two db values into a new one. The fact logs concatenate and
   replay in instant order, so the entity view reflects last-write-wins
-  by :instant. The tx counter is the max of the two."
+  by :instant. The tx counter is the max of the two. Schema and closed?
+  are taken from db-a."
   [db-a db-b]
-  (let [all-facts (sort-by :instant (concat (:log db-a) (:log db-b)))
-        entities (reduce apply-fact {} all-facts)]
+  (let [schema (get db-a :schema {})
+        all-facts (sort-by :instant (concat (:log db-a) (:log db-b)))
+        entities (reduce (fn [acc f] (apply-fact acc f schema))
+                         {} all-facts)]
     {:entities entities
      :log (vec all-facts)
-     :tx (max (:tx db-a) (:tx db-b))}))
+     :tx (max (:tx db-a) (:tx db-b))
+     :schema schema
+     :closed? (get db-a :closed? false)}))
 
 (defn fold
   "Reduces across a collection of db values. extract-fn pulls the value
@@ -402,7 +487,9 @@
 
 (defn compact
   "Bounds the log of a durable or long-lived store by dropping old
-  facts while preserving the materialized view.
+  facts while preserving the materialized view. Does not write to the
+  WAL — compaction is a maintenance operation; checkpoint afterwards to
+  persist the compacted state.
 
   With one arg, drops the entire log (only the current view survives).
   With a keep-spec map:
@@ -412,7 +499,9 @@
    (let [cur @conn]
      (store-commit* conn {:entities (:entities cur)
                           :log []
-                          :tx (:tx cur)})))
+                          :tx (:tx cur)
+                          :schema (get cur :schema {})
+                          :closed? (get cur :closed? false)})))
   ([conn keep-spec]
    (let [cur @conn
          log (:log cur)
@@ -426,14 +515,16 @@
                 :else log)]
      (store-commit* conn {:entities (:entities cur)
                           :log (vec kept)
-                          :tx (:tx cur)}))))
+                          :tx (:tx cur)
+                          :schema (get cur :schema {})
+                          :closed? (get cur :closed? false)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema (reserved for future use)
 ;; ---------------------------------------------------------------------------
 
 (defn schema
-  "Returns the store's schema map. Empty in v1; schema validation is
-  not yet implemented."
+  "Returns the store's schema map (attribute -> {:type :cardinality}).
+  Empty when no schema was configured."
   [db-val]
-  {})
+  (get db-val :schema {}))

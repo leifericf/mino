@@ -506,4 +506,161 @@
       (finally
         (rm-rf store-test-dir)))))
 
+;; ---------------------------------------------------------------------------
+;; WAL durability
+;; ---------------------------------------------------------------------------
+
+(deftest store-wal-survives-without-checkpoint
+  ;; Transact without checkpoint, reopen: WAL replay recovers the data.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/wal1.db")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn {1 {:name "Alice"}})
+            ;; Don't checkpoint or close — simulate crash by opening a new conn
+            conn2 (store/open path)
+            db (store/db conn2)]
+        (is (= "Alice" (store/read db 1 :name)) "WAL replay recovers data"))
+      (finally
+        (rm-rf store-test-dir)))))
+
+(deftest store-wal-multiple-transactions
+  ;; Multiple transactions between checkpoints are all replayed.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/wal2.db")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            _ (store/transact conn [:db/add 2 :name "Bob"])
+            _ (store/transact conn [:db/add 3 :name "Carol"])
+            conn2 (store/open path)
+            db (store/db conn2)]
+        (is (= #{"Alice" "Bob" "Carol"}
+               (set (map #(store/read db % :name) [1 2 3]))))
+        (is (= 3 (:tx db)) "tx counter preserved across WAL replay"))
+      (finally
+        (rm-rf store-test-dir)))))
+
+(deftest store-wal-checkpoint-deletes-wal
+  ;; After checkpoint, the WAL file is deleted.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/wal3.db")
+        wal-path (str path ".wal")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            _ (store/checkpoint conn)]
+        (is (not (file-exists? wal-path)) "WAL deleted after checkpoint"))
+      (finally
+        (rm-rf store-test-dir)))))
+
+(deftest store-wal-torn-write-recovery
+  ;; A malformed trailing WAL line is silently dropped.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/wal4.db")
+        wal-path (str path ".wal")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            ;; Append garbage to simulate a torn write
+            _ (spit wal-path "GARBAGE{not valid" :append true)
+            conn2 (store/open path)
+            db (store/db conn2)]
+        (is (= "Alice" (store/read db 1 :name)) "good entry recovered")
+        (is (= 1 (:tx db)) "tx counter from good entry"))
+      (finally
+        (rm-rf store-test-dir)))))
+
+(deftest store-wal-checkpoint-then-transact
+  ;; Snapshot captures state, new WAL entries are replayed on top.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/wal5.db")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            _ (store/checkpoint conn)
+            _ (store/transact conn [:db/add 2 :name "Bob"])
+            conn2 (store/open path)
+            db (store/db conn2)]
+        (is (= "Alice" (store/read db 1 :name)) "from snapshot")
+        (is (= "Bob" (store/read db 2 :name)) "from WAL replay"))
+      (finally
+        (rm-rf store-test-dir)))))
+
+;; ---------------------------------------------------------------------------
+;; Schema validation
+;; ---------------------------------------------------------------------------
+
+(deftest store-schema-accepts-valid-type
+  (let [conn (store/open nil {:schema {:name {:type :string}}})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (= "Alice" (store/read db 1 :name)))))
+
+(deftest store-schema-rejects-wrong-type
+  (let [conn (store/open nil {:schema {:age {:type :long}}})]
+    (is (thrown? (store/transact conn [:db/add 1 :age "not a number"])))))
+
+(deftest store-schema-many-cardinality
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn [:db/add 1 :tags :a])
+        _ (store/transact conn [:db/add 1 :tags :b])
+        _ (store/transact conn [:db/add 1 :tags :c])
+        db (store/db conn)]
+    (is (= #{:a :b :c} (store/read db 1 :tags)))))
+
+(deftest store-schema-many-retract-member
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn [:db/add 1 :tags :a])
+        _ (store/transact conn [:db/add 1 :tags :b])
+        _ (store/transact conn [:db/retract 1 :tags :a])
+        db (store/db conn)]
+    (is (= #{:b} (store/read db 1 :tags)))))
+
+(deftest store-schema-closed-rejects-unknown
+  (let [conn (store/open nil {:schema {:name {:type :string}}
+                              :closed true})]
+    (is (thrown? (store/transact conn [:db/add 1 :unknown "value"])))))
+
+(deftest store-schema-closed-accepts-declared
+  (let [conn (store/open nil {:schema {:name {:type :string}}
+                              :closed true})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (= "Alice" (store/read db 1 :name)))))
+
+(deftest store-schema-open-allows-unknown
+  ;; Default (open schema) allows any attribute.
+  (let [conn (store/open nil {:schema {:name {:type :string}}})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        _ (store/transact conn [:db/add 1 :extra "anything"])
+        db (store/db conn)]
+    (is (= "Alice" (store/read db 1 :name)))
+    (is (= "anything" (store/read db 1 :extra)))))
+
+(deftest store-schema-returns-schema
+  (let [schema {:name {:type :string} :tags {:cardinality :many}}
+        conn (store/open nil {:schema schema})
+        db (store/db conn)]
+    (is (= schema (store/schema db)))))
+
+(deftest store-schema-keyword-type
+  (let [conn (store/open nil {:schema {:role {:type :keyword}}})
+        _ (store/transact conn [:db/add 1 :role :admin])
+        db (store/db conn)]
+    (is (= :admin (store/read db 1 :role)))))
+
+(deftest store-schema-many-single-overwrite-without-schema
+  ;; Without schema :many, :db/add overwrites (single-valued).
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :tags :a])
+        _ (store/transact conn [:db/add 1 :tags :b])
+        db (store/db conn)]
+    (is (= :b (store/read db 1 :tags)) "overwrites without :many")))
+
 (run-tests-and-exit)

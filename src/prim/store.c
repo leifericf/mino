@@ -4,9 +4,14 @@
  * A store connection is an identity cell wrapping an immutable db
  * value (a persistent map) plus optional host-owned durability state
  * (a malloc'd mino_store_handle carrying the snapshot path and clock).
- * Durability is snapshot-on-checkpoint only for v1: checkpoint writes
- * the current db value to handle->path via mino_print_to; close
- * flushes and releases the handle. There is no WAL.
+ *
+ * Durability uses snapshot + WAL (see ADR 11). Snapshot files carry a
+ * 1-byte format-version header (0x00 = EDN text). The WAL at
+ * <path>.wal is line-delimited EDN, one tx-info map per line.
+ * store-commit* appends to the WAL before publishing when given a
+ * tx-info argument. Checkpoint writes the snapshot and deletes the
+ * WAL. On open, the snapshot is read, then the WAL is replayed entry
+ * by entry (torn-write recovery: stop at first parse failure).
  *
  * The store is per-state isolated: cross-state access throws MST007,
  * matching the agent/ref pattern. publish is the raw write barrier +
@@ -41,6 +46,125 @@ static char *store_dup_path(const char *s)
     if (out == NULL) return NULL;
     memcpy(out, s, n + 1);
     return out;
+}
+
+/* --- WAL path / append / read --------------------------------------------- */
+
+/* Snapshot format version byte. 0x00 = EDN text follows. No other
+ * value is assigned; the read path treats any non-0x00 first byte as
+ * a headerless (v1) snapshot and parses the entire file as EDN. */
+#define STORE_SNAPSHOT_VERSION  0x00
+
+/* Construct the WAL path "<snap_path>.wal" in fresh malloc'd storage.
+ * Returns NULL if snap_path is NULL or allocation fails. Caller frees. */
+static char *store_wal_path(const char *snap_path)
+{
+    size_t plen;
+    char  *wal;
+    if (snap_path == NULL) return NULL;
+    plen = strlen(snap_path);
+    wal = (char *)malloc(plen + 5);          /* ".wal" + NUL */
+    if (wal == NULL) return NULL;
+    memcpy(wal, snap_path, plen);
+    memcpy(wal + plen, ".wal", 5);
+    return wal;
+}
+
+/* Append tx-info as one line of EDN to the WAL at <snap_path>.wal.
+ * The file is opened in append mode (created if absent), written, and
+ * closed per call — no persistent FILE* in the handle, avoiding fd
+ * exhaustion when many stores are open. Returns 0 on success, -1 on
+ * I/O failure (diagnostic set). */
+static int store_wal_append(mino_state *S, const char *snap_path,
+                             mino_val *tx_info)
+{
+    char *wal_path;
+    FILE *f;
+    wal_path = store_wal_path(snap_path);
+    if (wal_path == NULL) {
+        gc_oom_throw(S, "store: out of memory");
+        return -1;
+    }
+    f = fopen(wal_path, "ab");
+    free(wal_path);
+    if (f == NULL) {
+        set_eval_diag(S, NULL, "io", "MIO001",
+            "store: cannot open WAL for append");
+        return -1;
+    }
+    mino_print_to(S, f, tx_info);
+    fputc('\n', f);
+    fclose(f);
+    return 0;
+}
+
+/* Read the WAL at <snap_path>.wal and return a vector of parsed
+ * tx-info maps. Returns nil if the file does not exist. On torn-write
+ * (a line that fails to parse), parsing stops and entries read so far
+ * are returned — the malformed trailing line is silently dropped. */
+static mino_val *store_wal_read(mino_state *S, const char *snap_path,
+                                 mino_env *env)
+{
+    char              *wal_path;
+    FILE              *f;
+    long                sz;
+    char              *buf;
+    char              *line_start;
+    char              *p;
+    mino_vec_builder  *vb;
+    mino_val          *result;
+
+    wal_path = store_wal_path(snap_path);
+    if (wal_path == NULL) return mino_nil(S);
+    f = fopen(wal_path, "rb");
+    free(wal_path);
+    if (f == NULL) return mino_nil(S);
+
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    if (sz < 0) { fclose(f); return mino_nil(S); }
+    fseek(f, 0, SEEK_SET);
+    buf = (char *)malloc((size_t)sz + 1);
+    if (buf == NULL) { fclose(f); gc_oom_throw(S, "store: oom"); return NULL; }
+    if (sz > 0) {
+        size_t got = fread(buf, 1, (size_t)sz, f);
+        if (got != (size_t)sz) { free(buf); fclose(f); return mino_nil(S); }
+    }
+    buf[sz] = '\0';
+    fclose(f);
+
+    vb = mino_vector_builder_new(S);
+    line_start = buf;
+    for (p = buf; ; p++) {
+        if (*p == '\n' || *p == '\0') {
+            size_t llen = (size_t)(p - line_start);
+            if (llen > 0) {
+                char saved = *p;
+                char *trim = line_start;
+                mino_val *entry = NULL;
+                mino_val *err_ex = NULL;
+                int rc;
+                *p = '\0';
+                while (*trim == ' ' || *trim == '\t' || *trim == '\r') trim++;
+                if (*trim != '\0') {
+                    rc = mino_eval_string_ex(S, trim, env, &entry, &err_ex);
+                    if (rc == 0 && entry != NULL) {
+                        mino_vector_builder_push(vb, entry);
+                    } else {
+                        /* Torn write: stop here, keep what we have */
+                        *p = saved;
+                        break;
+                    }
+                }
+                *p = saved;
+            }
+            line_start = p + 1;
+            if (*p == '\0') break;
+        }
+    }
+    free(buf);
+    result = mino_vector_builder_finish(vb);
+    return result;
 }
 
 /* --- public-API constructor + predicate ----------------------------------- */
@@ -148,9 +272,11 @@ mino_val *mino_store_publish(mino_state *S, mino_val *conn,
 
 /* --- C API: open / checkpoint / close ------------------------------------- */
 
-/* Read a snapshot file as EDN. Returns the parsed db value, or NULL
- * if the file does not exist or cannot be read/parsed. Used by both
- * the C API mino_store_open and the store-open* primitive. */
+/* Read a snapshot file as EDN. The file may carry a 1-byte version
+ * header (0x00 = EDN text); if the first byte is 0x00, the rest is
+ * parsed as EDN. Otherwise the entire file is parsed as EDN (backward
+ * compat with headerless v1 snapshots). Returns the parsed db value,
+ * or NULL if the file does not exist or cannot be read/parsed. */
 static mino_val *store_read_snapshot(mino_state *S, const char *path,
                                         mino_env *env)
 {
@@ -158,6 +284,7 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     long       sz;
     char      *buf;
     mino_val *db;
+    size_t     offset = 0;
     if (path == NULL) return NULL;
     f = fopen(path, "rb");
     if (f == NULL) return NULL;
@@ -173,7 +300,10 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     }
     buf[sz] = '\0';
     fclose(f);
-    db = mino_eval_string(S, buf, env);
+    /* Version header check: skip one byte if it's the version sentinel */
+    if (sz > 0 && (unsigned char)buf[0] == STORE_SNAPSHOT_VERSION)
+        offset = 1;
+    db = mino_eval_string(S, buf + offset, env);
     free(buf);
     return db;
 }
@@ -197,6 +327,7 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
 {
     mino_store_handle *h;
     FILE              *f;
+    char              *wal_path;
     if (!mino_is_store(conn)) {
         prim_throw_classified(S, "eval/type", "MTY001",
             "store-checkpoint requires a store connection");
@@ -205,14 +336,22 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
     if (store_check_state(S, conn)) return -1;
     h = (mino_store_handle *)conn->as.store.handle;
     if (h == NULL || h->path == NULL) return 0;
+    /* Write snapshot with version header */
     f = fopen(h->path, "wb");
     if (f == NULL) {
         set_eval_diag(S, NULL, "io", "MIO001",
             "store-checkpoint: cannot open file for writing");
         return -1;
     }
+    fputc(STORE_SNAPSHOT_VERSION, f);
     mino_print_to(S, f, conn->as.store.val);
     fclose(f);
+    /* Delete the WAL — the snapshot captures all state up to :tx */
+    wal_path = store_wal_path(h->path);
+    if (wal_path != NULL) {
+        remove(wal_path);
+        free(wal_path);
+    }
     return 0;
 }
 
@@ -251,13 +390,17 @@ void mino_store_gc_finalize(mino_val *v)
 
 /* --- primitives ----------------------------------------------------------- */
 
-/* (store-open* initial-db path) -> store connection */
+/* (store-open* db path) -> store connection
+ * Pure constructor: wraps the given db value in a store identity.
+ * Snapshot reading and WAL replay happen in the Clojure layer
+ * (store/open) via store-read-snapshot* and store-read-wal*. */
 static mino_val *prim_store_open(mino_state *S, mino_val *args,
-                                     mino_env *env)
+                                      mino_env *env)
 {
     mino_val   *db;
     mino_val   *path_val;
     const char *path_str = NULL;
+    (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -272,39 +415,58 @@ static mino_val *prim_store_open(mino_state *S, mino_val *args,
         }
         path_str = path_val->as.s.data;
     }
-    if (path_str != NULL) {
-        mino_val *snapshot = store_read_snapshot(S, path_str, env);
-        if (snapshot != NULL) db = snapshot;
-    }
     return mino_store_val(S, db, path_str, NULL, NULL);
 }
 
-/* (store-commit* conn new-db) -> new-db (publish + watches) */
+/* (store-commit* conn new-db) -> new-db          (no WAL)
+ * (store-commit* conn new-db tx-info) -> new-db  (append tx-info to WAL)
+ * Publish + watches. When tx-info is a non-nil 3rd arg and the store
+ * is durable (has a path), tx-info is appended to the WAL before the
+ * publish. This ordering ensures crash safety: if the append succeeds
+ * but the process dies before the in-memory publish takes effect, the
+ * WAL has the data and it is replayed on next open. */
 static mino_val *prim_store_commit(mino_state *S, mino_val *args,
-                                      mino_env *env)
+                                       mino_env *env)
 {
-    mino_val *conn;
-    mino_val *new_db;
-    mino_val *old_val;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
-        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+    mino_val          *conn;
+    mino_val          *new_db;
+    mino_val          *tx_info = NULL;
+    mino_val          *old_val;
+    mino_store_handle *h;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "store-commit* requires two arguments");
+            "store-commit* requires at least two arguments");
     }
     conn   = args->as.cons.car;
     new_db = args->as.cons.cdr->as.cons.car;
+    /* Optional 3rd arg */
+    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        tx_info = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "store-commit* accepts at most three arguments");
+        }
+    }
     if (!mino_is_store(conn)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "store-commit* requires a store connection");
     }
     if (store_check_state(S, conn)) return NULL;
+    /* WAL append before publish (crash safety) */
+    if (tx_info != NULL && !mino_is_nil(tx_info)) {
+        h = (mino_store_handle *)conn->as.store.handle;
+        if (h != NULL && h->path != NULL) {
+            if (store_wal_append(S, h->path, tx_info) != 0) return NULL;
+        }
+    }
     old_val = conn->as.store.val;
     if (mino_store_publish(S, conn, new_db) == NULL) return NULL;
     store_notify_watches(S, conn, old_val, new_db, env);
     return new_db;
 }
 
-/* (store-checkpoint* conn) -> nil */
+/* (store-checkpoint* conn) -> nil
+ * Writes the snapshot (version header + EDN) and deletes the WAL. */
 static mino_val *prim_store_checkpoint(mino_state *S, mino_val *args,
                                           mino_env *env)
 {
@@ -391,21 +553,72 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
     return mino_int(S, now);
 }
 
+/* --- snapshot / WAL read primitives --------------------------------------- */
+
+/* (store-read-snapshot* path) -> db-value or nil
+ * Reads a snapshot file (with version header) and returns the parsed
+ * db value. Returns nil if the file does not exist or cannot be parsed. */
+static mino_val *prim_store_read_snapshot(mino_state *S, mino_val *args,
+                                              mino_env *env)
+{
+    mino_val   *path_val;
+    const char *path_str;
+    mino_val   *db;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "store-read-snapshot* requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "store-read-snapshot*: path must be a string");
+    }
+    path_str = path_val->as.s.data;
+    db = store_read_snapshot(S, path_str, env);
+    return db != NULL ? db : mino_nil(S);
+}
+
+/* (store-read-wal* path) -> [tx-info...] or nil
+ * Reads the WAL at <path>.wal and returns a vector of parsed tx-info
+ * maps. Returns nil if the WAL file does not exist. Stops at the first
+ * line that fails to parse (torn-write recovery). */
+static mino_val *prim_store_read_wal(mino_state *S, mino_val *args,
+                                         mino_env *env)
+{
+    mino_val   *path_val;
+    const char *path_str;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "store-read-wal* requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "store-read-wal*: path must be a string");
+    }
+    path_str = path_val->as.s.data;
+    return store_wal_read(S, path_str, env);
+}
+
 /* --- primitive table + install hook --------------------------------------- */
 
 const mino_prim_def k_prims_store[] = {
-    {"store-open*",       prim_store_open,
-     "Create a store connection from an initial db value and optional path."},
-    {"store-commit*",     prim_store_commit,
-     "Publish a new db value to the store and fire watches."},
-    {"store-checkpoint*", prim_store_checkpoint,
-     "Flush the store's db value to disk if durable."},
-    {"store-close*",      prim_store_close,
+    {"store-open*",              prim_store_open,
+     "Create a store connection from a db value and optional path."},
+    {"store-commit*",            prim_store_commit,
+     "Publish a new db value to the store, optionally appending to WAL."},
+    {"store-checkpoint*",        prim_store_checkpoint,
+     "Write the db value to disk and truncate the WAL if durable."},
+    {"store-close*",             prim_store_close,
      "Close the store, flushing if durable."},
-    {"store?",            prim_store_p,
+    {"store?",                   prim_store_p,
      "Return true if x is a store connection."},
-    {"store-clock*",      prim_store_clock,
+    {"store-clock*",             prim_store_clock,
      "Return the current instant from the store's clock."},
+    {"store-read-snapshot*",     prim_store_read_snapshot,
+     "Read a snapshot file and return the db value, or nil."},
+    {"store-read-wal*",          prim_store_read_wal,
+     "Read the WAL and return a vector of tx-info maps, or nil."},
 };
 
 const size_t k_prims_store_count = sizeof(k_prims_store)
