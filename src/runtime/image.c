@@ -204,7 +204,7 @@ static void img_idt_init(img_id_table *t)
 {
     img_ht_init(&t->val_ht);
     img_env_ht_init(t);
-    t->id_count = 0;
+    t->id_count = 1;  /* ID 0 reserved for NULL sentinel */
     t->id_cap   = 256;
     t->id_vals  = (mino_val **)calloc(t->id_cap, sizeof(mino_val *));
     t->id_envs  = (mino_env **)calloc(t->id_cap, sizeof(mino_env *));
@@ -734,7 +734,7 @@ int mino_save_image(mino_state *S, const char *path)
 
     /* Values section */
     fprintf(f, "VALUES\n");
-    for (i = 0; i < idt.id_count; i++) {
+    for (i = 1; i < idt.id_count; i++) {
         if (idt.id_vals[i] != NULL)
             img_emit_val_full(f, &idt, idt.id_vals[i], i);
         else if (idt.id_envs[i] != NULL)

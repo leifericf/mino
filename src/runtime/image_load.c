@@ -313,7 +313,7 @@ static mino_val *img_resolve_val(img_reader *r, uint32_t id)
 /* Resolve an ID to an env. */
 static mino_env *img_resolve_env(img_reader *r, uint32_t id)
 {
-    if (id == 0 || id >= r->id_count) return NULL;
+    if (id >= r->id_count) return NULL;
     return r->id_envs[id];
 }
 
@@ -680,26 +680,48 @@ int mino_load_image_into(mino_state *S, const char *path)
                     new_env = img_resolve_env(&r, (uint32_t)eid);
                 }
                 if (ns_name != NULL && new_env != NULL) {
-                    /* Register the env as a root and add to ns_env_table */
+                    size_t j;
+                    int found = 0;
+                    /* Reconnect parent to clojure.core (skipped during
+                     * serialization because core is reinstalled by bootstrap) */
+                    if (new_env->parent == NULL)
+                        new_env->parent = S->ns_vars.mino_core_env;
+                    /* Register the env as a GC root */
                     root_env_t *rr = (root_env_t *)malloc(sizeof(*rr));
                     if (rr != NULL) {
                         rr->env = new_env;
                         rr->next = S->gc.root_envs;
                         S->gc.root_envs = rr;
                     }
-                    /* Add namespace entry */
-                    {
+                    /* Search for existing namespace entry to replace */
+                    for (j = 0; j < S->ns_vars.ns_env_len; j++) {
+                        if (S->ns_vars.ns_env_table[j].name != NULL &&
+                            strcmp(S->ns_vars.ns_env_table[j].name,
+                                   ns_name) == 0) {
+                            S->ns_vars.ns_env_table[j].env = new_env;
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        /* Add new namespace entry */
                         ns_env_entry_t *ne;
-                        if (S->ns_vars.ns_env_len >= S->ns_vars.ns_env_cap) {
+                        if (S->ns_vars.ns_env_len >=
+                            S->ns_vars.ns_env_cap) {
                             S->ns_vars.ns_env_cap *= 2;
                             S->ns_vars.ns_env_table =
-                                (ns_env_entry_t *)realloc(S->ns_vars.ns_env_table,
-                                S->ns_vars.ns_env_cap * sizeof(ns_env_entry_t));
+                                (ns_env_entry_t *)realloc(
+                                    S->ns_vars.ns_env_table,
+                                    S->ns_vars.ns_env_cap *
+                                    sizeof(ns_env_entry_t));
                         }
-                        ne = &S->ns_vars.ns_env_table[S->ns_vars.ns_env_len++];
+                        ne = &S->ns_vars.ns_env_table[
+                            S->ns_vars.ns_env_len++];
                         ne->name = ns_name; /* takes ownership */
                         ne->env = new_env;
                         ne->meta = mino_nil(S);
+                    } else {
+                        free(ns_name);
                     }
                 } else {
                     free(ns_name);
