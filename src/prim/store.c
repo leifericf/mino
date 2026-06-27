@@ -19,6 +19,15 @@
  * with watch dispatch. The handle is malloc-owned (not GC-traced);
  * mino_store_gc_finalize releases it on GC sweep if the host did not
  * call close explicitly.
+ *
+ * Trust model: snapshot and WAL files are parsed as EDN (via eval) on
+ * open and through the snapshot/WAL read primitives. Those primitives
+ * are installed under the "store" capability (MINO_CAP_STORE); an
+ * embedder that does not grant it never binds them. Paths and file
+ * contents are supplied by the script author (the same script-author-
+ * is-trust-boundary model used by fs.c), so reading a store's own
+ * written files is a trusted-path round-trip rather than evaluation of
+ * untrusted input.
  */
 
 #include "prim/internal.h"
