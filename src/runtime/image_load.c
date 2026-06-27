@@ -900,6 +900,166 @@ static int img_patch_one(img_reader *r, uint32_t id)
 
 /* --- public API: load --------------------------------------------- */
 
+/* Apply the META section: set v->meta on each value that carries one. */
+static void img_apply_meta(img_reader *r, char *buf)
+{
+    char *l = buf;
+    int in_meta = 0;
+    while (*l != '\0') {
+        char *nl = strchr(l, '\n');
+        char saved3 = '\0';
+        if (nl) { saved3 = *nl; *nl = '\0'; }
+        if (strcmp(l, "META") == 0) {
+            in_meta = 1;
+        } else if (strncmp(l, "ROOTS", 5) == 0) {
+            in_meta = 0;
+        } else if (in_meta && *l != '\0' && l[0] != '#') {
+            const char *p = l;
+            uint32_t id, mid;
+            if (img_parse_u32(&p, &id) && img_parse_u32(&p, &mid)
+                && id < r->id_count && r->id_vals[id] != NULL
+                && MINO_IS_PTR(r->id_vals[id])) {
+                r->id_vals[id]->meta = img_resolve_val(r, mid);
+            }
+        }
+        if (nl) { *nl = saved3; l = nl + 1; } else break;
+    }
+}
+
+/* Splice the ROOTS section into the state: namespace envs (replacing or
+ * adding entries), the current ns, the var registry, and aliases.
+ * Returns 0 on success, -1 on allocation failure. */
+static int img_splice_roots(img_reader *r, char *buf)
+{
+    mino_state *S = r->S;
+    char *l = buf;
+    int saw_roots = 0;
+    while (*l != '\0') {
+        char *nl = strchr(l, '\n');
+        char saved2 = '\0';
+        if (nl) { saved2 = *nl; *nl = '\0'; }
+
+        if (strcmp(l, "ROOTS") == 0 || strncmp(l, "ROOTS", 5) == 0) {
+            saw_roots = 1;
+        }
+        if (saw_roots && strncmp(l, "NS ", 3) == 0) {
+            const char *p = l + 3;
+            char *ns_name = img_parse_token(&p);
+            long long eid;
+            uint32_t mid;
+            mino_val *ns_meta = NULL;
+            mino_env *new_env = NULL;
+            if (img_parse_ll(&p, &eid) && eid >= 0) {
+                new_env = img_resolve_env(r, (uint32_t)eid);
+            }
+            if (img_parse_u32(&p, &mid))
+                ns_meta = img_resolve_val(r, mid);
+            if (ns_meta == NULL) ns_meta = mino_nil(S);
+            if (ns_name != NULL && new_env != NULL) {
+                size_t j;
+                int found = 0;
+                if (new_env->parent == NULL)
+                    new_env->parent = S->ns_vars.mino_core_env;
+                for (j = 0; j < S->ns_vars.ns_env_len; j++) {
+                    if (S->ns_vars.ns_env_table[j].name != NULL &&
+                        strcmp(S->ns_vars.ns_env_table[j].name,
+                               ns_name) == 0) {
+                        S->ns_vars.ns_env_table[j].env = new_env;
+                        S->ns_vars.ns_env_table[j].meta = ns_meta;
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ns_env_entry_t *ne;
+                    if (S->ns_vars.ns_env_len >=
+                        S->ns_vars.ns_env_cap) {
+                        size_t ncap = S->ns_vars.ns_env_cap * 2;
+                        ns_env_entry_t *nt;
+                        if (ncap == 0) ncap = 16;
+                        nt = (ns_env_entry_t *)realloc(
+                                S->ns_vars.ns_env_table,
+                                ncap * sizeof(ns_env_entry_t));
+                        if (nt == NULL) { free(ns_name); return -1; }
+                        S->ns_vars.ns_env_table = nt;
+                        S->ns_vars.ns_env_cap = ncap;
+                    }
+                    ne = &S->ns_vars.ns_env_table[
+                        S->ns_vars.ns_env_len++];
+                    ne->name = intern_var_str(S, ns_name); free(ns_name);
+                    ne->env = new_env;
+                    ne->meta = ns_meta;
+                } else {
+                    free(ns_name);
+                }
+            } else {
+                free(ns_name);
+            }
+        }
+        if (saw_roots && strncmp(l, "CURSOR ", 7) == 0) {
+            const char *cp = l + 7;
+            char *ns_name = img_parse_token(&cp);
+            if (ns_name != NULL) {
+                S->ns_vars.current_ns = intern_var_str(S, ns_name);
+                free(ns_name);
+            }
+        }
+        if (saw_roots && strncmp(l, "VREG ", 5) == 0) {
+            const char *cp = l + 5;
+            char *ns_str = img_parse_token(&cp);
+            char *name_str = img_parse_token(&cp);
+            uint32_t vid;
+            if (ns_str != NULL && name_str != NULL &&
+                img_parse_u32(&cp, &vid) && vid < r->id_count) {
+                mino_val *var = r->id_vals[vid];
+                if (var != NULL && mino_type_of(var) == MINO_VAR) {
+                    const char *i_ns = intern_var_str(S, ns_str);
+                    const char *i_name = intern_var_str(S, name_str);
+                    var->as.var.ns = i_ns;
+                    var->as.var.sym = i_name;
+                    var_registry_add(S, i_ns, i_name, var);
+                }
+            }
+            free(ns_str);
+            free(name_str);
+        }
+        if (saw_roots && strncmp(l, "ALIAS ", 6) == 0) {
+            const char *cp = l + 6;
+            char *owning = img_parse_token(&cp);
+            char *alias = img_parse_token(&cp);
+            char *full = img_parse_token(&cp);
+            if (owning != NULL && alias != NULL && full != NULL) {
+                if (S->ns_vars.ns_alias_len >=
+                    S->ns_vars.ns_alias_cap) {
+                    size_t ncap = S->ns_vars.ns_alias_cap > 0
+                        ? S->ns_vars.ns_alias_cap * 2 : 16;
+                    ns_alias_t *na = (ns_alias_t *)realloc(
+                            S->ns_vars.ns_aliases,
+                            ncap * sizeof(ns_alias_t));
+                    if (na == NULL) {
+                        free(owning); free(alias); free(full);
+                        return -1;
+                    }
+                    S->ns_vars.ns_aliases = na;
+                    S->ns_vars.ns_alias_cap = ncap;
+                }
+                S->ns_vars.ns_aliases[
+                    S->ns_vars.ns_alias_len].owning_ns = owning;
+                S->ns_vars.ns_aliases[
+                    S->ns_vars.ns_alias_len].alias = alias;
+                S->ns_vars.ns_aliases[
+                    S->ns_vars.ns_alias_len].full_name = full;
+                S->ns_vars.ns_alias_len++;
+            } else {
+                free(owning); free(alias); free(full);
+            }
+        }
+
+        if (nl) { *nl = saved2; l = nl + 1; } else break;
+    }
+    return 0;
+}
+
 int mino_load_image_into(mino_state *S, const char *path)
 {
     FILE *f;
@@ -1088,165 +1248,9 @@ int mino_load_image_into(mino_state *S, const char *path)
         }
     }
 
-    /* Apply metadata: parse META section and set v->meta on each value */
-    {
-        char *l = buf;
-        int in_meta = 0;
-        while (*l != '\0') {
-            char *nl = strchr(l, '\n');
-            char saved3 = '\0';
-            if (nl) { saved3 = *nl; *nl = '\0'; }
-            if (strcmp(l, "META") == 0) {
-                in_meta = 1;
-            } else if (strncmp(l, "ROOTS", 5) == 0) {
-                in_meta = 0;
-            } else if (in_meta && *l != '\0' && l[0] != '#') {
-                const char *p = l;
-                uint32_t id, mid;
-                if (img_parse_u32(&p, &id) && img_parse_u32(&p, &mid)
-                    && id < r.id_count && r.id_vals[id] != NULL
-                    && MINO_IS_PTR(r.id_vals[id])) {
-                    r.id_vals[id]->meta = img_resolve_val(&r, mid);
-                }
-            }
-            if (nl) { *nl = saved3; l = nl + 1; } else break;
-        }
-    }
+    img_apply_meta(&r, buf);
 
-    /* Splice: rebuild namespace envs and var registry */
-    {
-        char *l = buf;
-        int saw_roots = 0;
-        while (*l != '\0') {
-            char *nl = strchr(l, '\n');
-            char saved2 = '\0';
-            if (nl) { saved2 = *nl; *nl = '\0'; }
-
-            if (strcmp(l, "ROOTS") == 0 || strncmp(l, "ROOTS", 5) == 0) {
-                saw_roots = 1;
-            }
-            if (saw_roots && strncmp(l, "NS ", 3) == 0) {
-                const char *p = l + 3;
-                char *ns_name = img_parse_token(&p);
-                long long eid;
-                uint32_t mid;
-                mino_val *ns_meta = NULL;
-                mino_env *new_env = NULL;
-                if (img_parse_ll(&p, &eid) && eid >= 0) {
-                    new_env = img_resolve_env(&r, (uint32_t)eid);
-                }
-                if (img_parse_u32(&p, &mid))
-                    ns_meta = img_resolve_val(&r, mid);
-                if (ns_meta == NULL) ns_meta = mino_nil(S);
-                if (ns_name != NULL && new_env != NULL) {
-                    size_t j;
-                    int found = 0;
-                    /* Reconnect parent to clojure.core (skipped during
-                     * serialization because core is reinstalled by bootstrap) */
-                    if (new_env->parent == NULL)
-                        new_env->parent = S->ns_vars.mino_core_env;
-                    /* Search for existing namespace entry to replace */
-                    for (j = 0; j < S->ns_vars.ns_env_len; j++) {
-                        if (S->ns_vars.ns_env_table[j].name != NULL &&
-                            strcmp(S->ns_vars.ns_env_table[j].name,
-                                   ns_name) == 0) {
-                            S->ns_vars.ns_env_table[j].env = new_env;
-                            S->ns_vars.ns_env_table[j].meta = ns_meta;
-                            found = 1;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        /* Add new namespace entry */
-                        ns_env_entry_t *ne;
-                        if (S->ns_vars.ns_env_len >=
-                            S->ns_vars.ns_env_cap) {
-                            size_t ncap = S->ns_vars.ns_env_cap * 2;
-                            ns_env_entry_t *nt;
-                            if (ncap == 0) ncap = 16;
-                            nt = (ns_env_entry_t *)realloc(
-                                    S->ns_vars.ns_env_table,
-                                    ncap * sizeof(ns_env_entry_t));
-                            if (nt == NULL) { free(ns_name); rc = -1; goto cleanup; }
-                            S->ns_vars.ns_env_table = nt;
-                            S->ns_vars.ns_env_cap = ncap;
-                        }
-                        ne = &S->ns_vars.ns_env_table[
-                            S->ns_vars.ns_env_len++];
-                        ne->name = intern_var_str(S, ns_name); free(ns_name);
-                        ne->env = new_env;
-                        ne->meta = ns_meta;
-                    } else {
-                        free(ns_name);
-                    }
-                } else {
-                    free(ns_name);
-                }
-            }
-            if (saw_roots && strncmp(l, "CURSOR ", 7) == 0) {
-                const char *cp = l + 7;
-                char *ns_name = img_parse_token(&cp);
-                if (ns_name != NULL) {
-                    S->ns_vars.current_ns = intern_var_str(S, ns_name);
-                    free(ns_name);
-                }
-            }
-            if (saw_roots && strncmp(l, "VREG ", 5) == 0) {
-                const char *cp = l + 5;
-                char *ns_str = img_parse_token(&cp);
-                char *name_str = img_parse_token(&cp);
-                uint32_t vid;
-                if (ns_str != NULL && name_str != NULL &&
-                    img_parse_u32(&cp, &vid) && vid < r.id_count) {
-                    mino_val *var = r.id_vals[vid];
-                    if (var != NULL && mino_type_of(var) == MINO_VAR) {
-                        const char *i_ns = intern_var_str(S, ns_str);
-                        const char *i_name = intern_var_str(S, name_str);
-                        /* ns/sym are already interned from the patch pass;
-                         * just update to the canonical pointers and register */
-                        var->as.var.ns = i_ns;
-                        var->as.var.sym = i_name;
-                        var_registry_add(S, i_ns, i_name, var);
-                    }
-                }
-                free(ns_str);
-                free(name_str);
-            }
-            if (saw_roots && strncmp(l, "ALIAS ", 6) == 0) {
-                const char *cp = l + 6;
-                char *owning = img_parse_token(&cp);
-                char *alias = img_parse_token(&cp);
-                char *full = img_parse_token(&cp);
-                if (owning != NULL && alias != NULL && full != NULL) {
-                    if (S->ns_vars.ns_alias_len >=
-                        S->ns_vars.ns_alias_cap) {
-                        size_t ncap = S->ns_vars.ns_alias_cap > 0
-                            ? S->ns_vars.ns_alias_cap * 2 : 16;
-                        ns_alias_t *na = (ns_alias_t *)realloc(
-                                S->ns_vars.ns_aliases,
-                                ncap * sizeof(ns_alias_t));
-                        if (na == NULL) {
-                            free(owning); free(alias); free(full);
-                            rc = -1; goto cleanup;
-                        }
-                        S->ns_vars.ns_aliases = na;
-                        S->ns_vars.ns_alias_cap = ncap;
-                    }
-                    S->ns_vars.ns_aliases[
-                        S->ns_vars.ns_alias_len].owning_ns = owning;
-                    S->ns_vars.ns_aliases[
-                        S->ns_vars.ns_alias_len].alias = alias;
-                    S->ns_vars.ns_aliases[
-                        S->ns_vars.ns_alias_len].full_name = full;
-                    S->ns_vars.ns_alias_len++;
-                } else {
-                    free(owning); free(alias); free(full);
-                }
-            }
-
-            if (nl) { *nl = saved2; l = nl + 1; } else break;
-        }
-    }
+    if (img_splice_roots(&r, buf) != 0) { rc = -1; goto cleanup; }
 
 cleanup:
     img_reader_free(&r);
