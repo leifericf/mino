@@ -268,7 +268,10 @@
   value drops the whole attribute; with a concrete value it drops the
   attribute when the current value matches (single-valued) or disj's
   the value from a multi-valued set, removing the attribute when the
-  set becomes empty."
+  set becomes empty.
+  Performs no schema validation: apply-tx is the single validation
+  boundary, so callers (replay, merge, as-of) must feed it facts that
+  apply-tx has already validated."
   ([entities fact] (apply-fact entities fact nil))
   ([entities {:keys [e a v op]} schema]
    (let [entity  (or (get entities e) {})
