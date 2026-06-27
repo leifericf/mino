@@ -370,6 +370,10 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
             v = alloc_val(S, MINO_TYPE);
         } else if (strcmp(type_tag, "RC") == 0) {
             v = alloc_val(S, MINO_RECORD);
+        } else if (strcmp(type_tag, "TX") == 0) {
+            v = alloc_val(S, MINO_TX_REF);
+        } else if (strcmp(type_tag, "TR") == 0) {
+            v = alloc_val(S, MINO_TRANSIENT);
         } else {
             return 0; /* unsupported type */
         }
@@ -583,6 +587,9 @@ static int img_patch_one(img_reader *r, uint32_t id)
         if (parent_tok != NULL && strcmp(parent_tok, "-") != 0) {
             uint32_t pid = (uint32_t)strtoul(parent_tok, NULL, 10);
             e->parent = img_resolve_env(r, pid);
+        } else {
+            /* Parent was clojure.core (skipped during serialization) */
+            e->parent = S->ns_vars.mino_core_env;
         }
         free(parent_tok);
         if (!img_parse_ll(&p, &n)) { free(tag); return 0; }
@@ -626,8 +633,8 @@ static int img_patch_one(img_reader *r, uint32_t id)
         v->as.regex.source = img_resolve_val(r, sid);
     } else if (strcmp(tag, "SM") == 0 || strcmp(tag, "SS") == 0) {
         int is_map = (strcmp(tag, "SM") == 0);
-        uint32_t count, i;
-        if (!img_parse_u32(&p, &count)) { free(tag); return 0; }
+        uint32_t count, comp_id, i;
+        if (!img_parse_u32(&p, &count) || !img_parse_u32(&p, &comp_id)) { free(tag); return 0; }
         {
             mino_val **keys = count > 0 ? malloc(count * sizeof(mino_val *)) : NULL;
             mino_val **vals = is_map && count > 0 ? malloc(count * sizeof(mino_val *)) : NULL;
@@ -642,9 +649,12 @@ static int img_patch_one(img_reader *r, uint32_t id)
                 }
             }
             {
+                mino_val *comp = comp_id == 0 ? NULL : img_resolve_val(r, comp_id);
                 mino_val *nv = is_map
-                    ? mino_sorted_map(S, keys, vals, count)
-                    : mino_sorted_set(S, keys, count);
+                    ? (comp ? mino_sorted_map_by(S, comp, keys, vals, count)
+                            : mino_sorted_map(S, keys, vals, count))
+                    : (comp ? mino_sorted_set_by(S, comp, keys, count)
+                            : mino_sorted_set(S, keys, count));
                 mino_val *v = r->id_vals[id];
                 v->as.sorted = nv->as.sorted;
                 v->type = is_map ? MINO_SORTED_MAP : MINO_SORTED_SET;
@@ -792,6 +802,28 @@ static int img_patch_one(img_reader *r, uint32_t id)
         }
     }
 
+    if (strcmp(tag, "TX") == 0) {
+        uint32_t vid, wid, valid_;
+        long long ver, rid;
+        mino_val *v = r->id_vals[id];
+        if (!img_parse_u32(&p, &vid) || !img_parse_u32(&p, &wid) ||
+            !img_parse_u32(&p, &valid_) || !img_parse_ll(&p, &ver) ||
+            !img_parse_ll(&p, &rid)) { free(tag); return 0; }
+        v->as.tx_ref.val = img_resolve_val(r, vid);
+        v->as.tx_ref.watches = wid == 0 ? NULL : img_resolve_val(r, wid);
+        v->as.tx_ref.validator = valid_ == 0 ? NULL : img_resolve_val(r, valid_);
+        v->as.tx_ref.version = (uint64_t)ver;
+        v->as.tx_ref.ref_id = (uint64_t)rid;
+        v->as.tx_ref.owning_state = S;
+    } else if (strcmp(tag, "TR") == 0) {
+        uint32_t cid;
+        mino_val *v = r->id_vals[id];
+        if (!img_parse_u32(&p, &cid)) { free(tag); return 0; }
+        v->as.transient.current = img_resolve_val(r, cid);
+        v->as.transient.valid = 0;  /* invalidated on load */
+        v->as.transient.owner_id = 0;
+    }
+
     free(tag);
     return 1;
 }
@@ -886,6 +918,11 @@ int mino_load_image_into(mino_state *S, const char *path)
             if (nl) { *nl = saved; line = nl + 1; } else break;
             continue;
         }
+        if (strcmp(line, "META") == 0) {
+            in_values = 0;
+            if (nl) { *nl = saved; line = nl + 1; } else break;
+            continue;
+        }
         if (strcmp(line, "ROOTS") == 0 || strncmp(line, "ROOTS", 5) == 0) {
             in_values = 0;
             if (nl) { *nl = saved; line = nl + 1; } else break;
@@ -919,18 +956,23 @@ int mino_load_image_into(mino_state *S, const char *path)
         if (nl) { *nl = saved; line = nl + 1; } else break;
     }
 
-    /* Patch pass 1: everything except TY and RC */
-    for (i = 0; i < r.id_count; i++) {
-        if (r.id_lines[i] != NULL) {
-            const char *tp = r.id_lines[i];
+    /* Patch pass 1: everything except TY, RC, SM, SS
+     * SM/SS are deferred because their construction calls comparator fns
+     * which need all other values (including params/body) to be ready. */
+    for (i = r.id_count; i > 0; i--) {
+        uint32_t idx = i - 1;
+        if (r.id_lines[idx] != NULL) {
+            const char *tp = r.id_lines[idx];
             char *tag = img_parse_token(&tp);
-            int is_ty = (tag != NULL && strcmp(tag, "TY") == 0);
-            int is_rc = (tag != NULL && strcmp(tag, "RC") == 0);
+            int skip = (tag != NULL && (strcmp(tag, "TY") == 0
+                       || strcmp(tag, "RC") == 0
+                       || strcmp(tag, "SM") == 0
+                       || strcmp(tag, "SS") == 0));
             free(tag);
-            if (is_ty || is_rc) continue;
-            if (!img_patch_one(&r, i)) { rc = -1; goto cleanup; }
-            free(r.id_lines[i]);
-            r.id_lines[i] = NULL;
+            if (skip) continue;
+            if (!img_patch_one(&r, idx)) { rc = -1; goto cleanup; }
+            free(r.id_lines[idx]);
+            r.id_lines[idx] = NULL;
         }
     }
 
@@ -951,10 +993,48 @@ int mino_load_image_into(mino_state *S, const char *path)
     /* Patch pass 3: RC (types are now resolved) */
     for (i = 0; i < r.id_count; i++) {
         if (r.id_lines[i] != NULL) {
-            if (!img_patch_one(&r, i)) {
-                rc = -1;
-                goto cleanup;
+            const char *tp = r.id_lines[i];
+            char *tag = img_parse_token(&tp);
+            int is_rc = (tag != NULL && strcmp(tag, "RC") == 0);
+            free(tag);
+            if (!is_rc) continue;
+            if (!img_patch_one(&r, i)) { rc = -1; goto cleanup; }
+            free(r.id_lines[i]);
+            r.id_lines[i] = NULL;
+        }
+    }
+
+    /* Patch pass 4: SM/SS (all fns are now patched, comparators callable) */
+    for (i = 0; i < r.id_count; i++) {
+        if (r.id_lines[i] != NULL) {
+            if (!img_patch_one(&r, i)) { rc = -1; goto cleanup; }
+            free(r.id_lines[i]);
+            r.id_lines[i] = NULL;
+        }
+    }
+
+    /* Apply metadata: parse META section and set v->meta on each value */
+    {
+        char *l = buf;
+        int in_meta = 0;
+        while (*l != '\0') {
+            char *nl = strchr(l, '\n');
+            char saved3 = '\0';
+            if (nl) { saved3 = *nl; *nl = '\0'; }
+            if (strcmp(l, "META") == 0) {
+                in_meta = 1;
+            } else if (strncmp(l, "ROOTS", 5) == 0) {
+                in_meta = 0;
+            } else if (in_meta && *l != '\0' && l[0] != '#') {
+                const char *p = l;
+                uint32_t id, mid;
+                if (img_parse_u32(&p, &id) && img_parse_u32(&p, &mid)
+                    && id < r.id_count && r.id_vals[id] != NULL
+                    && MINO_IS_PTR(r.id_vals[id])) {
+                    r.id_vals[id]->meta = img_resolve_val(&r, mid);
+                }
             }
+            if (nl) { *nl = saved3; l = nl + 1; } else break;
         }
     }
 
@@ -974,10 +1054,15 @@ int mino_load_image_into(mino_state *S, const char *path)
                 const char *p = l + 3;
                 char *ns_name = img_parse_token(&p);
                 long long eid;
+                uint32_t mid;
+                mino_val *ns_meta = NULL;
                 mino_env *new_env = NULL;
                 if (img_parse_ll(&p, &eid) && eid >= 0) {
                     new_env = img_resolve_env(&r, (uint32_t)eid);
                 }
+                if (img_parse_u32(&p, &mid))
+                    ns_meta = img_resolve_val(&r, mid);
+                if (ns_meta == NULL) ns_meta = mino_nil(S);
                 if (ns_name != NULL && new_env != NULL) {
                     size_t j;
                     int found = 0;
@@ -998,6 +1083,7 @@ int mino_load_image_into(mino_state *S, const char *path)
                             strcmp(S->ns_vars.ns_env_table[j].name,
                                    ns_name) == 0) {
                             S->ns_vars.ns_env_table[j].env = new_env;
+                            S->ns_vars.ns_env_table[j].meta = ns_meta;
                             found = 1;
                             break;
                         }
@@ -1018,7 +1104,7 @@ int mino_load_image_into(mino_state *S, const char *path)
                             S->ns_vars.ns_env_len++];
                         ne->name = ns_name; /* takes ownership */
                         ne->env = new_env;
-                        ne->meta = mino_nil(S);
+                        ne->meta = ns_meta;
                     } else {
                         free(ns_name);
                     }

@@ -303,6 +303,9 @@ static int img_check_quiesced(mino_state *S, const char **reason)
 static void img_visit_val_children(img_id_table *t, mino_val *v)
 {
     if (v == NULL) return;
+    /* Visit metadata (applies to all heap-allocated values) */
+    if (MINO_IS_PTR(v) && MINO_IS_PTR(v->meta))
+        img_idt_assign_val(t, v->meta);
     switch (mino_type_of(v)) {
     case MINO_NIL:
     case MINO_BOOL:
@@ -402,10 +405,11 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
         break;
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET: {
-        /* Iterative in-order RB tree traversal */
         const mino_rb_node_t *stack[64];
         int sp = 0;
         const mino_rb_node_t *node = v->as.sorted.root;
+        if (MINO_IS_PTR(v->as.sorted.comparator))
+            img_idt_assign_val(t, v->as.sorted.comparator);
         while (node != NULL || sp > 0) {
             while (node != NULL) {
                 if (sp < 64) stack[sp++] = node;
@@ -472,12 +476,21 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
             img_idt_assign_val(t, v->as.record.ext);
         break;
     }
+    case MINO_TX_REF:
+        img_idt_assign_val(t, v->as.tx_ref.val);
+        if (MINO_IS_PTR(v->as.tx_ref.watches))
+            img_idt_assign_val(t, v->as.tx_ref.watches);
+        if (MINO_IS_PTR(v->as.tx_ref.validator))
+            img_idt_assign_val(t, v->as.tx_ref.validator);
+        break;
+    case MINO_TRANSIENT:
+        if (MINO_IS_PTR(v->as.transient.current))
+            img_idt_assign_val(t, v->as.transient.current);
+        break;
     case MINO_HANDLE:
     case MINO_FUTURE:
     case MINO_CHAN:
-    case MINO_TX_REF:
     case MINO_AGENT:
-    case MINO_TRANSIENT:
     case MINO_HOST_ARRAY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
@@ -792,8 +805,9 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET: {
         int is_map = (mino_type_of(v) == MINO_SORTED_MAP);
-        fprintf(f, "%u %s %zu", id, is_map ? "SM" : "SS",
+        fprintf(f, "%u %s %zu ", id, is_map ? "SM" : "SS",
                 v->as.sorted.len);
+        img_emit_val_id(f, t, v->as.sorted.comparator);
         /* Iterative in-order RB tree traversal */
         {
             const mino_rb_node_t *stack[64];
@@ -888,6 +902,22 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         fprintf(f, "%u PR %s\n", id,
                 v->as.prim.name ? v->as.prim.name : "-");
         break;
+    case MINO_TX_REF:
+        fprintf(f, "%u TX ", id);
+        img_emit_val_id(f, t, v->as.tx_ref.val);
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.tx_ref.watches);
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.tx_ref.validator);
+        fprintf(f, " %llu %llu\n",
+                (unsigned long long)v->as.tx_ref.version,
+                (unsigned long long)v->as.tx_ref.ref_id);
+        break;
+    case MINO_TRANSIENT:
+        fprintf(f, "%u TR ", id);
+        img_emit_val_id(f, t, v->as.transient.current);
+        fputc('\n', f);
+        break;
     default:
         fprintf(f, "%u UNSUPPORTED %d\n", id, (int)mino_type_of(v));
         break;
@@ -957,6 +987,17 @@ int mino_save_image(mino_state *S, const char *path)
             img_emit_env(f, &idt, idt.id_envs[i], i);
     }
 
+    /* Meta section: values with non-null metadata */
+    fprintf(f, "\nMETA\n");
+    for (i = 1; i < idt.id_count; i++) {
+        mino_val *mv = idt.id_vals[i];
+        if (mv != NULL && MINO_IS_PTR(mv) && MINO_IS_PTR(mv->meta)) {
+            fprintf(f, "%u ", i);
+            img_emit_val_id(f, &idt, mv->meta);
+            fputc('\n', f);
+        }
+    }
+
     /* Roots section: namespaces and vars */
     fprintf(f, "\nROOTS\n");
     {
@@ -967,6 +1008,8 @@ int mino_save_image(mino_state *S, const char *path)
             if (img_is_stdlib_ns(ne->name)) continue;
             fprintf(f, "NS %s ", ne->name);
             img_emit_env_id(f, &idt, ne->env);
+            fputc(' ', f);
+            img_emit_val_id(f, &idt, ne->meta);
             fputc('\n', f);
         }
         /* Var registry: emit (ns, name, var-id) for each non-stdlib var */
