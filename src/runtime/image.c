@@ -1313,7 +1313,11 @@ static int img_patch_one(img_reader *r, uint32_t id)
                 name = img_parse_token(&p);
                 if (!img_parse_u32(&p, &vid)) { free(name); free(tag); return 0; }
                 if (name != NULL && e->len < e->cap) {
-                    e->bindings[e->len].name = name; /* takes ownership */
+                    /* Intern the name so it's stable for the state's
+                     * lifetime (same pool as var ns/name strings). The
+                     * malloc'd copy from img_parse_token is freed. */
+                    e->bindings[e->len].name = intern_var_str(r->S, name);
+                    free(name);
                     e->bindings[e->len].val = img_resolve_val(r, vid);
                     e->len++;
                 } else {
