@@ -592,6 +592,34 @@
       (finally
         (rm-rf store-test-dir)))))
 
+(deftest store-wal-stale-entries-skipped
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/stale.db")
+        wal-path (str path ".wal")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            stale-line (slurp wal-path)
+            _ (store/transact conn [:db/add 1 :age 30])
+            _ (store/checkpoint conn)
+            conn2 (store/open path)
+            _ (store/transact conn2 [:db/add 2 :name "Carol"])
+            fresh-line (slurp wal-path)
+            _ (spit wal-path (str stale-line fresh-line))
+            conn3 (store/open path)
+            db (store/db conn3)
+            name-facts (filter #(and (= (:e %) 1) (= (:a %) :name))
+                               (:log db))]
+        (is (= "Alice" (store/read db 1 :name)) "snapshot value present")
+        (is (= 30 (store/read db 1 :age)) "snapshot value present")
+        (is (= "Carol" (store/read db 2 :name)) "fresh WAL entry replayed")
+        (is (= 1 (count name-facts)) "stale entry not double-applied to log")
+        (is (= 3 (:tx db)) "tx advanced past the fresh entry only")
+        (store/close conn3))
+      (finally
+        (rm-rf store-test-dir)))))
+
 (deftest store-snapshot-atomic-write
   ;; Checkpoint writes to <path>.tmp then renames into place, so a
   ;; stale .tmp from a crashed previous attempt is cleaned up and the
