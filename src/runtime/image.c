@@ -331,7 +331,8 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
     }
     case MINO_MAP: {
         size_t i;
-        if (v->as.map.key_order != NULL) {
+        if (MINO_IS_PTR(v->as.map.key_order) &&
+            MINO_IS_PTR(v->as.map.val_order)) {
             for (i = 0; i < v->as.map.len; i++) {
                 mino_val *k = vec_nth(v->as.map.key_order, i);
                 mino_val *val = vec_nth(v->as.map.val_order, i);
@@ -343,7 +344,7 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
     }
     case MINO_SET: {
         size_t i;
-        if (v->as.set.key_order != NULL) {
+        if (MINO_IS_PTR(v->as.set.key_order)) {
             for (i = 0; i < v->as.set.len; i++)
                 img_idt_assign_val(t, vec_nth(v->as.set.key_order, i));
         }
@@ -358,27 +359,27 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
         img_idt_assign_val(t, v->as.fn.params);
         img_idt_assign_val(t, v->as.fn.body);
         img_idt_assign_env(t, v->as.fn.env);
-        if (v->as.fn.wraps_prim != NULL)
+        if (MINO_IS_PTR(v->as.fn.wraps_prim))
             img_idt_assign_val(t, v->as.fn.wraps_prim);
-        if (v->as.fn.template_fn != NULL)
+        if (MINO_IS_PTR(v->as.fn.template_fn))
             img_idt_assign_val(t, v->as.fn.template_fn);
         break;
     case MINO_ATOM:
         img_idt_assign_val(t, v->as.atom.val);
-        if (v->as.atom.watches != NULL)
+        if (MINO_IS_PTR(v->as.atom.watches))
             img_idt_assign_val(t, v->as.atom.watches);
-        if (v->as.atom.validator != NULL)
+        if (MINO_IS_PTR(v->as.atom.validator))
             img_idt_assign_val(t, v->as.atom.validator);
         break;
     case MINO_VOLATILE:
         img_idt_assign_val(t, v->as.volatile_.val);
         break;
     case MINO_VAR:
-        if (v->as.var.root != NULL)
+        if (MINO_IS_PTR(v->as.var.root))
             img_idt_assign_val(t, v->as.var.root);
-        if (v->as.var.watches != NULL)
+        if (MINO_IS_PTR(v->as.var.watches))
             img_idt_assign_val(t, v->as.var.watches);
-        if (v->as.var.validator != NULL)
+        if (MINO_IS_PTR(v->as.var.validator))
             img_idt_assign_val(t, v->as.var.validator);
         break;
     case MINO_RATIO:
@@ -387,7 +388,7 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
         break;
     case MINO_STORE:
         img_idt_assign_val(t, v->as.store.val);
-        if (v->as.store.watches != NULL)
+        if (MINO_IS_PTR(v->as.store.watches))
             img_idt_assign_val(t, v->as.store.watches);
         break;
     case MINO_BIGINT:
@@ -586,7 +587,8 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
     case MINO_MAP: {
         size_t i;
         fprintf(f, "%u M %zu", id, v->as.map.len);
-        if (v->as.map.key_order != NULL) {
+        if (MINO_IS_PTR(v->as.map.key_order) &&
+            MINO_IS_PTR(v->as.map.val_order)) {
             for (i = 0; i < v->as.map.len; i++) {
                 fputc(' ', f);
                 img_emit_val_id(f, t, vec_nth(v->as.map.key_order, i));
@@ -600,7 +602,7 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
     case MINO_SET: {
         size_t i;
         fprintf(f, "%u SE %zu", id, v->as.set.len);
-        if (v->as.set.key_order != NULL) {
+        if (MINO_IS_PTR(v->as.set.key_order)) {
             for (i = 0; i < v->as.set.len; i++) {
                 fputc(' ', f);
                 img_emit_val_id(f, t, vec_nth(v->as.set.key_order, i));

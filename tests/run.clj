@@ -140,6 +140,7 @@
 (require "tests/introspection_test")
 (require "tests/census_surface_test")
 (require "tests/qualified_special_form_test")
+(require "tests/image_test")
 
 (reset! clojure.test/suite-mode false)
 

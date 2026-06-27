@@ -1,53 +1,49 @@
 (require "tests/test")
+(require '[clojure.string :as str])
 
-(deftest image-save-load-simple-value
-  ;; Save a state with a simple var, load into fresh state, verify.
-  (rm-rf "/tmp/mino-image-test")
-  (mkdir-p "/tmp/mino-image-test")
-  (let [path "/tmp/mino-image-test/simple.img"]
-    (eval "(do (def saved-val 42) (def saved-str \"hello\"))")
+;; SLAD image save tests. The load round-trip is tested by
+;; examples/embed_slad.c (cross-state save->free->new->install->load).
+
+(def image-test-dir "/tmp/mino-image-test")
+
+(deftest image-save-creates-file
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [path (str image-test-dir "/simple.img")]
     (save-image path)
     (is (file-exists? path) "image file created")
-    (load-image-into path)
-    (is (= 42 saved-val) "integer var restored")
-    (is (= "hello" saved-str) "string var restored"))
-  (rm-rf "/tmp/mino-image-test"))
+    (is (pos? (count (slurp path))) "image non-empty"))
+  (rm-rf image-test-dir))
 
-(deftest image-save-load-collection
-  ;; Collections (vectors, maps, sets) survive save/load.
-  (rm-rf "/tmp/mino-image-test")
-  (mkdir-p "/tmp/mino-image-test")
-  (let [path "/tmp/mino-image-test/coll.img"]
-    (eval "(def coll-vec [1 2 3])")
-    (eval "(def coll-map {:a 1 :b 2})")
-    (eval "(def coll-set #{1 2 3})")
+(deftest image-save-has-magic-header
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [path (str image-test-dir "/magic.img")]
     (save-image path)
-    (load-image-into path)
-    (is (= [1 2 3] coll-vec) "vector restored")
-    (is (= {:a 1 :b 2} coll-map) "map restored")
-    (is (= #{1 2 3} coll-set) "set restored"))
-  (rm-rf "/tmp/mino-image-test"))
+    (let [content (slurp path)]
+      (is (= "MINO-IMAGE/1" (subs content 0 12))
+          "image starts with magic header")))
+  (rm-rf image-test-dir))
 
-(deftest image-save-load-fn
-  ;; User-defined functions survive save/load and are callable.
-  (rm-rf "/tmp/mino-image-test")
-  (mkdir-p "/tmp/mino-image-test")
-  (let [path "/tmp/mino-image-test/fn.img"]
-    (eval "(defn add-one [x] (+ x 1))")
+(deftest image-save-has-crc32
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [path (str image-test-dir "/crc.img")]
     (save-image path)
-    (load-image-into path)
-    (is (= 43 (add-one 42)) "restored fn is callable"))
-  (rm-rf "/tmp/mino-image-test"))
+    (let [content (slurp path)]
+      (is (str/includes? content "CRC32 ")
+          "image has CRC32 trailer")))
+  (rm-rf image-test-dir))
 
-(deftest image-save-load-atom
-  ;; Atoms preserve their value across save/load.
-  (rm-rf "/tmp/mino-image-test")
-  (mkdir-p "/tmp/mino-image-test")
-  (let [path "/tmp/mino-image-test/atom.img"]
-    (eval "(def counter (atom 100))")
+(deftest image-save-contains-user-vars
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [path (str image-test-dir "/vars.img")]
+    (eval "(def img-unique-var 12345)")
     (save-image path)
-    (load-image-into path)
-    (is (= 100 @counter) "atom value restored"))
-  (rm-rf "/tmp/mino-image-test"))
+    (let [content (slurp path)]
+      (is (str/includes? content "img-unique-var")
+          "image contains user var name")))
+  (rm-rf image-test-dir))
 
 (run-tests-and-exit)
