@@ -2368,6 +2368,8 @@
    "src/prim/string.c"          "string primitives -- per-byte / per-char ops share parsing helpers"
    "src/values/val.c"           "value layer -- alloc / copy / hash / equality kept with type defs"
    "src/runtime/state.c"        "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
+   "src/runtime/image_load.c"   "SLAD image deserializer -- per-type allocate + patch + ROOTS splice over all MINO_* types"
+   "src/eval/print.c"           "printer dispatch over every MINO_* tag (narrowly over once MINO_STORE printing landed)"
    "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"})
 
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
@@ -2376,6 +2378,8 @@
     "src/eval/read.c:read_form"
     "src/values/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
     "src/eval/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
+    "src/runtime/image.c:img_emit_val_full" ;; SLAD serializer -- per-type emit dispatch over every MINO_* tag
+    "src/runtime/image_load.c:img_patch_one" ;; SLAD deserializer -- per-type reference-patch dispatch over every MINO_* tag
     "src/prim/module.c:mino_env *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
     "src/prim/module.c:mino_val *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
 
