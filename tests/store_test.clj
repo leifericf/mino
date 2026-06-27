@@ -867,4 +867,36 @@
                          :where [?e :name ?name]
                                 [?e :email "a@x.com"]])))))
 
+(deftest store-q-index-variable-value
+  ;; Datalog on indexed attr with variable value uses the index.
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [[:db/add 1 :email "a@x.com"]
+                                [:db/add 2 :email "b@x.com"]
+                                [:db/add 3 :email "c@x.com"]])
+        db (store/db conn)]
+    (is (= #{[1 "a@x.com"] [2 "b@x.com"] [3 "c@x.com"]}
+           (store/q db '[:find ?e ?email
+                         :where [?e :email ?email]])))))
+
+(deftest store-q-index-constant-eid
+  ;; Datalog on indexed attr with constant entity-id uses the index.
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [[:db/add 1 :email "a@x.com"]
+                                [:db/add 2 :email "b@x.com"]])
+        db (store/db conn)]
+    (is (= #{["a@x.com"]}
+           (store/q db '[:find ?email
+                         :where [1 :email ?email]])))))
+
+(deftest store-q-index-join
+  ;; Datalog joins work when one pattern uses an indexed attr.
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn {1 {:email "a@x.com" :name "Alice"}
+                                2 {:email "b@x.com" :name "Bob"}})
+        db (store/db conn)]
+    (is (= #{["Alice"]}
+           (store/q db '[:find ?name
+                         :where [?e :email "a@x.com"]
+                                [?e :name ?name]])))))
+
 (run-tests-and-exit)

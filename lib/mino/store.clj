@@ -673,13 +673,25 @@
 
 (defn- find-pattern-bindings
   "Finds all variable bindings for a pattern [e a v] in db.
-  Constant elements in e or v act as filters."
+  Constant elements in e or v act as filters. Uses the reverse index
+  for attr when available (O(entities-with-attr) instead of O(all
+  entities)); falls back to a linear scan otherwise."
   [db [e a v]]
-  (for [[eid attrs] (:entities db)
-        :when (contains? attrs a)
-        :let [val (get attrs a)]
-        :when (pattern-ok? e v eid val)]
-    (pattern-binding-for e v eid val)))
+  (if-let [index (get-in db [:indexes a])]
+    (if (variable? v)
+      (for [[val eids] index
+            eid eids
+            :when (pattern-ok? e v eid val)]
+        (pattern-binding-for e v eid val))
+      (let [eids (or (get index v) #{})]
+        (for [eid eids
+              :when (pattern-ok? e v eid v)]
+          (pattern-binding-for e v eid v))))
+    (for [[eid attrs] (:entities db)
+          :when (contains? attrs a)
+          :let [val (get attrs a)]
+          :when (pattern-ok? e v eid val)]
+      (pattern-binding-for e v eid val))))
 
 (defn- bindings-consistent?
   "Returns true if two bindings agree on all shared keys."
