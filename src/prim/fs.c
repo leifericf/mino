@@ -247,5 +247,6 @@ void mino_install_fs(mino_state *S, mino_env *env)
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_fs, k_prims_fs_count, "fs");
+    mino_install_image_prims(S, env);
     S->caps_installed |= MINO_CAP_FS;
 }
