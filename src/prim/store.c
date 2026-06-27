@@ -230,6 +230,15 @@ mino_val *mino_store_deref(const mino_val *v)
     return v->as.store.val;
 }
 
+const char *mino_store_path(const mino_val *v)
+{
+    mino_store_handle *h;
+    if (v == NULL || mino_type_of(v) != MINO_STORE) return NULL;
+    h = (mino_store_handle *)v->as.store.handle;
+    if (h == NULL) return NULL;
+    return h->path;
+}
+
 /* Cross-state defense, mirroring agent_check_state. Throws MST007 if
  * the store was allocated in a different state than S. Returns 0 on
  * match, 1 on mismatch (caller should propagate NULL). */

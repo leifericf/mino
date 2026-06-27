@@ -802,6 +802,23 @@ mino_val *mino_store_open (mino_state *S, const char *path,
 int       mino_store_checkpoint (mino_state *S, mino_val *conn);
 int       mino_store_close      (mino_state *S, mino_val *conn);
 
+/* Return the store's path string (NULL if in-memory). Borrowed; do not free. */
+const char *mino_store_path(const mino_val *v);
+
+/* ------------------------------------------------------------------------- */
+/* Save-lisp-and-die (SLAD) image save/load                                  */
+/* ------------------------------------------------------------------------- */
+
+/* Save the full runtime state to an image file. Returns 0 on success,
+ * -1 on failure. Refuses to save if the runtime is not quiesced
+ * (active try/catch, STM tx, async ops, agent actions). See ADR 12. */
+int mino_save_image(mino_state *S, const char *path);
+
+/* Load an image into a pre-initialized state (mino_state_new +
+ * mino_install_all must be called first). Replaces namespace envs,
+ * vars, and values. Returns 0 on success, -1 on failure. */
+int mino_load_image_into(mino_state *S, const char *path);
+
 /* ------------------------------------------------------------------------- */
 /* Record types                                                              */
 /* ------------------------------------------------------------------------- */

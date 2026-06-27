@@ -563,6 +563,7 @@ void mino_install_minimal(mino_state *S, mino_env *env)
 
     core_env = floor_install_prim_tables(S);
     install_floor_vars(S, core_env);
+    mino_install_image_prims(S, env);
     S->caps_installed |= MINO_CAP_FLOOR;
 }
 
