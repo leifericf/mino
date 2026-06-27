@@ -89,11 +89,12 @@ typedef struct {
     mino_env  *core_env;
 } img_id_table;
 
-static void img_ht_init(img_ht *h)
+static int img_ht_init(img_ht *h)
 {
     h->cap    = IMG_HT_INIT;
     h->count  = 0;
     h->entries = (img_ht_entry *)calloc(h->cap, sizeof(img_ht_entry));
+    return h->entries != NULL ? 0 : -1;
 }
 
 static void img_ht_free(img_ht *h)
@@ -158,12 +159,13 @@ static void img_ht_insert(img_ht *h, mino_val *key, uint32_t id)
 
 /* --- env ID table ------------------------------------------------- */
 
-static void img_env_ht_init(img_id_table *t)
+static int img_env_ht_init(img_id_table *t)
 {
     t->env_ht.cap   = IMG_HT_INIT;
     t->env_ht.count = 0;
     t->env_ht.keys  = (mino_env **)calloc(t->env_ht.cap, sizeof(mino_env *));
     t->env_ht.ids   = (uint32_t *)calloc(t->env_ht.cap, sizeof(uint32_t));
+    return (t->env_ht.keys != NULL && t->env_ht.ids != NULL) ? 0 : -1;
 }
 
 static void img_env_ht_free(img_id_table *t)
@@ -200,18 +202,27 @@ static void img_env_ht_insert(img_id_table *t, mino_env *env, uint32_t id)
 
 /* --- ID table: init / assign / enqueue ---------------------------- */
 
-static void img_idt_init(img_id_table *t)
+static int img_idt_init(img_id_table *t)
 {
-    img_ht_init(&t->val_ht);
-    img_env_ht_init(t);
+    if (img_ht_init(&t->val_ht) != 0) return -1;
+    if (img_env_ht_init(t) != 0) {
+        img_ht_free(&t->val_ht);
+        return -1;
+    }
     t->id_count = 1;  /* ID 0 reserved for NULL sentinel */
     t->id_cap   = 256;
     t->id_vals  = (mino_val **)calloc(t->id_cap, sizeof(mino_val *));
     t->id_envs  = (mino_env **)calloc(t->id_cap, sizeof(mino_env *));
     t->queue    = (uint32_t *)calloc(t->id_cap, sizeof(uint32_t));
+    if (t->id_vals == NULL || t->id_envs == NULL || t->queue == NULL) {
+        img_env_ht_free(t);
+        img_ht_free(&t->val_ht);
+        return -1;
+    }
     t->q_head   = 0;
     t->q_tail   = 0;
     t->core_env = NULL;
+    return 0;
 }
 
 static void img_idt_free(img_id_table *t)
@@ -961,7 +972,11 @@ int mino_save_image(mino_state *S, const char *path)
         return -1;
     }
 
-    img_idt_init(&idt);
+    if (img_idt_init(&idt) != 0) {
+        set_eval_diag(S, NULL, "internal", "MIN001",
+                       "save-image: out of memory");
+        return -1;
+    }
     idt.core_env = S->ns_vars.mino_core_env;
     img_walk_roots(S, &idt);
 
