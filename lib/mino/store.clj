@@ -34,6 +34,11 @@
 ;; mirroring the -lock-* capture pattern used in core.clj.
 (def ^:private c-store? store?)
 
+;; clojure.core/merge is shadowed by the public store/merge below.
+;; Capture it so internal functions (join-bindings) can merge plain
+;; maps without calling the db-value merge.
+(def ^:private map-merge merge)
+
 ;; ---------------------------------------------------------------------------
 ;; Data shape helpers
 ;; ---------------------------------------------------------------------------
@@ -624,3 +629,124 @@
   Empty when no schema was configured."
   [db-val]
   (get db-val :schema {}))
+
+;; ---------------------------------------------------------------------------
+;; Datalog query
+;; ---------------------------------------------------------------------------
+
+(defn- variable?
+  "Returns true if x is a query variable (symbol starting with ?)."
+  [x]
+  (and (symbol? x)
+       (let [s (name x)]
+         (and (pos? (count s))
+              (= (first s) \?)))))
+
+(defn- parse-query
+  "Parses a Datalog query vector into {:find [...] :where [...]}."
+  [query]
+  (loop [q query find-vars [] clauses [] mode nil]
+    (if (empty? q)
+      {:find find-vars :where clauses}
+      (let [el (first q)]
+        (cond
+          (= el :find) (recur (rest q) find-vars clauses :find)
+          (= el :where) (recur (rest q) find-vars clauses :where)
+          (= mode :find) (recur (rest q) (conj find-vars el) clauses :find)
+          (= mode :where) (recur (rest q) find-vars (conj clauses el) :where)
+          :else (recur (rest q) find-vars clauses mode))))))
+
+(defn- pattern-binding-for
+  "Creates a binding map from a pattern match, given the pattern's
+  e and v elements and the actual entity-id and value."
+  [e v eid val]
+  (cond-> {}
+    (variable? e) (assoc e eid)
+    (variable? v) (assoc v val)))
+
+(defn- pattern-ok?
+  "Checks if entity eid with attribute value val is consistent with
+  the constant constraints in pattern [e a v]."
+  [e v eid val]
+  (and (or (variable? e) (= e eid))
+       (or (variable? v) (= v val))))
+
+(defn- find-pattern-bindings
+  "Finds all variable bindings for a pattern [e a v] in db.
+  Constant elements in e or v act as filters."
+  [db [e a v]]
+  (for [[eid attrs] (:entities db)
+        :when (contains? attrs a)
+        :let [val (get attrs a)]
+        :when (pattern-ok? e v eid val)]
+    (pattern-binding-for e v eid val)))
+
+(defn- bindings-consistent?
+  "Returns true if two bindings agree on all shared keys."
+  [b1 b2]
+  (every? (fn [[k v]] (or (not (contains? b1 k)) (= (get b1 k) v)))
+          b2))
+
+(defn- join-bindings
+  "Joins two seqs of bindings, keeping only consistent pairs."
+  [old new]
+  (mapcat (fn [o]
+            (for [n new :when (bindings-consistent? o n)]
+              (map-merge o n)))
+          old))
+
+(defn- subst-vars
+  "Substitutes query variables in an expression with bound values."
+  [expr bindings]
+  (cond
+    (variable? expr) (get bindings expr)
+    (vector? expr) (vec (map #(subst-vars % bindings) expr))
+    (seq? expr) (apply list (map #(subst-vars % bindings) expr))
+    :else expr))
+
+(defn- predicate-clause?
+  "Returns true if a where clause is a predicate [(pred ...)]."
+  [clause]
+  (and (vector? clause)
+       (= (count clause) 1)
+       (seq? (first clause))))
+
+(defn- filter-by-predicate
+  "Filters bindings by evaluating a predicate clause. The predicate
+  expression has its variables substituted from each binding, then
+  eval'd. Bindings that yield falsy results are dropped."
+  [bindings clause]
+  (filter (fn [b]
+            (let [expr (subst-vars (first clause) b)]
+              (eval expr)))
+          bindings))
+
+(defn q
+  "Executes a Datalog query against a db value.
+
+  Query format:
+    [:find ?var ... :where clause ...]
+
+  Pattern clause: [?e :attr ?v] or [?e :attr literal]
+  Predicate clause: [(pred-fn ?x ... literal ...)]
+
+  Returns a set of result tuples (vectors).
+
+  Example:
+    (store/q db [:find ?e ?name
+                 :where
+                 [?e :name ?name]
+                 [?e :age ?age]
+                 [(> ?age 18)]])"
+  [db-val query]
+  (let [{:keys [find where]} (parse-query query)
+        result-bindings
+        (reduce (fn [bindings clause]
+                  (if (predicate-clause? clause)
+                    (filter-by-predicate bindings clause)
+                    (let [matches (find-pattern-bindings db-val clause)]
+                      (join-bindings bindings matches))))
+                [{}]
+                where)]
+    (set (for [b result-bindings]
+           (vec (for [v find] (get b v)))))))

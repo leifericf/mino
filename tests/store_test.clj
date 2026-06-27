@@ -764,4 +764,80 @@
         db (store/db conn)]
     (is (= 5 (:tx db)) "tx counter preserved after compaction")))
 
+;; ---------------------------------------------------------------------------
+;; Datalog query
+;; ---------------------------------------------------------------------------
+
+(deftest store-q-basic-find
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"} 2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1] [2]}
+           (store/q db '[:find ?e :where [?e :name ?n]])))))
+
+(deftest store-q-find-two-vars
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"} 2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1 "Alice"] [2 "Bob"]}
+           (store/q db '[:find ?e ?name :where [?e :name ?name]])))))
+
+(deftest store-q-constant-value
+  (let [conn (store/open)
+        _ (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 2 :name "Bob"]])
+        db (store/db conn)]
+    (is (= #{[1]}
+           (store/q db '[:find ?e :where [?e :name "Alice"]])))))
+
+(deftest store-q-join-two-patterns
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob" :age 25}})
+        db (store/db conn)]
+    (is (= #{[1 "Alice" 30] [2 "Bob" 25]}
+           (store/q db '[:find ?e ?name ?age
+                         :where [?e :name ?name]
+                                [?e :age ?age]])))))
+
+(deftest store-q-predicate-filter
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob" :age 25}
+                                3 {:name "Carol" :age 35}})
+        db (store/db conn)]
+    (is (= #{[1 "Alice"] [3 "Carol"]}
+           (store/q db '[:find ?e ?name
+                         :where [?e :name ?name]
+                                [?e :age ?age]
+                                [(> ?age 28)]])))))
+
+(deftest store-q-predicate-eq
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:role :admin} 2 {:role :user}})
+        db (store/db conn)]
+    (is (= #{[1]}
+           (store/q db '[:find ?e
+                         :where [?e :role ?r]
+                                [(= ?r :admin)]])))))
+
+(deftest store-q-empty-result
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (= #{}
+           (store/q db '[:find ?e :where [?e :name "Nonexistent"]])))))
+
+(deftest store-q-with-index
+  ;; Datalog works with indexed attributes.
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [[:db/add 1 :email "a@x.com"]
+                                [:db/add 2 :email "b@x.com"]
+                                [:db/add 1 :name "Alice"]])
+        db (store/db conn)]
+    (is (= #{[1 "Alice"]}
+           (store/q db '[:find ?e ?name
+                         :where [?e :name ?name]
+                                [?e :email "a@x.com"]])))))
+
 (run-tests-and-exit)
