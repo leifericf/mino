@@ -491,7 +491,12 @@ static int img_patch_one(img_reader *r, uint32_t id)
             !img_parse_u32(&p, &eid)) { free(tag); return 0; }
         ns_str = img_parse_token(&p);
         if (!img_parse_ll(&p, &shape)) { free(ns_str); free(tag); return 0; }
-        v->as.fn.params = img_resolve_val(r, pid);
+        /* Multi-arity fns have params == NULL (C NULL, not tagged nil).
+         * img_resolve_val returns tagged nil for ID 0; convert back. */
+        {
+            mino_val *p = img_resolve_val(r, pid);
+            v->as.fn.params = MINO_IS_NIL(p) ? NULL : p;
+        }
         v->as.fn.body = img_resolve_val(r, bid);
         v->as.fn.env = img_resolve_env(r, eid);
         v->as.fn.defining_ns = (ns_str && strcmp(ns_str, "-") != 0)
