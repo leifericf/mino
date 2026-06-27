@@ -592,6 +592,33 @@
       (finally
         (rm-rf store-test-dir)))))
 
+(deftest store-snapshot-atomic-write
+  ;; Checkpoint writes to <path>.tmp then renames into place, so a
+  ;; stale .tmp from a crashed previous attempt is cleaned up and the
+  ;; canonical snapshot is never left half-written.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/snap_atomic.db")
+        tmp-path (str path ".tmp")]
+    (try
+      (let [conn (store/open path)
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            _ (store/checkpoint conn)
+            ;; Simulate a stale .tmp left by a crashed checkpoint attempt
+            _ (spit tmp-path "STALE GARBAGE FROM CRASHED CHECKPOINT")
+            conn2 (store/open path)
+            _ (store/transact conn2 [:db/add 2 :name "Bob"])
+            _ (store/checkpoint conn2)
+            conn3 (store/open path)
+            db (store/db conn3)]
+        (is (= "Alice" (store/read db 1 :name)) "first snapshot intact")
+        (is (= "Bob" (store/read db 2 :name)) "second checkpoint applied")
+        (is (not (file-exists? tmp-path))
+            "stale .tmp cleaned up by atomic rename")
+        (store/close conn3))
+      (finally
+        (rm-rf store-test-dir)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Schema validation
 ;; ---------------------------------------------------------------------------

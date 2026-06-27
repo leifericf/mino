@@ -70,6 +70,23 @@ static char *store_wal_path(const char *snap_path)
     return wal;
 }
 
+/* Construct the atomic-write temp path "<snap_path>.tmp" in fresh
+ * malloc'd storage. Checkpoint writes the snapshot here first, then
+ * renames it into place so a crash mid-write cannot corrupt the
+ * canonical snapshot. Returns NULL on allocation failure. Caller frees. */
+static char *store_tmp_path(const char *snap_path)
+{
+    size_t plen;
+    char  *tmp;
+    if (snap_path == NULL) return NULL;
+    plen = strlen(snap_path);
+    tmp = (char *)malloc(plen + 5);          /* ".tmp" + NUL */
+    if (tmp == NULL) return NULL;
+    memcpy(tmp, snap_path, plen);
+    memcpy(tmp + plen, ".tmp", 5);
+    return tmp;
+}
+
 /* Append tx-info as one line of EDN to the WAL at <snap_path>.wal.
  * The file is opened in append mode (created if absent), written, and
  * closed per call — no persistent FILE* in the handle, avoiding fd
@@ -328,6 +345,7 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
     mino_store_handle *h;
     FILE              *f;
     char              *wal_path;
+    char              *tmp_path;
     if (!mino_is_store(conn)) {
         prim_throw_classified(S, "eval/type", "MTY001",
             "store-checkpoint requires a store connection");
@@ -336,16 +354,32 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
     if (store_check_state(S, conn)) return -1;
     h = (mino_store_handle *)conn->as.store.handle;
     if (h == NULL || h->path == NULL) return 0;
-    /* Write snapshot with version header */
-    f = fopen(h->path, "wb");
+    /* Atomic snapshot: write to <path>.tmp, then rename into place.
+     * A crash between write and rename leaves a stale .tmp and the
+     * previous snapshot intact; the next checkpoint overwrites .tmp. */
+    tmp_path = store_tmp_path(h->path);
+    if (tmp_path == NULL) {
+        gc_oom_throw(S, "store: out of memory");
+        return -1;
+    }
+    f = fopen(tmp_path, "wb");
     if (f == NULL) {
         set_eval_diag(S, NULL, "io", "MIO001",
             "store-checkpoint: cannot open file for writing");
+        free(tmp_path);
         return -1;
     }
     fputc(STORE_SNAPSHOT_VERSION, f);
     mino_print_to(S, f, conn->as.store.val);
     fclose(f);
+    if (rename(tmp_path, h->path) != 0) {
+        set_eval_diag(S, NULL, "io", "MIO001",
+            "store-checkpoint: cannot rename snapshot into place");
+        remove(tmp_path);
+        free(tmp_path);
+        return -1;
+    }
+    free(tmp_path);
     /* Delete the WAL — the snapshot captures all state up to :tx */
     wal_path = store_wal_path(h->path);
     if (wal_path != NULL) {
