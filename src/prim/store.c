@@ -474,6 +474,9 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
         return -1;
     }
     fclose(f);
+#if defined(_WIN32)
+    remove(h->path);
+#endif
     if (rename(tmp_path, h->path) != 0) {
         set_eval_diag(S, NULL, "io", "MIO001",
             "store-checkpoint: cannot rename snapshot into place");
