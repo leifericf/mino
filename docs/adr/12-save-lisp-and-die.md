@@ -124,8 +124,7 @@ images. Version 1 covers all current `MINO_*` types.
 | **Scalars** | nil, bool, int, char, float, float32, bigint, ratio, bigdec | Trivial |
 | **Strings/syms/kws** | string, symbol, keyword | Re-interned on load to preserve identity |
 | **Collections** | cons, vector, map, set, sorted-map, sorted-set, queue, map-entry | Recursive; sorted comparator is dropped (revert to default) |
-| **Code** | fn, macro | params, body, env, defining_ns, shape, bytecode (minus JIT fields) |
-| **Bytecode** | `mino_bc_fn` | code[], consts[], clauses[], source_map; IC slots zeroed; native fields dropped |
+| **Code** | fn, macro | params, body, env, defining_ns, shape. Bytecode is NOT saved; it is recompiled from body on first call after load (see What is dropped) |
 | **Mutable refs** | atom, volatile, tx-ref, agent | val, watches, validator, err, identity counters |
 | **Stores** | store | db value (serializable map); path; handle is reopened |
 | **Records** | record, type | type registry spliced before instances are patched |
@@ -136,6 +135,7 @@ images. Version 1 covers all current `MINO_*` types.
 
 | Category | Why |
 |---|---|
+| **Function bytecode** (`mino_bc_fn`) | Reproducible from the fn's params/body/env; `fn.bc` is set to NULL on load and recompiled by `mino_bc_compile_fn` on first call. Saves space and avoids serializing the const pool / clauses twice. |
 | **JIT native code** | Reproducible from bytecode; recompiles on warmup |
 | **Inline caches** | Reproducible; re-resolve on first call |
 | **GC heap layout** | New heap; identity preserved via ID table |
@@ -157,6 +157,7 @@ images. Version 1 covers all current `MINO_*` types.
 | `owning_state` (atom, ref, agent, store) | old `mino_state*` | new `mino_state*` |
 | `MINO_PRIM.fn` / `.fn2` | old C function pointer | re-resolved by name from the install table |
 | `MINO_STORE.handle` | old malloc'd handle | reopened via `mino_store_open(path)` or NULL (in-memory) |
+| `fn.bc` | compiled `mino_bc_fn` | NULL; recompiled from body on first call |
 | `bc->native` / `hot_counter` | JIT state | NULL / 0 (rewarms lazily) |
 | `bc->ic_slots[].cached*` | IC resolutions | zeroed (re-resolves on first call) |
 | `MINO_LAZY.c_thunk` | C function pointer | NULL (force-on-save or drop thunk; body+env survive) |
@@ -164,18 +165,39 @@ images. Version 1 covers all current `MINO_*` types.
 ### Quiesce protocol
 
 `mino_save_image` refuses to save if the runtime is not at rest. The
-checks:
+checked conditions (heap/state that cannot be safely captured mid-flight):
 
-1. **No active try/catch** — `S->tc->try_stack_top == 0`
-2. **No in-flight futures** — `S->async.run_head == NULL`
-3. **No pending agent actions** — `S->agent.pool[i].run_head == NULL` for all i
-4. **No active STM transaction** — `S->tc->current_tx == NULL`
-5. **No active dynamic bindings** — `S->tc->dyn_stack == NULL` (or warn and drop)
-6. **Module load stack empty** — `S->module.load_stack_len == 0`
+1. **No in-flight futures** — `S->async.run_head == NULL`
+2. **No pending agent actions** — `S->agent.pool[i].run_head == NULL` for all i
+3. **No active STM transaction** — `S->tc->current_tx == NULL`
 
 If any check fails, `mino_save_image` returns -1 with a diagnostic
 identifying which check failed. The host resolves the issue (drain
 queues, commit transactions) and retries.
+
+Execution state is intentionally NOT gated: an active try/catch frame
+(`S->tc->try_stack_top`), dynamic binding stack (`S->tc->dyn_stack`),
+and module load stack (`S->module.load_stack_len`) are per-thread
+execution state, not heap state. The image captures the current
+binding/namespace state as-is; these transient frames do not survive
+into the restored image (try/catch frames and the dyn stack are dropped
+on load, per What is dropped). A host that wants a fully-clean snapshot
+should ensure it calls `mino_save_image` from a top-level rest state;
+the runtime does not refuse on their account.
+
+### Trust model
+
+An image file is a **trusted artifact**: the host writes it and loads it
+back, much like a core dump. The CRC32 trailer guards against accidental
+corruption (truncated writes, bit rot); it is not a cryptographic
+authenticator and a missing trailer is tolerated for v0 compatibility, so
+it must not be treated as an integrity boundary for an attacker-supplied
+file. Loading an image from an untrusted source is unsafe: the value pool
+is parsed defensively (bounded lengths, checked allocations) but the
+ROOTS section restores arbitrary namespace/var/alias graphs, and a
+serialized `MINO_STORE` carries its on-disk path, which is reopened on
+load via `mino_store_open` — so a hostile image can direct the loader at
+arbitrary snapshot/WAL paths. Only load images the host authored.
 
 ### Identity guarantees
 
@@ -276,12 +298,14 @@ reopened db matches the saved db. Consistent.
   files, re-connect sockets, and re-establish channels after load. This
   is the same contract as process restart — SLAD is not transparent
   for OS resources.
-- **JIT warm-up cost on every restore.** Functions start interpreted
-  and recompile on hot-path threshold. For a player image with 50
-  functions, the warm-up window is typically < 100ms.
-- **The image format is versioned.** Adding a new `MINO_*` type tag
-  bumps the version. The reader rejects incompatible images rather
-  than silently corrupting.
+- **Bytecode + JIT warm-up cost on every restore.** Function bytecode
+  is not serialized; each loaded fn starts with `bc == NULL`,
+  recompiles from its body on first call, and then rewarms the JIT on
+  the hot-path threshold. For a player image with 50 functions, the
+  warm-up window is typically < 100ms.
+- **The image format is versioned.** The magic string embeds the
+  version (`MINO-IMAGE/1`); the reader rejects images whose magic does
+  not match. Adding a new `MINO_*` type tag bumps the embedded version.
 - **SLAD is orthogonal to the store.** The store persists application
   data (EAVT facts); SLAD persists the runtime (functions, namespaces,
   all mutable refs). A player's store survives via its own snapshot +
