@@ -436,8 +436,7 @@ mino_val *mino_store_open(mino_state *S, const char *path,
             "(require 'mino.store)"
             "(mino.store/open \"%s\")", escaped);
         free(escaped);
-        if (mino_eval_string_ex(S, buf, env, &conn, NULL) != 0)
-            conn = NULL;
+        conn = mino_eval_string(S, buf, env);
         free(buf);
         if (conn == NULL || !mino_is_store(conn)) return NULL;
         db = mino_store_deref(conn);
