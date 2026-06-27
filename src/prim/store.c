@@ -356,7 +356,8 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     /* Version header check: skip one byte if it's the version sentinel */
     if (sz > 0 && (unsigned char)buf[0] == STORE_SNAPSHOT_VERSION)
         offset = 1;
-    db = mino_eval_string(S, buf + offset, env);
+    if (mino_eval_string_ex(S, buf + offset, env, &db, NULL) != 0)
+        db = NULL;
     free(buf);
     return db;
 }
@@ -426,7 +427,8 @@ mino_val *mino_store_open(mino_state *S, const char *path,
             "(require 'mino.store)"
             "(mino.store/open \"%s\")", escaped);
         free(escaped);
-        conn = mino_eval_string(S, buf, env);
+        if (mino_eval_string_ex(S, buf, env, &conn, NULL) != 0)
+            conn = NULL;
         free(buf);
         if (conn == NULL || !mino_is_store(conn)) return NULL;
         db = mino_store_deref(conn);
