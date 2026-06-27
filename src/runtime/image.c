@@ -315,7 +315,9 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
     case MINO_KEYWORD:
     case MINO_EMPTY_LIST:
     case MINO_UUID:
-    case MINO_REGEX:
+    case MINO_BYTES:
+    case MINO_BIGINT:
+    case MINO_PRIM:
         break;
     case MINO_CONS:
         img_idt_assign_val(t, v->as.cons.car);
@@ -391,28 +393,95 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
         if (MINO_IS_PTR(v->as.store.watches))
             img_idt_assign_val(t, v->as.store.watches);
         break;
-    case MINO_BIGINT:
     case MINO_BIGDEC:
-    case MINO_BYTES:
+        img_idt_assign_val(t, v->as.bigdec.unscaled);
+        break;
+    case MINO_REGEX:
+        if (MINO_IS_PTR(v->as.regex.source))
+            img_idt_assign_val(t, v->as.regex.source);
+        break;
     case MINO_SORTED_MAP:
-    case MINO_SORTED_SET:
-    case MINO_TYPE:
-    case MINO_RECORD:
+    case MINO_SORTED_SET: {
+        /* Iterative in-order RB tree traversal */
+        const mino_rb_node_t *stack[64];
+        int sp = 0;
+        const mino_rb_node_t *node = v->as.sorted.root;
+        while (node != NULL || sp > 0) {
+            while (node != NULL) {
+                if (sp < 64) stack[sp++] = node;
+                node = node->left;
+            }
+            if (sp > 0) {
+                node = stack[--sp];
+                img_idt_assign_val(t, node->key);
+                if (node->val != NULL)
+                    img_idt_assign_val(t, node->val);
+                node = node->right;
+            }
+        }
+        break;
+    }
     case MINO_LAZY:
-    case MINO_CHUNK:
+        if (v->as.lazy.realized == 1) {
+            /* Realized: visit cached value */
+            if (MINO_IS_PTR(v->as.lazy.cached))
+                img_idt_assign_val(t, v->as.lazy.cached);
+        } else if (v->as.lazy.c_thunk == NULL) {
+            /* Unrealized Clojure lazy: visit body + env */
+            if (MINO_IS_PTR(v->as.lazy.body))
+                img_idt_assign_val(t, v->as.lazy.body);
+            if (v->as.lazy.env != NULL)
+                img_idt_assign_env(t, v->as.lazy.env);
+        }
+        /* C-thunk lazies: no children, will error on emit */
+        break;
+    case MINO_QUEUE:
+        if (MINO_IS_PTR(v->as.queue.front))
+            img_idt_assign_val(t, v->as.queue.front);
+        if (MINO_IS_PTR(v->as.queue.back))
+            img_idt_assign_val(t, v->as.queue.back);
+        break;
+    case MINO_CHUNK: {
+        unsigned i;
+        for (i = 0; i < v->as.chunk.len; i++)
+            img_idt_assign_val(t, v->as.chunk.vals[i]);
+        break;
+    }
     case MINO_CHUNKED_CONS:
+        if (MINO_IS_PTR(v->as.chunked_cons.chunk))
+            img_idt_assign_val(t, v->as.chunked_cons.chunk);
+        if (MINO_IS_PTR(v->as.chunked_cons.more))
+            img_idt_assign_val(t, v->as.chunked_cons.more);
+        break;
+    case MINO_TYPE:
+        if (MINO_IS_PTR(v->as.record_type.fields))
+            img_idt_assign_val(t, v->as.record_type.fields);
+        break;
+    case MINO_RECORD: {
+        unsigned i, nfields;
+        if (MINO_IS_PTR(v->as.record.type))
+            img_idt_assign_val(t, v->as.record.type);
+        nfields = 0;
+        if (MINO_IS_PTR(v->as.record.type) &&
+            mino_type_of(v->as.record.type) == MINO_TYPE &&
+            MINO_IS_PTR(v->as.record.type->as.record_type.fields))
+            nfields = (unsigned)v->as.record.type->as.record_type.fields->as.vec.len;
+        for (i = 0; i < nfields; i++)
+            img_idt_assign_val(t, v->as.record.vals[i]);
+        if (MINO_IS_PTR(v->as.record.ext))
+            img_idt_assign_val(t, v->as.record.ext);
+        break;
+    }
     case MINO_HANDLE:
     case MINO_FUTURE:
     case MINO_CHAN:
-    case MINO_QUEUE:
     case MINO_TX_REF:
     case MINO_AGENT:
     case MINO_TRANSIENT:
-    case MINO_PRIM:
+    case MINO_HOST_ARRAY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
     case MINO_REDUCED:
-    case MINO_HOST_ARRAY:
         break;
     default:
         break;
@@ -674,6 +743,151 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         fprintf(f, " %s\n", sp ? sp : "-");
         break;
     }
+    case MINO_BIGINT: {
+        char buf[256];
+        size_t written = 0;
+        if (mino_to_bigint_str(v, buf, sizeof buf, &written) && written > 0)
+            fprintf(f, "%u BI %s\n", id, buf);
+        else
+            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_BIGINT);
+        break;
+    }
+    case MINO_BIGDEC:
+        fprintf(f, "%u BD ", id);
+        img_emit_val_id(f, t, v->as.bigdec.unscaled);
+        fprintf(f, " %d\n", v->as.bigdec.scale);
+        break;
+    case MINO_UUID: {
+        unsigned char ub[16];
+        if (mino_to_uuid_bytes(v, ub)) {
+            fprintf(f, "%u UI ", id);
+            {
+                int bi;
+                for (bi = 0; bi < 16; bi++)
+                    fprintf(f, "%02x", ub[bi]);
+            }
+            fputc('\n', f);
+        } else {
+            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_UUID);
+        }
+        break;
+    }
+    case MINO_REGEX:
+        fprintf(f, "%u RX ", id);
+        img_emit_val_id(f, t, v->as.regex.source);
+        fputc('\n', f);
+        break;
+    case MINO_BYTES: {
+        size_t blen = mino_bytes_len(v);
+        const unsigned char *data = mino_bytes_data(v);
+        fprintf(f, "%u BY %zu %u ", id, blen, v->as.bytes.bit_tail);
+        {
+            size_t bi;
+            for (bi = 0; bi < blen; bi++)
+                fprintf(f, "%02x", data[bi]);
+        }
+        fputc('\n', f);
+        break;
+    }
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET: {
+        int is_map = (mino_type_of(v) == MINO_SORTED_MAP);
+        fprintf(f, "%u %s %zu", id, is_map ? "SM" : "SS",
+                v->as.sorted.len);
+        /* Iterative in-order RB tree traversal */
+        {
+            const mino_rb_node_t *stack[64];
+            int sp = 0;
+            const mino_rb_node_t *node = v->as.sorted.root;
+            while (node != NULL || sp > 0) {
+                while (node != NULL) {
+                    if (sp < 64) stack[sp++] = node;
+                    node = node->left;
+                }
+                if (sp > 0) {
+                    node = stack[--sp];
+                    fputc(' ', f);
+                    img_emit_val_id(f, t, node->key);
+                    if (is_map) {
+                        fputc(' ', f);
+                        img_emit_val_id(f, t, node->val);
+                    }
+                    node = node->right;
+                }
+            }
+        }
+        fputc('\n', f);
+        break;
+    }
+    case MINO_LAZY:
+        if (v->as.lazy.realized == 1) {
+            fprintf(f, "%u LZ R ", id);
+            img_emit_val_id(f, t, v->as.lazy.cached);
+            fputc('\n', f);
+        } else if (v->as.lazy.c_thunk == NULL) {
+            fprintf(f, "%u LZ U ", id);
+            img_emit_val_id(f, t, v->as.lazy.body);
+            fputc(' ', f);
+            img_emit_env_id(f, t, v->as.lazy.env);
+            fprintf(f, " %s\n",
+                    v->as.lazy.defining_ns ? v->as.lazy.defining_ns : "-");
+        } else {
+            fprintf(f, "%u UNSUPPORTED %d\n", id, (int)MINO_LAZY);
+        }
+        break;
+    case MINO_QUEUE:
+        fprintf(f, "%u QU ", id);
+        img_emit_val_id(f, t, v->as.queue.front);
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.queue.back);
+        fprintf(f, " %zu\n", v->as.queue.len);
+        break;
+    case MINO_CHUNK: {
+        unsigned ci;
+        fprintf(f, "%u CH %u", id, v->as.chunk.len);
+        for (ci = 0; ci < v->as.chunk.len; ci++) {
+            fputc(' ', f);
+            img_emit_val_id(f, t, v->as.chunk.vals[ci]);
+        }
+        fputc('\n', f);
+        break;
+    }
+    case MINO_CHUNKED_CONS:
+        fprintf(f, "%u CC ", id);
+        img_emit_val_id(f, t, v->as.chunked_cons.chunk);
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.chunked_cons.more);
+        fprintf(f, " %u\n", v->as.chunked_cons.off);
+        break;
+    case MINO_TYPE:
+        fprintf(f, "%u TY %s %s ", id,
+                v->as.record_type.ns ? v->as.record_type.ns : "-",
+                v->as.record_type.name ? v->as.record_type.name : "-");
+        img_emit_val_id(f, t, v->as.record_type.fields);
+        fputc('\n', f);
+        break;
+    case MINO_RECORD: {
+        unsigned i, nfields = 0;
+        if (MINO_IS_PTR(v->as.record.type) &&
+            mino_type_of(v->as.record.type) == MINO_TYPE &&
+            MINO_IS_PTR(v->as.record.type->as.record_type.fields))
+            nfields = (unsigned)v->as.record.type->as.record_type.fields->as.vec.len;
+        fprintf(f, "%u RC ", id);
+        img_emit_val_id(f, t, v->as.record.type);
+        fprintf(f, " %u", nfields);
+        for (i = 0; i < nfields; i++) {
+            fputc(' ', f);
+            img_emit_val_id(f, t, v->as.record.vals[i]);
+        }
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.record.ext);
+        fputc('\n', f);
+        break;
+    }
+    case MINO_PRIM:
+        fprintf(f, "%u PR %s\n", id,
+                v->as.prim.name ? v->as.prim.name : "-");
+        break;
     default:
         fprintf(f, "%u UNSUPPORTED %d\n", id, (int)mino_type_of(v));
         break;
