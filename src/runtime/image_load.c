@@ -1145,13 +1145,6 @@ int mino_load_image_into(mino_state *S, const char *path)
                      * serialization because core is reinstalled by bootstrap) */
                     if (new_env->parent == NULL)
                         new_env->parent = S->ns_vars.mino_core_env;
-                    /* Register the env as a GC root */
-                    root_env_t *rr = (root_env_t *)malloc(sizeof(*rr));
-                    if (rr != NULL) {
-                        rr->env = new_env;
-                        rr->next = S->gc.root_envs;
-                        S->gc.root_envs = rr;
-                    }
                     /* Search for existing namespace entry to replace */
                     for (j = 0; j < S->ns_vars.ns_env_len; j++) {
                         if (S->ns_vars.ns_env_table[j].name != NULL &&
