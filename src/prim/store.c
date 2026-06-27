@@ -166,7 +166,7 @@ static mino_val *store_wal_read(mino_state *S, const char *snap_path,
 
     fseek(f, 0, SEEK_END);
     sz = ftell(f);
-    if (sz < 0) { fclose(f); return mino_nil(S); }
+    if (sz < 0 || (size_t)sz > SIZE_MAX - 1) { fclose(f); return mino_nil(S); }
     fseek(f, 0, SEEK_SET);
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) { fclose(f); gc_oom_throw(S, "store: oom"); return NULL; }
@@ -343,7 +343,7 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     if (f == NULL) return NULL;
     fseek(f, 0, SEEK_END);
     sz = ftell(f);
-    if (sz < 0) { fclose(f); return NULL; }
+    if (sz < 0 || (size_t)sz > SIZE_MAX - 1) { fclose(f); return NULL; }
     fseek(f, 0, SEEK_SET);
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) { fclose(f); return NULL; }
