@@ -927,4 +927,13 @@
                          :where [?e :email "a@x.com"]
                                 [?e :name ?name]])))))
 
+(deftest store-q-malformed-throws
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (thrown? (store/q db {:not :a-query})) "non-vector throws")
+    (is (thrown? (store/q db 42)) "scalar throws")
+    (is (thrown? (store/q db [:where [?e :a ?v]])) "missing :find throws")
+    (is (thrown? (store/q db nil)) "nil throws")))
+
 (run-tests-and-exit)

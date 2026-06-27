@@ -649,8 +649,13 @@
               (= (first s) \?)))))
 
 (defn- parse-query
-  "Parses a Datalog query vector into {:find [...] :where [...]}."
+  "Parses a Datalog query vector into {:find [...] :where [...]}.
+  Throws ex-info tagged ::invalid-query when the input is not a vector
+  beginning with :find."
   [query]
+  (when-not (and (vector? query) (= (first query) :find))
+    (throw (ex-info "Invalid query: expected a vector starting with :find"
+                    {::invalid-query query})))
   (loop [q query find-vars [] clauses [] mode nil]
     (if (empty? q)
       {:find find-vars :where clauses}
