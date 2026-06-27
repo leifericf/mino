@@ -12,9 +12,16 @@
 - Serve: Add `mino.store` — embedded EAVT fact store with per-state isolation, temporal queries (`as-of`/`since`/`history`/`recent`), cross-state aggregation via `mino_clone`, and snapshot-on-checkpoint durability. New `MINO_STORE` value type, `MINO_CAP_STORE` capability (bit 32; `caps_installed` widened to `uint64_t`), `mino.store` Clojure namespace, and C API (`mino_store_open`/`mino_store_checkpoint`/`mino_store_close`). See ADR 10.
 - Serve: Add `mino.store` — embedded EAVT fact store with per-state isolation, temporal queries (`as-of`/`since`/`history`/`recent`), cross-state aggregation via `mino_clone`, WAL durability (line-delimited EDN with format-version header, torn-write recovery), schema validation (`:type`/`:cardinality` with `:closed` mode), secondary indexes (`:indexes` option, index-accelerated `find-by`), log retention policy (`:history {:keep-last N}`), and Datalog query (`store/q` with pattern joins and inline predicates). New `MINO_STORE` value type, `MINO_CAP_STORE` capability (bit 32; `caps_installed` widened to `uint64_t`), `mino.store` Clojure namespace, and C API. See ADR 10 and ADR 11.
 - Runtime: Add save-lisp-and-die (SLAD) image save/load — `mino_save_image` / `mino_load_image_into` serialize the full runtime state (namespaces, vars, user-defined functions, closures, atoms, stores) to a line-delimited text image file with an identity table for shared-reference preservation. Skips standard library namespaces (reinstalled on load). JIT state is dropped; bytecode is recompiled from source on load. See ADR 12.
-
+- Runtime: Fix GC window in set_eval_diag_with_data — pin keys/vals arrays across sequential allocating calls
+- Runtime: Replace bare abort() with gc_oom_throw in ns_env OOM paths so (ns ...) OOM is catchable
+- Runtime: Pin sym across alloc_val in ns_symbol_with_meta to close GC window
+- Runtime: Guard __builtin_expect in mino_eval_stack_guard_fast behind GCC/Clang check for MSVC portability
+- Runtime: Guard __atomic_compare_exchange_n in mino_lazy_inflight_unwind with InterlockedCompareExchange fallback for MSVC
+- Runtime: Guard __atomic builtins behind __GNUC__/__clang__ in host_threads.h and state.c
+- Runtime: Guard all size-doubling realloc paths against size_t overflow in state.c, ns_env.c, var.c, error.c
+- Runtime: Replace atoi with strtol for MINO_SAMPLE_PERIOD env-var parsing
+- Runtime: Pin GC values across allocating calls in mino_repl_feed, mino_state_new, var_set_root
 - Serve: Add `mino.store` — embedded EAVT fact store with per-state isolation, temporal queries (`as-of`/`since`/`history`/`recent`), cross-state aggregation via `mino_clone`, WAL durability (line-delimited EDN with format-version header, torn-write recovery, atomic checkpoint via temp file and rename), schema validation (`:type`/`:cardinality` with `:closed` mode), secondary indexes (`:indexes` option, index-accelerated `find-by` and Datalog), log retention policy (`:history {:keep-last N}`), and Datalog query (`store/q` with pattern joins, inline predicates, and index-accelerated pattern matching). New `MINO_STORE` value type, `MINO_CAP_STORE` capability (bit 32; `caps_installed` widened to `uint64_t`), `mino.store` Clojure namespace, and C API (`mino_store_open` now replays WAL via Clojure layer). See ADR 10, ADR 11, and ADR 12.
-
 - Build: The single-file amalgamation (`dist/mino.c`) hoists the `_POSIX_C_SOURCE` / `_DARWIN_C_SOURCE` feature-test macros to the top of the unified translation unit and strips the per-file copies, so the whole TU sees the POSIX/Darwin surface the sources request. Previously an earlier file pulled the system headers before `fs.c` / `proc.c` redefined the macros, which broke the amalgam compile on glibc with a `_POSIX_C_SOURCE` redefinition.
 - Core: `sequence` with a transducer now realizes in O(1) stack per element. It emits each step's buffered outputs as a direct lazy cons-chain instead of `(concat items (step ...))`, so reducing, counting, or seq-walking a large transduced sequence (and `clojure.core.reducers/foldcat` over a reducer, which builds on it) no longer recurses on the C stack proportional to the element count -- which previously tripped the recursion guard under the larger stack frames of sanitizer builds.
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
@@ -80,6 +87,7 @@
 - Style: Fix ALLOW annotation wrong TU limit, missing error class docs, ADR TBD placeholder, formatting inconsistency in values module
 - Style: Move detached ic_resolve_global comment to its function; rename _pad_ic* struct members to remove leading underscores; remove double blank line in eval-bc module
 - Style: Fix stale fall-through comment, alignment, and duplicate inline comments in eval-bc-jit module
+- Style: correct the MINO_STORE store_id layout comment (an address-derived print tag, not a monotonic counter) and place the MINO_STORE enumerator comma on its line
 - Factoring: Expose gc_charge_pause and extract gc_mark_each_ctx/gc_mark_ctx_try_stack to eliminate duplicate lock-walk-unlock pattern in gc_mark_thread_state
 - Factoring: Forward-declare mino_bc_trace_fn_bc and future helpers in values/internal.h to remove eval/bc/internal.h boundary violation from gc_handlers.c
 - Factoring: Extract intern_ns_name helper to deduplicate mino_keyword_ns_n and mino_symbol_ns_n; fix OOM diagnostic inconsistency in symbol variant
@@ -92,6 +100,7 @@
 - Security: Propagate OOM when intern table bootstrap malloc fails instead of NULL-dereferencing probe loop
 - Security: Add overflow guard before malloc(n_fields * sizeof(*field_kws)) in mino_defrecord
 - Security: Tighten size_t overflow guards in eq_stack_push and mino_host_array_from_coll to account for element size in capacity doubling check
+- Security: gate save-image and load-image-into behind the fs capability instead of the floor, so sandboxed runtimes without fs cannot write or read arbitrary host paths via the image primitives
 - Values: extract eq_map_same_type and eq_set_same_type helpers to bring eq_step under 250 LOC
 - Values: Guard mino_host_array_new against len*sizeof overflow (security-values-002)
 - Values: Pin head across allocating GC calls in mino_host_array_from_coll generic seq path (memory-values-001)
@@ -148,9 +157,15 @@
 - Fix: Add :doc key to special-form var meta so (:doc (meta (resolve 'when))) returns the docstring
 - Fix: The bytecode compiler's env-capture pre-scan now recognizes the `clojure.core/`-qualified spelling of `fn` / `fn*` / `lazy-seq`, so a nested syntax-quoted closure that captures an enclosing `let` local resolves it at runtime instead of throwing an unbound-symbol error.
 - Fix: empty? on a lazy-seq that realizes to an empty list now returns true (previously any forced non-nil value was reported non-empty).
+- Fix: Harden SLAD image loader against malformed images — bounded lengths, checked allocations, and validated integer ranges in the deserializer so a truncated or hostile image fails cleanly instead of reading out of bounds or dereferencing NULL
+- Fix: Check OOM in the SLAD image serializer ID-table init paths
+- Fix: Drop the redundant namespace-env GC root registration added during image splice (envs are already rooted in the allocate pass)
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
 - Docs: Correct tag_kw and var_promote comments, add *clojure-version* docstring
+- Docs: correct ADR 12 to match the implementation — function bytecode is dropped and recompiled on load (not serialized), the quiesce gate checks 3 of the 6 listed conditions by design (execution state is captured as-is), and the image is a trusted artifact whose CRC32 is advisory and whose embedded store paths are reopened on load
+- Docs: document the trusted-path eval model for store snapshot and WAL files
+- Docs: clarify that apply-fact intentionally skips schema validation (validation lives at apply-tx, the public boundary)
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
@@ -260,15 +275,6 @@
 - Regex: Cap matchgroup_loop recursion at 10 000 iterations to prevent stack exhaustion on long inputs (security-regex-001)
 - Regex: Guard GC windows in match_vector and prim_re_find_from across group-string allocation loops
 - Regex: Fix matchgroup_loop depth counter reset on nested quantified groups
-- Runtime: Fix GC window in set_eval_diag_with_data — pin keys/vals arrays across sequential allocating calls
-- Runtime: Replace bare abort() with gc_oom_throw in ns_env OOM paths so (ns ...) OOM is catchable
-- Runtime: Pin sym across alloc_val in ns_symbol_with_meta to close GC window
-- Runtime: Guard __builtin_expect in mino_eval_stack_guard_fast behind GCC/Clang check for MSVC portability
-- Runtime: Guard __atomic_compare_exchange_n in mino_lazy_inflight_unwind with InterlockedCompareExchange fallback for MSVC
-- Runtime: Guard __atomic builtins behind __GNUC__/__clang__ in host_threads.h and state.c
-- Runtime: Guard all size-doubling realloc paths against size_t overflow in state.c, ns_env.c, var.c, error.c
-- Runtime: Replace atoi with strtol for MINO_SAMPLE_PERIOD env-var parsing
-- Runtime: Pin GC values across allocating calls in mino_repl_feed, mino_state_new, var_set_root
 - Stencils: JIT loop stencils now exit the region with a real return NULL on safepoint cancel and cons OOM instead of chaining NULL to the next stencil (memory-stencils-001)
 - Stencils: non-loop stencils guard against NULL regs from slow helpers before chaining to the next stencil (memory-stencils-002)
 - Prim: Add mino_bigint_is_odd to bignum.c to insulate reflection.c from imath.h
@@ -326,6 +332,11 @@
 - Memory: Pin GC pointers in ratio arithmetic, set operations, stm closure, proc/meta map builders, and str_replace_match_arg
 - Memory: Pin data parameter in set_eval_diag_with_data across allocating calls
 - Memory: Guard mino_defrecord field-keyword loop with gc_depth to prevent symbol buffer sweep
+- Store: fsync WAL append and snapshot checkpoint so the advertised crash durability actually holds across an OS crash
+- Store: make checkpoint rename atomic on Windows (POSIX rename already atomically replaces an existing target)
+- Store: guard snapshot and WAL size reads against overflow on LLP64 targets
+- Store: skip stale WAL entries below the snapshot tx on open, matching the ADR 11 crash-recovery contract
+- Store: reject malformed store/q queries with a classified ::invalid-query error instead of silently accepting them
 
 ## v0.423.5 — Security Fixes
 
