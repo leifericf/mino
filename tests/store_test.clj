@@ -663,4 +663,105 @@
         db (store/db conn)]
     (is (= :b (store/read db 1 :tags)) "overwrites without :many")))
 
+;; ---------------------------------------------------------------------------
+;; Indexes
+;; ---------------------------------------------------------------------------
+
+(deftest store-index-find-by-single
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        db (store/db conn)]
+    (is (= 1 (store/find-by db :email "a@x.com")))))
+
+(deftest store-index-find-by-multiple
+  (let [conn (store/open nil {:indexes #{:role}})
+        _ (store/transact conn [[:db/add 1 :role :admin]
+                                [:db/add 2 :role :admin]])
+        db (store/db conn)]
+    (is (= #{1 2} (store/find-by db :role :admin)))))
+
+(deftest store-index-find-by-none
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        db (store/db conn)]
+    (is (nil? (store/find-by db :email "missing@x.com")))))
+
+(deftest store-index-maintained-on-update
+  ;; When a value changes, the old index entry is removed.
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [:db/add 1 :email "old@x.com"])
+        _ (store/transact conn [:db/add 1 :email "new@x.com"])
+        db (store/db conn)]
+    (is (nil? (store/find-by db :email "old@x.com")) "old value gone from index")
+    (is (= 1 (store/find-by db :email "new@x.com")) "new value indexed")))
+
+(deftest store-index-maintained-on-retract
+  (let [conn (store/open nil {:indexes #{:email}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        _ (store/transact conn [:db/retract 1 :email])
+        db (store/db conn)]
+    (is (nil? (store/find-by db :email "a@x.com")) "retracted value removed from index")))
+
+(deftest store-index-fallback-scan
+  ;; Non-indexed attributes fall back to linear scan.
+  (let [conn (store/open)
+        _ (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 2 :name "Bob"]])
+        db (store/db conn)]
+    (is (= 1 (store/find-by db :name "Alice")))
+    (is (= 2 (store/find-by db :name "Bob")))))
+
+(deftest store-index-many-cardinality
+  ;; Indexes work with :many cardinality (find entities with a specific tag).
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}
+                              :indexes #{:tags}})
+        _ (store/transact conn [[:db/add 1 :tags :a]
+                                [:db/add 1 :tags :b]
+                                [:db/add 2 :tags :a]])
+        db (store/db conn)]
+    (is (= #{1 2} (store/find-by db :tags :a)) "both entities have :a")
+    (is (= 1 (store/find-by db :tags :b)) "only entity 1 has :b")))
+
+;; ---------------------------------------------------------------------------
+;; Retention
+;; ---------------------------------------------------------------------------
+
+(deftest store-retention-keep-last
+  ;; Auto-compaction triggers when log exceeds 2×keep-last.
+  (let [conn (store/open nil {:history {:keep-last 3}})
+        _ (store/transact conn [:db/add 1 :a 1])
+        _ (store/transact conn [:db/add 1 :a 2])
+        _ (store/transact conn [:db/add 1 :a 3])
+        ;; At 3 facts, threshold is 6 — no compaction yet
+        db3 (store/db conn)]
+    (is (= 3 (count (:log db3))) "log not compacted below threshold")
+    (let [_ (store/transact conn [:db/add 1 :a 4])
+          _ (store/transact conn [:db/add 1 :a 5])
+          _ (store/transact conn [:db/add 1 :a 6])
+          _ (store/transact conn [:db/add 1 :a 7])
+          db7 (store/db conn)]
+      (is (<= (count (:log db7)) 6) "log compacted after exceeding 2×threshold")
+      (is (= 7 (store/read db7 1 :a)) "current value preserved"))))
+
+(deftest store-retention-keep-since
+  ;; :keep-since drops facts older than the cutoff.
+  (let [conn (store/open nil {:history {:keep-since 200}})
+        _ (store/transact conn [:db/add 1 :a :old])  ;; instant ~100
+        _ (store/transact conn [:db/add 2 :a :new])  ;; instant ~200+
+        db (store/db conn)]
+    ;; With keep-since 200, facts before 200 should be compacted when
+    ;; the threshold is exceeded. We check entities are preserved.
+    (is (= :new (store/read db 2 :a)) "entity 2 preserved")
+    (is (= :old (store/read db 1 :a)) "entity 1 preserved in view")))
+
+(deftest store-retention-preserves-tx
+  (let [conn (store/open nil {:history {:keep-last 2}})
+        _ (store/transact conn [:db/add 1 :a 1])
+        _ (store/transact conn [:db/add 1 :a 2])
+        _ (store/transact conn [:db/add 1 :a 3])
+        _ (store/transact conn [:db/add 1 :a 4])
+        _ (store/transact conn [:db/add 1 :a 5])
+        db (store/db conn)]
+    (is (= 5 (:tx db)) "tx counter preserved after compaction")))
+
 (run-tests-and-exit)

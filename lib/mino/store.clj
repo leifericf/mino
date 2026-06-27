@@ -91,6 +91,63 @@
       (check-type a v (:type spec)))))
 
 ;; ---------------------------------------------------------------------------
+;; Index maintenance
+;; ---------------------------------------------------------------------------
+
+(defn- build-indexes
+  "Builds the index map from entities for the given set of indexed
+  attributes. Returns a map: attr -> {value -> #{entity-ids}}.
+  Handles set-valued (:many) attributes by indexing each member."
+  [entities indexed-attrs]
+  (if (empty? indexed-attrs)
+    {}
+    (reduce (fn [idx [e attrs]]
+              (reduce (fn [idx a]
+                        (if (contains? indexed-attrs a)
+                          (let [v   (get attrs a)
+                                vals (cond
+                                       (set? v) v
+                                       (nil? v) nil
+                                       :else #{v})]
+                            (if vals
+                              (reduce (fn [idx val]
+                                        (let [cur (get-in idx [a val] #{})]
+                                          (assoc-in idx [a val] (conj cur e))))
+                                      idx vals)
+                              idx))
+                          idx))
+                      idx (keys attrs)))
+            {} entities)))
+
+;; ---------------------------------------------------------------------------
+;; Retention
+;; ---------------------------------------------------------------------------
+
+(defn- maybe-compact-log
+  "Checks the :history policy on db and compacts the log if it exceeds
+  the threshold. The materialized entities view is always preserved;
+  only old log entries are dropped. Returns db unchanged when no
+  policy is active or the threshold is not exceeded."
+  [db]
+  (let [history (get db :history)
+        log (:log db)]
+    (cond
+      (nil? history) db
+
+      (and (:keep-last history)
+           (> (count log) (* 2 (:keep-last history))))
+      (let [kept (take-last (:keep-last history) log)]
+        (assoc db :log (vec kept)))
+
+      (and (:keep-since history)
+           (some #(< (:instant % 0) (:keep-since history)) log))
+      (let [cutoff (:keep-since history)
+            kept (filter #(>= (:instant % 0) cutoff) log)]
+        (assoc db :log (vec kept)))
+
+      :else db)))
+
+;; ---------------------------------------------------------------------------
 ;; Lifecycle
 ;; ---------------------------------------------------------------------------
 
@@ -98,23 +155,28 @@
   "Opens a store connection. With no args, opens an in-memory store.
   With a path string, opens a durable store (reads snapshot + replays
   WAL if files exist). The options map may carry:
-    :schema   map of attribute -> {:type :cardinality} spec
-    :closed   when true, reject attributes not in :schema (default false)
-  Schema is set at first open and stored in the db value; on reopen the
-  snapshot's schema takes precedence."
+    :schema    map of attribute -> {:type :cardinality} spec
+    :closed    when true, reject attributes not in :schema (default false)
+    :indexes   set of attributes to maintain reverse indexes for
+    :history   {:keep-last N} or {:keep-since T} for auto-compaction
+  Schema, indexes, and history are set at first open and stored in the
+  db value; on reopen the snapshot's values take precedence."
   ([] (store-open* (empty-db) nil))
   ([path] (open path nil))
   ([path opts]
    (let [snap-db (when path (store-read-snapshot* path))
          base (or snap-db
-                    (empty-db (:schema opts) (:closed opts)))
+                    (-> (empty-db (:schema opts) (:closed opts))
+                        (assoc :indexed-attrs (or (:indexes opts) #{}))
+                        (assoc :history (:history opts))))
          entries (when path (store-read-wal* path))
          db (if (seq entries)
               (reduce (fn [d entry]
                         (apply-tx d (:tx entry) (:instant entry)
                                   (:tx-data entry)))
                       base entries)
-              base)]
+              base)
+         db (maybe-compact-log db)]
      (store-open* db path))))
 
 (defn close
@@ -232,23 +294,29 @@
   "Applies a parsed transaction to the db value, returning a new db
   value. Each op becomes a fact tagged with tx-num and instant; the
   materialized view is rebuilt by folding the facts, and the flat log
-  grows by the new facts. The tx counter advances by one. Schema and
-  closed? are preserved from the input db. Each fact is validated
-  against the schema before application."
+  grows by the new facts. The tx counter advances by one. Schema,
+  closed?, indexes, and history policy are preserved from the input db.
+  Each fact is validated against the schema before application."
   [db tx-num instant tx-data]
-  (let [schema  (get db :schema {})
-        closed? (get db :closed? false)
-        ops     (parse-tx-data tx-data)
-        facts   (vec (for [[op e a v] ops]
-                       (make-fact e a v tx-num instant op)))]
+  (let [schema        (get db :schema {})
+        closed?       (get db :closed? false)
+        indexed-attrs (get db :indexed-attrs #{})
+        history       (get db :history)
+        ops           (parse-tx-data tx-data)
+        facts         (vec (for [[op e a v] ops]
+                             (make-fact e a v tx-num instant op)))]
     (doseq [f facts] (validate-fact schema closed? f))
     (let [entities (reduce (fn [acc f] (apply-fact acc f schema))
-                           (:entities db) facts)]
+                           (:entities db) facts)
+          indexes  (build-indexes entities indexed-attrs)]
       {:entities entities
        :log (into (:log db) facts)
        :tx (inc tx-num)
        :schema schema
-       :closed? closed?})))
+       :closed? closed?
+       :indexed-attrs indexed-attrs
+       :indexes indexes
+       :history history})))
 
 ;; ---------------------------------------------------------------------------
 ;; Public transaction API
@@ -264,7 +332,8 @@
   (let [cur @conn
         tx-num (:tx cur)
         instant (store-clock* conn)
-        new-db (apply-tx cur tx-num instant tx-data)
+        new-db (maybe-compact-log
+                 (apply-tx cur tx-num instant tx-data))
         tx-info {:tx tx-num :instant instant :tx-data tx-data}]
     (store-commit* conn new-db tx-info)
     {:tx tx-num :db-after new-db}))
@@ -336,17 +405,27 @@
             (assoc attrs :db/id e))))
 
 (defn find-by
-  "Finds entity ids where attr equals value via a linear scan. Returns
-  the single id when exactly one entity matches, a set of ids when
-  several match, and nil when none do."
+  "Finds entity ids where attr equals value. Uses the reverse index if
+  one is maintained for attr (via :indexes on open); otherwise falls
+  back to a linear scan. Handles :many cardinality attributes by
+  checking set membership. Returns the single id when exactly one entity
+  matches, a set of ids when several match, and nil when none do."
   [db-val attr value]
-  (let [found (for [[e attrs] (:entities db-val)
-                    :when (= (get attrs attr) value)]
-                e)]
-    (cond
-      (empty? found) nil
-      (= (count found) 1) (first found)
-      :else (set found))))
+  (if-let [index (get-in db-val [:indexes attr])]
+    (let [found (get index value)]
+      (cond
+        (nil? found) nil
+        (= (count found) 1) (first found)
+        :else found))
+    (let [found (for [[e attrs] (:entities db-val)
+                      :let [cur (get attrs attr)]
+                      :when (or (= cur value)
+                                (and (set? cur) (contains? cur value)))]
+                  e)]
+      (cond
+        (empty? found) nil
+        (= (count found) 1) (first found)
+        :else (set found)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Temporal reads
@@ -362,10 +441,12 @@
 (defn as-of
   "Returns the db value as it was at tx N or instant T. Replays the log
   up to (but not including) the point, rebuilding the materialized view
-  in tx order. The returned :tx and :schema/:closed? are preserved from
-  the input."
+  in tx order. The returned :tx, :schema, :closed?, :indexed-attrs, and
+  :history are preserved from the input. Indexes are rebuilt for the
+  as-of entity view."
   [db-val point]
   (let [schema (get db-val :schema {})
+        indexed-attrs (get db-val :indexed-attrs #{})
         instant? (point-as-instant? point)
         facts-before (filter (fn [f]
                                 (if instant?
@@ -374,9 +455,12 @@
                               (:log db-val))
         ordered (sort-by :tx facts-before)
         entities (reduce (fn [acc f] (apply-fact acc f schema))
-                         {} ordered)]
+                         {} ordered)
+        indexes (build-indexes entities indexed-attrs)]
     {:entities entities :log (vec ordered) :tx (:tx db-val)
-     :schema schema :closed? (get db-val :closed? false)}))
+     :schema schema :closed? (get db-val :closed? false)
+     :indexed-attrs indexed-attrs :indexes indexes
+     :history (get db-val :history)}))
 
 (defn since
   "Returns the seq of facts asserted at or after tx N (or instant T),
@@ -441,18 +525,24 @@
 (defn merge
   "Merges two db values into a new one. The fact logs concatenate and
   replay in instant order, so the entity view reflects last-write-wins
-  by :instant. The tx counter is the max of the two. Schema and closed?
-  are taken from db-a."
+  by :instant. The tx counter is the max of the two. Schema, closed?,
+  indexed-attrs, and history are taken from db-a. Indexes are rebuilt
+  for the merged entity view."
   [db-a db-b]
   (let [schema (get db-a :schema {})
+        indexed-attrs (get db-a :indexed-attrs #{})
         all-facts (sort-by :instant (concat (:log db-a) (:log db-b)))
         entities (reduce (fn [acc f] (apply-fact acc f schema))
-                         {} all-facts)]
+                         {} all-facts)
+        indexes (build-indexes entities indexed-attrs)]
     {:entities entities
      :log (vec all-facts)
      :tx (max (:tx db-a) (:tx db-b))
      :schema schema
-     :closed? (get db-a :closed? false)}))
+     :closed? (get db-a :closed? false)
+     :indexed-attrs indexed-attrs
+     :indexes indexes
+     :history (get db-a :history)}))
 
 (defn fold
   "Reduces across a collection of db values. extract-fn pulls the value
@@ -501,7 +591,10 @@
                           :log []
                           :tx (:tx cur)
                           :schema (get cur :schema {})
-                          :closed? (get cur :closed? false)})))
+                          :closed? (get cur :closed? false)
+                          :indexed-attrs (get cur :indexed-attrs #{})
+                          :indexes (get cur :indexes {})
+                          :history (get cur :history)})))
   ([conn keep-spec]
    (let [cur @conn
          log (:log cur)
@@ -517,7 +610,10 @@
                           :log (vec kept)
                           :tx (:tx cur)
                           :schema (get cur :schema {})
-                          :closed? (get cur :closed? false)}))))
+                          :closed? (get cur :closed? false)
+                          :indexed-attrs (get cur :indexed-attrs #{})
+                          :indexes (get cur :indexes {})
+                          :history (get cur :history)}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema (reserved for future use)
