@@ -174,14 +174,17 @@
                     (-> (empty-db (:schema opts) (:closed opts))
                         (assoc :indexed-attrs (or (:indexes opts) #{}))
                         (assoc :history (:history opts))))
-         entries (when path (store-read-wal* path))
-         db (if (seq entries)
-              (reduce (fn [d entry]
-                        (apply-tx d (:tx entry) (:instant entry)
-                                  (:tx-data entry)))
-                      base entries)
-              base)
-         db (maybe-compact-log db)]
+          entries (when path (store-read-wal* path))
+          db (if (seq entries)
+               (let [snapshot-tx (:tx base)]
+                 (reduce (fn [d entry]
+                           (if (< (:tx entry) snapshot-tx)
+                             d
+                             (apply-tx d (:tx entry) (:instant entry)
+                                       (:tx-data entry))))
+                         base entries))
+               base)
+          db (maybe-compact-log db)]
      (store-open* db path))))
 
 (defn close
