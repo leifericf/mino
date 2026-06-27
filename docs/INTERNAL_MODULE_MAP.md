@@ -84,7 +84,7 @@ src/
 | `src/prim/stateful.c` | Atoms (`atom`, `deref`, `reset!`, `swap!`, `atom?`, `add-watch`, `remove-watch`, `set-validator!`, `get-validator`, `swap-vals!`, `reset-vals!`, `compare-and-set!`); dynamic-binding capture (`get-thread-bindings`, `with-bindings*`) |
 | `src/prim/agent.c` | Agents: asynchronous mutable cells with serialized actions (`send`, `send-off`) |
 | `src/prim/stm.c` | Software transactional memory: refs and `dosync` |
-| `src/prim/store.c` | EAVT fact store: `MINO_STORE` connection lifecycle (`store-open*`, `store-commit*`, `store-checkpoint*`, `store-close*`, `store?`, `store-clock*`), C API (`mino_store_open`/`mino_store_checkpoint`/`mino_store_close`), GC finalizer for handle cleanup |
+| `src/prim/store.c` | EAVT fact store: `MINO_STORE` connection lifecycle (`store-open*`, `store-commit*`, `store-checkpoint*`, `store-close*`, `store?`, `store-clock*`, `store-read-snapshot*`, `store-read-wal*`), WAL append/replay with format-version header, C API (`mino_store_open`/`mino_store_checkpoint`/`mino_store_close`), GC finalizer for handle cleanup |
 | `src/prim/bits.c` | Bit-syntax surface over `MINO_BYTES` (`bits` constructor/matcher) |
 | `src/prim/ns.c` | Namespace and var introspection primitives (Clojure namespace API parity) |
 | `src/prim/jvm_statics.c` | JVM-Clojure surface-parity statics layer |
