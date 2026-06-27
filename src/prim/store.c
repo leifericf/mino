@@ -28,6 +28,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(_WIN32)
+#  include <io.h>
+#else
+#  include <unistd.h>
+#endif
 
 /* --- host-owned handle ---------------------------------------------------- */
 
@@ -87,6 +92,27 @@ static char *store_tmp_path(const char *snap_path)
     return tmp;
 }
 
+static int store_durable_flush(mino_state *S, FILE *f)
+{
+    int fd = fileno(f);
+    if (fflush(f) != 0) {
+        set_eval_diag(S, NULL, "io", "MIO001", "store: flush failed");
+        return -1;
+    }
+#if defined(_WIN32)
+    if (_commit(fd) != 0) {
+        set_eval_diag(S, NULL, "io", "MIO001", "store: fsync failed");
+        return -1;
+    }
+#else
+    if (fsync(fd) != 0) {
+        set_eval_diag(S, NULL, "io", "MIO001", "store: fsync failed");
+        return -1;
+    }
+#endif
+    return 0;
+}
+
 /* Append tx-info as one line of EDN to the WAL at <snap_path>.wal.
  * The file is opened in append mode (created if absent), written, and
  * closed per call — no persistent FILE* in the handle, avoiding fd
@@ -111,6 +137,7 @@ static int store_wal_append(mino_state *S, const char *snap_path,
     }
     mino_print_to(S, f, tx_info);
     fputc('\n', f);
+    if (store_durable_flush(S, f) != 0) { fclose(f); return -1; }
     fclose(f);
     return 0;
 }
@@ -440,6 +467,12 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
     }
     fputc(STORE_SNAPSHOT_VERSION, f);
     mino_print_to(S, f, conn->as.store.val);
+    if (store_durable_flush(S, f) != 0) {
+        fclose(f);
+        remove(tmp_path);
+        free(tmp_path);
+        return -1;
+    }
     fclose(f);
     if (rename(tmp_path, h->path) != 0) {
         set_eval_diag(S, NULL, "io", "MIO001",
