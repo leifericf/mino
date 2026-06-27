@@ -410,8 +410,9 @@ struct mino_val {
                             *
                             * `owning_state` is the cross-state defense
                             * (MST007 on mismatch, matching agent/ref).
-                            * `store_id` is a monotonic per-state
-                            * identity counter for printing. */
+                            * `store_id` is an identity tag derived from
+                            * the cell address, used only for the
+                            * #store[ID] print form (not a counter). */
             mino_val    *val;
             mino_val    *watches;
             void        *handle;

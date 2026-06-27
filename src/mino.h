@@ -254,8 +254,7 @@ typedef enum {
                      * by codepoint. The bit_tail layout is forward-
                      * compatible with the bit-syntax surface (bits
                      * constructor + destructure) that ships in a
-                     * follow-on cycle. */
-    ,
+                     * follow-on cycle. */,
     MINO_STORE      /* EAVT fact store connection: an identity cell
                       * holding the current immutable db value (a
                       * persistent map of {:entities, :log, :tx, ...})
