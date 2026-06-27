@@ -777,6 +777,15 @@ int mino_save_image(mino_state *S, const char *path)
             img_emit_env_id(f, &idt, ne->env);
             fputc('\n', f);
         }
+        /* Var registry: emit (ns, name, var-id) for each non-stdlib var */
+        for (j = 0; j < S->ns_vars.var_registry_len; j++) {
+            var_entry_t *ve = &S->ns_vars.var_registry[j];
+            uint32_t vid;
+            if (ve->ns == NULL || ve->name == NULL) continue;
+            if (img_is_stdlib_ns(ve->ns)) continue;
+            if (!img_ht_lookup(&idt.val_ht, ve->var, &vid)) continue;
+            fprintf(f, "VREG %s %s %u\n", ve->ns, ve->name, vid);
+        }
         for (j = 0; j < S->ns_vars.ns_env_len; j++) {
             ns_env_entry_t *ne = &S->ns_vars.ns_env_table[j];
             size_t a;
@@ -1503,6 +1512,28 @@ int mino_load_image_into(mino_state *S, const char *path)
                 if (ns_name != NULL) {
                     S->ns_vars.current_ns = ns_name;
                 }
+            }
+            if (saw_roots && strncmp(l, "VREG ", 5) == 0) {
+                const char *cp = l + 5;
+                char *ns_str = img_parse_token(&cp);
+                char *name_str = img_parse_token(&cp);
+                uint32_t vid;
+                if (ns_str != NULL && name_str != NULL &&
+                    img_parse_u32(&cp, &vid) && vid < r.id_count) {
+                    mino_val *var = r.id_vals[vid];
+                    if (var != NULL && mino_type_of(var) == MINO_VAR) {
+                        const char *i_ns = intern_var_str(S, ns_str);
+                        const char *i_name = intern_var_str(S, name_str);
+                        /* Replace malloc'd strings with interned versions */
+                        free((char *)var->as.var.ns);
+                        free((char *)var->as.var.sym);
+                        var->as.var.ns = i_ns;
+                        var->as.var.sym = i_name;
+                        var_registry_add(S, i_ns, i_name, var);
+                    }
+                }
+                free(ns_str);
+                free(name_str);
             }
 
             if (nl) { *nl = saved2; l = nl + 1; } else break;

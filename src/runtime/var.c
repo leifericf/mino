@@ -112,7 +112,7 @@ static void intern_str_hash_insert(mino_state *S, const char *s)
 
 /* Intern a string into the state's var-string table. Returns a pointer
  * that is stable for the life of the state. Strings are malloc-owned. */
-static const char *intern_var_str(mino_state *S, const char *s)
+const char *intern_var_str(mino_state *S, const char *s)
 {
     const char *existing;
     size_t      n;
@@ -234,6 +234,35 @@ static void var_hash_rebuild(mino_state *S)
 
 /* ----- public surface ---------------------------------------------- */
 
+/* Add a var to the registry arrays. The ns and name must already be
+ * interned via intern_var_str. Returns 0 on success, -1 on OOM. */
+int var_registry_add(mino_state *S, const char *i_ns, const char *i_name,
+                      mino_val *var)
+{
+    if (S->ns_vars.var_registry_len == S->ns_vars.var_registry_cap) {
+        size_t       new_cap, byte_sz;
+        var_entry_t *nb;
+        if (S->ns_vars.var_registry_cap == 0) {
+            new_cap = 64u;
+        } else if (!checked_double_sz(S->ns_vars.var_registry_cap, &new_cap)) {
+            return -1;
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*nb), &byte_sz)) {
+            return -1;
+        }
+        nb = (var_entry_t *)realloc(S->ns_vars.var_registry, byte_sz);
+        if (nb == NULL) return -1;
+        S->ns_vars.var_registry     = nb;
+        S->ns_vars.var_registry_cap = new_cap;
+    }
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].ns   = i_ns;
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].name = i_name;
+    S->ns_vars.var_registry[S->ns_vars.var_registry_len].var  = var;
+    S->ns_vars.var_registry_len++;
+    var_hash_insert(S, i_ns, i_name, var);
+    return 0;
+}
+
 mino_val *var_intern(mino_state *S, const char *ns, const char *name)
 {
     mino_val *v;
@@ -251,41 +280,12 @@ mino_val *var_intern(mino_state *S, const char *ns, const char *name)
     v = mino_mk_var(S, i_ns, i_name, mino_nil(S));
     gc_pin(v);
 
-    /* Grow registry if needed. */
-    if (S->ns_vars.var_registry_len == S->ns_vars.var_registry_cap) {
-        size_t       new_cap, byte_sz;
-        var_entry_t *nb;
-        if (S->ns_vars.var_registry_cap == 0) {
-            new_cap = 64u;
-        } else if (!checked_double_sz(S->ns_vars.var_registry_cap, &new_cap)) {
-            gc_unpin(1);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "internal", "MIN001", "out of memory");
-            return NULL;
-        }
-        if (!checked_mul_sz(new_cap, sizeof(*nb), &byte_sz)) {
-            gc_unpin(1);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "internal", "MIN001", "out of memory");
-            return NULL;
-        }
-        nb = (var_entry_t *)realloc(S->ns_vars.var_registry, byte_sz);
-        if (nb == NULL) {
-            gc_unpin(1);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "internal", "MIN001", "out of memory");
-            return NULL;
-        }
-        S->ns_vars.var_registry     = nb;
-        S->ns_vars.var_registry_cap = new_cap;
+    if (var_registry_add(S, i_ns, i_name, v) != 0) {
+        gc_unpin(1);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", "out of memory");
+        return NULL;
     }
-
-    S->ns_vars.var_registry[S->ns_vars.var_registry_len].ns   = i_ns;
-    S->ns_vars.var_registry[S->ns_vars.var_registry_len].name = i_name;
-    S->ns_vars.var_registry[S->ns_vars.var_registry_len].var  = v;
-    S->ns_vars.var_registry_len++;
-
-    var_hash_insert(S, i_ns, i_name, v);
 
     gc_unpin(1);
     return v;

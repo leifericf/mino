@@ -35,6 +35,9 @@ mino_env *current_ns_env(mino_state *S);                    /* GC-owned, rooted 
 
 /* var.c: var registry helpers. */
 mino_val    *var_intern(mino_state *S, const char *ns, const char *name);
+const char *intern_var_str(mino_state *S, const char *s);
+int            var_registry_add(mino_state *S, const char *i_ns,
+                                const char *i_name, mino_val *var);
 void           var_set_root(mino_state *S, mino_val *var, mino_val *val);
 mino_val    *var_find(mino_state *S, const char *ns, const char *name);
 void           var_unintern(mino_state *S, const char *ns, const char *name);
