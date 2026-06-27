@@ -19,6 +19,12 @@
 #define IMG_HT_INIT     256
 #define IMG_HT_LOAD     75
 
+/* Sanity ceiling on value/env IDs read from an image file. A real image
+ * is small (ADR 12: ~30 KB for a player); an ID at this scale signals a
+ * truncated or hostile file. Bounding it also bounds the four ID-table
+ * allocations in the reader against a malicious huge id. */
+#define IMG_MAX_ID      (1u << 24)
+
 /* CRC32 (IEEE 802.3 polynomial 0xEDB88320).
  * Table is computed once on first use. */
 uint32_t img_crc32_update(uint32_t crc, const void *data, size_t len);

@@ -35,7 +35,7 @@ typedef struct {
     mino_env   *root_env;  /* protects all id_vals from GC during patching */
 } img_reader;
 
-static void img_reader_init(img_reader *r, mino_state *S, mino_env *env)
+static int img_reader_init(img_reader *r, mino_state *S, mino_env *env)
 {
     r->S = S;
     r->env = env;
@@ -45,7 +45,11 @@ static void img_reader_init(img_reader *r, mino_state *S, mino_env *env)
     r->id_envs = (mino_env **)calloc(r->id_cap, sizeof(mino_env *));
     r->id_lines = (char **)calloc(r->id_cap, sizeof(char *));
     r->id_types = (int *)calloc(r->id_cap, sizeof(int));
+    if (r->id_vals == NULL || r->id_envs == NULL ||
+        r->id_lines == NULL || r->id_types == NULL)
+        return -1;
     r->root_env = mino_env_new(S);
+    return r->root_env != NULL ? 0 : -1;
 }
 
 static void img_reader_free(img_reader *r)
@@ -61,13 +65,37 @@ static void img_reader_free(img_reader *r)
         mino_env_free(r->S, r->root_env);
 }
 
-static void img_reader_grow(img_reader *r)
+static int img_reader_grow(img_reader *r)
 {
-    r->id_cap *= 2;
-    r->id_vals = (mino_val **)realloc(r->id_vals, r->id_cap * sizeof(mino_val *));
-    r->id_envs = (mino_env **)realloc(r->id_envs, r->id_cap * sizeof(mino_env *));
-    r->id_lines = (char **)realloc(r->id_lines, r->id_cap * sizeof(char *));
-    r->id_types = (int *)realloc(r->id_types, r->id_cap * sizeof(int));
+    uint32_t   old_cap = r->id_cap;
+    uint32_t   new_cap = old_cap * 2;
+    size_t     i;
+    mino_val **nv;
+    mino_env **ne;
+    char     **nl;
+    int       *nt;
+    if (new_cap < old_cap || new_cap > IMG_MAX_ID)
+        return -1;
+    nv = (mino_val **)realloc(r->id_vals, (size_t)new_cap * sizeof(mino_val *));
+    if (nv == NULL) return -1;
+    r->id_vals = nv;
+    ne = (mino_env **)realloc(r->id_envs, (size_t)new_cap * sizeof(mino_env *));
+    if (ne == NULL) return -1;
+    r->id_envs = ne;
+    nl = (char **)realloc(r->id_lines, (size_t)new_cap * sizeof(char *));
+    if (nl == NULL) return -1;
+    r->id_lines = nl;
+    nt = (int *)realloc(r->id_types, (size_t)new_cap * sizeof(int));
+    if (nt == NULL) return -1;
+    r->id_types = nt;
+    r->id_cap = new_cap;
+    for (i = old_cap; i < new_cap; i++) {
+        r->id_vals[i] = NULL;
+        r->id_envs[i] = NULL;
+        r->id_lines[i] = NULL;
+        r->id_types[i] = 0;
+    }
+    return 0;
 }
 
 /* Skip whitespace, return pointer to next non-space char. */
@@ -82,8 +110,9 @@ static int img_parse_u32(const char **pp, uint32_t *out)
 {
     const char *p = img_skip_ws(*pp);
     char *end;
-    unsigned long val = strtoul(p, &end, 10);
+    unsigned long long val = strtoull(p, &end, 10);
     if (end == p) return 0;
+    if (val > 0xFFFFFFFFull) return 0;
     *out = (uint32_t)val;
     *pp = end;
     return 1;
@@ -119,8 +148,10 @@ static char *img_parse_str(const char **pp)
 {
     const char *p = img_skip_ws(*pp);
     size_t cap = 64, len = 0;
-    char *out = (char *)malloc(cap);
-    if (*p != '"') { free(out); return NULL; }
+    char *out;
+    if (*p != '"') return NULL;
+    out = (char *)malloc(cap);
+    if (out == NULL) return NULL;
     p++;
     while (*p != '"' && *p != '\0') {
         char c;
@@ -139,8 +170,11 @@ static char *img_parse_str(const char **pp)
             c = *p++;
         }
         if (len + 1 >= cap) {
+            char *grown;
             cap *= 2;
-            out = (char *)realloc(out, cap);
+            grown = (char *)realloc(out, cap);
+            if (grown == NULL) { free(out); return NULL; }
+            out = grown;
         }
         out[len++] = c;
     }
@@ -161,6 +195,7 @@ static char *img_parse_token(const char **pp)
         p++;
     len = (size_t)(p - start);
     out = (char *)malloc(len + 1);
+    if (out == NULL) return NULL;
     memcpy(out, start, len);
     out[len] = '\0';
     *pp = p;
@@ -177,8 +212,9 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
     mino_env *e = NULL;
     char *line_copy;
 
-    if (id >= r->id_cap) {
-        while (id >= r->id_cap) img_reader_grow(r);
+    if (id >= IMG_MAX_ID) return 0;
+    while (id >= r->id_cap) {
+        if (img_reader_grow(r) != 0) return 0;
     }
     if (id >= r->id_count) r->id_count = id + 1;
 
@@ -186,6 +222,7 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
     {
         size_t rlen = strlen(type_tag) + 1 + strlen(line_rest) + 1;
         line_copy = (char *)malloc(rlen);
+        if (line_copy == NULL) return 0;
         snprintf(line_copy, rlen, "%s %s", type_tag, line_rest);
     }
     r->id_lines[id] = line_copy;
@@ -212,10 +249,14 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         /* Parse binding count to pre-allocate */
         {
             long long n;
-            if (img_parse_ll(&p, &n) && n > 0) {
+            if (img_parse_ll(&p, &n) && n > 0 && n <= (long long)IMG_MAX_ID) {
                 e->cap = (size_t)n;
                 e->bindings = (env_binding_t *)calloc((size_t)n,
                                               sizeof(env_binding_t));
+                if (e->bindings == NULL) {
+                    e->cap = 0;
+                    return 0;
+                }
             }
         }
         return 1;
@@ -285,6 +326,7 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         const char *p = img_skip_ws(line_rest);
         unsigned char ub[16];
         int ok = 1, bi;
+        if (strlen(p) < 32) return 0;
         for (bi = 0; bi < 16; bi++) {
             char hex[3] = {p[bi*2], p[bi*2+1], '\0'};
             char *end;
@@ -299,17 +341,23 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         if (!img_parse_ll(&bp, &blen) || !img_parse_ll(&bp, &btail)) return 0;
         {
             const char *p = img_skip_ws(bp);
-            unsigned char *data = blen > 0 ? (unsigned char *)malloc((size_t)blen) : NULL;
-            int ok = 1, bi;
-            for (bi = 0; bi < blen; bi++) {
-                char hex[3] = {p[bi*2], p[bi*2+1], '\0'};
-                char *end;
-                data[bi] = (unsigned char)strtoul(hex, &end, 16);
-                if (end == hex) { ok = 0; break; }
+            if (blen < 0 || blen > (long long)IMG_MAX_ID) return 0;
+            if (strlen(p) < (size_t)blen * 2) return 0;
+            {
+                unsigned char *data = blen > 0
+                    ? (unsigned char *)malloc((size_t)blen) : NULL;
+                int ok = 1, bi;
+                if (blen > 0 && data == NULL) return 0;
+                for (bi = 0; bi < blen; bi++) {
+                    char hex[3] = {p[bi*2], p[bi*2+1], '\0'};
+                    char *end;
+                    data[bi] = (unsigned char)strtoul(hex, &end, 16);
+                    if (end == hex) { ok = 0; break; }
+                }
+                if (!ok) { free(data); return 0; }
+                v = mino_bytes(S, data, (size_t)blen);
+                free(data);
             }
-            if (!ok) { free(data); return 0; }
-            v = mino_bytes(S, data, (size_t)blen);
-            free(data);
         }
     } else if (strcmp(type_tag, "PR") == 0) {
         const char *p = line_rest;
@@ -463,20 +511,24 @@ static int img_patch_one(img_reader *r, uint32_t id)
     } else if (strcmp(tag, "SE") == 0) {
         uint32_t count, i;
         if (!img_parse_u32(&p, &count)) { free(tag); return 0; }
+        if (count > IMG_MAX_ID) { free(tag); return 0; }
         {
-            /* Build set from vector of elements */
-            mino_val *elems[count > 0 ? count : 1];
+            mino_val **elems = count > 0
+                ? (mino_val **)malloc((size_t)count * sizeof(mino_val *))
+                : NULL;
+            mino_val *nv;
+            mino_val *v;
+            if (count > 0 && elems == NULL) { free(tag); return 0; }
             for (i = 0; i < count; i++) {
                 uint32_t eid;
-                if (!img_parse_u32(&p, &eid)) { free(tag); return 0; }
+                if (!img_parse_u32(&p, &eid)) { free(elems); free(tag); return 0; }
                 elems[i] = img_resolve_val(r, eid);
             }
-            {
-                mino_val *nv = mino_set(S, elems, count);
-                mino_val *v = r->id_vals[id];
-                v->as.set = nv->as.set;
-                v->type = MINO_SET;
-            }
+            nv = mino_set(S, elems, count);
+            v = r->id_vals[id];
+            v->as.set = nv->as.set;
+            v->type = MINO_SET;
+            free(elems);
         }
     } else if (strcmp(tag, "ME") == 0) {
         uint32_t kid, vid;
@@ -498,8 +550,8 @@ static int img_patch_one(img_reader *r, uint32_t id)
         /* Multi-arity fns have params == NULL (C NULL, not tagged nil).
          * img_resolve_val returns tagged nil for ID 0; convert back. */
         {
-            mino_val *p = img_resolve_val(r, pid);
-            v->as.fn.params = MINO_IS_NIL(p) ? NULL : p;
+            mino_val *params = img_resolve_val(r, pid);
+            v->as.fn.params = MINO_IS_NIL(params) ? NULL : params;
         }
         v->as.fn.body = img_resolve_val(r, bid);
         v->as.fn.env = img_resolve_env(r, eid);
@@ -635,9 +687,13 @@ static int img_patch_one(img_reader *r, uint32_t id)
         int is_map = (strcmp(tag, "SM") == 0);
         uint32_t count, comp_id, i;
         if (!img_parse_u32(&p, &count) || !img_parse_u32(&p, &comp_id)) { free(tag); return 0; }
+        if (count > IMG_MAX_ID) { free(tag); return 0; }
         {
-            mino_val **keys = count > 0 ? malloc(count * sizeof(mino_val *)) : NULL;
-            mino_val **vals = is_map && count > 0 ? malloc(count * sizeof(mino_val *)) : NULL;
+            mino_val **keys = count > 0 ? (mino_val **)malloc((size_t)count * sizeof(mino_val *)) : NULL;
+            mino_val **vals = is_map && count > 0 ? (mino_val **)malloc((size_t)count * sizeof(mino_val *)) : NULL;
+            if (count > 0 && (keys == NULL || (is_map && vals == NULL))) {
+                free(keys); free(vals); free(tag); return 0;
+            }
             for (i = 0; i < count; i++) {
                 uint32_t kid;
                 if (!img_parse_u32(&p, &kid)) { free(keys); free(vals); free(tag); return 0; }
@@ -716,11 +772,12 @@ static int img_patch_one(img_reader *r, uint32_t id)
     } else if (strcmp(tag, "CH") == 0) {
         long long clen;
         mino_val *v = r->id_vals[id];
-        if (!img_parse_ll(&p, &clen)) { free(tag); return 0; }
+        if (!img_parse_ll(&p, &clen) || clen < 0 || clen > (long long)IMG_MAX_ID) { free(tag); return 0; }
         v->as.chunk.cap = (unsigned)(clen > 0 ? clen : 1);
         v->as.chunk.len = (unsigned)clen;
         v->as.chunk.sealed = 1;
-        v->as.chunk.vals = clen > 0 ? malloc((size_t)clen * sizeof(mino_val *)) : NULL;
+        v->as.chunk.vals = clen > 0 ? (mino_val **)malloc((size_t)clen * sizeof(mino_val *)) : NULL;
+        if (clen > 0 && v->as.chunk.vals == NULL) { free(tag); return 0; }
         {
             long long ci;
             for (ci = 0; ci < clen; ci++) {
@@ -747,8 +804,9 @@ static int img_patch_one(img_reader *r, uint32_t id)
             mino_val *fields = img_resolve_val(r, fid);
             size_t nf = (MINO_IS_PTR(fields) && mino_type_of(fields) == MINO_VECTOR)
                 ? fields->as.vec.len : 0;
-            const char **fnames = nf > 0 ? malloc(nf * sizeof(char *)) : NULL;
+            const char **fnames = nf > 0 ? (const char **)malloc(nf * sizeof(char *)) : NULL;
             size_t fi;
+            if (nf > 0 && fnames == NULL) { free(ns_str); free(name_str); free(tag); return 0; }
             for (fi = 0; fi < nf; fi++) {
                 mino_val *kw = vec_nth(fields, fi);
                 fnames[fi] = (MINO_IS_PTR(kw) && mino_type_of(kw) == MINO_KEYWORD)
@@ -771,11 +829,14 @@ static int img_patch_one(img_reader *r, uint32_t id)
     } else if (strcmp(tag, "RC") == 0) {
         uint32_t tid;
         long long nf;
-        if (!img_parse_u32(&p, &tid) || !img_parse_ll(&p, &nf)) { free(tag); return 0; }
+        if (!img_parse_u32(&p, &tid) || !img_parse_ll(&p, &nf) ||
+            nf < 0 || nf > (long long)IMG_MAX_ID) { free(tag); return 0; }
         {
             mino_val *type = img_resolve_val(r, tid);
-            mino_val **vals = nf > 0 ? malloc((size_t)nf * sizeof(mino_val *)) : NULL;
+            mino_val **vals = nf > 0
+                ? (mino_val **)malloc((size_t)nf * sizeof(mino_val *)) : NULL;
             long long fi;
+            if (nf > 0 && vals == NULL) { free(tag); return 0; }
             for (fi = 0; fi < nf; fi++) {
                 uint32_t vid;
                 if (!img_parse_u32(&p, &vid)) { free(vals); free(tag); return 0; }
@@ -784,17 +845,26 @@ static int img_patch_one(img_reader *r, uint32_t id)
             {
                 uint32_t eid;
                 if (!img_parse_u32(&p, &eid)) { free(vals); free(tag); return 0; }
-                if (MINO_IS_PTR(type) && mino_type_of(type) == MINO_TYPE) {
-                    /* Set record fields directly on the shell */
+                {
                     mino_val *v = r->id_vals[id];
-                    v->as.record.type = type;
-                    v->as.record.vals = nf > 0
-                        ? malloc((size_t)nf * sizeof(mino_val *)) : NULL;
-                    for (fi = 0; fi < nf; fi++)
-                        v->as.record.vals[fi] = vals[fi];
-                    {
-                        mino_val *ext = img_resolve_val(r, eid);
-                        v->as.record.ext = MINO_IS_PTR(ext) ? ext : NULL;
+                    v->as.record.type = NULL;
+                    v->as.record.vals = NULL;
+                    v->as.record.ext = NULL;
+                    if (MINO_IS_PTR(type) && mino_type_of(type) == MINO_TYPE) {
+                        v->as.record.type = type;
+                        if (nf > 0) {
+                            v->as.record.vals = (mino_val **)malloc(
+                                (size_t)nf * sizeof(mino_val *));
+                            if (v->as.record.vals == NULL) {
+                                free(vals); free(tag); return 0;
+                            }
+                            for (fi = 0; fi < nf; fi++)
+                                v->as.record.vals[fi] = vals[fi];
+                        }
+                        {
+                            mino_val *ext = img_resolve_val(r, eid);
+                            v->as.record.ext = MINO_IS_PTR(ext) ? ext : NULL;
+                        }
                     }
                 }
             }
@@ -898,7 +968,12 @@ int mino_load_image_into(mino_state *S, const char *path)
         /* If no CRC32 line found, proceed without verification (v0 compat) */
     }
 
-    img_reader_init(&r, S, ns_env_ensure(S, "clojure.core"));
+    if (img_reader_init(&r, S, ns_env_ensure(S, "clojure.core")) != 0) {
+        free(buf);
+        set_eval_diag(S, NULL, "internal", "MIN001",
+                       "load-image: out of memory");
+        return -1;
+    }
 
     /* First pass: allocate all values */
     line = buf;
@@ -1093,16 +1168,19 @@ int mino_load_image_into(mino_state *S, const char *path)
                         ns_env_entry_t *ne;
                         if (S->ns_vars.ns_env_len >=
                             S->ns_vars.ns_env_cap) {
-                            S->ns_vars.ns_env_cap *= 2;
-                            S->ns_vars.ns_env_table =
-                                (ns_env_entry_t *)realloc(
+                            size_t ncap = S->ns_vars.ns_env_cap * 2;
+                            ns_env_entry_t *nt;
+                            if (ncap == 0) ncap = 16;
+                            nt = (ns_env_entry_t *)realloc(
                                     S->ns_vars.ns_env_table,
-                                    S->ns_vars.ns_env_cap *
-                                    sizeof(ns_env_entry_t));
+                                    ncap * sizeof(ns_env_entry_t));
+                            if (nt == NULL) { free(ns_name); rc = -1; goto cleanup; }
+                            S->ns_vars.ns_env_table = nt;
+                            S->ns_vars.ns_env_cap = ncap;
                         }
                         ne = &S->ns_vars.ns_env_table[
                             S->ns_vars.ns_env_len++];
-                        ne->name = ns_name; /* takes ownership */
+                        ne->name = intern_var_str(S, ns_name); free(ns_name);
                         ne->env = new_env;
                         ne->meta = ns_meta;
                     } else {
@@ -1116,7 +1194,8 @@ int mino_load_image_into(mino_state *S, const char *path)
                 const char *cp = l + 7;
                 char *ns_name = img_parse_token(&cp);
                 if (ns_name != NULL) {
-                    S->ns_vars.current_ns = ns_name;
+                    S->ns_vars.current_ns = intern_var_str(S, ns_name);
+                    free(ns_name);
                 }
             }
             if (saw_roots && strncmp(l, "VREG ", 5) == 0) {
@@ -1148,14 +1227,17 @@ int mino_load_image_into(mino_state *S, const char *path)
                 if (owning != NULL && alias != NULL && full != NULL) {
                     if (S->ns_vars.ns_alias_len >=
                         S->ns_vars.ns_alias_cap) {
-                        S->ns_vars.ns_alias_cap =
-                            S->ns_vars.ns_alias_cap > 0
+                        size_t ncap = S->ns_vars.ns_alias_cap > 0
                             ? S->ns_vars.ns_alias_cap * 2 : 16;
-                        S->ns_vars.ns_aliases =
-                            (ns_alias_t *)realloc(
+                        ns_alias_t *na = (ns_alias_t *)realloc(
                                 S->ns_vars.ns_aliases,
-                                S->ns_vars.ns_alias_cap *
-                                sizeof(ns_alias_t));
+                                ncap * sizeof(ns_alias_t));
+                        if (na == NULL) {
+                            free(owning); free(alias); free(full);
+                            rc = -1; goto cleanup;
+                        }
+                        S->ns_vars.ns_aliases = na;
+                        S->ns_vars.ns_alias_cap = ncap;
                     }
                     S->ns_vars.ns_aliases[
                         S->ns_vars.ns_alias_len].owning_ns = owning;
