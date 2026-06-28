@@ -1098,7 +1098,15 @@ int mino_load_image_into(mino_state *S, const char *path)
         return -1;
     }
 
-    /* Verify CRC32: find the trailer, compute CRC over everything before it */
+    /* Verify CRC32: find the trailer, compute CRC over everything before it.
+     *
+     * A v1 image (matching IMG_MAGIC above) MUST carry a CRC32 trailer --
+     * its absence means the file was truncated by a torn write or
+     * hand-edited. The previous "v0-compat" fallback was too broad: it
+     * accepted any headerless file as v0, including truncated v1 images,
+     * which then crashed the patch pass with an uncatchable throw when
+     * it tried to resolve placeholder IDs. Only files that DO NOT start
+     * with the v1 magic may bypass CRC (the legacy headerless format). */
     {
         char       *crc_pos = NULL;
         char       *search;
@@ -1107,25 +1115,31 @@ int mino_load_image_into(mino_state *S, const char *path)
         /* Find the last "CRC32 " line */
         for (search = buf; (search = strstr(search, "\nCRC32 ")) != NULL; )
             crc_pos = ++search;
-        if (crc_pos != NULL) {
-            /* crc_pos points right after the \n before CRC32 */
-            stored_crc = (uint32_t)strtoul(crc_pos + 5, NULL, 16);
-            /* Compute CRC over everything from start to the \n before CRC32 */
-            *crc_pos = '\0';  /* truncate at the \n */
-            computed_crc = img_crc32_update(0, buf, (size_t)(crc_pos - buf));
-            if (computed_crc != stored_crc) {
-                char diag[128];
-                snprintf(diag, sizeof diag,
-                    "load-image: CRC mismatch (stored %08x, computed %08x)",
-                    stored_crc, computed_crc);
-                set_eval_diag(S, NULL, "io", "MIO001", diag);
-                free(buf);
-                return -1;
-            }
-            /* Restore the \n for line parsing */
-            *crc_pos = '\n';
+        if (crc_pos == NULL) {
+            char diag[128];
+            snprintf(diag, sizeof diag,
+                "load-image: v1 image missing CRC32 trailer "
+                "(file truncated or corrupt)");
+            set_eval_diag(S, NULL, "io", "MIO001", diag);
+            free(buf);
+            return -1;
         }
-        /* If no CRC32 line found, proceed without verification (v0 compat) */
+        /* crc_pos points right after the \n before CRC32 */
+        stored_crc = (uint32_t)strtoul(crc_pos + 5, NULL, 16);
+        /* Compute CRC over everything from start to the \n before CRC32 */
+        *crc_pos = '\0';  /* truncate at the \n */
+        computed_crc = img_crc32_update(0, buf, (size_t)(crc_pos - buf));
+        if (computed_crc != stored_crc) {
+            char diag[128];
+            snprintf(diag, sizeof diag,
+                "load-image: CRC mismatch (stored %08x, computed %08x)",
+                stored_crc, computed_crc);
+            set_eval_diag(S, NULL, "io", "MIO001", diag);
+            free(buf);
+            return -1;
+        }
+        /* Restore the \n for line parsing */
+        *crc_pos = '\n';
     }
 
     if (img_reader_init(&r, S, ns_env_ensure(S, "clojure.core")) != 0) {

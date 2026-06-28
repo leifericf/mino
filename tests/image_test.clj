@@ -61,4 +61,22 @@
     (is (= 42 @f) "future still resolves after the refused save"))
   (rm-rf image-test-dir))
 
+(deftest image-load-rejects-truncated-v1-image
+  ;; A v1 image (matching MINO-IMAGE/1 magic) whose CRC32 trailer is
+  ;; missing -- e.g. a torn write that lost the tail -- must be
+  ;; rejected. The v0-compat escape hatch is narrow enough that it
+  ;; can't swallow a v1 file with a missing trailer.
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [full   (str image-test-dir "/full.img")
+        trunc  (str image-test-dir "/trunc.img")]
+    (save-image full)
+    (let [content (slurp full)
+          cut     (quot (count content) 2)
+          half    (subs content 0 (max 20 cut))]
+      (spit trunc half)
+      (is (thrown? (load-image-into trunc))
+          "truncated v1 image without CRC trailer is rejected")))
+  (rm-rf image-test-dir))
+
 (run-tests-and-exit)
