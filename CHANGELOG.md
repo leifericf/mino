@@ -175,6 +175,7 @@
 - Docs: document the trusted-path eval model for store snapshot and WAL files
 - Docs: clarify that apply-fact intentionally skips schema validation (validation lives at apply-tx, the public boundary)
 - Docs: Note store snapshot and WAL restore via eval not a data-only EDN read
+- Docs: Correct store finalizer contract to not-flushing
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
