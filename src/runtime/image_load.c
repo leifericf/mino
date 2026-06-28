@@ -157,6 +157,10 @@ static char *img_parse_str(const char **pp)
         char c;
         if (*p == '\\') {
             p++;
+            /* Dangling backslash at end of line: stop rather than
+             * consuming the line's NUL terminator and running into the
+             * next image line (torn/crafted input). */
+            if (*p == '\0') break;
             switch (*p) {
             case 'n': c = '\n'; break;
             case 'r': c = '\r'; break;
