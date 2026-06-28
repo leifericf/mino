@@ -183,6 +183,40 @@
     (is (not (store/entity-exists? db 1)) "last attribute gone removes entity")))
 
 ;; ---------------------------------------------------------------------------
+;; Transact -- malformed tx-data
+;; ---------------------------------------------------------------------------
+
+(deftest store-tx-data-add-missing-value-throws
+  ;; [:db/add e a] (3-tuple) is missing v and must NOT be silently
+  ;; rewritten as :db/retract.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add 1 :name])))
+    (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
+    (is (= 0 (:tx (store/db conn))) "tx counter not advanced on throw")))
+
+(deftest store-tx-data-add-extra-value-throws
+  ;; [:db/add e a v extra] (5-tuple) is malformed.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add 1 :name "X" :extra])))
+    (is (= #{} (store/entities (store/db conn))))
+    (is (= 0 (:tx (store/db conn))))))
+
+(deftest store-tx-data-retract-extra-value-throws
+  ;; [:db/retract e a v extra] (5-tuple) is malformed.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/retract 1 :name "X" :extra])))
+    (is (= 0 (:tx (store/db conn))))))
+
+(deftest store-tx-data-retract-three-tuple-still-works
+  ;; The 3-tuple [:db/retract e a] sugar for "retract whole attribute"
+  ;; must keep working after the arity tightening.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        _ (store/transact conn [:db/retract 1 :name])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)))))
+
+;; ---------------------------------------------------------------------------
 ;; Point reads
 ;; ---------------------------------------------------------------------------
 
