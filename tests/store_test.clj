@@ -744,6 +744,24 @@
         db (store/db conn)]
     (is (= :admin (store/read db 1 :role)))))
 
+(deftest store-schema-rejects-unknown-type-spec
+  ;; A typo in the type keyword (e.g. :strng) must not silently disable
+  ;; validation. The schema declares :str, but :str is not a supported
+  ;; type. The schema should be rejected at transact time so the typo
+  ;; surfaces rather than silently accepting every value.
+  (let [conn (store/open nil {:schema {:name {:type :strng}}})]
+    (is (thrown? (store/transact conn [:db/add 1 :name "Alice"])))
+    (is (thrown? (store/transact conn [:db/add 1 :name 42])))))
+
+(deftest store-schema-long-rejects-overflowing-bigint
+  ;; :long means 64-bit signed; bigints beyond Long/MAX_VALUE must be
+  ;; rejected, not silently accepted as integers.
+  (let [conn (store/open nil {:schema {:n {:type :long}}})]
+    (is (thrown? (store/transact conn [:db/add 1 :n 9223372036854775808N])))
+    (let [r (store/transact conn [:db/add 1 :n 1])]
+      (is (= 1 (store/read (:db-after r) 1 :n))
+          "in-range long still accepted"))))
+
 (deftest store-schema-many-single-overwrite-without-schema
   ;; Without schema :many, :db/add overwrites (single-valued).
   (let [conn (store/open)
