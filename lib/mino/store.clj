@@ -486,8 +486,12 @@
      (store-open* db path))))
 
 (defn close
-  "Flushes (if durable) and closes the store. Idempotent."
+  "Flushes (if durable) and closes the store. Idempotent. Also clears
+  any listeners registered on conn so the process-global listener
+  registry does not retain the conn (or its listener closures) after
+  close."
   [conn]
+  (swap! listener-registry dissoc conn)
   (store-close* conn)
   nil)
 
