@@ -772,8 +772,10 @@ typedef long long (*mino_store_clock_fn)(void *ctx);
  * map). The store is in-memory by default; pass a non-NULL path to
  * make it durable (snapshot file + append-only EDN WAL). clock /
  * clock_ctx install a custom time source (NULL/NULL = wall-clock ms).
- * The returned MINO_STORE is GC-managed with a finalizer that flushes-
- * if-durable on sweep or state_free. */
+ * The returned MINO_STORE is GC-managed; on sweep or state_free the
+ * finalizer releases the malloc'd durability handle but does NOT flush
+ * -- the host must call mino_store_checkpoint or mino_store_close to
+ * persist a durable store. */
 mino_val *mino_store_val(mino_state *S, mino_val *db_val,
                            const char *path,
                            mino_store_clock_fn clock,
