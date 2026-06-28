@@ -1074,6 +1074,18 @@
                           :indexes (get cur :indexes {})
                           :history (get cur :history)})))
   ([conn keep-spec]
+   (let [valid-last  (and (map? keep-spec)
+                          (contains? keep-spec :keep-last)
+                          (integer? (:keep-last keep-spec))
+                          (>= (:keep-last keep-spec) 0))
+         valid-since (and (map? keep-spec)
+                          (contains? keep-spec :keep-since)
+                          (integer? (:keep-since keep-spec)))]
+     (if (or valid-last valid-since)
+       nil
+       (throw (ex-info (str "compact keep-spec must be {:keep-last N} or {:keep-since T}, got: "
+                            (pr-str keep-spec))
+                       {::invalid-keep-spec keep-spec}))))
    (let [cur @conn
          log (:log cur)
          kept (cond

@@ -1108,6 +1108,18 @@
     (is (thrown? (store/as-of db [:also :bad])) "as-of rejects vector")
     (is (thrown? (store/since db "not-a-tx-or-inst")) "since rejects string")))
 
+(deftest store-compact-rejects-bogus-keep-spec
+  ;; compact's keep-spec must be {:keep-last N} or {:keep-since T}. An
+  ;; unrecognized spec is a caller error -- previously the cond fell
+  ;; through to :else and silently kept everything, masking the typo.
+  (let [conn (store/open)
+        _    (store/put conn 1 :name "Alice")
+        _    (store/put conn 2 :name "Bob")]
+    (is (thrown? (store/compact conn {:bogus-option 42})) "bogus key throws")
+    (is (thrown? (store/compact conn {:keep-last "not-a-number"})) "bad type throws")
+    (is (thrown? (store/compact conn nil)) "nil throws")
+    (is (thrown? (store/compact conn 42)) "scalar throws")))
+
 (deftest store-q-malformed-pattern-throws
   ;; Pattern clauses must be 3-element vectors [e a v]. Wrong arities and
   ;; non-vector clauses must throw, not silently produce empty results.
