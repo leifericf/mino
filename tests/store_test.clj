@@ -1952,4 +1952,558 @@
               (nil? (store/read as-of-0 1 :a)))
           "as-of at tx 0 returns partial/empty view after retention"))))
 
+;; ---------------------------------------------------------------------------
+;; Track E1: :in -- parameterized queries
+;;
+;; Spec-first. Extra args after the query map positionally to :in vars.
+;; ---------------------------------------------------------------------------
+(deftest store-q-in-single
+  ;; A single :in var is bound to the extra arg, narrowing the query.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1]}
+           (store/q db '[:find ?e :in ?n :where [?e :name ?n]] "Alice")))))
+
+(deftest store-q-in-multiple
+  ;; Multiple :in vars bind positionally to successive extra args.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob"   :age 25}})
+        db (store/db conn)]
+    (is (= #{[1]}
+           (store/q db '[:find ?e
+                         :in ?n ?a
+                         :where [?e :name ?n]
+                                [?e :age ?a]]
+                    "Alice" 30)))))
+
+(deftest store-q-in-with-aggregate
+  ;; :in binds a group key used by an aggregate expression.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:dept "A" :amount 100}
+                                2 {:dept "A" :amount 200}
+                                3 {:dept "B" :amount 50}})
+        db (store/db conn)]
+    (is (= #{["A" 300]}
+           (store/q db '[:find ?dept (sum ?amount)
+                         :in ?dept
+                         :where [?e :dept ?dept]
+                                [?e :amount ?amount]]
+                    "A")))))
+
+(deftest store-q-in-scalar-binding
+  ;; :in combined with a scalar find spec unwraps the single result.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= 1
+           (store/q db '[:find ?e .
+                         :in ?n
+                         :where [?e :name ?n]]
+                    "Alice")))))
+
+(deftest store-qseq-in
+  ;; qseq honors :in bindings just like q.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1]}
+           (set (store/qseq db '[:find ?e :in ?n :where [?e :name ?n]]
+                            "Alice"))))))
+
+;; ---------------------------------------------------------------------------
+;; Track E2: :db/retractEntity
+;;
+;; Spec-first. [:db/retractEntity eid] retracts every attribute of the
+;; entity, removing it entirely.
+;; ---------------------------------------------------------------------------
+(deftest store-retract-entity-all-attrs
+  ;; retractEntity strips every attribute, dissolving the entity.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30 :email "a@x.com"}})
+        _ (store/transact conn [:db/retractEntity 1])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)) "entity fully removed")
+    (is (= #{} (store/entities db)))))
+
+(deftest store-retract-entity-nonexistent
+  ;; Retracting an absent eid is a no-op.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        _ (store/transact conn [:db/retractEntity 999])
+        db (store/db conn)]
+    (is (= #{1} (store/entities db)) "unrelated entity untouched")))
+
+(deftest store-retract-entity-cleans-refs
+  ;; Refs pointing at a retractEntity'd target are nilled (the existing
+  ;; dangling-ref cleanup, exercised here via retractEntity).
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Parent"]
+                                [:db/add 2 :name "Holder"]
+                                [:db/add 2 :child 1]])
+        _ (store/transact conn [:db/retractEntity 1])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)))
+    (is (nil? (store/read db 2 :child)) "dangling ref nilled")))
+
+(deftest store-retract-entity-returns-tx
+  ;; retractEntity returns the normal transact result shape.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        r (store/transact conn [:db/retractEntity 1])]
+    (is (contains? r :tx))
+    (is (contains? r :db-after))
+    (is (= (:db-after r) (store/db conn)))))
+
+;; ---------------------------------------------------------------------------
+;; Track E3: negation (not / not-join)
+;;
+;; Spec-first. (not [pattern]) filters out bindings where the nested
+;; pattern matches. (not-join [vars] pattern...) takes the join vars
+;; explicitly.
+;; ---------------------------------------------------------------------------
+(deftest store-q-not-basic
+  ;; (not [?e :archived true]) keeps only entities lacking that fact.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :archived true}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[2]}
+           (store/q db '[:find ?e
+                         :where [?e :name ?n]
+                                (not [?e :archived true])])))))
+
+(deftest store-q-not-with-constant
+  ;; (not [?e :status :active]) filters out active entities.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:status :active}
+                                2 {:status :inactive}
+                                3 {:status :active}})
+        db (store/db conn)]
+    (is (= #{[2]}
+           (store/q db '[:find ?e
+                         :where [?e :status ?s]
+                                (not [?e :status :active])])))))
+
+(deftest store-q-not-join
+  ;; not-join names the join variable(s) explicitly.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:dept "A" :role :admin}
+                                2 {:dept "A" :role :user}
+                                3 {:dept "B" :role :user}})
+        db (store/db conn)]
+    (is (= #{[2] [3]}
+           (store/q db '[:find ?e
+                         :where [?e :dept ?d]
+                                (not-join [?e] [?e :role :admin])])))))
+
+(deftest store-q-not-empty-result
+  ;; (not ...) matching every binding yields an empty result set.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{}
+           (store/q db '[:find ?e
+                         :where [?e :name ?n]
+                                (not [?e :name ?n])]))
+        "not matching every binding returns empty")))
+
+;; ---------------------------------------------------------------------------
+;; Track E4: :order-by
+;;
+;; Spec-first. :order-by ?var sorts the result ascending; appending
+;; :desc sorts descending. Ordered results come back as a seq of tuples
+;; (not a set).
+;; ---------------------------------------------------------------------------
+(deftest store-q-order-by-asc
+  ;; Ascending order-by returns tuples in ascending value order.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= [[2 25] [1 30] [3 35]]
+           (store/q db '[:find ?e ?age
+                         :order-by ?age
+                         :where [?e :age ?age]])))))
+
+(deftest store-q-order-by-desc
+  ;; :desc reverses the sort.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= [[3 35] [1 30] [2 25]]
+           (store/q db '[:find ?e ?age
+                         :order-by ?age :desc
+                         :where [?e :age ?age]])))))
+
+(deftest store-q-order-by-with-limit
+  ;; order-by composes with a find collection spec, yielding ordered values.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)
+        result (store/q db '[:find [?e ...]
+                             :order-by ?age
+                             :where [?e :age ?age]])]
+    (is (= [2 1 3] result))))
+
+(deftest store-qseq-order-by
+  ;; qseq preserves order-by ordering and is still a seq.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)
+        result (store/qseq db '[:find ?e ?age
+                                :order-by ?age
+                                :where [?e :age ?age]])]
+    (is (seq? result))
+    (is (= [[2 25] [1 30] [3 35]] result))))
+
+;; ---------------------------------------------------------------------------
+;; Track E5: sorted AVET index + find-by-range
+;;
+;; Spec-first. {:sorted-index true} on an attribute enables
+;; (store/find-by-range db attr lo hi), returning eids whose value is in
+;; [lo, hi], in ascending value order.
+;; ---------------------------------------------------------------------------
+(deftest store-sorted-index-range
+  ;; find-by-range returns eids whose value falls in the inclusive range.
+  (let [conn (store/open nil {:schema {:age {:type :long
+                                              :sorted-index true}}})
+        _ (store/transact conn [[:db/add 1 :age 25]
+                                [:db/add 2 :age 30]
+                                [:db/add 3 :age 35]
+                                [:db/add 4 :age 40]])
+        db (store/db conn)]
+    (is (= #{2 3} (set (store/find-by-range db :age 30 35))))))
+
+(deftest store-sorted-index-inclusive
+  ;; Range bounds are inclusive on both ends.
+  (let [conn (store/open nil {:schema {:age {:type :long
+                                              :sorted-index true}}})
+        _ (store/transact conn [[:db/add 1 :age 10]
+                                [:db/add 2 :age 20]
+                                [:db/add 3 :age 30]])
+        db (store/db conn)]
+    (is (= #{1 2 3} (set (store/find-by-range db :age 10 30))))))
+
+(deftest store-sorted-index-empty
+  ;; A range with no matches returns an empty seq.
+  (let [conn (store/open nil {:schema {:age {:type :long
+                                              :sorted-index true}}})
+        _ (store/transact conn [[:db/add 1 :age 10]
+                                [:db/add 2 :age 20]])
+        db (store/db conn)]
+    (is (empty? (store/find-by-range db :age 100 200)))))
+
+(deftest store-sorted-index-ordered
+  ;; find-by-range results come back in ascending value order.
+  (let [conn (store/open nil {:schema {:age {:type :long
+                                              :sorted-index true}}})
+        _ (store/transact conn [[:db/add 1 :age 40]
+                                [:db/add 2 :age 10]
+                                [:db/add 3 :age 30]
+                                [:db/add 4 :age 20]])
+        db (store/db conn)
+        eids (store/find-by-range db :age 10 40)]
+    (is (= [10 20 30 40]
+           (map #(store/read db % :age) eids)))))
+
+;; ---------------------------------------------------------------------------
+;; Track E6: transaction result detail (:tx-data)
+;;
+;; Spec-first. transact's return map gains :tx-data, a seq of
+;; {:e :a :v :op} maps describing what was asserted/retracted.
+;; ---------------------------------------------------------------------------
+(deftest store-tx-data-add
+  ;; A single :db/add yields one tx-data entry with the asserted e/a/v.
+  (let [conn (store/open)
+        r (store/transact conn [:db/add 1 :name "Alice"])
+        td (:tx-data r)]
+    (is (= 1 (count td)) "one tx-data entry")
+    (is (= {:e 1 :a :name :v "Alice" :op :db/add} (first td)))))
+
+(deftest store-tx-data-retract
+  ;; A :db/retract surfaces as a :db/retract op in tx-data.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        r (store/transact conn [:db/retract 1 :name "Alice"])
+        td (:tx-data r)]
+    (is (some #(and (= (:op %) :db/retract)
+                    (= (:e %) 1)
+                    (= (:a %) :name)
+                    (= (:v %) "Alice")) td))))
+
+(deftest store-tx-data-multiple
+  ;; Every fact in a multi-fact tx appears in tx-data, in order.
+  (let [conn (store/open)
+        r (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 1 :age 30]
+                                [:db/add 2 :name "Bob"]])
+        td (:tx-data r)]
+    (is (= 3 (count td)))
+    (is (= [1 1 2] (map :e td)))
+    (is (= [:name :age :name] (map :a td)))))
+
+(deftest store-tx-data-retract-entity
+  ;; retractEntity produces one :db/retract tx-data entry per retracted fact.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}})
+        r (store/transact conn [:db/retractEntity 1])
+        td (:tx-data r)
+        retracted (filter #(= (:op %) :db/retract) td)]
+    (is (= 2 (count retracted)) "two facts retracted")
+    (is (= #{:name :age} (set (map :a retracted))))))
+
+;; ---------------------------------------------------------------------------
+;; Track E7: :unique :value
+;;
+;; Spec-first. {:unique :value} enforces uniqueness (throws on duplicate)
+;; but does NOT upsert -- the duplicate tx is rejected, the eid is never
+;; rewritten.
+;; ---------------------------------------------------------------------------
+(deftest store-unique-value-first-write-ok
+  ;; First write of a :unique :value attribute succeeds.
+  (let [conn (store/open nil {:schema {:email {:unique :value}}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        db (store/db conn)]
+    (is (= "a@x.com" (store/read db 1 :email)))))
+
+(deftest store-unique-value-rejects-duplicate
+  ;; A second entity carrying the same :unique :value throws.
+  (let [conn (store/open nil {:schema {:email {:unique :value}}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        e (try
+            (store/transact conn [:db/add 2 :email "a@x.com"])
+            nil
+            (catch e e))]
+    (is (some? e) "duplicate :unique :value throws")
+    (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
+        "ex-data carries ::unique-conflict tag")))
+
+(deftest store-unique-value-no-upsert
+  ;; Unlike :identity, :unique :value does NOT rewrite the eid; the
+  ;; duplicate tx throws and leaves the existing entity alone.
+  (let [conn (store/open nil {:schema {:email {:unique :value}}})
+        _ (store/transact conn [:db/add 100 :email "a@x.com"])
+        e (try
+            (store/transact conn [:db/add 999 :email "a@x.com"])
+            nil
+            (catch e e))]
+    (is (some? e) "duplicate throws rather than upserting")
+    (is (= #{100} (store/entities (store/db conn)))
+        "no new entity written; existing eid unchanged")))
+
+;; ---------------------------------------------------------------------------
+;; Track E8: pull :offset
+;;
+;; Spec-first. [:attr :offset M :limit N] skips M values then takes N;
+;; [:attr :offset M] skips M and returns the rest.
+;; ---------------------------------------------------------------------------
+(deftest store-pull-offset
+  ;; Skip 2, take next 2 of a :many attribute.
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn {1 {:tags #{:a :b :c :d :e}}})
+        db (store/db conn)
+        result (store/pull db [[:tags :offset 2 :limit 2]] 1)]
+    (is (= 2 (count (:tags result))))
+    (is (every? #{:a :b :c :d :e} (:tags result)))))
+
+(deftest store-pull-offset-beyond
+  ;; Offset past the available values yields an empty result for the attr.
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn {1 {:tags #{:a :b}}})
+        db (store/db conn)
+        result (store/pull db [[:tags :offset 10 :limit 5]] 1)]
+    (is (empty? (:tags result)))))
+
+(deftest store-pull-offset-without-limit
+  ;; Offset alone skips M values and returns the rest.
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn {1 {:tags #{:a :b :c :d :e}}})
+        db (store/db conn)
+        result (store/pull db [[:tags :offset 2]] 1)]
+    (is (= 3 (count (:tags result))) "skips 2, returns remaining 3")
+    (is (every? #{:a :b :c :d :e} (:tags result)))))
+
+;; ---------------------------------------------------------------------------
+;; Track E9: :db/isComponent cascade
+;;
+;; Spec-first. {:type :ref :isComponent true} marks a ref as owned; when
+;; the parent is retractEntity'd, all component children are also
+;; retracted. Non-component refs are nilled, not retracted.
+;; ---------------------------------------------------------------------------
+(deftest store-component-cascade-on-retract
+  ;; retractEntity on the parent cascades to component children.
+  (let [conn (store/open nil {:schema {:child {:type :ref :isComponent true}}})
+        _ (store/transact conn [[:db/add 1 :name "Parent"]
+                                [:db/add 2 :name "Child"]
+                                [:db/add 1 :child 2]])
+        _ (store/transact conn [:db/retractEntity 1])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)) "parent removed")
+    (is (not (store/entity-exists? db 2)) "component child cascade-retracted")))
+
+(deftest store-component-non-cascade-by-default
+  ;; A plain (non-component) ref target survives the source's retraction.
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Parent"]
+                                [:db/add 2 :name "Child"]
+                                [:db/add 1 :child 2]])
+        _ (store/transact conn [:db/retractEntity 1])
+        db (store/db conn)]
+    (is (store/entity-exists? db 2) "non-component child survives")))
+
+(deftest store-component-nested
+  ;; Cascade propagates through nested components: retracting the root
+  ;; retracts the whole component tree.
+  (let [conn (store/open nil {:schema {:child {:type :ref :isComponent true}}})
+        _ (store/transact conn [[:db/add 1 :name "Root"]
+                                [:db/add 2 :name "Mid"]
+                                [:db/add 3 :name "Leaf"]
+                                [:db/add 1 :child 2]
+                                [:db/add 2 :child 3]])
+        _ (store/transact conn [:db/retractEntity 1])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)))
+    (is (not (store/entity-exists? db 2)))
+    (is (not (store/entity-exists? db 3)) "nested component cascaded")))
+
+;; ---------------------------------------------------------------------------
+;; Track E10: change notification (store/listen)
+;;
+;; Spec-first. (store/listen conn key f) registers f to be called with
+;; {:db-before :db-after :tx-data} on each transact; returns nil.
+;; (store/unlisten conn key) removes the listener.
+;; ---------------------------------------------------------------------------
+(deftest store-listen-fires-on-transact
+  ;; A registered listener is called once per transact.
+  (let [conn (store/open)
+        calls (atom 0)
+        _ (store/listen conn :w (fn [_] (swap! calls inc)))
+        _ (store/transact conn [:db/add 1 :name "Alice"])]
+    (is (= 1 @calls))))
+
+(deftest store-listen-receives-tx-data
+  ;; The listener receives a map with :db-before, :db-after, and :tx-data.
+  (let [conn (store/open)
+        received (atom nil)
+        _ (store/listen conn :w (fn [evt] (reset! received evt)))
+        _ (store/transact conn [:db/add 1 :name "Alice"])]
+    (is (map? @received))
+    (is (contains? @received :db-before))
+    (is (contains? @received :db-after))
+    (is (contains? @received :tx-data))
+    (is (sequential? (:tx-data @received)))))
+
+(deftest store-listen-unlisten
+  ;; An unlistened listener does not fire on later transactions.
+  (let [conn (store/open)
+        calls (atom 0)
+        f (fn [_] (swap! calls inc))
+        _ (store/listen conn :w f)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        before @calls
+        _ (store/unlisten conn :w)
+        _ (store/transact conn [:db/add 2 :name "Bob"])]
+    (is (= before @calls) "no further calls after unlisten")))
+
+(deftest store-listen-multiple
+  ;; Multiple distinct listeners all fire on each transact.
+  (let [conn (store/open)
+        a (atom 0) b (atom 0)
+        _ (store/listen conn :a (fn [_] (swap! a inc)))
+        _ (store/listen conn :b (fn [_] (swap! b inc)))
+        _ (store/transact conn [:db/add 1 :name "Alice"])]
+    (is (= 1 @a))
+    (is (= 1 @b))))
+
+;; ---------------------------------------------------------------------------
+;; Track E11: or / disjunction
+;;
+;; Spec-first. (or clause...) unions the bindings of each alternative
+;; branch, preserving shared variable bindings.
+;; ---------------------------------------------------------------------------
+(deftest store-q-or-basic
+  ;; or of two patterns unions the result sets.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:label "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1] [2]}
+           (store/q db '[:find ?e
+                         :where (or [?e :name ?n]
+                                    [?e :label ?n])])))))
+
+(deftest store-q-or-with-shared-var
+  ;; or preserves shared variable bindings across branches; ?n is bound
+  ;; by whichever branch matches.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:label "Bob"   :age 25}})
+        db (store/db conn)]
+    (is (= #{[1 "Alice"] [2 "Bob"]}
+           (store/q db '[:find ?e ?n
+                         :where [?e :age ?a]
+                                (or [?e :name ?n]
+                                    [?e :label ?n])])))))
+
+;; ---------------------------------------------------------------------------
+;; Track E12: datoms API
+;;
+;; Spec-first. (store/datoms db index) returns a seq of {:e :a :v :tx}
+;; maps in the named index order: :eavt, :avet, or :aevt.
+;; ---------------------------------------------------------------------------
+(deftest store-datoms-eavt
+  ;; :eavt returns all datoms sorted by entity then attribute.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob"}})
+        db (store/db conn)
+        ds (store/datoms db :eavt)]
+    (is (sequential? ds))
+    (is (= 3 (count ds)))
+    (is (= [1 1 2] (map :e ds)))
+    (is (= [:age :name :name] (map :a ds))
+        "attrs sorted within each entity")))
+
+(deftest store-datoms-avet
+  ;; :avet sorts by attribute then value.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30 :name "Alice"}
+                                2 {:age 25 :name "Bob"}})
+        db (store/db conn)
+        ds (store/datoms db :avet)]
+    (is (sequential? ds))
+    (is (= [:age :age :name :name] (map :a ds))
+        "grouped by attribute first")))
+
+(deftest store-datoms-aevt
+  ;; :aevt sorts by attribute then entity.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30 :name "Alice"}
+                                2 {:age 25 :name "Bob"}})
+        db (store/db conn)
+        ds (store/datoms db :aevt)]
+    (is (sequential? ds))
+    (is (= [:age :age :name :name] (map :a ds)))))
+
+(deftest store-datoms-count
+  ;; Total datom count equals the sum of attribute counts across entities.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob" :email "b@x.com"}})
+        db (store/db conn)]
+    (is (= 4 (count (store/datoms db :eavt))))))
+
 (run-tests-and-exit)
