@@ -903,23 +903,25 @@
               (= (first s) \?)))))
 
 (defn- parse-query
-  "Parses a Datalog query vector into {:find [...] :where [...]}.
+  "Parses a Datalog query vector into {:find [...] :with [...] :where [...]}.
   Throws ex-info tagged ::invalid-query when the input is not a vector
   beginning with :find."
   [query]
   (when-not (and (vector? query) (= (first query) :find))
     (throw (ex-info "Invalid query: expected a vector starting with :find"
                     {::invalid-query query})))
-  (loop [q query find-vars [] clauses [] mode nil]
+  (loop [q query find-vars [] with-vars [] clauses [] mode nil]
     (if (empty? q)
-      {:find find-vars :where clauses}
+      {:find find-vars :with with-vars :where clauses}
       (let [el (first q)]
         (cond
-          (= el :find) (recur (rest q) find-vars clauses :find)
-          (= el :where) (recur (rest q) find-vars clauses :where)
-          (= mode :find) (recur (rest q) (conj find-vars el) clauses :find)
-          (= mode :where) (recur (rest q) find-vars (conj clauses el) :where)
-          :else (recur (rest q) find-vars clauses mode))))))
+          (= el :find) (recur (rest q) find-vars with-vars clauses :find)
+          (= el :with) (recur (rest q) find-vars with-vars clauses :with)
+          (= el :where) (recur (rest q) find-vars with-vars clauses :where)
+          (= mode :find) (recur (rest q) (conj find-vars el) with-vars clauses :find)
+          (= mode :with) (recur (rest q) find-vars (conj with-vars el) clauses :with)
+          (= mode :where) (recur (rest q) find-vars with-vars (conj clauses el) :where)
+          :else (recur (rest q) find-vars with-vars clauses mode))))))
 
 (defn- pattern-binding-for
   "Creates a binding map from a pattern match, given the pattern's
@@ -1001,7 +1003,9 @@
   two author-error classes:
     - a where clause that is neither a 3-element pattern vector nor a
       1-element predicate vector
-    - a find var that no clause binds (silent nil column otherwise)"
+    - a find var that no clause binds (silent nil column otherwise)
+  Aggregate expressions like (count ?e) are unwrapped: the inner
+  variable is checked, not the expression itself."
   [find where]
   (let [bound-vars (reduce
                      (fn [acc clause]
@@ -1015,7 +1019,13 @@
                            (ex-info "Invalid Datalog clause: must be [e a v] pattern or [(pred ...)] predicate"
                                     {::invalid-query clause}))))
                      #{} where)
-        unbound (filter #(not (contains? bound-vars %)) find)]
+        find-vars-for-check (flatten
+                              (for [v find]
+                                (cond
+                                  (variable? v) [v]
+                                  (and (seq? v) (variable? (second v))) [(second v)]
+                                  :else [])))
+        unbound (filter #(not (contains? bound-vars %)) find-vars-for-check)]
     (when (seq unbound)
       (throw
         (ex-info (str "Query var(s) not bound by any clause: " (vec unbound))
@@ -1031,25 +1041,93 @@
               (eval expr)))
           bindings))
 
-(defn q
-  "Executes a Datalog query against a db value.
+;; ---------------------------------------------------------------------------
+;; Aggregates and find specs
+;; ---------------------------------------------------------------------------
 
-  Query format:
-    [:find ?var ... :where clause ...]
+(def ^:private aggregate-fns
+  '#{count count-distinct sum min max avg distinct sample rand})
 
-  Pattern clause: [?e :attr ?v] or [?e :attr literal]
-  Predicate clause: [(pred-fn ?x ... literal ...)]
+(defn- aggregate-expr?
+  "Returns true if x is an aggregate expression like (count ?e)."
+  [x]
+  (and (seq? x) (contains? aggregate-fns (first x))))
 
-  Returns a set of result tuples (vectors).
+(defn- detect-find-spec
+  "Returns {:spec :rel|:coll|:scalar|:tuple :vars [...]}."
+  [find-vars]
+  (cond
+    (and (= (count find-vars) 1)
+         (vector? (first find-vars))
+         (= (last (first find-vars)) '...))
+    {:spec :coll :vars (vec (butlast (first find-vars)))}
 
-  Example:
-    (store/q db [:find ?e ?name
-                 :where
-                 [?e :name ?name]
-                 [?e :age ?age]
-                 [(> ?age 18)]])"
+    (and (>= (count find-vars) 2)
+         (= (last find-vars) '.))
+    {:spec :scalar :vars (vec (butlast find-vars))}
+
+    (and (= (count find-vars) 1)
+         (vector? (first find-vars)))
+    {:spec :tuple :vars (vec (first find-vars))}
+
+    :else
+    {:spec :rel :vars (vec find-vars)}))
+
+(defn- apply-aggregate
+  "Applies aggregate fn-sym to a seq of values."
+  [fn-sym values]
+  (case fn-sym
+    count (count values)
+    count-distinct (count (distinct values))
+    sum (reduce + 0 values)
+    min (reduce (fn [a b] (if (< a b) a b)) values)
+    max (reduce (fn [a b] (if (> a b) a b)) values)
+    avg (if (empty? values) 0 (/ (reduce + 0 values) (count values)))
+    distinct (set values)
+    sample (set (take 1 (shuffle values)))
+    rand (set (take 1 (shuffle values)))))
+
+(defn- compute-results
+  "Given bindings, find spec vars, with-vars, and where clauses, returns
+  a seq of result tuples (vectors)."
+  [bindings spec-vars with-vars]
+  (let [aggs (filter aggregate-expr? spec-vars)
+        scalars (remove aggregate-expr? spec-vars)
+        group-keys (vec (concat scalars with-vars))]
+    (if (empty? aggs)
+      (for [b bindings]
+        (vec (for [v spec-vars] (get b v))))
+      (let [groups (reduce
+                     (fn [m b]
+                       (let [key (vec (for [gk group-keys] (get b gk)))]
+                         (assoc m key (conj (get m key []) b))))
+                     {} bindings)
+            results
+            (for [[key group-bindings] groups]
+              (vec
+                (concat
+                  (for [s scalars] (get (first group-bindings) s))
+                  (for [agg aggs]
+                    (let [fn-sym (first agg)
+                          agg-var (second agg)
+                          vals (for [b group-bindings] (get b agg-var))]
+                      (apply-aggregate fn-sym vals))))))]
+        (if (empty? groups)
+          ;; Empty result set: aggregates produce default values
+          (if (empty? scalars)
+            (let [default-tuple (vec (for [agg aggs]
+                                       (apply-aggregate (first agg) [])))]
+              [default-tuple])
+            [])
+          results)))))
+
+(defn qseq
+  "Executes a Datalog query and returns a lazy seq of results.
+  Same query language as q. See q for full documentation."
   [db-val query]
-  (let [{:keys [find where]} (parse-query query)
+  (let [{:keys [find with where]} (parse-query query)
+        spec-info (detect-find-spec find)
+        spec-vars (:vars spec-info)
         _ (validate-query find where)
         result-bindings
         (reduce (fn [bindings clause]
@@ -1058,9 +1136,44 @@
                     (let [matches (find-pattern-bindings db-val clause)]
                       (join-bindings bindings matches))))
                 [{}]
-                where)]
-    (set (for [b result-bindings]
-            (vec (for [v find] (get b v)))))))
+                where)
+        tuples (compute-results result-bindings spec-vars with)]
+    (case (:spec spec-info)
+      :rel tuples
+      :coll (map first tuples)
+      :scalar (map first tuples)
+      :tuple tuples)))
+
+(defn q
+  "Executes a Datalog query against a db value.
+
+  Query format:
+    [:find find-spec :where clause ...]
+
+  Find specs:
+    ?e ?n            relation (set of tuples)
+    [?e ...]         collection (seq of single values)
+    ?e .             scalar (single value, nil if empty)
+    [?e ?n]          single tuple
+
+  Find elements:
+    ?var             scalar value
+    (agg-fn ?var)    aggregate (count, sum, min, max, avg, distinct, ...)
+
+  Pattern clause: [?e :attr ?v] or [?e :attr literal]
+  Predicate clause: [(pred-fn ?x ... literal ...)]
+  :with ?var        group-by var omitted from results
+
+  Returns a set of result tuples (for :rel), or appropriate type
+  for other find specs."
+  [db-val query]
+  (let [spec-info (detect-find-spec (:find (parse-query query)))
+        results (qseq db-val query)]
+    (case (:spec spec-info)
+      :rel (set results)
+      :coll results
+      :scalar (first results)
+      :tuple (first results))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reverse-index reads
