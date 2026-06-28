@@ -471,26 +471,46 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- point-as-instant?
-  "Distinguishes a wall-clock instant (epoch milliseconds, well above a
-  billion) from a transaction number (small and monotonic). Used by
-  as-of and since to interpret their point argument."
+  "Returns true when point is a #inst value (or any value carrying
+  the :mino/instant metadata marker). Used by as-of and since to
+  dispatch the temporal axis by argument TYPE, matching Datomic's
+  (d/as-of db inst) vs (d/as-of db t) convention: callers pass an
+  inst for wall-clock semantics, anything else (typically a long)
+  for tx-number semantics. Replaces an earlier magnitude heuristic
+  that conflated tx and instant whenever the process's clock value
+  fell below 1e9 (i.e. any process up < 12 days, or any custom
+  clock returning small counts)."
   [point]
-  (> point 1000000000))
+  (inst? point))
+
+(defn- as-point-ms
+  "Normalizes the as-of/since point argument to an epoch-ms long
+  when it is an inst; returns other values unchanged. Callers then
+  compare against :instant (epoch ms) for the inst branch or :tx
+  for the tx branch."
+  [point]
+  (if (point-as-instant? point) (inst-ms point) point))
 
 (defn as-of
   "Returns the db value as it was at tx N or instant T. Replays the log
   up to (but not including) the point, rebuilding the materialized view
   in tx order. The returned :tx, :schema, :closed?, :indexed-attrs, and
   :history are preserved from the input. Indexes are rebuilt for the
-  as-of entity view."
+  as-of entity view.
+
+  The point argument is dispatched by type, matching Datomic: an inst
+  (#inst \"...\" or any value satisfying inst?) selects wall-clock
+  semantics; any other value (typically a long) selects tx-number
+  semantics."
   [db-val point]
   (let [schema (get db-val :schema {})
         indexed-attrs (get db-val :indexed-attrs #{})
         instant? (point-as-instant? point)
+        cmp     (as-point-ms point)
         facts-before (filter (fn [f]
                                 (if instant?
-                                  (< (:instant f) point)
-                                  (< (:tx f) point)))
+                                  (< (:instant f) cmp)
+                                  (< (:tx f) cmp)))
                               (:log db-val))
         ordered (sort-by :tx facts-before)
         entities (reduce (fn [acc f] (apply-fact acc f schema))
@@ -503,13 +523,16 @@
 
 (defn since
   "Returns the seq of facts asserted at or after tx N (or instant T),
-  in log order."
+  in log order. The point argument is dispatched by type, matching
+  Datomic: an inst selects wall-clock semantics; any other value
+  (typically a long) selects tx-number semantics."
   [db-val point]
-  (let [instant? (point-as-instant? point)]
+  (let [instant? (point-as-instant? point)
+        cmp      (as-point-ms point)]
     (filter (fn [f]
               (if instant?
-                (>= (:instant f) point)
-                (>= (:tx f) point)))
+                (>= (:instant f) cmp)
+                (>= (:tx f) cmp)))
             (:log db-val))))
 
 (defn history

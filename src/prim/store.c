@@ -39,11 +39,37 @@
 #include <string.h>
 #if defined(_WIN32)
 #  include <io.h>
+#  include <windows.h>
 #else
 #  include <unistd.h>
+#  include <time.h>
 #endif
 
 /* --- host-owned handle ---------------------------------------------------- */
+
+/* Portable wall-clock epoch-ms. Used as the default store clock so
+ * that recorded :instant values line up with #inst / inst-ms, matching
+ * ADR 11 ("wall-clock milliseconds") and Datomic's :db/txInstant. The
+ * previous implementation used mino_monotonic_ns() / 1000000, which is
+ * process-uptime ms; that only coincidentally ordered facts within one
+ * process and never aligned with #inst comparisons in as-of / since. */
+static long long store_wall_clock_ms(void)
+{
+#if defined(_WIN32)
+    FILETIME    ft;
+    ULARGE_INTEGER u;
+    GetSystemTimeAsFileTime(&ft);
+    u.LowPart  = ft.dwLowDateTime;
+    u.HighPart = ft.dwHighDateTime;
+    /* FILETIME is 100ns ticks since 1601-01-01; convert to ms since
+     * Unix epoch (1970-01-01) by subtracting the 11644473600 s offset. */
+    return (long long)(u.QuadPart / 10000ULL) - 11644473600000LL;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (long long)ts.tv_sec * 1000LL + (long long)(ts.tv_nsec / 1000000L);
+#endif
+}
 
 typedef struct mino_store_handle {
     char                *path;       /* NULL for in-memory stores */
@@ -686,7 +712,7 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
        conn to read a clock from, so fall back to the wall clock, mirroring
        the NULL-clock path below. Any other non-store value is a type error. */
     if (mino_is_nil(conn)) {
-        return mino_int(S, mino_monotonic_ns() / 1000000);
+        return mino_int(S, store_wall_clock_ms());
     }
     if (!mino_is_store(conn)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
@@ -697,7 +723,7 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
     if (h != NULL && h->clock != NULL) {
         now = h->clock(h->clock_ctx);
     } else {
-        now = mino_monotonic_ns() / 1000000;
+        now = store_wall_clock_ms();
     }
     return mino_int(S, now);
 }
