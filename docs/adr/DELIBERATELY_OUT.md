@@ -19,11 +19,11 @@ so.
   mutable state is a host responsibility, brokered via `host/*` interop
   or an external database. Ref ADR 10.
 
-- **Full Datalog.** Query is a deliberately small `q`: the patterns and
-  joins needed for EAVT navigation. Rules, `not`/`not-join`, and
-  `or`/`or-join` are out. They add a solver, a stratification check, and
-  a meaningfully larger query compiler for power most embedded users do
-  not draw on.
+- **Rules in Datalog.** Query supports patterns, predicates, negation
+  (`not`/`not-join`), and disjunction (`or`). Rules (named query
+  fragments with recursion) are out: they add a solver, a stratification
+  check, and a meaningfully larger query compiler for power most embedded
+  users do not draw on.
 
 - **SQL query interface.** SQL presumes a server-process planner,
   cursor state, and a relational algebra layer that does not match an
