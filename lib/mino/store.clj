@@ -96,9 +96,19 @@
 
 (defn- validate-fact
   "Validates a single fact against the schema. Throws ex-info on
-  violation: unknown attribute in a closed schema, or type mismatch
-  on :db/add. No-op when schema is empty."
+  violation: nil entity-id, nil attribute, unknown attribute in a
+  closed schema, or type mismatch on :db/add. No-op when schema is
+  empty. nil as a fact value on :db/add is a documented v1 design
+  choice (see store-add-nil-value) and is allowed."
   [schema closed? {:keys [e a v op]}]
+  (when (nil? e)
+    (throw
+      (ex-info "nil entity id is not allowed"
+               {:attribute a})))
+  (when (nil? a)
+    (throw
+      (ex-info "nil attribute is not allowed"
+               {:entity e})))
   (let [spec (get schema a)]
     (when (and closed? (not spec))
       (throw
