@@ -312,11 +312,6 @@ static int img_check_quiesced(mino_state *S, const char **reason)
     /* Pending futures live on S->threading.future_list_head (they detach
      * when the worker resolves and GC sweeps); the async scheduler queue
      * above does not track them. Walk the list and refuse if any future
-     * is still PENDING. Realized/failed/cancelled futures may still be
-     * on the chain until GC sweeps them; those don't block the save. */
-    /* Pending futures live on S->threading.future_list_head (they detach
-     * when the worker resolves and GC sweeps); the async scheduler queue
-     * above does not track them. Walk the list and refuse if any future
      * has a running worker that has not yet published. Promises share
      * the future struct but never spawn a worker (thread_started == 0);
      * an undelivered promise is not actively mutating state and does
