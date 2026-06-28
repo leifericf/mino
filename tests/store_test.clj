@@ -1584,4 +1584,372 @@
     (is (some? first-elem) "first of qseq returns a value")
     (is (vector? first-elem) "first element is a tuple")))
 
+;; ---------------------------------------------------------------------------
+;; Track C1: attribute predicates
+;;
+;; Spec-first. Schema accepts {:preds [sym ...]} on an attribute. Each
+;; :db/add value is passed to each predicate (resolved via resolve) AFTER
+;; the type check and BEFORE the fact is applied. Falsy return aborts
+;; the whole tx tagged ::attr-pred-failed.
+;; ---------------------------------------------------------------------------
+
+(defn store-pred-positive-num
+  "Test helper attr pred: truthy when v is a positive number."
+  [v]
+  (and (number? v) (pos? v)))
+
+(defn store-pred-non-empty-str
+  "Test helper attr pred: truthy when v is a non-empty string."
+  [v]
+  (and (string? v) (pos? (count v))))
+
+(defn store-pred-always-reject
+  "Test helper attr pred: always returns false."
+  [_]
+  false)
+
+(deftest store-attr-pred-accepts-valid
+  (let [conn (store/open nil {:schema {:n {:type :long
+                                           :preds ['store-pred-positive-num]}}})
+        _ (store/transact conn [:db/add 1 :n 5])
+        db (store/db conn)]
+    (is (= 5 (store/read db 1 :n)) "pred-satisfying value accepted")))
+
+(deftest store-attr-pred-rejects-invalid
+  (let [conn (store/open nil {:schema {:n {:type :long
+                                           :preds ['store-pred-positive-num]}}})
+        e (try
+            (store/transact conn [:db/add 1 :n -1])
+            nil
+            (catch e e))]
+    (is (some? e) "pred rejection throws")
+    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
+        "ex-data carries ::attr-pred-failed tag")
+    (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
+    (is (= 0 (:tx (store/db conn))) "tx counter not advanced")))
+
+(deftest store-attr-pred-multiple
+  ;; Multiple preds on one attr: ALL must pass.
+  (let [conn (store/open nil {:schema {:s {:type :string
+                                           :preds ['store-pred-non-empty-str
+                                                   'store-pred-always-reject]}}})
+        e (try
+            (store/transact conn [:db/add 1 :s "hi"])
+            nil
+            (catch e e))]
+    (is (some? e) "second pred failing throws")
+    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
+        "failure reports the pred that rejected")))
+
+(deftest store-attr-pred-runs-after-type-check
+  ;; The type check fires first. A string value for :long must surface as
+  ;; the type error, NOT as an attr-pred-failed, even though the pred
+  ;; would also reject.
+  (let [conn (store/open nil {:schema {:n {:type :long
+                                           :preds ['store-pred-always-reject]}}})
+        e (try
+            (store/transact conn [:db/add 1 :n "not a number"])
+            nil
+            (catch e e))]
+    (is (some? e) "type mismatch throws")
+    (is (nil? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
+        "type error observed, pred never reached")))
+
+(deftest store-attr-pred-tx-atomic
+  ;; A pred failure on any one fact in a multi-fact tx aborts ALL facts.
+  (let [conn (store/open nil {:schema {:n {:type :long
+                                           :preds ['store-pred-positive-num]}}})
+        e (try
+            (store/transact conn [[:db/add 1 :n 5]
+                                  [:db/add 2 :n -1]])
+            nil
+            (catch e e))]
+    (is (some? e) "pred failure on second fact throws")
+    (is (= #{} (store/entities (store/db conn))) "first fact NOT applied (atomic)")
+    (is (= 0 (:tx (store/db conn))) "tx not advanced")))
+
+(deftest store-attr-pred-many-cardinality
+  ;; Pred is checked per member for :cardinality :many attrs.
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many
+                                              :preds ['store-pred-non-empty-str]}}})
+        _ (store/transact conn [[:db/add 1 :tags "x"]
+                                [:db/add 1 :tags "y"]])
+        db-ok (store/db conn)
+        e (try
+            (store/transact conn [:db/add 1 :tags ""])
+            nil
+            (catch e e))]
+    (is (= #{"x" "y"} (store/read db-ok 1 :tags)) "valid members accepted")
+    (is (some? e) "pred rejection on a :many member throws")
+    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e)))))))
+
+;; ---------------------------------------------------------------------------
+;; Track C2: entity specs (:db/ensure)
+;;
+;; Spec-first. Entity specs are registered at open time under
+;; :entity-specs. tx-data map form carries a virtual :db/ensure spec-name
+;; key. After all facts apply, each ensured entity is checked for
+;; required-attrs and preds. Failure aborts tagged ::entity-spec-failed.
+;; ---------------------------------------------------------------------------
+
+(defn store-spec-email-has-at
+  "Test helper entity pred: truthy when entity's :email contains @.
+  Entity preds take (db eid) and return truthy/falsy."
+  [db eid]
+  (let [email (store/read db eid :email)]
+    (and (string? email)
+         (boolean (re-find #"@" email)))))
+
+(defn store-spec-always-reject
+  "Test helper entity pred: always falsy."
+  [_ _]
+  false)
+
+(def store-es-schema
+  "Shared schema for entity-spec tests."
+  {:name {:type :string} :email {:type :string} :note {:type :string}})
+
+(deftest store-entity-spec-required-attrs-satisfied
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:required-attrs [:name :email]}}})
+        _ (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
+        db (store/db conn)]
+    (is (= "Alice" (store/read db 1 :name)))
+    (is (= "a@x.com" (store/read db 1 :email)))
+    (is (nil? (:db/ensure (store/entity db 1)))
+        ":db/ensure is virtual, not stored on the entity")))
+
+(deftest store-entity-spec-required-attrs-missing
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:required-attrs [:name :email]}}})
+        e (try
+            (store/transact conn {1 {:db/ensure :user :name "Alice"}})
+            nil
+            (catch e e))]
+    (is (some? e) "missing required attr throws")
+    (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e))))
+        "ex-data carries ::entity-spec-failed tag")
+    (is (= #{} (store/entities (store/db conn))) "no facts applied")))
+
+(deftest store-entity-spec-pred-passes
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:preds ['store-spec-email-has-at]}}})
+        _ (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
+        db (store/db conn)]
+    (is (= "a@x.com" (store/read db 1 :email)) "pred-satisfying entity accepted")))
+
+(deftest store-entity-spec-pred-fails
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:preds ['store-spec-always-reject]}}})
+        e (try
+            (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
+            nil
+            (catch e e))]
+    (is (some? e) "failing entity pred throws")
+    (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e)))))
+    (is (= #{} (store/entities (store/db conn))) "no facts applied")))
+
+(deftest store-entity-spec-on-new-entity
+  ;; Ensure works when the tx creates the entity from scratch; the spec
+  ;; is checked against the working entities view after all facts apply.
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:required-attrs [:name :email]}}})
+        _ (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
+        db (store/db conn)]
+    (is (= #{1} (store/entities db)) "entity created")))
+
+(deftest store-entity-spec-atomic
+  ;; Spec failure aborts the whole tx, including facts on entities that
+  ;; are NOT under any spec.
+  (let [conn (store/open nil {:schema store-es-schema
+                             :entity-specs {:user {:required-attrs [:name :email]}}})
+        e (try
+            (store/transact conn {1 {:db/ensure :user :name "Alice"}
+                                  2 {:note "unrelated"}})
+            nil
+            (catch e e))]
+    (is (some? e) "entity spec failure throws")
+    (is (= #{} (store/entities (store/db conn))) "no facts applied (atomic)")
+    (is (= 0 (:tx (store/db conn))) "tx not advanced")))
+
+;; ---------------------------------------------------------------------------
+;; Track C3: migration API
+;;
+;; Spec-first. (store/migrate conn new-schema opts?) re-exports a new
+;; schema, validates existing facts, optionally coerces, and publishes
+;; the result. Returns {:db-after new-db :violations [...] :tx N}.
+;; ---------------------------------------------------------------------------
+
+(defn store-mig-coerce-to-long
+  "Test helper coerce-fn: maps any value to the long 42."
+  [_v]
+  42)
+
+(deftest store-migrate-add-new-attr
+  (let [conn (store/open nil {:schema {:name {:type :string}}})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        r (store/migrate conn {:name {:type :string} :email {:type :string}})
+        db (:db-after r)]
+    (is (= [] (:violations r)) "no violations adding a new attr")
+    (is (some? (:tx r)) "returns tx number")
+    (is (= "Alice" (store/read db 1 :name)) "existing data preserved")
+    ;; New schema is live: :email is now transactable.
+    (store/transact conn [:db/add 1 :email "a@x.com"])
+    (is (= "a@x.com" (store/read (store/db conn) 1 :email)))))
+
+(deftest store-migrate-tighten-type-throws
+  ;; Tightening :any -> :long when existing data is non-long throws
+  ;; ::migration-conflict without :force.
+  (let [conn (store/open nil {:schema {:n {}}})
+        _ (store/transact conn [:db/add 1 :n "not a number"])
+        e (try
+            (store/migrate conn {:n {:type :long}})
+            nil
+            (catch e e))]
+    (is (some? e) "violations throw without :force")
+    (is (some? (re-find #"migration-conflict" (pr-str (ex-data e))))
+        "ex-data carries ::migration-conflict tag")
+    (is (= "not a number" (store/read (store/db conn) 1 :n))
+        "existing db unchanged on throw")))
+
+(deftest store-migrate-tighten-type-with-coerce
+  ;; coerce-fn transforms non-conforming values before validation; the
+  ;; migration then succeeds and the coerced value is visible.
+  (let [conn (store/open nil {:schema {:n {}}})
+        _ (store/transact conn [:db/add 1 :n "42"])
+        r (store/migrate conn {:n {:type :long}}
+                         {:coerce {:n 'store-mig-coerce-to-long}})
+        db (:db-after r)]
+    (is (= [] (:violations r)) "coerce fixed the violation")
+    (is (= 42 (store/read db 1 :n)) "coerced value visible in entities")))
+
+(deftest store-migrate-add-indexes
+  ;; Adding indexes to existing attrs builds the index as part of the
+  ;; migration; find-by works immediately afterward.
+  (let [conn (store/open nil {:schema {:email {:type :string}}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        _ (store/migrate conn {:email {:type :string}} {:indexes #{:email}})
+        db (store/db conn)]
+    (is (= 1 (store/find-by db :email "a@x.com")) "index built during migration")))
+
+(deftest store-migrate-then-transact
+  ;; After migration the new schema is active for new transactions,
+  ;; including type tightening.
+  (let [conn (store/open nil {:schema {:name {:type :string}}})
+        _ (store/migrate conn {:name {:type :string} :age {:type :long}})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        _ (store/transact conn [:db/add 1 :age 30])
+        db (store/db conn)]
+    (is (= 30 (store/read db 1 :age)) "new attr transactable after migration"))
+  (let [conn (store/open nil {:schema {:n {}}})
+        _ (store/migrate conn {:n {:type :long}})
+        e (try
+            (store/transact conn [:db/add 1 :n "not a number"])
+            nil
+            (catch e e))]
+    (is (some? e) "tightened type enforced on new txs")))
+
+(deftest store-migrate-durable
+  ;; Migration persists across checkpoint+reopen: the new schema is
+  ;; active on the reopened connection.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/mig.db")]
+    (try
+      (let [conn (store/open path {:schema {:name {:type :string}}})
+            _ (store/transact conn [:db/add 1 :name "Alice"])
+            _ (store/migrate conn {:name {:type :string} :email {:type :string}})
+            _ (store/checkpoint conn)
+            _ (store/close conn)
+            conn2 (store/open path)
+            _ (store/transact conn2 [:db/add 1 :email "a@x.com"])
+            db (store/db conn2)]
+        (is (= "Alice" (store/read db 1 :name)) "pre-migration value intact")
+        (is (= "a@x.com" (store/read db 1 :email)) "post-migration attr usable")
+        (store/close conn2))
+      (finally
+        (rm-rf store-test-dir)))))
+
+;; ---------------------------------------------------------------------------
+;; Track D1: per-attribute :noHistory
+;;
+;; Spec-first. Schema accepts {:no-history true} on an attribute. Facts
+;; for no-history attrs are applied to entities but NOT appended to :log;
+;; as-of/since/history for these attrs return the current value at all
+;; points. Indexes are maintained normally.
+;; ---------------------------------------------------------------------------
+
+(deftest store-no-history-attr-not-in-log
+  (let [conn (store/open nil {:schema {:name {:type :string}
+                                       :ephemeral {:type :string :no-history true}}})
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        _ (store/transact conn [:db/add 1 :ephemeral "v0"])
+        log (:log (store/db conn))]
+    (is (= 1 (count (filter #(= (:a %) :name) log))) ":name logged normally")
+    (is (zero? (count (filter #(= (:a %) :ephemeral) log)))
+        ":ephemeral facts NOT appended to log")))
+
+(deftest store-no-history-attr-readable
+  (let [conn (store/open nil {:schema {:ephemeral {:type :string :no-history true}}})
+        _ (store/transact conn [:db/add 1 :ephemeral "v0"])
+        _ (store/transact conn [:db/add 1 :ephemeral "v1"])
+        db (store/db conn)]
+    (is (= "v1" (store/read db 1 :ephemeral)) "current value readable")
+    (is (= "v1" (:ephemeral (store/entity db 1))) "visible in entity map")))
+
+(deftest store-no-history-as-of-returns-current
+  ;; With :no-history true, as-of at any prior tx returns the CURRENT
+  ;; value rather than the historical value (there is no history).
+  (let [conn (store/open nil {:schema {:a {:type :string}
+                                       :eph {:type :string :no-history true}}})
+        _ (store/transact conn [:db/add 1 :a "a0"])      ;; tx 0
+        _ (store/transact conn [:db/add 1 :eph "e0"])    ;; tx 1
+        _ (store/transact conn [:db/add 1 :eph "e1"])    ;; tx 2
+        db (store/db conn)]                              ;; :tx 3
+    ;; Normal attr honors tx boundaries.
+    (is (nil? (store/read (store/as-of db 0) 1 :a)) "normal attr absent before its tx")
+    ;; no-history attr returns the CURRENT value at every as-of point.
+    (is (= "e1" (store/read (store/as-of db 3) 1 :eph))
+        "no-history as-of at current tx returns current value")
+    (is (= "e1" (store/read (store/as-of db 1) 1 :eph))
+        "no-history as-of at tx 1 (before e1 was written) still returns current")))
+
+(deftest store-no-history-index-maintained
+  ;; Indexes are maintained normally for :no-history attrs.
+  (let [conn (store/open nil {:schema {:email {:type :string :no-history true}}
+                              :indexes #{:email}})
+        _ (store/transact conn [:db/add 1 :email "a@x.com"])
+        _ (store/transact conn [:db/add 1 :email "b@x.com"])
+        db (store/db conn)]
+    (is (= 1 (store/find-by db :email "b@x.com")) "current value indexed")
+    (is (nil? (store/find-by db :email "a@x.com")) "stale value dropped from index")))
+
+;; ---------------------------------------------------------------------------
+;; Track D2: retention makes as-of partial
+;;
+;; Spec-first. Documents that retention policies drop old log entries,
+;; so as-of at an early tx returns a partial or empty view.
+;; ---------------------------------------------------------------------------
+
+(deftest store-as-of-with-retention-partial
+  ;; With :keep-last 2, once the log exceeds the compaction threshold
+  ;; the oldest facts are dropped. as-of at an early tx cannot
+  ;; reconstruct the past and returns a partial/empty view. This
+  ;; demonstrates why the as-of contract warns about retention.
+  (let [conn (store/open nil {:history {:keep-last 2}})
+        _ (store/transact conn [:db/add 1 :a :v0])   ;; tx 0
+        _ (store/transact conn [:db/add 1 :a :v1])   ;; tx 1
+        _ (store/transact conn [:db/add 1 :a :v2])   ;; tx 2
+        _ (store/transact conn [:db/add 1 :a :v3])   ;; tx 3
+        _ (store/transact conn [:db/add 1 :a :v4])   ;; tx 4
+        _ (store/transact conn [:db/add 1 :a :v5])   ;; tx 5
+        db (store/db conn)]
+    (is (= :v5 (store/read db 1 :a)) "current value preserved")
+    (is (< (count (:log db)) 6)
+        "log has been compacted below the full 6 facts")
+    (let [as-of-0 (store/as-of db 0)]
+      (is (or (not (store/entity-exists? as-of-0 1))
+              (nil? (store/read as-of-0 1 :a)))
+          "as-of at tx 0 returns partial/empty view after retention"))))
+
 (run-tests-and-exit)
