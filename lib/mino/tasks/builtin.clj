@@ -2369,6 +2369,7 @@
    "src/values/val.c"           "value layer -- alloc / copy / hash / equality kept with type defs"
    "src/runtime/state.c"        "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
    "src/runtime/image_load.c"   "SLAD image deserializer -- per-type allocate + patch + ROOTS splice over all MINO_* types"
+   "src/runtime/image.c"        "SLAD image serializer -- per-type emit dispatch over every MINO_* tag"
    "src/eval/print.c"           "printer dispatch over every MINO_* tag (narrowly over once MINO_STORE printing landed)"
    "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"})
 
