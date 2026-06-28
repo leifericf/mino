@@ -46,4 +46,19 @@
           "image contains user var name")))
   (rm-rf image-test-dir))
 
+(deftest image-save-refuses-with-in-flight-future
+  ;; Quiesce protocol: a pending future means the runtime is not at
+  ;; rest. save-image must refuse rather than silently capturing a
+  ;; half-mutated heap. Future is given a long enough body that the
+  ;; save attempt lands while it is still in flight; we deref it
+  ;; afterwards to clean up.
+  (rm-rf image-test-dir)
+  (mkdir-p image-test-dir)
+  (let [path (str image-test-dir "/fut.img")
+        f (future (Thread/sleep 3000) 42)]
+    (is (thrown? (save-image path))
+        "save-image refuses while a future is in flight")
+    (is (= 42 @f) "future still resolves after the refused save"))
+  (rm-rf image-test-dir))
+
 (run-tests-and-exit)
