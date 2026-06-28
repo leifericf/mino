@@ -541,7 +541,7 @@ int mino_store_close(mino_state *S, mino_val *conn)
     if (store_check_state(S, conn)) return -1;
     h = (mino_store_handle *)conn->as.store.handle;
     if (h == NULL) return 0;
-    mino_store_checkpoint(S, conn);
+    if (mino_store_checkpoint(S, conn) != 0) return -1;
     free(h->path);
     free(h);
     conn->as.store.handle = NULL;
