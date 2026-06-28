@@ -63,6 +63,7 @@ void mino_install_image_prims(mino_state *S, mino_env *env)
 {
     mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
-    prim_install_table(S, core_env, "clojure.core",
-                       k_prims_image, k_prims_image_count);
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_image, k_prims_image_count,
+                                       "fs");
 }
