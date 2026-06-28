@@ -298,6 +298,51 @@
     (is (= 1 (count (store/since db 2)) "only tx 2"))
     (is (empty? (store/since db 3)) "nothing at or after current tx")))
 
+(deftest store-as-of-by-inst
+  ;; Datomic parity: (as-of db inst) interprets the arg as a wall-clock
+  ;; instant by TYPE, not by magnitude. Passing #inst must always take
+  ;; the instant branch, regardless of how small the epoch-ms value is.
+  ;; A typical break with the old magnitude heuristic: a fresh process
+  ;; whose monotonic clock was < 1e9 had every instant misread as a tx.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :a :v0])   ;; tx 0
+        _ (store/transact conn [:db/add 1 :a :v1])   ;; tx 1
+        _ (store/transact conn [:db/add 1 :a :v2])   ;; tx 2
+        db (store/db conn)]
+    ;; A past inst (well before this test process started) sees no facts.
+    (is (empty? (:entities (store/as-of db #inst "2020-01-01T00:00:00.000Z")))
+        "past inst excludes all facts")
+    ;; A far-future inst sees the current state.
+    (is (= :v2 (store/read (store/as-of db #inst "2099-01-01T00:00:00.000Z") 1 :a))
+        "future inst sees current state")))
+
+(deftest store-since-by-inst
+  ;; Symmetric: (since db inst) returns facts at or after the wall-clock
+  ;; instant when the arg is an inst.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :a :v0])
+        _ (store/transact conn [:db/add 1 :a :v1])
+        db (store/db conn)]
+    (is (= 2 (count (store/since db #inst "2020-01-01T00:00:00.000Z"))
+           "past inst includes all facts"))
+    (is (empty? (store/since db #inst "2099-01-01T00:00:00.000Z"))
+        "future inst excludes all facts")))
+
+(deftest store-instants-are-wall-clock-ms
+  ;; ADR 11 documents :instant as "wall-clock milliseconds". Recorded
+  ;; :instant values must be in the same epoch-ms space as #inst and
+  ;; inst-ms so that (as-of db #inst ...) and the recorded :instants
+  ;; actually compare against each other usefully. (Pre-fix the clock
+  ;; returned monotonic-ms, which only coincidentally ordered facts
+  ;; within one process and never aligned with #inst.)
+  (let [conn (store/open)
+        before (inst-ms #inst "2024-01-01T00:00:00.000Z")
+        _ (store/transact conn [:db/add 1 :a :v0])
+        db (store/db conn)
+        recorded (:instant (first (:log db)))]
+    (is (> recorded before)
+        "recorded :instant is in epoch-ms space (greater than a 2024 inst)")))
+
 (deftest store-history-entity
   (let [conn (store/open)
         _ (store/transact conn [:db/add 1 :name "Alice"])    ;; tx 0
