@@ -770,6 +770,22 @@
         db (store/db conn)]
     (is (= :b (store/read db 1 :tags)) "overwrites without :many")))
 
+(deftest store-tx-data-rejects-nil-entity-id
+  ;; nil as an entity id collides with "absent" in point reads and lets
+  ;; callers create a phantom nil-keyed entity.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add nil :name "X"])))
+    (is (= #{} (store/entities (store/db conn))))
+    (is (= 0 (:tx (store/db conn))))))
+
+(deftest store-tx-data-rejects-nil-attribute
+  ;; nil as an attribute is meaningless and indistinguishable from
+  ;; "absent" on read.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add 1 nil "X"])))
+    (is (= #{} (store/entities (store/db conn))))
+    (is (= 0 (:tx (store/db conn))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Indexes
 ;; ---------------------------------------------------------------------------
