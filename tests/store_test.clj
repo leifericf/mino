@@ -2489,6 +2489,17 @@
     (is (= 1 @a))
     (is (= 1 @b))))
 
+(deftest store-listen-cleared-on-close
+  ;; The listener registry is a process-global atom keyed by conn. Closing
+  ;; the store must remove the conn's entry so the registry does not leak
+  ;; the conn (and its closures) across many open/close cycles, and so a
+  ;; listener registered before close is not retained.
+  (let [conn (store/open)
+        _    (store/listen conn :w (fn [_] nil))]
+    (store/close conn)
+    (is (nil? (get @@#'mino.store/listener-registry conn))
+        "registry no longer holds the closed conn")))
+
 ;; ---------------------------------------------------------------------------
 ;; Disjunction
 ;;
