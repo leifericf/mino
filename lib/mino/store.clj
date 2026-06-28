@@ -230,9 +230,14 @@
     (and (vector? tx-data)
          (or (= (first tx-data) :db/add)
              (= (first tx-data) :db/retract)))
-    (if (= (count tx-data) 4)
-      [[(tx-data 0) (tx-data 1) (tx-data 2) (tx-data 3)]]
-      [[:db/retract (tx-data 1) (tx-data 2) nil]])
+    (condp = (count tx-data)
+      4 [[(tx-data 0) (tx-data 1) (tx-data 2) (tx-data 3)]]
+      3 (if (= (first tx-data) :db/retract)
+          [[:db/retract (tx-data 1) (tx-data 2) nil]]
+          (throw (ex-info "[:db/add e a] is missing a value"
+                          {:tx-data tx-data})))
+      (throw (ex-info "tx-data vector has wrong arity (expected 3 or 4 elements)"
+                      {:tx-data tx-data})))
 
     (map? tx-data)
     (vec (for [[e attrs] tx-data
