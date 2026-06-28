@@ -1077,4 +1077,277 @@
     (is (thrown? (store/q db '[:find ?e :where []]))
         "empty vector clause throws")))
 
+;; ---------------------------------------------------------------------------
+;; Track A1: domain-unique attributes, upsert, lookup-refs
+;;
+;; Spec-first. These fail until the implementation lands.
+;; ---------------------------------------------------------------------------
+
+(deftest store-unique-attr-upsert-creates
+  ;; First write of a :unique :identity attribute creates a new entity.
+  (let [conn (store/open nil {:schema {:email {:unique :identity}}})
+        _ (store/transact conn [:db/add 100 :email "a@x.com"])
+        db (store/db conn)]
+    (is (= "a@x.com" (store/read db 100 :email)))
+    (is (= #{100} (store/entities db)))))
+
+(deftest store-unique-attr-upsert-merges
+  ;; A second write that carries an already-seen unique value on a
+  ;; not-yet-existing eid is rewritten onto the existing entity
+  ;; (upsert) instead of creating a new one.
+  (let [conn (store/open nil {:schema {:email {:unique :identity}}})
+        _ (store/transact conn [:db/add 100 :email "a@x.com"])
+        _ (store/transact conn [:db/add 999 :email "a@x.com"])
+        db (store/db conn)]
+    (is (= #{100} (store/entities db)) "no new entity for duplicate unique value")
+    (is (= "a@x.com" (store/read db 100 :email)))))
+
+(deftest store-lookup-ref-resolves
+  ;; A 2-element vector [:unique-attr value] is accepted as an entity-id
+  ;; in tx-data and resolved at parse time via the unique index.
+  (let [conn (store/open nil {:schema {:email {:unique :identity}}})
+        _ (store/transact conn [:db/add 100 :email "a@x.com"])
+        _ (store/transact conn [:db/add [:email "a@x.com"] :name "Alice"])
+        db (store/db conn)]
+    (is (= "Alice" (store/read db 100 :name)) "lookup-ref resolved to entity 100")
+    (is (= #{100} (store/entities db)) "no phantom entity created")))
+
+(deftest store-unique-conflict-throws
+  ;; Two distinct new entities carrying the same unique value within a
+  ;; single tx must throw, tagged ::unique-conflict, and apply nothing.
+  (let [conn (store/open nil {:schema {:email {:unique :identity}}})
+        e (try
+            (store/transact conn [[:db/add 100 :email "a@x.com"]
+                                  [:db/add 200 :email "a@x.com"]])
+            nil
+            (catch e e))]
+    (is (some? e) "conflicting tx throws")
+    (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
+        "ex-data carries ::unique-conflict tag")
+    (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
+    (is (= 0 (:tx (store/db conn))) "tx counter not advanced on throw")))
+
+(deftest store-unique-requires-cardinality-one
+  ;; Declaring :unique :identity on a :cardinality :many attribute is a
+  ;; schema error detected at open time.
+  (is (thrown? (store/open nil {:schema {:tags {:cardinality :many
+                                                :unique :identity}}}))))
+
+(deftest store-unique-attr-auto-indexed
+  ;; A :unique attribute is implicitly indexed; find-by works without an
+  ;; explicit :indexes entry.
+  (let [conn (store/open nil {:schema {:email {:unique :identity}}})
+        _ (store/transact conn [[:db/add 1 :email "a@x.com"]
+                                [:db/add 2 :email "b@x.com"]])
+        db (store/db conn)]
+    (is (= 1 (store/find-by db :email "a@x.com")))
+    (is (= 2 (store/find-by db :email "b@x.com")))
+    (is (nil? (store/find-by db :email "missing@x.com")))))
+
+;; ---------------------------------------------------------------------------
+;; Track A2: :ref type + reverse index
+;; ---------------------------------------------------------------------------
+
+(deftest store-ref-validates-existing-eid
+  ;; A :ref attribute accepts any existing eid as its value.
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        _ (store/transact conn [:db/add 1 :name "Parent"])
+        _ (store/transact conn [:db/add 2 :child 1])
+        db (store/db conn)]
+    (is (= 1 (store/read db 2 :child)))))
+
+(deftest store-ref-dangling-throws
+  ;; A :ref value that is not an existing eid at apply time throws,
+  ;; tagged ::dangling-ref, and applies nothing.
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        e (try
+            (store/transact conn [:db/add 1 :child 999])
+            nil
+            (catch e e))]
+    (is (some? e) ":ref to nonexistent eid throws")
+    (is (some? (re-find #"dangling-ref" (pr-str (ex-data e))))
+        "ex-data carries ::dangling-ref tag")
+    (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
+    (is (= 0 (:tx (store/db conn))) "tx counter not advanced on throw")))
+
+(deftest store-reverse-index-built
+  ;; store/referring returns the set of source eids whose value for the
+  ;; given ref-attr equals the target eid.
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Parent"]
+                                [:db/add 2 :child 1]
+                                [:db/add 3 :child 1]])
+        db (store/db conn)]
+    (is (= #{2 3} (store/referring db :child 1)))
+    (is (= #{} (store/referring db :child 999)) "no refs to absent eid")))
+
+(deftest store-referred-by-returns-map
+  ;; store/referred-by returns a map of {ref-attr #{source-eids}} for
+  ;; every ref attribute pointing at the given eid.
+  (let [conn (store/open nil {:schema {:child {:type :ref}
+                                       :friend {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Target"]
+                                [:db/add 2 :child 1]
+                                [:db/add 3 :child 1]
+                                [:db/add 4 :friend 1]])
+        db (store/db conn)]
+    (is (= {:child #{2 3} :friend #{4}} (store/referred-by db 1)))
+    (is (= {} (store/referred-by db 999)) "absent target has empty map")))
+
+(deftest store-retract-target-nils-refs
+  ;; When an entity ceases to exist (its last attribute retracted), ref
+  ;; attributes in other entities that pointed at it are nilled.
+  (let [conn (store/open nil {:schema {:child {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Parent"]
+                                [:db/add 2 :name "Holder"]
+                                [:db/add 2 :child 1]])
+        _ (store/transact conn [:db/retract 1 :name])
+        db (store/db conn)]
+    (is (not (store/entity-exists? db 1)) "target fully retracted")
+    (is (nil? (store/read db 2 :child)) "dangling ref nilled in source")
+    (is (= #{} (store/referring db :child 1)) "reverse index drops the link")))
+
+(deftest store-ref-with-many-cardinality
+  ;; A :ref with :cardinality :many holds a set of eids and the reverse
+  ;; index tracks every source for each target.
+  (let [conn (store/open nil {:schema {:members {:type :ref
+                                                :cardinality :many}}})
+        _ (store/transact conn [[:db/add 1 :name "A"]
+                                [:db/add 2 :name "B"]
+                                [:db/add 3 :name "C"]
+                                [:db/add 10 :members 1]
+                                [:db/add 10 :members 2]
+                                [:db/add 20 :members 1]])
+        db (store/db conn)]
+    (is (= #{1 2} (store/read db 10 :members)))
+    (is (= #{10 20} (store/referring db :members 1)))
+    (is (= #{10} (store/referring db :members 2)))))
+
+;; ---------------------------------------------------------------------------
+;; Track A3: minimal pull
+;; ---------------------------------------------------------------------------
+
+(deftest store-pull-flat-attr
+  ;; A bare keyword spec returns that single attribute's value.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}})
+        db (store/db conn)]
+    (is (= {:db/id 1 :name "Alice"} (store/pull db [:name] 1)))))
+
+(deftest store-pull-wildcard
+  ;; `*` returns every attribute of the entity.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}})
+        db (store/db conn)]
+    (is (= {:db/id 1 :name "Alice" :age 30} (store/pull db [*] 1)))))
+
+(deftest store-pull-map-spec-ref
+  ;; A map-spec {attr sub-pattern} recurses into a :ref attribute. The
+  ;; :as rename applies at the key position; :many refs yield a seq.
+  (let [conn (store/open nil {:schema {:child {:type :ref
+                                              :cardinality :many}}})
+        _ (store/transact conn {1 {:name "Parent"}
+                                2 {:name "Alice"}
+                                3 {:name "Bob"}})
+        _ (store/transact conn [[:db/add 1 :child 2]
+                                [:db/add 1 :child 3]])
+        db (store/db conn)
+        result (store/pull db [{[:child :as :kids] [:name]}] 1)]
+    (is (= {:db/id 1 :name "Parent"} (dissoc result :kids)))
+    (is (= #{{:db/id 2 :name "Alice"} {:db/id 3 :name "Bob"}}
+           (set (:kids result))))))
+
+(deftest store-pull-recursion-limit
+  ;; A positive number in map-spec position bounds recursion depth; the
+  ;; leaf returns only :db/id once the budget is spent.
+  (let [conn (store/open nil {:schema {:parent {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 2 :name "Bob"]
+                                [:db/add 3 :name "Carol"]
+                                [:db/add 1 :parent 2]
+                                [:db/add 2 :parent 3]])
+        db (store/db conn)]
+    (is (= {:db/id 1 :parent {:db/id 2}}
+           (store/pull db [{:parent 1}] 1))
+        "limit 1 stops at :db/id on the first descent")))
+
+(deftest store-pull-unlimited-recursion-cycle
+  ;; `...` allows unlimited recursion and is cycle-safe: a revisit
+  ;; yields only :db/id instead of looping forever.
+  (let [conn (store/open nil {:schema {:friend {:type :ref}}})
+        _ (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 2 :name "Bob"]
+                                [:db/add 1 :friend 2]
+                                [:db/add 2 :friend 1]])
+        db (store/db conn)]
+    (is (= {:db/id 1 :name "Alice"
+            :friend {:db/id 2 :name "Bob"
+                     :friend {:db/id 1}}}
+           (store/pull db [{:friend ...}] 1))
+        "cycle terminates with :db/id on revisit")))
+
+(deftest store-pull-as-rename
+  ;; [:attr :as name] renames the attribute in the output map.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        db (store/db conn)]
+    (is (= {:db/id 1 :fullName "Alice"}
+           (store/pull db [[:name :as :fullName]] 1)))))
+
+(deftest store-pull-limit-many
+  ;; [:attr :limit N] bounds a cardinality-:many attribute to N values.
+  (let [conn (store/open nil {:schema {:tags {:cardinality :many}}})
+        _ (store/transact conn {1 {:tags #{:a :b :c :d}}})
+        db (store/db conn)
+        result (store/pull db [[:tags :limit 2]] 1)]
+    (is (= 2 (count (:tags result))) "at most N values")
+    (is (every? #{:a :b :c :d} (:tags result)) "values come from the source")))
+
+(deftest store-pull-default
+  ;; [:attr :default v] supplies v when the attribute is absent.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        db (store/db conn)]
+    (is (= {:db/id 1 :name "Alice" :age 21}
+           (store/pull db [:name [:age :default 21]] 1))
+        "missing attr appears with its default")))
+
+(deftest store-pull-many
+  ;; pull-many maps pull across a seq of eids, preserving order.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}
+                                3 {:name "Carol"}})
+        db (store/db conn)
+        result (store/pull-many db [:name] [1 2 3])]
+    (is (= 3 (count result)))
+    (is (= #{{:db/id 1 :name "Alice"}
+             {:db/id 2 :name "Bob"}
+             {:db/id 3 :name "Carol"}}
+           (set result)))))
+
+(deftest store-pull-missing-attr-omitted
+  ;; Attributes with no value on the entity are absent from the result
+  ;; (not nil).
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        db (store/db conn)]
+    (is (= {:db/id 1 :name "Alice"}
+           (store/pull db [:name :age :email] 1))
+        "absent attrs :age and :email are omitted")))
+
+(deftest store-pull-nonexistent-entity
+  ;; Pulling an eid that does not exist returns nil.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        db (store/db conn)]
+    (is (nil? (store/pull db [:name] 999)))))
+
+(deftest store-pull-includes-db-id
+  ;; The result map always carries :db/id, including under a wildcard.
+  (let [conn (store/open)
+        _ (store/transact conn {42 {:name "Alice" :age 30}})
+        db (store/db conn)]
+    (is (= 42 (:db/id (store/pull db [*] 42))))))
+
 (run-tests-and-exit)
