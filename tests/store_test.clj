@@ -1419,6 +1419,22 @@
            (store/q db '[:find (avg ?age) :where [?e :age ?age]]))
         "(30 + 25 + 35) / 3 = 30")))
 
+(deftest store-q-aggregate-avg-empty
+  ;; (avg ?v) over an empty result set returns nil, mirroring the
+  ;; nil-for-empty rule established for min/max in
+  ;; store-q-aggregate-min-max-empty. avg is sum/count and Datomic
+  ;; returns nil for a scalar aggregate over zero bindings; the
+  ;; previous 0 was indistinguishable from a real "average happens to
+  ;; be zero" and was the wrong type for a query that matched nothing.
+  ;; The populated db ensures the empty set comes from the where-clause
+  ;; matching no entity, not from an empty store.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}})
+        db (store/db conn)]
+    (is (nil? (store/q db '[:find (avg ?age) . :where [?e :no-such-attr ?age])))
+    (is (= #{[nil]}
+           (store/q db '[:find (avg ?age) :where [?e :no-such-attr ?age])))))
+
 (deftest store-q-aggregate-distinct
   ;; (distinct ?v) returns the set of distinct values as one tuple.
   (let [conn (store/open)
