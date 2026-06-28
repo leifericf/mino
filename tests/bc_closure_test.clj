@@ -144,12 +144,17 @@
   ;; recur / self-tail-call, not gated on a source-level "has
   ;; closures?" probe, or these regress silently.
   (testing "future inside loop+recur captures per-iteration i"
-    (let [p (promise)]
+    (let [p (promise)
+          f (atom nil)]
       (loop [i 0]
         (when (< i 1)
-          (future (deliver p (* i i)))
+          (reset! f (future (deliver p (* i i))))
           (recur (inc i))))
-      (is (= 0 @p))))
+      (is (= 0 @p))
+      ;; deref the worker so it has fully returned before the next test
+      ;; runs (avoids leaking a PENDING future into the save-image
+      ;; quiesce check).
+      @f))
   (testing "N futures x N promises via dotimes deliver to distinct slots"
     ;; The closure-capture invariant doesn't depend on N; any N >= 2
     ;; that fires distinct futures with distinct captured i exercises
@@ -157,11 +162,15 @@
     ;; grant so 3-4 CPU CI runners don't hit MTH001 before the test
     ;; can verify the invariant. Clamp [2, 10].
     (let [n  (max 2 (min 10 (- (mino-thread-limit) 1)))
-          ps (vec (repeatedly n promise))]
+          ps (vec (repeatedly n promise))
+          fs (atom [])]
       (dotimes [i n]
-        (future (deliver (nth ps i) (* i i))))
+        (swap! fs conj (future (deliver (nth ps i) (* i i)))))
       (is (= (mapv (fn [i] (* i i)) (range n))
-             (mapv deref ps)))))
+             (mapv deref ps)))
+      ;; wait for every worker to fully return so no PENDING future
+      ;; leaks into a later save-image quiesce check.
+      (doseq [f @fs] @f)))
   (testing "delay inside self-tail-call captures per-iteration param"
     (let [cls (atom [])]
       (defn G-delay [i]

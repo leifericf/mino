@@ -37,11 +37,15 @@
   ;; Fix: thread-sleep now wraps the nanosleep in
   ;; mino_yield_lock/mino_resume_lock so workers can make progress.
   (testing "realized? observes cross-thread delivery after thread-sleep"
-    (let [p (promise)]
-      (future (deliver p 42))
+    (let [p (promise)
+          f (future (deliver p 42))]
       (thread-sleep 200)
       (is (realized? p))
-      (is (= 42 @p)))))
+      (is (= 42 @p))
+      ;; deref the worker so it has fully returned before the next test
+      ;; runs (avoids leaking a PENDING future into the save-image
+      ;; quiesce check).
+      @f)))
 
 (deftest async-parking-ops-are-referable
   ;; Regression: clojure.core.async previously did not expose `>!` or
@@ -68,9 +72,12 @@
     (let [p (promise)]
       (is (= :timeout (deref p 50 :timeout)))))
   (testing "3-arg deref returns the value if delivered in time"
-    (let [p (promise)]
-      (future (thread-sleep 30) (deliver p :ok))
-      (is (= :ok (deref p 500 :timeout)))))
+    (let [p (promise)
+          f (future (thread-sleep 30) (deliver p :ok))]
+      (is (= :ok (deref p 500 :timeout)))
+      ;; deref the worker so it has fully returned (avoids leaking a
+      ;; PENDING future into the save-image quiesce check).
+      @f))
   (testing "3-arg deref poll (ms=0) on already-delivered promise"
     (let [p (promise)]
       (deliver p :delivered)
@@ -80,7 +87,11 @@
       (is (= 42 (deref f 500 :timeout)))))
   (testing "3-arg deref times out on a slow future"
     (let [f (future (thread-sleep 200) 99)]
-      (is (= :timeout (deref f 10 :timeout))))))
+      (is (= :timeout (deref f 10 :timeout)))
+      ;; Cleanup: wait for the slow future to resolve so it doesn't
+      ;; leak a pending worker into subsequent tests (notably the
+      ;; save-image quiesce check).
+      (is (= 99 (deref f 500 :timeout))))))
 
 (deftest async-concurrent-fn-yield-preserves-args
   ;; Regression: two workers calling the same fn that yields state_lock
