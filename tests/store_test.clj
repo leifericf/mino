@@ -1239,7 +1239,7 @@
   (let [conn (store/open)
         _ (store/transact conn {1 {:name "Alice" :age 30}})
         db (store/db conn)]
-    (is (= {:db/id 1 :name "Alice" :age 30} (store/pull db [*] 1)))))
+    (is (= {:db/id 1 :name "Alice" :age 30} (store/pull db '[*] 1)))))
 
 (deftest store-pull-map-spec-ref
   ;; A map-spec {attr sub-pattern} recurses into a :ref attribute. The
@@ -1252,7 +1252,7 @@
         _ (store/transact conn [[:db/add 1 :child 2]
                                 [:db/add 1 :child 3]])
         db (store/db conn)
-        result (store/pull db [{[:child :as :kids] [:name]}] 1)]
+        result (store/pull db [:name {[:child :as :kids] [:name]}] 1)]
     (is (= {:db/id 1 :name "Parent"} (dissoc result :kids)))
     (is (= #{{:db/id 2 :name "Alice"} {:db/id 3 :name "Bob"}}
            (set (:kids result))))))
@@ -1283,7 +1283,7 @@
     (is (= {:db/id 1 :name "Alice"
             :friend {:db/id 2 :name "Bob"
                      :friend {:db/id 1}}}
-           (store/pull db [{:friend ...}] 1))
+           (store/pull db '[:name {:friend ...}] 1))
         "cycle terminates with :db/id on revisit")))
 
 (deftest store-pull-as-rename

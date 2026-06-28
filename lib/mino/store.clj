@@ -39,6 +39,8 @@
 ;; maps without calling the db-value merge.
 (def ^:private map-merge merge)
 
+(require '[clojure.set :as set])
+
 ;; ---------------------------------------------------------------------------
 ;; Data shape helpers
 ;; ---------------------------------------------------------------------------
@@ -80,7 +82,8 @@
               :double  (float? v)
               :boolean (boolean? v)
               :instant (and (integer? v)
-                            (<= long-min v long-max))
+                             (<= long-min v long-max))
+              :ref     true
               :any     true
               ;; Unknown type keyword: surface as a schema error instead
               ;; of silently passing every value.
@@ -176,6 +179,198 @@
       :else db)))
 
 ;; ---------------------------------------------------------------------------
+;; Schema validation for open-time errors
+;; ---------------------------------------------------------------------------
+
+(defn- validate-schema
+  "Validates a schema map at open time. Currently checks that :unique
+  :identity is only declared on :cardinality :one attributes."
+  [schema]
+  (doseq [[attr spec] schema]
+    (when (and (= :identity (:unique spec))
+               (= :many (:cardinality spec)))
+      (throw
+        (ex-info (str "Attribute " attr " cannot be :unique :identity"
+                      " with :cardinality :many")
+                 {:attribute attr :spec spec}))))
+  schema)
+
+(defn- unique-attrs
+  "Returns the set of attribute keywords declared :unique :identity."
+  [schema]
+  (set (for [[a spec] schema
+             :when (= :identity (:unique spec))]
+         a)))
+
+(defn- ref-attrs
+  "Returns the set of attribute keywords declared :type :ref."
+  [schema]
+  (set (for [[a spec] schema
+             :when (= :ref (:type spec))]
+         a)))
+
+;; ---------------------------------------------------------------------------
+;; Lookup-ref and upsert resolution
+;; ---------------------------------------------------------------------------
+
+(defn- lookup-ref?
+  "Returns true if x is a 2-element vector [keyword value] that could
+  be a lookup-ref."
+  [x]
+  (and (vector? x) (= (count x) 2) (keyword? (first x))))
+
+(defn- resolve-lookup-refs
+  "Resolves lookup-refs in the entity-id position of parsed ops.
+  A lookup-ref [:unique-attr value] is resolved via the unique index."
+  [db ops]
+  (let [schema (:schema db)
+        indexes (:indexes db)
+        u-attrs (unique-attrs schema)]
+    (for [[op e a v] ops]
+      (if (and (lookup-ref? e) (contains? u-attrs (first e)))
+        (let [[ref-attr ref-val] e
+              existing (seq (get-in indexes [ref-attr ref-val]))]
+          (if existing
+            [op (first existing) a v]
+            (throw (ex-info (str "Lookup-ref " e " does not resolve")
+                            {:lookup-ref e}))))
+        [op e a v]))))
+
+(defn- resolve-upserts
+  "Rewrites entity-ids for upsert. When a :db/add carries a unique-attr
+  value that already exists on entity X, ALL ops for the same source
+  eid are rewritten to X. Detects unique conflicts (two different source
+  eids claiming the same unique value in one tx)."
+  [db ops]
+  (let [schema (:schema db)
+        indexes (:indexes db)
+        u-attrs (unique-attrs schema)]
+    (if (empty? u-attrs)
+      ops
+      (loop [remaining ops
+             eid-map {}   ;; {original-eid -> resolved-eid}
+             tx-uniques {}] ;; {[attr val] -> eid}
+        (if-let [[op e a v] (first remaining)]
+          (if (and (= op :db/add) (contains? u-attrs a))
+            (let [pre-existing (seq (get-in indexes [a v]))
+                  tx-existing (get tx-uniques [a v])
+                  mapped-e (get eid-map e e)]
+              (cond
+                (and pre-existing
+                     tx-existing
+                     (not= pre-existing tx-existing))
+                (throw (ex-info (str "Unique conflict on " a ": " v)
+                                {::unique-conflict {:attr a :value v}}))
+
+                (and pre-existing (not= (first pre-existing) mapped-e))
+                (if (and tx-existing (not= tx-existing (first pre-existing)))
+                  (throw (ex-info (str "Unique conflict on " a ": " v)
+                                  {::unique-conflict {:attr a :value v}}))
+                  (recur (rest remaining)
+                         (assoc eid-map e (first pre-existing))
+                         (assoc tx-uniques [a v] (first pre-existing))))
+
+                (and (not pre-existing)
+                     tx-existing
+                     (not= tx-existing mapped-e))
+                (throw (ex-info (str "Unique conflict on " a ": " v)
+                                {::unique-conflict {:attr a :value v}}))
+
+                pre-existing
+                (recur (rest remaining)
+                       (assoc eid-map e (first pre-existing))
+                       (assoc tx-uniques [a v] (first pre-existing)))
+
+                (not tx-existing)
+                (recur (rest remaining)
+                       eid-map
+                       (assoc tx-uniques [a v] mapped-e))
+
+                :else
+                (recur (rest remaining) eid-map tx-uniques)))
+            (recur (rest remaining) eid-map tx-uniques))
+          (for [[op e a v] ops]
+            [op (get eid-map e e) a v]))))))
+
+;; ---------------------------------------------------------------------------
+;; Ref validation and dangling-ref cleanup
+;; ---------------------------------------------------------------------------
+
+(defn- validate-refs
+  "Validates that :db/add facts on :ref attrs target eids that exist
+  in the pre-tx db or are created in this tx. Throws ::dangling-ref."
+  [db ops]
+  (let [schema (:schema db)
+        r-attrs (ref-attrs schema)
+        existing-eids (set (keys (:entities db)))
+        tx-created-eids (set (for [[op e a v] ops :when (= op :db/add)] e))
+        all-known (set/union existing-eids tx-created-eids)]
+    (doseq [[op e a v] ops
+            :when (and (= op :db/add) (contains? r-attrs a))]
+      (let [vals (if (set? v) v #{v})]
+        (doseq [val vals]
+          (when-not (contains? all-known val)
+            (throw
+              (ex-info (str "Dangling ref: " a " = " val
+                            " does not reference an existing entity")
+                       {::dangling-ref {:attr a :value val :entity e}}))))))))
+
+(defn- cleanup-dangling-refs
+  "After applying facts, removes ref values that point at entities that
+  no longer exist (retracted entities). Returns updated entities."
+  [entities schema]
+  (let [r-attrs (ref-attrs schema)
+        existing (set (keys entities))]
+    (if (empty? r-attrs)
+      entities
+      (into {}
+        (for [[e attrs] entities]
+          (let [cleaned
+                (reduce (fn [m a]
+                          (if (contains? r-attrs a)
+                            (let [v (get m a)]
+                              (cond
+                                (nil? v) m
+                                (set? v)
+                                (let [keep (set/intersection v existing)]
+                                  (if (empty? keep)
+                                    (dissoc m a)
+                                    (assoc m a keep)))
+                                (contains? existing v) m
+                                :else (dissoc m a)))
+                            m))
+                        attrs (keys attrs))]
+            (when (seq cleaned) [e cleaned])))))))
+
+;; ---------------------------------------------------------------------------
+;; Reverse index
+;; ---------------------------------------------------------------------------
+
+(defn- build-reverse-index
+  "Builds the reverse index {ref-attr {target-eid #{source-eid}}} from
+  entities and schema. Called lazily by referring/referred-by."
+  [entities schema]
+  (let [r-attrs (ref-attrs schema)]
+    (if (empty? r-attrs)
+      {}
+      (reduce (fn [idx [e attrs]]
+                (reduce (fn [idx a]
+                          (if (contains? r-attrs a)
+                            (let [v (get attrs a)
+                                  vals (cond (set? v) v
+                                             (nil? v) nil
+                                             :else #{v})]
+                              (if vals
+                                (reduce (fn [idx val]
+                                          (let [cur (get-in idx [a val] #{})]
+                                            (assoc-in idx [a val] (conj cur e))))
+                                        idx vals)
+                                idx))
+                              idx))
+                        idx (keys attrs)))
+              {} entities))))
+
+;; ---------------------------------------------------------------------------
 ;; Lifecycle
 ;; ---------------------------------------------------------------------------
 
@@ -192,10 +387,12 @@
   ([] (store-open* (empty-db) nil))
   ([path] (open path nil))
   ([path opts]
-   (let [snap-db (when path (store-read-snapshot* path))
+   (let [schema (validate-schema (:schema opts))
+         snap-db (when path (store-read-snapshot* path))
          base (or snap-db
-                    (-> (empty-db (:schema opts) (:closed opts))
-                        (assoc :indexed-attrs (or (:indexes opts) #{}))
+                    (-> (empty-db schema (:closed opts))
+                        (assoc :indexed-attrs (set/union (or (:indexes opts) #{})
+                                                          (unique-attrs schema)))
                         (assoc :history (:history opts))))
           entries (when path (store-read-wal* path))
           db (if (seq entries)
@@ -306,11 +503,13 @@
          spec    (get schema a)
          many?   (= :many (:cardinality spec))]
      (case op
-       :db/add
-       (if many?
-         (let [cur (get entity a)]
-           (assoc entities e (assoc entity a (conj (or cur #{}) v))))
-         (assoc entities e (assoc entity a v)))
+      :db/add
+        (if many?
+          (let [cur (get entity a)]
+            (assoc entities e (assoc entity a (if (set? v)
+                                                 (set/union (or cur #{}) v)
+                                                 (conj (or cur #{}) v)))))
+          (assoc entities e (assoc entity a v)))
 
        :db/retract
        (if (nil? v)
@@ -341,12 +540,16 @@
         closed?       (get db :closed? false)
         indexed-attrs (get db :indexed-attrs #{})
         history       (get db :history)
-        ops           (parse-tx-data tx-data)
+        ops           (->> (parse-tx-data tx-data)
+                           (resolve-lookup-refs db)
+                           (resolve-upserts db))
+        _             (validate-refs db ops)
         facts         (vec (for [[op e a v] ops]
                              (make-fact e a v tx-num instant op)))]
     (doseq [f facts] (validate-fact schema closed? f))
     (let [entities (reduce (fn [acc f] (apply-fact acc f schema))
                            (:entities db) facts)
+          entities (cleanup-dangling-refs entities schema)
           indexes  (build-indexes entities indexed-attrs)]
       {:entities entities
        :log (into (:log db) facts)
@@ -857,4 +1060,155 @@
                 [{}]
                 where)]
     (set (for [b result-bindings]
-           (vec (for [v find] (get b v)))))))
+            (vec (for [v find] (get b v)))))))
+
+;; ---------------------------------------------------------------------------
+;; Reverse-index reads
+;; ---------------------------------------------------------------------------
+
+(defn referring
+  "Returns the set of source entity-ids whose value for ref-attr
+  equals target-eid."
+  [db-val attr target-eid]
+  (let [reverse (build-reverse-index (:entities db-val) (:schema db-val))]
+    (get-in reverse [attr target-eid] #{})))
+
+(defn referred-by
+  "Returns a map of {ref-attr #{source-eid...}} for all ref attrs
+  pointing at eid."
+  [db-val eid]
+  (let [reverse (build-reverse-index (:entities db-val) (:schema db-val))]
+    (into {}
+      (for [[attr targets] reverse
+            :when (contains? targets eid)]
+        [attr (get targets eid)]))))
+
+;; ---------------------------------------------------------------------------
+;; Pull
+;; ---------------------------------------------------------------------------
+
+(defn- find-opt
+  "Returns the value following key in a flat seq, or nil."
+  [opts k]
+  (loop [opts (seq opts)]
+    (when (seq opts)
+      (if (= (first opts) k)
+        (when (seq (rest opts)) (second opts))
+        (recur (rest opts))))))
+
+(declare pull-entity)
+
+(defn- pull-with-depth
+  "Pulls entity e with all attrs, limiting ref recursion to depth levels."
+  [db e depth visited]
+  (let [attrs (get-in (:entities db) [e])]
+    (cond
+      (nil? attrs) nil
+      (contains? visited e) {:db/id e}
+      (<= depth 1) {:db/id e}
+      :else
+      (let [visited' (conj visited e)
+            depth' (dec depth)]
+        (loop [result {:db/id e}
+               kvs (seq attrs)]
+          (if (empty? kvs)
+            result
+            (let [[k v] (first kvs)]
+              (if (= k :db/id)
+                (recur result (rest kvs))
+                (if (= :ref (get-in (:schema db) [k :type]))
+                  (let [vals (if (set? v) v #{v})
+                        pulled (for [target vals]
+                                 (pull-with-depth db target depth' visited'))]
+                    (recur (assoc result k (if (set? v) (set pulled) (first pulled)))
+                           (rest kvs)))
+                  (recur (assoc result k v) (rest kvs)))))))))))
+
+(defn- pull-attr-spec
+  "Processes one attribute spec from a pull pattern.
+  Returns [key val] or [:* attrs-map] for wildcard, or nil."
+  [db spec e visited]
+  (cond
+    (keyword? spec)
+    (let [v (get-in (:entities db) [e spec])]
+      (when (some? v) [spec v]))
+
+    (= spec '*)
+    [:* (dissoc (get-in (:entities db) [e]) :db/id)]
+
+    (vector? spec)
+    (let [attr (first spec)
+          opts (rest spec)
+          rename (or (find-opt opts :as) attr)
+          default-val (find-opt opts :default)
+          limit-val (find-opt opts :limit)
+          v (get-in (:entities db) [e attr])]
+      (cond
+        (and (nil? v) (some? default-val)) [rename default-val]
+        (nil? v) nil
+        (and (some? limit-val) (set? v)) [rename (set (take limit-val v))]
+        :else [rename v]))
+
+    (map? spec)
+    (let [[key-expr value-expr] (first spec)
+          real-attr (if (keyword? key-expr) key-expr (first key-expr))
+          rename (if (keyword? key-expr)
+                   key-expr
+                   (or (find-opt (rest key-expr) :as) (first key-expr)))
+          v (get-in (:entities db) [e real-attr])]
+      (if (nil? v)
+        nil
+        (let [vals (if (set? v) v #{v})
+              is-many (set? v)
+              visited' (conj visited e)
+              pulled (for [target vals]
+                       (cond
+                         (contains? visited target) {:db/id target}
+                         (number? value-expr)
+                         (pull-with-depth db target value-expr visited')
+                         (= value-expr '...)
+                         (pull-with-depth db target 1000000 visited')
+                         (vector? value-expr)
+                         (pull-entity db value-expr target visited')
+                         :else {:db/id target}))]
+          [rename (if is-many (set pulled) (first pulled))])))
+
+    :else nil))
+
+(defn- pull-entity
+  [db pattern e visited]
+  (let [attrs (get-in (:entities db) [e])]
+    (when attrs
+      (loop [specs (seq pattern)
+             result {:db/id e}]
+        (if (empty? specs)
+          result
+          (let [kv (pull-attr-spec db (first specs) e visited)]
+            (cond
+              (nil? kv) (recur (rest specs) result)
+              (= (first kv) :*) (recur (rest specs) (map-merge result (second kv)))
+              :else (recur (rest specs) (assoc result (first kv) (second kv))))))))))
+
+(defn pull
+  "Pulls a projection of entity e using a pull pattern.
+
+  Pattern is a vector of attribute specs:
+    :attr              return that attr's value
+    *                  return all attrs
+    [:attr :as name]   rename in output
+    [:attr :limit N]   limit cardinality-:many to N values
+    [:attr :default v] default for missing attr
+    {attr sub-pattern} recurse into ref attr
+    {attr N}           recurse with depth limit N
+    {attr ...}         recurse with unlimited depth
+
+  Result includes :db/id. Missing attrs are omitted.
+  Returns nil for nonexistent entities."
+  [db-val pattern e]
+  (pull-entity db-val pattern e #{}))
+
+(defn pull-many
+  "Pulls the same pattern across a seq of eids, preserving order."
+  [db-val pattern eids]
+  (for [eid eids]
+    (pull-entity db-val pattern eid #{})))
