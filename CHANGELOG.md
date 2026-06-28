@@ -169,6 +169,9 @@
 - Fix: Propagate store watch exceptions from store-commit*
 - Fix: Stop image string parser at a dangling trailing backslash
 - Fix: Return nil for store min/max aggregates over empty results
+- Fix: Return nil for store avg aggregate over empty results
+- Fix: Surface image save write errors on flush and close
+- Fix: Guard img_patch_one tag against OOM NULL deref
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
 - Docs: Correct tag_kw and var_promote comments, add *clojure-version* docstring
