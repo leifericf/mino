@@ -135,6 +135,25 @@
     :any     true
     true))
 
+(defn- coerce-fn
+  "Normalizes a :coerce spec value into a callable function. Accepts
+  either a function value (passed directly) or a symbol (resolved in
+  the calling namespace, mirroring how migrate's docstring names the
+  value as a 'coerce-fn-sym'). Symbols are not callable in mino; an
+  unresolved symbol throws ::invalid-coerce so the failure surfaces
+  at migration time rather than silently producing nil."
+  [cf]
+  (cond
+    (fn? cf) cf
+    (symbol? cf)
+    (let [v (resolve cf)]
+      (when-not (and v (fn? @v))
+        (throw (ex-info (str "migrate :coerce symbol not resolvable to a function: " cf)
+                        {::invalid-coerce cf})))
+      @v)
+    :else (throw (ex-info (str "migrate :coerce spec must be a function or symbol: " cf)
+                          {::invalid-coerce cf}))))
+
 (defn- validate-preds
   "Validates attribute predicates on a fact. Each pred symbol is
   resolved and called with the value. For :many cardinality with a
@@ -1086,16 +1105,16 @@
          coerce (:coerce opts)
          indexed-attrs (set/union (get cur :indexed-attrs #{})
                                    (or (:indexes opts) #{}))
-         entities (if coerce
-                    (reduce (fn [ents [e attrs]]
-                              (assoc ents e
-                                (reduce (fn [m [a v]]
-                                          (if-let [cf-sym (get coerce a)]
-                                            (assoc m a (cf-sym v))
-                                            (assoc m a v)))
-                                        {} attrs)))
-                            (:entities cur) (:entities cur))
-                    (:entities cur))
+          entities (if coerce
+                     (reduce (fn [ents [e attrs]]
+                               (assoc ents e
+                                 (reduce (fn [m [a v]]
+                                           (if-let [cf (get coerce a)]
+                                             (assoc m a ((coerce-fn cf) v))
+                                             (assoc m a v)))
+                                         {} attrs)))
+                             (:entities cur) (:entities cur))
+                     (:entities cur))
          violations (vec
                       (for [[e attrs] entities
                             [a v] attrs
