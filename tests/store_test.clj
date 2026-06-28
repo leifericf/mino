@@ -1060,6 +1060,17 @@
                                :where [?e :name ?n]]))
         "unbound var in :find throws")))
 
+(deftest store-q-order-by-unbound-var-throws
+  ;; :order-by must reference a var bound by some :where clause. An
+  ;; :order-by var that no clause binds is a query-author error --
+  ;; previously it silently sorted by nil, masking the typo.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (thrown? (store/q db '[:find ?n :order-by ?missing :where
+                              [?e :name ?n]]))
+        ":order-by var not bound by any clause throws")))
+
 (deftest store-q-malformed-pattern-throws
   ;; Pattern clauses must be 3-element vectors [e a v]. Wrong arities and
   ;; non-vector clauses must throw, not silently produce empty results.

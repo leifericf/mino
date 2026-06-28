@@ -1284,8 +1284,9 @@
 
 (defn- validate-query
   "Validates a parsed query. Throws ex-info tagged ::invalid-query for
-  malformed clauses or unbound find vars."
-  [find where]
+  malformed clauses, unbound find vars, or an :order-by var that is
+  not projected by :find."
+  [find where order-by]
   (let [bound-vars (reduce
                      (fn [acc clause]
                        (cond
@@ -1319,7 +1320,13 @@
     (when (seq unbound)
       (throw
         (ex-info (str "Query var(s) not bound by any clause: " (vec unbound))
-                 {::invalid-query {:find find :unbound (vec unbound)}})))))
+                 {::invalid-query {:find find :unbound (vec unbound)}})))
+    (when (and order-by (variable? (:var order-by)))
+      (let [ob-var (:var order-by)]
+        (when-not (contains? bound-vars ob-var)
+          (throw
+            (ex-info (str "Query :order-by var not bound by any clause: " ob-var)
+                     {::invalid-query {:order-by ob-var}})))))))
 
 (defn- process-not
   "Filters bindings: removes any binding where the negated pattern matches."
@@ -1501,7 +1508,7 @@
    (let [{:keys [find with in order-by where]} (parse-query query)
          spec-info (detect-find-spec find)
          spec-vars (:vars spec-info)
-         _ (validate-query find where)
+          _ (validate-query find where order-by)
          in-bindings (if (and in (seq in) (seq in-args))
                        (zipmap in in-args)
                        {})
