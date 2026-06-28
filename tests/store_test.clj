@@ -1391,6 +1391,23 @@
     (is (= #{[35]}
            (store/q db '[:find (max ?age) :where [?e :age ?age]])))))
 
+(deftest store-q-aggregate-min-max-empty
+  ;; (min ?v) / (max ?v) over an empty result set no longer crash on an
+  ;; arity-0 reduce. As scalars they return nil (Datomic nil-for-empty);
+  ;; as relations they share the uniform empty-aggregate default-row path
+  ;; every other aggregate uses (count -> [0]), now yielding nil instead
+  ;; of throwing MAR002. The populated db ensures the empty set comes from
+  ;; the where-clause matching no entity, not from an empty store.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}})
+        db (store/db conn)]
+    (is (nil? (store/q db '[:find (min ?age) . :where [?e :no-such-attr ?age]])))
+    (is (nil? (store/q db '[:find (max ?age) . :where [?e :no-such-attr ?age]])))
+    (is (= #{[nil]}
+           (store/q db '[:find (min ?age) :where [?e :no-such-attr ?age]])))
+    (is (= #{[0]}
+           (store/q db '[:find (count ?age) :where [?e :no-such-attr ?age]])))))
+
 (deftest store-q-aggregate-avg
   ;; (avg ?v) returns the arithmetic mean of the bindings.
   (let [conn (store/open)

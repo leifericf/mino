@@ -1377,14 +1377,17 @@
     {:spec :rel :vars (vec find-vars)}))
 
 (defn- apply-aggregate
-  "Applies aggregate fn-sym to a seq of values."
+  "Applies aggregate fn-sym to a seq of values. min/max return nil on
+  an empty seq (Datomic scalar semantics: a scalar aggregate over zero
+  bindings is nil, not a crash); the reducing fn is arity-2, so
+  reducing [] would otherwise call it with zero arguments."
   [fn-sym values]
   (case fn-sym
     count (count values)
     count-distinct (count (distinct values))
     sum (reduce + 0 values)
-    min (reduce (fn [a b] (if (< a b) a b)) values)
-    max (reduce (fn [a b] (if (> a b) a b)) values)
+    min (if (empty? values) nil (reduce (fn [a b] (if (< a b) a b)) values))
+    max (if (empty? values) nil (reduce (fn [a b] (if (> a b) a b)) values))
     avg (if (empty? values) 0 (/ (reduce + 0 values) (count values)))
     distinct (set values)
     sample (set (take 1 (shuffle values)))
