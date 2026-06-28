@@ -1431,9 +1431,9 @@
   (let [conn (store/open)
         _ (store/transact conn {1 {:age 30}})
         db (store/db conn)]
-    (is (nil? (store/q db '[:find (avg ?age) . :where [?e :no-such-attr ?age])))
+    (is (nil? (store/q db '[:find (avg ?age) . :where [?e :no-such-attr ?age]])))
     (is (= #{[nil]}
-           (store/q db '[:find (avg ?age) :where [?e :no-such-attr ?age])))))
+            (store/q db '[:find (avg ?age) :where [?e :no-such-attr ?age]])))))
 
 (deftest store-q-aggregate-distinct
   ;; (distinct ?v) returns the set of distinct values as one tuple.
