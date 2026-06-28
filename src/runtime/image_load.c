@@ -466,6 +466,14 @@ static int img_patch_one(img_reader *r, uint32_t id)
     if (line == NULL) return 1;
     p = line;
     tag = img_parse_token(&p);
+    /* img_parse_token returns NULL only on malloc failure (the line is
+     * non-empty here because the alloc pass tokenised the same line
+     * successfully). Match the alloc caller' guard in mino_load_image_into
+     * rather than dereferencing NULL under strcmp below. */
+    if (tag == NULL) {
+        gc_oom_throw(r->S, "load-image: out of memory");
+        return 0;
+    }
 
     if (strcmp(tag, "L") == 0) {
         uint32_t car_id, cdr_id;
