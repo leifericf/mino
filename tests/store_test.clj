@@ -2500,6 +2500,17 @@
     (is (nil? (get @@#'mino.store/listener-registry conn))
         "registry no longer holds the closed conn")))
 
+(deftest store-migrate-coerce-accepts-symbol
+  ;; migrate's :coerce docstring names the value as a "coerce-fn-sym".
+  ;; A symbol must be resolved and applied, not invoked as a function
+  ;; (symbols are not callable). Verify the documented form works.
+  (let [conn (store/open nil {:schema {:n {:type :long}}})
+        _    (store/put conn 1 :n 1)
+        r    (store/migrate conn {:n {:type :long}}
+                            {:coerce {:n 'inc}})]
+    (is (= {1 {:n 2}} (:entities (:db-after r))))
+    (store/close conn)))
+
 ;; ---------------------------------------------------------------------------
 ;; Disjunction
 ;;
