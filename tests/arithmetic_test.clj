@@ -82,6 +82,20 @@
   (is (thrown? (unsigned-bit-shift-right 1 64)))
   (is (thrown? (unsigned-bit-shift-right 1 -1))))
 
+(deftest bit-shift-right-preserves-sign
+  ;; bit-shift-right is arithmetic (sign-preserving) on negative inputs,
+  ;; matching JVM Clojure. unsigned-bit-shift-right is logical (zero-fill).
+  ;; C99 §6.5.7p5 makes `a >> b` implementation-defined for negative a, so
+  ;; the implementation must compute the sign-extended result explicitly.
+  (is (= -1 (bit-shift-right -1 1)))
+  (is (= -64 (bit-shift-right -128 1)))
+  (is (= -1 (bit-shift-right -64 63)))
+  (is (= 0x0fffffffffffffff
+         (bit-shift-right 0x1ffffffffffffffe 1)))
+  ;; Same input under unsigned-bit-shift-right must NOT sign-extend.
+  (is (= 9223372036854775806 (unsigned-bit-shift-right -4 1)))
+  (is (= 1 (unsigned-bit-shift-right -1 63))))
+
 (deftest trivial-compositions
   (is (= 2 (second [1 2 3])))
   (is (= 1 (ffirst '((1 2) (3 4)))))
