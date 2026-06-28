@@ -215,20 +215,27 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- validate-schema
-  "Validates a schema map at open time. Currently checks that :unique
-  :identity is only declared on :cardinality :one attributes."
+  "Validates a schema map at open time. Checks that :unique is only
+  declared on :cardinality :one attributes."
   [schema]
   (doseq [[attr spec] schema]
-    (when (and (= :identity (:unique spec))
+    (when (and (:unique spec)
                (= :many (:cardinality spec)))
       (throw
-        (ex-info (str "Attribute " attr " cannot be :unique :identity"
+        (ex-info (str "Attribute " attr " cannot be :unique"
                       " with :cardinality :many")
                  {:attribute attr :spec spec}))))
   schema)
 
 (defn- unique-attrs
-  "Returns the set of attribute keywords declared :unique :identity."
+  "Returns the set of attribute keywords with any :unique declaration."
+  [schema]
+  (set (for [[a spec] schema
+             :when (:unique spec)]
+         a)))
+
+(defn- identity-attrs
+  "Returns attrs with :unique :identity (upsert)."
   [schema]
   (set (for [[a spec] schema
              :when (= :identity (:unique spec))]
@@ -269,57 +276,51 @@
         [op e a v]))))
 
 (defn- resolve-upserts
-  "Rewrites entity-ids for upsert. When a :db/add carries a unique-attr
-  value that already exists on entity X, ALL ops for the same source
-  eid are rewritten to X. Detects unique conflicts (two different source
-  eids claiming the same unique value in one tx)."
+  "Rewrites entity-ids for upsert (:unique :identity) and detects
+  conflicts for both :identity and :value unique attrs."
   [db ops]
   (let [schema (:schema db)
         indexes (:indexes db)
-        u-attrs (unique-attrs schema)]
-    (if (empty? u-attrs)
+        id-attrs (identity-attrs schema)]
+    (if (empty? (unique-attrs schema))
       ops
       (loop [remaining ops
-             eid-map {}   ;; {original-eid -> resolved-eid}
-             tx-uniques {}] ;; {[attr val] -> eid}
+             eid-map {}
+             tx-uniques {}]
         (if-let [[op e a v] (first remaining)]
-          (if (and (= op :db/add) (contains? u-attrs a))
-            (let [pre-existing (seq (get-in indexes [a v]))
+          (if (and (= op :db/add) (contains? (unique-attrs schema) a))
+            (let [u-type (get-in schema [a :unique])
+                  pre-existing (seq (get-in indexes [a v]))
                   tx-existing (get tx-uniques [a v])
                   mapped-e (get eid-map e e)]
               (cond
-                (and pre-existing
-                     tx-existing
-                     (not= pre-existing tx-existing))
+                ;; Two tx claims on same unique value, different eids
+                (and tx-existing (not= tx-existing mapped-e))
                 (throw (ex-info (str "Unique conflict on " a ": " v)
                                 {::unique-conflict {:attr a :value v}}))
 
-                (and pre-existing (not= (first pre-existing) mapped-e))
-                (if (and tx-existing (not= tx-existing (first pre-existing)))
-                  (throw (ex-info (str "Unique conflict on " a ": " v)
-                                  {::unique-conflict {:attr a :value v}}))
-                  (recur (rest remaining)
-                         (assoc eid-map e (first pre-existing))
-                         (assoc tx-uniques [a v] (first pre-existing))))
-
-                (and (not pre-existing)
-                     tx-existing
-                     (not= tx-existing mapped-e))
+                ;; Pre-existing + :value + different eid = conflict (no upsert)
+                (and pre-existing (= u-type :value)
+                     (not= (first pre-existing) mapped-e))
                 (throw (ex-info (str "Unique conflict on " a ": " v)
                                 {::unique-conflict {:attr a :value v}}))
 
-                pre-existing
+                ;; Pre-existing + :identity + different eid = upsert
+                (and pre-existing (= u-type :identity)
+                     (not= (first pre-existing) mapped-e))
                 (recur (rest remaining)
                        (assoc eid-map e (first pre-existing))
                        (assoc tx-uniques [a v] (first pre-existing)))
 
-                (not tx-existing)
-                (recur (rest remaining)
-                       eid-map
-                       (assoc tx-uniques [a v] mapped-e))
+                ;; Pre-existing, same eid = OK
+                pre-existing
+                (recur (rest remaining) eid-map
+                       (assoc tx-uniques [a v] (first pre-existing)))
 
+                ;; First time seeing this value
                 :else
-                (recur (rest remaining) eid-map tx-uniques)))
+                (recur (rest remaining) eid-map
+                       (assoc tx-uniques [a v] mapped-e))))
             (recur (rest remaining) eid-map tx-uniques))
           (for [[op e a v] ops]
             [op (get eid-map e e) a v]))))))
@@ -477,8 +478,8 @@
                  (reduce (fn [d entry]
                            (if (< (:tx entry) snapshot-tx)
                              d
-                             (apply-tx d (:tx entry) (:instant entry)
-                                       (:tx-data entry))))
+                             (dissoc (apply-tx d (:tx entry) (:instant entry)
+                                       (:tx-data entry)) :tx-data)))
                          base entries))
                base)
           db (maybe-compact-log db)]
@@ -551,6 +552,41 @@
     :else
     (throw (ex-info "Invalid tx-data format" {:tx-data tx-data}))))
 
+(defn- expand-retract-entity
+  "Pre-processes tx-data to expand [:db/retractEntity eid] into
+  individual [:db/retract eid attr] ops. Cascades to :isComponent
+  ref children recursively. Returns a flat seq of tx-data items."
+  [entities schema tx-data]
+  (cond
+    (and (vector? tx-data) (= (count tx-data) 2)
+         (= (first tx-data) :db/retractEntity))
+    (let [eid (second tx-data)
+          attrs (get entities eid)]
+      (if attrs
+        (let [component-attrs (for [[a spec] schema :when (:isComponent spec)] a)
+              retracts (for [a (keys attrs)] [:db/retract eid a])
+              children (for [ca component-attrs
+                             :when (contains? attrs ca)
+                             :let [v (get attrs ca)]
+                             child (if (set? v) v #{v})]
+                         child)
+              cascades (mapcat #(expand-retract-entity entities schema [:db/retractEntity %]) children)]
+          (concat retracts cascades))
+        '()))
+
+    (and (vector? tx-data)
+         (not (= (first tx-data) :db/add))
+         (not (= (first tx-data) :db/retract)))
+    (mapcat #(expand-retract-entity entities schema %) tx-data)
+
+    (seq? tx-data)
+    (mapcat #(expand-retract-entity entities schema %) tx-data)
+
+    (map? tx-data)
+    (list tx-data)
+
+    :else (list tx-data)))
+
 ;; ---------------------------------------------------------------------------
 ;; Transaction application
 ;; ---------------------------------------------------------------------------
@@ -619,8 +655,9 @@
         indexed-attrs (get db :indexed-attrs #{})
         history       (get db :history)
         entity-specs  (get db :entity-specs)
+        expanded      (expand-retract-entity (:entities db) schema tx-data)
         ensures       (extract-ensures tx-data)
-        ops           (->> (parse-tx-data tx-data)
+        ops           (->> (parse-tx-data expanded)
                            (resolve-lookup-refs db)
                            (resolve-upserts db))
         _             (validate-refs db ops)
@@ -637,7 +674,8 @@
           nh-attrs (no-history-attrs schema)
           log-facts (if (empty? nh-attrs)
                       facts
-                      (filter #(not (contains? nh-attrs (:a %))) facts))]
+                      (filter #(not (contains? nh-attrs (:a %))) facts))
+          tx-facts (for [f facts] {:e (:e f) :a (:a f) :v (:v f) :op (:op f)})]
       {:entities entities
        :log (into (:log db) log-facts)
        :tx (inc tx-num)
@@ -646,27 +684,52 @@
        :indexed-attrs indexed-attrs
        :indexes indexes
        :entity-specs entity-specs
-       :history history})))
+       :history history
+       :tx-data tx-facts})))
 
 ;; ---------------------------------------------------------------------------
 ;; Public transaction API
 ;; ---------------------------------------------------------------------------
 
+(def ^:private listener-registry (atom {}))
+
+(defn listen
+  "Registers f to be called with {:db-before :db-after :tx-data} on
+  each transact. key is used for unregistration. Returns nil."
+  [conn key f]
+  (swap! listener-registry assoc-in [conn key] f)
+  nil)
+
+(defn unlisten
+  "Removes the listener registered under key. Returns nil."
+  [conn key]
+  (swap! listener-registry update-in [conn] dissoc key)
+  nil)
+
+(defn- fire-listeners
+  "Calls all registered listeners for conn with the event map."
+  [conn event]
+  (let [listeners (get @listener-registry conn)]
+    (doseq [[_ f] listeners]
+      (f event))))
+
 (defn transact
   "Transacts facts against the store connection. Atomic: all-or-nothing.
-  tx-data accepts any of the parse-tx-data forms. Returns a map of the
-  tx number just applied and the resulting db value under :db-after.
-  On a durable store, the transaction is appended to the WAL before
-  the in-memory publish."
+  tx-data accepts any of the parse-tx-data forms, plus [:db/retractEntity eid].
+  Returns {:tx N :db-after db :tx-data [...]}. On a durable store, the
+  transaction is appended to the WAL before the in-memory publish."
   [conn tx-data]
   (let [cur @conn
         tx-num (:tx cur)
         instant (store-clock* conn)
-        new-db (maybe-compact-log
+        result (maybe-compact-log
                  (apply-tx cur tx-num instant tx-data))
+        tx-facts (:tx-data result)
+        new-db (dissoc result :tx-data)
         tx-info {:tx tx-num :instant instant :tx-data tx-data}]
     (store-commit* conn new-db tx-info)
-    {:tx tx-num :db-after new-db}))
+    (fire-listeners conn {:db-before cur :db-after new-db :tx-data tx-facts})
+    {:tx tx-num :db-after new-db :tx-data tx-facts}))
 
 (defn with
   "Pure variant of transact: applies tx-data to a db value without
@@ -675,8 +738,9 @@
   [db-val tx-data]
   (let [tx-num (:tx db-val)
         instant (store-clock* nil)
-        new-db (apply-tx db-val tx-num instant tx-data)]
-    {:tx tx-num :db-after new-db}))
+        result (apply-tx db-val tx-num instant tx-data)
+        new-db (dissoc result :tx-data)]
+    {:tx tx-num :db-after new-db :tx-data (:tx-data result)}))
 
 (defn put
   "Asserts a single fact. Equivalent to
@@ -1069,25 +1133,35 @@
               (= (first s) \?)))))
 
 (defn- parse-query
-  "Parses a Datalog query vector into {:find [...] :with [...] :where [...]}.
+  "Parses a Datalog query vector into {:find :with :in :order-by :where}.
   Throws ex-info tagged ::invalid-query when the input is not a vector
   beginning with :find."
   [query]
   (when-not (and (vector? query) (= (first query) :find))
     (throw (ex-info "Invalid query: expected a vector starting with :find"
                     {::invalid-query query})))
-  (loop [q query find-vars [] with-vars [] clauses [] mode nil]
+  (loop [q query find-vars [] with-vars [] in-vars [] order-by nil clauses [] mode nil]
     (if (empty? q)
-      {:find find-vars :with with-vars :where clauses}
+      {:find find-vars :with with-vars :in in-vars
+       :order-by order-by :where clauses}
       (let [el (first q)]
         (cond
-          (= el :find) (recur (rest q) find-vars with-vars clauses :find)
-          (= el :with) (recur (rest q) find-vars with-vars clauses :with)
-          (= el :where) (recur (rest q) find-vars with-vars clauses :where)
-          (= mode :find) (recur (rest q) (conj find-vars el) with-vars clauses :find)
-          (= mode :with) (recur (rest q) find-vars (conj with-vars el) clauses :with)
-          (= mode :where) (recur (rest q) find-vars with-vars (conj clauses el) :where)
-          :else (recur (rest q) find-vars with-vars clauses mode))))))
+          (= el :find)     (recur (rest q) find-vars with-vars in-vars order-by clauses :find)
+          (= el :with)     (recur (rest q) find-vars with-vars in-vars order-by clauses :with)
+          (= el :in)       (recur (rest q) find-vars with-vars in-vars order-by clauses :in)
+          (= el :where)    (recur (rest q) find-vars with-vars in-vars order-by clauses :where)
+          (= el :order-by) (recur (rest q) find-vars with-vars in-vars order-by clauses :order-by)
+          (= mode :find)     (recur (rest q) (conj find-vars el) with-vars in-vars order-by clauses :find)
+          (= mode :with)     (recur (rest q) find-vars (conj with-vars el) in-vars order-by clauses :with)
+          (= mode :in)       (recur (rest q) find-vars with-vars (conj in-vars el) order-by clauses :in)
+          (= mode :order-by) (if (variable? el)
+                               (recur (rest q) find-vars with-vars in-vars {:var el :asc true} clauses :order-by-done)
+                               (recur (rest q) find-vars with-vars in-vars (assoc order-by :asc (not= el :desc)) clauses :order-by-done))
+          (= mode :order-by-done) (if (= el :desc)
+                                    (recur (rest q) find-vars with-vars in-vars (assoc order-by :asc false) clauses :order-by-done)
+                                    (recur (rest q) find-vars with-vars in-vars order-by (conj clauses el) :where))
+          (= mode :where)    (recur (rest q) find-vars with-vars in-vars order-by (conj clauses el) :where)
+          :else              (recur (rest q) find-vars with-vars in-vars order-by clauses mode))))))
 
 (defn- pattern-binding-for
   "Creates a binding map from a pattern match, given the pattern's
@@ -1156,6 +1230,21 @@
        (= (count clause) 1)
        (seq? (first clause))))
 
+(defn- not-clause?
+  "Returns true if clause is a (not [pattern]) form."
+  [clause]
+  (and (seq? clause) (= (first clause) 'not)))
+
+(defn- not-join-clause?
+  "Returns true if clause is a (not-join [?e ...] [pattern...]) form."
+  [clause]
+  (and (seq? clause) (= (first clause) 'not-join)))
+
+(defn- or-clause?
+  "Returns true if clause is an (or clause...) form."
+  [clause]
+  (and (seq? clause) (= (first clause) 'or)))
+
 (defn- pattern-vars
   "Returns the set of variable symbols appearing in a pattern clause's
   e and v slots (a is the attribute and assumed constant)."
@@ -1166,12 +1255,7 @@
 
 (defn- validate-query
   "Validates a parsed query. Throws ex-info tagged ::invalid-query for
-  two author-error classes:
-    - a where clause that is neither a 3-element pattern vector nor a
-      1-element predicate vector
-    - a find var that no clause binds (silent nil column otherwise)
-  Aggregate expressions like (count ?e) are unwrapped: the inner
-  variable is checked, not the expression itself."
+  malformed clauses or unbound find vars."
   [find where]
   (let [bound-vars (reduce
                      (fn [acc clause]
@@ -1180,9 +1264,20 @@
                          (into acc (filter variable? (first clause)))
                          (and (vector? clause) (= (count clause) 3))
                          (into acc (pattern-vars clause))
+                         (or-clause? clause)
+                         (reduce (fn [a c]
+                                   (cond
+                                     (and (vector? c) (= (count c) 3))
+                                     (into a (pattern-vars c))
+                                     (predicate-clause? c)
+                                     (into a (filter variable? (first c)))
+                                     :else a))
+                                 acc (rest clause))
+                         (not-clause? clause) acc
+                         (not-join-clause? clause) acc
                          :else
                          (throw
-                           (ex-info "Invalid Datalog clause: must be [e a v] pattern or [(pred ...)] predicate"
+                           (ex-info "Invalid Datalog clause: must be [e a v] pattern, [(pred ...)] predicate, (not ...), (not-join ...), or (or ...)"
                                     {::invalid-query clause}))))
                      #{} where)
         find-vars-for-check (flatten
@@ -1196,6 +1291,48 @@
       (throw
         (ex-info (str "Query var(s) not bound by any clause: " (vec unbound))
                  {::invalid-query {:find find :unbound (vec unbound)}})))))
+
+(defn- process-not
+  "Filters bindings: removes any binding where the negated pattern matches."
+  [db bindings clause]
+  (let [pattern (second clause)]
+    (filter (fn [b]
+              (let [resolved (subst-vars pattern b)
+                    matches (find-pattern-bindings db resolved)]
+                (empty? matches)))
+            bindings)))
+
+(defn- process-not-join
+  "Filters bindings using explicit join variables."
+  [db bindings clause]
+  (let [patterns (drop 2 clause)]
+    (filter (fn [b]
+              (let [resolved (map #(subst-vars % b) patterns)
+                    matches (reduce (fn [ms p]
+                                      (join-bindings ms (find-pattern-bindings db p)))
+                                    [{}] resolved)]
+                (empty? matches)))
+            bindings)))
+
+(defn- process-or
+  "Unions bindings from alternative branches."
+  [db bindings clause]
+  (let [alternatives (rest clause)]
+    (reduce (fn [acc alt]
+              (if (vector? alt)
+                (let [matches (find-pattern-bindings db alt)
+                      joined (join-bindings bindings matches)]
+                  (concat acc joined))
+                (let [and-clauses (rest alt)
+                      joined (reduce (fn [bs c]
+                                       (if (predicate-clause? c)
+                                         (filter-by-predicate bs c)
+                                         (join-bindings bs (find-pattern-bindings db c))))
+                                     bindings
+                                     and-clauses)]
+                  (concat acc joined))))
+            []
+            alternatives)))
 
 (defn- filter-by-predicate
   "Filters bindings by evaluating a predicate clause. The predicate
@@ -1287,34 +1424,54 @@
             [])
           results)))))
 
+(defn- var-index
+  "Returns the index of sym in coll, or nil."
+  [coll sym]
+  (loop [c (seq coll) i 0]
+    (cond
+      (not (seq c)) nil
+      (= (first c) sym) i
+      :else (recur (rest c) (inc i)))))
+
 (defn qseq
   "Executes a Datalog query and returns a lazy seq of results.
-  Same query language as q. See q for full documentation."
-  [db-val query]
-  (let [{:keys [find with where]} (parse-query query)
-        spec-info (detect-find-spec find)
-        spec-vars (:vars spec-info)
-        _ (validate-query find where)
-        result-bindings
-        (reduce (fn [bindings clause]
-                  (if (predicate-clause? clause)
-                    (filter-by-predicate bindings clause)
-                    (let [matches (find-pattern-bindings db-val clause)]
-                      (join-bindings bindings matches))))
-                [{}]
-                where)
-        tuples (compute-results result-bindings spec-vars with)]
+  Accepts optional :in bindings as extra arguments. See q for docs."
+  ([db-val query] (qseq db-val query nil))
+  ([db-val query & in-args]
+   (let [{:keys [find with in order-by where]} (parse-query query)
+         spec-info (detect-find-spec find)
+         spec-vars (:vars spec-info)
+         _ (validate-query find where)
+         in-bindings (if (and in (seq in) (seq in-args))
+                       (zipmap in in-args)
+                       {})
+         result-bindings
+         (reduce (fn [bindings clause]
+                   (cond
+                     (not-clause? clause) (process-not db-val bindings clause)
+                     (not-join-clause? clause) (process-not-join db-val bindings clause)
+                     (or-clause? clause) (process-or db-val bindings clause)
+                     (predicate-clause? clause) (filter-by-predicate bindings clause)
+                     :else (let [matches (find-pattern-bindings db-val clause)]
+                             (join-bindings bindings matches))))
+                 [in-bindings]
+                 where)
+         sorted-bindings (if order-by
+                           (let [sorted (sort-by (fn [b] (get b (:var order-by))) result-bindings)]
+                             (if (:asc order-by) sorted (reverse sorted)))
+                           result-bindings)
+         tuples (compute-results sorted-bindings spec-vars with)]
     (case (:spec spec-info)
       :rel tuples
       :coll (map first tuples)
       :scalar (map first tuples)
-      :tuple tuples)))
+      :tuple tuples))))
 
 (defn q
   "Executes a Datalog query against a db value.
 
   Query format:
-    [:find find-spec :where clause ...]
+    [:find find-spec :in ?var ... :order-by ?var :where clause ...]
 
   Find specs:
     ?e ?n            relation (set of tuples)
@@ -1329,17 +1486,26 @@
   Pattern clause: [?e :attr ?v] or [?e :attr literal]
   Predicate clause: [(pred-fn ?x ... literal ...)]
   :with ?var        group-by var omitted from results
+  :in ?var ...      bind external values positionally from extra args
+  :order-by ?var    sort results by var (append :desc for descending)
+  (not [pattern])   negation: filter bindings where pattern matches
+  (not-join [?e] [pattern...])  negation with explicit join vars
+  (or clause ...)   disjunction: union bindings from alternatives
 
-  Returns a set of result tuples (for :rel), or appropriate type
-  for other find specs."
-  [db-val query]
-  (let [spec-info (detect-find-spec (:find (parse-query query)))
-        results (qseq db-val query)]
-    (case (:spec spec-info)
-      :rel (set results)
-      :coll results
-      :scalar (first results)
-      :tuple (first results))))
+  Returns a set of tuples (for :rel without :order-by), or a seq
+  (for :order-by), or other types for other find specs."
+  ([db-val query] (q db-val query nil))
+  ([db-val query & in-args]
+   (let [parsed (parse-query query)
+         spec-info (detect-find-spec (:find parsed))
+         results (apply qseq db-val query in-args)]
+     (cond
+       (and (:order-by parsed) (= (:spec spec-info) :rel)) results
+       (= (:spec spec-info) :rel) (set results)
+       :else (case (:spec spec-info)
+               :coll results
+               :scalar (first results)
+               :tuple (first results))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Reverse-index reads
@@ -1421,11 +1587,15 @@
           rename (or (find-opt opts :as) attr)
           default-val (find-opt opts :default)
           limit-val (find-opt opts :limit)
+          offset-val (find-opt opts :offset)
           v (get-in (:entities db) [e attr])]
       (cond
         (and (nil? v) (some? default-val)) [rename default-val]
         (nil? v) nil
-        (and (some? limit-val) (set? v)) [rename (set (take limit-val v))]
+        (and (or offset-val limit-val) (set? v))
+        (let [s (if offset-val (drop offset-val v) v)
+              s (if limit-val (take limit-val s) s)]
+          (if (empty? s) nil [rename (set s)]))
         :else [rename v]))
 
     (map? spec)
@@ -1491,3 +1661,38 @@
   [db-val pattern eids]
   (for [eid eids]
     (pull-entity db-val pattern eid #{})))
+
+;; ---------------------------------------------------------------------------
+;; Sorted range queries
+;; ---------------------------------------------------------------------------
+
+(defn find-by-range
+  "Returns eids whose attr value falls in [lo, hi] (inclusive), in
+  ascending value order. Works on any attr; schema :sorted-index true
+  documents intent but is not required."
+  [db-val attr lo hi]
+  (->> (:entities db-val)
+       (filter (fn [[e attrs]]
+                 (let [v (get attrs attr)]
+                   (and (some? v) (>= v lo) (<= v hi)))))
+       (sort-by (fn [[e attrs]] (get attrs attr)))
+       (map first)))
+
+;; ---------------------------------------------------------------------------
+;; Raw datom access
+;; ---------------------------------------------------------------------------
+
+(defn datoms
+  "Returns a seq of {:e :a :v} maps in the named index order.
+  Index: :eavt (entity, attr), :avet (attr, value), :aevt (attr, entity)."
+  [db-val index]
+  (let [entries (for [[e attrs] (:entities db-val)
+                      [a v] attrs
+                      :when (not= a :db/id)]
+                  {:e e :a a :v v})]
+    (case index
+      :eavt (sort-by (fn [d] [(:e d) (:a d)]) entries)
+      :avet (sort-by (fn [d] [(:a d) (:v d)]) entries)
+      :aevt (sort-by (fn [d] [(:a d) (:e d)]) entries)
+      (throw (ex-info (str "Unknown index: " index)
+                      {:index index})))))
