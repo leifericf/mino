@@ -7,7 +7,11 @@
  *
  * Durability uses snapshot + WAL (see ADR 11). Snapshot files carry a
  * 1-byte format-version header (0x00 = EDN text). The WAL at
- * <path>.wal is line-delimited EDN, one tx-info map per line.
+ * <path>.wal is line-delimited EDN, one tx-info map per line. Both
+ * snapshot and WAL are restored by evaluating their contents as
+ * Clojure (mino_eval_string_ex), not by a data-only EDN reader, so a
+ * tampered store file is arbitrary code -- acceptable under the
+ * script-author-is-trust-boundary model below, but not data-safe.
  * store-commit* appends to the WAL before publishing when given a
  * tx-info argument. Checkpoint writes the snapshot and deletes the
  * WAL. On open, the snapshot is read, then the WAL is replayed entry
