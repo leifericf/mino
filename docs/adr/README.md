@@ -21,6 +21,7 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [10](10-eavt-fact-store.md) | EAVT fact store, per-state isolated, no cross-runtime shared state |
 | [11](11-store-on-disk-format.md) | Store on-disk format — EDN text with version header, line-delimited WAL |
 | [12](12-save-lisp-and-die.md) | Save-lisp-and-die — value-serialization image with identity table |
+| [13](13-references-and-reverse-indexes.md) | References and reverse indexes — `:ref` type, lazy reverse index, nil-on-retraction |
 | [15](15-vector-embedding-scope.md) | Vector embedding and similarity search are out of scope for mino.store |
 | [16](16-binary-snapshot-format.md) | EDN text is the stable on-disk format for mino.store v1 |
 | [17](17-slad-forward-compatibility.md) | SLAD forward compatibility via skip-and-warn, plus an offline migration tool |
