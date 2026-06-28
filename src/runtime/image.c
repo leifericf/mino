@@ -136,6 +136,7 @@ static void img_ht_insert(img_ht *h, mino_val *key, uint32_t id)
         size_t new_cap  = h->cap * 2;
         img_ht_entry *ne = (img_ht_entry *)calloc(new_cap, sizeof(img_ht_entry));
         size_t j;
+        if (ne == NULL) return;  /* OOM: leave old table; caller bails elsewhere */
         for (j = 0; j < h->cap; j++) {
             if (h->entries[j].key != NULL) {
                 size_t ni = img_hash_ptr(h->entries[j].key) & (new_cap - 1);
@@ -189,11 +190,15 @@ static int img_env_ht_lookup(img_id_table *t, mino_env *env, uint32_t *out_id)
 static void img_env_ht_insert(img_id_table *t, mino_env *env, uint32_t id)
 {
     if (t->env_ht.count >= t->env_ht.cap) {
-        t->env_ht.cap *= 2;
-        t->env_ht.keys = (mino_env **)realloc(t->env_ht.keys,
-                                    t->env_ht.cap * sizeof(mino_env *));
-        t->env_ht.ids  = (uint32_t *)realloc(t->env_ht.ids,
-                                    t->env_ht.cap * sizeof(uint32_t));
+        size_t ncap = t->env_ht.cap * 2;
+        mino_env **nk = (mino_env **)realloc(t->env_ht.keys,
+                                    ncap * sizeof(mino_env *));
+        if (nk != NULL) t->env_ht.keys = nk;
+        uint32_t *ni = (uint32_t *)realloc(t->env_ht.ids,
+                                    ncap * sizeof(uint32_t));
+        if (ni != NULL) t->env_ht.ids = ni;
+        if (nk == NULL || ni == NULL) return;  /* partial grow: cap unchanged */
+        t->env_ht.cap = ncap;
     }
     t->env_ht.keys[t->env_ht.count] = env;
     t->env_ht.ids[t->env_ht.count]  = id;
@@ -234,21 +239,27 @@ static void img_idt_free(img_id_table *t)
     free(t->queue);
 }
 
-static void img_idt_grow(img_id_table *t)
+static int img_idt_grow(img_id_table *t)
 {
     uint32_t old_cap = t->id_cap;
+    uint32_t new_cap = old_cap * 2;
     uint32_t i;
-    t->id_cap *= 2;
-    t->id_vals = (mino_val **)realloc(t->id_vals,
-                                t->id_cap * sizeof(mino_val *));
-    t->id_envs = (mino_env **)realloc(t->id_envs,
-                                t->id_cap * sizeof(mino_env *));
-    t->queue   = (uint32_t *)realloc(t->queue,
-                                t->id_cap * sizeof(uint32_t));
+    mino_val **nv;
+    mino_env **ne;
+    uint32_t  *nq;
+    nv = (mino_val **)realloc(t->id_vals, (size_t)new_cap * sizeof(mino_val *));
+    if (nv != NULL) t->id_vals = nv;
+    ne = (mino_env **)realloc(t->id_envs, (size_t)new_cap * sizeof(mino_env *));
+    if (ne != NULL) t->id_envs = ne;
+    nq = (uint32_t *)realloc(t->queue, (size_t)new_cap * sizeof(uint32_t));
+    if (nq != NULL) t->queue = nq;
+    if (nv == NULL || ne == NULL || nq == NULL) return -1;  /* id_cap unchanged */
+    t->id_cap = new_cap;
     for (i = old_cap; i < t->id_cap; i++) {
         t->id_vals[i] = NULL;
         t->id_envs[i] = NULL;
     }
+    return 0;
 }
 
 /* Assign an ID to a value if not already assigned. Returns the ID.
@@ -259,7 +270,8 @@ static uint32_t img_idt_assign_val(img_id_table *t, mino_val *v)
     if (v == NULL) return 0;  /* NULL maps to ID 0 (nil placeholder) */
     if (img_ht_lookup(&t->val_ht, v, &id)) return id;
     id = t->id_count++;
-    if (t->id_count >= t->id_cap) img_idt_grow(t);
+    if (t->id_count >= t->id_cap)
+        if (img_idt_grow(t) != 0) { t->id_count--; return 0; }
     t->id_vals[id] = v;
     img_ht_insert(&t->val_ht, v, id);
     t->queue[t->q_tail++] = id;
@@ -273,7 +285,8 @@ static uint32_t img_idt_assign_env(img_id_table *t, mino_env *env)
     if (env == NULL) return 0;
     if (img_env_ht_lookup(t, env, &id)) return id;
     id = t->id_count++;
-    if (t->id_count >= t->id_cap) img_idt_grow(t);
+    if (t->id_count >= t->id_cap)
+        if (img_idt_grow(t) != 0) { t->id_count--; return 0; }
     t->id_envs[id] = env;
     img_env_ht_insert(t, env, id);
     t->queue[t->q_tail++] = id;

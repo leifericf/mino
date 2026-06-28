@@ -1070,6 +1070,7 @@ int mino_load_image_into(mino_state *S, const char *path)
     uint32_t i;
     int in_values = 0;
     int rc = 0;
+    root_env_t *pre_root_envs;  /* for reclaiming per-env roots on failure */
 
     f = fopen(path, "rb");
     if (f == NULL) {
@@ -1148,6 +1149,12 @@ int mino_load_image_into(mino_state *S, const char *path)
                        "load-image: out of memory");
         return -1;
     }
+    /* Snapshot the GC root-env list so a failed load can unlink the
+     * per-env root_env_t nodes that img_alloc_one pushes (line ~237).
+     * Without this they leak as malloc'd structs pinning half-loaded
+     * envs; the protective r.root_env is freed in img_reader_free, so
+     * values rooted only there would be dropped while envs stay pinned. */
+    pre_root_envs = S->gc.root_envs;
 
     /* First pass: allocate all values */
     line = buf;
@@ -1267,6 +1274,18 @@ int mino_load_image_into(mino_state *S, const char *path)
     if (img_splice_roots(&r, buf) != 0) { rc = -1; goto cleanup; }
 
 cleanup:
+    if (rc != 0) {
+        /* Reclaim per-env root_env_t nodes pushed during the failed load
+         * (img_alloc_one env case). The GC-owned envs become unrooted and
+         * are collected; only the malloc'd link nodes are freed here. */
+        root_env_t *rn = S->gc.root_envs;
+        while (rn != pre_root_envs) {
+            root_env_t *next = rn->next;
+            free(rn);
+            rn = next;
+        }
+        S->gc.root_envs = pre_root_envs;
+    }
     img_reader_free(&r);
     free(buf);
     return rc;
