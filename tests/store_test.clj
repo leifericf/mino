@@ -985,7 +985,35 @@
         db (store/db conn)]
     (is (thrown? (store/q db {:not :a-query})) "non-vector throws")
     (is (thrown? (store/q db 42)) "scalar throws")
-    (is (thrown? (store/q db [:where [?e :a ?v]])) "missing :find throws")
+    (is (thrown? (store/q db '[:where [?e :a ?v]])) "missing :find throws")
     (is (thrown? (store/q db nil)) "nil throws")))
+
+(deftest store-q-unbound-find-var-throws
+  ;; A var referenced in :find but never bound by any :where clause is a
+  ;; query-author error. It must throw, not silently return a column of
+  ;; nils.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (thrown? (store/q db '[:find ?e ?unbound
+                               :where [?e :name ?n]]))
+        "unbound var in :find throws")))
+
+(deftest store-q-malformed-pattern-throws
+  ;; Pattern clauses must be 3-element vectors [e a v]. Wrong arities and
+  ;; non-vector clauses must throw, not silently produce empty results.
+  (let [conn (store/open)
+        _ (store/transact conn [:db/add 1 :name "Alice"])
+        db (store/db conn)]
+    (is (thrown? (store/q db '[:find ?e :where [?e :name]]))
+        "2-element pattern throws")
+    (is (thrown? (store/q db '[:find ?e :where [?e]]))
+        "1-element pattern throws")
+    (is (thrown? (store/q db '[:find ?e :where [?e :n ?v ?w]]))
+        "4-element pattern throws")
+    (is (thrown? (store/q db '[:find ?e :where :not-a-clause]))
+        "non-vector clause throws")
+    (is (thrown? (store/q db '[:find ?e :where []]))
+        "empty vector clause throws")))
 
 (run-tests-and-exit)
