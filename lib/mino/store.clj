@@ -1228,7 +1228,13 @@
   [clause]
   (and (vector? clause)
        (= (count clause) 1)
-       (seq? (first clause))))
+       (seq? (first clause))
+       ;; The predicate head must be a literal symbol resolvable in the
+       ;; calling namespace -- never a variable. A variable head would
+       ;; let an :in-bound value control the function position of an
+       ;; evaluated form, which is a code-injection vector.
+       (symbol? (first (first clause)))
+       (not (variable? (first (first clause))))))
 
 (defn- not-clause?
   "Returns true if clause is a (not [pattern]) form."
@@ -1335,14 +1341,40 @@
             alternatives)))
 
 (defn- filter-by-predicate
-  "Filters bindings by evaluating a predicate clause. The predicate
-  expression has its variables substituted from each binding, then
-  eval'd. Bindings that yield falsy results are dropped."
+  "Filters bindings by applying a predicate clause to each binding.
+
+  The predicate clause has the shape [(pred-sym arg-spec ...)] where
+  pred-sym is a literal symbol resolvable in the calling namespace
+  and each arg-spec is either a query variable (looked up in the
+  binding) or a literal value. The resolved function is APPLY'd to
+  the arg values.
+
+  This intentionally replaces an earlier (eval substituted-form)
+  implementation. Eval'ing a substituted form let an :in-bound
+  value in any arg slot run as code: passing '(println \"pwned\")
+  as ?v produced the form (identity (println \"pwned\")) and eval
+  ran the inner println. Applying the resolved function to the
+  literal arg values closes that vector -- the value is data, never
+  an expression to evaluate."
   [bindings clause]
-  (filter (fn [b]
-            (let [expr (subst-vars (first clause) b)]
-              (eval expr)))
-          bindings))
+  (let [pred-form (first clause)
+        pred-sym  (first pred-form)
+        arg-specs (rest pred-form)
+        pred-var  (resolve pred-sym)
+        _         (when-not pred-var
+                    (throw
+                      (ex-info (str "Query predicate not resolvable: " pred-sym)
+                               {::invalid-query {:predicate pred-sym}})))
+        pred-fn   @pred-var
+        _         (when-not (fn? pred-fn)
+                    (throw
+                      (ex-info (str "Query predicate not a function: " pred-sym)
+                               {::invalid-query {:predicate pred-sym}})))]
+    (filter (fn [b]
+              (let [args (for [a arg-specs]
+                           (if (variable? a) (get b a) a))]
+                (apply pred-fn args)))
+            bindings)))
 
 ;; ---------------------------------------------------------------------------
 ;; Aggregates and find specs
