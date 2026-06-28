@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 /* --- CRC32 (IEEE 802.3 polynomial 0xEDB88320) -------------------- */
 
@@ -1093,8 +1094,22 @@ int mino_save_image(mino_state *S, const char *path)
     fprintf(f, "CURSOR %s\n",
             S->ns_vars.current_ns ? S->ns_vars.current_ns : "user");
 
-    /* CRC32: compute over everything written so far */
-    fflush(f);
+    /* CRC32: compute over everything written so far. A failed fflush
+     * here means a prior buffered write never reached the kernel --
+     * the CRC would then be computed over a partial buffer and the
+     * trailer would mask the truncation on next load only by luck, so
+     * surface the failure now (matches store_durable_flush's contract
+     * in prim/store.c). */
+    if (fflush(f) != 0) {
+        char diag[128];
+        snprintf(diag, sizeof diag,
+                 "save-image: flush failed before CRC32 (%s)",
+                 strerror(errno));
+        set_eval_diag(S, NULL, "io", "MIO001", diag);
+        fclose(f);
+        img_idt_free(&idt);
+        return -1;
+    }
     fseek(f, 0, SEEK_END);
     file_end = ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -1109,7 +1124,22 @@ int mino_save_image(mino_state *S, const char *path)
     fseek(f, 0, SEEK_END);
     fprintf(f, "CRC32 %08x\n", crc);
 
-    fclose(f);
+    /* fclose is the only stdio call that surfaces a delayed kernel
+     * write error (ENOSPC, EIO, ESTALE on an NFS drop, EDQUOT). The
+     * body writes already happened, so a failure here means the
+     * trailer or the last body chunk never reached stable storage --
+     * report it rather than letting the host believe a corrupt image
+     * was saved. Mirrors the round-1 'Surface store checkpoint errors
+     * on close' fix applied to prim/store.c. */
+    if (fclose(f) != 0) {
+        char diag[128];
+        snprintf(diag, sizeof diag,
+                 "save-image: write failed on close (%s)",
+                 strerror(errno));
+        set_eval_diag(S, NULL, "io", "MIO001", diag);
+        img_idt_free(&idt);
+        return -1;
+    }
     img_idt_free(&idt);
     return 0;
 }
