@@ -1095,6 +1095,19 @@
     (is (= [1 2] (store/find-by-range @conn :score 15 35)))
     (store/close conn)))
 
+(deftest store-as-of-rejects-non-inst-non-integer-point
+  ;; as-of/since dispatch the temporal axis by argument type: inst for
+  ;; wall-clock, integer for tx-number. Anything else is a query-author
+  ;; error -- previously the comparator crashed at (< tx "garbage") with
+  ;; a misleading "MTY001: < expects numbers".
+  (let [conn (store/open)
+        _    (store/put conn 1 :name "Alice")
+        db   @conn]
+    (is (thrown? (store/as-of db "not-a-tx-or-inst")) "as-of rejects string")
+    (is (thrown? (store/as-of db nil)) "as-of rejects nil")
+    (is (thrown? (store/as-of db [:also :bad])) "as-of rejects vector")
+    (is (thrown? (store/since db "not-a-tx-or-inst")) "since rejects string")))
+
 (deftest store-q-malformed-pattern-throws
   ;; Pattern clauses must be 3-element vectors [e a v]. Wrong arities and
   ;; non-vector clauses must throw, not silently produce empty results.

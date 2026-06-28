@@ -873,9 +873,19 @@
   "Normalizes the as-of/since point argument to an epoch-ms long
   when it is an inst; returns other values unchanged. Callers then
   compare against :instant (epoch ms) for the inst branch or :tx
-  for the tx branch."
+  for the tx branch.
+
+  Validates point is either an inst or an integer; anything else
+  throws ::invalid-point so callers see a clear argument error
+  rather than a downstream numeric-comparator crash."
   [point]
-  (if (point-as-instant? point) (inst-ms point) point))
+  (cond
+    (point-as-instant? point) (inst-ms point)
+    (integer? point) point
+    :else (throw
+            (ex-info (str "as-of/since point must be an inst or an integer, got: "
+                          (pr-str point))
+                     {::invalid-point point}))))
 
 (defn as-of
   "Returns the db value as it was at tx N or instant T. Replays the log
