@@ -1071,6 +1071,30 @@
                               [?e :name ?n]]))
         ":order-by var not bound by any clause throws")))
 
+(deftest store-schema-many-type-checks-set-members
+  ;; A :cardinality :many attribute accepts a set value at tx time and
+  ;; checks each member against the declared type. Without per-member
+  ;; iteration the type check rejected the set itself ("expected :keyword").
+  (let [conn (store/open nil {:schema {:tags {:type :keyword :cardinality :many}}})]
+    (is (store/transact conn [:db/add 1 :tags #{:a :b :c}])
+        "set of matching values accepted")
+    (is (= #{:a :b :c} (store/read @conn 1 :tags)))
+    (is (thrown? (store/transact conn [:db/add 2 :tags #{:ok :bad 42}]))
+        "set with one bad member rejected as a whole")
+    (store/close conn)))
+
+(deftest store-find-by-range-many-cardinality
+  ;; find-by-range on a :many attribute (set values) returns entities
+  ;; with at least one in-range member. Previously the (>= v lo) check
+  ;; crashed against a set.
+  (let [conn (store/open nil {:schema {:score {:type :long :cardinality :many}}})
+        _    (store/transact conn [:db/add 1 :score #{10 20 30}])
+        _    (store/transact conn [:db/add 2 :score #{20 30 40}])
+        _    (store/transact conn [:db/add 3 :score #{100 200 300}])]
+    ;; range [15 35] catches entities 1 (20,30) and 2 (20,30), not 3.
+    (is (= [1 2] (store/find-by-range @conn :score 15 35)))
+    (store/close conn)))
+
 (deftest store-q-malformed-pattern-throws
   ;; Pattern clauses must be 3-element vectors [e a v]. Wrong arities and
   ;; non-vector clauses must throw, not silently produce empty results.

@@ -72,30 +72,38 @@
   :instant (treated as :long, 64-bit signed), :any (no check).
   Unknown type-spec values throw -- they are treated as schema
   definition errors so typos surface rather than silently disabling
-  validation."
-  [attr v type-spec]
-  (let [ok? (case type-spec
-              :string  (string? v)
-              :keyword (keyword? v)
-              :long    (and (integer? v)
-                            (<= long-min v long-max))
-              :double  (float? v)
-              :boolean (boolean? v)
-              :instant (and (integer? v)
-                             (<= long-min v long-max))
-              :ref     true
-              :any     true
-              ;; Unknown type keyword: surface as a schema error instead
-              ;; of silently passing every value.
-              (throw
-                (ex-info (str "Unknown schema type spec for attribute " attr
-                              ": " type-spec)
-                         {:attribute attr :type-spec type-spec})))]
-    (when-not ok?
-      (throw
-        (ex-info (str "Type mismatch for attribute " attr
-                      ": expected " type-spec)
-                 {:attribute attr :value v :expected type-spec})))))
+  validation.
+
+  For :cardinality :many attributes the value may be a set of
+  members; each member is checked against type-spec individually,
+  mirroring validate-preds' iteration over set values."
+  ([attr v type-spec] (check-type attr v type-spec nil))
+  ([attr v type-spec cardinality]
+   (let [many?    (= :many cardinality)
+         to-check (if (and many? (set? v)) v [v])]
+     (doseq [val to-check]
+       (let [ok? (case type-spec
+                   :string  (string? val)
+                   :keyword (keyword? val)
+                   :long    (and (integer? val)
+                                 (<= long-min val long-max))
+                   :double  (float? val)
+                   :boolean (boolean? val)
+                   :instant (and (integer? val)
+                                 (<= long-min val long-max))
+                   :ref     true
+                   :any     true
+                   ;; Unknown type keyword: surface as a schema error instead
+                   ;; of silently passing every value.
+                   (throw
+                     (ex-info (str "Unknown schema type spec for attribute " attr
+                                   ": " type-spec)
+                              {:attribute attr :type-spec type-spec})))]
+         (when-not ok?
+           (throw
+             (ex-info (str "Type mismatch for attribute " attr
+                           ": expected " type-spec)
+                      {:attribute attr :value val :expected type-spec}))))))))
 
 (defn- validate-fact
   "Validates a single fact against the schema. Throws ex-info on
@@ -119,7 +127,7 @@
                  {:attribute a :entity e})))
     (when (and spec (:type spec) (not= (:type spec) :any)
                (= op :db/add))
-      (check-type a v (:type spec)))))
+      (check-type a v (:type spec) (:cardinality spec)))))
 
 (defn- type-matches?
   "Non-throwing type check. Returns true if v matches type-spec."
@@ -1736,13 +1744,23 @@
 (defn find-by-range
   "Returns eids whose attr value falls in [lo, hi] (inclusive), in
   ascending value order. Works on any attr; schema :sorted-index true
-  documents intent but is not required."
+  documents intent but is not required.
+
+  For :cardinality :many attributes the value is a set; an entity is
+  returned if ANY member falls in [lo, hi], ordered by the smallest
+  in-range member."
   [db-val attr lo hi]
   (->> (:entities db-val)
-       (filter (fn [[e attrs]]
-                 (let [v (get attrs attr)]
-                   (and (some? v) (>= v lo) (<= v hi)))))
-       (sort-by (fn [[e attrs]] (get attrs attr)))
+       (keep (fn [[e attrs]]
+               (let [v (get attrs attr)]
+                 (cond
+                   (nil? v) nil
+                   (set? v) (let [in-range (filter #(and (>= % lo) (<= % hi)) v)]
+                              (when (seq in-range)
+                                [e (reduce min in-range)]))
+                   (and (>= v lo) (<= v hi)) [e v]
+                   :else nil))))
+       (sort-by second)
        (map first)))
 
 ;; ---------------------------------------------------------------------------
