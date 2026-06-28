@@ -121,6 +121,38 @@
                (= op :db/add))
       (check-type a v (:type spec)))))
 
+(defn- type-matches?
+  "Non-throwing type check. Returns true if v matches type-spec."
+  [v type-spec]
+  (case type-spec
+    :string  (string? v)
+    :keyword (keyword? v)
+    :long    (and (integer? v) (<= long-min v long-max))
+    :double  (float? v)
+    :boolean (boolean? v)
+    :instant (and (integer? v) (<= long-min v long-max))
+    :ref     true
+    :any     true
+    true))
+
+(defn- validate-preds
+  "Validates attribute predicates on a fact. Each pred symbol is
+  resolved and called with the value. For :many cardinality with a
+  set value, each member is checked. Falsy return throws
+  ::attr-pred-failed."
+  [schema {:keys [e a v op]}]
+  (when (= op :db/add)
+    (let [spec (get schema a)
+          preds (or (:preds spec) [])
+          many? (= :many (:cardinality spec))
+          vals (if (and many? (set? v)) v [v])]
+      (doseq [pred preds
+              val vals]
+        (when-not (pred val)
+            (throw
+              (ex-info (str "Attribute predicate failed for " a)
+                       {::attr-pred-failed {:attr a :value val}})))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Index maintenance
 ;; ---------------------------------------------------------------------------
@@ -292,9 +324,53 @@
           (for [[op e a v] ops]
             [op (get eid-map e e) a v]))))))
 
-;; ---------------------------------------------------------------------------
-;; Ref validation and dangling-ref cleanup
-;; ---------------------------------------------------------------------------
+(defn- extract-ensures
+  "Extracts {:db/ensure eid -> spec-name} from tx-data. Returns a map
+  of ensures that were found. For map-form tx-data, :db/ensure is a
+  virtual key; for other forms, returns empty map."
+  [tx-data]
+  (cond
+    (map? tx-data)
+    (into {} (for [[e attrs] tx-data
+                   :when (:db/ensure attrs)]
+               [e (:db/ensure attrs)]))
+    (seq? tx-data)
+    (reduce conj {} (map extract-ensures tx-data))
+    (vector? tx-data)
+    (if (or (= (first tx-data) :db/add)
+            (= (first tx-data) :db/retract))
+      {}
+      (reduce conj {} (map extract-ensures tx-data)))
+    :else {}))
+
+(defn- no-history-attrs
+  "Returns the set of attrs declared :no-history true."
+  [schema]
+  (set (for [[a spec] schema :when (:no-history spec)] a)))
+
+(defn- validate-entity-specs
+  "Validates entity specs on entities that had :db/ensure. Called after
+  all facts are applied. Throws ::entity-spec-failed."
+  [entities entity-specs ensures]
+  (let [db-proxy {:entities entities}]
+    (doseq [[eid spec-name] ensures]
+      (let [spec (get entity-specs spec-name)
+            entity (get entities eid)]
+        (when spec
+          (let [required (:required-attrs spec)
+                missing (filter #(nil? (get entity %)) required)]
+            (when (seq missing)
+              (throw
+                (ex-info (str "Entity spec " spec-name " failed for entity " eid
+                              ": missing required attrs " (vec missing))
+                         {::entity-spec-failed {:eid eid :spec spec-name
+                                                :missing-attrs (vec missing)}}))))
+          (doseq [pred (:preds spec)]
+            (when-not (pred db-proxy eid)
+                (throw
+                  (ex-info (str "Entity spec " spec-name
+                                " predicate failed for entity " eid)
+                           {::entity-spec-failed {:eid eid :spec spec-name}})))))))))
 
 (defn- validate-refs
   "Validates that :db/add facts on :ref attrs target eids that exist
@@ -393,7 +469,8 @@
                     (-> (empty-db schema (:closed opts))
                         (assoc :indexed-attrs (set/union (or (:indexes opts) #{})
                                                           (unique-attrs schema)))
-                        (assoc :history (:history opts))))
+                        (assoc :history (:history opts))
+                        (assoc :entity-specs (:entity-specs opts))))
           entries (when path (store-read-wal* path))
           db (if (seq entries)
                (let [snapshot-tx (:tx base)]
@@ -461,7 +538,8 @@
 
     (map? tx-data)
     (vec (for [[e attrs] tx-data
-               [a v] attrs]
+               [a v] attrs
+               :when (not= a :db/ensure)]
            [:db/add e a v]))
 
     (seq? tx-data)
@@ -540,24 +618,34 @@
         closed?       (get db :closed? false)
         indexed-attrs (get db :indexed-attrs #{})
         history       (get db :history)
+        entity-specs  (get db :entity-specs)
+        ensures       (extract-ensures tx-data)
         ops           (->> (parse-tx-data tx-data)
                            (resolve-lookup-refs db)
                            (resolve-upserts db))
         _             (validate-refs db ops)
         facts         (vec (for [[op e a v] ops]
                              (make-fact e a v tx-num instant op)))]
-    (doseq [f facts] (validate-fact schema closed? f))
+    (doseq [f facts]
+      (validate-fact schema closed? f)
+      (validate-preds schema f))
     (let [entities (reduce (fn [acc f] (apply-fact acc f schema))
                            (:entities db) facts)
           entities (cleanup-dangling-refs entities schema)
-          indexes  (build-indexes entities indexed-attrs)]
+          _        (validate-entity-specs entities entity-specs ensures)
+          indexes  (build-indexes entities indexed-attrs)
+          nh-attrs (no-history-attrs schema)
+          log-facts (if (empty? nh-attrs)
+                      facts
+                      (filter #(not (contains? nh-attrs (:a %))) facts))]
       {:entities entities
-       :log (into (:log db) facts)
+       :log (into (:log db) log-facts)
        :tx (inc tx-num)
        :schema schema
        :closed? closed?
        :indexed-attrs indexed-attrs
        :indexes indexes
+       :entity-specs entity-specs
        :history history})))
 
 ;; ---------------------------------------------------------------------------
@@ -701,6 +789,13 @@
   :history are preserved from the input. Indexes are rebuilt for the
   as-of entity view.
 
+  WARNING: when the store has a :history {:keep-last N} or
+  {:keep-since T} retention policy, as-of for points earlier than the
+  retained window returns a PARTIAL view -- old facts have been dropped
+  from the log. The materialized entities view reflects only retained
+  facts replayed. Attributes declared :no-history return their current
+  value at all points (they were never logged).
+
   The point argument is dispatched by type, matching Datomic: an inst
   (#inst \"...\" or any value satisfying inst?) selects wall-clock
   semantics; any other value (typically a long) selects tx-number
@@ -718,10 +813,23 @@
         ordered (sort-by :tx facts-before)
         entities (reduce (fn [acc f] (apply-fact acc f schema))
                          {} ordered)
+        nh-attrs (no-history-attrs schema)
+        entities (if (empty? nh-attrs)
+                   entities
+                   (reduce (fn [ents [e attrs]]
+                             (let [nh-vals (into {} (for [a nh-attrs
+                                                          :when (contains? attrs a)]
+                                                      [a (get attrs a)]))]
+                               (if (empty? nh-vals)
+                                 ents
+                                 (let [cur (or (get ents e) {})]
+                                   (assoc ents e (conj cur nh-vals))))))
+                           entities (:entities db-val)))
         indexes (build-indexes entities indexed-attrs)]
     {:entities entities :log (vec ordered) :tx (:tx db-val)
      :schema schema :closed? (get db-val :closed? false)
      :indexed-attrs indexed-attrs :indexes indexes
+     :entity-specs (get db-val :entity-specs)
      :history (get db-val :history)}))
 
 (defn since
@@ -881,7 +989,7 @@
                           :history (get cur :history)}))))
 
 ;; ---------------------------------------------------------------------------
-;; Schema (reserved for future use)
+;; Schema and migration
 ;; ---------------------------------------------------------------------------
 
 (defn schema
@@ -889,6 +997,64 @@
   Empty when no schema was configured."
   [db-val]
   (get db-val :schema {}))
+
+(defn migrate
+  "Programmatically changes the store's schema. Validates existing
+  facts against the new schema, optionally coerces non-conforming
+  values, and publishes the result.
+
+  opts map (all optional):
+    :coerce   {attr coerce-fn-sym} — applied before validation
+    :force    true — publish even when violations exist
+    :indexes  #{attr} — attrs to add to the index set
+    :data     fn — called as a tx on the migrated db (for data migration)
+
+  Returns {:db-after new-db :violations [...] :tx N}.
+  Throws ::migration-conflict when violations exist without :force."
+  ([conn new-schema] (migrate conn new-schema {}))
+  ([conn new-schema opts]
+   (let [cur @conn
+         old-schema (get cur :schema {})
+         coerce (:coerce opts)
+         indexed-attrs (set/union (get cur :indexed-attrs #{})
+                                   (or (:indexes opts) #{}))
+         entities (if coerce
+                    (reduce (fn [ents [e attrs]]
+                              (assoc ents e
+                                (reduce (fn [m [a v]]
+                                          (if-let [cf-sym (get coerce a)]
+                                            (assoc m a (cf-sym v))
+                                            (assoc m a v)))
+                                        {} attrs)))
+                            (:entities cur) (:entities cur))
+                    (:entities cur))
+         violations (vec
+                      (for [[e attrs] entities
+                            [a v] attrs
+                            :let [spec (get new-schema a)]
+                            :when (and spec (:type spec)
+                                       (not= (:type spec) :any)
+                                       (not (type-matches? v (:type spec))))]
+                        {:entity e :attr a :value v :expected (:type spec)}))
+         _ (when (and (seq violations) (not (:force opts)))
+             (throw (ex-info (str "Migration conflict: " (count violations) " violations")
+                             {::migration-conflict violations})))
+         new-db {:entities entities
+                 :log (:log cur)
+                 :tx (:tx cur)
+                 :schema new-schema
+                 :closed? (:closed? cur)
+                 :indexed-attrs indexed-attrs
+                 :indexes (build-indexes entities indexed-attrs)
+                 :entity-specs (:entity-specs cur)
+                 :history (:history cur)}
+         new-db (if (:data opts)
+                  (:db-after (with new-db ((:data opts))))
+                  new-db)
+         tx-num (:tx cur)
+         instant (store-clock* conn)]
+     (store-commit* conn new-db {:tx tx-num :instant instant :migration true})
+     {:db-after new-db :violations violations :tx tx-num})))
 
 ;; ---------------------------------------------------------------------------
 ;; Datalog query

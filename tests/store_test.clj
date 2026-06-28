@@ -1610,14 +1610,14 @@
 
 (deftest store-attr-pred-accepts-valid
   (let [conn (store/open nil {:schema {:n {:type :long
-                                           :preds ['store-pred-positive-num]}}})
+                                           :preds [store-pred-positive-num]}}})
         _ (store/transact conn [:db/add 1 :n 5])
         db (store/db conn)]
     (is (= 5 (store/read db 1 :n)) "pred-satisfying value accepted")))
 
 (deftest store-attr-pred-rejects-invalid
   (let [conn (store/open nil {:schema {:n {:type :long
-                                           :preds ['store-pred-positive-num]}}})
+                                           :preds [store-pred-positive-num]}}})
         e (try
             (store/transact conn [:db/add 1 :n -1])
             nil
@@ -1631,7 +1631,7 @@
 (deftest store-attr-pred-multiple
   ;; Multiple preds on one attr: ALL must pass.
   (let [conn (store/open nil {:schema {:s {:type :string
-                                           :preds ['store-pred-non-empty-str
+                                           :preds [store-pred-non-empty-str
                                                    'store-pred-always-reject]}}})
         e (try
             (store/transact conn [:db/add 1 :s "hi"])
@@ -1646,7 +1646,7 @@
   ;; the type error, NOT as an attr-pred-failed, even though the pred
   ;; would also reject.
   (let [conn (store/open nil {:schema {:n {:type :long
-                                           :preds ['store-pred-always-reject]}}})
+                                           :preds [store-pred-always-reject]}}})
         e (try
             (store/transact conn [:db/add 1 :n "not a number"])
             nil
@@ -1658,7 +1658,7 @@
 (deftest store-attr-pred-tx-atomic
   ;; A pred failure on any one fact in a multi-fact tx aborts ALL facts.
   (let [conn (store/open nil {:schema {:n {:type :long
-                                           :preds ['store-pred-positive-num]}}})
+                                           :preds [store-pred-positive-num]}}})
         e (try
             (store/transact conn [[:db/add 1 :n 5]
                                   [:db/add 2 :n -1]])
@@ -1671,7 +1671,7 @@
 (deftest store-attr-pred-many-cardinality
   ;; Pred is checked per member for :cardinality :many attrs.
   (let [conn (store/open nil {:schema {:tags {:cardinality :many
-                                              :preds ['store-pred-non-empty-str]}}})
+                                              :preds [store-pred-non-empty-str]}}})
         _ (store/transact conn [[:db/add 1 :tags "x"]
                                 [:db/add 1 :tags "y"]])
         db-ok (store/db conn)
@@ -1733,14 +1733,14 @@
 
 (deftest store-entity-spec-pred-passes
   (let [conn (store/open nil {:schema store-es-schema
-                             :entity-specs {:user {:preds ['store-spec-email-has-at]}}})
+                             :entity-specs {:user {:preds [store-spec-email-has-at]}}})
         _ (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
         db (store/db conn)]
     (is (= "a@x.com" (store/read db 1 :email)) "pred-satisfying entity accepted")))
 
 (deftest store-entity-spec-pred-fails
   (let [conn (store/open nil {:schema store-es-schema
-                             :entity-specs {:user {:preds ['store-spec-always-reject]}}})
+                             :entity-specs {:user {:preds [store-spec-always-reject]}}})
         e (try
             (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
             nil
@@ -1818,7 +1818,7 @@
   (let [conn (store/open nil {:schema {:n {}}})
         _ (store/transact conn [:db/add 1 :n "42"])
         r (store/migrate conn {:n {:type :long}}
-                         {:coerce {:n 'store-mig-coerce-to-long}})
+                         {:coerce {:n store-mig-coerce-to-long}})
         db (:db-after r)]
     (is (= [] (:violations r)) "coerce fixed the violation")
     (is (= 42 (store/read db 1 :n)) "coerced value visible in entities")))
