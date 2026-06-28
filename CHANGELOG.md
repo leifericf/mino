@@ -165,6 +165,7 @@
 - Fix: Drop the redundant namespace-env GC root registration added during image splice (envs are already rooted in the allocate pass)
 - Fix: Surface store checkpoint errors on close instead of dropping them silently
 - Fix: Avoid NULL deref and leaks in image save and load under memory pressure
+- Fix: Close static-analyzer realloc path in image env ID table
 - Docs: Correct clojure.math exact-arithmetic docstrings to document bignum promotion instead of overflow throwing
 - Docs: Note in special_registry.c that when/and/or expand via core.clj defmacros even though C dispatch handles evaluation
 - Docs: Correct tag_kw and var_promote comments, add *clojure-version* docstring
