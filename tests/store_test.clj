@@ -1078,9 +1078,8 @@
         "empty vector clause throws")))
 
 ;; ---------------------------------------------------------------------------
-;; Track A1: domain-unique attributes, upsert, lookup-refs
+;; Domain-unique attributes, upsert, lookup-refs
 ;;
-;; Spec-first. These fail until the implementation lands.
 ;; ---------------------------------------------------------------------------
 
 (deftest store-unique-attr-upsert-creates
@@ -1145,7 +1144,7 @@
     (is (nil? (store/find-by db :email "missing@x.com")))))
 
 ;; ---------------------------------------------------------------------------
-;; Track A2: :ref type + reverse index
+;; Reference type + reverse index
 ;; ---------------------------------------------------------------------------
 
 (deftest store-ref-validates-existing-eid
@@ -1224,7 +1223,7 @@
     (is (= #{10} (store/referring db :members 2)))))
 
 ;; ---------------------------------------------------------------------------
-;; Track A3: minimal pull
+;; Pull
 ;; ---------------------------------------------------------------------------
 
 (deftest store-pull-flat-attr
@@ -1351,9 +1350,8 @@
     (is (= 42 (:db/id (store/pull db [*] 42))))))
 
 ;; ---------------------------------------------------------------------------
-;; Track B1: aggregates + :with
+;; Aggregates + :with
 ;;
-;; Spec-first. These fail until the implementation lands.
 ;; ---------------------------------------------------------------------------
 
 (deftest store-q-aggregate-count
@@ -1454,9 +1452,8 @@
         "count over zero bindings yields [0]")))
 
 ;; ---------------------------------------------------------------------------
-;; Track B2: :find specs
+;; Find specs
 ;;
-;; Spec-first. Post-processing on the result set, no engine changes.
 ;; ---------------------------------------------------------------------------
 
 (deftest store-q-find-coll-spec
@@ -1523,9 +1520,8 @@
         "scalar spec unwraps the aggregate tuple to a bare value")))
 
 ;; ---------------------------------------------------------------------------
-;; Track B3: streaming query (qseq)
+;; Streaming query (qseq)
 ;;
-;; Spec-first. qseq yields result tuples lazily; q is equivalent to
 ;; (set (qseq ...)).
 ;; ---------------------------------------------------------------------------
 
@@ -1585,9 +1581,8 @@
     (is (vector? first-elem) "first element is a tuple")))
 
 ;; ---------------------------------------------------------------------------
-;; Track C1: attribute predicates
+;; Attribute predicates
 ;;
-;; Spec-first. Schema accepts {:preds [sym ...]} on an attribute. Each
 ;; :db/add value is passed to each predicate (resolved via resolve) AFTER
 ;; the type check and BEFORE the fact is applied. Falsy return aborts
 ;; the whole tx tagged ::attr-pred-failed.
@@ -1684,7 +1679,7 @@
     (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Track C2: entity specs (:db/ensure)
+;; Entity specs (:db/ensure)
 ;;
 ;; Spec-first. Entity specs are registered at open time under
 ;; :entity-specs. tx-data map form carries a virtual :db/ensure spec-name
@@ -1773,9 +1768,8 @@
     (is (= 0 (:tx (store/db conn))) "tx not advanced")))
 
 ;; ---------------------------------------------------------------------------
-;; Track C3: migration API
+;; Migration API
 ;;
-;; Spec-first. (store/migrate conn new-schema opts?) re-exports a new
 ;; schema, validates existing facts, optionally coerces, and publishes
 ;; the result. Returns {:db-after new-db :violations [...] :tx N}.
 ;; ---------------------------------------------------------------------------
@@ -1871,9 +1865,8 @@
         (rm-rf store-test-dir)))))
 
 ;; ---------------------------------------------------------------------------
-;; Track D1: per-attribute :noHistory
+;; Per-attribute :noHistory
 ;;
-;; Spec-first. Schema accepts {:no-history true} on an attribute. Facts
 ;; for no-history attrs are applied to entities but NOT appended to :log;
 ;; as-of/since/history for these attrs return the current value at all
 ;; points. Indexes are maintained normally.
@@ -1925,9 +1918,8 @@
     (is (nil? (store/find-by db :email "a@x.com")) "stale value dropped from index")))
 
 ;; ---------------------------------------------------------------------------
-;; Track D2: retention makes as-of partial
+;; Retention makes as-of partial
 ;;
-;; Spec-first. Documents that retention policies drop old log entries,
 ;; so as-of at an early tx returns a partial or empty view.
 ;; ---------------------------------------------------------------------------
 
@@ -1953,7 +1945,7 @@
           "as-of at tx 0 returns partial/empty view after retention"))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E1: :in -- parameterized queries
+;; Parameterized queries queries
 ;;
 ;; Spec-first. Extra args after the query map positionally to :in vars.
 ;; ---------------------------------------------------------------------------
@@ -2016,7 +2008,7 @@
                             "Alice"))))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E2: :db/retractEntity
+;; Retract entity
 ;;
 ;; Spec-first. [:db/retractEntity eid] retracts every attribute of the
 ;; entity, removing it entirely.
@@ -2060,7 +2052,7 @@
     (is (= (:db-after r) (store/db conn)))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E3: negation (not / not-join)
+;; Negation (not / not-join)
 ;;
 ;; Spec-first. (not [pattern]) filters out bindings where the nested
 ;; pattern matches. (not-join [vars] pattern...) takes the join vars
@@ -2114,7 +2106,7 @@
         "not matching every binding returns empty")))
 
 ;; ---------------------------------------------------------------------------
-;; Track E4: :order-by
+;; Order-by
 ;;
 ;; Spec-first. :order-by ?var sorts the result ascending; appending
 ;; :desc sorts descending. Ordered results come back as a seq of tuples
@@ -2170,7 +2162,7 @@
     (is (= [[2 25] [1 30] [3 35]] result))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E5: sorted AVET index + find-by-range
+;; Sorted range queries index + find-by-range
 ;;
 ;; Spec-first. {:sorted-index true} on an attribute enables
 ;; (store/find-by-range db attr lo hi), returning eids whose value is in
@@ -2220,7 +2212,7 @@
            (map #(store/read db % :age) eids)))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E6: transaction result detail (:tx-data)
+;; Transaction result detail detail (:tx-data)
 ;;
 ;; Spec-first. transact's return map gains :tx-data, a seq of
 ;; {:e :a :v :op} maps describing what was asserted/retracted.
@@ -2266,7 +2258,7 @@
     (is (= #{:name :age} (set (map :a retracted))))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E7: :unique :value
+;; Unique :value
 ;;
 ;; Spec-first. {:unique :value} enforces uniqueness (throws on duplicate)
 ;; but does NOT upsert -- the duplicate tx is rejected, the eid is never
@@ -2305,7 +2297,7 @@
         "no new entity written; existing eid unchanged")))
 
 ;; ---------------------------------------------------------------------------
-;; Track E8: pull :offset
+;; Pull :offset
 ;;
 ;; Spec-first. [:attr :offset M :limit N] skips M values then takes N;
 ;; [:attr :offset M] skips M and returns the rest.
@@ -2337,7 +2329,7 @@
     (is (every? #{:a :b :c :d :e} (:tags result)))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E9: :db/isComponent cascade
+;; Component cascade cascade
 ;;
 ;; Spec-first. {:type :ref :isComponent true} marks a ref as owned; when
 ;; the parent is retractEntity'd, all component children are also
@@ -2380,7 +2372,7 @@
     (is (not (store/entity-exists? db 3)) "nested component cascaded")))
 
 ;; ---------------------------------------------------------------------------
-;; Track E10: change notification (store/listen)
+;; Change notification (store/listen)
 ;;
 ;; Spec-first. (store/listen conn key f) registers f to be called with
 ;; {:db-before :db-after :tx-data} on each transact; returns nil.
@@ -2429,7 +2421,7 @@
     (is (= 1 @b))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E11: or / disjunction
+;; Disjunction
 ;;
 ;; Spec-first. (or clause...) unions the bindings of each alternative
 ;; branch, preserving shared variable bindings.
@@ -2459,7 +2451,7 @@
                                     [?e :label ?n])])))))
 
 ;; ---------------------------------------------------------------------------
-;; Track E12: datoms API
+;; Raw datom access
 ;;
 ;; Spec-first. (store/datoms db index) returns a seq of {:e :a :v :tx}
 ;; maps in the named index order: :eavt, :avet, or :aevt.
