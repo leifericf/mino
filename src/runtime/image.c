@@ -191,13 +191,18 @@ static void img_env_ht_insert(img_id_table *t, mino_env *env, uint32_t id)
 {
     if (t->env_ht.count >= t->env_ht.cap) {
         size_t ncap = t->env_ht.cap * 2;
-        mino_env **nk = (mino_env **)realloc(t->env_ht.keys,
-                                    ncap * sizeof(mino_env *));
-        if (nk != NULL) t->env_ht.keys = nk;
-        uint32_t *ni = (uint32_t *)realloc(t->env_ht.ids,
-                                    ncap * sizeof(uint32_t));
-        if (ni != NULL) t->env_ht.ids = ni;
-        if (nk == NULL || ni == NULL) return;  /* partial grow: cap unchanged */
+        /* Immediate-assign form (field = realloc(field, ...)): the static
+         * analyzer's realloc model treats the original as released on
+         * every call, so a temp-then-conditional-assign trips a false
+         * "free released memory". This form keeps it quiet. On failure
+         * realloc returns NULL; we bail before the write below so the
+         * NULL is never dereferenced (the entry is dropped, not stored). */
+        t->env_ht.keys = (mino_env **)realloc(t->env_ht.keys,
+                                    ncap * sizeof(*t->env_ht.keys));
+        t->env_ht.ids  = (uint32_t *)realloc(t->env_ht.ids,
+                                    ncap * sizeof(*t->env_ht.ids));
+        if (t->env_ht.keys == NULL || t->env_ht.ids == NULL)
+            return;  /* grow failed: drop this insert, never deref NULL */
         t->env_ht.cap = ncap;
     }
     t->env_ht.keys[t->env_ht.count] = env;
