@@ -124,10 +124,18 @@ mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
             "bit-shift-right shift amount must be in [0, 63]");
     }
     /* C99 §6.5.7p5: right-shifting a negative signed value is
-     * implementation-defined.  Cast through unsigned to make the shift
-     * well-defined, then sign-extend by casting back — this produces
-     * the arithmetic (sign-preserving) right shift that Clojure specifies
-     * on all two's-complement targets (GCC, Clang, MSVC, x86_64, ARM64). */
+     * implementation-defined, so we cannot rely on `a >> b` being
+     * arithmetic (sign-preserving) on every target. Cast through
+     * unsigned to make the shift itself well-defined, then OR the
+     * sign bits back in by hand so the result matches Clojure's
+     * arithmetic-shift semantics on every two's-complement target
+     * (GCC, Clang, MSVC; x86_64, ARM64). Shift-by-0 short-circuits
+     * the sign-fill so the unsigned-cast path alone handles it. */
+    if (a < 0 && b > 0) {
+        unsigned long long ua = (unsigned long long)a >> b;
+        unsigned long long sign_fill = (~0ULL) << (MINO_SHIFT_WIDTH - b);
+        return mino_int_wrap(S, (long long)(ua | sign_fill));
+    }
     return mino_int_wrap(S, (long long)((unsigned long long)a >> b));
 }
 
