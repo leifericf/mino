@@ -640,7 +640,7 @@ static mino_val *prim_store_commit(mino_state *S, mino_val *args,
     }
     old_val = conn->as.store.val;
     if (mino_store_publish(S, conn, new_db) == NULL) return NULL;
-    store_notify_watches(S, conn, old_val, new_db, env);
+    if (store_notify_watches(S, conn, old_val, new_db, env) != 0) return NULL;
     return new_db;
 }
 
