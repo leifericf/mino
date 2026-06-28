@@ -1077,6 +1077,42 @@
     (is (thrown? (store/q db '[:find ?e :where []]))
         "empty vector clause throws")))
 
+(deftest store-q-predicate-rejects-variable-head
+  ;; A variable in the predicate-function position would let an :in-bound
+  ;; value control the head of an eval'd form, which is a code-injection
+  ;; vector. Validation must reject it; the predicate head must be a
+  ;; literal symbol resolvable in the calling namespace.
+  (let [conn (store/open)
+        _    (store/transact conn [:db/add 1 :name "Alice"])
+        db   (store/db conn)]
+    (is (thrown? (store/q db '[:find ?e :in ?p :where
+                              [?e :name ?n]
+                              [(?p ?n)]]
+                         'eval))
+        "variable predicate head throws")
+    (is (thrown? (store/q db '[:find ?e :in ?p ?arg :where
+                              [?e :name ?n]
+                              [(?p ?arg)]]
+                         'eval '(println "pwned")))
+        "variable predicate head with bound args throws")))
+
+(deftest store-q-predicate-args-passed-as-data
+  ;; A constant-head predicate clause applies the resolved function to the
+  ;; substituted arg VALUES. The arg must never be eval'd as code: an
+  ;; :in-bound form like (undefined-fn) is data, not an expression to run.
+  ;; If the implementation substituted-and-eval'd, this query would throw
+  ;; resolving the undefined symbol; if it applies-the-fn-to-the-value,
+  ;; identity returns the form (truthy) and the row matches.
+  (let [conn (store/open)
+        _    (store/transact conn [:db/add 1 :name "Alice"])
+        db   (store/db conn)]
+    (is (= #{[1]}
+           (store/q db '[:find ?e :in ?v :where
+                         [?e :name ?n]
+                         [(identity ?v)]]
+                    '(undefined-fn)))
+        "predicate arg is passed as data, not eval'd")))
+
 ;; ---------------------------------------------------------------------------
 ;; Domain-unique attributes, upsert, lookup-refs
 ;;
