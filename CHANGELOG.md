@@ -23,6 +23,7 @@
 - Runtime: Pin GC values across allocating calls in mino_repl_feed, mino_state_new, var_set_root
 - Serve: Add `mino.store` — embedded EAVT fact store with per-state isolation, temporal queries (`as-of`/`since`/`history`/`recent`), cross-state aggregation via `mino_clone`, WAL durability (line-delimited EDN with format-version header, torn-write recovery, atomic checkpoint via temp file and rename), schema validation (`:type`/`:cardinality` with `:closed` mode), secondary indexes (`:indexes` option, index-accelerated `find-by` and Datalog), log retention policy (`:history {:keep-last N}`), and Datalog query (`store/q` with pattern joins, inline predicates, and index-accelerated pattern matching). New `MINO_STORE` value type, `MINO_CAP_STORE` capability (bit 32; `caps_installed` widened to `uint64_t`), `mino.store` Clojure namespace, and C API (`mino_store_open` now replays WAL via Clojure layer). See ADR 10, ADR 11, and ADR 12.
 - Build: The single-file amalgamation (`dist/mino.c`) hoists the `_POSIX_C_SOURCE` / `_DARWIN_C_SOURCE` feature-test macros to the top of the unified translation unit and strips the per-file copies, so the whole TU sees the POSIX/Darwin surface the sources request. Previously an earlier file pulled the system headers before `fs.c` / `proc.c` redefined the macros, which broke the amalgam compile on glibc with a `_POSIX_C_SOURCE` redefinition.
+- Build: Allowlist image serializer translation-unit size
 - Core: `sequence` with a transducer now realizes in O(1) stack per element. It emits each step's buffered outputs as a direct lazy cons-chain instead of `(concat items (step ...))`, so reducing, counting, or seq-walking a large transduced sequence (and `clojure.core.reducers/foldcat` over a reducer, which builds on it) no longer recurses on the C stack proportional to the element count -- which previously tripped the recursion guard under the larger stack frames of sanitizer builds.
 - Core: clojure.core gains seventeen vars: `line-seq`, `seque`, `sync`, `xml-seq`, `read+string`, `test`, `Throwable->map`, `print-simple`, `->Eduction`, the `Inst` protocol with `inst-ms*`, the `char-escape-string` and `char-name-string` tables, `default-data-readers` (with 'inst and 'uuid readers), `*repl*` (default false), and the `unquote` / `unquote-splicing` placeholders.
 - Core: Add \delete to char-name-string and add \delete reader literal support
@@ -94,6 +95,7 @@
 - Factoring: Remove redundant gc/internal.h include from eval/bc/gc_handlers.c (already transitively included)
 - Factoring: Document is_special_form_name duplication with eval/special_registry.c; document bc_protocol_type_disc duplication with prim_type
 - Factoring: Extract jit_extract_form_loc and jit_protocol_resolve helpers to deduplicate source-location extraction and protocol IC resolution in eval-bc-jit
+- Factoring: Tag image save/load primitives with the fs capability for auditing
 - Security: Add size_t overflow guard and malloc NULL check in mino_keyword_ns_n
 - Security: Add size_t overflow guard and malloc NULL check in mino_symbol_ns_n
 - Security: Add size_t overflow guards in intern table entries-array and ht doubling
