@@ -61,20 +61,33 @@
 ;; Schema validation
 ;; ---------------------------------------------------------------------------
 
+(def ^:private long-min -9223372036854775808)
+(def ^:private long-max 9223372036854775807)
+
 (defn- check-type
   "Returns nil if v matches type-spec, throws ex-info otherwise.
   Supported types: :string, :keyword, :long, :double, :boolean,
-  :instant (treated as :long), :any (no check, default)."
+  :instant (treated as :long, 64-bit signed), :any (no check).
+  Unknown type-spec values throw -- they are treated as schema
+  definition errors so typos surface rather than silently disabling
+  validation."
   [attr v type-spec]
   (let [ok? (case type-spec
               :string  (string? v)
               :keyword (keyword? v)
-              :long    (integer? v)
+              :long    (and (integer? v)
+                            (<= long-min v long-max))
               :double  (float? v)
               :boolean (boolean? v)
-              :instant (integer? v)
+              :instant (and (integer? v)
+                            (<= long-min v long-max))
               :any     true
-              true)]
+              ;; Unknown type keyword: surface as a schema error instead
+              ;; of silently passing every value.
+              (throw
+                (ex-info (str "Unknown schema type spec for attribute " attr
+                              ": " type-spec)
+                         {:attribute attr :type-spec type-spec})))]
     (when-not ok?
       (throw
         (ex-info (str "Type mismatch for attribute " attr
