@@ -1350,4 +1350,238 @@
         db (store/db conn)]
     (is (= 42 (:db/id (store/pull db [*] 42))))))
 
+;; ---------------------------------------------------------------------------
+;; Track B1: aggregates + :with
+;;
+;; Spec-first. These fail until the implementation lands.
+;; ---------------------------------------------------------------------------
+
+(deftest store-q-aggregate-count
+  ;; (count ?e) in find position counts the bindings in each group.
+  ;; With no group-by var, all bindings collapse to one group.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}
+                                3 {:name "Carol"}})
+        db (store/db conn)]
+    (is (= #{[3]}
+           (store/q db '[:find (count ?e) :where [?e :name ?n]]))
+        "count over all entities returns a single [3] tuple")))
+
+(deftest store-q-aggregate-sum-with-group-by
+  ;; A non-aggregate find var becomes a group-by key; (sum ?v) sums
+  ;; within each group.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:dept "A" :amount 100}
+                                2 {:dept "A" :amount 200}
+                                3 {:dept "B" :amount 50}})
+        db (store/db conn)]
+    (is (= #{["A" 300] ["B" 50]}
+           (store/q db '[:find ?dept (sum ?amount)
+                         :where [?e :dept ?dept]
+                                [?e :amount ?amount]])))))
+
+(deftest store-q-aggregate-min-max
+  ;; (min ?v) and (max ?v) return the extreme values as single tuples.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= #{[25]}
+           (store/q db '[:find (min ?age) :where [?e :age ?age]])))
+    (is (= #{[35]}
+           (store/q db '[:find (max ?age) :where [?e :age ?age]])))))
+
+(deftest store-q-aggregate-avg
+  ;; (avg ?v) returns the arithmetic mean of the bindings.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= #{[30]}
+           (store/q db '[:find (avg ?age) :where [?e :age ?age]]))
+        "(30 + 25 + 35) / 3 = 30")))
+
+(deftest store-q-aggregate-distinct
+  ;; (distinct ?v) returns the set of distinct values as one tuple.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:dept "A"}
+                                2 {:dept "A"}
+                                3 {:dept "B"}})
+        db (store/db conn)]
+    (is (= #{[#{"A" "B"}]}
+           (store/q db '[:find (distinct ?dept)
+                         :where [?e :dept ?dept]])))))
+
+(deftest store-q-with-clause
+  ;; :with ?var groups by ?var but does NOT return it. Without :with,
+  ;; (count ?e) over all entities would be a single [3] tuple; with
+  ;; :with ?dept it groups per dept and returns each count.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:dept "A"}
+                                2 {:dept "A"}
+                                3 {:dept "B"}})
+        db (store/db conn)]
+    (is (= #{[2] [1]}
+           (store/q db '[:find (count ?e) :with ?dept
+                         :where [?e :dept ?dept]]))
+        "groups by ?dept (counts 2 and 1) but omits ?dept from results")))
+
+(deftest store-q-mixed-aggregate-scalar
+  ;; Find position carries both a scalar var (group-by key) and an
+  ;; aggregate expression; each group yields one tuple.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:role :admin :amount 10}
+                                2 {:role :admin :amount 20}
+                                3 {:role :user  :amount 5}})
+        db (store/db conn)]
+    (is (= #{[:admin 2] [:user 1]}
+           (store/q db '[:find ?role (count ?e)
+                         :where [?e :role ?role]]))
+        "scalar ?role groups, (count ?e) aggregates per group")))
+
+(deftest store-q-aggregate-empty-result
+  ;; An aggregate over an empty result set returns the empty-group
+  ;; value: count is 0, not an empty result set.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}})
+        db (store/db conn)]
+    (is (= #{[0]}
+           (store/q db '[:find (count ?e)
+                         :where [?e :name "Nonexistent"]]))
+        "count over zero bindings yields [0]")))
+
+;; ---------------------------------------------------------------------------
+;; Track B2: :find specs
+;;
+;; Spec-first. Post-processing on the result set, no engine changes.
+;; ---------------------------------------------------------------------------
+
+(deftest store-q-find-coll-spec
+  ;; :find [?e ...] returns a collection of single values (not a set of
+  ;; tuples).
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}
+                                3 {:name "Carol"}})
+        db (store/db conn)
+        result (store/q db '[:find [?e ...] :where [?e :name ?n]])]
+    (is (coll? result) "returns a collection")
+    (is (= #{1 2 3} (set result)) "of single values, not tuples")
+    (is (not (set? result)) "a seq, not a set of tuples")))
+
+(deftest store-q-find-scalar-spec
+  ;; :find ?e . returns a single scalar value, nil when empty.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= 1
+           (store/q db '[:find ?e . :where [?e :name "Alice"]])))
+    (is (nil?
+          (store/q db '[:find ?e . :where [?e :name "Nonexistent"]]))
+        "scalar returns nil for empty result")))
+
+(deftest store-q-find-tuple-spec
+  ;; :find [?e ?n] returns a single tuple, nil when empty.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice" :age 30}
+                                2 {:name "Bob"   :age 25}})
+        db (store/db conn)]
+    (is (= [1 "Alice"]
+           (store/q db '[:find [?e ?name]
+                         :where [?e :name ?name]
+                                [?e :age 30]])))
+    (is (nil?
+          (store/q db '[:find [?e ?name]
+                        :where [?e :name ?name]
+                               [?e :age 999]]))
+        "tuple returns nil for empty result")))
+
+(deftest store-q-find-rel-spec-unchanged
+  ;; :find ?a ?b (bare vars) still returns a set of tuples.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (= #{[1 "Alice"] [2 "Bob"]}
+           (store/q db '[:find ?e ?name :where [?e :name ?name]]))
+        "relation spec (bare vars) preserves existing behavior")))
+
+(deftest store-q-find-spec-with-aggregate
+  ;; A find spec combines with an aggregate expression: scalar spec on
+  ;; (count ?e) returns a bare number.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= 3
+           (store/q db '[:find (count ?e) . :where [?e :age ?age]]))
+        "scalar spec unwraps the aggregate tuple to a bare value")))
+
+;; ---------------------------------------------------------------------------
+;; Track B3: streaming query (qseq)
+;;
+;; Spec-first. qseq yields result tuples lazily; q is equivalent to
+;; (set (qseq ...)).
+;; ---------------------------------------------------------------------------
+
+(deftest store-qseq-returns-lazy-seq
+  ;; qseq returns something that satisfies seq?.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)]
+    (is (seq? (store/qseq db '[:find ?e :where [?e :name ?n]]))
+        "qseq returns a seq")))
+
+(deftest store-qseq-results-match-q
+  ;; Collecting qseq into a set yields the same result as q.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}})
+        db (store/db conn)
+        query '[:find ?e ?name :where [?e :name ?name]]]
+    (is (= (store/q db query)
+           (set (store/qseq db query)))
+        "qseq collected into a set equals q")))
+
+(deftest store-qseq-with-aggregates
+  ;; qseq supports aggregate find expressions.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:age 30}
+                                2 {:age 25}
+                                3 {:age 35}})
+        db (store/db conn)]
+    (is (= #{[3]}
+           (set (store/qseq db '[:find (count ?e) :where [?e :age ?age]])))
+        "qseq yields aggregate tuples")))
+
+(deftest store-qseq-with-find-spec
+  ;; qseq supports find specs; the collection spec yields single values
+  ;; lazily.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}
+                                3 {:name "Carol"}})
+        db (store/db conn)
+        result (store/qseq db '[:find [?e ...] :where [?e :name ?n]])]
+    (is (seq? result) "coll spec via qseq is a seq")
+    (is (= #{1 2 3} (set result)) "yields single values")))
+
+(deftest store-qseq-is-lazy
+  ;; qseq does not realize all results eagerly: first returns a valid
+  ;; tuple without needing to force the whole seq.
+  (let [conn (store/open)
+        _ (store/transact conn {1 {:name "Alice"}
+                                2 {:name "Bob"}
+                                3 {:name "Carol"}})
+        db (store/db conn)
+        first-elem (first (store/qseq db '[:find ?e :where [?e :name ?n]]))]
+    (is (some? first-elem) "first of qseq returns a value")
+    (is (vector? first-elem) "first element is a tuple")))
+
 (run-tests-and-exit)
