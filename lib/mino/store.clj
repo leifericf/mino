@@ -752,6 +752,39 @@
        (= (count clause) 1)
        (seq? (first clause))))
 
+(defn- pattern-vars
+  "Returns the set of variable symbols appearing in a pattern clause's
+  e and v slots (a is the attribute and assumed constant)."
+  [clause]
+  (set (for [el [((vec clause) 0) ((vec clause) 2)]
+             :when (variable? el)]
+         el)))
+
+(defn- validate-query
+  "Validates a parsed query. Throws ex-info tagged ::invalid-query for
+  two author-error classes:
+    - a where clause that is neither a 3-element pattern vector nor a
+      1-element predicate vector
+    - a find var that no clause binds (silent nil column otherwise)"
+  [find where]
+  (let [bound-vars (reduce
+                     (fn [acc clause]
+                       (cond
+                         (predicate-clause? clause)
+                         (into acc (filter variable? (first clause)))
+                         (and (vector? clause) (= (count clause) 3))
+                         (into acc (pattern-vars clause))
+                         :else
+                         (throw
+                           (ex-info "Invalid Datalog clause: must be [e a v] pattern or [(pred ...)] predicate"
+                                    {::invalid-query clause}))))
+                     #{} where)
+        unbound (filter #(not (contains? bound-vars %)) find)]
+    (when (seq unbound)
+      (throw
+        (ex-info (str "Query var(s) not bound by any clause: " (vec unbound))
+                 {::invalid-query {:find find :unbound (vec unbound)}})))))
+
 (defn- filter-by-predicate
   "Filters bindings by evaluating a predicate clause. The predicate
   expression has its variables substituted from each binding, then
@@ -781,6 +814,7 @@
                  [(> ?age 18)]])"
   [db-val query]
   (let [{:keys [find where]} (parse-query query)
+        _ (validate-query find where)
         result-bindings
         (reduce (fn [bindings clause]
                   (if (predicate-clause? clause)
