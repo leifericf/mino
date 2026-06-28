@@ -89,6 +89,7 @@
 - Style: Move detached ic_resolve_global comment to its function; rename _pad_ic* struct members to remove leading underscores; remove double blank line in eval-bc module
 - Style: Fix stale fall-through comment, alignment, and duplicate inline comments in eval-bc-jit module
 - Style: correct the MINO_STORE store_id layout comment (an address-derived print tag, not a monotonic counter) and place the MINO_STORE enumerator comma on its line
+- Style: Drop duplicate futures comment in image save quiesce check
 - Factoring: Expose gc_charge_pause and extract gc_mark_each_ctx/gc_mark_ctx_try_stack to eliminate duplicate lock-walk-unlock pattern in gc_mark_thread_state
 - Factoring: Forward-declare mino_bc_trace_fn_bc and future helpers in values/internal.h to remove eval/bc/internal.h boundary violation from gc_handlers.c
 - Factoring: Extract intern_ns_name helper to deduplicate mino_keyword_ns_n and mino_symbol_ns_n; fix OOM diagnostic inconsistency in symbol variant
@@ -170,6 +171,7 @@
 - Docs: correct ADR 12 to match the implementation — function bytecode is dropped and recompiled on load (not serialized), the quiesce gate checks 3 of the 6 listed conditions by design (execution state is captured as-is), and the image is a trusted artifact whose CRC32 is advisory and whose embedded store paths are reopened on load
 - Docs: document the trusted-path eval model for store snapshot and WAL files
 - Docs: clarify that apply-fact intentionally skips schema validation (validation lives at apply-tx, the public boundary)
+- Docs: Note store snapshot and WAL restore via eval not a data-only EDN read
 - Test: (run-tests) with no arguments now runs only the current namespace's tests, matching clojure.test; pass namespace symbols to run a wider set.
 - Pprint: print-table now renders padded, pipe-delimited columns with a separator row sized to the widest cell, instead of tab-separated values.
 - BC: Add regression tests pinning queue/into correctness under BC with apply-= trigger shape
