@@ -13,7 +13,7 @@
 ;;     main.c -lm
 ;; Then: ./mino task build, ./mino task test, etc.
 
-{:paths ["src" "lib" ".agentic-sdk/src"]
+{:paths ["src" "lib"]
  :tasks
  {gen-core-header {:doc  "Escape src/core.clj into src/core_mino.h"
                    :task mino.tasks.builtin/gen-core-header}
@@ -133,21 +133,4 @@
   gen-stencils-x86-64-darwin {:doc  "Cross-compile stencils for x86_64 Darwin"
                               :task mino.tasks.builtin/gen-stencils-x86-64-darwin}
   gen-stencils-x86-64-windows {:doc  "Cross-compile stencils for x86_64 Windows (COFF)"
-                               :task mino.tasks.builtin/gen-stencils-x86-64-windows}
-  ;; Spine tasks (agentic-sdk)
-  spine-opencode-sync   {:doc  "Project agent masters into .opencode/agent"
-                         :task spine.tasks/opencode-sync}
-  spine-opencode-check  {:doc  "Fail when derived agents are stale"
-                         :task spine.tasks/opencode-check}
-  spine-triage          {:doc  "Fold findings into a punch list"
-                         :task spine.tasks/triage}
-  spine-integrate       {:doc  "Land fix branches oldest-first"
-                         :task spine.tasks/integrate}
-  spine-run-init        {:doc  "Seed run.edn from the plan"
-                         :task spine.tasks/run-init}
-  spine-run-status      {:doc  "Print the resumption directive"
-                         :task spine.tasks/run-status}
-  spine-compile-rules   {:doc  "Project decisions into lint rules"
-                         :task spine.tasks/compile-rules}
-  spine-lint            {:doc  "House prose regex plus project linter"
-                         :task spine.tasks/lint}}}
+                                :task mino.tasks.builtin/gen-stencils-x86-64-windows}}}
