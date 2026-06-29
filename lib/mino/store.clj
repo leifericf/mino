@@ -758,7 +758,16 @@
 
 (defn listen
   "Registers f to be called with {:db-before :db-after :tx-data} on
-  each transact. key is used for unregistration. Returns nil."
+  each transact. key is used for unregistration. Returns nil.
+
+  Scope is the transaction stream only: `put`, `retract`, and
+  `transact` (which they delegate to) all fire f. The maintenance and
+  schema ops `compact` and `migrate` do NOT fire f -- they bypass the
+  tx log and publish directly via store-commit*. If you need to react
+  to a compact/migrate db change, poll `(db conn)` after the call.
+  (The C-level `add-watch` does not cover stores either: stores are
+  not in the watchable-get table, so store->watches is never populated.
+  `listen`/`fire-listeners` is the only observer surface.)"
   [conn key f]
   (swap! listener-registry assoc-in [conn key] f)
   nil)
@@ -1091,6 +1100,9 @@
   WAL — compaction is a maintenance operation; checkpoint afterwards to
   persist the compacted state.
 
+  listeners do NOT fire for compact (it bypasses the tx log); see
+  `listen` for the scope contract.
+
   With one arg, drops the entire log (only the current view survives).
   With a keep-spec map:
     {:keep-last N}     keep the last N facts
@@ -1159,7 +1171,10 @@
     :data     fn — called as a tx on the migrated db (for data migration)
 
   Returns {:db-after new-db :violations [...] :tx N}.
-  Throws ::migration-conflict when violations exist without :force."
+  Throws ::migration-conflict when violations exist without :force.
+
+  listeners do NOT fire for migrate (it publishes via store-commit*,
+  bypassing the tx log); see `listen` for the scope contract."
   ([conn new-schema] (migrate conn new-schema {}))
   ([conn new-schema opts]
    (let [cur @conn

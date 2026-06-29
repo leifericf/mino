@@ -2719,4 +2719,24 @@
     (store/close a)
     (store/close b)))
 
+(deftest listen-fires-on-transact-not-on-compact-or-migrate
+  ;; The listen contract is transact-scoped by design (see the `listen`
+  ;; docstring): compact and migrate are maintenance/schema ops that
+  ;; bypass the tx log and publish directly via store-commit*, so they
+  ;; do NOT fire listeners. This pins the documented scope so a future
+  ;; change to the contract breaks here loudly. Wiring listeners into
+  ;; migrate/compact was considered and deferred: it would change
+  ;; observed behavior for every existing listener caller and require
+  ;; inventing an event shape for ops that have no natural :tx-data.
+  (let [conn (store/open nil {:schema {:name {:type :any}}})
+        fired (atom [])
+        key :round2-scope-watch]
+    (store/listen conn key #(swap! fired conj %))
+    (store/transact conn {1 {:name "a"}})
+    (store/compact conn)
+    (store/migrate conn {:name {:type :string}})
+    (is (= 1 (count @fired))
+        "listener fired exactly once (transact only, not compact/migrate)")
+    (store/close conn)))
+
 (run-tests-and-exit)
