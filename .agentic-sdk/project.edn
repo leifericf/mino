@@ -30,7 +30,7 @@
 
   :spine
   {:runtime     :mino                              ; mino self-host: spine runs on the mino runtime
-   :store       :edn
+   :store       :mino                              ; mino store with temporal history
    :working-dir ".agentic-sdk/state/"}
 
  :adr        {:store "docs/adr/" :format :nygard} ; mino already tracks docs/adr/
