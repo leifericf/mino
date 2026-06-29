@@ -30,43 +30,46 @@ and nil-on-target-retraction semantics.
 - **`:cardinality :many` interacts with `:ref`.** A `:many` `:ref` holds
   a set of eids; each element is validated independently. The reverse
   index records one source→target pair per element.
-- **Automatic reverse index.** The db carries
-  `{:reverse {ref-attr {target-eid #{source-eid}}}}`. It is maintained
-  incrementally on every transaction that adds or retracts a `:ref`
-  fact. Reverse traversal is exposed via `store/referring` (which eids
-  does this attr point at?) and `store/referred-by` (which eids point
-  at this one through this attr?); both are O(1) index lookups.
+- **Automatic reverse index.** The db exposes
+  `{:reverse {ref-attr {target-eid #{source-eid}}}}`. It is **rebuilt
+  lazily** by `store/referring` (which eids does this attr point at?)
+  and `store/referred-by` (which eids point at this one through this
+  attr?) on each call from the current `:entities` view, not maintained
+  incrementally per transaction. See the revision note below.
 - **Nil-on-retraction, no cascade.** When an entity ceases to exist
   (its last attribute is retracted), every `:ref` attribute elsewhere
   that pointed at it is nilled automatically — retracted from the
   source entity's `:v` set (or, for `:one`, the attribute is removed).
   The reverse index makes this cheap: it lists exactly the source facts
   that need rewriting. Source entities themselves are not retracted.
-- **Lazy correctness over eager work.** The reverse index is updated as
-  a side effect of applying a transaction, not as a separate rebuild.
-  There is no "reindex" operation; the index is always consistent with
-  the materialized db view.
+- **Lazy correctness over eager work.** The reverse index is a pure
+  function of the materialized db view, recomputed when a reverse
+  query needs it. There is no incremental per-tx maintenance and no
+  persisted index to drift; the index is always consistent with
+  `:entities` because it is derived from it on demand.
 
 ## Consequences
 
 - Referential integrity is enforced: dangling refs throw at apply time,
   not silently stored. A caller who writes `[:db/add e :friend 9999]`
   against a db with no entity `9999` gets an exception, not a time bomb.
-- Reverse traversal is O(1) index lookup, not O(n) entity scan. The
-  agent-memory "who has this entity in its queue?" query is constant
-  time regardless of db size.
+- Reverse traversal rebuilds the index on each call, so `store/referring`
+  and `store/referred-by` are O(entities) per call, not O(1). This is
+  acceptable for v1's stated scale (agent-memory and game-NPC stores with
+  modest entity counts); incremental maintenance is the obvious follow-up
+  if a workload makes reverse queries hot. See the revision note below.
 - Entity retraction is safe: no dangling refs remain after a target is
   removed. A reader never has to defensive-check whether a `:ref` value
   resolves.
 - No cascade delete. Retracting an entity does not retract entities
   that refer to it. Callers who want cascade must explicitly retract the
   sources, typically by reading `store/referred-by` first.
-- The reverse index adds a constant per-`:ref`-fact memory cost. For
-  stores dominated by `:ref` relationships this is significant; for
-  stores dominated by scalar attributes it is negligible. It is always
-  proportional to the number of `:ref` facts, never to entity count.
-- Snapshot and WAL formats (ADR 11) carry the reverse index as part of
-  the db value. No format change is needed — the index is just data.
+- The reverse index is not persisted: it is derived from `:entities` on
+  demand, so the snapshot and WAL formats (ADR 11) do not carry it. The
+  persisted db value is just the entities and the log.
+- The reverse index adds a constant per-`:ref`-fact memory cost only
+  while a reverse query holds the rebuilt index; it is not retained on
+  the db value between queries.
 
 ## Alternatives
 
@@ -92,3 +95,18 @@ and nil-on-target-retraction semantics.
   `store/referring` / `store/referred-by` are pure functions of that
   data. A C-side index would duplicate state, complicate clone, and
   break the "host-owned handles, GC-owned values" split from ADR 10.
+
+## Revision (2026-06-29)
+
+The original Decision and Consequences described the reverse index as
+maintained incrementally on every transaction, carried in the snapshot
+and WAL, and queried in O(1). The shipped v1 does not do this:
+`store.clj` rebuilds the reverse index lazily inside `referring` and
+`referred-by` (`build-reverse-index` over `:entities`), does not retain
+it on the db value, and does not persist it. The bullets above have
+been corrected to match the implementation. Rationale: incremental
+maintenance adds per-tx bookkeeping and snapshot/WAL format surface
+that v1 does not need at its stated scale; a lazy derived index keeps
+the persisted db value small and the referential-integrity guarantee
+intact. Incremental maintenance is the documented follow-up if reverse
+queries become hot. Recorded during the unpushed-store-image audit.
