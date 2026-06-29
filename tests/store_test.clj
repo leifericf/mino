@@ -2362,6 +2362,20 @@
         db (store/db conn)]
     (is (empty? (store/find-by-range db :age 100 200)))))
 
+(deftest store-find-by-range-rejects-mixed-types
+  ;; Bounds and attribute values must be mutually comparable. A numeric
+  ;; range over a string attribute used to throw a raw ClassCastException
+  ;; from inside (>= v lo); it must surface a classified error instead so
+  ;; the caller can tell a misuse from a runtime bug.
+  (let [conn (store/open nil {:schema {:name {:type :string}}})
+        _ (store/transact conn [[:db/add 1 :name "Alice"]
+                                [:db/add 2 :name "Bob"]])
+        db (store/db conn)
+        e (try (store/find-by-range db :name 1 10) (catch e e))]
+    (is (some? e) "mixed-type range throws")
+    (is (= :range-type-mismatch (:reason (ex-data e)))
+        "classified :range-type-mismatch, not a raw ClassCastException")))
+
 (deftest store-sorted-index-ordered
   ;; find-by-range results come back in ascending value order.
   (let [conn (store/open nil {:schema {:age {:type :long

@@ -1795,6 +1795,23 @@
 ;; Sorted range queries
 ;; ---------------------------------------------------------------------------
 
+;; Classify a value into a comparable category so find-by-range can tell
+;; a genuine "out of range" result from a type mismatch. Without this,
+;; (>= v lo) on a string value against numeric bounds throws a raw
+;; ClassCastException from inside the comparator -- a runtime-bug-shaped
+;; error for what is really caller misuse.
+(defn- range-value-category
+  [x]
+  (cond
+    (number? x) :number
+    (string? x) :string
+    (inst? x)   :inst
+    (char? x)   :char
+    (boolean? x) :boolean
+    (keyword? x) :keyword
+    (symbol? x)  :symbol
+    :else nil))
+
 (defn find-by-range
   "Returns eids whose attr value falls in [lo, hi] (inclusive), in
   ascending value order. Works on any attr; schema :sorted-index true
@@ -1802,20 +1819,50 @@
 
   For :cardinality :many attributes the value is a set; an entity is
   returned if ANY member falls in [lo, hi], ordered by the smallest
-  in-range member."
+  in-range member.
+
+  Bounds and attribute values must be mutually comparable: a numeric
+  range over a string attr (or vice versa) throws a classified
+  ::range-type-mismatch error rather than a raw ClassCastException."
   [db-val attr lo hi]
-  (->> (:entities db-val)
-       (keep (fn [[e attrs]]
-               (let [v (get attrs attr)]
-                 (cond
-                   (nil? v) nil
-                   (set? v) (let [in-range (filter #(and (>= % lo) (<= % hi)) v)]
-                              (when (seq in-range)
-                                [e (reduce min in-range)]))
-                   (and (>= v lo) (<= v hi)) [e v]
-                   :else nil))))
-       (sort-by second)
-       (map first)))
+  (let [lo-cat (range-value-category lo)
+        hi-cat (range-value-category hi)]
+    (when (and lo-cat hi-cat (not= lo-cat hi-cat))
+      (throw
+        (ex-info (str "find-by-range: lo and hi must be the same type, got "
+                      (pr-str lo) " and " (pr-str hi))
+                 {:reason :range-type-mismatch :attr attr :lo lo :hi hi})))
+    (->> (:entities db-val)
+         (keep (fn [[e attrs]]
+                 (let [v (get attrs attr)]
+                   (cond
+                     (nil? v) nil
+                     ;; A value (or set member) whose category differs
+                     ;; from the bounds is a misuse: surface it rather
+                     ;; than letting (>= v lo) throw opaquely.
+                     (set? v) (let [bad (some #(when (and lo-cat
+                                                           (not= (range-value-category %) lo-cat))
+                                                 %) v)]
+                                (when bad
+                                  (throw
+                                    (ex-info (str "find-by-range: value " (pr-str bad)
+                                                  " for " attr " is not comparable to bounds "
+                                                  (pr-str lo) ".." (pr-str hi))
+                                             {:reason :range-type-mismatch
+                                              :attr attr :value bad :entity e})))
+                                (let [in-range (filter #(and (>= % lo) (<= % hi)) v)]
+                                  (when (seq in-range)
+                                    [e (reduce min in-range)])))
+                     (and lo-cat (not= (range-value-category v) lo-cat))
+                     (throw
+                       (ex-info (str "find-by-range: value " (pr-str v) " for " attr
+                                     " is not comparable to bounds " (pr-str lo) ".." (pr-str hi))
+                                {:reason :range-type-mismatch
+                                 :attr attr :value v :entity e}))
+                     (and (>= v lo) (<= v hi)) [e v]
+                     :else nil))))
+         (sort-by second)
+         (map first))))
 
 ;; ---------------------------------------------------------------------------
 ;; Raw datom access
