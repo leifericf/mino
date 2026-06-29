@@ -27,7 +27,7 @@
   "Relational logic programming: run / run* drive a set of goals built
   from == (unify), != (disequality), fresh, conde, and a relation
   library, reifying the query variable's answers."
-  (:refer-clojure :exclude [== walk]))
+  (:refer-clojure :exclude [== walk run]))
 
 ;; --------------------------------------------------------------------
 ;; Logic variables and logical cons cells
