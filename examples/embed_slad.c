@@ -114,6 +114,23 @@ int main(void)
     define_or_die(A, env_a, "(def rt-kw :user/tag)", "rt-kw");
     define_or_die(A, env_a, "(def rt-vec [10 20 30])", "rt-vec");
     define_or_die(A, env_a, "(def rt-map {:a 1 :b 2 :c 3})", "rt-map");
+    /* rt-hamt forces the HAMT representation (> MINO_FLATMAP_THRESHOLD
+     * = 8 entries): this is the direct round-trip coverage for the
+     * round-1 HAMT emit/visit fix on a standalone map. */
+    define_or_die(A, env_a,
+                 "(def rt-hamt {:k1 1 :k2 2 :k3 3 :k4 4 :k5 5 :k6 6"
+                 "              :k7 7 :k8 8 :k9 9 :k10 10 :k11 11 :k12 12})",
+                 "rt-hamt");
+    /* rt-nested: outer flatmap whose value is itself a HAMT map, so the
+     * HAMT value is reachable through a flatmap entry's child walk. */
+    define_or_die(A, env_a,
+                 "(def rt-nested {:big {1 2, 3 4, 5 6, 7 8, 9 10,"
+                 "                      11 12, 13 14, 15 16, 17 18}})",
+                 "rt-nested");
+    /* rt-wrap: a fn whose only behavior is invoking a single primitive
+     * (inc) -- so wraps_prim is set. Round-trips the FN line's
+     * wraps_prim/template_fn ids added in round 2 (previously dropped). */
+    define_or_die(A, env_a, "(def rt-wrap (fn [x] (inc x)))", "rt-wrap");
     define_or_die(A, env_a, "(def rt-set #{1 2 3})", "rt-set");
     define_or_die(A, env_a, "(def rt-smap (sorted-map :b 2 :a 1 :c 3))",
                  "rt-smap");
@@ -139,6 +156,15 @@ int main(void)
     define_or_die(A, env_a, "(def rt-re #\"abc+\")", "rt-re");
     define_or_die(A, env_a, "(def rt-meta (with-meta [1 2 3] {:tag :kept}))",
                  "rt-meta");
+    /* A non-stdlib namespace with a var, plus an alias from `user`,
+     * exercising the ROOTS NS / VREG / ALIAS splice (env reconnection,
+     * var_registry_add on load, alias table rebuild). */
+    define_or_die(A, env_a,
+                 "(do (create-ns 'rt.aliased)"
+                 "  (intern 'rt.aliased 'rt-aliased 7)"
+                 "  (in-ns 'user)"
+                 "  (alias 'rta 'rt.aliased))",
+                 "rt namespace alias");
 
     /* A durable store whose path contains a space. The ST image line
      * emits the path as a whitespace-delimited token, so an unescaped
@@ -156,8 +182,11 @@ int main(void)
                  "  (def rt-store (mino.store/open \"" STORE_PATH "\")))",
                  "rt-store");
     define_or_die(A, env_a,
-                 "(mino.store/transact rt-store {:k {:v 1}})",
-                 "rt-store tx");
+                 "(mino.store/transact rt-store {1 {:v 1} 2 {:v 2} 3 {:v 3}"
+                 "                         4 {:v 4} 5 {:v 5} 6 {:v 6} 7 {:v 7}"
+                 "                         8 {:v 8} 9 {:v 9} 10 {:v 10} 11 {:v 11}"
+                 "                         12 {:v 12} 13 {:v 13} 14 {:v 14} 15 {:v 15}})",
+                 "rt-store tx (HAMT db)");
 
     /* Sanity: state A works before saving. */
     failures += verify_long(A, env_a, "(rt-fn 7)", 49, "A: fn works");
@@ -201,6 +230,22 @@ int main(void)
     failures += verify_long(B, env_b, "(count rt-vec)", 3, "B: vec count");
     failures += verify_long(B, env_b, "(first rt-vec)", 10, "B: vec first");
     failures += verify_long(B, env_b, "(:b rt-map)", 2, "B: map lookup");
+    /* HAMT map: 12 entries drove the flatmap->HAMT transition in A; the
+     * round-1 emit fix wrote every entry, and the load-side map builder
+     * rebuilt it. A lookup deep in the iteration order catches a missed
+     * or mis-emitted entry. */
+    failures += verify_long(B, env_b, "(:k8 rt-hamt)", 8, "B: hamt lookup");
+    failures += verify_long(B, env_b, "(count rt-hamt)", 12, "B: hamt count");
+    /* Nested: a flatmap whose value is itself a HAMT map. The HAMT
+     * child must be walked, emitted, and reconstructed through the
+     * outer map entry's value slot. */
+    failures += verify_long(B, env_b,
+                            "(-> rt-nested :big (get 7))", 8,
+                            "B: nested hamt lookup");
+    /* wraps_prim fn: the FN line now round-trips wraps_prim/template_fn;
+     * the restored fn must still compute (a restored garbage wraps_prim
+     * id would route the call at the wrong cell). */
+    failures += verify_long(B, env_b, "(rt-wrap 41)", 42, "B: wraps-prim fn");
     failures += verify_true(B, env_b, "(contains? rt-set 2)", "B: set");
     failures += verify_long(B, env_b, "(:a rt-smap)", 1, "B: smap lookup");
     failures += verify_true(B, env_b,
@@ -261,8 +306,19 @@ int main(void)
                             "B: store restored");
     failures += verify_long(B, env_b,
                             "(do (require 'mino.store)"
-                            "  (mino.store/read (mino.store/db rt-store) :k :v))",
+                            "  (mino.store/read (mino.store/db rt-store) 1 :v))",
                             1, "B: store read");
+    /* A deep entity id (15) forces a HAMT db-map traversal on read,
+     * covering the round-1 HAMT fix on the store db value, not just a
+     * standalone map. Entity 15 was the last tx'd in A. */
+    failures += verify_long(B, env_b,
+                            "(do (require 'mino.store)"
+                            "  (mino.store/read (mino.store/db rt-store) 15 :v))",
+                            15, "B: store read deep entity (HAMT db)");
+    /* Namespace alias round-tripped via the ROOTS ALIAS splice. */
+    failures += verify_true(B, env_b,
+                            "(= 'rt.aliased (get (ns-aliases 'user) 'rta))",
+                            "B: namespace alias restored");
     {
         mino_val *st = mino_eval_string(B, "rt-store", env_b);
         const char *got = (st != NULL) ? mino_store_path(st) : NULL;
