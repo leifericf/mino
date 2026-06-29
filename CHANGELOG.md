@@ -18,6 +18,7 @@
 - Fix: Iterate set values in store type-check and find-by-range for :cardinality :many attributes, matching validate-preds and apply-fact.
 - Fix: Validate store as-of/since point argument is an inst or integer instead of crashing at the numeric comparator.
 - Fix: Reject unrecognized keep-spec in store compact instead of silently no-op'ing.
+- Fix: Reject degenerate store entity ids (nil, zero, negative, float, string, unresolved lookup-ref) and degenerate attribute keys (empty string, empty keyword) at validate-fact, surfacing caller bugs instead of storing under unusable keys.
 - Runtime: Add save-lisp-and-die (SLAD) image save/load — `mino_save_image` / `mino_load_image_into` serialize the full runtime state (namespaces, vars, user-defined functions, closures, atoms, stores) to a line-delimited text image file with an identity table for shared-reference preservation. Skips standard library namespaces (reinstalled on load). JIT state is dropped; bytecode is recompiled from source on load. See ADR 12.
 - Runtime: Fix GC window in set_eval_diag_with_data — pin keys/vals arrays across sequential allocating calls
 - Runtime: Replace bare abort() with gc_oom_throw in ns_env OOM paths so (ns ...) OOM is catchable
