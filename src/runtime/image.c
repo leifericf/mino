@@ -130,14 +130,14 @@ static int img_ht_lookup(img_ht *h, mino_val *key, uint32_t *out_id)
     return 0;
 }
 
-static void img_ht_insert(img_ht *h, mino_val *key, uint32_t id)
+static int img_ht_insert(img_ht *h, mino_val *key, uint32_t id)
 {
     size_t mask, i;
     if (h->count * 100 >= h->cap * IMG_HT_LOAD) {
         size_t new_cap  = h->cap * 2;
         img_ht_entry *ne = (img_ht_entry *)calloc(new_cap, sizeof(img_ht_entry));
         size_t j;
-        if (ne == NULL) return;  /* OOM: leave old table; caller bails elsewhere */
+        if (ne == NULL) return -1;  /* OOM: old table intact, caller bails */
         for (j = 0; j < h->cap; j++) {
             if (h->entries[j].key != NULL) {
                 size_t ni = img_hash_ptr(h->entries[j].key) & (new_cap - 1);
@@ -157,6 +157,7 @@ static void img_ht_insert(img_ht *h, mino_val *key, uint32_t id)
     h->entries[i].key = key;
     h->entries[i].id  = id;
     h->count++;
+    return 0;
 }
 
 /* --- env ID table ------------------------------------------------- */
@@ -188,27 +189,38 @@ static int img_env_ht_lookup(img_id_table *t, mino_env *env, uint32_t *out_id)
     return 0;
 }
 
-static void img_env_ht_insert(img_id_table *t, mino_env *env, uint32_t id)
+static int img_env_ht_insert(img_id_table *t, mino_env *env, uint32_t id)
 {
     if (t->env_ht.count >= t->env_ht.cap) {
         size_t ncap = t->env_ht.cap * 2;
-        /* Immediate-assign form (field = realloc(field, ...)): the static
-         * analyzer's realloc model treats the original as released on
-         * every call, so a temp-then-conditional-assign trips a false
-         * "free released memory". This form keeps it quiet. On failure
-         * realloc returns NULL; we bail before the write below so the
-         * NULL is never dereferenced (the entry is dropped, not stored). */
-        t->env_ht.keys = (mino_env **)realloc(t->env_ht.keys,
-                                    ncap * sizeof(*t->env_ht.keys));
-        t->env_ht.ids  = (uint32_t *)realloc(t->env_ht.ids,
-                                    ncap * sizeof(*t->env_ht.ids));
-        if (t->env_ht.keys == NULL || t->env_ht.ids == NULL)
-            return;  /* grow failed: drop this insert, never deref NULL */
-        t->env_ht.cap = ncap;
+        mino_env **nkeys;
+        uint32_t  *nids;
+        /* Grow atomically: realloc both sides into temps and commit
+         * only if both succeed. On failure realloc leaves the original
+         * buffer intact, so we free whichever temp succeeded (a fresh
+         * buffer we will not use) and leave both fields pointing at
+         * their still-valid originals -- the next insert must never
+         * find one field NULL and dereference it. The previous
+         * immediate-assign form (`field = realloc(field, ...)`) lost
+         * the original on the failing side and left the field NULL,
+         * crashing the next insert through `ids[count] = id`. */
+        nkeys = (mino_env **)realloc(t->env_ht.keys,
+                                      ncap * sizeof(*nkeys));
+        nids  = (uint32_t *)realloc(t->env_ht.ids,
+                                    ncap * sizeof(*nids));
+        if (nkeys == NULL || nids == NULL) {
+            if (nkeys != NULL) free(nkeys);
+            if (nids != NULL) free(nids);
+            return -1;
+        }
+        t->env_ht.keys = nkeys;
+        t->env_ht.ids  = nids;
+        t->env_ht.cap  = ncap;
     }
     t->env_ht.keys[t->env_ht.count] = env;
     t->env_ht.ids[t->env_ht.count]  = id;
     t->env_ht.count++;
+    return 0;
 }
 
 /* --- ID table: init / assign / enqueue ---------------------------- */
@@ -279,7 +291,15 @@ static uint32_t img_idt_assign_val(img_id_table *t, mino_val *v)
     if (t->id_count >= t->id_cap)
         if (img_idt_grow(t) != 0) { t->id_count--; return 0; }
     t->id_vals[id] = v;
-    img_ht_insert(&t->val_ht, v, id);
+    if (img_ht_insert(&t->val_ht, v, id) != 0) {
+        /* Insert (and its table grow) failed: undo the assignment so a
+         * later re-encounter of v does not get a second ID -- that would
+         * break identity preservation across the image. Drop back to the
+         * nil sentinel; the value is lost from this image, not duplicated. */
+        t->id_vals[id] = NULL;
+        t->id_count--;
+        return 0;
+    }
     t->queue[t->q_tail++] = id;
     return id;
 }
@@ -294,7 +314,11 @@ static uint32_t img_idt_assign_env(img_id_table *t, mino_env *env)
     if (t->id_count >= t->id_cap)
         if (img_idt_grow(t) != 0) { t->id_count--; return 0; }
     t->id_envs[id] = env;
-    img_env_ht_insert(t, env, id);
+    if (img_env_ht_insert(t, env, id) != 0) {
+        t->id_envs[id] = NULL;
+        t->id_count--;
+        return 0;
+    }
     t->queue[t->q_tail++] = id;
     return id;
 }
@@ -1115,10 +1139,35 @@ int mino_save_image(mino_state *S, const char *path)
     fseek(f, 0, SEEK_SET);
     buf_len = (size_t)file_end;
     buf = (char *)malloc(buf_len);
-    if (buf != NULL) {
+    if (buf == NULL) {
+        /* OOM computing the CRC: never fall back to a zero CRC trailer.
+         * A `CRC32 00000000` trailer over a body whose real CRC is
+         * nonzero makes the image unloadable on the next open while
+         * save reports success -- silent data loss. Surface the OOM. */
+        set_eval_diag(S, NULL, "internal", "MIN001",
+                       "save-image: out of memory computing CRC32");
+        fclose(f);
+        img_idt_free(&idt);
+        return -1;
+    }
+    {
         size_t got = fread(buf, 1, buf_len, f);
-        if (got == buf_len)
-            crc = img_crc32_update(0, buf, buf_len);
+        if (got != buf_len) {
+            /* Short read of the body we just flushed: the kernel lost
+             * bytes between the write and the read-back, so the CRC
+             * would be computed over a partial buffer. Treat as I/O
+             * failure rather than writing a wrong trailer. */
+            char diag[128];
+            snprintf(diag, sizeof diag,
+                     "save-image: short read computing CRC32 (%s)",
+                     strerror(errno));
+            set_eval_diag(S, NULL, "io", "MIO001", diag);
+            free(buf);
+            fclose(f);
+            img_idt_free(&idt);
+            return -1;
+        }
+        crc = img_crc32_update(0, buf, buf_len);
         free(buf);
     }
     fseek(f, 0, SEEK_END);

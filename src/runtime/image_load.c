@@ -236,14 +236,19 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         const char *p = line_rest;
         char *parent_tok;
         e = env_alloc(S, NULL);  /* parent set in patch pass */
-        /* Register as GC root to survive patch-phase collection */
+        /* Register as GC root to survive patch-phase collection. If the
+         * root node cannot be allocated the env is unreachable from the
+         * GC roots, and any collection during the patch pass would free
+         * it out from under r->id_envs[id] -> use-after-free. Abort the
+         * load rather than race the collector; the caller fails the
+         * whole load and the half-built envs are reclaimed in cleanup. */
         {
             root_env_t *rr = (root_env_t *)malloc(sizeof(*rr));
-            if (rr != NULL) {
-                rr->env = e;
-                rr->next = S->gc.root_envs;
-                S->gc.root_envs = rr;
-            }
+            if (rr == NULL)
+                return 0;  /* alloc failure: caller sets rc=-1, cleans up */
+            rr->env = e;
+            rr->next = S->gc.root_envs;
+            S->gc.root_envs = rr;
         }
         r->id_envs[id] = e;
         r->id_types[id] = 2;
