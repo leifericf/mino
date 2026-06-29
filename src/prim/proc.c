@@ -28,6 +28,9 @@
 #  include <windows.h>
 #else
 #  include <sys/wait.h>
+#  include <unistd.h>
+#  include <poll.h>
+#  include <errno.h>
 #endif
 
 /* ---- shell-escape and command-string building ---- */
@@ -286,6 +289,237 @@ static mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
     return map_get_val(result, mino_keyword(S, "out"));
 }
 
+/* ---- run: subprocess with separate stdout, stderr, and exit ---- */
+
+/* Append data to a dynamic buffer. Returns 0 on success, -1 on OOM. */
+static int buf_append(char **buf, size_t *len, size_t *cap,
+                      const char *data, size_t n)
+{
+    if (n > SIZE_MAX - *len - 1) return -1;
+    if (*len + n + 1 > *cap) {
+        size_t new_cap = *cap == 0 ? 4096 : *cap * 2;
+        char *new_buf;
+        while (new_cap < *len + n + 1) {
+            if (new_cap > SIZE_MAX / 2) return -1;
+            new_cap *= 2;
+        }
+        new_buf = (char *)realloc(*buf, new_cap);
+        if (new_buf == NULL) return -1;
+        *buf = new_buf;
+        *cap = new_cap;
+    }
+    memcpy(*buf + *len, data, n);
+    *len += n;
+    return 0;
+}
+
+/* Build a C argv array from a mino cons list of string arguments.
+ * Each string is malloc'd and null-terminated. The array itself is
+ * malloc'd and NULL-terminated. Caller frees with free_argv. */
+static char **build_argv(mino_state *S, mino_val *args, size_t *out_argc)
+{
+    size_t argc = 0;
+    mino_val *p = args;
+    char **argv;
+    size_t ai = 0;
+
+    while (mino_is_cons(p)) { argc++; p = p->as.cons.cdr; }
+    if (argc == 0) return NULL;
+
+    argv = (char **)malloc(sizeof(char *) * (argc + 1));
+    if (argv == NULL) return NULL;
+
+    p = args;
+    while (mino_is_cons(p)) {
+        mino_val *arg = p->as.cons.car;
+        if (arg == NULL || mino_type_of(arg) != MINO_STRING) {
+            size_t j;
+            for (j = 0; j < ai; j++) free(argv[j]);
+            free(argv);
+            prim_throw_classified(S, "eval/type", "MTY001",
+                                  "run: all arguments must be strings");
+            return NULL;
+        }
+        argv[ai] = (char *)malloc(arg->as.s.len + 1);
+        if (argv[ai] == NULL) {
+            size_t j;
+            for (j = 0; j < ai; j++) free(argv[j]);
+            free(argv);
+            return NULL;
+        }
+        memcpy(argv[ai], arg->as.s.data, arg->as.s.len);
+        argv[ai][arg->as.s.len] = '\0';
+        ai++;
+        p = p->as.cons.cdr;
+    }
+    argv[ai] = NULL;
+    *out_argc = argc;
+    return argv;
+}
+
+static void free_argv(char **argv)
+{
+    if (argv) {
+        size_t i;
+        for (i = 0; argv[i] != NULL; i++) free(argv[i]);
+        free(argv);
+    }
+}
+
+/* (run [opts] cmd & args) -- run command, return {:out :err :exit}.
+ * opts is an optional map as the first argument; :dir sets the working
+ * directory. Never throws on non-zero exit; throws only on spawn failure. */
+static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *opts = NULL;
+    const char *dir = NULL;
+    char **argv = NULL;
+    size_t argc = 0;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "run requires at least one argument");
+    }
+
+    /* Optional opts map as first argument. */
+    {
+        mino_val *first = args->as.cons.car;
+        if (mino_type_of(first) == MINO_MAP) {
+            opts = first;
+            args = args->as.cons.cdr;
+            if (opts != NULL) {
+                mino_val *dir_val = map_get_val(opts, mino_keyword(S, "dir"));
+                if (dir_val != NULL && mino_type_of(dir_val) == MINO_STRING)
+                    dir = dir_val->as.s.data;
+            }
+        }
+    }
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "run requires a command");
+    }
+
+    argv = build_argv(S, args, &argc);
+    if (argv == NULL) return NULL; /* error already thrown or OOM */
+
+#ifdef _WIN32
+    free_argv(argv);
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "run: not yet implemented on Windows");
+#else
+    {
+        int out_pipe[2], err_pipe[2];
+        pid_t pid;
+        int status;
+        char *out_buf = NULL; size_t out_len = 0, out_cap = 0;
+        char *err_buf = NULL; size_t err_len = 0, err_cap = 0;
+        int out_done = 0, err_done = 0;
+        mino_val *keys[3], *vals[3];
+
+        if (pipe(out_pipe) == -1 || pipe(err_pipe) == -1) {
+            free_argv(argv);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "run: pipe failed");
+        }
+
+        pid = fork();
+        if (pid == -1) {
+            close(out_pipe[0]); close(out_pipe[1]);
+            close(err_pipe[0]); close(err_pipe[1]);
+            free_argv(argv);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "run: fork failed");
+        }
+
+        if (pid == 0) {
+            /* Child: redirect stdout and stderr to pipes, exec. */
+            close(out_pipe[0]);
+            close(err_pipe[0]);
+            dup2(out_pipe[1], STDOUT_FILENO);
+            dup2(err_pipe[1], STDERR_FILENO);
+            close(out_pipe[1]);
+            close(err_pipe[1]);
+            if (dir) chdir(dir);
+            execvp(argv[0], argv);
+            /* execvp failed: report and exit. */
+            {
+                const char *msg = "run: exec failed\n";
+                write(STDERR_FILENO, msg, strlen(msg));
+            }
+            _exit(127);
+        }
+
+        /* Parent: close write ends, poll both pipes, wait. */
+        close(out_pipe[1]);
+        close(err_pipe[1]);
+
+        while (!out_done || !err_done) {
+            struct pollfd pfds[2];
+            int nfds = 0;
+            int out_idx = -1, err_idx = -1;
+            int ret;
+
+            if (!out_done) {
+                pfds[nfds].fd = out_pipe[0];
+                pfds[nfds].events = POLLIN;
+                pfds[nfds].revents = 0;
+                out_idx = nfds++;
+            }
+            if (!err_done) {
+                pfds[nfds].fd = err_pipe[0];
+                pfds[nfds].events = POLLIN;
+                pfds[nfds].revents = 0;
+                err_idx = nfds++;
+            }
+
+            ret = poll(pfds, (nfds_t)nfds, -1);
+            if (ret == -1) {
+                if (errno == EINTR) continue;
+                break;
+            }
+
+            if (out_idx >= 0 &&
+                (pfds[out_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
+                char chunk[4096];
+                ssize_t n = read(out_pipe[0], chunk, sizeof(chunk));
+                if (n <= 0) out_done = 1;
+                else buf_append(&out_buf, &out_len, &out_cap, chunk, (size_t)n);
+            }
+            if (err_idx >= 0 &&
+                (pfds[err_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
+                char chunk[4096];
+                ssize_t n = read(err_pipe[0], chunk, sizeof(chunk));
+                if (n <= 0) err_done = 1;
+                else buf_append(&err_buf, &err_len, &err_cap, chunk, (size_t)n);
+            }
+        }
+
+        close(out_pipe[0]);
+        close(err_pipe[0]);
+        waitpid(pid, &status, 0);
+        free_argv(argv);
+
+        if (WIFEXITED(status)) status = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) status = 128 + WTERMSIG(status);
+        else status = -1;
+
+        keys[0] = mino_keyword(S, "out");
+        keys[1] = mino_keyword(S, "err");
+        keys[2] = mino_keyword(S, "exit");
+        vals[0] = out_buf
+            ? mino_string_n(S, out_buf, out_len) : mino_string(S, "");
+        vals[1] = err_buf
+            ? mino_string_n(S, err_buf, err_len) : mino_string(S, "");
+        vals[2] = mino_int(S, status);
+        free(out_buf);
+        free(err_buf);
+        return mino_map(S, keys, vals, 3);
+    }
+#endif
+}
+
 /* (thread-sleep ms) -- block the current thread for ms milliseconds.
  * Returns nil. Negative or non-integer ms throws. */
 mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
@@ -343,6 +577,9 @@ const mino_prim_def k_prims_proc[] = {
      "Runs an external command. Returns {:exit n :out \"...\"}."},
     {"sh!", prim_sh_bang,
      "Runs an external command. Returns stdout; throws on non-zero exit."},
+    {"run", prim_run,
+     "Runs a command with separate stdout, stderr, and exit. "
+     "Returns {:out \"\" :err \"\" :exit n}. Accepts optional {:dir \"\"} map."},
     {"thread-sleep", prim_thread_sleep,
      "Blocks the current thread for the given number of milliseconds. Returns nil."},
 };
