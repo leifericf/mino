@@ -31,6 +31,7 @@
 #  include <unistd.h>
 #  include <poll.h>
 #  include <errno.h>
+#  include <sys/resource.h>  /* getrlimit / RLIMIT_NOFILE for child closefds */
 #endif
 
 /* ---- shell-escape and command-string building ---- */
@@ -447,6 +448,29 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
             dup2(err_pipe[1], STDERR_FILENO);
             close(out_pipe[1]);
             close(err_pipe[1]);
+            /* Close every other inherited descriptor so the exec'd child
+             * does not see the VM's open files, sockets, store handles,
+             * or pipes from a surrounding capture. An embedded mino
+             * routinely holds such FDs open across a `run` call; leaking
+             * them is both an info/capability leak into the subprocess
+             * and a correctness hazard (a child holding a write end of a
+             * sibling pipe keeps it from signalling EOF). Leave 0/1/2
+             * (stdin and the two redirected pipes) intact. Bound the loop
+             * by the soft RLIMIT_NOFILE; fall back to a high constant if
+             * the lookup is unavailable on the host. POSIX-only. */
+            {
+                struct rlimit rl;
+                long max_fd;
+                int fd;
+                if (getrlimit(RLIMIT_NOFILE, &rl) == 0 &&
+                    rl.rlim_cur != RLIM_INFINITY &&
+                    rl.rlim_cur <= 1000000)
+                    max_fd = (long)rl.rlim_cur;
+                else if ((max_fd = sysconf(_SC_OPEN_MAX)) < 0)
+                    max_fd = 1024;
+                for (fd = STDERR_FILENO + 1; fd < max_fd; fd++)
+                    close(fd);
+            }
             if (dir != NULL && chdir(dir) != 0) {
                 /* chdir failed: report on the captured stderr pipe and
                  * exit 127 so the parent surfaces a failure. The old

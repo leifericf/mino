@@ -2285,7 +2285,8 @@
    "examples/embed_record.c"
    "examples/embed_store.c"
    "examples/embed_slad.c"
-   "examples/embed_multi_tenant_threads.c"])
+   "examples/embed_multi_tenant_threads.c"
+   "examples/embed_proc.c"])
 
 (defn- compile-and-run-example
   "Compile one examples/embed_*.c against the lib srcs and run it.
