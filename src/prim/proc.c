@@ -441,7 +441,19 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
             dup2(err_pipe[1], STDERR_FILENO);
             close(out_pipe[1]);
             close(err_pipe[1]);
-            if (dir) chdir(dir);
+            if (dir != NULL && chdir(dir) != 0) {
+                /* chdir failed: report on the captured stderr pipe and
+                 * exit 127 so the parent surfaces a failure. The old
+                 * code ignored the return and ran execvp in the
+                 * inherited cwd, reporting success for a misplaced run. */
+                char msg[256];
+                int mn = snprintf(msg, sizeof msg,
+                                  "run: chdir to %s failed: %s\n",
+                                  dir, strerror(errno));
+                if (mn > 0)
+                    write(STDERR_FILENO, msg, (size_t)mn);
+                _exit(127);
+            }
             execvp(argv[0], argv);
             /* execvp failed: report and exit. */
             {
