@@ -416,6 +416,12 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         char *out_buf = NULL; size_t out_len = 0, out_cap = 0;
         char *err_buf = NULL; size_t err_len = 0, err_cap = 0;
         int out_done = 0, err_done = 0;
+        /* Sticky OOM flag: a buf_append failure (capture buffer realloc)
+         * used to be silently ignored, truncating :out/:err and reporting
+         * success. On OOM we now stop draining, close the read ends so the
+         * child's next write takes EPIPE and it exits (no blocked-writer
+         * deadlock across waitpid), and surface a MIN001 after reaping. */
+        int capture_oom = 0;
         mino_val *keys[3], *vals[3];
 
         if (pipe(out_pipe) == -1 || pipe(err_pipe) == -1) {
@@ -497,14 +503,16 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
                 char chunk[4096];
                 ssize_t n = read(out_pipe[0], chunk, sizeof(chunk));
                 if (n <= 0) out_done = 1;
-                else buf_append(&out_buf, &out_len, &out_cap, chunk, (size_t)n);
+                else if (buf_append(&out_buf, &out_len, &out_cap, chunk, (size_t)n) != 0)
+                    { capture_oom = 1; out_done = 1; err_done = 1; }
             }
             if (err_idx >= 0 &&
                 (pfds[err_idx].revents & (POLLIN | POLLHUP | POLLERR))) {
                 char chunk[4096];
                 ssize_t n = read(err_pipe[0], chunk, sizeof(chunk));
                 if (n <= 0) err_done = 1;
-                else buf_append(&err_buf, &err_len, &err_cap, chunk, (size_t)n);
+                else if (buf_append(&err_buf, &err_len, &err_cap, chunk, (size_t)n) != 0)
+                    { capture_oom = 1; out_done = 1; err_done = 1; }
             }
         }
 
@@ -512,6 +520,16 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         close(err_pipe[0]);
         waitpid(pid, &status, 0);
         free_argv(argv);
+
+        if (capture_oom) {
+            /* The child was reaped above; the partial buffers are discarded.
+             * Report OOM rather than returning a success map whose :out/:err
+             * silently lost everything past the realloc failure. */
+            free(out_buf);
+            free(err_buf);
+            return prim_throw_classified(S, "internal", "MIN001",
+                                         "run: out of memory capturing output");
+        }
 
         if (WIFEXITED(status)) status = WEXITSTATUS(status);
         else if (WIFSIGNALED(status)) status = 128 + WTERMSIG(status);
