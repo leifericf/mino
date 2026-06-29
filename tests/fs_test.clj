@@ -55,7 +55,10 @@
   ;; rmrf() used stat() which follows symlinks; a symlink-to-directory
   ;; planted inside the removal tree caused rmrf to recurse through it
   ;; and delete the *target* directory's contents (CWE-59).
-  ;; The fix changes stat() to lstat() so symlinks are unlinked directly.
+  ;; The fix changed stat() to lstat(), then to the *at-family race-free
+  ;; walk (fstatat AT_SYMLINK_NOFOLLOW + openat O_NOFOLLOW + unlinkat):
+  ;; each level is pinned by its open directory descriptor so a path
+  ;; swapped for a symlink mid-walk cannot redirect the recursion.
   ;;
   ;; POSIX-only: builds the symlink with `ln -s`, which Windows has no
   ;; equivalent for (mklink needs a privileged shell), and tests
@@ -77,5 +80,25 @@
         "victim file inside symlink target was deleted")
     (try (rm-rf test-dir)   (catch _ nil))
     (try (rm-rf sentinel)   (catch _ nil)))))
+
+(deftest rm-rf-unlinks-top-level-symlink-without-following
+  ;; rm-rf on a path that is itself a symlink must unlink the symlink,
+  ;; not follow it into the target. The *at walk stat's the entry with
+  ;; AT_SYMLINK_NOFOLLOW, sees a symlink, and unlinkat's it directly.
+  ;; POSIX-only (see rm-rf-does-not-follow-symlinks).
+  (when-not windows?
+  (let [sentinel "/tmp/mino-fs-toplevel-sentinel"
+        link     (str test-dir "-link")]
+    (try (rm-rf sentinel) (catch _ nil))
+    (try (rm-rf link)     (catch _ nil))
+    (mkdir-p sentinel)
+    (spit (str sentinel "/keep.txt") "must survive")
+    (sh! "ln" "-s" sentinel link)
+    (is (file-exists? link) "symlink created")
+    (try (rm-rf link) (catch _ nil))
+    (is (not (file-exists? link)) "top-level symlink removed")
+    (is (file-exists? (str sentinel "/keep.txt"))
+        "symlink target survived top-level rm-rf")
+    (try (rm-rf sentinel) (catch _ nil)))))
 
 (run-tests-and-exit)

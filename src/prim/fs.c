@@ -32,6 +32,7 @@
 #  include <dirent.h>
 #  include <sys/stat.h>
 #  include <unistd.h>
+#  include <fcntl.h>      /* openat, O_NOFOLLOW, AT_SYMLINK_NOFOLLOW, unlinkat */
 #else
 #  include "win_dirent.h"
 #endif
@@ -138,14 +139,99 @@ static mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- rm-rf: recursive removal ---- */
 
+#if !defined(_WIN32)
+/* POSIX race-free recursive removal using the *at family.
+ *
+ * The previous lstat(path)-then-opendir(path) walk had a TOCTOU window:
+ * between seeing a directory and opening it, an attacker with write
+ * access to the parent could swap the entry for a symlink, redirecting
+ * the recursion into the symlink's target tree (CWE-59). The *at walk
+ * pins each level by its open directory descriptor and stat's every
+ * child with AT_SYMLINK_NOFOLLOW relative to that descriptor, so a path
+ * swapped mid-walk cannot redirect the descent. A symlink planted as a
+ * direct entry is unlinked, never descended.
+ *
+ * Names are snapshotted before unlinking so a directory mutation during
+ * readdir cannot skip or double-visit an entry. */
+
+static int rmrf_at(int dirfd, const char *name);
+
+static int rmrf_children(int dfd)
+{
+    DIR           *d;
+    struct dirent *ent;
+    char         **names = NULL;
+    size_t          n = 0, cap = 0, i;
+    int             rc = 0;
+    /* fdopendir takes ownership of dfd (closedir closes it). Keep a
+     * second descriptor on the same directory so unlinkat after the
+     * close still resolves relative to the pinned directory. */
+    int dfd2 = dup(dfd);
+    if (dfd2 < 0) return -1;
+    d = fdopendir(dfd);
+    if (d == NULL) { close(dfd2); return -1; }
+    while ((ent = readdir(d)) != NULL) {
+        char **nn;
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 16;
+            nn = (char **)realloc(names, cap * sizeof(*names));
+            if (nn == NULL) { rc = -1; break; }
+            names = nn;
+        }
+        names[n] = strdup(ent->d_name);
+        if (names[n] == NULL) { rc = -1; break; }
+        n++;
+    }
+    closedir(d);  /* closes the original dfd; dfd2 stays open */
+    for (i = 0; i < n && rc == 0; i++)
+        rc = rmrf_at(dfd2, names[i]);
+    for (i = 0; i < n; i++) free(names[i]);
+    free(names);
+    close(dfd2);
+    return rc;
+}
+
+/* Remove name relative to dirfd, recursing into real subdirectories. */
+static int rmrf_at(int dirfd, const char *name)
+{
+    struct stat st;
+    if (fstatat(dirfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+        return (errno == ENOENT) ? 0 : -1;
+    if (S_ISDIR(st.st_mode)) {
+        int dfd = openat(dirfd, name, O_RDONLY | O_NOFOLLOW | O_DIRECTORY);
+        if (dfd < 0) {
+            /* Lost the race to a symlink, or the entry flipped type;
+             * unlink it as a non-dir and move on. A missing entry by
+             * now is not an error (concurrent remover). */
+            if (unlinkat(dirfd, name, 0) == 0) return 0;
+            return (errno == ENOENT) ? 0 : -1;
+        }
+        if (rmrf_children(dfd) != 0) { close(dfd); return -1; }
+        close(dfd);
+        if (unlinkat(dirfd, name, AT_REMOVEDIR) != 0)
+            return (errno == ENOENT) ? 0 : -1;
+        return 0;
+    }
+    if (unlinkat(dirfd, name, 0) != 0)
+        return (errno == ENOENT) ? 0 : -1;
+    return 0;
+}
+
+static int rmrf(const char *path)
+{
+    return rmrf_at(AT_FDCWD, path);
+}
+
+#else
+/* Windows: no *at / AT_SYMLINK_NOFOLLOW surface. Reparse-point handling
+ * differs from POSIX symlinks and the POSIX-only test tier does not
+ * exercise this path, so keep the simple recursive stat walk. */
 static int rmrf(const char *path)
 {
     struct stat st;
-#ifdef _WIN32
-    if (stat(path, &st) != 0) return 0;  /* lstat unavailable on Windows */
-#else
-    if (lstat(path, &st) != 0) return 0; /* don't follow symlinks */
-#endif
+    if (stat(path, &st) != 0) return 0;  /* nothing to remove */
 
     if (S_ISDIR(st.st_mode)) {
         DIR *d = opendir(path);
@@ -167,6 +253,7 @@ static int rmrf(const char *path)
     }
     return unlink(path);
 }
+#endif
 
 /* (rm-rf path) -- recursively remove path. Returns nil. */
 static mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
