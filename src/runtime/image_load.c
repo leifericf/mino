@@ -675,7 +675,9 @@ static int img_patch_one(img_reader *r, uint32_t id)
         v->as.store.val = img_resolve_val(r, dbid);
         v->as.store.watches = NULL;
         v->as.store.handle = NULL;
-        v->as.store.store_id = (uint64_t)(uintptr_t)v;
+        /* Assign a fresh per-state counter rather than reusing the
+         * (uintptr_t)v address leak. Matches mino_store_val. */
+        v->as.store.store_id = ++S->next_store_id;
         v->as.store.owning_state = S;
         if (path_str && strcmp(path_str, "-") != 0) {
             /* Create a proper store handle via the public constructor.

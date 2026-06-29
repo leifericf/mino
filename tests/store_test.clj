@@ -2698,4 +2698,25 @@
         db (store/db conn)]
     (is (= 4 (count (store/datoms db :eavt))))))
 
+(deftest store-print-id-is-stable-counter-not-heap-address
+  ;; #store[ID VAL] used to derive ID from (uintptr_t)v: it leaked the
+  ;; heap cell address (info disclosure) and made prints nondeterministic
+  ;; across runs. The ID is now a monotonic per-state counter (mirrors
+  ;; agent/ref IDs), printed as 0xN in hex. A counter is 1-4 hex digits
+  ;; (<= 65535 across a run); a leaked 64-bit heap address is 12+ hex
+  ;; digits (e.g. 0x7f8b3c404000). So assert: two stores print
+  ;; differently, and each id is short (counter-shaped, not pointer-shaped).
+  (let [a (store/open)
+        b (store/open)
+        sa (pr-str a)
+        sb (pr-str b)
+        id-len (fn [s]
+                 (let [m (re-find #"\#store\[0x([0-9a-f]+)" s)]
+                   (if m (count (second m)) 0)))]
+    (is (not= sa sb) "two stores print distinct ids")
+    (is (<= 1 (id-len sa) 4) "id is a small counter, not a heap address")
+    (is (<= 1 (id-len sb) 4))
+    (store/close a)
+    (store/close b)))
+
 (run-tests-and-exit)

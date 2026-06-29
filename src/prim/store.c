@@ -261,7 +261,10 @@ mino_val *mino_store_val(mino_state *S, mino_val *db_val,
     v->as.store.val          = db_val;
     v->as.store.watches      = NULL;
     v->as.store.owning_state = S;
-    v->as.store.store_id     = (uint64_t)(uintptr_t)v;
+    /* Monotonic per-state counter, not the cell address: keeps the
+     * #store[ID] print deterministic and free of heap-address leaks
+     * (matches agent.agent_id / tx_ref.ref_id). */
+    v->as.store.store_id     = ++S->next_store_id;
     if (path != NULL) {
         mino_store_handle *h = (mino_store_handle *)malloc(sizeof(*h));
         char              *pcopy;

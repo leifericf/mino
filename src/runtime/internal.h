@@ -449,6 +449,16 @@ struct mino_state {
      * to occupy. */
     async_state_t   async;
 
+    /* Monotonic counter for store connection IDs, mirroring
+     * stm.next_ref_id and agent.next_id. Used only for the
+     * #store[ID VAL] print form so two stores are distinguishable
+     * WITHOUT leaking the heap cell address (the old store_id was
+     * derived from (uintptr_t)v, an info disclosure and a source of
+     * nondeterministic output across runs). Past the stencil-ABI
+     * anchor blocks (bc/ns_vars/jit), so adding a field here does
+     * not shift any pinned offset. */
+    uint64_t        next_store_id;
+
     /* Reader recursion depth. Bumped on every read_form entry,
      * checked against MINO_READER_MAX_DEPTH so pathological
      * input ('(' repeated 30k+ times) emits MRE011 instead of

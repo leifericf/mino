@@ -408,11 +408,15 @@ struct mino_val {
                             * finalizer on GC sweep or state teardown.
                             * NULL for in-memory stores.
                             *
-                            * `owning_state` is the cross-state defense
-                            * (MST007 on mismatch, matching agent/ref).
-                            * `store_id` is an identity tag derived from
-                            * the cell address, used only for the
-                            * #store[ID] print form (not a counter). */
+     * `owning_state` is the cross-state defense
+     * (MST007 on mismatch, matching agent/ref).
+     * `store_id` is a monotonic per-state counter
+     * (S->next_store_id), assigned at construction. It backs the
+     * #store[ID VAL] print form, distinguishing two stores without
+     * leaking the heap cell address (the earlier derivation from
+     * (uintptr_t)v disclosed the address and made prints
+     * nondeterministic across runs). Mirrors tx_ref.ref_id and
+     * agent.agent_id. */
             mino_val    *val;
             mino_val    *watches;
             void        *handle;

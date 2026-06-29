@@ -247,6 +247,7 @@ static void state_init(mino_state *S)
     S->stm.lock_inited     = 0;
     S->stm.next_ref_id     = 0;
     S->agent.next_id       = 0;
+    S->next_store_id       = 0;
     S->agent.shutdown     = 0;
     {
         int pi;
