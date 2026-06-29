@@ -408,13 +408,20 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
     }
     case MINO_MAP: {
         size_t i;
-        if (MINO_IS_PTR(v->as.map.key_order) &&
-            MINO_IS_PTR(v->as.map.val_order)) {
+        /* Flatmap: key_order + val_order parallel vectors. HAMT map
+         * (len > MINO_FLATMAP_THRESHOLD): key_order holds the keys,
+         * val_order is NULL and values live in the HAMT root, so look
+         * them up per key. key_order is always maintained (it is the
+         * iteration order), so drive off it in both cases. */
+        if (MINO_IS_PTR(v->as.map.key_order)) {
+            int flat = MINO_IS_PTR(v->as.map.val_order);
             for (i = 0; i < v->as.map.len; i++) {
                 mino_val *k = vec_nth(v->as.map.key_order, i);
-                mino_val *val = vec_nth(v->as.map.val_order, i);
+                mino_val *val = flat ? vec_nth(v->as.map.val_order, i)
+                                     : map_get_val(v, k);
                 img_idt_assign_val(t, k);
-                img_idt_assign_val(t, val);
+                if (val != NULL)
+                    img_idt_assign_val(t, val);
             }
         }
         break;
@@ -509,7 +516,9 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
             if (v->as.lazy.env != NULL)
                 img_idt_assign_env(t, v->as.lazy.env);
         }
-        /* C-thunk lazies: no children, will error on emit */
+        /* C-thunk lazies hold a C function pointer that cannot be
+         * serialized: they emit as nil (the LZ else branch writes "N")
+         * and so have no children to traverse here. */
         break;
     case MINO_QUEUE:
         if (MINO_IS_PTR(v->as.queue.front))
@@ -650,6 +659,29 @@ static void img_emit_escaped(FILE *f, const char *s, size_t len)
     fputc('"', f);
 }
 
+/* Emit a store path as the last whitespace-delimited token on an ST
+ * line. The path is read back with a stop-at-whitespace tokeniser, so
+ * any space (and newlines/CR/tab, rare in paths but legal) would
+ * truncate the path on load or, worse, a newline would inject a fake
+ * line that the CRC search could mistake for the trailer. Escape them.
+ * NULL emits the single-dash nil sentinel; a literal "-" path is
+ * escaped so it is not mistaken for that sentinel. Inverse of
+ * img_path_unescape in image_load.c. */
+static void img_emit_path(FILE *f, const char *s)
+{
+    if (s == NULL) { fputc('-', f); return; }
+    if (s[0] == '-' && s[1] == '\0') { fputs("\\-", f); return; }
+    for (; *s != '\0'; s++) {
+        unsigned char c = (unsigned char)*s;
+        if (c == '\\')      { fputc('\\', f); fputc('\\', f); }
+        else if (c == ' ')  { fputc('\\', f); fputc('s', f); }
+        else if (c == '\n') { fputc('\\', f); fputc('n', f); }
+        else if (c == '\r') { fputc('\\', f); fputc('r', f); }
+        else if (c == '\t') { fputc('\\', f); fputc('t', f); }
+        else                { fputc(c, f); }
+    }
+}
+
 /* Forward declarations for emit-with-ids */
 static void img_emit_val_id(FILE *f, img_id_table *t, mino_val *v);
 static void img_emit_env(FILE *f, img_id_table *t, mino_env *env, uint32_t id);
@@ -740,14 +772,22 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
     }
     case MINO_MAP: {
         size_t i;
+        int flat = MINO_IS_PTR(v->as.map.val_order);
         fprintf(f, "%u M %zu", id, v->as.map.len);
-        if (MINO_IS_PTR(v->as.map.key_order) &&
-            MINO_IS_PTR(v->as.map.val_order)) {
+        /* HAMT maps (val_order NULL) keep keys in key_order and values
+         * in the trie; look them up per key like print_map does. The
+         * old val_order-only path emitted "M <len>" with no child ids
+         * for any map past the flatmap threshold, corrupting the
+         * image (the load then failed parsing the short map line). */
+        if (MINO_IS_PTR(v->as.map.key_order)) {
             for (i = 0; i < v->as.map.len; i++) {
+                mino_val *k = vec_nth(v->as.map.key_order, i);
+                mino_val *val = flat ? vec_nth(v->as.map.val_order, i)
+                                     : map_get_val(v, k);
                 fputc(' ', f);
-                img_emit_val_id(f, t, vec_nth(v->as.map.key_order, i));
+                img_emit_val_id(f, t, k);
                 fputc(' ', f);
-                img_emit_val_id(f, t, vec_nth(v->as.map.val_order, i));
+                img_emit_val_id(f, t, val != NULL ? val : v);
             }
         }
         fputc('\n', f);
@@ -825,7 +865,9 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         const char *sp = mino_store_path(v);
         fprintf(f, "%u ST ", id);
         img_emit_val_id(f, t, v->as.store.val);
-        fprintf(f, " %s\n", sp ? sp : "-");
+        fputc(' ', f);
+        img_emit_path(f, sp);
+        fputc('\n', f);
         break;
     }
     case MINO_BIGINT: {

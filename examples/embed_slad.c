@@ -140,6 +140,25 @@ int main(void)
     define_or_die(A, env_a, "(def rt-meta (with-meta [1 2 3] {:tag :kept}))",
                  "rt-meta");
 
+    /* A durable store whose path contains a space. The ST image line
+     * emits the path as a whitespace-delimited token, so an unescaped
+     * space would truncate the path on load (and a newline could inject
+     * a fake line). This is the only round-trip coverage for the ST
+     * save/load path; the single-state Clojure harness cannot load. */
+    #define STORE_DIR  "/tmp/mino_slad_c7/has space"
+    #define STORE_PATH STORE_DIR "/store"
+    remove(STORE_PATH);
+    remove(STORE_PATH ".wal");
+    define_or_die(A, env_a, "(mkdir-p \"" STORE_DIR "\")",
+                 "mkdir spaced store dir");
+    define_or_die(A, env_a,
+                 "(do (require 'mino.store)"
+                 "  (def rt-store (mino.store/open \"" STORE_PATH "\")))",
+                 "rt-store");
+    define_or_die(A, env_a,
+                 "(mino.store/transact rt-store {:k {:v 1}})",
+                 "rt-store tx");
+
     /* Sanity: state A works before saving. */
     failures += verify_long(A, env_a, "(rt-fn 7)", 49, "A: fn works");
     failures += verify_long(A, env_a, "@rt-atom", 99, "A: atom value");
@@ -232,10 +251,37 @@ int main(void)
     failures += verify_true(B, env_b, "(= (:tag (meta rt-meta)) :kept)",
                             "B: metadata");
 
+    /* Store round-trip: the in-memory db restores and the spaced path
+     * survives the escaped ST token. A regression in the path escape
+     * truncates mino_store_path here. mino.store is a stdlib ns skipped
+     * on save, so require it fresh in B before the script calls. */
+    failures += verify_true(B, env_b,
+                            "(do (require 'mino.store)"
+                            "  (mino.store/store? rt-store))",
+                            "B: store restored");
+    failures += verify_long(B, env_b,
+                            "(do (require 'mino.store)"
+                            "  (mino.store/read (mino.store/db rt-store) :k :v))",
+                            1, "B: store read");
+    {
+        mino_val *st = mino_eval_string(B, "rt-store", env_b);
+        const char *got = (st != NULL) ? mino_store_path(st) : NULL;
+        if (got == NULL || strcmp(got, STORE_PATH) != 0) {
+            fprintf(stderr,
+                    "FAIL B: store path round-trip: got \"%s\", expected \"%s\"\n",
+                    got ? got : "(null)", STORE_PATH);
+            failures++;
+        } else {
+            printf("ok B: store path with space round-tripped\n");
+        }
+    }
+
     /* Vars are re-registered and resolvable. */
     failures += verify_resolves(B, env_b, "rt-fn", "B: resolve rt-fn");
 
     remove(IMG_PATH);
+    remove(STORE_PATH);
+    remove(STORE_PATH ".wal");
 
     if (failures > 0) {
         fprintf(stderr, "%d failures\n", failures);

@@ -206,6 +206,34 @@ static char *img_parse_token(const char **pp)
     return out;
 }
 
+/* Unescape a store path token in place. Inverse of img_emit_path in
+ * image.c: \\, \s, \n, \r, \t, \- map to \, space, newline, CR, tab, -.
+ * An unknown escape keeps the escaped char literally (lenient forward
+ * compat). Called only on a non-sentinel path token, so a raw "-" is
+ * never passed through here as the nil marker. */
+static void img_path_unescape(char *s)
+{
+    char *w = s, *r = s;
+    while (*r != '\0') {
+        if (*r == '\\' && r[1] != '\0') {
+            r++;
+            switch (*r) {
+                case '\\': *w++ = '\\'; break;
+                case 's':  *w++ = ' ';  break;
+                case 'n':  *w++ = '\n'; break;
+                case 'r':  *w++ = '\r'; break;
+                case 't':  *w++ = '\t'; break;
+                case '-':  *w++ = '-';  break;
+                default:   *w++ = *r;   break;
+            }
+            r++;
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+}
+
 /* Allocate a value for the given ID based on its type tag.
  * Stores the raw line for the patch pass. */
 static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
@@ -650,7 +678,11 @@ static int img_patch_one(img_reader *r, uint32_t id)
         v->as.store.store_id = (uint64_t)(uintptr_t)v;
         v->as.store.owning_state = S;
         if (path_str && strcmp(path_str, "-") != 0) {
-            /* Create a proper store handle via the public constructor */
+            /* Create a proper store handle via the public constructor.
+             * The path was escaped on save (img_emit_path) so a path
+             * containing spaces/newlines survives the whitespace-delimited
+             * token format; unescape it back before reopening. */
+            img_path_unescape(path_str);
             mino_val *tmp = mino_store_val(S, v->as.store.val, path_str,
                                              NULL, NULL);
             if (tmp != NULL) {
