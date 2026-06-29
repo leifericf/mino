@@ -432,7 +432,17 @@ static int img_alloc_one(img_reader *r, uint32_t id, const char *type_tag,
         } else if (strcmp(type_tag, "TR") == 0) {
             v = alloc_val(S, MINO_TRANSIENT);
         } else {
-            v = mino_nil(S); /* unsupported type → nil */
+            /* Unknown type tag: ADR 17 says substitute nil AND record
+             * the ID and tag in a warning log so the data loss is
+             * visible. The image still loads; references to this ID
+             * resolve to nil. There is no in-process log framework, so
+             * the warning goes to stderr -- the established channel for
+             * runtime notices (install.c, sequences.c). */
+            fprintf(stderr,
+                    "load-image: warning: unknown type tag '%s' for id "
+                    "%u; substituting nil\n",
+                    type_tag, id);
+            v = mino_nil(S);
         }
     }
 
@@ -642,7 +652,7 @@ static int img_patch_one(img_reader *r, uint32_t id)
         if (path_str && strcmp(path_str, "-") != 0) {
             /* Create a proper store handle via the public constructor */
             mino_val *tmp = mino_store_val(S, v->as.store.val, path_str,
-                                            NULL, NULL);
+                                             NULL, NULL);
             if (tmp != NULL) {
                 v->as.store.handle = tmp->as.store.handle;
                 tmp->as.store.handle = NULL; /* prevent double-free */
