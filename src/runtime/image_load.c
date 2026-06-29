@@ -605,10 +605,18 @@ static int img_patch_one(img_reader *r, uint32_t id)
         ns_str = img_parse_token(&p);
         if (!img_parse_ll(&p, &shape)) { free(ns_str); free(tag); return 0; }
         /* Multi-arity fns have params == NULL (C NULL, not tagged nil).
-         * img_resolve_val returns tagged nil for ID 0; convert back. */
+         * img_resolve_val returns tagged nil for ID 0; convert back.
+         * wraps_prim / template_fn likewise use id 0 -> NULL. */
         {
-            mino_val *params = img_resolve_val(r, pid);
+            uint32_t wid, tid;
+            mino_val *params;
+            if (!img_parse_u32(&p, &wid) || !img_parse_u32(&p, &tid)) {
+                free(ns_str); free(tag); return 0;
+            }
+            params = img_resolve_val(r, pid);
             v->as.fn.params = MINO_IS_NIL(params) ? NULL : params;
+            v->as.fn.wraps_prim  = wid == 0 ? NULL : img_resolve_val(r, wid);
+            v->as.fn.template_fn = tid == 0 ? NULL : img_resolve_val(r, tid);
         }
         v->as.fn.body = img_resolve_val(r, bid);
         v->as.fn.env = img_resolve_env(r, eid);
@@ -616,8 +624,6 @@ static int img_patch_one(img_reader *r, uint32_t id)
                                ? intern_var_str(r->S, ns_str) : NULL;
         v->as.fn.shape = (int)shape;
         v->as.fn.bc = NULL;
-        v->as.fn.wraps_prim = NULL;
-        v->as.fn.template_fn = NULL;
         free(ns_str);
     } else if (strcmp(tag, "A") == 0) {
         uint32_t vid, wid, valid;
@@ -667,13 +673,13 @@ static int img_patch_one(img_reader *r, uint32_t id)
         v->as.ratio.num = img_resolve_val(r, nid);
         v->as.ratio.denom = img_resolve_val(r, did);
     } else if (strcmp(tag, "ST") == 0) {
-        uint32_t dbid;
+        uint32_t dbid, wid;
         char *path_str;
         mino_val *v = r->id_vals[id];
-        if (!img_parse_u32(&p, &dbid)) { free(tag); return 0; }
+        if (!img_parse_u32(&p, &dbid) || !img_parse_u32(&p, &wid)) { free(tag); return 0; }
         path_str = img_parse_token(&p);
         v->as.store.val = img_resolve_val(r, dbid);
-        v->as.store.watches = NULL;
+        v->as.store.watches = wid == 0 ? NULL : img_resolve_val(r, wid);
         v->as.store.handle = NULL;
         /* Assign a fresh per-state counter rather than reusing the
          * (uintptr_t)v address leak. Matches mino_store_val. */
@@ -875,7 +881,26 @@ static int img_patch_one(img_reader *r, uint32_t id)
                 fnames[fi] = (MINO_IS_PTR(kw) && mino_type_of(kw) == MINO_KEYWORD)
                     ? kw->as.s.data : "_";
             }
-            /* Call mino_defrecord to get the canonical type (idempotent) */
+            /* Call mino_defrecord to get the canonical type (idempotent).
+             *
+             * Known deferral -- record TYPE pointer identity is NOT
+             * preserved across save/load: `(= (type rt-rec) Point)` is
+             * false after load even though field access works. The cause
+             * is patch ordering + table repoint. The VAR holding `Point`
+             * is patched in pass 1, where img_resolve_val(type_id) returns
+             * this shell; pass 2 (TY) then calls mino_defrecord, which
+             * creates a NEW canonical type and repoints r->id_vals[id]
+             * at it. Records patched in pass 3 see the canonical type, but
+             * the pass-1 var root still holds the shell pointer, so the
+             * two differ. ANY value holding a type reference patched
+             * before TY (var roots, vectors/atoms containing a type) gets
+             * the shell. The robust fix is to mutate the shell IN PLACE
+             * into the canonical type and repoint the record_types
+             * registry entry at the shell (so every reference agrees),
+             * but that is GC-sensitive (the freshly-built canonical
+             * becomes unreachable mid-patch) and touches defrecord
+             * semantics, so it is deferred to a dedicated change. See
+             * embed_slad.c's record note for the behavioural pin. */
             {
                 mino_val *real_type = mino_defrecord(S,
                     ns_str && strcmp(ns_str, "-") != 0 ? ns_str : "user",

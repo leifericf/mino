@@ -820,9 +820,19 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         img_emit_val_id(f, t, v->as.fn.body);
         fputc(' ', f);
         img_emit_env_id(f, t, v->as.fn.env);
-        fprintf(f, " %s %d\n",
+        fprintf(f, " %s %d",
                 v->as.fn.defining_ns ? v->as.fn.defining_ns : "-",
                 v->as.fn.shape);
+        /* wraps_prim / template_fn are visited as children; emit their
+         * ids so a round-trip preserves the prim fast-lane and the
+         * closure->template back-pointer instead of dropping them (and
+         * leaving the visited prim/template as orphan image lines).
+         * NULL maps to id 0, inverse of the patch-side 0 -> NULL. */
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.fn.wraps_prim);
+        fputc(' ', f);
+        img_emit_val_id(f, t, v->as.fn.template_fn);
+        fputc('\n', f);
         break;
     case MINO_ATOM:
         fprintf(f, "%u A ", id);
@@ -865,6 +875,13 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         const char *sp = mino_store_path(v);
         fprintf(f, "%u ST ", id);
         img_emit_val_id(f, t, v->as.store.val);
+        fputc(' ', f);
+        /* watches mirrors the atom/var/tx-ref layout. Today store->watches
+         * is vestigial (stores are not in watchable_get, so add-watch never
+         * populates it), but emitting it keeps the visit/emit pair symmetric
+         * and the format ready if store watches are ever wired. id 0 -> NULL
+         * on the patch side. */
+        img_emit_val_id(f, t, v->as.store.watches);
         fputc(' ', f);
         img_emit_path(f, sp);
         fputc('\n', f);
