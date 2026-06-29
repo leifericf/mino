@@ -831,6 +831,41 @@
     (is (= #{} (store/entities (store/db conn))))
     (is (= 0 (:tx (store/db conn))))))
 
+(deftest store-tx-data-rejects-degenerate-attribute
+  ;; An attribute key names a property of an entity. An empty string or
+  ;; empty keyword is always a caller bug -- a typo, an unbound slot, or
+  ;; a missing input. Reject at validate-fact rather than storing under
+  ;; a key that no later read can usefully reference.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add 1 "" "X"]))
+        "empty string attribute rejected")
+    (is (thrown? (store/transact conn [:db/add 1 (keyword "") "X"]))
+        "empty keyword attribute rejected")
+    (is (= #{} (store/entities (store/db conn))))
+    (is (= 0 (:tx (store/db conn))))))
+
+(deftest store-tx-data-rejects-degenerate-eid
+  ;; Entity ids must be positive integers (Datomic reserves negatives
+  ;; for tempids; mino has no tempids yet, so negatives are reserved)
+  ;; or keywords (natural-key style; mino also accepts lookup-refs
+  ;; resolved before validate-fact). Zero, floats, strings, and
+  ;; unresolved vectors are caller bugs and must throw.
+  (let [conn (store/open)]
+    (is (thrown? (store/transact conn [:db/add -1 :name "Neg"]))
+        "negative eid rejected")
+    (is (thrown? (store/transact conn [:db/add 0 :name "Zero"]))
+        "zero eid rejected")
+    (is (thrown? (store/transact conn [:db/add 1.5 :name "Float"]))
+        "float eid rejected")
+    (is (thrown? (store/transact conn [:db/add "alice" :name "Str"]))
+        "string eid rejected")
+    (is (thrown? (store/transact conn [:db/add [:email "x@y.z"] :name "Lookup"]))
+        "unresolved lookup-ref eid rejected")
+    ;; Positive ints and keywords remain valid.
+    (is (store/transact conn [:db/add 1 :name "Alice"]))
+    (is (store/transact conn [:db/add :bob :name "Bob"]))
+    (is (= #{1 :bob} (store/entities (store/db conn))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Indexes
 ;; ---------------------------------------------------------------------------
