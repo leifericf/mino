@@ -234,11 +234,18 @@ static void var_hash_rebuild(mino_state *S)
 
 /* ----- public surface ---------------------------------------------- */
 
-/* Add a var to the registry arrays. The ns and name must already be
- * interned via intern_var_str. Returns 0 on success, -1 on OOM. */
-int var_registry_add(mino_state *S, const char *i_ns, const char *i_name,
+/* Add a var to the registry arrays. ns and name are interned internally
+ * (intern_var_str is idempotent, so an already-interned pointer is a
+ * fast hash-hit no-op). This removes the old footgun where a caller
+ * passing a non-interned string stored a pointer the hash lookup (which
+ * keys on the interned pointer) would never find, silently producing a
+ * duplicate registry entry and a lookup miss. Returns 0 on success,
+ * -1 on OOM. */
+int var_registry_add(mino_state *S, const char *ns, const char *name,
                       mino_val *var)
 {
+    const char *i_ns   = intern_var_str(S, ns);
+    const char *i_name = intern_var_str(S, name);
     if (S->ns_vars.var_registry_len == S->ns_vars.var_registry_cap) {
         size_t       new_cap, byte_sz;
         var_entry_t *nb;

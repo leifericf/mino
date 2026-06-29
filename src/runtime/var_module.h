@@ -36,8 +36,13 @@ mino_env *current_ns_env(mino_state *S);                    /* GC-owned, rooted 
 /* var.c: var registry helpers. */
 mino_val    *var_intern(mino_state *S, const char *ns, const char *name);
 const char *intern_var_str(mino_state *S, const char *s);
-int            var_registry_add(mino_state *S, const char *i_ns,
-                                const char *i_name, mino_val *var);
+/* var_registry_add: append (ns, name, var) to the linear registry and
+ * the lookup hash. ns and name are interned internally (idempotent), so
+ * callers may pass either an already-interned pointer or a fresh string;
+ * the registry never stores a non-interned pointer that a later
+ * var_find (which keys on the interned pointer) would miss. */
+int            var_registry_add(mino_state *S, const char *ns,
+                                const char *name, mino_val *var);
 void           var_set_root(mino_state *S, mino_val *var, mino_val *val);
 mino_val    *var_find(mino_state *S, const char *ns, const char *name);
 void           var_unintern(mino_state *S, const char *ns, const char *name);
