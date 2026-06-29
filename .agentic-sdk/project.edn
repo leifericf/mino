@@ -28,10 +28,10 @@
  :dimensions-active #{:correctness :factoring :style :conformance
                       :security :performance :memory :portability}
 
- :spine
- {:runtime     :babashka                          ; bb on PATH; full spine
-  :store       :edn
-  :working-dir ".agentic-sdk/state/"}
+  :spine
+  {:runtime     :mino                              ; mino self-host: spine runs on the mino runtime
+   :store       :edn
+   :working-dir ".agentic-sdk/state/"}
 
  :adr        {:store "docs/adr/" :format :nygard} ; mino already tracks docs/adr/
 
