@@ -105,6 +105,28 @@
                            ": expected " type-spec)
                       {:attribute attr :value val :expected type-spec}))))))))
 
+(defn- eid-ok?
+  "Returns true if e is a valid entity id: a positive integer (>= 1,
+  matching Datomic's address space and reserving negatives for future
+  tempid support) or a keyword (natural-key style; lookup-refs are
+  resolved before this check, so unresolved vectors fail here)."
+  [e]
+  (cond
+    (integer? e) (pos? e)
+    (keyword? e) true
+    :else false))
+
+(defn- attr-ok?
+  "Returns true if a is a valid attribute key: a non-empty keyword
+  (the Datomic convention) or a non-empty string (some callers use
+  string keys). nil is handled by the caller; empty keys are always
+  a caller bug and surface here."
+  [a]
+  (cond
+    (keyword? a) (not= (keyword "") a)
+    (string? a)  (not= "" a)
+    :else false))
+
 (defn- validate-fact
   "Validates a single fact against the schema. Throws ex-info on
   violation: nil entity-id, nil attribute, unknown attribute in a
@@ -116,10 +138,20 @@
     (throw
       (ex-info "nil entity id is not allowed"
                {:attribute a})))
+  (when (not (eid-ok? e))
+    (throw
+      (ex-info (str "Invalid entity id (must be a positive integer or a keyword): "
+                    (pr-str e))
+               {:entity e :attribute a})))
   (when (nil? a)
     (throw
       (ex-info "nil attribute is not allowed"
                {:entity e})))
+  (when (not (attr-ok? a))
+    (throw
+      (ex-info (str "Invalid attribute (must be a non-empty keyword or string): "
+                    (pr-str a))
+               {:entity e :attribute a})))
   (let [spec (get schema a)]
     (when (and closed? (not spec))
       (throw
