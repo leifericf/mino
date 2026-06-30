@@ -481,14 +481,14 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
                                   "run: chdir to %s failed: %s\n",
                                   dir, strerror(errno));
                 if (mn > 0)
-                    write(STDERR_FILENO, msg, (size_t)mn);
+                    (void)write(STDERR_FILENO, msg, (size_t)mn);
                 _exit(127);
             }
             execvp(argv[0], argv);
             /* execvp failed: report and exit. */
             {
                 const char *msg = "run: exec failed\n";
-                write(STDERR_FILENO, msg, strlen(msg));
+                (void)write(STDERR_FILENO, msg, strlen(msg));
             }
             _exit(127);
         }
