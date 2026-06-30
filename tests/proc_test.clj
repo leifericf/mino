@@ -54,8 +54,11 @@
   ;; silently run the command in the inherited cwd and report success.
   ;; Qualified clojure.core/run: bare `run` collides with core.logic's
   ;; run macro when the full suite loads core.logic before proc_test.
-  (let [result (clojure.core/run {:dir "/no/such/mino-dir-xyz"} "true")]
-    (is (= 127 (:exit result)))
-    (is (pstr/includes? (:err result) "chdir"))))
+  ;; `run` is POSIX-only (fork/execvp); on Windows it throws, so skip
+  ;; there rather than report a spurious error.
+  (when-not (some? (getenv "OS"))
+    (let [result (clojure.core/run {:dir "/no/such/mino-dir-xyz"} "true")]
+      (is (= 127 (:exit result)))
+      (is (pstr/includes? (:err result) "chdir")))))
 
 (run-tests-and-exit)
