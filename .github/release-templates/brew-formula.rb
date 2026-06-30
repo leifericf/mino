@@ -6,22 +6,22 @@ class Mino < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/leifericf/mino/releases/download/v__VERSION_NUMBER__/mino_darwin_arm64_v__VERSION_NUMBER__.tar.gz"
+      url "https://github.com/leifericf/mino/releases/download/__VERSION_NUMBER__/mino_darwin_arm64___VERSION_NUMBER__.tar.gz"
       sha256 "__SHA_DARWIN_ARM64__"
     end
     on_intel do
-      url "https://github.com/leifericf/mino/releases/download/v__VERSION_NUMBER__/mino_darwin_amd64_v__VERSION_NUMBER__.tar.gz"
+      url "https://github.com/leifericf/mino/releases/download/__VERSION_NUMBER__/mino_darwin_amd64___VERSION_NUMBER__.tar.gz"
       sha256 "__SHA_DARWIN_AMD64__"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/leifericf/mino/releases/download/v__VERSION_NUMBER__/mino_linux_arm64_v__VERSION_NUMBER__.tar.gz"
+      url "https://github.com/leifericf/mino/releases/download/__VERSION_NUMBER__/mino_linux_arm64___VERSION_NUMBER__.tar.gz"
       sha256 "__SHA_LINUX_ARM64__"
     end
     on_intel do
-      url "https://github.com/leifericf/mino/releases/download/v__VERSION_NUMBER__/mino_linux_amd64_v__VERSION_NUMBER__.tar.gz"
+      url "https://github.com/leifericf/mino/releases/download/__VERSION_NUMBER__/mino_linux_amd64___VERSION_NUMBER__.tar.gz"
       sha256 "__SHA_LINUX_AMD64__"
     end
   end
