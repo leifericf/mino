@@ -1,6 +1,22 @@
 (require "tests/test")
+(require '[clojure.string :as str])
 
 ;; Collections and keywords as callable functions (IFn).
+
+;; --- Vars as functions ---
+;; clojure.lang.Var implements IFn, so a var in function position
+;; invokes its bound value. Covers both the tree-walk eval path
+;; (top-level / unresolved heads) and the bytecode call path (a var
+;; handed to and called by a compiled fn).
+
+(deftest var-as-fn-via-resolve
+  (is (= "HI" ((resolve 'clojure.string/upper-case) "hi")))
+  (is (= "YO" ((var clojure.string/upper-case) "yo"))))
+
+(deftest var-as-fn-through-compiled-fn
+  (let [call-it (fn [f x] (f x))]
+    (is (= 42 (call-it (resolve 'clojure.core/inc) 41)))
+    (is (= "ABC" (call-it (resolve 'str/upper-case) "abc")))))
 
 ;; --- Maps as functions ---
 

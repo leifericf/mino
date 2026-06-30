@@ -589,6 +589,28 @@ static mino_val *eval_apply_regular_call(mino_state *S, mino_val *form,
     if (fn == NULL) {
         return NULL;
     }
+    /* A var in function position invokes its bound value (Clojure:
+     * clojure.lang.Var implements IFn, so ((resolve 'f) x) calls the
+     * fn the var holds). Unwrap after the IC block above so the
+     * cache's "don't cache vars" fill condition stays literal, then
+     * let the normal PRIM/FN/non-fn-callable dispatch handle the
+     * root. apply_callable does the same unwrap on the apply path. */
+    if (mino_type_of(fn) == MINO_VAR) {
+        if (!fn->as.var.bound) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "var is unbound: %s/%s",
+                     fn->as.var.ns ? fn->as.var.ns : "?",
+                     fn->as.var.sym ? fn->as.var.sym : "?");
+            set_eval_diag(S, form, "eval/type", "MTY002", msg);
+            return NULL;
+        }
+        fn = fn->as.var.root;
+        if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
+            set_eval_diag(S, form, "eval/type", "MTY002",
+                "var has nil root");
+            return NULL;
+        }
+    }
     /* Pin fn: eval_args allocates, and the conservative stack
      * scanner may miss fn if the compiler keeps it in a register. */
     gc_pin(fn);
