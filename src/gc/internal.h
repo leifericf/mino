@@ -143,8 +143,10 @@ char  *dup_n_inner(mino_state *S, const char *s, size_t len);
  * its own NULL return; callers that detect allocation failure outside
  * the GC path -- e.g. checked-size overflow before a raw malloc/realloc,
  * or a non-GC heap returning NULL -- route through here so the failure
- * shape is uniform. */
-void gc_oom_throw(mino_state *S, const char *msg);
+ * shape is uniform. Never returns: longjmps into the active try frame,
+ * or aborts. Marked noreturn so callers' capacity-growth paths are not
+ * flagged for possibly-uninitialized uses past the throw. */
+__attribute__((noreturn)) void gc_oom_throw(mino_state *S, const char *msg);
 
 #ifdef MINO_ALLOC_PROFILE
 void mino_alloc_profile_record(const char *file, int line,

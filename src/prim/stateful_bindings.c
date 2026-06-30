@@ -65,7 +65,7 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
             }
             if (dup) { free(heap_key); continue; }
             if (len == cap) {
-                size_t       new_cap;
+                size_t       new_cap = 0;
                 mino_val **nk;
                 mino_val **nv;
                 size_t       j;

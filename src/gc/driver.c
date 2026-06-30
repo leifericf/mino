@@ -415,7 +415,7 @@ static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
  * deliberate deviation: the embedder model requires that OOM be
  * recoverable when a try frame is in place, so the host can free
  * resources and retry rather than crashing the process. */
-void gc_oom_throw(mino_state *S, const char *msg)
+__attribute__((noreturn)) void gc_oom_throw(mino_state *S, const char *msg)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
