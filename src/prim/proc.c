@@ -375,8 +375,8 @@ static void free_argv(char **argv)
  * directory. Never throws on non-zero exit; throws only on spawn failure. */
 static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *opts = NULL;
 #ifndef _WIN32
+    mino_val *opts = NULL;
     const char *dir = NULL;
 #endif
     char **argv = NULL;
@@ -392,9 +392,9 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
     {
         mino_val *first = args->as.cons.car;
         if (mino_type_of(first) == MINO_MAP) {
-            opts = first;
             args = args->as.cons.cdr;
 #ifndef _WIN32
+            opts = first;
             if (opts != NULL) {
                 mino_val *dir_val = map_get_val(opts, mino_keyword(S, "dir"));
                 if (dir_val != NULL && mino_type_of(dir_val) == MINO_STRING)
