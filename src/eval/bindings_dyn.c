@@ -51,13 +51,13 @@ static int push_dyn_binding(mino_state *S, mino_val *form,
         set_eval_diag(S, form, "eval/binding", "MBN001", msg);
         return 0;
     }
-    /* Snapshot current_ns once per frame when the frame binds
-     * clojure.core/*ns*. *ns* reads return current_ns directly, so the
-     * frame must restore it on teardown to give `binding` its
-     * thread-local scope over ns mutations (in-ns / ns inside the
-     * body). dyn_frame_restore_ns consumes the snapshot at every pop
-     * site. Taken before the value form evaluates so any in-ns there
-     * is also scoped. */
+    /* Snapshot current_ns once per frame when the frame binds the
+     * clojure.core star-ns dynamic var. Reads of that var return
+     * current_ns directly, so the frame must restore it on teardown
+     * to give `binding` its thread-local scope over ns mutations
+     * (in-ns / ns inside the body). dyn_frame_restore_ns consumes
+     * the snapshot at every pop site. Taken before the value form
+     * evaluates so any in-ns there is also scoped. */
     if (frame->saved_ns == NULL
         && var != NULL && var->as.var.dynamic
         && var->as.var.ns != NULL && strcmp(var->as.var.ns, "clojure.core") == 0
@@ -209,9 +209,9 @@ mino_binding_frame *mino_push_bindings(mino_state *S,
     frame->bindings = bhead;
     frame->building = 0;
     frame->prev     = mino_current_ctx(S)->dyn_stack;
-    /* Mirror eval_binding: if this frame binds clojure.core/*ns*,
-     * snapshot current_ns so mino_pop_bindings can restore it (reads
-     * of *ns* return current_ns directly). */
+    /* Mirror eval_binding: if this frame binds the clojure.core
+     * star-ns dynamic var, snapshot current_ns so mino_pop_bindings
+     * can restore it (reads of that var return current_ns directly). */
     if (S->ns_vars.current_ns != NULL) {
         dyn_binding_t *b;
         for (b = bhead; b != NULL; b = b->next) {

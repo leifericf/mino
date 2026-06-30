@@ -377,13 +377,14 @@ void dyn_binding_list_free(dyn_binding_t *head)
 }
 
 /* Restore S->ns_vars.current_ns from a binding frame that snapshotted
- * it (i.e. the frame bound clojure.core/*ns*). *ns* reads return
- * current_ns directly, so a binding scope must restore it on teardown
- * or an in-ns inside the body leaks past the frame. No-op when the
- * frame did not bind *ns* (saved_ns == NULL). Re-publishes so the
- * clojure.core/*ns* var root tracks the restored namespace. Called
- * from every dyn_frame teardown site (pop_dyn_frame, the throw-unwind
- * loop in control.c, and mino_pop_bindings). */
+ * it (i.e. the frame bound the clojure.core star-ns dynamic var).
+ * Reads of that var return current_ns directly, so a binding scope
+ * must restore it on teardown or an in-ns inside the body leaks past
+ * the frame. No-op when the frame did not bind that var (saved_ns ==
+ * NULL). Re-publishes so the clojure.core star-ns var root tracks the
+ * restored namespace. Called from every dyn_frame teardown site
+ * (pop_dyn_frame, the throw-unwind loop in control.c, and
+ * mino_pop_bindings). */
 void dyn_frame_restore_ns(mino_state *S, dyn_frame_t *f)
 {
     if (f != NULL && f->saved_ns != NULL) {
