@@ -63,7 +63,7 @@ jobs:
             /^#define MINO_VERSION_MAJOR/ {maj=$3}
             /^#define MINO_VERSION_MINOR/ {min=$3}
             /^#define MINO_VERSION_PATCH/ {pat=$3}
-            END {print maj"."min"."pat}
+            END {printf "%s.%02d.%02d", maj, min, pat}
           ' src/mino.h)"
           tag_base="${TAG%%-*}"
           if [ "$src_ver" != "$tag_base" ]; then
