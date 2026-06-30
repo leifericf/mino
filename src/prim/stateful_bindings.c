@@ -237,7 +237,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
         bhead = b;
     }
 
-    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) {
         dyn_binding_list_free(bhead);
         return prim_throw_classified(S, "eval/contract", "MIN001",
@@ -306,7 +306,7 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
             bhead = b;
         }
     }
-    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) {
         dyn_binding_list_free(bhead);
         return prim_throw_classified(S, "eval/contract", "MIN001",

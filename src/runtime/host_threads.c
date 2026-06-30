@@ -373,7 +373,7 @@ static void worker_run(mino_future *impl, char *stack_anchor)
             }
             mino_unlock(S);
             if (!oom) {
-                conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
+                conveyed = (dyn_frame_t *)calloc(1, sizeof(*conveyed));
                 if (conveyed == NULL) { dyn_binding_list_free(bhead); }
                 else {
                     conveyed->bindings = bhead;

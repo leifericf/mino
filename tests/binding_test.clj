@@ -174,4 +174,49 @@
   ;; Read via the home-ns fn (unqualified read in home ns) to confirm root.
   (is (= :root (dyn.bind.throw.home/dbt-trd))))
 
+;; ---------------------------------------------------------------------------
+;; *ns* save/restore. *ns* is backed by the runtime's current-ns field
+;; (reads return it directly), so a `binding` scope must snapshot and
+;; restore it -- otherwise an in-ns / ns inside the body leaks past the
+;; frame. Mirrors Clojure, where Var thread-binds *ns*.
+;; ---------------------------------------------------------------------------
+
+(deftest binding-ns-restore-after-in-ns
+  (in-ns 'bind.ns.check)
+  (is (= 'bind.ns.check (ns-name *ns*)))
+  (binding [*ns* *ns*]
+    (in-ns 'user))
+  (is (= 'bind.ns.check (ns-name *ns*)))
+  (in-ns 'user))
+
+(deftest binding-ns-body-reflects-in-ns-then-restores
+  (in-ns 'bind.ns.check2)
+  (binding [*ns* *ns*]
+    (is (= 'bind.ns.check2 (ns-name *ns*)))
+    (in-ns 'user)
+    (is (= 'user (ns-name *ns*))))
+  (is (= 'bind.ns.check2 (ns-name *ns*)))
+  (in-ns 'user))
+
+(deftest binding-ns-nested-restore
+  (in-ns 'bind.ns.outer)
+  (binding [*ns* *ns*]
+    (in-ns 'user)
+    (binding [*ns* *ns*]
+      (in-ns 'bind.ns.inner)
+      (is (= 'bind.ns.inner (ns-name *ns*))))
+    (is (= 'user (ns-name *ns*))))
+  (is (= 'bind.ns.outer (ns-name *ns*)))
+  (in-ns 'user))
+
+(deftest binding-ns-restores-on-throw
+  (in-ns 'bind.ns.throw)
+  (try
+    (binding [*ns* *ns*]
+      (in-ns 'user)
+      (throw :boom))
+    (catch _e nil))
+  (is (= 'bind.ns.throw (ns-name *ns*)))
+  (in-ns 'user))
+
 (run-tests-and-exit)

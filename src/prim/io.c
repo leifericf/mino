@@ -278,7 +278,7 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
                         : "*out*";
         binding->val  = atom_val;
         binding->next = NULL;
-        frame = (dyn_frame_t *)malloc(sizeof(*frame));
+        frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
         if (frame == NULL) {
             free(binding);
             prim_throw_classified(S, "internal", "MIN001",

@@ -86,6 +86,13 @@ typedef struct dyn_frame {
     dyn_binding_t       *bindings;
     int                  building;
     struct dyn_frame    *prev;
+    /* When this frame binds clojure.core/*ns*, snapshot of
+     * S->ns_vars.current_ns to restore on pop. *ns* is backed by the
+     * C current_ns field (reads return it directly), so a `binding`
+     * scope must save/restore current_ns -- otherwise an in-ns inside
+     * the body leaks past the frame. NULL when the frame does not
+     * bind *ns*. calloc-zeroed at every alloc site. */
+    const char          *saved_ns;
 } dyn_frame_t;
 
 /* Environment binding. */

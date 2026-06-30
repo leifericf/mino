@@ -393,7 +393,7 @@ static void agent_worker_run_one(mino_state *S, agent_action_node_t *n)
             bhead = b;
         }
         if (!oom) {
-            conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
+            conveyed = (dyn_frame_t *)calloc(1, sizeof(*conveyed));
             if (conveyed == NULL) { dyn_binding_list_free(bhead); bhead = NULL; }
             else {
                 conveyed->bindings = bhead;

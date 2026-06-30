@@ -1122,7 +1122,7 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
             b->next = bhead;
             bhead   = b;
         }
-        dyn_frame_t *frame = (dyn_frame_t *)malloc(sizeof(*frame));
+        dyn_frame_t *frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
         if (frame == NULL) {
             dyn_binding_list_free(bhead);
             *ok = 0; return 0;

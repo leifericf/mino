@@ -51,6 +51,19 @@ static int push_dyn_binding(mino_state *S, mino_val *form,
         set_eval_diag(S, form, "eval/binding", "MBN001", msg);
         return 0;
     }
+    /* Snapshot current_ns once per frame when the frame binds
+     * clojure.core/*ns*. *ns* reads return current_ns directly, so the
+     * frame must restore it on teardown to give `binding` its
+     * thread-local scope over ns mutations (in-ns / ns inside the
+     * body). dyn_frame_restore_ns consumes the snapshot at every pop
+     * site. Taken before the value form evaluates so any in-ns there
+     * is also scoped. */
+    if (frame->saved_ns == NULL
+        && var != NULL && var->as.var.dynamic
+        && var->as.var.ns != NULL && strcmp(var->as.var.ns, "clojure.core") == 0
+        && var->as.var.sym != NULL && strcmp(var->as.var.sym, "*ns*") == 0) {
+        frame->saved_ns = S->ns_vars.current_ns;
+    }
     val = eval(S, val_form, env);
     if (val == NULL) return 0;
     b = (dyn_binding_t *)malloc(sizeof(*b));
@@ -73,6 +86,7 @@ static int push_dyn_binding(mino_state *S, mino_val *form,
 static void pop_dyn_frame(mino_state *S, dyn_frame_t *frame)
 {
     mino_current_ctx(S)->dyn_stack = frame->prev;
+    dyn_frame_restore_ns(S, frame);
     dyn_binding_list_free(frame->bindings);
     free(frame);
 }
@@ -106,7 +120,7 @@ mino_val *eval_binding(mino_state *S, mino_val *form,
         set_eval_diag(S, form, "syntax", "MSY001", "binding requires a binding list and body");
         return NULL;
     }
-    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) {
         set_eval_diag(S, form, "internal", "MIN001", "binding: out of memory");
         return NULL;
@@ -190,11 +204,27 @@ mino_binding_frame *mino_push_bindings(mino_state *S,
         if (b == NULL) { dyn_binding_list_free(bhead); return NULL; }
         bhead = b;
     }
-    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) { dyn_binding_list_free(bhead); return NULL; }
     frame->bindings = bhead;
     frame->building = 0;
     frame->prev     = mino_current_ctx(S)->dyn_stack;
+    /* Mirror eval_binding: if this frame binds clojure.core/*ns*,
+     * snapshot current_ns so mino_pop_bindings can restore it (reads
+     * of *ns* return current_ns directly). */
+    if (S->ns_vars.current_ns != NULL) {
+        dyn_binding_t *b;
+        for (b = bhead; b != NULL; b = b->next) {
+            if (b->var != NULL
+                && b->var->as.var.ns != NULL
+                && strcmp(b->var->as.var.ns, "clojure.core") == 0
+                && b->var->as.var.sym != NULL
+                && strcmp(b->var->as.var.sym, "*ns*") == 0) {
+                frame->saved_ns = S->ns_vars.current_ns;
+                break;
+            }
+        }
+    }
     mino_current_ctx(S)->dyn_stack = frame;
     return (mino_binding_frame *)frame;
 }
@@ -220,11 +250,13 @@ void mino_pop_bindings(mino_state *S, mino_binding_frame *frame)
            && mino_current_ctx(S)->dyn_stack != df) {
         dyn_frame_t *top = mino_current_ctx(S)->dyn_stack;
         mino_current_ctx(S)->dyn_stack = top->prev;
+        dyn_frame_restore_ns(S, top);
         dyn_binding_list_free(top->bindings);
         free(top);
     }
     if (mino_current_ctx(S)->dyn_stack == df) {
         mino_current_ctx(S)->dyn_stack = df->prev;
+        dyn_frame_restore_ns(S, df);
         dyn_binding_list_free(df->bindings);
         free(df);
     }

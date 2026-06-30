@@ -333,6 +333,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         while (mino_current_ctx(S)->dyn_stack != saved_dyn) {
             dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
             mino_current_ctx(S)->dyn_stack = f->prev;
+            dyn_frame_restore_ns(S, f);
             dyn_binding_list_free(f->bindings);
             /* Mirror eval_binding's normal-path free(frame); the
              * frame is malloc'd in bindings.c (heap-allocated so
@@ -407,6 +408,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 while (mino_current_ctx(S)->dyn_stack != id) {
                     dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
                     mino_current_ctx(S)->dyn_stack = f->prev;
+                    dyn_frame_restore_ns(S, f);
                     dyn_binding_list_free(f->bindings);
                     free(f);
                 }

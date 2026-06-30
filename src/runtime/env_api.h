@@ -39,6 +39,7 @@ mino_val    *dyn_lookup_sym(mino_state *S, const char *data, size_t n);
 dyn_binding_t *dyn_binding_make(mino_state *S, mino_val *key,   /* caller owns node */
                         mino_val *val, dyn_binding_t *next);
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
+void           dyn_frame_restore_ns(mino_state *S, dyn_frame_t *f); /* restore *ns* on teardown */
 
 /* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
  * Returns mino_nil(S) when the stack is empty. Used by future spawn to
