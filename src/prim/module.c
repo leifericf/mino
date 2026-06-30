@@ -170,6 +170,24 @@ static mino_val *require_load_path(mino_state *S, mino_val *name_val,
         const char *saved_ambient = S->ns_vars.fn_ambient_ns;
         const char *post_ns;
         S->ns_vars.fn_ambient_ns = NULL;
+        /* A namespace load is a top-level boundary: evaluate the file
+         * in a clean lexical env so the closures it defines capture
+         * only their own namespace's bindings, never the caller's
+         * locals. require may be called from inside a fn whose scope
+         * has a local shadowing a clojure.core name (e.g. a `let`
+         * bound `ns-name`); if the load inherited that scope, every
+         * fn defined in the loaded file would resolve the shadowed
+         * global to the caller's local value at runtime, surfacing as
+         * "not a function (got string)". A fresh root env breaks the
+         * capture; free vars in the file still resolve through the
+         * current ns env and clojure.core as usual. */
+        mino_env *load_env = mino_env_new(S);
+        if (load_env == NULL) {
+            if (S->module.load_stack_len > 0) {
+                free(S->module.load_stack[--S->module.load_stack_len]);
+            }
+            return NULL;
+        }
         if (bundled_source != NULL) {
             /* Bundled load: eval the in-memory source directly. Set
              * reader_file to a synthetic <bundled name> path so any
@@ -179,11 +197,12 @@ static mino_val *require_load_path(mino_state *S, mino_val *name_val,
             char        synth[256];
             snprintf(synth, sizeof(synth), "<bundled %s>", name);
             S->reader.reader_file = intern_filename(S, synth);
-            result         = mino_eval_string(S, bundled_source, env);
+            result         = mino_eval_string(S, bundled_source, load_env);
             S->reader.reader_file = saved_file;
         } else {
-            result = mino_load_file(S, path, env);
+            result = mino_load_file(S, path, load_env);
         }
+        (void)env;  /* caller's lexical env is intentionally not shared with the load */
         post_ns = S->ns_vars.current_ns;
         S->ns_vars.current_ns    = saved_ns;
         S->ns_vars.fn_ambient_ns = saved_ambient;
