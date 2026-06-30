@@ -2,7 +2,7 @@ name: release-build
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', '[0-9]*']
   workflow_dispatch:
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
 
       - name: Verify tag matches src/mino.h
         run: |
-          src_ver="v$(awk '
+          src_ver="$(awk '
             /^#define MINO_VERSION_MAJOR/ {maj=$3}
             /^#define MINO_VERSION_MINOR/ {min=$3}
             /^#define MINO_VERSION_PATCH/ {pat=$3}
