@@ -1181,9 +1181,13 @@ int mino_load_image_into(mino_state *S, const char *path)
 
     /* Verify magic */
     if (strncmp(buf, IMG_MAGIC, strlen(IMG_MAGIC)) != 0) {
+        /* Free buf BEFORE set_eval_diag: when a load is attempted inside
+         * a (try ...), set_eval_diag longjmps to raise the diagnostic as
+         * a catchable exception, skipping any code after it. Freeing
+         * afterwards would leak the file buffer on every rejected image. */
+        free(buf);
         set_eval_diag(S, NULL, "io", "MIO001",
                        "load-image: bad magic");
-        free(buf);
         return -1;
     }
 
@@ -1209,8 +1213,8 @@ int mino_load_image_into(mino_state *S, const char *path)
             snprintf(diag, sizeof diag,
                 "load-image: v1 image missing CRC32 trailer "
                 "(file truncated or corrupt)");
+            free(buf);  /* before set_eval_diag: it longjmps under a try */
             set_eval_diag(S, NULL, "io", "MIO001", diag);
-            free(buf);
             return -1;
         }
         /* crc_pos points right after the \n before CRC32 */
@@ -1223,8 +1227,8 @@ int mino_load_image_into(mino_state *S, const char *path)
             snprintf(diag, sizeof diag,
                 "load-image: CRC mismatch (stored %08x, computed %08x)",
                 stored_crc, computed_crc);
+            free(buf);  /* before set_eval_diag: it longjmps under a try */
             set_eval_diag(S, NULL, "io", "MIO001", diag);
-            free(buf);
             return -1;
         }
         /* Restore the \n for line parsing */
