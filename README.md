@@ -36,9 +36,9 @@ Documentation: [mino-lang.org](https://mino-lang.org)
 
 ## Versioning
 
-Pre-1.0.0: semantic versioning applies informally. Any minor version bump (0.X) may contain breaking changes to the embedding API, the language, or the standalone binary. Every break is called out under the corresponding version heading in `CHANGELOG.md` so embedders can audit the delta before upgrading. Patch versions (0.X.Y) are reserved for bug fixes and non-breaking additions.
+mino uses calendar versioning ([CalVer](https://calver.org)): `YYYY.MM.DD[-prerelease]`, e.g. `2026.06.30-alpha1`. A release on the same day bumps the prerelease suffix (`-alpha2`, `-alpha3`, ...; `-betaN`, then the unqualified date for a stable release).
 
-Post-1.0.0: strict [SemVer 2.0.0](https://semver.org/spec/v2.0.0.html). Breaking changes happen only at major bumps; minor bumps add API; patch bumps fix bugs.
+Stable releases (`YYYY.MM.DD` with no suffix) aim to be backward compatible within the language and the embedding API. Anything labelled `-alphaN` or `-betaN` is a preview and may change or break before the stable release on that date. Every change of note is called out under the corresponding version heading in `CHANGELOG.md` so embedders can audit the delta before upgrading.
 
 The ABI freeze is scheduled for the v1.0 cycle; until then, `src/mino.h` continues to carry evolving-API language.
 

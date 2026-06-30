@@ -34,20 +34,24 @@
 /* ------------------------------------------------------------------------- */
 
 /*
- * Compile-time version constants, bumped by the release process. Host code
- * can check these at preprocessor time to guard against embedding against an
- * unexpected runtime:
+ * Compile-time version constants, bumped by the release process. mino
+ * uses calendar versioning (YYYY.MM.DD[-prerelease]); MAJOR/MINOR/PATCH
+ * carry the year/month/day numerically for any preprocessor-time check,
+ * and MINO_VERSION is the canonical, pre-formatted string (zero-padded,
+ * with any prerelease suffix) returned by mino_version_string().
  *
- *   #if MINO_VERSION_MAJOR == 0 && MINO_VERSION_MINOR < 48
- *   # error "embedded mino is too old; need >= 0.48"
+ *   #if MINO_VERSION_MAJOR < 2026
+ *   # error "embedded mino is too old"
  *   #endif
  *
- * The linked-in version (which may differ if the header was updated without
- * rebuilding the runtime) is available at runtime via mino_version_string().
+ * The linked-in version (which may differ if the header was updated
+ * without rebuilding the runtime) is available at runtime via
+ * mino_version_string().
  */
-#define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 425
-#define MINO_VERSION_PATCH 0
+#define MINO_VERSION_MAJOR 2026
+#define MINO_VERSION_MINOR 6
+#define MINO_VERSION_PATCH 30
+#define MINO_VERSION       "2026.06.30-alpha1"
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".

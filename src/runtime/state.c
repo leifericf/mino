@@ -53,14 +53,9 @@ void      mino_agent_quiesce_workers(mino_state *S);
 /* Version                                                                   */
 /* ------------------------------------------------------------------------- */
 
-#define MINO_VERSION_STR_HELPER(x) #x
-#define MINO_VERSION_STR(x) MINO_VERSION_STR_HELPER(x)
-
 const char *mino_version_string(void)
 {
-    return MINO_VERSION_STR(MINO_VERSION_MAJOR) "."
-           MINO_VERSION_STR(MINO_VERSION_MINOR) "."
-           MINO_VERSION_STR(MINO_VERSION_PATCH);
+    return MINO_VERSION;
 }
 
 /* ------------------------------------------------------------------------- */
