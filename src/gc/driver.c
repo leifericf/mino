@@ -577,7 +577,7 @@ char *dup_n_inner(mino_state *S, const char *s, size_t len)
 static void gc_mark_stack_push_raw(mino_state *S, gc_hdr_t *h)
 {
     if (S->gc.mark_stack_len == S->gc.mark_stack_cap) {
-        size_t     new_cap;
+        size_t     new_cap = 0;
         gc_hdr_t **ns;
         if (S->gc.mark_stack_cap == 0) {
             new_cap = GC_MARK_STACK_INIT;
