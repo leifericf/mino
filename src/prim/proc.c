@@ -292,7 +292,9 @@ static mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- run: subprocess with separate stdout, stderr, and exit ---- */
 
-/* Append data to a dynamic buffer. Returns 0 on success, -1 on OOM. */
+/* Append data to a dynamic buffer. Returns 0 on success, -1 on OOM.
+ * Used only by the POSIX run path. */
+#ifndef _WIN32
 static int buf_append(char **buf, size_t *len, size_t *cap,
                       const char *data, size_t n)
 {
@@ -313,6 +315,7 @@ static int buf_append(char **buf, size_t *len, size_t *cap,
     *len += n;
     return 0;
 }
+#endif
 
 /* Build a C argv array from a mino cons list of string arguments.
  * Each string is malloc'd and null-terminated. The array itself is
@@ -373,7 +376,9 @@ static void free_argv(char **argv)
 static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *opts = NULL;
+#ifndef _WIN32
     const char *dir = NULL;
+#endif
     char **argv = NULL;
     size_t argc = 0;
     (void)env;
@@ -389,11 +394,13 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         if (mino_type_of(first) == MINO_MAP) {
             opts = first;
             args = args->as.cons.cdr;
+#ifndef _WIN32
             if (opts != NULL) {
                 mino_val *dir_val = map_get_val(opts, mino_keyword(S, "dir"));
                 if (dir_val != NULL && mino_type_of(dir_val) == MINO_STRING)
                     dir = dir_val->as.s.data;
             }
+#endif
         }
     }
 
@@ -480,15 +487,22 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
                 int mn = snprintf(msg, sizeof msg,
                                   "run: chdir to %s failed: %s\n",
                                   dir, strerror(errno));
-                if (mn > 0)
-                    (void)write(STDERR_FILENO, msg, (size_t)mn);
+                if (mn > 0) {
+                    /* best-effort diagnostic in the child before _exit.
+                     * Capture the result to satisfy glibc's
+                     * warn_unused_result on write; the value itself is
+                     * not needed (the child exits regardless). */
+                    ssize_t wr = write(STDERR_FILENO, msg, (size_t)mn);
+                    (void)wr;
+                }
                 _exit(127);
             }
             execvp(argv[0], argv);
             /* execvp failed: report and exit. */
             {
                 const char *msg = "run: exec failed\n";
-                (void)write(STDERR_FILENO, msg, strlen(msg));
+                ssize_t wr = write(STDERR_FILENO, msg, strlen(msg));
+                (void)wr;
             }
             _exit(127);
         }
