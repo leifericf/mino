@@ -203,6 +203,11 @@ jobs:
           exit $RC
         timeout-minutes: 12
 
+      - name: Embed API smoke test
+        if: matrix.os != 'windows-2022'
+        run: ./mino task test-embed
+        timeout-minutes: 5
+
   # Stencil determinism, re-armed.
   #
   # A previous `cross-compile` job regenerated each target's stencil
