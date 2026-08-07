@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fix: The standalone REPL now refers `clojure.repl` (`doc`, `source`, `dir`, `find-doc`, `pst`) into the `user` namespace at startup, so `(doc map)` works with no manual `require`, matching `clj` (`clojure.main/repl` does the same at its `:init`). Previously `doc` was unbound and `(clojure.repl/doc map)` errored "no var doc in namespace clojure.repl" until a manual `(require 'clojure.repl)`; the macros in `lib/clojure/repl.clj` were registered as bundled source but never loaded into the REPL ns. Root-caused in `main.c` `run_repl` (no `:init`-style refer); embedded envs are unaffected since they never enter `run_repl`. Regression-pinned by a subprocess smoke test that spawns the binary in REPL mode, since the in-process harness never enters `run_repl`.
+
 ## 2026.08.07-alpha1 — def semantics fixes, public text accessors, satellite resync
 
 - Fix: `def` in a function body now binds the value into the namespace environment on the bytecode path, matching the tree-walker. Previously `OP_SETGLOBAL` interned the var and set its root but skipped the env bind, so a function-local `def` was invisible to subsequent top-level symbol resolution until the next GC cycle happened to fix up the binding. Root-caused in `src/eval/bc/vm.c` `OP_SETGLOBAL`; the fix mirrors `eval_def` in `src/eval/defs.c`.
