@@ -13,14 +13,18 @@
 ;; unbound-symbol error (stderr). POSIX-only, like proc_test's
 ;; run-reports-failed-chdir: mino's stdin redirect is POSIX.
 
-(deftest repl-doc-available-without-require
+(deftest repl-clojure-repl-helpers-available-without-require
   (when-not (some? (getenv "OS"))
-    (spit "/tmp/mino_repl_doc_probe.txt" "(doc map)\n")
+    (spit "/tmp/mino_repl_doc_probe.txt"
+      "(doc map)\n(apropos \"cons\")\n")
     (let [result (sh "sh" "-c"
                      "./mino < /tmp/mino_repl_doc_probe.txt")
           out    (:out result)]
       (is (= 0 (:exit result)))
       (is (re-find #"lazy sequence" out))
+      ;; apropos is a referable clojure.repl var: available unqualified,
+      ;; returns namespace-qualified symbols across all loaded namespaces.
+      (is (re-find #"clojure\.core/cons" out))
       (is (not (re-find #"MNS001" out))))))
 
 (run-tests-and-exit)

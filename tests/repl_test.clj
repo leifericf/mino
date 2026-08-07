@@ -19,10 +19,16 @@
 
 (deftest apropos-finds-substring
   (let [r (apropos "cons")]
-    (is (cons? r))))
+    (is (seq? r))
+    ;; Namespace-qualified symbols (clojure.repl/apropos parity), not
+    ;; the bare names the old C primitive returned.
+    (is (some #{'clojure.core/cons} r))))
 
 (deftest apropos-empty-on-miss
-  (is (= nil (apropos "zzz_no_such_thing_zzz"))))
+  ;; clojure.repl/apropos returns an empty seq, not nil.
+  (let [r (apropos "zzz_no_such_thing_zzz")]
+    (is (not (nil? r)))
+    (is (empty? r))))
 
 ;; clojure.repl macros emit prints; we just confirm they return nil and don't
 ;; throw. with-out-str captures the printed text.
