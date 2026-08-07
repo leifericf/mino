@@ -939,7 +939,7 @@ static int run_repl(mino_state *S, mino_env *env,
      * doc-string, source-form) are deliberately not referred, since
      * refer rejects bindings without an owning var. */
     (void)mino_eval_string(S,
-        "(require '[clojure.repl :refer [doc source dir find-doc pst]])",
+        "(require '[clojure.repl :refer [doc source dir find-doc pst apropos]])",
         env);
     fputs("mino=> ", stderr);
     fflush(stderr);

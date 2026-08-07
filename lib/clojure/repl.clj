@@ -22,6 +22,21 @@
      (when s# (prn s#))
      nil))
 
+(defn apropos
+  "Given a regular expression or stringable thing, return a sorted seq of
+  all public definitions in all currently-loaded namespaces whose names
+  match str-or-pattern (substring for strings, re-find for regexes), as
+  namespace-qualified symbols. Parity with clojure.repl/apropos."
+  [str-or-pattern]
+  (let [pat    (if (regex? str-or-pattern) str-or-pattern (str str-or-pattern))
+        match? (if (regex? str-or-pattern)
+                 (fn [s] (re-find pat s))
+                 (fn [s] (clojure.string/includes? s pat)))]
+    (sort (for [ns-name (all-ns)
+                sym     (keys (ns-publics ns-name))
+                :when   (match? (str sym))]
+            (symbol (str ns-name) (str sym))))))
+
 (defn find-doc
   "Prints documentation for any var whose documentation or name contains
   a match for `re-string-or-pattern`, where the pattern is a regex or a

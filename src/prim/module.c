@@ -1046,54 +1046,6 @@ static mino_val *prim_source(mino_state *S, mino_val *args, mino_env *env)
     return mino_nil(S);
 }
 
-/* (apropos substring) -- return a list of bound names containing substring. */
-static mino_val *prim_apropos(mino_state *S, mino_val *args, mino_env *env)
-{
-    mino_val *pat_val;
-    const char *pat;
-    mino_val *head = mino_nil(S);
-    mino_val *tail = NULL;
-    mino_env *e;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001", "apropos requires one argument");
-        return NULL;
-    }
-    pat_val = args->as.cons.car;
-    if (pat_val == NULL || mino_type_of(pat_val) != MINO_STRING) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "apropos: argument must be a string");
-        return NULL;
-    }
-    pat = pat_val->as.s.data;
-    /* Walk every env frame from the given env up to root, then also
-     * the current namespace chain so primitives interned in clojure.core
-     * are reachable when the caller env doesn't chain into it. */
-    {
-        mino_env *chains[2];
-        size_t      ci;
-        chains[0] = env;
-        chains[1] = current_ns_env(S);
-        for (ci = 0; ci < 2; ci++) {
-            for (e = chains[ci]; e != NULL; e = e->parent) {
-                size_t i;
-                if (ci == 1 && e == chains[0]) continue;
-                for (i = 0; i < e->len; i++) {
-                    if (strstr(e->bindings[i].name, pat) != NULL) {
-                        mino_val *sym  = mino_symbol(S, e->bindings[i].name);
-                        mino_val *cell = mino_cons(S, sym, mino_nil(S));
-                        if (tail == NULL) {
-                            head = cell;
-                        } else {
-                            mino_cons_cdr_set(S, tail, cell);
-                        }
-                        tail = cell;
-                    }
-                }
-            }
-        }
-    }
-    return head;
-}
-
 void mino_set_resolver(mino_state *S, mino_resolve_fn fn, void *ctx)
 {
     S->module.module_resolver     = fn;
@@ -1273,18 +1225,17 @@ const size_t k_prims_module_count =
 
 /* clojure.repl primitives. Installed into the clojure.repl ns env, not
  * clojure.core, so a fresh user namespace gets these only after an
- * explicit (require '[clojure.repl :refer [doc apropos source]]).
+ * explicit (require '[clojure.repl :refer [doc source]]).
  *
- * The C primitives expose the data accessors (`doc-string`, `source-form`,
- * `apropos`); the user-facing `doc` / `source` macros and the higher-level
- * `dir`, `find-doc`, `pst` live in lib/clojure/repl.clj on top of these. */
+ * The C primitives expose the data accessors (`doc-string`, `source-form`)
+ * that read the C-level meta table; every user-facing helper -- `doc`,
+ * `source`, `apropos`, `dir`, `find-doc`, `pst` -- lives in
+ * lib/clojure/repl.clj as a referable var on top of these. */
 const mino_prim_def k_prims_clojure_repl[] = {
     {"doc-string",  prim_doc,
      "Returns the documentation string for the named var, or nil."},
     {"source-form", prim_source,
      "Returns the source form for the named var, or nil."},
-    {"apropos",     prim_apropos,
-     "Returns a list of vars whose names contain the given substring."},
 };
 
 const size_t k_prims_clojure_repl_count =
