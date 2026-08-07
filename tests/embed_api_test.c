@@ -64,14 +64,14 @@ static mino_val *prim_boom(mino_state *S, mino_val *args,
 static void test_version(void)
 {
     const char *v = mino_version_string();
-    char        expected[32];
-    snprintf(expected, sizeof(expected), "%d.%d.%d",
+    char        prefix[32];
+    snprintf(prefix, sizeof(prefix), "%d.%02d.%02d",
              MINO_VERSION_MAJOR, MINO_VERSION_MINOR, MINO_VERSION_PATCH);
     REQUIRE(v != NULL, "mino_version_string returned NULL");
-    REQUIRE(v != NULL && strcmp(v, expected) == 0,
+    REQUIRE(v != NULL && strncmp(v, prefix, strlen(prefix)) == 0,
             "mino_version_string does not match compile-time constants");
-    REQUIRE(MINO_VERSION_MAJOR == 0, "unexpected MAJOR");
-    REQUIRE(MINO_VERSION_MINOR >= 48, "unexpected MINOR");
+    REQUIRE(MINO_VERSION_MAJOR >= 2026, "unexpected MAJOR");
+    REQUIRE(MINO_VERSION_MINOR >= 1, "unexpected MINOR");
 }
 
 static void test_args_parse_ok(mino_state *S, mino_env *env)
