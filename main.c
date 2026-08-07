@@ -928,18 +928,19 @@ static int run_repl(mino_state *S, mino_env *env,
             fputs("Type :help for help, :quit to exit\n", stderr);
         }
     }
-    /* clojure.repl parity with clojure.main/repl's :init: load the
-     * macros and refer the REPL helpers into the user namespace so
-     * (doc map) works with no manual require. Standalone-only --
-     * embedded envs never enter run_repl. clojure.repl is always
-     * registered via mino_install_all, so this cannot legitimately
-     * fail; treat a failure as non-fatal so a stripped build still
-     * boots, just without doc. The five referred names are all vars
-     * defined in lib/clojure/repl.clj; the C primitives (apropos,
-     * doc-string, source-form) are deliberately not referred, since
-     * refer rejects bindings without an owning var. */
+    /* clojure.repl + clojure.pprint parity with clojure.main/repl's
+     * :init: load the macros/functions and refer the REPL helpers into
+     * the user namespace so (doc map), (apropos ...), and (pprint ...)
+     * work with no manual require. Standalone-only -- embedded envs
+     * never enter run_repl. Both libs are always registered via
+     * mino_install_all, so this cannot legitimately fail; treat a
+     * failure as non-fatal so a stripped build still boots, just
+     * without the helpers. The referred clojure.repl names are vars
+     * defined in lib/clojure/repl.clj; pprint/pp are vars in
+     * clojure.pprint. */
     (void)mino_eval_string(S,
-        "(require '[clojure.repl :refer [doc source dir find-doc pst apropos]])",
+        "(require '[clojure.repl :refer [doc source dir find-doc pst apropos]]"
+        " '[clojure.pprint :refer [pp pprint]])",
         env);
     fputs("mino=> ", stderr);
     fflush(stderr);
