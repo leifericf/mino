@@ -34,6 +34,7 @@
 (require "tests/io_test")
 (require "tests/reflection_test")
 (require "tests/repl_test")
+(require "tests/repl_doc_smoke_test")
 (require "tests/gc_test")
 (require "tests/regression_bc_clause_params_gc")
 (require "tests/math_test")
