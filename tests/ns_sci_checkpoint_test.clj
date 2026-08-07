@@ -87,9 +87,9 @@
     (is (= :success
            (deref (requiring-resolve 'foo.bar/x)))))
 
-  ;; thrown-with-msg? #"already refers to"
-  (is (thrown?
-       (eval (read-string "(do (ns foo (:require [clojure.string :refer [split]])) (declare split))")))))
+  ;; Clojure semantics: def shadows a referred binding (warn, not error).
+  (is (= :mine
+         (eval (read-string "(do (ns rc1 (:require [clojure.string :refer [split]])) (def split :mine) split)")))))
 
 ;; ---- use-test ----
 
@@ -113,12 +113,9 @@
   (is (thrown?
        (eval (read-string "(do (ns ut-a5) (use '[clojure.set :only [difference]]) (union #{1} #{2}))"))))
 
-  ;; thrown-with-msg? #"already refers to"
-  ;; capitalize is the mino-side definition that lives only in
-  ;; clojure.string; bringing it in via :use should still trigger the
-  ;; refer-collision when the ns already declares the same name.
-  (is (thrown?
-       (eval (read-string "(do (ns ut-a6 (:use clojure.string)) (declare capitalize))")))))
+  ;; Clojure semantics: def shadows a :use-referred binding (warn, not error).
+  (is (= :mine
+         (eval (read-string "(do (ns rc2 (:use clojure.string)) (def capitalize :mine) capitalize)")))))
 
 ;; ---- misc-namespace-test ----
 

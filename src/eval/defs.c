@@ -54,42 +54,6 @@ static mino_val *ns_meta_merge(mino_state *S,
     }
 }
 
-/* True if `name` is bound in the current ns env via :refer from another
- * namespace (env binding exists but no var owned by current_ns). Used by
- * def/declare/defmacro to surface a "already refers to" collision before
- * silently shadowing. Names that already have a var entry for the current
- * namespace are normal redefs and pass through. */
-static int refer_collision_check(mino_state *S, mino_val *form,
-                                 const char *name)
-{
-    mino_env    *ns_env;
-    env_binding_t *b;
-    if (S->ns_vars.current_ns == NULL) return 0;
-    /* clojure.core itself "owns" its primitives via env_bind at install
-     * time without interning vars; skip the check there so core.clj can
-     * def names whose primitive bindings live in the same env. */
-    if (strcmp(S->ns_vars.current_ns, "clojure.core") == 0) return 0;
-    ns_env = current_ns_env(S);
-    if (ns_env == NULL) return 0;
-    b = env_find_here(ns_env, name);
-    if (b == NULL) return 0;
-    if (var_find(S, S->ns_vars.current_ns, name) != NULL) return 0;
-    /* Every primitive is interned into its install-time namespace,
-     * so the var_find check above already exempts legitimate
-     * shadowing within the home ns (e.g. clojure.string wrappers
-     * over clojure.string primitives). A primitive binding that
-     * reaches this point was refer'd in from another ns; treat the
-     * new def as a real collision. */
-    {
-        char msg[300];
-        snprintf(msg, sizeof(msg),
-                 "%s already refers to a var from another namespace",
-                 name);
-        set_eval_diag(S, form, "name", "MNS001", msg);
-    }
-    return 1;
-}
-
 /* Process a single require spec from within an ns form.
  * spec is either a symbol (bare require) or a vector [mod.name :as alias ...].
  * Attempts to load the module via the resolver and stores aliases.
@@ -669,7 +633,6 @@ mino_val *eval_defmacro(mino_state *S, mino_val *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
-    if (refer_collision_check(S, form, buf)) return NULL;
     {
         int is_priv = 0;
         mino_val *m = name_form->meta;
@@ -721,7 +684,6 @@ mino_val *eval_declare(mino_state *S, mino_val *form,
         }
         memcpy(buf, sym->as.s.data, n);
         buf[n] = '\0';
-        if (refer_collision_check(S, form, buf)) return NULL;
         /* Intern the var so a later def/declare doesn't look like a
          * cross-namespace refer collision. Bind the VAR (not nil) into
          * the namespace env so symbol resolution lands on the var --
@@ -850,7 +812,6 @@ mino_val *eval_def(mino_state *S, mino_val *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
-    if (refer_collision_check(S, form, buf)) return NULL;
     /* Check for ^:dynamic / ^:private metadata on the name symbol. */
     {
         int is_dynamic = 0;
