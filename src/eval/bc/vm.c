@@ -970,6 +970,7 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         mino_val *var = var_intern(S, S->ns_vars.current_ns, sym->as.s.data);
         if (var == NULL) { *ok = 0; return 0; }
         var_set_root(S, var, v);
+        env_bind(S, current_ns_env(S), sym->as.s.data, v);
         S->ns_vars.ic_gen++;
         regs = S->bc.bc_regs + base;
         regs[a] = v;
