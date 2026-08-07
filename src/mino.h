@@ -527,6 +527,14 @@ void       *mino_handle_ptr(const mino_val *v);
 /* Return the type tag from a handle, or NULL if v is not a handle. */
 const char *mino_handle_tag(const mino_val *v);
 
+/* Return the byte content of a string, symbol, or keyword, or NULL
+ * for any other type. The pointer is owned by the GC; do not free. */
+const char *mino_text_data(const mino_val *v);
+
+/* Return the byte length of a string, symbol, or keyword, or 0 for
+ * any other type. */
+size_t      mino_text_len(const mino_val *v);
+
 /* Return 1 if v is an atom, 0 otherwise. */
 int         mino_is_atom(const mino_val *v);
 

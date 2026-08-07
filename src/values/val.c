@@ -816,6 +816,32 @@ int mino_is_record_type(const mino_val *v)
     return v != NULL && mino_type_of(v) == MINO_TYPE;
 }
 
+const char *mino_text_data(const mino_val *v)
+{
+    if (v == NULL) return NULL;
+    switch (mino_type_of(v)) {
+    case MINO_STRING:
+    case MINO_SYMBOL:
+    case MINO_KEYWORD:
+        return v->as.s.data;
+    default:
+        return NULL;
+    }
+}
+
+size_t mino_text_len(const mino_val *v)
+{
+    if (v == NULL) return 0;
+    switch (mino_type_of(v)) {
+    case MINO_STRING:
+    case MINO_SYMBOL:
+    case MINO_KEYWORD:
+        return v->as.s.len;
+    default:
+        return 0;
+    }
+}
+
 mino_val *mino_record(mino_state *S, mino_val *type,
                         mino_val **vals, size_t n_vals)
 {
