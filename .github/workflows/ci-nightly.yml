@@ -1,7 +1,7 @@
 name: ci-nightly
 
 # Runs the C embedding stress on every supported host once a day,
-# in addition to release-gate (which the PR matrix already runs).
+# in addition to release-gate (which the push matrix already runs).
 # GC stress and fault-injection tests live in the mino-tests
 # satellite repo's nightly workflow now.
 on:
@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Same host set as ci.yml's PR matrix. Windows skips the
+        # Same host set as ci.yml's push matrix. Windows skips the
         # extended battery for the same reason it skips release-gate
         # in ci.yml -- ASan path needs a libsanitizer mingw doesn't
         # ship, and several stress tasks depend on it.
@@ -66,7 +66,7 @@ jobs:
 
       - name: Release gate
         # First gate -- if release-gate fails, the rest of the
-        # nightly battery is noise. Same gate as PR CI; included
+        # nightly battery is noise. Same gate as push CI; included
         # here so nightly is self-contained.
         run: ./mino task release-gate
         timeout-minutes: 12
@@ -75,7 +75,7 @@ jobs:
         run: ./mino task test-embed
         timeout-minutes: 10
 
-  # Clang static-analyzer gate on one pinned-zig runner. Off the PR
+  # Clang static-analyzer gate on one pinned-zig runner. Off the push
   # path on purpose: the analyzer is slow (~90s) and its raw output is
   # noisy (clang cross-TU false positives), so it runs nightly rather
   # than gating every merge. Promoted from advisory to a GATE: the
