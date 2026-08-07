@@ -46,6 +46,20 @@ config is needed. Cache hit/miss is observable in each job's "Install pinned
 Zig" step log; there is nothing to tune here, only to watch if a run is
 unexpectedly slow.
 
+### setup-zig action runtime (Node 20)
+
+`mlugg/setup-zig@v2` (latest tag `v2.2.1`) still runs on the **Node 20**
+action runtime, which GitHub has deprecated. Runs are forced onto Node 24
+with a warning in every job log; the action itself works. The project is
+mirrored to GitHub from
+[Codeberg](https://codeberg.org/mlugg/setup-zig), and no Node-24 release
+exists upstream, so there is nothing to change here yet. When the
+maintainer ships a Node-24 build, the floating `@v2` tag picks it up
+automatically if it lands under the `v2` line; if it lands as a new
+major, bump the nine `@v2` references across `ci.yml`, `ci-nightly.yml`,
+and `release-build.yml`. Pinning the action to a commit SHA is a
+separate supply-chain hardening decision, not a Node-runtime fix.
+
 ## Pinned Zig version
 
 A few maintainer tasks shell out to [`zig cc`](https://ziglang.org) — a bundled,
