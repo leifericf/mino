@@ -26,3 +26,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [15](15-vector-embedding-scope.md) | Vector embedding and similarity search are out of scope for mino.store |
 | [16](16-binary-snapshot-format.md) | EDN text is the stable on-disk format for mino.store v1 |
 | [17](17-slad-forward-compatibility.md) | SLAD forward compatibility via skip-and-warn, plus an offline migration tool |
+| [18](18-analyze-zig-baseline-is-ci-specific.md) | The analyze-zig baseline is CI-specific (platform-conditional analyzer output) |
