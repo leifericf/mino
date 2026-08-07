@@ -59,7 +59,7 @@ jobs:
         shell: bash
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Bootstrap mino
         run: make
@@ -93,7 +93,7 @@ jobs:
         shell: bash
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.

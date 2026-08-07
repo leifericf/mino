@@ -24,7 +24,7 @@ jobs:
     env:
       CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Compiler version
         run: |
@@ -226,7 +226,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Version must match `zig-version-pin` in
@@ -254,7 +254,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -282,7 +282,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -307,7 +307,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -333,7 +333,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -369,7 +369,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -488,7 +488,7 @@ jobs:
       # the same suite without it.
       MINO_SLOW_HOST: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
@@ -519,7 +519,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Bootstrap mino (mingw gcc)
         run: make

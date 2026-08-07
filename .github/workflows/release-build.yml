@@ -55,7 +55,7 @@ jobs:
       CC: ${{ matrix.os == 'windows' && 'gcc' || 'cc' }}
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify tag matches src/mino.h
         run: |
@@ -147,7 +147,7 @@ jobs:
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install pinned Zig
         # Must match zig-version-pin in lib/mino/tasks/builtin.clj.

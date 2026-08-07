@@ -92,12 +92,12 @@ jobs:
       GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
     steps:
       - name: Checkout mino (for templates)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: mino
 
       - name: Checkout homebrew-mino main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: leifericf/homebrew-mino
           ref: main
@@ -142,12 +142,12 @@ jobs:
       GH_TOKEN: ${{ secrets.BUCKET_REPO_TOKEN }}
     steps:
       - name: Checkout mino (for templates)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: mino
 
       - name: Checkout scoop-mino main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: leifericf/scoop-mino
           ref: main
