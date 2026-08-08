@@ -1,9 +1,10 @@
 ;; clojure.repl - interactive helpers for the REPL.
 ;;
-;; The data accessors (`doc-string`, `source-form`, `apropos`) are interned
-;; into this namespace as C primitives. The user-facing `doc` and `source`
-;; macros, plus `dir`, `find-doc`, and `pst`, layer print formatting on
-;; top so REPL ergonomics match the canonical surface.
+;; The data accessors (`doc-string`, `source-form`) are interned as C
+;; primitives that read the meta table. Every user-facing helper in this
+;; file (`doc`, `source`, `apropos`, `dir`, `find-doc`, `pst`) is Clojure,
+;; layering print formatting on top so REPL ergonomics match the canonical
+;; surface.
 
 (ns clojure.repl)
 
