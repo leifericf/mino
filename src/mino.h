@@ -50,11 +50,11 @@
  */
 #define MINO_VERSION_MAJOR 2026
 #define MINO_VERSION_MINOR 8
-#define MINO_VERSION_PATCH 7
-#define MINO_VERSION       "2026.08.07-alpha1"
+#define MINO_VERSION_PATCH 8
+#define MINO_VERSION       "2026.08.08-alpha1"
 
 /*
- * Human-readable version string of the *linked* runtime, e.g. "2026.08.07".
+ * Human-readable version string of the *linked* runtime, e.g. "2026.08.08".
  * The pointer is to a static string with program lifetime; callers must not
  * free it.
  */
