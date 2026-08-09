@@ -5,7 +5,7 @@ Date: 2026-06-11
 ## Context
 
 `./mino task ci-matrix` built two Ubuntu images (`docker/*.Dockerfile`,
-linux/arm64 + linux/amd64) and ran `release-gate` inside each — a
+linux/arm64 + linux/amd64) and ran `release-gate` inside each, a
 local mirror of the CI matrix from before the zig toolchain lanes
 existed. By 2026-06 the zig axis provided `cross-build` (Linux
 amd64/arm64 + Windows artifacts from one host), `test-cross-qemu`
@@ -34,8 +34,8 @@ an unrelated GitHub action and stays.)
 
 ## Alternatives
 
-- **Keep both** — two overlapping local mirrors to maintain, with
+- **Keep both**: two overlapping local mirrors to maintain, with
   the Docker one slower and heavier. Rejected.
-- **Containerize the zig lanes instead** — adds the Docker
+- **Containerize the zig lanes instead**: adds the Docker
   dependency back for hermeticity zig already provides (pinned
   compiler, musl static linking). Rejected.

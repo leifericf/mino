@@ -5,10 +5,10 @@ There are two distinct audiences, and the toolchain line between them is firm:
 - **Building or embedding mino** needs only an **ANSI C compiler** plus
   **`make`**, with no external dependencies. That is the promise embedders rely
   on (`README.md`), and nothing here weakens it. Zig is **never** required for
-  this path — not for bootstrap, not for embedding, not for a from-source
+  this path: not for bootstrap, not for embedding, not for a from-source
   standalone build.
-- **Developing mino itself** — cutting a release, regenerating stencils, or
-  running the reproducible QA lanes — **requires the pinned `zig cc`**. This is
+- **Developing mino itself** (cutting a release, regenerating stencils, or
+  running the reproducible QA lanes) **requires the pinned `zig cc`**. This is
   a hard requirement for maintainers, not an optional extra. It stays entirely
   off the embedder path above.
 
@@ -24,7 +24,7 @@ The maintainer tasks that require the pinned `zig cc`:
 | `cross-build` (alias `release-cross`) | cross-compile the Linux + Windows release artifacts |
 | `build-all` | build every target (native + cross) from one host |
 | `sanitize-zig` | reproducible UBSan + TSan suite run, JIT-enabled, in auto and eager JIT mode |
-| `build-debug-zig` | dev binary at `zig cc -O0 -g` → `./mino_debug`; zig's default UBSan-trap aborts at the faulting instruction on UB |
+| `build-debug-zig` | dev binary at `zig cc -O0 -g` (produces `./mino_debug`); zig's default UBSan-trap aborts at the faulting instruction on UB |
 | `test-jit-host` | per-host JIT runtime canary: build the dormant JIT pipeline this machine can execute (plus a lean twin), full suite auto + eager, four-way parity |
 | `lint-zig` | curated strict-warning lane (a third compiler lens) |
 | `analyze-zig` | clang static-analyzer report (advisory, full output) |
@@ -41,7 +41,7 @@ Zig's global compile cache (`~/.cache/zig` / the per-OS equivalent) keyed on the
 zig version + source hashes. Because all the zig lanes
 (`stencil-determinism`, `sanitize-zig`, `lint-zig`, `build-zig-hermetic`,
 `darwin-zig-canary`, `jit-host-canary`, `analyze-zig`) share that action and the
-single pinned version, a warm cache carries across runs and jobs — no extra
+single pinned version, a warm cache carries across runs and jobs. No extra
 config is needed. Cache hit/miss is observable in each job's "Install pinned
 Zig" step log; there is nothing to tune here, only to watch if a run is
 unexpectedly slow.
@@ -62,7 +62,7 @@ separate supply-chain hardening decision, not a Node-runtime fix.
 
 ## Pinned Zig version
 
-A few maintainer tasks shell out to [`zig cc`](https://ziglang.org) — a bundled,
+A few maintainer tasks shell out to [`zig cc`](https://ziglang.org), a bundled,
 pinned Clang with first-class cross-compilation. Zig is **pre-1.0**: a minor
 version bump can shift the bundled LLVM and therefore the exact machine code it
 emits, so the version is pinned and must move deliberately.
@@ -85,7 +85,7 @@ change. `./mino task check-stencils-fresh-all` must be clean afterward.
 Installing a specific Zig is just a tarball extract; nothing about it needs to
 be on `PATH` for a normal build. Override the compiler with
 `STENCIL_CC=clang ./mino task gen-stencils-all` to use a host Clang instead
-(this opts out of byte reproducibility — the version pin is skipped).
+(this opts out of byte reproducibility: the version pin is skipped).
 
 ## Stencil regeneration
 
@@ -94,13 +94,13 @@ blobs and **committed** as headers under
 `src/eval/bc/stencils/generated/stencils_<arch>_<os>.h`. Normal builds and
 embedders consume those committed bytes and never invoke a stencil compiler.
 
-- `./mino task gen-stencils-all` — regenerate every target's header from one
+- `./mino task gen-stencils-all`: regenerate every target's header from one
   host via the pinned `zig cc`. Stencil sources are hermetic (only project
-  headers plus Clang-resource `<stdint.h>`/`<stddef.h>`), so all five targets —
-  including both macOS ones — cross-compile with no platform SDK.
-- `./mino task gen-stencils` / `gen-stencils-x86-64-linux` / … — regenerate a
+  headers plus Clang-resource `<stdint.h>`/`<stddef.h>`), so all five targets
+  (including both macOS ones) cross-compile with no platform SDK.
+- `./mino task gen-stencils` / `gen-stencils-x86-64-linux` / …: regenerate a
   single target. Thin wrappers over the same table (`stencil-targets`).
-- `./mino task check-stencils-fresh-all` — regenerate all targets and fail if
+- `./mino task check-stencils-fresh-all`: regenerate all targets and fail if
   `git diff` is non-empty. This is the **determinism gate**, run in CI on one
   pinned-Zig host (`stencil-determinism`). It must never run on the per-OS
   matrix: host compiler-version skew is exactly what forced the original
@@ -113,7 +113,7 @@ PE/COFF symbol naming is ABI-agnostic.
 
 ## Cross-compiled release binaries
 
-- `./mino task cross-build` (alias `release-cross`) — cross-compile the Linux
+- `./mino task cross-build` (alias `release-cross`): cross-compile the Linux
   (amd64/arm64) and Windows (amd64) release binaries from one host into
   `dist-cross/`. Each binary mirrors the native `make` config, so a cross-built
   artifact matches the corresponding native-matrix release binary.
@@ -122,11 +122,11 @@ Two deliberate boundaries:
 
 - **macOS is native-only.** The full runtime links libSystem and pulls system
   headers; Zig bundles no macOS SDK, so darwin release builds stay native
-  (`release-build.yml` matrix). Tier-1 darwin *stencils* are unaffected — they
+  (`release-build.yml` matrix). Tier-1 darwin *stencils* are unaffected; they
   need no SDK.
 - **Windows drops the `-static` hack.** zig's mingw links the compiler runtime
   statically by default, so the cross-built PE imports only the system
-  Universal CRT + `KERNEL32` — no `libgcc_s_seh-1.dll` /
+  Universal CRT + `KERNEL32`: no `libgcc_s_seh-1.dll` /
   `libwinpthread-1.dll`, and thus no `STATUS_DLL_NOT_FOUND` on a clean Windows
   install. CI asserts this in the `cross-build-validate` job.
 
@@ -134,13 +134,13 @@ The native release matrix in `release-build.yml` remains the source of the
 published artifacts and the portability canary (gcc + Apple Clang + mingw).
 `cross-build` runs *alongside* it as validation, never as a replacement.
 
-- `./mino task test-cross-qemu` — execute the cross-built
+- `./mino task test-cross-qemu`: execute the cross-built
   `linux-arm64-musl` artifact and run the full suite against it. The
   `cross-build-validate` job only `readelf`-inspects the arm64 binary (it
   can't run an AArch64 ELF natively on an x86_64 runner); this task closes
   that gap by registering `qemu-user-static` in `binfmt_misc` so the static
-  ELF executes transparently, then reusing `MINO_TEST_BIN` so the suite —
-  including its subprocess re-execs — runs through the arm64 binary. It
+  ELF executes transparently, then reusing `MINO_TEST_BIN` so the suite
+  (including its subprocess re-execs) runs through the arm64 binary. It
   runs without emulation on a native arm64 host, and **skips with a note**
   when no aarch64 binfmt handler is present (no `qemu-user-static`), so it
   is safe to invoke anywhere. In CI it is wired into `cross-build-validate`
@@ -149,14 +149,14 @@ published artifacts and the portability canary (gcc + Apple Clang + mingw).
   Local one-off: `sudo apt-get install -y qemu-user-static && ./mino task
   cross-build && ./mino task test-cross-qemu`.
 
-- `./mino task check-binary-reproducible` — gate that the published
+- `./mino task check-binary-reproducible`: gate that the published
   `linux-amd64-musl` artifact is reproducible: built twice from clean it must
   be **byte-identical**, and it must embed **no builder-specific absolute
-  path** (`$PWD` / `$HOME`) — a host-independent proxy for cross-machine
+  path** (`$PWD` / `$HOME`), a host-independent proxy for cross-machine
   reproducibility. The published binaries otherwise embed ~470 references to
   the builder's paths, carried in the **DWARF** of zig's bundled
   `libunwind`/`compiler_rt` objects (which `-ffile-prefix-map` can't reach).
-  `cross-build-one` strips them with `-Wl,--strip-debug` on the ELF targets —
+  `cross-build-one` strips them with `-Wl,--strip-debug` on the ELF targets,
   the only cross-arch, single-host fix (host binutils `strip` can't read a
   foreign-arch ELF; `zig objcopy --strip-debug` is unimplemented in 0.16).
   That fully strips the static link (`.debug_*` and `.symtab`), so the
@@ -169,8 +169,8 @@ published artifacts and the portability canary (gcc + Apple Clang + mingw).
 
 Every sanitizer build (host ASan in `release-gate`, pinned-zig UBSan + TSan in
 `sanitize-zig`) is JIT-enabled for the machine it runs on and drives the suite
-in both AUTO and eager (`--jit=on`) mode. That covers the JIT's entire C side —
-emit, patcher, helpers, invoke, safepoints, deopt — which is exactly the
+in both AUTO and eager (`--jit=on`) mode. That covers the JIT's entire C side
+(emit, patcher, helpers, invoke, safepoints, deopt), which is exactly the
 pointer-heavy code sanitizers exist for.
 
 The boundary: **JIT-emitted machine code is uninstrumented.** Stencil bytes
@@ -185,7 +185,7 @@ Only arm64 darwin runtime-enables the JIT in published artifacts. The other
 four committed pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
 behind per-host opt-in defines (`MINO_CPJIT_<ARCH>_<OS>` in
 `src/eval/bc/jit/internal.h`) and are exercised by the `jit-host-canary` CI
-matrix via `./mino task test-jit-host` — informational lanes until they hold a
+matrix via `./mino task test-jit-host`, informational lanes until they hold a
 green streak. On arm64 darwin machines the task cross-builds the Mach-O
 x86_64 pipeline and runs it under Rosetta 2.
 
@@ -200,7 +200,7 @@ streak.
 One known wrinkle gates the flip: zig 0.16.0's self-hosted Mach-O
 linker mis-binds the 2nd-and-later `__thread_vars` descriptor thunks
 to an unrelated libSystem import (observed `___clear_cache`,
-`_printf`) instead of `__tlv_bootstrap`. It is **harmless on macOS** —
+`_printf`) instead of `__tlv_bootstrap`. It is **harmless on macOS**:
 dyld4 rewrites every descriptor in the `__thread_vars` section to
 `_tlv_get_addr` at load regardless of the bound symbol, so the wrong
 bind never takes effect. The canary's full eager suite (mino uses
@@ -214,7 +214,7 @@ a zig bump that changes the mis-bind pattern surfaces before the flip.
 A minimal reproducer and an upstream-issue draft live under `.local/`
 (gitignored); the issue is not yet filed.
 
-**Flip checklist** (darwin artifact → zig): (1) canary green streak;
+**Flip checklist** (darwin artifact to zig): (1) canary green streak;
 (2) TLV tripwire green; (3) re-verify the mis-bind against the current
 zig pin and file/​link the upstream issue; then swap the
 `darwin-*` matrix entries in `release-build.yml` to a pinned-zig build
@@ -223,12 +223,12 @@ and invert the canary so Apple clang becomes the informational lens.
 ## Guardrails
 
 - **Zig is a toolchain, never a source language.** No `.zig` files in the
-  runtime, the tests, or the tooling — language behavior is tested in
+  runtime, the tests, or the tooling. Language behavior is tested in
   `tests/*_test.clj`, the C ABI in C embed tests. The only sanctioned Zig
   artifact is a `build.zig.zon` package smoke test, if one is ever added.
 - The embedder line is absolute: `zig` is never required to build or embed
   mino, nor for a from-source standalone build. `make` + `cc` stays the
-  canonical bootstrap. zig is a *maintainer* requirement only — it gates the
+  canonical bootstrap. zig is a *maintainer* requirement only: it gates the
   release / stencil / QA tasks listed above, never the embedder path.
 - Adopting `zig cc` only ever *adds* a compiler to CI; it never removes one.
   gcc, Apple Clang, and mingw stay in the matrix as portability canaries, and
@@ -236,26 +236,26 @@ and invert the canary so Apple clang becomes the informational lens.
 - Build orchestration stays in the self-hosted Clojure task runner; it shells
   `zig cc` underneath rather than moving anything into `build.zig`.
 
-## The toolchain ceiling (what zig 0.16 cannot do — don't re-spike)
+## The toolchain ceiling (what zig 0.16 cannot do, so don't re-spike)
 
 zig 0.16 is a superb *compiler + cross + linker*, but it ships **none of the
 LLVM runtime libraries** (asan, msan, fuzzer, profile) nor the **LLVM tool
 binaries** (`llvm-profdata`, `llvm-cov`). Anything needing those stays on a
-host LLVM/clang, off the pinned-zig path — by design, not oversight:
+host LLVM/clang, off the pinned-zig path, by design, not oversight:
 
-- **PGO** — investigated hands-on and deferred on three independently verified
+- **PGO**: investigated hands-on and deferred on three independently verified
   counts: zig ships no profile runtime (`-fprofile-generate` fails to link),
   no `llvm-profdata` to merge raw profiles, and zig's clang driver never
   registers the profile `atexit` writer even when both are supplied
   externally (zero `.profraw` written). Making it work would mean adopting a
   version-coupled second LLVM toolchain, contradicting the single-pin
-  mandate — and mino's hot path, the copy-and-patch JIT, is uninstrumentable
+  mandate; mino's hot path, the copy-and-patch JIT, is uninstrumentable
   by PGO anyway (stencils ship as committed machine-code bytes). Revisit only
   if zig bundles the profile runtime plus a `profdata` subcommand.
-- **ASan** — zig ships no asan runtime; stays on host `cc` (`release-gate`).
-- **MSan** — needs an MSan-instrumented libc zig's musl doesn't provide.
-- **libFuzzer** — fuzzer runtime missing; fuzzing stays on host clang
+- **ASan**: zig ships no asan runtime; stays on host `cc` (`release-gate`).
+- **MSan**: needs an MSan-instrumented libc zig's musl doesn't provide.
+- **libFuzzer**: fuzzer runtime missing; fuzzing stays on host clang
   (`mino-bench` `fuzz-build-libfuzzer`).
-- **Coverage rendering** — `zig cc` can instrument (`-fcoverage-mapping`) but
+- **Coverage rendering**: `zig cc` can instrument (`-fcoverage-mapping`) but
   zig exposes no `llvm-cov` / `llvm-profdata` to render reports.
-- **Debugger / profiler** — zig ships none; use lldb/gdb, perf/valgrind.
+- **Debugger / profiler**: zig ships none; use lldb/gdb, perf/valgrind.

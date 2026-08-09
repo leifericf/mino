@@ -1,4 +1,4 @@
-# ADR 01: Any ANSI C compiler + make builds mino — C99, no extensions
+# ADR 01: Any ANSI C compiler + make builds mino: C99, no extensions
 
 Date: 2026-06-11 (standing since inception; recorded retroactively)
 
@@ -34,13 +34,13 @@ matrix enforces the promise from five compiler perspectives.
 
 ## Alternatives
 
-- **C11 baseline** — gains atomics, `_Static_assert`, anonymous
+- **C11 baseline**: gains atomics, `_Static_assert`, anonymous
   unions; loses older toolchains and (at the time of adoption) full
   MSVC C11 coverage was still uneven. Rejected: the wins are
   conveniences, the losses are embedders.
-- **GNU extensions where convenient** — pragmatic short-term, but the
+- **GNU extensions where convenient**: pragmatic short-term, but the
   promise is binary: either any compiler builds mino or it doesn't.
   Rejected.
-- **C++ core with C API** — richer abstraction toolkit, but doubles
+- **C++ core with C API**: richer abstraction toolkit, but doubles
   the toolchain demands on embedders and contradicts the
   single-translation-unit amalgamation story. Rejected.

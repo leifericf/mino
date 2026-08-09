@@ -21,7 +21,7 @@ redundant-decls, format=2. Exclude, after site-by-site audits:
 
 - `-Wcast-qual` (~90 sites, all intentional const-drops: GC marking
   const-reachable objects, mutable-cache members like memoized
-  hashes, numeric accumulators — gating would force uintptr_t
+  hashes, numeric accumulators; gating would force uintptr_t
   laundering across delicate code for near-zero signal),
 - `-Wbad-function-cast` (~30 sites, idiomatic function-return casts),
 - `-Wmissing-field-initializers` (`{0}` partial-brace zero-init is
@@ -39,18 +39,18 @@ excluded idioms.
 
 - The lane stays at zero findings, so any new warning is signal.
 - `-Wmissing-prototypes`/`-Wmissing-variable-declarations` drove the
-  over-export audit to zero — static-by-default is now mechanical.
+  over-export audit to zero; static-by-default is now mechanical.
 - A periodic re-audit is legitimate when the codebase shifts; the
   def's docstring records audit dates.
 
 ## Alternatives
 
-- **-Weverything minus suppressions** — inverts the maintenance
+- **-Weverything minus suppressions**: inverts the maintenance
   burden: every clang release adds warnings that must be triaged
   under -Werror immediately. Rejected.
-- **Inline pragma suppressions at the ~120 audited sites** — makes
+- **Inline pragma suppressions at the ~120 audited sites**: makes
   the exclusions visible in code but smears 120 pragma blocks across
   delicate GC/numeric paths. Rejected.
-- **No third lens** — the native build already gates -Wall/-Wextra/
+- **No third lens**: the native build already gates -Wall/-Wextra/
   -Wpedantic, but zig's newer clang catches categories gcc misses;
   the lane is cheap (~10 s). Rejected.

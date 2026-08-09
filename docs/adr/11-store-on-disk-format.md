@@ -1,4 +1,4 @@
-# ADR 11: Store on-disk format — EDN text with version header, line-delimited WAL
+# ADR 11: Store on-disk format: EDN text with version header, line-delimited WAL
 
 Date: 2026-06-27
 
@@ -6,7 +6,7 @@ Date: 2026-06-27
 
 ADR 10 shipped an EAVT fact store with snapshot-on-checkpoint durability.
 The v1 snapshot format is bare EDN text: `mino_print_to` writes the db
-value, `mino_eval_string` reads it back. There is no WAL — transactions
+value, `mino_eval_string` reads it back. There is no WAL; transactions
 between checkpoints are lost on crash.
 
 Wave 1 adds a WAL for per-transaction durability and needs a stable
@@ -32,7 +32,7 @@ bytes 1+: EDN text of the db value, as produced by mino_print_to
 On read, the first byte is checked. If it is `0x00`, the rest of the
 file is parsed as EDN. If it is any other byte, the entire file is
 parsed as EDN (backward compatibility with v1 snapshots that have no
-header — the first character of a bare-EDN snapshot is always `{`,
+header; the first character of a bare-EDN snapshot is always `{`,
 which is `0x7B`, never `0x00`).
 
 Future versions reserve `0x01` for binary encoding. The version byte
@@ -50,7 +50,7 @@ Each line is a map with `:tx` (transaction number), `:instant`
 input in any form accepted by `parse-tx-data`). On replay, `apply-tx`
 is called for each entry in order.
 
-**WAL path**: `<snapshot-path>.wal` (e.g., `data.db` → `data.db.wal`).
+**WAL path**: `<snapshot-path>.wal` (e.g., `data.db` to `data.db.wal`).
 
 **Torn-write recovery**: on open, the WAL is read line by line. If a
 line fails to parse (torn write from a crash mid-append), parsing

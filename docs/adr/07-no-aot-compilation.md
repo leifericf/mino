@@ -1,4 +1,4 @@
-# ADR 07: No AOT compilation — the tiers stay interpreter, bytecode VM, and runtime JIT
+# ADR 07: No AOT compilation: the tiers stay interpreter, bytecode VM, and runtime JIT
 
 Date: 2026-06-12
 
@@ -11,7 +11,7 @@ pipeline (transpile to C, invoke the platform C compiler, load the
 result) gain a higher performance ceiling and a ship-as-library story,
 but couple every deployment to a host C compiler, produce
 platform-specific artifacts, and complicate static linking. The classic
-AOT motivation — startup — is already ~1 ms for the floor install.
+AOT motivation (startup) is already ~1 ms for the floor install.
 
 ## Decision
 
@@ -22,7 +22,7 @@ deliberately a hot-path subset, not a full-language representation,
 and an artifact covering a subset would misrepresent the surface.
 
 Revisit triggers: (1) an embedder on a no-JIT platform (iOS, WASM)
-needs more than interpreter speed — the fix is broadening bytecode
+needs more than interpreter speed; the fix is broadening bytecode
 coverage, after which luac-style image serialization becomes cheap and
 can be reconsidered; (2) demand for source concealment in shipped
 scripts, which rides on the same serialization.

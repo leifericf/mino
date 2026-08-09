@@ -19,7 +19,7 @@ TU, so function names are globally unique already.
 
 A primitive is `static` in its defining file by default; the
 registration tables are the single extern-visible registry. The
-exceptions — functions with real cross-TU callers — live in one
+exceptions (functions with real cross-TU callers) live in one
 labeled section of `prim/internal.h`, grouped with the reason they
 are exceptions. The add-a-primitive ritual drops to four steps
 (`docs/INTERNAL_MODULE_MAP.md`), and the lint lane's
@@ -33,7 +33,7 @@ cannot run a mino binary.
 ## Consequences
 
 - Promoting a prim to a fast path or another domain's table means
-  dropping `static` and adding a declared exception — one extra,
+  dropping `static` and adding a declared exception, one extra,
   deliberate step.
 - `internal.h` now states which prims are load-bearing across TUs
   and why; the compiler enforces the classification.

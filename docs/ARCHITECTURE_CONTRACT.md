@@ -112,14 +112,14 @@ inconsistent state or no state exists to report through.
 
 Current abort sites:
 
-- `runtime/state.c` -- `mino_state_new` initial alloc failure
+- `runtime/state.c`: `mino_state_new` initial alloc failure
   (no state exists)
-- `gc/driver.c` -- `gc_alloc_typed` OOM with no try frame; range
+- `gc/driver.c`: `gc_alloc_typed` OOM with no try frame; range
   index realloc inside GC; unexpected `setjmp` return in `gc_collect`
-- `gc/{barrier,major,minor,roots,trace}.c` -- corruption-only paths
+- `gc/{barrier,major,minor,roots,trace}.c`: corruption-only paths
   inside the collector
-- `prim/install.c` -- `install_core_mino` bootstrap failures
-  (5 sites: OOM, parse, eval -- the state has not finished
+- `prim/install.c`: `install_core_mino` bootstrap failures
+  (5 sites: OOM, parse, eval; the state has not finished
   initializing)
 
 **Rule:** Every `abort()` must have a comment explaining why recovery is
@@ -175,7 +175,7 @@ recognized inside `try` (`partition_try_clauses` in `src/eval/control.c`),
 not entries in the registry.
 
 `when`, `and`, and `or` are macros defined in `core.clj` and ALSO have
-fast-path entries in the special-form registry — the evaluator inlines
+fast-path entries in the special-form registry: the evaluator inlines
 them to skip per-invocation macro expansion. `macroexpand` still
 returns their macro expansion, so user-observable semantics are
 unchanged.

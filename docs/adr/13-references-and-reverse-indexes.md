@@ -29,7 +29,7 @@ and nil-on-target-retraction semantics.
   apply time rather than being silently persisted.
 - **`:cardinality :many` interacts with `:ref`.** A `:many` `:ref` holds
   a set of eids; each element is validated independently. The reverse
-  index records one source→target pair per element.
+  index records one source/target pair per element.
 - **Automatic reverse index.** The db exposes
   `{:reverse {ref-attr {target-eid #{source-eid}}}}`. It is **rebuilt
   lazily** by `store/referring` (which eids does this attr point at?)
@@ -38,7 +38,7 @@ and nil-on-target-retraction semantics.
   incrementally per transaction. See the revision note below.
 - **Nil-on-retraction, no cascade.** When an entity ceases to exist
   (its last attribute is retracted), every `:ref` attribute elsewhere
-  that pointed at it is nilled automatically — retracted from the
+  that pointed at it is nilled automatically, retracted from the
   source entity's `:v` set (or, for `:one`, the attribute is removed).
   The reverse index makes this cheap: it lists exactly the source facts
   that need rewriting. Source entities themselves are not retracted.

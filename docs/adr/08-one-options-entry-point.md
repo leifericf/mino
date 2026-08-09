@@ -20,7 +20,7 @@ Per-state config knobs go through one pair:
 `mino_set_option(S, opt, value)` / `mino_get_option(S, opt)`, with a
 single `mino_option` enum (step limit, heap limit, thread limit,
 thread stack bytes, JIT mode, JIT hot threshold). The setter follows
-`mino_gc_set_param`'s contract — 0 ok, -1 on NULL state, unknown
+`mino_gc_set_param`'s contract: 0 ok, -1 on NULL state, unknown
 option, or out-of-range value, rejected writes leave the old value.
 The eight per-knob function symbols are removed outright (plus the two MINO_LIMIT_* macros, replaced by enum values). `mino_gc_set_param`
 stays as the GC-domain analog: GC tuning is a parameter space with

@@ -9,7 +9,7 @@ solves real maintainer problems: deterministic stencil regeneration
 for all JIT targets from one host, Linux+Windows release
 cross-builds, hermetic sanitizer lanes, and a third compiler lens for
 linting. That utility creates standing temptation to write `.zig`
-files — build scripts, test harnesses, eventually runtime code — each
+files (build scripts, test harnesses, eventually runtime code), each
 one eroding ADR 01's promise from a different angle.
 
 ## Decision
@@ -19,7 +19,7 @@ language*. Maintainer tasks shell out to the pinned `zig cc`
 (`gen-stencils-all`, `cross-build`, `sanitize-zig`, `lint-zig`,
 `analyze-zig`, and friends); no `.zig` files exist in the runtime,
 the tests, or the tooling. Tests stay C + mino. Build orchestration
-stays in the self-hosted Clojure task runner — nothing moves into
+stays in the self-hosted Clojure task runner; nothing moves into
 `build.zig`. The single sanctioned future exception is a
 `build.zig.zon` package smoke test. Zig is required for maintainers
 only; the embedder path (ADR 01) never sees it.
@@ -37,13 +37,13 @@ only; the embedder path (ADR 01) never sees it.
 
 ## Alternatives
 
-- **Adopt build.zig as the build system** — richer caching and a
+- **Adopt build.zig as the build system**: richer caching and a
   uniform entry point, but makes zig a hard dependency and moves
   build logic out of mino itself (the task runner is dogfood).
   Rejected.
-- **Allow .zig for tests/tooling only** — the line would not hold;
+- **Allow .zig for tests/tooling only**: the line would not hold;
   test surface law (language behavior in tests/*_test.clj, ABI in C
   embed tests) already covers the need. Rejected.
-- **No zig at all** — keeps maximal purity but forfeits
+- **No zig at all**: keeps maximal purity but forfeits
   deterministic stencils and single-host cross-builds, which were
   recurring release pain. Rejected.

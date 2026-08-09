@@ -1,4 +1,4 @@
-# ADR 12: Save-lisp-and-die — value-serialization image with identity table
+# ADR 12: Save-lisp-and-die: value-serialization image with identity table
 
 Date: 2026-06-27
 
@@ -6,7 +6,7 @@ Date: 2026-06-27
 
 Traditional Lisp implementations (SBCL, ECL, Clozure CL) offer
 "save-lisp-and-die" (SLAD): dump the entire in-memory state to a file,
-terminate, and later restart from that file with the exact same state —
+terminate, and later restart from that file with the exact same state:
 all functions, variables, loaded libraries, and data structures intact.
 
 mino needs this for two use cases:
@@ -15,8 +15,8 @@ mino needs this for two use cases:
    `mino_state` for their AI scripts, inventory, quest state, and
    custom-defined behaviors. On logout, the host saves the image; on
    login, it loads the image into a fresh state. The store (ADR 10)
-   handles the *data* layer; SLAD handles the *code* layer — runtime-
-   defined functions, closures, atoms, namespace structure.
+   handles the *data* layer; SLAD handles the *code* layer
+   (runtime-defined functions, closures, atoms, namespace structure).
 
 2. **REPL session persistence.** A developer builds up a working state
    interactively (defines functions, transacts into stores, loads
@@ -49,7 +49,7 @@ not a heap dump.
 3. **Root walk + ID assignment.** Walk all GC roots
    (`ns_env_table`, `var_registry`, `record_types`, `intern tables`,
    `module_cache`, `meta_table`). Assign each reachable `mino_val*` a
-   stable integer ID via a hash table (pointer → ID). Shared references
+    stable integer ID via a hash table (pointer to ID). Shared references
    get one ID; cycles are handled naturally.
 4. **Emit.** Write each value as a line: `<id> <type-tag> <payload>`.
    References to other values are written as `#<id>`. Emit side tables
@@ -62,10 +62,10 @@ not a heap dump.
    `mino_state_new()` and runs `mino_install_all(S, env)` to register
    all primitives, core library, and special forms. This re-creates
    the C-function-pointer layer.
-2. **First pass — allocate.** Read each value line, allocate a
-   `mino_val` of the right type, store it in an `ID → pointer` table.
+2. **First pass: allocate.** Read each value line, allocate a
+   `mino_val` of the right type, store it in an `ID -> pointer` table.
    Reference fields are left as placeholder sentinels.
-3. **Second pass — patch.** Walk every allocated value, replace
+3. **Second pass: patch.** Walk every allocated value, replace
    sentinel references with real pointers from the ID table.
 4. **Splice.** Replace the fresh state's namespace envs, var registry,
    record types, and aliases with the deserialized ones. Re-intern all
@@ -78,7 +78,7 @@ not a heap dump.
 ### Image format
 
 Line-delimited text, consistent with the store's WAL format (ADR 11).
-Human-readable for debuggability — a developer can `head`, `grep`, or
+Human-readable for debuggability: a developer can `head`, `grep`, or
 `diff` an image file.
 
 ```
@@ -167,9 +167,9 @@ images. Version 1 covers all current `MINO_*` types.
 `mino_save_image` refuses to save if the runtime is not at rest. The
 checked conditions (heap/state that cannot be safely captured mid-flight):
 
-1. **No in-flight futures** — `S->async.run_head == NULL`
-2. **No pending agent actions** — `S->agent.pool[i].run_head == NULL` for all i
-3. **No active STM transaction** — `S->tc->current_tx == NULL`
+1. **No in-flight futures**: `S->async.run_head == NULL`
+2. **No pending agent actions**: `S->agent.pool[i].run_head == NULL` for all i
+3. **No active STM transaction**: `S->tc->current_tx == NULL`
 
 If any check fails, `mino_save_image` returns -1 with a diagnostic
 identifying which check failed. The host resolves the issue (drain
@@ -196,7 +196,7 @@ file. Loading an image from an untrusted source is unsafe: the value pool
 is parsed defensively (bounded lengths, checked allocations) but the
 ROOTS section restores arbitrary namespace/var/alias graphs, and a
 serialized `MINO_STORE` carries its on-disk path, which is reopened on
-load via `mino_store_open` — so a hostile image can direct the loader at
+load via `mino_store_open`, so a hostile image can direct the loader at
 arbitrary snapshot/WAL paths. Only load images the host authored.
 
 ### Identity guarantees
@@ -208,7 +208,7 @@ arbitrary snapshot/WAL paths. Only load images the host authored.
 | **Interned identity** (symbols, keywords) | Yes | Re-interned into the new state's intern tables |
 | **Record type identity** (`instance?`) | Yes | Type registry spliced before instances are patched |
 | **Var identity** (`var?`, `resolve`) | Yes | Var registry spliced; vars get new pointers but same ns/name |
-| **Behavioral identity** (calling a fn) | Yes (eventually) | Same bytecode → same results; JIT rewarms |
+| **Behavioral identity** (calling a fn) | Yes (eventually) | Same bytecode produces same results; JIT rewarms |
 | **Clock identity** (`nanoTime`) | No | New wall-clock on restart; expected and correct |
 | **Thread identity** | No | All threads gone; async state lost |
 | **Resource identity** (file handles) | No | Must be re-opened by host |
@@ -247,12 +247,12 @@ mino_load_image_into(S, "players/alice.img");
 
 The load path relies on a layered bootstrap:
 
-1. `mino_state_new()` — allocates the runtime, GC, intern tables,
+1. `mino_state_new()`: allocates the runtime, GC, intern tables,
    singletons. State is empty but valid.
-2. `mino_install_all(S, env)` — registers all C primitives, core
+2. `mino_install_all(S, env)`: registers all C primitives, core
    library, special forms. This populates `clojure.core` and the
    primitive registry. The C-function-pointer layer is now live.
-3. `mino_load_image_into(S, path)` — reads the image file, allocates
+3. `mino_load_image_into(S, path)`: reads the image file, allocates
    all values, patches references, splices namespace envs and var
    registry into the state.
 
@@ -260,16 +260,16 @@ Step 2 is critical: `MINO_PRIM` values in the image carry names, not
 function pointers. During patching, each `MINO_PRIM` is re-resolved by
 looking up its name in the freshly installed primitive registry. If a
 primitive is not found (e.g., the host installed a different capability
-set), the var binding is left as a broken reference — the first call
+set), the var binding is left as a broken reference; the first call
 will throw "unbound."
 
 ### Interaction with the store (ADR 10/11)
 
 Stores are values (`MINO_STORE`) and serialize naturally:
 
-- The db value (`as.store.val`) is a persistent map — fully serializable.
-- The path (`handle->path`) is a string — serializable.
-- The clock function pointer (`handle->clock`) — dropped; defaults to
+- The db value (`as.store.val`) is a persistent map, fully serializable.
+- The path (`handle->path`) is a string, serializable.
+- The clock function pointer (`handle->clock`): dropped; defaults to
   wall-clock on reopen.
 - The WAL file on disk is untouched by SLAD. On restore, the store is
   reopened from its path, which replays the WAL (see ADR 11). If the
@@ -279,7 +279,7 @@ Stores are values (`MINO_STORE`) and serialize naturally:
 
 One subtlety: if the host saves the image, then the process crashes
 before checkpointing the store, then the host loads the image into a
-new process — the new process's store is reopened from snapshot + WAL.
+new process, and the new process's store is reopened from snapshot + WAL.
 The WAL has all transactions since the last checkpoint, so the
 reopened db matches the saved db. Consistent.
 
@@ -296,7 +296,7 @@ reopened db matches the saved db. Consistent.
   queues and commit transactions before calling `mino_save_image`.
 - **Host handles and async resources are lost.** The host must re-open
   files, re-connect sockets, and re-establish channels after load. This
-  is the same contract as process restart — SLAD is not transparent
+  is the same contract as process restart; SLAD is not transparent
   for OS resources.
 - **Bytecode + JIT warm-up cost on every restore.** Function bytecode
   is not serialized; each loaded fn starts with `bc == NULL`,
