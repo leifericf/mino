@@ -293,3 +293,55 @@ jobs:
           files: |
             dist/mino_*
             dist/checksums.txt
+
+  # Move the mino submodule in every downstream satellite to the tag
+  # that just shipped. Runs only after the release itself is fully
+  # built and published; needs the same v-less CalVer tag push that
+  # triggers the rest of this workflow. One command bumps all six
+  # satellites direct to master, gated per satellite by its own cheap
+  # lane (the tool runs bootstrap + cheap-lane before committing).
+  #
+  # PREREQ: SATELLITE_BUMP_TOKEN -- a fine-grained PAT with
+  # contents:write on the six satellite repos (mino-tests, mino-bench,
+  # mino-examples, mino-lsp, mino-nrepl, mino-site). Store it in this
+  # repo's Actions secrets. Without it the job fails closed (the tool
+  # validates but never pushes). See tools/bump_satellites.bb and
+  # docs/adr/19-census-as-source-of-truth.md (release automation).
+  bump-satellites:
+    name: bump downstream satellites
+    needs: [build, cross-build-validate, publish-draft]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install babashka
+        run: |
+          curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
+            | bash -s -- --dir /usr/local/bin
+          bb --version
+
+      - name: Install Clojure CLI (for mino-site cheap lane)
+        run: |
+          curl -sSL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh \
+            | bash -s -- --prefix /usr/local
+          clojure --version
+
+      - name: Clone satellites with submodules
+        run: |
+          mkdir -p "$RUNNER_TEMP/sats"
+          for slug in \
+            mino-tests mino-bench mino-examples mino-lsp mino-nrepl mino-site; do
+            git clone --depth 1 --recurse-submodules \
+              "https://github.com/leifericf/${slug}.git" \
+              "$RUNNER_TEMP/sats/${slug}"
+          done
+          echo "MINO_SATELLITES_DIR=$RUNNER_TEMP/sats" >> "$GITHUB_ENV"
+
+      - name: Bump each satellite (verify + push)
+        env:
+          SATELLITE_BUMP_TOKEN: ${{ secrets.SATELLITE_BUMP_TOKEN }}
+        run: bb tools/bump_satellites.bb "$TAG" --verify
