@@ -345,3 +345,30 @@ jobs:
         env:
           SATELLITE_BUMP_TOKEN: ${{ secrets.SATELLITE_BUMP_TOKEN }}
         run: bb tools/bump_satellites.bb "$TAG" --verify
+
+  # After the release ships, refresh the public parity dashboard so the
+  # 90.9% number tracks the released mino, not whatever main pointed at
+  # when the nightly last ran. Dispatches clojure-census's existing
+  # parity-nightly-mino workflow with the tag, which builds mino at that
+  # ref, re-captures the surface and behavior catalog, commits the
+  # refreshed dashboard to census main, and lets pages.yml redeploy.
+  #
+  # PREREQ: CENSUS_DISPATCH_TOKEN -- a fine-grained PAT with the
+  # Actions permission on leifericf/clojure-census (workflow_dispatch
+  # across repos needs it; the census workflow commits via its own
+  # GITHUB_TOKEN). Decoupled from bump-satellites so a broken satellite
+  # bump never blocks the parity refresh.
+  dispatch-census-recapture:
+    name: refresh census parity dashboard
+    needs: [publish-draft]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.CENSUS_DISPATCH_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Dispatch parity-nightly-mino at the released tag
+        run: |
+          gh workflow run parity-nightly-mino.yml \
+            --repo leifericf/clojure-census \
+            -f mino_ref="$TAG"
+          echo "dispatched census parity re-capture for $TAG"
