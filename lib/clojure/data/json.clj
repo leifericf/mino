@@ -21,7 +21,7 @@
                       (if (< @pos len)
                         (let [p @pos]
                           (swap! pos inc)
-                          (char-at s p))
+                          (subs s p (+ p 1)))
                         nil)))
      :unread-char (fn [c]
                     (reset! pushed c))
@@ -222,9 +222,113 @@
   [string & {:as opts}]
   (read-value (make-reader string) opts))
 
+;;;; String escaping (writer)
+
+(def ^:private escape-map
+  {"\"" "\\\"" "\\" "\\\\" "\n" "\\n" "\r" "\\r"
+   "\t" "\\t" "\b" "\\b" "\f" "\\f"})
+
+(defn- escape-char
+  "Return the JSON escape sequence for a single character string, or
+   nil if no escape is needed."
+  [c]
+  (get escape-map c))
+
+(defn- non-ascii? [c]
+  (let [cp (int (first c))]
+    (or (< cp 32) (> cp 127))))
+
+(defn- hex-digit [n]
+  (if (< n 10)
+    (str n)
+    (str (char (+ 55 n)))))
+
+(defn- unicode-escape [n]
+  (str "\\u"
+       (hex-digit (quot n 4096))
+       (hex-digit (quot (mod n 4096) 256))
+       (hex-digit (quot (mod n 256) 16))
+       (hex-digit (mod n 16))))
+
+(defn- write-string-chars
+  "Escape and accumulate string characters into buf. Non-ASCII
+   characters are emitted as \\uXXXX. Returns the updated buf."
+  ([s]
+   (apply str (persistent! (write-string-chars s 0 (transient [])))))
+  ([s i buf]
+   (if (>= i (count s))
+     buf
+     (let [c (subs s i (+ i 1))]
+       (cond
+         (escape-char c)
+         (write-string-chars s (+ i 1) (conj! buf (escape-char c)))
+         (non-ascii? c)
+         (write-string-chars s (+ i 1) (conj! buf (unicode-escape (int (first c)))))
+         :else
+         (write-string-chars s (+ i 1) (conj! buf c)))))))
+
+;;;; Type dispatch (writer)
+
+(defn- write-json
+  "Dispatch on Clojure type and serialize to a JSON string."
+  [x]
+  (cond
+    (nil? x)       "null"
+    (true? x)      "true"
+    (false? x)     "false"
+    (string? x)    (str "\"" (write-string-chars x) "\"")
+    (number? x)    (str x)
+    (keyword? x)   (str "\"" (write-string-chars (name x)) "\"")
+    (map? x)       (write-object x)
+    (vector? x)    (write-array x)
+    (seq? x)       (write-array (vec x))
+    :else          (throw (ex-info (str "Cannot serialize " (str x) " to JSON") {}))))
+
+(defn- write-array-rest
+  "Serialize remaining vector elements after the first. Returns a
+   string fragment."
+  [v i]
+  (if (>= i (count v))
+    "]"
+    (str "," (write-json (nth v i)) (write-array-rest v (+ i 1)))))
+
+(defn- write-array [v]
+  (if (empty? v)
+    "[]"
+    (str "[" (write-json (first v)) (write-array-rest v 1))))
+
+(defn- write-object-rest
+  "Serialize remaining map entries after the first. Returns a string
+   fragment."
+  [entries]
+  (if (empty? entries)
+    "}"
+    (let [[k v] (first entries)
+          key-str (cond
+                    (string? k)  k
+                    (keyword? k) (name k)
+                    :else        (str k))]
+      (str "," (str "\"" (write-string-chars key-str) "\"")
+           ":" (write-json v)
+           (write-object-rest (rest entries))))))
+
+(defn- write-object [m]
+  (if (empty? m)
+    "{}"
+    (let [[k v] (first m)
+          key-str (cond
+                    (string? k)  k
+                    (keyword? k) (name k)
+                    :else        (str k))]
+      (str "{" (str "\"" (write-string-chars key-str) "\"")
+           ":" (write-json v)
+           (write-object-rest (rest m))))))
+
+;;;; Public API (writer)
+
 (defn write-str
   "Serialize Clojure data to a JSON string. nil becomes null, keywords
    become strings (via name), maps become objects, vectors and seqs
    become arrays."
   [x & {:as opts}]
-  (throw (ex-info "clojure.data.json/write-str: not yet implemented" {})))
+  (write-json x))
