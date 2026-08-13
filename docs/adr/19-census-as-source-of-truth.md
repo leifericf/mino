@@ -31,7 +31,7 @@ Everything else derives from it and must not be hand-maintained in ways
 that can disagree:
 
 - The mino coverage manifest is regenerated from the census reference
-  surface by `tools/gen_coverage_manifest.bb`; the committed
+  surface by `tools/gen_coverage_manifest.clj`; the committed
   `expected-*` sets are its output, re-derived whenever the baseline
   moves.
 - The three `mino-site` pages render the divergence list, the surface
@@ -45,7 +45,7 @@ that can disagree:
 - A divergence or surface verdict is recorded once, in census. Editing
   it on a page or in the manifest is a drift bug, not a shortcut.
 - Moving the Clojure baseline is one change in census (a regenerated
-  reference surface) followed by a `gen_coverage_manifest.bb` run, not
+  reference surface) followed by a `gen_coverage_manifest.clj` run, not
   a hand-edit of the manifest.
 - The cost is a render pipeline (census payload into the site pages)
   and a generator for the manifest. Both are small and pay back every

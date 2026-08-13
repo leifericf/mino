@@ -15,7 +15,7 @@
 ;; Regenerate the six expected-* sets from the canonical reference
 ;; surface that clojure-census captures (clojure/1.12.4-surface.edn):
 ;;
-;;   bb tools/gen_coverage_manifest.bb [path/to/1.12.4-surface.edn]
+;;   ./mino tools/gen_coverage_manifest.clj [path/to/1.12.4-surface.edn]
 ;;
 ;; See docs/adr/19-census-as-source-of-truth.md.
 
