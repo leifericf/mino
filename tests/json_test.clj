@@ -131,4 +131,90 @@
 (deftest read-single-quotes-throws
   (is (thrown? (json/read-str "{'a':1}"))))
 
+;;;; JSON writer
+
+(deftest write-nil
+  (is (= "null" (json/write-str nil))))
+
+(deftest write-true
+  (is (= "true" (json/write-str true))))
+
+(deftest write-false
+  (is (= "false" (json/write-str false))))
+
+(deftest write-integer
+  (is (= "42" (json/write-str 42))))
+
+(deftest write-negative-integer
+  (is (= "-7" (json/write-str -7))))
+
+(deftest write-zero
+  (is (= "0" (json/write-str 0))))
+
+(deftest write-float
+  (is (= "3.14" (json/write-str 3.14))))
+
+(deftest write-simple-string
+  (is (= "\"hello\"" (json/write-str "hello"))))
+
+(deftest write-empty-string
+  (is (= "\"\"" (json/write-str ""))))
+
+(deftest write-string-escapes
+  (is (= "\"\\\"\"" (json/write-str "\"")))
+  (is (= "\"\\\\\"" (json/write-str "\\")))
+  (is (= "\"\\n\"" (json/write-str "\n")))
+  (is (= "\"\\t\"" (json/write-str "\t")))
+  (is (= "\"\\r\"" (json/write-str "\r")))
+  (is (= "\"\\b\"" (json/write-str "\b")))
+  (is (= "\"\\f\"" (json/write-str "\f"))))
+
+(deftest write-empty-array
+  (is (= "[]" (json/write-str []))))
+
+(deftest write-simple-array
+  (is (= "[1,2,3]" (json/write-str [1 2 3]))))
+
+(deftest write-mixed-array
+  (is (= "[1,\"two\",true,null]" (json/write-str [1 "two" true nil]))))
+
+(deftest write-nested-arrays
+  (is (= "[[1,2],[3,4]]" (json/write-str [[1 2] [3 4]]))))
+
+(deftest write-empty-object
+  (is (= "{}" (json/write-str {}))))
+
+(deftest write-simple-object
+  (is (= "{\"a\":1,\"b\":2}" (json/write-str {"a" 1 "b" 2}))))
+
+(deftest write-object-with-keyword-keys
+  (is (= "{\"a\":1}" (json/write-str {:a 1}))))
+
+(deftest write-nested-object
+  (is (= "{\"outer\":{\"inner\":42}}" (json/write-str {"outer" {"inner" 42}}))))
+
+(deftest write-object-with-array-value
+  (is (= "{\"items\":[1,2,3]}" (json/write-str {"items" [1 2 3]}))))
+
+;;;; Round-trip
+
+(deftest round-trip-integer
+  (is (= 42 (json/read-str (json/write-str 42)))))
+
+(deftest round-trip-string
+  (is (= "hello\nworld" (json/read-str (json/write-str "hello\nworld")))))
+
+(deftest round-trip-vector
+  (is (= [1 "two" true nil] (json/read-str (json/write-str [1 "two" true nil])))))
+
+(deftest round-trip-object
+  (is (= {"a" 1 "b" [2 3]} (json/read-str (json/write-str {"a" 1 "b" [2 3]})))))
+
+(deftest round-trip-nested
+  (let [data {"users" [{"name" "alice" "age" 30} {"name" "bob" "age" 25}]}]
+    (is (= data (json/read-str (json/write-str data))))))
+
+(deftest round-trip-unicode
+  (is (= "\u00e9" (json/read-str (json/write-str "\u00e9")))))
+
 (run-tests-and-exit)
