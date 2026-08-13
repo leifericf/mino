@@ -93,9 +93,8 @@
                                             :incremental 0 :qualifier nil}]
                  *clojure-version*)]
     (is (= 99 (:major result))))
-  ;; Outside the binding, the original value is restored. The 1 tracks
-  ;; mino's declared Clojure-compatibility major version.
-  (is (= 1 (:major *clojure-version*))))
+  ;; Outside the binding, the original value is restored.
+  (is (= 2026 (:major *clojure-version*))))
 
 (deftest cs-clojure-version-binding-does-not-affect-string-fn
   ;; (clojure-version) reads *clojure-version* dynamically, so a binding
