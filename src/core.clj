@@ -3206,7 +3206,7 @@
 
 (def ^:dynamic *clojure-version*
   "The Clojure compatibility version for this runtime, as a map with :major :minor :incremental and :qualifier keys."
-  {:major 1 :minor 11 :incremental 0 :qualifier nil})
+  {:major 1 :minor 12 :incremental 4 :qualifier nil})
 (defn clojure-version
   "Returns the Clojure compatibility version as a printable string."
   []
