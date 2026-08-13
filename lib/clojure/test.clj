@@ -670,10 +670,29 @@
   failures or errors, 1 otherwise.  A no-op while suite-mode is true.
   Used as the bottom-of-file entry point in test files and by the suite
   driver; it always runs every registered test, independent of the
-  namespace-scoped run-tests."
+  namespace-scoped run-tests.
+
+  When the MINO_TEST_SUMMARY env var names a writable path, the summary
+  is written there as EDN before exiting. The shape is:
+    {:tests N :passes N :failures N :errors N
+     :assertions N :pass-rate 0.0..1.0}"
   [& _nss]
   (when-not @suite-mode
     (let [s (run-all-registered-tests)]
+      (when-let [summary-path (getenv "MINO_TEST_SUMMARY")]
+        (let [pass (or (:pass s) 0)
+              fail (or (:fail s) 0)
+              err  (or (:error s) 0)
+              total (+ pass fail err)]
+          (spit summary-path
+                (pr-str {:tests      (or (:test s) 0)
+                         :passes     pass
+                         :failures   fail
+                         :errors     err
+                         :assertions total
+                         :pass-rate  (if (zero? total)
+                                       1.0
+                                       (/ (double pass) (double total)))}))))
       (if (and (= 0 (get s :fail)) (= 0 (get s :error)))
         (exit 0)
         (exit 1)))))

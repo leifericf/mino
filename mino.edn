@@ -98,6 +98,9 @@
   test            {:doc  "Build and run the test suite"
                    :deps [build]
                    :task mino.tasks.builtin/test-suite}
+  test-summary    {:doc  "Run the suite and emit output/test-results.edn"
+                   :deps [build]
+                   :task mino.tasks.builtin/test-summary}
   test-external   {:doc  "Build and run external tests"
                    :deps [build]
                    :task mino.tasks.builtin/test-external}

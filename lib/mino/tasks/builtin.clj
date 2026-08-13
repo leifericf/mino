@@ -2231,6 +2231,21 @@
   []
   (println (sh! mino-bin "tests/run.clj")))
 
+(defn test-summary
+  "Run the test suite and emit a stable EDN summary artifact at
+  output/test-results.edn. The shape is:
+    {:tests N :passes N :failures N :errors N
+     :assertions N :pass-rate 0.0..1.0}
+  Exits non-zero if the suite fails."
+  []
+  (sh! "mkdir" "-p" "output")
+  (println (sh! "sh" "-c"
+                (str "MINO_TEST_SUMMARY=output/test-results.edn "
+                     mino-bin " tests/run.clj")))
+  (println "---")
+  (when (file-exists? "output/test-results.edn")
+    (println (slurp "output/test-results.edn"))))
+
 (defn test-external
   "Run the external test runner."
   []
