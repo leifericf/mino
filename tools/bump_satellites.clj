@@ -1,17 +1,16 @@
-#!/usr/bin/env bb
-;; tools/bump_satellites.bb
-;;
+(ns tools.bump-satellites)
+
 ;; Move the mino submodule in every downstream satellite to a given
 ;; CalVer tag, run each satellite's cheap lane, commit direct to
 ;; master, and (when a token is present) push. This is the one-command
 ;; release step that replaces the hand-made "Embed: bump mino submodule
 ;; to <tag>" commit previously made per satellite per release.
 ;;
-;;   bb tools/bump_satellites.bb <CalVer-tag>              # stage only
-;;   bb tools/bump_satellites.bb <CalVer-tag> --verify     # stage + validate cheap lane
-;;   SATELLITE_BUMP_TOKEN=<pat> bb tools/bump_satellites.bb <CalVer-tag> --verify
-;;                                                          # validate + commit + push
-;;   bb tools/bump_satellites.bb <tag> --verify --only=mino-tests   # one satellite
+;;   ./mino tools/bump_satellites.clj <CalVer-tag>              # stage only
+;;   ./mino tools/bump_satellites.clj <CalVer-tag> --verify     # stage + validate cheap lane
+;;   SATELLITE_BUMP_TOKEN=<pat> ./mino tools/bump_satellites.clj <CalVer-tag> --verify
+;;                                                               # validate + commit + push
+;;   ./mino tools/bump_satellites.clj <tag> --verify --only=mino-tests   # one satellite
 ;;
 ;; Tag is a bare CalVer, e.g. 2026.08.08-alpha1 (matches src/mino.h's
 ;; MINO_VERSION and the release-build tag filter). No "v" prefix.
@@ -30,33 +29,25 @@
 ;; satellite repos. Store it as SATELLITE_BUMP_TOKEN in the mino repo's
 ;; Actions secrets; the CI job (bump-satellites) passes it through.
 
-(require '[clojure.string :as str]
-         '[clojure.java.shell :refer [sh]]
-         '[clojure.java.io :as io])
-(import '[java.io File])
+(require '[clojure.string :as str])
 
 (def argv *command-line-args*)
 (def tag (first argv))
-(def verify? (some #(#{ "--verify" } %) argv))
+(def verify? (some #(= % "--verify") argv))
 (def only (first (filter #(str/starts-with? % "--only=") argv)))
 (def only-name (when only (subs only (count "--only="))))
-(def token (System/getenv "SATELLITE_BUMP_TOKEN"))
+(def token (getenv "SATELLITE_BUMP_TOKEN"))
 
 (when (or (nil? tag) (= tag "--verify") (str/starts-with? tag "--"))
-  (println "usage: bb tools/bump_satellites.bb <CalVer-tag> [--verify] [--only <name>]")
-  (System/exit 2))
+  (println "usage: ./mino tools/bump_satellites.clj <CalVer-tag> [--verify] [--only <name>]")
+  (exit 2))
 
-(def mino-root (-> (io/file *file*) .getCanonicalFile .getParentFile .getParentFile))
 (def satellites-dir
-  (io/file (or (System/getenv "MINO_SATELLITES_DIR")
-              (-> mino-root .getParentFile .getPath))))
+  (or (getenv "MINO_SATELLITES_DIR") ".."))
 
-;; Each satellite: name, github repo slug, bootstrap (builds the mino
-;; the cheap lane runs against; nil for satellites that do not build
-;; mino), and the cheap-lane command vector run in the satellite root.
 (def satellites
   [{:name      "mino-tests"
-    :repo      "leifericf/mino-tests"
+    :repo      "leiferacf/mino-tests"
     :bootstrap ["sh" "-c" "cd mino && make"]
     :cheap     ["sh" "-c" "./mino/mino task adv-test"]}
    {:name      "mino-bench"
@@ -80,10 +71,10 @@
     :bootstrap nil
     :cheap     ["sh" "-c" "clojure -M:test"]}])
 
-(defn sh-ok?
-  ([dir args] (sh-ok? dir args true))
+(defn run-ok?
+  ([dir args] (run-ok? dir args true))
   ([dir args strict?]
-   (let [r (apply sh (conj (vec args) :dir (str dir)))]
+   (let [r (apply run {:dir dir} args)]
      (when (seq (:out r)) (print (:out r)))
      (when (seq (:err r)) (print (:err r)))
      (cond
@@ -91,7 +82,8 @@
        (not strict?)           true
        :else                   true))))
 
-(defn git [dir & args] (sh-ok? (io/file dir) (into ["git"] args)))
+(defn git [dir & args]
+  (run-ok? dir (into ["git"] args)))
 
 (defn push-url [repo]
   (str "https://x-access-token:" token "@github.com/" repo ".git"))
@@ -99,29 +91,28 @@
 (defn run-bootstrap [dir bootstrap]
   (if (nil? bootstrap)
     true
-    (do (println "  . bootstrap") (sh-ok? dir bootstrap))))
+    (do (println "  . bootstrap") (run-ok? dir bootstrap))))
 
 (defn bump-one [{:keys [name repo bootstrap cheap] :as sat}]
-  (let [dir (io/file satellites-dir name)
-        msg (format "Embed: bump mino submodule to %s" tag)]
+  (let [dir    (str satellites-dir "/" name)
+        submod (str dir "/mino")
+        msg    (format "Embed: bump mino submodule to %s" tag)]
     (println)
     (println "== mino/" name "==>")
     (cond
-      (not (.exists dir))
-      (do (println "  ! no checkout at" (str dir)) :missing)
+      (not (file-exists? dir))
+      (do (println "  ! no checkout at" dir) :missing)
 
-      (not (.isDirectory (io/file dir "mino")))
-      (do (println "  ! no mino/ submodule at" (str dir)) :missing)
+      (not (file-exists? submod))
+      (do (println "  ! no mino/ submodule at" dir) :missing)
 
-      (not (and (git (io/file dir "mino") "fetch" "origin" "tag" tag)
-                (git (io/file dir "mino") "checkout" tag)
+      (not (and (git submod "fetch" "origin" "tag" tag)
+                (git submod "checkout" tag)
                 (git dir "add" "mino")))
       (do (println "  ! bump git steps failed") :failed)
 
       :else
-      (let [;; git diff --cached --quiet exits 1 when a staged change
-            ;; exists, 0 when the index is clean.
-            moved? (= 1 (:exit (sh "git" "-C" (str dir) "diff" "--cached" "--quiet" "mino")))]
+      (let [moved? (= 1 (:exit (run {:dir dir} "git" "diff" "--cached" "--quiet" "mino")))]
         (cond
           (not moved?)
           (do (println "  . submodule already at" tag "; nothing to commit") :uptodate)
@@ -136,7 +127,7 @@
           (do
             (println "  . cheap lane")
             (cond
-              (not (sh-ok? dir cheap))
+              (not (run-ok? dir cheap))
               (do (println "  ! cheap lane failed; staged bump left uncommitted") :failed)
 
               (nil? token)
@@ -153,7 +144,7 @@
 
 (defn -main []
   (println "bump mino submodule ->" tag)
-  (println "satellites dir:" (str satellites-dir))
+  (println "satellites dir:" satellites-dir)
   (println "verify:" (boolean verify?) "| push:" (if token "enabled" "no token (validate only)"))
   (let [targets (if only-name (filter #(= (:name %) only-name) satellites) satellites)
         results (doall
@@ -165,6 +156,6 @@
     (let [failed (filter #(#{:failed :missing} (second %)) results)]
       (when (seq failed)
         (println " " (count failed) "satellite(s) need triage"))
-      (System/exit (if (or (seq failed) (empty? results)) 1 0)))))
+      (exit (if (or (seq failed) (empty? results)) 1 0)))))
 
 (-main)
