@@ -302,11 +302,11 @@ jobs:
   # lane (the tool runs bootstrap + cheap-lane before committing).
   #
   # PREREQ: SATELLITE_BUMP_TOKEN -- a fine-grained PAT with
-  # contents:write on the six satellite repos (mino-tests, mino-bench,
-  # mino-examples, mino-lsp, mino-nrepl, mino-site). Store it in this
-  # repo's Actions secrets. Without it the job fails closed (the tool
-  # validates but never pushes). See tools/bump_satellites.bb and
-  # docs/adr/19-census-as-source-of-truth.md (release automation).
+ # contents:write on the six satellite repos (mino-tests, mino-bench,
+ # mino-examples, mino-lsp, mino-nrepl, mino-site). Store it in this
+ # repo's Actions secrets. Without it the job fails closed (the tool
+ # validates but never pushes). See tools/bump_satellites.clj and
+ # docs/adr/19-census-as-source-of-truth.md (release automation).
   bump-satellites:
     name: bump downstream satellites
     needs: [build, cross-build-validate, publish-draft]
@@ -318,11 +318,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install babashka
-        run: |
-          curl -sSL https://raw.githubusercontent.com/babashka/babashka/master/install \
-            | bash -s -- --dir /usr/local/bin
-          bb --version
+      - name: Build mino (task runner for bump script)
+        run: make && ./mino --version
 
       - name: Install Clojure CLI (for mino-site cheap lane)
         run: |
@@ -344,7 +341,7 @@ jobs:
       - name: Bump each satellite (verify + push)
         env:
           SATELLITE_BUMP_TOKEN: ${{ secrets.SATELLITE_BUMP_TOKEN }}
-        run: bb tools/bump_satellites.bb "$TAG" --verify
+        run: ./mino tools/bump_satellites.clj "$TAG" --verify
 
   # After the release ships, refresh the public parity dashboard so the
   # 90.9% number tracks the released mino, not whatever main pointed at
