@@ -249,6 +249,8 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.core.logic (+ fd, nominal): relational logic programming." },
     { "store",        MINO_CAP_STORE,
       "mino.store: EAVT fact store (open / transact / query / merge)." },
+    { "json",         MINO_CAP_JSON,
+      "clojure.data.json (read-str / write-str)." },
     { NULL,           0u,                                                NULL },
 };
 

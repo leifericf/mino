@@ -1604,6 +1604,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 
 #define MINO_CAP_STORE         (1ull << 32) /* mino.store: EAVT fact store */
 
+#define MINO_CAP_JSON          (1ull << 33) /* clojure.data.json */
+
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
  * unsigned and widen implicitly when combined with 64-bit caps. */
@@ -1617,7 +1619,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
                           MINO_CAP_SET_LIB | MINO_CAP_WALK | MINO_CAP_EDN | \
                           MINO_CAP_DATA | MINO_CAP_TEST | MINO_CAP_DATAFY | \
-                          MINO_CAP_MATH_LIB | MINO_CAP_REDUCERS)
+                          MINO_CAP_MATH_LIB | MINO_CAP_REDUCERS | \
+                          MINO_CAP_JSON)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull
