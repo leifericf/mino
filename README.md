@@ -1,5 +1,7 @@
 # mino
 
+[![Clojure parity](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/leifericf/clojure-census/main/output/mino/badge.json)](https://clojure-census.leifericf.com/dialects/mino/readiness/)
+
 An embeddable Lisp in ANSI C. Link it into a C or C++ application to add a programmable extension layer. The standalone executable is for development; the embedding API is the primary interface.
 
 Requires only an ANSI C compiler and `make`.
