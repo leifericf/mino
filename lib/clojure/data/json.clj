@@ -267,6 +267,25 @@
          :else
          (write-string-chars s (+ i 1) (conj! buf c)))))))
 
+;;;; Number formatting (writer)
+
+(defn- format-double
+  "Format a double at the shortest %g precision that reads back as
+  the same value, so doubles round-trip exactly through write-str and
+  read-str. Integral results keep a .0 suffix so they read back as
+  doubles, not integers."
+  ([x]
+   (format-double x 15))
+  ([x prec]
+   (let [f (format (str "%." prec "g") x)]
+     (cond
+     (= x (read-string f)) (if (or (str/includes? f ".")
+                                  (str/includes? f "e"))
+                            f
+                            (str f ".0"))
+       (< prec 17)        (format-double x (inc prec))
+       :else              f))))
+
 ;;;; Type dispatch (writer)
 
 (defn- write-json
@@ -277,7 +296,17 @@
     (true? x)      "true"
     (false? x)     "false"
     (string? x)    (str "\"" (write-string-chars x) "\"")
-    (number? x)    (str x)
+    (number? x)    (cond
+                     (or (ratio? x)
+                         (infinite? x)
+                         ;; NaN compares false against both bounds;
+                         ;; every finite value clears one of them.
+                         (not (or (< x ##Inf) (> x ##-Inf))))
+                     (throw (ex-info (str "Cannot serialize " (str x)
+                                          " to JSON") {}))
+
+                     (double? x) (format-double x)
+                     :else       (str x))
     (keyword? x)   (str "\"" (write-string-chars (name x)) "\"")
     (map? x)       (write-object x)
     (vector? x)    (write-array x)

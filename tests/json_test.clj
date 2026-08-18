@@ -169,6 +169,17 @@
   (is (= "\"\\b\"" (json/write-str "\b")))
   (is (= "\"\\f\"" (json/write-str "\f"))))
 
+(deftest write-ratio-throws
+  ;; A ratio has no JSON representation; emitting "22/7" would
+  ;; produce invalid JSON that no reader accepts.
+  (is (thrown? (json/write-str 22/7)))
+  (is (thrown? (json/write-str {"a" [1/3]}))))
+
+(deftest write-non-finite-double-throws
+  (is (thrown? (json/write-str ##Inf)))
+  (is (thrown? (json/write-str ##NaN)))
+  (is (thrown? (json/write-str [1 ##-Inf]))))
+
 (deftest write-empty-array
   (is (= "[]" (json/write-str []))))
 
