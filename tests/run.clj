@@ -131,6 +131,7 @@
 (require "tests/parallel_fold_test")
 (require "tests/test_check_shrinking_test")
 (require "tests/fs_test")
+(require "tests/json_test")
 (require "tests/proc_test")
 (require "tests/deps_test")
 (require "tests/introspection_test")

@@ -516,9 +516,14 @@ static mino_val *apply_fn_bc_cons(mino_state *S, mino_val *fn,
         }
         if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
             && MINO_BC_RUNNABLE(next_fn)
-            && next_fn->as.fn.params != NULL
             && !next_args_lazy_tail) {
-            /* Rebuild argv from the new args list. */
+            /* Rebuild argv from the new args list. Multi-arity targets
+             * (params == NULL, body is a clause spine) stay on this
+             * trampoline too: mino_bc_run selects the matching clause
+             * from the bc record's own clause table, so re-entry needs
+             * nothing the single-arity path doesn't already provide.
+             * Bailing to the recursive apply_callable here would grow
+             * one C frame per hop and raise MLM004 on deep tail loops. */
             argc = 0;
             cur  = next_args;
             while (mino_is_cons(cur)) {
