@@ -86,3 +86,16 @@ recorded transforms (per-unit file-local identifier renames, a
 dropping one MSVC `#pragma comment` line); see
 `src/vendor/bearssl/README.md` for the full list and the update ritual.
 
+## Mozilla CA root certificates
+
+The file `src/vendor/bearssl/mozilla-roots.pem` is a snapshot of the
+Mozilla CA root store as republished by curl at
+<https://curl.se/ca/cacert.pem> (Mozilla data as of Thu Aug 13 03:12:01
+2026 GMT; sha256
+`f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9`).
+`src/vendor/bearssl/roots.c` is generated from it and embeds the same
+certificates as DER data. The certificates are copyright Mozilla and
+individual contributors and are distributed under the Mozilla Public
+License 2.0; the license text is at
+<https://mozilla.org/MPL/2.0/>.
+

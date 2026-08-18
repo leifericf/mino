@@ -76,7 +76,38 @@ client certificates, the ssl_lru session cache, and every
 runtime-dispatched implementation (x86ni, pwr8, sse2, pclmul, ctmulq);
 non-applicable arch code self-gates to nothing.
 
-## Update ritual
+## Mozilla CA root snapshot
+
+TLS certificate verification needs trust anchors. Two checked-in
+files provide them:
+
+- `mozilla-roots.pem` is the Mozilla-derived CA root bundle that
+  curl maintains, fetched from <https://curl.se/ca/cacert.pem>.
+- `roots.c` is generated from that PEM by
+  `./mino src/vendor/bearssl/tools/gen_ca_roots.clj`. It holds one
+  concatenated DER blob (`mino_ca_der_data`) plus a
+  `{pointer, length}` table over it (`mino_ca_anchors`,
+  `mino_ca_anchor_count`). PEM is decoded to DER at generation time,
+  never at runtime; the certificate validator feeds the table
+  entries to the BearSSL X.509 minimal validator.
+
+Current snapshot:
+
+- Mozilla data as of: Thu Aug 13 03:12:01 2026 GMT
+- PEM sha256:
+  `f66dff1bdf8f96060b8177976f8b7d9254bc89bc4db933d769f7384d28480bc9`
+- 121 anchors, 129143 bytes of DER
+
+The root certificates are distributed by Mozilla under the Mozilla
+Public License 2.0 (<https://mozilla.org/MPL/2.0/>); see
+THIRD_PARTY_LICENSES.md.
+
+Update ritual: fetch the URL over `mozilla-roots.pem`, rerun the
+generator (it prints the sha256 and the Mozilla date line), update
+the snapshot facts above, commit all three. `tests/ca_roots_test.clj`
+fails if the PEM, the generated data, and this README drift apart.
+
+## Update ritual (BearSSL)
 
 1. Re-pin: clone the canonical repo, check out the new release tag,
    copy `LICENSE.txt` over `LICENSE`, refresh `inc/` and `src/` per the

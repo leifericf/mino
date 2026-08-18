@@ -105,7 +105,8 @@
    "src/prim/async.c"
     "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
     "src/vendor/imath/imath.c"
-    "src/vendor/bearssl/bearssl_client.c"])
+    "src/vendor/bearssl/bearssl_client.c"
+    "src/vendor/bearssl/roots.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
@@ -2423,6 +2424,8 @@
    "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"
    "src/vendor/bearssl/bearssl_client.c"
    "generated BearSSL client amalgam -- see src/vendor/bearssl/README.md"
+   "src/vendor/bearssl/roots.c"
+   "generated Mozilla CA root data -- see src/vendor/bearssl/README.md"
    "src/vendor/bearssl/src/ec/ec_c25519_m15.c"
    "vendored BearSSL -- not modified"
    "src/vendor/bearssl/src/ec/ec_p256_m15.c"

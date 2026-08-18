@@ -144,6 +144,7 @@
 (require "tests/url_parse_test")
 (require "tests/codec_test")
 (require "tests/net_test")
+(require "tests/ca_roots_test")
 
 (reset! clojure.test/suite-mode false)
 
