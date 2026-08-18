@@ -95,3 +95,13 @@ HTTP/2, proxies, unix sockets, multipart, chunked upload.
 - curl shell-out or a plaintext stopgap: rejected by constraint.
 - Two-phase API (interim then final): rejected by constraint; the
   Babashka history is the counterexample.
+
+## Spike verdict (2026-08-18)
+
+The BearSSL spike passed gates 1 through 3 (host strict C99, zig cross
+for linux and windows, single-TU inlining dry run) against release
+v0.6 with zero warnings. Gate 4 (real cl.exe) rides the CI canary when
+the vendoring lands. File list, sizes, and exact commands:
+`~/.agentic-sdk/mino/runs/http-client/spike-report.md`. mbedTLS stays
+the documented fallback, unused.
+
