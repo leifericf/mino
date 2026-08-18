@@ -169,6 +169,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"lazy",        k_prims_lazy,        &k_prims_lazy_count},
     {"string",      k_prims_string,      &k_prims_string_count},
     {"url",         k_prims_url,         &k_prims_url_count},
+    {"codec",       k_prims_codec,       &k_prims_codec_count},
     {"reflection",  k_prims_reflection,  &k_prims_reflection_count},
     {"stateful",    k_prims_stateful,    &k_prims_stateful_count},
     {"module",      k_prims_module,      &k_prims_module_count},

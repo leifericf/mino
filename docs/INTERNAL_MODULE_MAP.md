@@ -94,7 +94,8 @@ src/
 | `src/prim/install_stdlib.c` | Per-namespace install hooks for the bundled `clojure.*` stdlib sources |
 | `src/prim/module.c` | Module system (`require`, `doc`, `source`, `apropos`, `mino_set_resolver`) |
 | `src/prim/fs.c` | Filesystem primitives |
-| `src/prim/url.c` | URL text primitives: percent-encode / percent-decode (RFC 3986) |
+| `src/prim/url.c` | URL text primitives: percent-encode / percent-decode, parse-url (RFC 3986) |
+| `src/prim/codec.c` | Binary codec primitives: base64-encode / base64-decode (RFC 4648), hex-encode / hex-decode |
 | `src/prim/proc.c` | Process / subprocess primitives |
 | `src/prim/host.c` | Host interop primitives (`host/new`, `host/call`, `host/static-call`, `host/get`), capability registry |
 | `src/interop/syntax.c` | Interop syntax desugaring (dot-method, field access, constructor, static calls) |
