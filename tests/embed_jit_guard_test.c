@@ -48,8 +48,11 @@ int main(void)
     REQUIRE(S->state_magic == MINO_STATE_MAGIC,
             "fresh state carries the magic");
 
-    /* NULL state: refused, not dereferenced. */
-#ifdef MINO_CPJIT
+    /* NULL state: refused, not dereferenced. Gated on the same
+     * MINO_CPJIT_HOST that compiles the slow helpers (helpers.c compiles
+     * to an empty TU on hosts without a stencil backend, so the symbol
+     * would not link there). */
+#ifdef MINO_CPJIT_HOST
     {
         mino_val **r;
         extern mino_val **mino_jit_getglobal_cached_slow(
