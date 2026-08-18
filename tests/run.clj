@@ -130,6 +130,7 @@
 (require "tests/parallel_calls_test")
 (require "tests/parallel_fold_test")
 (require "tests/test_check_shrinking_test")
+(require "tests/string_perf_test")
 (require "tests/fs_test")
 (require "tests/json_test")
 (require "tests/proc_test")

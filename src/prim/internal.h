@@ -293,6 +293,16 @@ size_t    utf8_skip_codepoints(const char *data, size_t bytes,
                                size_t pos, long long n);
 long long utf8_codepoint_count(const char *data, size_t bytes);
 
+/* string.c -- lazy per-string codepoint count. Strings are immutable,
+ * so the count is computed once and cached in the s.ns_len slot (which
+ * MINO_STRING never uses for its nominal purpose; every ns_len reader
+ * is gated on MINO_SYMBOL / MINO_KEYWORD). 0 means "not computed yet";
+ * the empty string re-scans trivially. The cache turns per-character
+ * subs/count loops from quadratic (whole-string rescan per call) into
+ * linear. Idempotent same-value stores; size_t-aligned so concurrent
+ * writes are benign. Returns the codepoint count of s. */
+long long mino_string_cp_count(mino_val *s);
+
 /* io.c -- most prims are file-local static. */
 
 /* bignum.c -- prim_bigint/prim_biginteger/prim_bigint_p are file-local static.

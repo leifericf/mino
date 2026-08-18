@@ -434,6 +434,24 @@ long long utf8_codepoint_count(const char *data, size_t bytes)
     return count;
 }
 
+/* Lazy cached codepoint count for a MINO_STRING. See the declaration
+ * in prim/internal.h for the caching discipline. */
+long long mino_string_cp_count(mino_val *s)
+{
+    size_t cached;
+    long long n;
+    cached = s->as.s.ns_len;
+    if (cached != 0) return (long long)cached;
+    n = utf8_codepoint_count(s->as.s.data, s->as.s.len);
+    /* Any positive long long fits size_t on every supported host
+     * (both 64-bit; the cast would only matter on a 32-bit size_t,
+     * which mino does not target). */
+    if (n > 0) {
+        s->as.s.ns_len = (size_t)n;
+    }
+    return n;
+}
+
 static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *s_val;
@@ -457,9 +475,11 @@ static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
     start = mino_val_int_get(args->as.cons.cdr->as.cons.car);
     /* Indices are codepoint-counted, matching Clojure where strings
      * are sequences of chars (UTF-16 code units there, codepoints
-     * here -- mino has no surrogates). For ASCII content the byte
-     * walk is identical to the codepoint walk. */
-    total_cps = utf8_codepoint_count(s_val->as.s.data, s_val->as.s.len);
+     * here -- mino has no surrogates). The count comes from the lazy
+     * per-string cache; when it equals the byte length the content is
+     * pure ASCII and the codepoint indices are byte offsets directly,
+     * skipping the per-call walks. */
+    total_cps = mino_string_cp_count(s_val);
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
             || !mino_val_int_p(args->as.cons.cdr->as.cons.cdr->as.cons.car)) {
@@ -472,10 +492,16 @@ static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
     if (start < 0 || end_idx < start || end_idx > total_cps) {
         return prim_throw_classified(S, "eval/bounds", "MBD001", "subs: index out of range");
     }
-    byte_start = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
-                                      0, start);
-    byte_end = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
-                                    byte_start, end_idx - start);
+    if ((size_t)total_cps == s_val->as.s.len) {
+        /* ASCII content: codepoint indices are byte offsets. */
+        byte_start = (size_t)start;
+        byte_end   = (size_t)end_idx;
+    } else {
+        byte_start = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
+                                          0, start);
+        byte_end = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
+                                        byte_start, end_idx - start);
+    }
     return mino_string_n(S, s_val->as.s.data + byte_start,
                          byte_end - byte_start);
 }

@@ -149,8 +149,13 @@ struct mino_val {
              * original (ns, name) split — the 2-arg keyword/symbol
              * constructor records the boundary explicitly so the
              * (keyword "a/b" "c") vs (keyword "a" "b/c") distinction
-             * survives, matching JVM Clojure. For MINO_STRING this
-             * field is always 0. */
+             * survives, matching JVM Clojure.
+             *
+             * For MINO_STRING this slot is a lazy cached codepoint
+             * count (see mino_string_cp_count in prim/internal.h):
+             * 0 = not computed yet. Every ns_len reader is gated on
+             * MINO_SYMBOL / MINO_KEYWORD, so the two uses never
+             * intersect. */
             size_t ns_len;
         } s;
         struct {          /* MINO_CONS */
