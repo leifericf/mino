@@ -18,7 +18,7 @@
                          (if (= v "") [] (str/split v " "))))
 (def ^:private windows? (some? (getenv "OS")))
 (def ^:private libs    (str/split (or (getenv "LIBS")
-                                       (if windows? "-lm" "-lm -lpthread")) " "))
+                                       (if windows? "-lm -lws2_32" "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
 ;; Stencil-regeneration toolchain. Stencils are committed as byte
@@ -91,7 +91,7 @@
    "src/prim/stateful.c" "src/prim/stateful_bindings.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/store.c" "src/prim/module.c"
    "src/prim/image.c"
    "src/prim/ns.c"
-   "src/prim/fs.c" "src/prim/proc.c"
+   "src/prim/fs.c" "src/prim/proc.c" "src/prim/net.c"
    "src/prim/host.c" "src/prim/jvm_statics.c" "src/interop/syntax.c"
    "src/collections/clone.c" "src/regex/re_compile.c" "src/regex/re_match.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"
@@ -343,7 +343,7 @@
    {:platform "linux-arm64"      :triple "aarch64-linux-gnu"
     :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
    {:platform "windows-amd64"    :triple "x86_64-windows-gnu"
-    :libs ["-lm"]                :exe ".exe" :static false :publish true}])
+    :libs ["-lm" "-lws2_32"]     :exe ".exe" :static false :publish true}])
 
 (defn- cross-build-one
   "Cross-compile one target in a single `zig cc` invocation (compile +

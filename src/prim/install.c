@@ -253,6 +253,8 @@ static const mino_capability_info k_capability_info[] = {
       "mino.store: EAVT fact store (open / transact / query / merge)." },
     { "json",         MINO_CAP_JSON,
       "clojure.data.json (read-str / write-str)." },
+    { "net",          MINO_CAP_NET,
+      "TCP sockets (net-connect / net-read / net-read-all / net-write / net-close)." },
     { NULL,           0u,                                                NULL },
 };
 
@@ -435,9 +437,9 @@ static const mino_prim_def k_prims_capability[] = {
     {"mino-installed?", prim_mino_installed_p,
      "Returns true if a named capability has been installed on this "
      "runtime. Argument is a keyword, symbol, or string; supported names "
-     "include :floor :regex :bignum :multimethods :protocols :transducers "
-     ":io :fs :proc :stm :agent :host :async. Used by core.clj sections "
-     "to gate optional surface on the host's install picks."},
+      "include :floor :regex :bignum :multimethods :protocols :transducers "
+      ":io :fs :proc :stm :agent :host :async :net. Used by core.clj sections "
+      "to gate optional surface on the host's install picks."},
 };
 
 static const size_t k_prims_capability_count =

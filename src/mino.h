@@ -1606,6 +1606,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 
 #define MINO_CAP_JSON          (1ull << 33) /* clojure.data.json */
 
+#define MINO_CAP_NET           (1ull << 34) /* TCP sockets: net-connect et al */
+
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
  * unsigned and widen implicitly when combined with 64-bit caps. */

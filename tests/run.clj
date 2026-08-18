@@ -143,6 +143,7 @@
 (require "tests/url_encode_test")
 (require "tests/url_parse_test")
 (require "tests/codec_test")
+(require "tests/net_test")
 
 (reset! clojure.test/suite-mode false)
 

@@ -26,7 +26,7 @@ INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
-LIBS = -lm
+LIBS = -lm -lws2_32
 # Static link on Windows so mino.exe doesn't depend on mingw runtime
 # DLLs (libgcc_s_seh-1.dll, libwinpthread-1.dll). Without -static the
 # exe fails to start on a fresh Windows install with

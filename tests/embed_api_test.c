@@ -213,6 +213,28 @@ static void test_to_int_bignum_round_trip(void)
     }
 }
 
+/* The net capability is opt-in: the sandbox preset must not carry it,
+ * and an embedder can add it explicitly. Pins the MINO_CAP_DEFAULT
+ * boundary that the script-side net tests cannot observe (the CLI
+ * installs every capability). */
+static void test_net_capability_gate(void)
+{
+    mino_state *S   = mino_state_new();
+    mino_env   *env = mino_env_new(S);
+    mino_val   *r;
+    mino_install_sandbox(S, env);
+    REQUIRE(!mino_capability_installed(S, MINO_CAP_NET),
+            "net/gate: sandbox preset must not install net");
+    mino_install(S, env, MINO_CAP_NET);
+    REQUIRE(mino_capability_installed(S, MINO_CAP_NET),
+            "net/gate: MINO_CAP_NET installs on demand");
+    r = mino_eval_string(S, "(mino-installed? :net)", env);
+    REQUIRE(r != NULL && r == mino_true(S),
+            "net/gate: script sees the installed net capability");
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 #if defined(__GNUC__)
 #  define MINO_NOINLINE __attribute__((noinline))
 #else
@@ -775,6 +797,7 @@ int main(void)
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
     test_to_int_bignum_round_trip();
+    test_net_capability_gate();
     test_atom_reset_tenured();
     test_predicate_grid(S, env);
     test_options(S, env);
