@@ -138,6 +138,19 @@ void  *gc_alloc_typed_inner(mino_state *S, unsigned char tag, size_t size);
 mino_val *alloc_val_inner(mino_state *S, mino_type type);
 char  *dup_n_inner(mino_state *S, const char *s, size_t len);
 
+/* Noreturn marker for gc_oom_throw's declaration and definition.
+ * __declspec on MSVC, which rejects the GCC/Clang-only __attribute__
+ * form (the msvc compile canary compiles the amalgam with cl.exe
+ * /TC). Mirrors the fallthrough / no_sanitize_address handling
+ * elsewhere in the tree. */
+#if defined(_MSC_VER)
+#  define MINO_NORETURN __declspec(noreturn)
+#elif defined(__GNUC__) || defined(__clang__)
+#  define MINO_NORETURN __attribute__((noreturn))
+#else
+#  define MINO_NORETURN
+#endif
+
 /* Raise the standard OOM mino diagnostic by longjmp'ing into the active
  * try frame (or abort if none). The same throw the GC allocator uses on
  * its own NULL return; callers that detect allocation failure outside
@@ -146,7 +159,7 @@ char  *dup_n_inner(mino_state *S, const char *s, size_t len);
  * shape is uniform. Never returns: longjmps into the active try frame,
  * or aborts. Marked noreturn so callers' capacity-growth paths are not
  * flagged for possibly-uninitialized uses past the throw. */
-__attribute__((noreturn)) void gc_oom_throw(mino_state *S, const char *msg);
+MINO_NORETURN void gc_oom_throw(mino_state *S, const char *msg);
 
 #ifdef MINO_ALLOC_PROFILE
 void mino_alloc_profile_record(const char *file, int line,
