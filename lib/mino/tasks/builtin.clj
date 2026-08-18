@@ -2232,6 +2232,19 @@
   []
   (println (sh! mino-bin "tests/run.clj")))
 
+(defn test-generative
+  "Run the generative property tests (tests/json_property_test.clj)
+  with the JIT disabled. The property loops push clojure.data.json's
+  writer and reader through enough iterations that fns cross the
+  hot threshold, and a CPJIT defect around the hot format-double
+  path crashes the process there (known issue, tracked with a
+  compact repro). The interpreter path is sound at the same seeds,
+  so the lane pins the properties while the JIT defect is open."
+  []
+  (println (sh! "sh" "-c"
+                (str "MINO_JIT=off " mino-bin
+                     " tests/json_property_test.clj"))))
+
 (defn test-summary
   "Run the test suite and emit a stable EDN summary artifact at
   output/test-results.edn. The shape is:

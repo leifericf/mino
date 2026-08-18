@@ -155,6 +155,15 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Generative property lane
+        # JSON round-trip properties. The lane runs with the JIT
+        # disabled inside the task (a CPJIT defect around the hot
+        # format-double path crashes the process; tracked as a known
+        # issue), so this step needs no extra env.
+        if: matrix.os != 'windows-2022'
+        run: ./mino task test-generative
+        timeout-minutes: 5
+
       - name: Release gate
         # The composite gate -- check-reloc-mirror, check-stencil-
         # registry, the test suite under ASan, and 4-way JIT parity
