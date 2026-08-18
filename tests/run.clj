@@ -141,6 +141,7 @@
 (require "tests/image_test")
 (require "tests/require_env_test")
 (require "tests/url_encode_test")
+(require "tests/url_parse_test")
 
 (reset! clojure.test/suite-mode false)
 
