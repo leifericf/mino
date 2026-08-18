@@ -452,6 +452,10 @@ extern const size_t        k_prims_async_count;
 extern const mino_prim_def k_prims_fs[];
 extern const size_t        k_prims_fs_count;
 
+/* url.c -- all prims are file-local static; no extern declarations needed. */
+extern const mino_prim_def k_prims_url[];
+extern const size_t        k_prims_url_count;
+
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;
 
