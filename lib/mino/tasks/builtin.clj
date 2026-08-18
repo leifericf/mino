@@ -2278,13 +2278,17 @@
     (println (sh! (str "./" bin)))))
 
 (defn test-embed
-  "Compile and run the embed_api_test smoke. Multi-state, STM, and
-   capability embed tests live in the mino-tests satellite repo
-   (test-embed-suite there); this smoke verifies the basic API
-   surface in mino's own gate."
+  "Compile and run the embed smoke tests. embed_api_test covers the
+  basic embedder API; embed_jit_guard_test pins the JIT slow-helper
+  state validation (a corrupt state pointer at the stencil boundary
+  must be refused as data, never dereferenced). Multi-state, STM,
+  and capability embed tests live in the mino-tests satellite repo
+  (test-embed-suite there)."
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
-                              "embed_api_test"))
+                              "embed_api_test")
+  (compile-and-run-embed-test "tests/embed_jit_guard_test.c"
+                              "embed_jit_guard_test"))
 
 (defn test-crash-handler
   "Compile and run the crash-handler backtrace smoke. Exercises the

@@ -44,10 +44,34 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "../../../mino.h"
 #include "../../../mino_internal.h"
 #include "../internal.h"
+
+/* JIT slow-helper state validation. The slow helpers are the boundary
+ * where native stencil code hands control back to the runtime: the
+ * chain ABI carries the state pointer in a caller-saved register that
+ * a defective stencil sequence can leave holding a Lisp value instead.
+ * Reading or writing any field through such a pointer corrupts the GC
+ * heap silently; the observed downstream faces are bogus free() calls
+ * and poisoned header lists in later collections. The guard refuses a
+ * foreign state as data (NULL return, the documented error-propagate
+ * path) before the first field access. The fprintf is on the
+ * corruption path only; the guard costs one compare on every entry. */
+#define MINO_JIT_REQUIRE_STATE(S_)                                    \
+    do {                                                              \
+        if ((S_) == NULL                                              \
+            || (S_)->state_magic != MINO_STATE_MAGIC) {               \
+            fprintf(stderr,                                           \
+                    "[mino] jit: corrupt state pointer at %s;"        \
+                    " refusing (disable jit to run without the"       \
+                    " guard firing)\n",                               \
+                    __func__);                                        \
+            return NULL;                                              \
+        }                                                             \
+    } while (0)
 
 /* Reloc kind enum mirror -- kept in sync with the values
  * tools/stencil_extract.c writes into <sym>_relocs tables. Header

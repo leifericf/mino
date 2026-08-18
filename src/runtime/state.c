@@ -82,6 +82,7 @@ mino_thread_ctx_t *mino_tls_ctx = NULL;
 static void state_init(mino_state *S)
 {
     memset(S, 0, sizeof(*S));
+    S->state_magic = MINO_STATE_MAGIC;
     /* Print dynvar caches: -1 = unset (no limit). Resolved per
      * top-level pr / print / pr-str call from *print-length* /
      * *print-level*; helpers consult these inline so dynvar lookup

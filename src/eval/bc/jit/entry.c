@@ -928,6 +928,17 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
     typedef mino_val *(*native_t)(mino_val **, mino_val **,
                                      mino_state *);
     native_t f = (native_t)bc->native;
+    /* The invoke call is also reached through the JIT call chain; the
+     * same state-pointer corruption the slow-helper guard catches can
+     * arrive here, and this function's first acts write through S
+     * (jit_invoke_env, jit_invoke_ctx), which is the poison entry. */
+    if (S == NULL || S->state_magic != MINO_STATE_MAGIC) {
+        fprintf(stderr,
+                "[mino] jit: corrupt state pointer at %s; refusing"
+                " (disable jit to run without the guard firing)\n",
+                __func__);
+        return NULL;
+    }
     /* Publish env on the current thread ctx so slow helpers running
      * from inside the JIT region can read it. Save / restore around
      * the call to support re-entry from a nested JIT'd callee in a

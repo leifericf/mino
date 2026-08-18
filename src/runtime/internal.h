@@ -85,6 +85,10 @@
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
 
+/* State identity stamp. See the state_magic field at the tail of
+ * struct mino_state. */
+#define MINO_STATE_MAGIC 0x4D494E4Fu /* "MINO" */
+
 struct mino_state {
     /* === Stencil-ABI anchor blocks ===================================== */
     /* The JIT's stencil byte tables read three fields of this struct
@@ -578,6 +582,16 @@ struct mino_state {
      * or resumes running script code (host-entry frame note, worker
      * and agent-pool thread entry, mino_resume_lock). */
     char                    *eval_stack_limit;
+
+    /* Identity stamp set once in state_init and never written again.
+     * The JIT's slow-helper boundary validates it on entry: a
+     * copy-and-patch chain defect can deliver a foreign pointer in
+     * the state argument register (observed: a tagged Lisp value),
+     * and refusing it as data converts silent heap corruption into
+     * a propagated eval error. Last member: appending here shifts no
+     * stencil-ABI anchor offset (see the anchor blocks at the head),
+     * so the checked-in stencil byte tables stay valid. */
+    uint32_t                state_magic;
 };
 
 /* Resolve the active per-thread ctx for state S.
