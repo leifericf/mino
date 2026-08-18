@@ -9,7 +9,8 @@
 (def ^:private include-flags
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
-       " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"))
+       " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
+       " -Isrc/vendor/bearssl"))
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        "-DMINO_CPJIT=1 "
@@ -18,7 +19,13 @@
                          (if (= v "") [] (str/split v " "))))
 (def ^:private windows? (some? (getenv "OS")))
 (def ^:private libs    (str/split (or (getenv "LIBS")
-                                       (if windows? "-lm -lws2_32" "-lm -lpthread")) " "))
+                                       ;; advapi32: BearSSL's vendored OS
+                                       ;; entropy (CryptGenRandom in
+                                       ;; src/vendor/bearssl/src/rand/
+                                       ;; sysrng.c) links against it.
+                                       (if windows?
+                                         "-lm -lws2_32 -ladvapi32"
+                                         "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
 ;; Stencil-regeneration toolchain. Stencils are committed as byte
@@ -96,8 +103,9 @@
    "src/collections/clone.c" "src/regex/re_compile.c" "src/regex/re_match.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"
    "src/prim/async.c"
-   "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
-   "src/vendor/imath/imath.c"])
+    "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
+    "src/vendor/imath/imath.c"
+    "src/vendor/bearssl/bearssl_client.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
@@ -343,7 +351,8 @@
    {:platform "linux-arm64"      :triple "aarch64-linux-gnu"
     :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
    {:platform "windows-amd64"    :triple "x86_64-windows-gnu"
-    :libs ["-lm" "-lws2_32"]     :exe ".exe" :static false :publish true}])
+    ;; advapi32: BearSSL's vendored OS entropy (CryptGenRandom).
+    :libs ["-lm" "-lws2_32" "-ladvapi32"]  :exe ".exe" :static false :publish true}])
 
 (defn- cross-build-one
   "Cross-compile one target in a single `zig cc` invocation (compile +
@@ -575,8 +584,8 @@
 (def ^:private amalgam-search-paths
   ["src" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
-   "src/vendor/imath" "src/eval/bc" "src/eval/bc/jit" "src/eval/bc/stencils"
-   "src/regex"])
+   "src/vendor/imath" "src/vendor/bearssl" "src/eval/bc"
+   "src/eval/bc/jit" "src/eval/bc/stencils" "src/regex"])
 
 (defn- amalgam-find-header
   "Resolve a project-local #include \"X\" string to an on-disk path.
@@ -753,10 +762,16 @@
              "- `mino.h` -- public embedding API (the only header you include).\n"
              "- `mino.c` -- unified translation unit; one `.c` file builds the\n"
              "  entire runtime.\n\n"
-             "## Versioning\n\n"
-             "The amalgamation is bit-identical to the mino source tree at\n"
-             "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
-             "`MINO_VERSION_*` macros.\n")))
+              "## Versioning\n\n"
+              "The amalgamation is bit-identical to the mino source tree at\n"
+              "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
+              "`MINO_VERSION_*` macros.\n\n"
+              "## Licenses\n\n"
+              "This distribution embeds two vendored libraries, both MIT:\n"
+              "imath (Michael J. Fromberger) and BearSSL v0.6 (Thomas\n"
+              "Pornin). Their license notices are preserved in the mino\n"
+              "source tree under `src/vendor/` and in the project's\n"
+              "THIRD_PARTY_LICENSES.md.\n")))
 
 (defn clean-dist
   "Remove the dist/ amalgamation tree."
@@ -2405,7 +2420,21 @@
    "src/runtime/image_load.c"   "SLAD image deserializer -- per-type allocate + patch + ROOTS splice over all MINO_* types"
    "src/runtime/image.c"        "SLAD image serializer -- per-type emit dispatch over every MINO_* tag"
    "src/eval/print.c"           "printer dispatch over every MINO_* tag (narrowly over once MINO_STORE printing landed)"
-   "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"})
+   "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"
+   "src/vendor/bearssl/bearssl_client.c"
+   "generated BearSSL client amalgam -- see src/vendor/bearssl/README.md"
+   "src/vendor/bearssl/src/ec/ec_c25519_m15.c"
+   "vendored BearSSL -- not modified"
+   "src/vendor/bearssl/src/ec/ec_p256_m15.c"
+   "vendored BearSSL -- not modified"
+   "src/vendor/bearssl/src/ec/ec_p256_m31.c"
+   "vendored BearSSL -- not modified"
+   "src/vendor/bearssl/src/ssl/ssl_engine.c"
+   "vendored BearSSL -- not modified"
+   "src/vendor/bearssl/src/ssl/ssl_hs_client.c"
+   "vendored BearSSL -- not modified"
+   "src/vendor/bearssl/src/x509/x509_minimal.c"
+   "vendored BearSSL -- not modified"})
 
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
@@ -2416,7 +2445,19 @@
     "src/runtime/image.c:img_emit_val_full" ;; SLAD serializer -- per-type emit dispatch over every MINO_* tag
     "src/runtime/image_load.c:img_patch_one" ;; SLAD deserializer -- per-type reference-patch dispatch over every MINO_* tag
     "src/prim/module.c:mino_env *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
-    "src/prim/module.c:mino_val *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
+    "src/prim/module.c:mino_val *prim_require" ;; require -- spec parsing + loading + aliasing in one path
+    ;; Vendored BearSSL: unrolled constant-time multiplication and
+    ;; private-exponent towers are large by design (constant-time code
+    ;; cannot loop over secret data); the amalgam entries match the
+    ;; generated per-unit rename prefixes (_u suffixes shift on regen).
+    "src/vendor/bearssl/bearssl_client.c:mul20_u"
+    "src/vendor/bearssl/bearssl_client.c:br_ghash_pwr8"
+    "src/vendor/bearssl/bearssl_client.c:br_rsa_private_key *sk"
+    "src/vendor/bearssl/src/ec/ec_c25519_m15.c:mul20"
+    "src/vendor/bearssl/src/ec/ec_p256_m15.c:mul20"
+    "src/vendor/bearssl/src/hash/ghash_pwr8.c:br_ghash_pwr8"
+    "src/vendor/bearssl/src/rsa/rsa_i15_privexp.c:br_rsa_private_key *sk"
+    "src/vendor/bearssl/src/rsa/rsa_i31_privexp.c:br_rsa_private_key *sk"})
 
 (defn- count-lines
   "Return the number of lines in a file."

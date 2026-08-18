@@ -22,11 +22,14 @@ CC      ?= cc
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -DMINO_CPJIT=1
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
-           -Isrc/interop -Isrc/diag -Isrc/vendor/imath
+           -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
+           -Isrc/vendor/bearssl
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
-LIBS = -lm -lws2_32
+# advapi32: BearSSL's vendored OS entropy path (CryptGenRandom in
+# src/vendor/bearssl/src/rand/sysrng.c) links against it.
+LIBS = -lm -lws2_32 -ladvapi32
 # Static link on Windows so mino.exe doesn't depend on mingw runtime
 # DLLs (libgcc_s_seh-1.dll, libwinpthread-1.dll). Without -static the
 # exe fails to start on a fresh Windows install with
@@ -45,7 +48,8 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                   src/runtime/*.c src/gc/*.c src/public/*.c \
                   src/values/*.c src/collections/*.c src/prim/*.c \
                   src/interop/*.c src/regex/*.c src/async/*.c \
-                  src/vendor/imath/*.c) main.c
+                  src/vendor/imath/*.c \
+                  src/vendor/bearssl/*.c) main.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/<symbol>.h with a single static const char *<symbol>_src

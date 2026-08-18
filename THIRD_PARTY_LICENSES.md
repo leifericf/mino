@@ -44,3 +44,45 @@ marked with a `mino:` comment for audit on upstream sync:
   documented MIN case now produces the correct unsigned magnitude.
 
 No other changes were made to the upstream source.
+
+## BearSSL
+
+Vendored TLS client library, pinned at release v0.6, upstream commit
+`8ef7680081c61b486622f2d983c0d3d21e83caad`. Source under
+`src/vendor/bearssl/`, fetched from
+<https://www.bearssl.org/git/BearSSL>. The upstream license notice is
+preserved verbatim in `src/vendor/bearssl/LICENSE`.
+
+```
+Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
+
+Permission is hereby granted, free of charge, to any person obtaining 
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be 
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The upstream sources under `src/vendor/bearssl/inc/` and
+`src/vendor/bearssl/src/` are unmodified. The committed
+`bearssl_client.c` is generated from them by
+`src/vendor/bearssl/tools/make_amalgam.py`, which applies mechanical,
+recorded transforms (per-unit file-local identifier renames, a
+`MIN`/`MAX` to `br_MIN`/`br_MAX` rename, hoisting one macro define, and
+dropping one MSVC `#pragma comment` line); see
+`src/vendor/bearssl/README.md` for the full list and the update ritual.
+
