@@ -164,6 +164,20 @@ jobs:
         run: ./mino task test-generative
         timeout-minutes: 5
 
+      - name: HTTP integration lane
+        # End-to-end localhost lane: one python3 fixture process
+        # (tests/fixtures/http/server.py, plain + TLS listeners) driven
+        # through the mino.http surface (tests/http_integration_test.clj):
+        # query/header GETs, JSON POST echo, gist pagination, 404 ex-data,
+        # redirect chains with 307 body preservation, keep-alive
+        # connection counting, gzip, chunked, async deref, read timeouts,
+        # and TLS trust. The fixture forks (os.fork), so it runs on the
+        # POSIX legs; the suite itself would skip the server tier on
+        # Windows (same gate as the net/tls suites in `task test`).
+        if: matrix.os != 'windows-2022'
+        run: ./mino task test-http
+        timeout-minutes: 5
+
       - name: Release gate
         # The composite gate -- check-reloc-mirror, check-stencil-
         # registry, the test suite under ASan, and 4-way JIT parity

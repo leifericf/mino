@@ -152,6 +152,7 @@
 (require "tests/http_request_test")
 (require "tests/http_ns_test")
 (require "tests/ca_roots_test")
+(require "tests/http_integration_test")
 
 (reset! clojure.test/suite-mode false)
 
