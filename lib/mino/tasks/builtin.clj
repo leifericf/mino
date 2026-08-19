@@ -101,7 +101,7 @@
    "src/prim/image.c"
    "src/prim/ns.c"
     "src/prim/fs.c" "src/prim/proc.c" "src/prim/net.c"
-    "src/prim/tls.c"
+    "src/prim/tls.c" "src/prim/pool.c"
    "src/prim/host.c" "src/prim/jvm_statics.c" "src/interop/syntax.c"
    "src/collections/clone.c" "src/regex/re_compile.c" "src/regex/re_match.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"

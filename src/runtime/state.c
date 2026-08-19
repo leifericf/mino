@@ -31,6 +31,7 @@ mino_val *prim_throw_classified(mino_state *S, const char *kind,
                                 const char *code, const char *msg);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 void      mino_agent_quiesce_workers(mino_state *S);
+void      mino_net_pool_state_free(mino_state *S);
 
 #include <errno.h>                   /* errno for strtol in mino_sampler_fire */
 #include <limits.h>                  /* INT_MAX for MINO_OPT_THREAD_LIMIT */
@@ -633,6 +634,11 @@ void mino_state_free(mino_state *S)
      * would crash. */
     mino_agent_quiesce_workers(S);
     mino_host_threads_quiesce(S);
+    /* Close every pooled keep-alive socket before any heap teardown:
+     * the release touches only descriptors and the ref-root list, and
+     * running it here keeps pooled sockets deterministic about dying
+     * with their state. */
+    mino_net_pool_state_free(S);
     /* Snapshot any MINO_CPJIT_STATS entries that borrow counters from
      * bc records before any of the teardown below can touch them; the
      * stats dump fires at atexit, after this state is gone. No-op when

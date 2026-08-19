@@ -99,8 +99,9 @@ src/
 | `src/prim/http.c` | HTTP/1.1 message codec primitives: http-encode-request / http-encode-chunk, response parsing (http-parse-response, http-parse-response-chunks) over a capped incremental parser |
 | `src/prim/gzip.c` | Decompression primitives: gzip-decompress (RFC 1952 container, CRC32 + ISIZE verified), deflate-decompress (raw RFC 1951), both capped by :max-bytes |
 | `src/prim/proc.c` | Process / subprocess primitives |
-| `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through |
+| `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through and the handle bridge the pool borrows descriptors through |
 | `src/prim/tls.c` | TLS client primitives (tls-connect, tls-read, tls-read-all, tls-write, tls-close) over vendored BearSSL: SNI always, chain+host verification against the vendored Mozilla roots, `:insecure?` skip path, and the getentropy/BCryptGenRandom entropy seeder |
+| `src/prim/pool.c` | Keep-alive connection pool primitives (pool-checkout, pool-return, pool-close-all): one pool per scheme/host/port endpoint per state (`S->net_pools`, freed at state teardown), entries rooted via mino_ref, expiry plus zero-timeout liveness polls at checkout |
 | `src/prim/host.c` | Host interop primitives (`host/new`, `host/call`, `host/static-call`, `host/get`), capability registry |
 | `src/interop/syntax.c` | Interop syntax desugaring (dot-method, field access, constructor, static calls) |
 

@@ -89,6 +89,10 @@
  * struct mino_state. */
 #define MINO_STATE_MAGIC 0x4D494E4Fu /* "MINO" */
 
+/* Keep-alive connection pool registry, owned and interpreted by
+ * prim/pool.c (opaque here). */
+struct mino_net_pools;
+
 struct mino_state {
     /* === Stencil-ABI anchor blocks ===================================== */
     /* The JIT's stencil byte tables read three fields of this struct
@@ -587,11 +591,18 @@ struct mino_state {
      * The JIT's slow-helper boundary validates it on entry: a
      * copy-and-patch chain defect can deliver a foreign pointer in
      * the state argument register (observed: a tagged Lisp value),
-     * and refusing it as data converts silent heap corruption into
-     * a propagated eval error. Last member: appending here shifts no
+     * and refusing it as data converts silent heap corruption into a
+     * propagated eval error. Last member: appending here shifts no
      * stencil-ABI anchor offset (see the anchor blocks at the head),
      * so the checked-in stencil byte tables stay valid. */
     uint32_t                state_magic;
+
+    /* Keep-alive connection pools (see the forward declaration
+     * above). malloc'd lazily by prim/pool.c on first use, freed by
+     * mino_net_pool_state_free during state teardown so pooled
+     * sockets die with their state. Past the stencil-ABI anchor
+     * blocks, like everything after jit_invoke_ctx's block. */
+    struct mino_net_pools  *net_pools;
 };
 
 /* Resolve the active per-thread ctx for state S.

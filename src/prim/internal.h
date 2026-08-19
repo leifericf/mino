@@ -402,6 +402,29 @@ int  mino_net_send_raw(mino_state *S, uintptr_t fd, const unsigned char *buf,
                        size_t n, long long write_ms, const char **kind,
                        const char **code, char *msg, size_t msg_cap);
 
+/* net.c handle bridge for prim/pool.c (keep-alive entries). The tag
+ * accessor lets the pool match handle kinds without redefining the
+ * tag literals; fd_of borrows a live descriptor (1) or answers 0 for
+ * a closed or foreign handle; the close is idempotent and marks the
+ * record so the handle finalizer stays a no-op. */
+const char *mino_net_sock_tag(void);
+int  mino_net_handle_fd(mino_val *v, uintptr_t *fd_out);
+void mino_net_handle_close(mino_val *v);
+
+/* tls.c -- same bridge shape as net.c above for TLS-socket handles.
+ * The pool-side close releases the descriptor without the close_notify
+ * pump (non-blocking, finalizer-equivalent). */
+const char *mino_tls_sock_tag(void);
+int  mino_tls_handle_fd(mino_val *v, uintptr_t *fd_out);
+void mino_tls_handle_close(mino_val *v);
+
+/* pool.c -- keep-alive connection pool per endpoint, per state (the
+ * registry hangs off S->net_pools; see runtime/internal.h). State
+ * teardown calls the free hook so pooled sockets die with the state.
+ * The prim table is file-local static (installed by mino_install_pool,
+ * dispatched from the MINO_CAP_NET capability bit like tls.c). */
+void mino_net_pool_state_free(mino_state *S);
+
 /* fs.c -- all prims are file-local static; no extern declarations needed. */
 void mino_install_fs(mino_state *S, mino_env *env);
 

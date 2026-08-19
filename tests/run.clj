@@ -147,6 +147,7 @@
 (require "tests/gzip_test")
 (require "tests/net_test")
 (require "tests/tls_test")
+(require "tests/pool_test")
 (require "tests/ca_roots_test")
 
 (reset! clojure.test/suite-mode false)

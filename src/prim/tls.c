@@ -1025,6 +1025,51 @@ static mino_val *prim_tls_close(mino_state *S, mino_val *args, mino_env *env)
     return mino_nil(S);
 }
 
+/* ---- handle bridge for the keep-alive pool (prim/pool.c) ---- */
+
+const char *mino_tls_sock_tag(void)
+{
+    return TLS_SOCK_TAG;
+}
+
+/* Borrow the descriptor of a live TLS-socket handle for a zero-timeout
+ * liveness poll. 1 with *fd_out set for an open session, 0 for any
+ * other value (wrong tag, closed, NULL). */
+int mino_tls_handle_fd(mino_val *v, uintptr_t *fd_out)
+{
+    mino_tls_sock_t *ts;
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, TLS_SOCK_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        return 0;
+    }
+    ts = (mino_tls_sock_t *)v->as.handle.ptr;
+    if (ts->closed) return 0;
+    *fd_out = ts->fd;
+    return 1;
+}
+
+/* Release a TLS-socket handle's descriptor without close_notify (the
+ * pool drops a peer it no longer trusts mid-conversation; skipping the
+ * shutdown pump keeps the release non-blocking, mirroring the
+ * finalizer). Idempotent. */
+void mino_tls_handle_close(mino_val *v)
+{
+    mino_tls_sock_t *ts;
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, TLS_SOCK_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        return;
+    }
+    ts = (mino_tls_sock_t *)v->as.handle.ptr;
+    if (!ts->closed) {
+        mino_net_close_raw(ts->fd);
+        ts->closed = 1;
+    }
+}
+
 /* ---- install ---- */
 
 static const mino_prim_def k_prims_tls[] = {

@@ -944,10 +944,52 @@ int mino_net_send_raw(mino_state *S, uintptr_t fd, const unsigned char *buf,
                            kind, code, msg, msg_cap);
 }
 
+/* ---- handle bridge for the keep-alive pool (prim/pool.c) ---- */
+
+const char *mino_net_sock_tag(void)
+{
+    return NET_SOCK_TAG;
+}
+
+/* Borrow the descriptor of a live net-socket handle for a zero-timeout
+ * liveness poll. 1 with *fd_out set for an open socket, 0 for any
+ * other value (wrong tag, closed, NULL). */
+int mino_net_handle_fd(mino_val *v, uintptr_t *fd_out)
+{
+    mino_net_sock_t *s;
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, NET_SOCK_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        return 0;
+    }
+    s = (mino_net_sock_t *)v->as.handle.ptr;
+    if (s->closed) return 0;
+    *fd_out = (uintptr_t)s->fd;
+    return 1;
+}
+
+/* Idempotent close of a net-socket handle: closes the descriptor and
+ * marks the record so the handle finalizer never closes it again. */
+void mino_net_handle_close(mino_val *v)
+{
+    mino_net_sock_t *s;
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, NET_SOCK_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        return;
+    }
+    s = (mino_net_sock_t *)v->as.handle.ptr;
+    if (!s->closed) {
+        net_close_fd(s->fd);
+        s->closed = 1;
+    }
+}
+
 /* ---- install ---- */
 
-static const mino_prim_def k_prims_net[] = {
-    {"net-connect",  prim_net_connect,
+static const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connect,
      "Connects to host:port over TCP. Returns a socket handle. Opts "
       "map keys :connect-timeout :read-timeout :write-timeout "
       "(non-negative ms; 0 disables the timeout; defaults 10000 / "
@@ -970,7 +1012,7 @@ static const mino_prim_def k_prims_net[] = {
      "also closed by the garbage collector."},
 };
 
-const size_t k_prims_net_count =
+static const size_t k_prims_net_count =
     sizeof(k_prims_net) / sizeof(k_prims_net[0]);
 
 void mino_install_net(mino_state *S, mino_env *env)

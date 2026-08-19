@@ -99,6 +99,7 @@ void mino_install_async       (mino_state *S, mino_env *env);
 void mino_install_store       (mino_state *S, mino_env *env);
 void mino_install_net         (mino_state *S, mino_env *env);
 void mino_install_tls         (mino_state *S, mino_env *env);
+void mino_install_pool        (mino_state *S, mino_env *env);
 void mino_install_image_prims (mino_state *S, mino_env *env);
 
 /* Bundled-stdlib registration hooks. Each registers the in-binary source
