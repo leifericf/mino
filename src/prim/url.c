@@ -260,8 +260,11 @@ static int url_scheme_is(const char *s, size_t len,
  * Single bounded walk: every component is a range of the input, so
  * total allocation is linear in the input length. All validation
  * happens before the first allocation; nothing is malloc'd until the
- * input has fully parsed. */
-static mino_val *prim_parse_url(mino_state *S, mino_val *args,
+ * input has fully parsed.
+ *
+ * Cross-TU: prim/http.c calls it for redirect-target resolution (the
+ * tls.c precedent of one prim driving another with a built arg list). */
+mino_val *prim_parse_url(mino_state *S, mino_val *args,
                                 mino_env *env)
 {
     mino_val *v;

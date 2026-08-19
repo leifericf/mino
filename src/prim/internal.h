@@ -503,9 +503,11 @@ extern const size_t        k_prims_async_count;
 extern const mino_prim_def k_prims_fs[];
 extern const size_t        k_prims_fs_count;
 
-/* url.c -- all prims are file-local static; no extern declarations needed. */
+/* url.c -- prims are file-local static except prim_parse_url, called
+ * by http.c to resolve redirect targets against a request :uri. */
 extern const mino_prim_def k_prims_url[];
 extern const size_t        k_prims_url_count;
+mino_val *prim_parse_url(mino_state *S, mino_val *args, mino_env *env);
 
 /* codec.c -- all prims are file-local static; no extern declarations needed. */
 extern const mino_prim_def k_prims_codec[];

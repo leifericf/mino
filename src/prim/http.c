@@ -1420,6 +1420,751 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
     return http_parse_drive(S, &o, p);
 }
 
+/* ---- redirect policy ---- */
+
+/* (redirect-next request response opts?) decides one redirect hop.
+ * Pure data in, data out: no sockets, no state, nothing but the two
+ * maps and the parsed base URL. The response is untrusted; every
+ * branch degrades to a :stop action rather than throwing, and the
+ * request side is validated up front (contract errors there are the
+ * caller's bug). */
+
+#define HTTP_REDIRECT_MAX_URI 4096
+
+static int http_ci_starts(const char *s, size_t len, const char *pfx,
+                          size_t pfx_len)
+{
+    size_t i;
+    if (len < pfx_len) return 0;
+    for (i = 0; i < pfx_len; i++) {
+        if (http_lower((unsigned char)s[i]) != (unsigned char)pfx[i])
+            return 0;
+    }
+    return 1;
+}
+
+static int http_hdr_name_is(const mino_val *k, const char *want)
+{
+    const char *n;
+    size_t len, i;
+    if (!http_name_arg(k, &n, &len)) return 0;
+    if (len != strlen(want)) return 0;
+    for (i = 0; i < len; i++) {
+        if (http_lower((unsigned char)n[i]) != (unsigned char)want[i])
+            return 0;
+    }
+    return 1;
+}
+
+/* Response status: the mino.http shape (:status int) or the codec
+ * shape (:code int). -1 when neither carries an integer. */
+static int http_status_of(mino_state *S, const mino_val *resp)
+{
+    mino_val *v;
+    long long n;
+    v = map_get_val(resp, mino_keyword(S, "status"));
+    if (v != NULL && as_long(v, &n) && n >= 100 && n <= 599)
+        return (int)n;
+    v = map_get_val(resp, mino_keyword(S, "code"));
+    if (v != NULL && as_long(v, &n) && n >= 100 && n <= 599)
+        return (int)n;
+    return -1;
+}
+
+/* Location header out of a response :headers map or pair vector.
+ * 1 = string found, 0 = absent, -1 = present but not a usable
+ * string. The first Location wins when headers repeat. */
+static int http_loc_header(mino_val *headers,
+                           const char **out, size_t *out_len)
+{
+    size_t i;
+    if (headers == NULL) return 0;
+    if (mino_type_of(headers) == MINO_MAP) {
+        size_t n = headers->as.map.len;
+        for (i = 0; i < n; i++) {
+            mino_val *k = vec_nth(headers->as.map.key_order, i);
+            if (http_hdr_name_is(k, "location")) {
+                mino_val *v = vec_nth(headers->as.map.val_order, i);
+                if (v != NULL && mino_type_of(v) == MINO_STRING) {
+                    *out = v->as.s.data;
+                    *out_len = v->as.s.len;
+                    return 1;
+                }
+                if (v != NULL && mino_type_of(v) == MINO_VECTOR
+                    && v->as.vec.len > 0) {
+                    mino_val *first = vec_nth(v, 0);
+                    if (first != NULL
+                        && mino_type_of(first) == MINO_STRING) {
+                        *out = first->as.s.data;
+                        *out_len = first->as.s.len;
+                        return 1;
+                    }
+                }
+                return -1;
+            }
+        }
+        return 0;
+    }
+    if (mino_type_of(headers) == MINO_VECTOR) {
+        size_t n = headers->as.vec.len;
+        for (i = 0; i < n; i++) {
+            mino_val *pair = vec_nth(headers, i);
+            if (pair != NULL && mino_type_of(pair) == MINO_VECTOR
+                && pair->as.vec.len == 2
+                && http_hdr_name_is(vec_nth(pair, 0), "location")) {
+                mino_val *v = vec_nth(pair, 1);
+                if (v != NULL && mino_type_of(v) == MINO_STRING) {
+                    *out = v->as.s.data;
+                    *out_len = v->as.s.len;
+                    return 1;
+                }
+                return -1;
+            }
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/* Validate an absolute http(s) URL text far enough that parse-url
+ * cannot throw on it: known scheme, nonempty host, port digits in
+ * range, and no space or control byte anywhere (the response is
+ * untrusted; parse-url itself does not police spaces). 0 ok, -1 bad. */
+static int http_abs_url_ok(const char *s, size_t len)
+{
+    size_t i, host_start;
+    long long port;
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c <= 0x20 || c == 0x7f) return -1;
+    }
+    if (http_ci_starts(s, len, "http://", 7)) {
+        i = 7;
+    } else if (http_ci_starts(s, len, "https://", 8)) {
+        i = 8;
+    } else {
+        return -1;
+    }
+    host_start = i;
+    if (i < len && s[i] == '[') {
+        while (i < len && s[i] != ']') i++;
+        if (i >= len) return -1;
+        i++;
+    } else {
+        while (i < len && s[i] != ':' && s[i] != '/' && s[i] != '?'
+               && s[i] != '#') {
+            i++;
+        }
+    }
+    if (i == host_start) return -1;
+    if (i < len && s[i] == ':') {
+        size_t digits = 0;
+        i++;
+        port = 0;
+        while (i < len && s[i] >= '0' && s[i] <= '9') {
+            port = port * 10 + (s[i] - '0');
+            if (port > 65535) return -1;
+            digits++;
+            i++;
+        }
+        (void)digits;
+        if (i < len && s[i] != '/' && s[i] != '?' && s[i] != '#')
+            return -1;
+    }
+    return 0;
+}
+
+enum {
+    HTTP_LOC_OK = 0,
+    HTTP_LOC_EMPTY,
+    HTTP_LOC_BAD
+};
+
+/* Append text to the assembly buffer; 0 ok, -1 past the cap. */
+static int http_buf_put(char *buf, size_t cap, size_t *len,
+                        const char *s, size_t n)
+{
+    if (*len > cap || n > cap - *len) return -1;
+    memcpy(buf + *len, s, n);
+    *len += n;
+    return 0;
+}
+
+/* ":port" only when the port was spelled out and is not the scheme
+ * default (canonical next-uri form). */
+static int http_put_port(char *buf, size_t cap, size_t *len,
+                         int is_https, int port)
+{
+    char num[16];
+    int n;
+    if (is_https ? port == 443 : port == 80) return 0;
+    n = snprintf(num, sizeof(num), ":%d", port);
+    return http_buf_put(buf, cap, len, num, (size_t)n);
+}
+
+/* Resolve a Location reference against the request URL's parts into
+ * an absolute URL string (RFC 3986 merge, fragments dropped). */
+static int http_loc_resolve(const char *loc, size_t loc_len,
+                            int b_is_https, const char *b_host,
+                            size_t b_host_len, int b_port,
+                            const char *b_path, size_t b_path_len,
+                            const char *b_query, size_t b_query_len,
+                            char *out, size_t cap, size_t *out_len)
+{
+    const char *scheme = b_is_https ? "https://" : "http://";
+    size_t scheme_len  = b_is_https ? 8 : 7;
+    size_t i;
+    size_t frag = loc_len;
+
+    *out_len = 0;
+    for (i = 0; i < loc_len; i++) {
+        if (loc[i] == '#') { frag = i; break; }
+    }
+    /* A fragment-only reference targets the base URL itself (path
+     * and query both carried over, RFC 3986 5.2.2). */
+    if (frag == 0 && loc_len > 0) {
+        if (http_buf_put(out, cap, out_len, scheme, scheme_len) != 0
+            || http_buf_put(out, cap, out_len, b_host, b_host_len) != 0
+            || http_put_port(out, cap, out_len, b_is_https, b_port) != 0
+            || http_buf_put(out, cap, out_len, b_path, b_path_len) != 0
+            || (b_query != NULL
+                && (http_buf_put(out, cap, out_len, "?", 1) != 0
+                    || http_buf_put(out, cap, out_len, b_query,
+                                    b_query_len) != 0)))
+            return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+    loc_len = frag;
+    if (loc_len == 0) return HTTP_LOC_EMPTY;
+
+    if (http_ci_starts(loc, loc_len, "http://", 7)
+        || http_ci_starts(loc, loc_len, "https://", 8)) {
+        if (http_abs_url_ok(loc, loc_len) != 0) return HTTP_LOC_BAD;
+        if (http_buf_put(out, cap, out_len, loc, loc_len) != 0)
+            return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+    if (loc_len >= 2 && loc[0] == '/' && loc[1] == '/') {
+        if (http_buf_put(out, cap, out_len, scheme, scheme_len) != 0
+            || http_buf_put(out, cap, out_len, loc + 2, loc_len - 2) != 0)
+            return HTTP_LOC_BAD;
+        if (http_abs_url_ok(out, *out_len) != 0) return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+    /* some other scheme ("ftp:..."): an http client cannot follow. */
+    {
+        size_t j = 0;
+        if (loc_len > 0
+            && ((loc[0] >= 'A' && loc[0] <= 'Z')
+                || (loc[0] >= 'a' && loc[0] <= 'z'))) {
+            j = 1;
+            while (j < loc_len) {
+                unsigned char c = (unsigned char)loc[j];
+                if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                    || (c >= '0' && c <= '9') || c == '+' || c == '-'
+                    || c == '.') {
+                    j++;
+                    continue;
+                }
+                break;
+            }
+            if (j < loc_len && loc[j] == ':' && j > 1)
+                return HTTP_LOC_BAD;
+        }
+    }
+    if (http_buf_put(out, cap, out_len, scheme, scheme_len) != 0
+        || http_buf_put(out, cap, out_len, b_host, b_host_len) != 0)
+        return HTTP_LOC_BAD;
+    if (http_put_port(out, cap, out_len, b_is_https, b_port) != 0)
+        return HTTP_LOC_BAD;
+    if (loc[0] == '/') {
+        if (http_buf_put(out, cap, out_len, loc, loc_len) != 0)
+            return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+    if (loc[0] == '?') {
+        if (http_buf_put(out, cap, out_len, b_path, b_path_len) != 0
+            || http_buf_put(out, cap, out_len, loc, loc_len) != 0)
+            return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+    /* relative segment: merge against the base path's directory */
+    {
+        size_t dir = b_path_len;
+        while (dir > 0 && b_path[dir - 1] != '/') dir--;
+        if (http_buf_put(out, cap, out_len, b_path, dir) != 0
+            || http_buf_put(out, cap, out_len, loc, loc_len) != 0)
+            return HTTP_LOC_BAD;
+        return HTTP_LOC_OK;
+    }
+}
+
+/* parse-url on a built string. The caller guarantees the text passed
+ * http_abs_url_ok, so this cannot throw; the fresh args cons is read
+ * before any allocation inside the callee (tls.c call-prim pattern). */
+static mino_val *http_parse_url_str(mino_state *S, const char *url,
+                                    size_t len)
+{
+    mino_val *uv = mino_string_n(S, url, len);
+    mino_val *args;
+    if (uv == NULL) return NULL;
+    args = mino_cons(S, uv, mino_nil(S));
+    return prim_parse_url(S, args, NULL);
+}
+
+static int http_part_str(mino_state *S, const mino_val *m, const char *key,
+                         const char **out, size_t *out_len)
+{
+    mino_val *v = map_get_val(m, mino_keyword(S, key));
+    if (v == NULL || mino_type_of(v) != MINO_STRING) return 0;
+    *out = v->as.s.data;
+    *out_len = v->as.s.len;
+    return 1;
+}
+
+static int http_part_int(mino_state *S, const mino_val *m, const char *key,
+                         long long *out)
+{
+    mino_val *v = map_get_val(m, mino_keyword(S, key));
+    return v != NULL && as_long(v, out);
+}
+
+/* Copy the parts a redirect needs out of a parsed URL map so no GC
+ * interior pointer is held across the result assembly. */
+typedef struct {
+    int         is_https;
+    char        host[256];
+    size_t      host_len;
+    int         port;
+    const char *path;
+    size_t      path_len;
+    const char *query;
+    size_t      query_len;
+} http_url_parts_t;
+
+static int http_url_parts(mino_state *S, const mino_val *m,
+                          http_url_parts_t *p)
+{
+    const char *scheme, *host;
+    size_t scheme_len, host_len;
+    long long port;
+    if (!http_part_str(S, m, "scheme", &scheme, &scheme_len)
+        || !http_part_str(S, m, "host", &host, &host_len)
+        || host_len == 0 || host_len >= sizeof(p->host)
+        || !http_part_int(S, m, "port", &port)
+        || !http_part_str(S, m, "path", &p->path, &p->path_len)) {
+        return 0;
+    }
+    p->is_https = scheme_len == 5 && memcmp(scheme, "https", 5) == 0;
+    p->port     = (int)port;
+    memcpy(p->host, host, host_len);
+    p->host[host_len] = '\0';
+    p->host_len = host_len;
+    if (!http_part_str(S, m, "query", &p->query, &p->query_len)) {
+        p->query = NULL;
+        p->query_len = 0;
+    }
+    return 1;
+}
+
+/* Rebuild a headers map or pair vector without the dropped names.
+ * Returns the original value when no drop applies. */
+static mino_val *http_headers_prune(mino_state *S, mino_val *headers,
+                                    int drop_auth, int drop_content)
+{
+    static const char *const k_auth[] = { "authorization", "cookie", NULL };
+    static const char *const k_content[] = {
+        "content-type", "content-length", "transfer-encoding", NULL
+    };
+    const char *const *sets[2];
+    size_t i, j, kept;
+    mino_val *result;
+
+    if (headers == NULL) return headers;
+    if (!drop_auth && !drop_content) return headers;
+    sets[0] = drop_auth ? k_auth : NULL;
+    sets[1] = drop_content ? k_content : NULL;
+    if (mino_type_of(headers) == MINO_MAP) {
+        mino_val **keys, **vals;
+        size_t n = headers->as.map.len;
+        keys = n > 0 ? (mino_val **)malloc(n * sizeof(*keys)) : NULL;
+        vals = n > 0 ? (mino_val **)malloc(n * sizeof(*vals)) : NULL;
+        if (n > 0 && (keys == NULL || vals == NULL)) {
+            free(keys);
+            free(vals);
+            prim_throw_classified(S, "internal", "MIN001",
+                                  "redirect-next: out of memory");
+            return NULL;
+        }
+        mino_current_ctx(S)->gc_depth++;
+        kept = 0;
+        for (i = 0; i < n; i++) {
+            mino_val *k = vec_nth(headers->as.map.key_order, i);
+            int drop = 0;
+            for (j = 0; j < 2 && !drop; j++) {
+                size_t t = 0;
+                if (sets[j] == NULL) continue;
+                while (sets[j][t] != NULL) {
+                    if (http_hdr_name_is(k, sets[j][t])) {
+                        drop = 1;
+                        break;
+                    }
+                    t++;
+                }
+            }
+            if (drop) continue;
+            keys[kept] = k;
+            vals[kept] = vec_nth(headers->as.map.val_order, i);
+            kept++;
+        }
+        result = mino_map(S, keys, vals, kept);
+        mino_current_ctx(S)->gc_depth--;
+        free(keys);
+        free(vals);
+        return result;
+    }
+    if (mino_type_of(headers) == MINO_VECTOR) {
+        mino_val **els;
+        size_t n = headers->as.vec.len;
+        els = n > 0 ? (mino_val **)malloc(n * sizeof(*els)) : NULL;
+        if (n > 0 && els == NULL) {
+            prim_throw_classified(S, "internal", "MIN001",
+                                  "redirect-next: out of memory");
+            return NULL;
+        }
+        mino_current_ctx(S)->gc_depth++;
+        kept = 0;
+        for (i = 0; i < n; i++) {
+            mino_val *pair = vec_nth(headers, i);
+            int drop = 0;
+            if (pair == NULL || mino_type_of(pair) != MINO_VECTOR
+                || pair->as.vec.len != 2) {
+                els[kept++] = pair;
+                continue;
+            }
+            for (j = 0; j < 2 && !drop; j++) {
+                size_t t = 0;
+                if (sets[j] == NULL) continue;
+                while (sets[j][t] != NULL) {
+                    if (http_hdr_name_is(vec_nth(pair, 0), sets[j][t])) {
+                        drop = 1;
+                        break;
+                    }
+                    t++;
+                }
+            }
+            if (drop) continue;
+            els[kept++] = pair;
+        }
+        result = mino_vector(S, els, kept);
+        mino_current_ctx(S)->gc_depth--;
+        free(els);
+        return result;
+    }
+    return headers;
+}
+
+static mino_val *http_stop_map(mino_state *S, const char *reason)
+{
+    mino_val *keys[2], *vals[2];
+    mino_current_ctx(S)->gc_depth++;
+    keys[0] = mino_keyword(S, "action");
+    vals[0] = mino_keyword(S, "stop");
+    keys[1] = mino_keyword(S, "reason");
+    vals[1] = mino_keyword(S, reason);
+    {
+        mino_val *m = mino_map(S, keys, vals, 2);
+        mino_current_ctx(S)->gc_depth--;
+        return m;
+    }
+}
+
+/* (redirect-next request response opts?) -> {:action :follow
+ * :request next-request} | {:action :stop :reason ...}. */
+static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
+                                    mino_env *env)
+{
+    mino_val *req, *resp, *opts = NULL;
+    mino_val *method_val, *uri_val, *headers_val, *parsed;
+    mino_val **keys, **vals, *result;
+    const char *loc, *base_uri;
+    size_t loc_len, base_uri_len;
+    long long max_redirects, redirect_count;
+    int status, follow = 1;
+    int drop_body, rewrite_get, cross_host;
+    http_url_parts_t base, target;
+    char abs[HTTP_REDIRECT_MAX_URI];
+    char next_uri[HTTP_REDIRECT_MAX_URI];
+    size_t abs_len, next_len;
+    size_t i, n, kept;
+    (void)env;
+
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "redirect-next requires a request "
+                                     "map and a response map");
+    }
+    req = args->as.cons.car;
+    resp = args->as.cons.cdr->as.cons.car;
+    args = args->as.cons.cdr->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "redirect-next takes at most 3 "
+                                         "arguments");
+        }
+    }
+    if (req == NULL || mino_type_of(req) != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "redirect-next: request must be a "
+                                     "map");
+    }
+    if (resp == NULL || mino_type_of(resp) != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "redirect-next: response must be a "
+                                     "map");
+    }
+    if (opts != NULL && mino_type_of(opts) != MINO_MAP
+        && mino_type_of(opts) != MINO_NIL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "redirect-next: opts must be a map");
+    }
+    if (opts != NULL && mino_type_of(opts) == MINO_MAP) {
+        mino_val *v = map_get_val(opts, mino_keyword(S,
+                                                     "follow-redirects"));
+        if (v != NULL && mino_type_of(v) != MINO_NIL) {
+            if (mino_type_of(v) != MINO_BOOL) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                                             "redirect-next: opts key "
+                                             ":follow-redirects must be "
+                                             "a boolean");
+            }
+            follow = mino_val_bool_get(v);
+        }
+    }
+    if (http_opt_long(S, opts, "max-redirects", 10, 0, 1000000,
+                      &max_redirects) != 0)
+        return NULL;
+    if (http_opt_long(S, opts, "redirect-count", 0, 0, 1000000,
+                      &redirect_count) != 0)
+        return NULL;
+
+    status = http_status_of(S, resp);
+    if (status != 301 && status != 302 && status != 303
+        && status != 307 && status != 308) {
+        return http_stop_map(S, "not-redirect");
+    }
+    if (!follow) return http_stop_map(S, "disabled");
+    if (redirect_count >= max_redirects)
+        return http_stop_map(S, "max-redirects");
+
+    method_val = map_get_val(req, mino_keyword(S, "method"));
+    if (method_val == NULL
+        || (mino_type_of(method_val) != MINO_KEYWORD
+            && mino_type_of(method_val) != MINO_SYMBOL
+            && mino_type_of(method_val) != MINO_STRING)) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "redirect-next: request :method "
+                                     "must be a keyword or string");
+    }
+    uri_val = map_get_val(req, mino_keyword(S, "uri"));
+    if (uri_val == NULL) {
+        uri_val = map_get_val(req, mino_keyword(S, "url"));
+    }
+    if (uri_val == NULL || mino_type_of(uri_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "redirect-next: request :uri must "
+                                     "be a string");
+    }
+    base_uri = uri_val->as.s.data;
+    base_uri_len = uri_val->as.s.len;
+    parsed = http_parse_url_str(S, base_uri, base_uri_len);
+    if (parsed == NULL) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "redirect-next: request :uri is "
+                                     "not a parseable http(s) URL");
+    }
+    /* parsed is pinned by gc suppression-free borrowing only until the
+     * parts are copied; path/query are re-borrowed from it (still
+     * reachable through the local parsed ref). */
+    mino_current_ctx(S)->gc_depth++;
+    if (!http_url_parts(S, parsed, &base)) {
+        mino_current_ctx(S)->gc_depth--;
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "redirect-next: request :uri is "
+                                     "not a parseable http(s) URL");
+    }
+
+    {
+        mino_val *hdrs = map_get_val(resp, mino_keyword(S, "headers"));
+        int rc = http_loc_header(hdrs, &loc, &loc_len);
+        if (rc == 0) {
+            mino_current_ctx(S)->gc_depth--;
+            return http_stop_map(S, "no-location");
+        }
+        if (rc < 0) {
+            mino_current_ctx(S)->gc_depth--;
+            return http_stop_map(S, "bad-location");
+        }
+    }
+    {
+        int rc = http_loc_resolve(loc, loc_len, base.is_https,
+                                  base.host, base.host_len, base.port,
+                                  base.path, base.path_len,
+                                  base.query, base.query_len,
+                                  abs, sizeof(abs), &abs_len);
+        if (rc == HTTP_LOC_EMPTY) {
+            mino_current_ctx(S)->gc_depth--;
+            return http_stop_map(S, "no-location");
+        }
+        if (rc == HTTP_LOC_BAD) {
+            mino_current_ctx(S)->gc_depth--;
+            return http_stop_map(S, "bad-location");
+        }
+    }
+    parsed = http_parse_url_str(S, abs, abs_len);
+    if (parsed == NULL
+        || !http_url_parts(S, parsed, &target)) {
+        mino_current_ctx(S)->gc_depth--;
+        return http_stop_map(S, "bad-location");
+    }
+    if (base.is_https && !target.is_https) {
+        mino_current_ctx(S)->gc_depth--;
+        return http_stop_map(S, "downgrade-blocked");
+    }
+    /* fetch-spec origin: scheme, host, and port as one unit. Any of
+     * the three changing moves the credentials to a different origin
+     * (http to https on the same host included), not just the host
+     * text. */
+    cross_host = target.is_https != base.is_https
+        || target.port != base.port
+        || target.host_len != base.host_len
+        || memcmp(target.host, base.host, base.host_len) != 0;
+
+    /* Method and body policy. 301/302 rewriting non-GET to GET is the
+     * browser-compatible divergence from strict RFC 7231 (which
+     * preserves the method); documented in the docstring. */
+    drop_body   = 0;
+    rewrite_get = 0;
+    if (status == 303) {
+        drop_body   = 1;
+        rewrite_get = 1;
+    } else if (status == 301 || status == 302) {
+        const char *m;
+        size_t mlen;
+        if (http_name_arg(method_val, &m, &mlen)
+            && ((mlen == 3
+                 && http_ci_starts(m, mlen, "get", 3))
+                || (mlen == 4
+                    && http_ci_starts(m, mlen, "head", 4)))) {
+            /* GET and HEAD keep their method (and any body they had) */
+        } else {
+            drop_body   = 1;
+            rewrite_get = 1;
+        }
+    }
+
+    /* Canonical next :uri: scheme://host[:port]path[?query]. */
+    next_len = 0;
+    if (http_buf_put(next_uri, sizeof(next_uri), &next_len,
+                     target.is_https ? "https://" : "http://",
+                     target.is_https ? 8 : 7) != 0
+        || http_buf_put(next_uri, sizeof(next_uri), &next_len,
+                        target.host, target.host_len) != 0
+        || http_put_port(next_uri, sizeof(next_uri), &next_len,
+                         target.is_https, target.port) != 0
+        || http_buf_put(next_uri, sizeof(next_uri), &next_len,
+                        target.path, target.path_len) != 0
+        || (target.query != NULL
+            && (http_buf_put(next_uri, sizeof(next_uri), &next_len,
+                             "?", 1) != 0
+                || http_buf_put(next_uri, sizeof(next_uri), &next_len,
+                                target.query, target.query_len) != 0))) {
+        mino_current_ctx(S)->gc_depth--;
+        return http_stop_map(S, "bad-location");
+    }
+
+    headers_val = map_get_val(req, mino_keyword(S, "headers"));
+    if (headers_val == NULL) headers_val = mino_nil(S);
+    if (cross_host || drop_body) {
+        mino_val *pruned = http_headers_prune(S, headers_val,
+                                              cross_host, drop_body);
+        if (pruned == NULL) {
+            mino_current_ctx(S)->gc_depth--;
+            return NULL;
+        }
+        headers_val = pruned;
+    }
+
+    /* Assemble the next request: every original key travels except
+     * :url (the stale alias), with :method/:headers/:body/:uri
+     * replaced per policy. GC stays suppressed while the arrays hold
+     * the fresh uri string and rebuilt headers (map_assoc_pairs
+     * precedent). */
+    n = req->as.map.len;
+    keys = (mino_val **)malloc((n + 1) * sizeof(*keys));
+    vals = (mino_val **)malloc((n + 1) * sizeof(*vals));
+    if (keys == NULL || vals == NULL) {
+        free(keys);
+        free(vals);
+        mino_current_ctx(S)->gc_depth--;
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "redirect-next: out of memory");
+    }
+    kept = 0;
+    for (i = 0; i < n; i++) {
+        mino_val *k = vec_nth(req->as.map.key_order, i);
+        mino_val *v = vec_nth(req->as.map.val_order, i);
+        if (k == mino_keyword(S, "method")) {
+            if (rewrite_get) {
+                keys[kept] = k;
+                vals[kept] = mino_keyword(S, "get");
+                kept++;
+            } else {
+                keys[kept] = k;
+                vals[kept] = v;
+                kept++;
+            }
+            continue;
+        }
+        if (k == mino_keyword(S, "uri") || k == mino_keyword(S, "url"))
+            continue;
+        if (k == mino_keyword(S, "body")) {
+            if (drop_body) continue;
+            keys[kept] = k;
+            vals[kept] = v;
+            kept++;
+            continue;
+        }
+        if (k == mino_keyword(S, "headers")) {
+            keys[kept] = k;
+            vals[kept] = headers_val;
+            kept++;
+            continue;
+        }
+        keys[kept] = k;
+        vals[kept] = v;
+        kept++;
+    }
+    keys[kept] = mino_keyword(S, "uri");
+    vals[kept] = mino_string_n(S, next_uri, next_len);
+    kept++;
+    {
+        mino_val *rkeys[2], *rvals[2];
+        mino_val *next_req = mino_map(S, keys, vals, kept);
+        rkeys[0] = mino_keyword(S, "action");
+        rvals[0] = mino_keyword(S, "follow");
+        rkeys[1] = mino_keyword(S, "request");
+        rvals[1] = next_req;
+        result = mino_map(S, rkeys, rvals, 2);
+    }
+    mino_current_ctx(S)->gc_depth--;
+    free(keys);
+    free(vals);
+    return result;
+}
+
 const mino_prim_def k_prims_http[] = {
     {"http-encode-request", prim_http_encode_request,
      "Serializes an HTTP request to bytes from a plain map: :method "
@@ -1455,6 +2200,25 @@ const mino_prim_def k_prims_http[] = {
      "shape as http-parse-response. Arbitrary read splits give the "
      "same result as a single feed; opts are shared, with :eof true "
      "signalling end of stream."},
+    {"redirect-next", prim_redirect_next,
+     "Decides one redirect hop from a request map, a response map, "
+     "and opts. Returns {:action :follow :request next-request} or "
+     "{:action :stop :reason k} with k one of :not-redirect "
+     ":disabled :max-redirects :no-location :bad-location "
+     ":downgrade-blocked. Follows only 301 302 303 307 308 with a "
+     "Location; 303 always becomes GET with the body and its content "
+     "headers dropped; 301 and 302 rewrite non-GET/HEAD methods to "
+     "GET (browser-compatible, a deliberate divergence from strict "
+     "RFC 7231 method preservation); 307 and 308 preserve method, "
+      "body, and headers. Relative Locations resolve against the "
+      "request :uri per RFC 3986 (fragments dropped, default ports "
+      "normalized away). Authorization and Cookie headers are stripped "
+      "when the redirect changes origin (scheme, host, or port; "
+      "fetch-spec origin); https to http is blocked while http to "
+      "https is allowed. Opts: :follow-redirects (boolean, default "
+     "true), :max-redirects (default 10), :redirect-count (hops "
+     "already followed, default 0; the policy stops when it reaches "
+     ":max-redirects). Pure data: no sockets, no capability."},
 };
 
 const size_t k_prims_http_count =
