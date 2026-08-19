@@ -22,3 +22,7 @@ Source and issue tracker: <https://github.com/leifericf/mino>
 ## License
 
 MIT. See `LICENSE` for the full text.
+
+The binary embeds three MIT-licensed libraries (imath, BearSSL,
+miniz) and Mozilla CA root certificate data (MPL-2.0). Every notice,
+including the full MPL-2.0 text, is in `THIRD_PARTY_LICENSES.md`.

@@ -721,16 +721,68 @@
               (do (swap! chunks conj (str line "\n"))
                   (recur (+ i 1))))))))))
 
+(def ^:private dist-license-banner
+  "Notice prepended to dist/mino.h and dist/mino.c so the distributed
+   files carry mino's copyright and the license map. Constant text,
+   no timestamps: regeneration stays byte-stable."
+  (str "/* mino: a tiny, embeddable Lisp. https://mino-lang.org\n"
+       " * Copyright (c) 2026 Leif Eric Fredheim. MIT license.\n"
+       " *\n"
+       " * This file embeds imath, BearSSL and miniz (MIT) and Mozilla\n"
+       " * CA root certificate data (MPL-2.0). Every notice, including\n"
+       " * the full license texts, is in THIRD_PARTY_LICENSES.md next to\n"
+       " * this file.\n"
+       " */\n"))
+
+(defn- gen-dist-third-party-licenses
+  "Assemble dist/THIRD_PARTY_LICENSES.md from the checked-in license
+   files: mino's own MIT notice, each vendored library's LICENSE, and
+   the Mozilla notice (attribution plus the full MPL-2.0 text) for
+   the embedded CA root data. Pure concatenation of versioned files,
+   so the output is deterministic."
+  []
+  (let [pem   (slurp "src/vendor/bearssl/mozilla-roots.pem")
+        date  (let [raw (or (first (filter #(str/includes? % "Certificate data from Mozilla as of:")
+                                           (str/split-lines pem)))
+                            "Certificate data from Mozilla as of: unknown")]
+                (str/replace raw #"^##\s+" ""))
+        block (fn [title body]
+                (str "## " title "\n\n```\n" (str/trim body) "\n```\n\n"))]
+    (spit "dist/THIRD_PARTY_LICENSES.md"
+          (str "# Third-Party Licenses\n\n"
+               "License notices for mino and everything embedded in the\n"
+               "single-file distribution (mino.c, mino.h).\n\n"
+               (block "mino (MIT)" (slurp "LICENSE"))
+               (block "imath (MIT), Copyright Michael J. Fromberger"
+                      (slurp "src/vendor/imath/LICENSE"))
+               (block "BearSSL (MIT), Copyright Thomas Pornin"
+                      (slurp "src/vendor/bearssl/LICENSE"))
+               (block "miniz inflate side (MIT)"
+                      (slurp "src/vendor/miniz/LICENSE"))
+               "## Mozilla CA root certificates (MPL-2.0)\n\n"
+               "The embedded CA root data is copyright Mozilla Foundation\n"
+               "and individual contributors, distributed under the Mozilla\n"
+               "Public License 2.0. The bundle is Mozilla's root store as\n"
+               "republished by curl (https://curl.se/ca/cacert.pem);\n"
+               date ". Full license text:\n\n"
+               "```\n" (str/trim (slurp "src/vendor/bearssl/MPL-2.0.txt"))
+               "\n```\n"))))
+
 (defn amalgamate
   "Produce a single-file vendor distribution under dist/.
 
    Writes:
-     dist/mino.h      -- copy of the public header
+     dist/mino.h      -- the public header, prefixed with the license
+                         banner
      dist/mino.c      -- unified TU of every lib src + transitively
                          referenced internal header, with project-
                          local includes pre-expanded inline and system
-                         includes deduped at the top.
-     dist/README.md   -- two-line build recipe.
+                         includes deduped at the top; prefixed with the
+                         license banner
+     dist/README.md   -- build recipe and license map
+     dist/THIRD_PARTY_LICENSES.md
+                      -- mino's MIT notice plus every vendored
+                         license, including the full MPL-2.0 text
 
    An embedder vendors the dist/ directory into their tree, compiles
    with `cc -std=c99 -c mino.c`, and links `mino.o app.o -lm -lpthread`.
@@ -741,8 +793,8 @@
   (gen-stdlib-headers)
   (when-not (file-exists? "dist") (sh! "mkdir" "-p" "dist"))
   (let [seen    (atom #{})
-        syshdrs (atom #{})
-        chunks  (atom [])]
+         syshdrs (atom #{})
+         chunks  (atom [])]
     ;; Recursively walk lib-srcs (excluding main.c -- the embedder
     ;; provides their own entrypoint).
     (doseq [src lib-srcs]
@@ -752,7 +804,8 @@
     ;; this single TU an earlier file pulls the system headers first, so
     ;; hoist them here (the per-file copies are stripped during expand) to
     ;; keep the POSIX / Darwin surface the sources request.
-    (let [header  (str "/* mino single-file amalgamation. See dist/README.md for usage. */\n\n"
+    (let [header  (str dist-license-banner "\n"
+                       "/* mino single-file amalgamation. See dist/README.md for usage. */\n\n"
                        "#if defined(__APPLE__)\n"
                        "#  define _DARWIN_C_SOURCE 1\n"
                        "#endif\n"
@@ -761,7 +814,7 @@
                        "#endif\n\n")
           body    (str/join "" @chunks)]
       (spit "dist/mino.c" (str header body))
-      (sh! "cp" "src/mino.h" "dist/mino.h")
+      (spit "dist/mino.h" (str dist-license-banner "\n" (slurp "src/mino.h")))
       (println (str "amalgamate: dist/mino.c (" (count body) " bytes body, "
                     (count @seen) " files inlined)"))))
   (spit "dist/README.md"
@@ -775,18 +828,26 @@
              "## Files\n\n"
              "- `mino.h` -- public embedding API (the only header you include).\n"
              "- `mino.c` -- unified translation unit; one `.c` file builds the\n"
-             "  entire runtime.\n\n"
-              "## Versioning\n\n"
-              "The amalgamation is bit-identical to the mino source tree at\n"
-              "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
-              "`MINO_VERSION_*` macros.\n\n"
-               "## Licenses\n\n"
-               "This distribution embeds three vendored libraries, all\n"
-               "MIT: imath (Michael J. Fromberger), BearSSL v0.6 (Thomas\n"
-               "Pornin), and the miniz inflate side v3.1.2 (Rich\n"
-               "Geldreich et al.). Their license notices are preserved in\n"
-               "the mino source tree under `src/vendor/` and in the\n"
-               "project's THIRD_PARTY_LICENSES.md.\n")))
+             "  entire runtime.\n"
+             "- `THIRD_PARTY_LICENSES.md` -- every license notice for this\n"
+             "  distribution, including the full MPL-2.0 text.\n\n"
+             "## Versioning\n\n"
+             "The amalgamation is bit-identical to the mino source tree at\n"
+             "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
+             "`MINO_VERSION_*` macros.\n\n"
+             "## Licenses\n\n"
+             "Component by component:\n\n"
+             "- mino: MIT (Leif Eric Fredheim).\n"
+             "- imath (Michael J. Fromberger): MIT.\n"
+             "- BearSSL v0.6 (Thomas Pornin): MIT.\n"
+             "- miniz inflate side v3.1.2 (RAD Game Tools, Valve Software,\n"
+             "  Rich Geldreich et al.): MIT.\n"
+             "- Mozilla CA root certificate data (Mozilla Foundation):\n"
+             "  MPL-2.0.\n\n"
+             "Every notice, including the full MPL-2.0 text, is reproduced\n"
+             "in `THIRD_PARTY_LICENSES.md` in this directory.\n"))
+  (gen-dist-third-party-licenses)
+  (println "amalgamate: dist/THIRD_PARTY_LICENSES.md"))
 
 (defn clean-dist
   "Remove the dist/ amalgamation tree."

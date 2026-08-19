@@ -104,6 +104,7 @@ jobs:
           mkdir -p "$dir"
           cp "mino${{ matrix.exe }}" "$dir/"
           cp LICENSE "$dir/"
+          cp THIRD_PARTY_LICENSES.md "$dir/"
           sed \
             -e "s/__VERSION__/${TAG}/g" \
             -e "s/__OS__/${{ matrix.os }}/g" \
@@ -246,6 +247,7 @@ jobs:
             mkdir -p "$dir"
             cp "$bin" "$dir/mino"
             cp LICENSE "$dir/"
+            cp THIRD_PARTY_LICENSES.md "$dir/"
             sed \
               -e "s/__VERSION__/${TAG}/g" \
               -e "s/__OS__/linux/g" \
