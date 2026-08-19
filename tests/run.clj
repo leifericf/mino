@@ -143,6 +143,7 @@
 (require "tests/url_encode_test")
 (require "tests/url_parse_test")
 (require "tests/codec_test")
+(require "tests/http_codec_test")
 (require "tests/gzip_test")
 (require "tests/net_test")
 (require "tests/tls_test")

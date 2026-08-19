@@ -96,6 +96,7 @@ src/
 | `src/prim/fs.c` | Filesystem primitives |
 | `src/prim/url.c` | URL text primitives: percent-encode / percent-decode, parse-url (RFC 3986) |
 | `src/prim/codec.c` | Binary codec primitives: base64-encode / base64-decode (RFC 4648), hex-encode / hex-decode |
+| `src/prim/http.c` | HTTP/1.1 message codec primitives: http-encode-request / http-encode-chunk, response parsing (http-parse-response, http-parse-response-chunks) over a capped incremental parser |
 | `src/prim/gzip.c` | Decompression primitives: gzip-decompress (RFC 1952 container, CRC32 + ISIZE verified), deflate-decompress (raw RFC 1951), both capped by :max-bytes |
 | `src/prim/proc.c` | Process / subprocess primitives |
 | `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through |
