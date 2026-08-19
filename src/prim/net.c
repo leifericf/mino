@@ -1,11 +1,14 @@
 /*
  * net.c -- TCP socket primitives: net-connect, net-read,
- * net-read-all, net-write, net-close.
+ * net-read-all, net-write, net-close; server side: net-listen,
+ * net-accept, net-listener-port.
  *
  * Sockets are MINO_HANDLE values (tag "mino/net-socket") wrapping a
- * malloc'd descriptor record. The handle finalizer closes the fd when
- * the value is collected or the state is torn down, so a dropped
- * socket never leaks; net-close is the explicit, idempotent form.
+ * malloc'd descriptor record; listeners use their own tag
+ * ("mino/net-listener") over the same shape. The handle finalizer
+ * closes the fd when the value is collected or the state is torn
+ * down, so a dropped handle never leaks; net-close is the explicit,
+ * idempotent form and accepts either tag.
  *
  * Winsock is initialised lazily, once per process, on the first
  * socket call: a WSAStartup failure there can be reported as a
@@ -53,6 +56,8 @@
 #  include <unistd.h>
 #  include <errno.h>
 #  include <fcntl.h>
+#  include <netinet/in.h>
+#  include <netinet/tcp.h>
 #endif
 
 #include <string.h>
@@ -68,11 +73,15 @@ typedef int mino_net_fd_t;
 #endif
 
 #define NET_SOCK_TAG "mino/net-socket"
+#define NET_LISTENER_TAG "mino/net-listener"
 
 /* Default per-operation timeouts, milliseconds. */
 #define NET_DEFAULT_CONNECT_TIMEOUT_MS 10000LL
 #define NET_DEFAULT_READ_TIMEOUT_MS    30000LL
 #define NET_DEFAULT_WRITE_TIMEOUT_MS   30000LL
+#define NET_DEFAULT_ACCEPT_TIMEOUT_MS  60000LL
+
+#define NET_DEFAULT_LISTEN_BACKLOG 16
 
 /* Ceiling for caller-supplied timeouts before they scale to
  * nanoseconds; above this the ms->ns multiply would overflow a
@@ -91,6 +100,11 @@ typedef struct {
     long long     write_timeout_ms;
     int           closed;
 } mino_net_sock_t;
+
+typedef struct {
+    mino_net_fd_t fd;
+    int           closed;
+} mino_net_listener_t;
 
 /* ---- platform shims ---- */
 
@@ -145,6 +159,15 @@ static void net_sock_finalize(void *ptr, const char *tag)
     free(s);
 }
 
+static void net_listener_finalize(void *ptr, const char *tag)
+{
+    mino_net_listener_t *l = (mino_net_listener_t *)ptr;
+    (void)tag;
+    if (l == NULL) return;
+    if (!l->closed) net_close_fd(l->fd);
+    free(l);
+}
+
 /* ---- argument helpers ---- */
 
 /* Extract the socket record from a net-socket handle. Throws eval/type
@@ -164,6 +187,23 @@ static mino_net_sock_t *net_sock_arg(mino_state *S, mino_val *v,
         return NULL;
     }
     return (mino_net_sock_t *)v->as.handle.ptr;
+}
+
+/* Same contract as net_sock_arg, for the listener tag. */
+static mino_net_listener_t *net_listener_arg(mino_state *S, mino_val *v,
+                                             const char *who)
+{
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, NET_LISTENER_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "%s: argument must be a net listener", who);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return NULL;
+    }
+    return (mino_net_listener_t *)v->as.handle.ptr;
 }
 
 /* Read an optional non-negative ms timeout out of opts under key.
@@ -217,6 +257,32 @@ static void net_apply_io_timeouts(mino_net_fd_t fd, long long read_ms,
         (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
     }
+}
+
+/* Ask the socket itself to suppress SIGPIPE where no per-send
+ * MSG_NOSIGNAL flag exists (BSD / Apple; Windows has no SIGPIPE). */
+static void net_suppress_sigpipe(mino_net_fd_t fd)
+{
+#if !defined(_WIN32) && !defined(MSG_NOSIGNAL)
+#  ifdef SO_NOSIGPIPE
+    int one = 1;
+    (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+#  else
+    (void)fd;
+#  endif
+#else
+    (void)fd;
+#endif
+}
+
+/* Loopback-oriented accepted sockets: coalesce nothing, the peer is
+ * on the same machine and per-segment latency dominates. Failure is
+ * non-fatal (an optimization, not a correctness requirement). */
+static void net_set_tcp_nodelay(mino_net_fd_t fd)
+{
+    int one = 1;
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+                     (const char *)&one, sizeof(one));
 }
 
 /* ---- connect ---- */
@@ -310,6 +376,56 @@ static int net_wait_connected(mino_state *S, mino_net_fd_t fd,
             }
             return 0;
         }
+    }
+}
+
+/* Wait until fd is readable or the timeout passes. Returns 0
+ * readable, 1 timeout, -1 error. Same poll-not-select reasoning and
+ * yield discipline as net_wait_connected. */
+static int net_wait_readable(mino_state *S, mino_net_fd_t fd,
+                             long long timeout_ms)
+{
+    long long deadline;
+    if (timeout_ms > NET_MAX_TIMEOUT_MS) timeout_ms = NET_MAX_TIMEOUT_MS;
+    deadline = mino_monotonic_ns() + timeout_ms * 1000000LL;
+    for (;;) {
+        long long remaining_ms;
+        long long now = mino_monotonic_ns();
+        int poll_ms;
+        int rc;
+        if (now >= deadline) return 1;
+        remaining_ms = (deadline - now) / 1000000LL;
+        poll_ms = remaining_ms > (long long)INT_MAX
+                    ? INT_MAX : (int)remaining_ms;
+        {
+#ifdef _WIN32
+            WSAPOLLFD pfd;
+            int depth = mino_yield_lock(S);
+            pfd.fd      = fd;
+            pfd.events  = POLLIN;
+            pfd.revents = 0;
+            rc = WSAPoll(&pfd, 1, poll_ms);
+            mino_resume_lock(S, depth);
+#else
+            struct pollfd pfd;
+            int depth = mino_yield_lock(S);
+            pfd.fd      = fd;
+            pfd.events  = POLLIN;
+            pfd.revents = 0;
+            rc = poll(&pfd, 1, poll_ms);
+            mino_resume_lock(S, depth);
+#endif
+        }
+        if (rc < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEINTR) continue;
+#else
+            if (errno == EINTR) continue;
+#endif
+            return -1;
+        }
+        if (rc == 0) return 1;
+        return 0;
     }
 }
 
@@ -487,16 +603,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "net/connect", "MNE002", msg);
     }
 
-#if !defined(_WIN32) && !defined(MSG_NOSIGNAL)
-    /* No per-send MSG_NOSIGNAL flag on this platform; ask the socket
-     * itself to suppress SIGPIPE (BSD / Apple). */
-#  ifdef SO_NOSIGPIPE
-    {
-        int one = 1;
-        (void)setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
-    }
-#  endif
-#endif
+    net_suppress_sigpipe(fd);
     net_apply_io_timeouts(fd, read_ms, write_ms);
 
     sock = (mino_net_sock_t *)malloc(sizeof(*sock));
@@ -513,6 +620,398 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
     hv->as.handle.ptr = sock;
     gc_unpin(1);
     return hv;
+}
+
+/* ---- listen / accept ---- */
+
+/* Socket + bind + listen for one candidate address. Returns 0 with
+ * *fd_out set, -1 with the OS detail in err. SO_REUSEADDR is set
+ * before bind on POSIX only: winsock's REUSEADDR also lets a second
+ * socket hijack a port another socket still holds, so listeners stay
+ * without it there. */
+static int net_try_bind(mino_net_fd_t *fd_out, const struct sockaddr *sa,
+                        socklen_t salen, int backlog, char *err,
+                        size_t err_cap)
+{
+    mino_net_fd_t fd = socket(sa->sa_family, SOCK_STREAM, 0);
+    if (fd == MINO_NET_INVALID_FD) {
+        net_os_error(err, err_cap);
+        return -1;
+    }
+#ifndef _WIN32
+    {
+        int one = 1;
+        (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    }
+#endif
+    if (bind(fd, sa, salen) != 0) {
+        net_os_error(err, err_cap);
+        net_close_fd(fd);
+        return -1;
+    }
+    if (listen(fd, backlog) != 0) {
+        net_os_error(err, err_cap);
+        net_close_fd(fd);
+        return -1;
+    }
+    *fd_out = fd;
+    return 0;
+}
+
+/* (net-listen host port [opts]) -> listener handle. host is a bind
+ * address (IP literal typical); "" or "*" binds the IPv4 wildcard.
+ * port 0 lets the kernel choose; net-listener-port reads the choice
+ * back. opts key :backlog (positive integer, default 16). */
+static mino_val *prim_net_listen(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val *host_val, *port_val, *opts = NULL, *hv;
+    long long port, backlog;
+    char host[512];
+    char portstr[16];
+    char detail[128];
+    mino_net_fd_t fd = MINO_NET_INVALID_FD;
+    mino_net_listener_t *rec;
+    int wildcard;
+    int depth;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "net-listen requires host and port");
+    }
+    host_val = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "net-listen requires host and port");
+    }
+    port_val = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (opts != NULL && mino_type_of(opts) == MINO_MAP
+            && mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "net-listen takes at most 3 "
+                                         "arguments");
+        }
+        if (opts != NULL && mino_type_of(opts) != MINO_MAP
+            && mino_type_of(opts) != MINO_NIL) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "net-listen: opts must be a map");
+        }
+    }
+    if (host_val == NULL || mino_type_of(host_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "net-listen: host must be a string");
+    }
+    if (host_val->as.s.len >= sizeof(host)) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "net-listen: host is too long");
+    }
+    memcpy(host, host_val->as.s.data, host_val->as.s.len);
+    host[host_val->as.s.len] = '\0';
+    wildcard = host[0] == '\0' || strcmp(host, "*") == 0;
+    if (!as_long(port_val, &port) || port < 0 || port > 65535) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "net-listen: port must be an integer "
+                                     "in 0..65535");
+    }
+    backlog = NET_DEFAULT_LISTEN_BACKLOG;
+    if (opts != NULL && mino_type_of(opts) == MINO_MAP) {
+        mino_val *v = map_get_val(opts, mino_keyword(S, "backlog"));
+        if (v != NULL && mino_type_of(v) != MINO_NIL) {
+            if (!as_long(v, &backlog) || backlog < 1) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                                             "net-listen: opts key "
+                                             ":backlog must be a positive "
+                                             "integer");
+            }
+        }
+    }
+    if (backlog > SOMAXCONN) backlog = SOMAXCONN;
+
+#ifdef _WIN32
+    if (net_winsock_init() != 0) {
+        return prim_throw_classified(S, "net", "MNE004",
+                                     "net-listen: WSAStartup failed");
+    }
+#endif
+    /* Pre-flight the handle value before any descriptor exists, per
+     * the net-connect ownership note. */
+    hv = mino_handle_ex(S, NULL, NET_LISTENER_TAG, net_listener_finalize);
+    gc_pin(hv);
+
+    if (wildcard) {
+        struct sockaddr_in any;
+        memset(&any, 0, sizeof(any));
+        any.sin_family      = AF_INET;
+        any.sin_addr.s_addr = htonl(INADDR_ANY);
+        any.sin_port        = htons((unsigned short)port);
+        if (net_try_bind(&fd, (struct sockaddr *)&any, sizeof(any),
+                         (int)backlog, detail, sizeof(detail)) != 0) {
+            fd = MINO_NET_INVALID_FD;
+        }
+    } else {
+        struct addrinfo hints, *res = NULL, *ai;
+        int gai_rc;
+        snprintf(portstr, sizeof(portstr), "%lld", port);
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_flags   = AI_PASSIVE;
+        hints.ai_family  = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        depth = mino_yield_lock(S);
+        gai_rc = getaddrinfo(host, portstr, &hints, &res);
+        mino_resume_lock(S, depth);
+        if (gai_rc != 0) {
+            char msg[300];
+            gc_unpin(1);
+#ifdef _WIN32
+            snprintf(msg, sizeof(msg), "net-listen: cannot resolve bind "
+                     "address %.190s: getaddrinfo error %d", host, gai_rc);
+#else
+            snprintf(msg, sizeof(msg), "net-listen: cannot resolve bind "
+                     "address %.190s: %.60s", host, gai_strerror(gai_rc));
+#endif
+            return prim_throw_classified(S, "net/dns", "MNE001", msg);
+        }
+        detail[0] = '\0';
+        for (ai = res; ai != NULL; ai = ai->ai_next) {
+            if (net_try_bind(&fd, ai->ai_addr, ai->ai_addrlen,
+                             (int)backlog, detail, sizeof(detail)) == 0)
+                break;
+            fd = MINO_NET_INVALID_FD;
+        }
+        freeaddrinfo(res);
+    }
+    if (fd == MINO_NET_INVALID_FD) {
+        char msg[300];
+        gc_unpin(1);
+        snprintf(msg, sizeof(msg), "net-listen: cannot listen on %.120s:"
+                 "%lld: %.60s", host, port,
+                 detail[0] ? detail : "no usable addresses");
+        return prim_throw_classified(S, "net", "MNE004", msg);
+    }
+    /* Non-blocking listener: accept is gated on a poll with a
+     * deadline, and a connection stolen between poll and accept must
+     * surface as EWOULDBLOCK so the wait can resume, never block. */
+    if (net_set_nonblocking(fd, 1) != 0) {
+        char msg[200];
+        net_os_error(detail, sizeof(detail));
+        net_close_fd(fd);
+        gc_unpin(1);
+        snprintf(msg, sizeof(msg), "net-listen: cannot set non-blocking "
+                 "mode: %.100s", detail);
+        return prim_throw_classified(S, "net", "MNE004", msg);
+    }
+
+    rec = (mino_net_listener_t *)malloc(sizeof(*rec));
+    if (rec == NULL) {
+        net_close_fd(fd);
+        gc_unpin(1);
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "net-listen: out of memory");
+    }
+    rec->fd     = fd;
+    rec->closed = 0;
+    hv->as.handle.ptr = rec;
+    gc_unpin(1);
+    return hv;
+}
+
+/* (net-accept listener [opts]) -> net-socket handle for one accepted
+ * connection. opts keys :accept-timeout bounding the wait for a
+ * connection (default 60000) and :read-timeout / :write-timeout
+ * preset on the accepted socket (defaults 30000 / 30000, matching
+ * net-connect). */
+static mino_val *prim_net_accept(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val *l_val, *opts = NULL, *hv;
+    mino_net_listener_t *listener;
+    long long accept_ms, read_ms, write_ms, deadline;
+    mino_net_fd_t cfd;
+    mino_net_sock_t *sock;
+    char detail[128];
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "net-accept requires a listener");
+    }
+    l_val = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "net-accept takes at most 2 "
+                                         "arguments");
+        }
+        if (opts != NULL && mino_type_of(opts) != MINO_MAP
+            && mino_type_of(opts) != MINO_NIL) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "net-accept: opts must be a map");
+        }
+    }
+    listener = net_listener_arg(S, l_val, "net-accept");
+    if (listener == NULL) return NULL;
+    if (listener->closed) {
+        return prim_throw_classified(S, "net", "MNE004",
+                                     "net-accept: listener is closed");
+    }
+    if (net_opt_ms(S, opts, "accept-timeout",
+                   NET_DEFAULT_ACCEPT_TIMEOUT_MS, &accept_ms) != 0)
+        return NULL;
+    if (net_opt_ms(S, opts, "read-timeout",
+                   NET_DEFAULT_READ_TIMEOUT_MS, &read_ms) != 0)
+        return NULL;
+    if (net_opt_ms(S, opts, "write-timeout",
+                   NET_DEFAULT_WRITE_TIMEOUT_MS, &write_ms) != 0)
+        return NULL;
+
+    /* Pre-flight the socket handle value (net-connect ownership
+     * note); pin it and the listener across the yield windows of the
+     * wait loop, since both are re-read after each resume. */
+    hv = mino_handle_ex(S, NULL, NET_SOCK_TAG, net_sock_finalize);
+    gc_pin(hv);
+    gc_pin(l_val);
+
+    if (accept_ms > NET_MAX_TIMEOUT_MS) accept_ms = NET_MAX_TIMEOUT_MS;
+    deadline = mino_monotonic_ns() + accept_ms * 1000000LL;
+    for (;;) {
+        long long remaining_ms = (deadline - mino_monotonic_ns())
+                                 / 1000000LL;
+        int rc;
+        if (remaining_ms < 0) remaining_ms = 0;
+        rc = net_wait_readable(S, listener->fd, remaining_ms);
+        if (rc == 1) {
+            char msg[160];
+            gc_unpin(2);
+            snprintf(msg, sizeof(msg),
+                     "net-accept: accept timed out after %lld ms",
+                     accept_ms);
+            return prim_throw_classified(S, "net/timeout", "MNE003", msg);
+        }
+        if (rc < 0) {
+            char msg[200];
+            net_os_error(detail, sizeof(detail));
+            gc_unpin(2);
+            snprintf(msg, sizeof(msg), "net-accept: accept failed: %.100s",
+                     detail);
+            return prim_throw_classified(S, "net/connect", "MNE002", msg);
+        }
+        cfd = accept(listener->fd, NULL, NULL);
+        if (cfd == MINO_NET_INVALID_FD) {
+#ifdef _WIN32
+            int e = WSAGetLastError();
+            if (e == WSAEINTR || e == WSAEWOULDBLOCK) continue;
+#else
+            /* EWOULDBLOCK: the readable event was consumed by a
+             * racing acceptor; ECONNABORTED / EPROTO: the peer died
+             * mid-handshake, the next pending connection may still be
+             * there. All three resume the wait. */
+            if (errno == EINTR || errno == EAGAIN
+                || errno == EWOULDBLOCK || errno == ECONNABORTED
+                || errno == EPROTO)
+                continue;
+#endif
+            {
+                char msg[200];
+                net_os_error(detail, sizeof(detail));
+                gc_unpin(2);
+                snprintf(msg, sizeof(msg),
+                         "net-accept: accept failed: %.100s", detail);
+                return prim_throw_classified(S, "net/connect", "MNE002",
+                                             msg);
+            }
+        }
+        break;
+    }
+    /* Accepted sockets inherit the listener's non-blocking mode on
+     * Windows; POSIX never inherits. Force blocking either way. */
+    if (net_set_nonblocking(cfd, 0) != 0) {
+        char msg[200];
+        net_os_error(detail, sizeof(detail));
+        net_close_fd(cfd);
+        gc_unpin(2);
+        snprintf(msg, sizeof(msg), "net-accept: cannot reset blocking "
+                 "mode on accepted socket: %.100s", detail);
+        return prim_throw_classified(S, "net/connect", "MNE002", msg);
+    }
+    net_suppress_sigpipe(cfd);
+    net_set_tcp_nodelay(cfd);
+    net_apply_io_timeouts(cfd, read_ms, write_ms);
+
+    sock = (mino_net_sock_t *)malloc(sizeof(*sock));
+    if (sock == NULL) {
+        net_close_fd(cfd);
+        gc_unpin(2);
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "net-accept: out of memory");
+    }
+    sock->fd              = cfd;
+    sock->read_timeout_ms  = read_ms;
+    sock->write_timeout_ms = write_ms;
+    sock->closed          = 0;
+    hv->as.handle.ptr = sock;
+    gc_unpin(2);
+    return hv;
+}
+
+/* (net-listener-port listener) -> bound port; how a caller learns the
+ * kernel-chosen port after net-listen with port 0. */
+static mino_val *prim_net_listener_port(mino_state *S, mino_val *args,
+                                        mino_env *env)
+{
+    mino_val *l_val;
+    mino_net_listener_t *listener;
+    struct sockaddr_storage ss;
+    unsigned short port;
+    (void)env;
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "net-listener-port requires one "
+                                     "argument");
+    }
+    l_val = args->as.cons.car;
+    listener = net_listener_arg(S, l_val, "net-listener-port");
+    if (listener == NULL) return NULL;
+    if (listener->closed) {
+        return prim_throw_classified(S, "net", "MNE004",
+                                     "net-listener-port: listener is "
+                                     "closed");
+    }
+    memset(&ss, 0, sizeof(ss));
+    {
+#ifdef _WIN32
+        int ss_len = (int)sizeof(ss);
+        if (getsockname(listener->fd, (struct sockaddr *)&ss, &ss_len)
+            != 0) {
+#else
+        socklen_t ss_len = sizeof(ss);
+        if (getsockname(listener->fd, (struct sockaddr *)&ss, &ss_len)
+            != 0) {
+#endif
+            char detail[128];
+            char msg[200];
+            net_os_error(detail, sizeof(detail));
+            snprintf(msg, sizeof(msg),
+                     "net-listener-port: getsockname failed: %.60s",
+                     detail);
+            return prim_throw_classified(S, "net", "MNE004", msg);
+        }
+    }
+    if (ss.ss_family == AF_INET6) {
+        struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)&ss;
+        port = ntohs(a6->sin6_port);
+    } else {
+        struct sockaddr_in *a4 = (struct sockaddr_in *)&ss;
+        port = ntohs(a4->sin_port);
+    }
+    return mino_int(S, (long long)port);
 }
 
 /* ---- read ---- */
@@ -870,26 +1369,42 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- close ---- */
 
-/* (net-close sock) -> nil. Idempotent; a closed socket is marked so
- * the handle finalizer never double-closes the fd. */
+/* (net-close sock-or-listener) -> nil. Idempotent for both net
+ * handle tags; the record is marked so the handle finalizer never
+ * double-closes the fd. */
 static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *sock_val;
-    mino_net_sock_t *sock;
+    mino_val *v;
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "net-close requires one argument");
     }
-    sock_val = args->as.cons.car;
-    sock = net_sock_arg(S, sock_val, "net-close");
-    if (sock == NULL) return NULL;
-    if (!sock->closed) {
-        net_close_fd(sock->fd);
-        sock->closed = 1;
+    v = args->as.cons.car;
+    if (v != NULL && mino_type_of(v) == MINO_HANDLE
+        && v->as.handle.tag != NULL && v->as.handle.ptr != NULL) {
+        if (strcmp(v->as.handle.tag, NET_SOCK_TAG) == 0) {
+            mino_net_sock_t *sock = (mino_net_sock_t *)v->as.handle.ptr;
+            if (!sock->closed) {
+                net_close_fd(sock->fd);
+                sock->closed = 1;
+            }
+            return mino_nil(S);
+        }
+        if (strcmp(v->as.handle.tag, NET_LISTENER_TAG) == 0) {
+            mino_net_listener_t *l;
+            l = (mino_net_listener_t *)v->as.handle.ptr;
+            if (!l->closed) {
+                net_close_fd(l->fd);
+                l->closed = 1;
+            }
+            return mino_nil(S);
+        }
     }
-    return mino_nil(S);
+    return prim_throw_classified(S, "eval/type", "MTY001",
+                                 "net-close: argument must be a net "
+                                 "socket or listener");
 }
 
 /* ---- fd bridge for the TLS layer ---- */
@@ -1010,9 +1525,31 @@ static const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connec
     {"net-write",    prim_net_write,
      "Writes a string (UTF-8 bytes) or bytes to a socket. Returns the "
      "number of bytes written. Throws :net/timeout on write timeout."},
+    {"net-listen",  prim_net_listen,
+     "Binds a TCP listener and returns a listener handle. host is a "
+     "bind address (IP literal typical); \"\" or \"*\" binds the IPv4 "
+     "wildcard. port 0 asks the kernel to choose (learn it with "
+     "net-listener-port). Opts map key :backlog (positive integer, "
+     "default 16). SO_REUSEADDR is set before bind on POSIX only; "
+     "winsock's REUSEADDR would let another socket hijack the port. "
+     "Throws :net/dns when the bind address cannot resolve, :net "
+     "otherwise."},
+    {"net-accept",  prim_net_accept,
+     "Waits for one inbound connection on a listener and returns it "
+     "as a socket handle (the type net-connect returns; net-read / "
+     "net-write / net-close work on it). Opts map keys :accept-timeout "
+     "(non-negative ms bounding the wait, default 60000) plus "
+     ":read-timeout / :write-timeout preset on the accepted socket "
+     "(defaults 30000 / 30000, matching net-connect). Accepted "
+     "sockets set TCP_NODELAY. Throws :net/timeout when the accept "
+     "deadline passes, :net/connect when accept itself fails."},
+    {"net-listener-port", prim_net_listener_port,
+     "Returns the port a listener is bound to; how a caller learns "
+     "the kernel-chosen port after net-listen with port 0. Throws "
+     ":net on a closed listener."},
     {"net-close",    prim_net_close,
-     "Closes a socket. Returns nil. Idempotent; dropped sockets are "
-     "also closed by the garbage collector."},
+     "Closes a socket or listener. Returns nil. Idempotent; dropped "
+     "handles are also closed by the garbage collector."},
 };
 
 static const size_t k_prims_net_count =

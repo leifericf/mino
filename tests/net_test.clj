@@ -8,13 +8,19 @@
 ;; C level in tests/embed_api_test.c where a state can be built
 ;; without it.
 ;;
-;; Behaviour tests drive a real loopback server (python3, 127.0.0.1,
-;; port 0 chosen by the kernel and printed before the parent exits).
-;; The server child detaches its stdio so the spawning sh returns as
-;; soon as the port is known, arms an alarm so it never outlives a
-;; crashed test run by much, and is killed in a finally block. These
-;; tests are POSIX-only (os.fork); Windows runs the metadata and
-;; argument-shape tests.
+;; Client behaviour tests drive a real loopback server (python3,
+;; 127.0.0.1, port 0 chosen by the kernel and printed before the
+;; parent exits). The server child detaches its stdio so the spawning
+;; sh returns as soon as the port is known, arms an alarm so it never
+;; outlives a crashed test run by much, and is killed in a finally
+;; block. These tests are POSIX-only (os.fork); Windows runs the
+;; metadata and argument-shape tests.
+;;
+;; Server-side prims (net-listen / net-accept / net-listener-port)
+;; are exercised in-process instead: the listener and its accept loop
+;; run inside a future on mino's own worker threads and the test
+;; thread plays the client, so no subprocess is involved and the
+;; tests run on every platform the CLI does.
 
 (def ^:private posix? (nil? (getenv "OS")))
 
@@ -301,5 +307,211 @@ s.close()")))
           (is (= 2 (net-write s "ok")))
           (is (= "6f6b" (hex-encode (net-read s 2))))
           (is (nil? (net-close s))))))))
+
+(defn- read-n
+  "Read exactly n bytes from a socket, folding short reads together.
+  Throws if the peer closes before n bytes arrive."
+  [sock n]
+  (loop [acc []]
+    (if (= n (count acc))
+      (byte-array acc)
+      (let [chunk (net-read sock (- n (count acc)))]
+        (if (nil? chunk)
+          (throw (str "unexpected EOF after " (count acc) " of " n " bytes"))
+          (recur (into acc (seq chunk))))))))
+
+;; ---- server prims: capability metadata ----
+
+(deftest net-listener-prims-labelled-with-net-capability
+  (is (= :net (mino-capability 'net-listen)))
+  (is (= :net (mino-capability 'net-accept)))
+  (is (= :net (mino-capability 'net-listener-port))))
+
+;; ---- server prims: argument shapes (no connection needed) ----
+
+(deftest net-listen-validates-arguments
+  (is (thrown? (net-listen)))
+  (is (thrown? (net-listen "127.0.0.1")))
+  (is (= :eval/type
+         (try (net-listen 42 80) (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (net-listen "127.0.0.1" -1) (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (net-listen "127.0.0.1" 70000) (catch e (:mino/kind e)))))
+  (is (= :eval/type
+         (try (net-listen "127.0.0.1" 80 :not-a-map) (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (net-listen "127.0.0.1" 80 {:backlog 0}) (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (net-listen "127.0.0.1" 80 {:backlog -4}) (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (net-listen "127.0.0.1" 80 {:backlog "many"})
+              (catch e (:mino/kind e)))))
+  ;; port 0 asks the kernel to choose; the empty-string wildcard
+  ;; binds the IPv4 wildcard address.
+  (let [l (net-listen "" 0 {})]
+    (is (>= (net-listener-port l) 1))
+    (is (nil? (net-close l)))))
+
+(deftest net-listener-prims-validate-arguments
+  (let [l (net-listen "127.0.0.1" 0 {})]
+    (is (= :eval/type
+           (try (net-accept "not-a-listener") (catch e (:mino/kind e)))))
+    (is (= :eval/type
+           (try (net-accept 7) (catch e (:mino/kind e)))))
+    (is (= :eval/type
+           (try (net-accept l :not-a-map) (catch e (:mino/kind e)))))
+    (is (= :eval/contract
+           (try (net-accept l {:accept-timeout -1}) (catch e (:mino/kind e)))))
+    (is (= :eval/type
+           (try (net-listener-port :keyword) (catch e (:mino/kind e)))))
+    (is (thrown? (net-listener-port)))
+    ;; A listener is not a socket: the io prims reject it.
+    (is (= :eval/type
+           (try (net-read l 1) (catch e (:mino/kind e)))))
+    (net-close l)))
+
+;; ---- server prims: in-process loopback behaviour ----
+
+(deftest net-listen-accept-echo-round-trip
+  (let [port-p (promise)
+        done-p (promise)]
+    (future
+      (let [l (net-listen "127.0.0.1" 0 {})]
+        (deliver port-p (net-listener-port l))
+        (let [c (net-accept l {})]
+          (net-write c (read-n c 11))
+          (net-close c))
+        (net-close l)
+        (deliver done-p :done)))
+    (let [port (deref port-p 10000 ::timeout)
+          s (net-connect "127.0.0.1" port)]
+      (is (not= ::timeout port))
+      ;; net-listener-port reported the kernel-chosen port: the
+      ;; connection succeeding to it is the oracle.
+      (is (and (>= port 1) (<= port 65535)))
+      (is (= 11 (net-write s "hello world")))
+      (is (= "68656c6c6f20776f726c64" (hex-encode (read-n s 11))))
+      (net-close s)
+      (is (= :done (deref done-p 10000 ::timeout))))))
+
+(deftest net-listen-accept-serves-two-sequential-connections
+  (let [port-p (promise)
+        done-p (promise)]
+    (future
+      (let [l (net-listen "127.0.0.1" 0 {})]
+        (deliver port-p (net-listener-port l))
+        (let [c1 (net-accept l {})]
+          (net-write c1 (read-n c1 3))
+          (net-close c1))
+        (let [c2 (net-accept l {})]
+          (net-write c2 (read-n c2 3))
+          (net-close c2))
+        (net-close l)
+        (deliver done-p :done)))
+    (let [port (deref port-p 10000 ::timeout)]
+      (is (not= ::timeout port))
+      (let [s1 (net-connect "127.0.0.1" port)]
+        (is (= 3 (net-write s1 "one")))
+        (is (= "6f6e65" (hex-encode (read-n s1 3))))
+        (net-close s1))
+      (let [s2 (net-connect "127.0.0.1" port)]
+        (is (= 3 (net-write s2 "two")))
+        (is (= "74776f" (hex-encode (read-n s2 3))))
+        (net-close s2))
+      (is (= :done (deref done-p 10000 ::timeout))))))
+
+(deftest net-listen-wildcard-host-accepts-loopback
+  ;; "*" and "" bind INADDR_ANY; a loopback connection reaches it.
+  (let [port-p (promise)
+        done-p (promise)]
+    (future
+      (let [l (net-listen "*" 0 {})]
+        (deliver port-p (net-listener-port l))
+        (let [c (net-accept l {})]
+          (net-write c (read-n c 4))
+          (net-close c))
+        (net-close l)
+        (deliver done-p :done)))
+    (let [port (deref port-p 10000 ::timeout)
+          s (net-connect "127.0.0.1" port)]
+      (is (not= ::timeout port))
+      (is (= 4 (net-write s "ping")))
+      (is (= "70696e67" (hex-encode (read-n s 4))))
+      (net-close s)
+      (is (= :done (deref done-p 10000 ::timeout))))))
+
+(deftest net-accept-timeout-classifies-and-fires-on-schedule
+  (let [l (net-listen "127.0.0.1" 0 {})
+        t0 (time-ms)
+        r  (try (net-accept l {:accept-timeout 300}) (catch e e))
+        dt (- (time-ms) t0)]
+    ;; Nothing connects: the accept deadline fires at ~300ms. The
+    ;; elapsed bound is what gives the kind assertion teeth.
+    (is (= :net/timeout (:mino/kind r)))
+    (is (str/includes? (:mino/message r) "accept"))
+    (is (< dt 2400) (str "accept timeout fired at " dt " ms"))
+    (net-close l)))
+
+(deftest net-close-closes-listeners-idempotently
+  (let [l (net-listen "127.0.0.1" 0 {})]
+    (is (= :handle (type l)))
+    (is (nil? (net-close l)))
+    (is (nil? (net-close l)))
+    (is (= :net
+           (try (net-listener-port l) (catch e (:mino/kind e)))))
+    (is (= :net
+           (try (net-accept l) (catch e (:mino/kind e)))))))
+
+(deftest net-listener-finalizer-closes-dropped-listeners
+  ;; Drop an open listener and force a full collection; the handle
+  ;; finalizer must close the descriptor without disturbing the
+  ;; runtime. A conservative stack pin may delay the collection. The
+  ;; sanitizer lanes are the leak oracle; a fresh listener still
+  ;; serving an echo is the behaviour oracle.
+  ((fn []
+     (let [doomed (net-listen "127.0.0.1" 0 {})]
+       :dropped)))
+  (gc!)
+  (let [port-p (promise)
+        done-p (promise)]
+    (future
+      (let [l (net-listen "127.0.0.1" 0 {})]
+        (deliver port-p (net-listener-port l))
+        (let [c (net-accept l {})]
+          (net-write c (read-n c 2))
+          (net-close c))
+        (net-close l)
+        (deliver done-p :done)))
+    (let [port (deref port-p 10000 ::timeout)
+          s (net-connect "127.0.0.1" port)]
+      (is (not= ::timeout port))
+      (is (= 2 (net-write s "ok")))
+      (is (= "6f6b" (hex-encode (read-n s 2))))
+      (net-close s)
+      (is (= :done (deref done-p 10000 ::timeout))))))
+
+(deftest net-accept-presets-read-timeout-on-accepted-socket
+  ;; The client connects and then sends nothing; the accepted
+  ;; socket's read timeout, preset from net-accept's :read-timeout,
+  ;; must fire server-side.
+  (let [port-p (promise)
+        kind-p (promise)]
+    (future
+      (let [l (net-listen "127.0.0.1" 0 {})]
+        (deliver port-p (net-listener-port l))
+        (let [c (net-accept l {:read-timeout 400})]
+          (deliver kind-p (try (net-read c 10) (catch e (:mino/kind e))))
+          (net-close c)
+          (net-close l))))
+    (let [port (deref port-p 10000 ::timeout)
+          s  (net-connect "127.0.0.1" port)
+          t0 (time-ms)
+          kind (deref kind-p 10000 ::timeout)
+          dt (- (time-ms) t0)]
+      (net-close s)
+      (is (not= ::timeout port))
+      (is (= :net/timeout kind))
+      (is (< dt 2400) (str "accepted-socket read timeout fired at " dt " ms")))))
 
 (run-tests-and-exit)
