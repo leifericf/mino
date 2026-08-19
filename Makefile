@@ -23,7 +23,8 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initiali
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
-           -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc
+           -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc \
+           -Isrc/vendor/miniz
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
@@ -48,8 +49,9 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                   src/runtime/*.c src/gc/*.c src/public/*.c \
                   src/values/*.c src/collections/*.c src/prim/*.c \
                   src/interop/*.c src/regex/*.c src/async/*.c \
-                  src/vendor/imath/*.c \
-                  src/vendor/bearssl/*.c) main.c
+                   src/vendor/imath/*.c \
+                   src/vendor/bearssl/*.c \
+                   src/vendor/miniz/*.c) main.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/<symbol>.h with a single static const char *<symbol>_src

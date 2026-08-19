@@ -10,7 +10,8 @@
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
-       " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"))
+       " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"
+       " -Isrc/vendor/miniz"))
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        "-DMINO_CPJIT=1 "
@@ -105,9 +106,10 @@
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"
    "src/prim/async.c"
     "src/prim/bignum.c" "src/prim/ratio.c" "src/prim/bigdec.c"
-    "src/vendor/imath/imath.c"
-    "src/vendor/bearssl/bearssl_client.c"
-    "src/vendor/bearssl/roots.c"])
+     "src/vendor/imath/imath.c"
+     "src/vendor/bearssl/bearssl_client.c"
+     "src/vendor/bearssl/roots.c"
+     "src/vendor/miniz/miniz_inflate.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
@@ -587,6 +589,7 @@
   ["src" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
    "src/vendor/imath" "src/vendor/bearssl" "src/vendor/bearssl/inc"
+   "src/vendor/miniz" "src/vendor/miniz/upstream"
    "src/eval/bc" "src/eval/bc/jit" "src/eval/bc/stencils" "src/regex"])
 
 (defn- amalgam-find-header
@@ -657,6 +660,13 @@
             (cond
               ;; Skip the file's own `#line` directives.
               (re-find #"^\s*#\s*line\b" line)
+              (recur (+ i 1))
+
+              ;; Drop `#pragma once` guards: include dedup in the
+              ;; amalgam is handled by the seen-set, and the pragma
+              ;; in a main file trips -Wpragma-once-outside-header
+              ;; under clang's -Wall (vendored miniz headers use it).
+              (re-find #"^\s*#\s*pragma\s+once\b" line)
               (recur (+ i 1))
 
               ;; Strip per-file feature-test macro defines; they are
@@ -768,12 +778,13 @@
               "The amalgamation is bit-identical to the mino source tree at\n"
               "the tag whose CHANGELOG entry produced it. See `mino.h` for\n"
               "`MINO_VERSION_*` macros.\n\n"
-              "## Licenses\n\n"
-              "This distribution embeds two vendored libraries, both MIT:\n"
-              "imath (Michael J. Fromberger) and BearSSL v0.6 (Thomas\n"
-              "Pornin). Their license notices are preserved in the mino\n"
-              "source tree under `src/vendor/` and in the project's\n"
-              "THIRD_PARTY_LICENSES.md.\n")))
+               "## Licenses\n\n"
+               "This distribution embeds three vendored libraries, all\n"
+               "MIT: imath (Michael J. Fromberger), BearSSL v0.6 (Thomas\n"
+               "Pornin), and the miniz inflate side v3.1.2 (Rich\n"
+               "Geldreich et al.). Their license notices are preserved in\n"
+               "the mino source tree under `src/vendor/` and in the\n"
+               "project's THIRD_PARTY_LICENSES.md.\n")))
 
 (defn clean-dist
   "Remove the dist/ amalgamation tree."
