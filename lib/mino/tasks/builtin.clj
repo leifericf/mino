@@ -16,9 +16,21 @@
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        "-DMINO_CPJIT=1 "
                                        include-flags)) " "))
-(def ^:private ldflags (let [v (or (getenv "LDFLAGS") "")]
-                         (if (= v "") [] (str/split v " "))))
 (def ^:private windows? (some? (getenv "OS")))
+(def ^:private ldflags (let [v (or (getenv "LDFLAGS")
+                                   ;; mingw ld defaults the PE
+                                   ;; main-thread stack to 2 MiB;
+                                   ;; deep-but-legal recursion (regex
+                                   ;; matchgroup cap 10000, interpreter
+                                   ;; error paths) overflows it with
+                                   ;; STATUS_STACK_OVERFLOW. Match the
+                                   ;; 8 MiB every other host gives the
+                                   ;; main thread (Makefile windows
+                                   ;; block, MINO_WORKER_STACK_DEFAULT).
+                                   (if windows?
+                                     "-Wl,--stack,8388608"
+                                     ""))]
+                          (if (= v "") [] (str/split v " "))))
 (def ^:private libs    (str/split (or (getenv "LIBS")
                                         ;; bcrypt: the TLS layer's
                                         ;; BCryptGenRandom entropy seeder

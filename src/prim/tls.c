@@ -645,41 +645,55 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
     hv = mino_handle_ex(S, NULL, TLS_SOCK_TAG, tls_sock_finalize);
     gc_pin(hv);
 
-    ts = (mino_tls_sock_t *)calloc(1, sizeof *ts);
-    if (ts == NULL) {
-        gc_unpin(1);
-        return prim_throw_classified(S, "internal", "MIN001",
-                                     "tls-connect: out of memory");
-    }
+    /* Establish the TCP connection BEFORE any malloc'd TLS resource
+     * exists. prim_net_connect throws (longjmp) on :net/dns and
+     * :net/connect failure, and mino_net_adopt throws on a bad or
+     * closed handle; a longjmp unwinds this C frame without running
+     * any free(), so nothing owned may be live across these calls.
+     * (The dead-port passthrough test leaked the 8 KiB engine struct
+     * here until the calloc moved below the connect block.) The
+     * adopted fd is held on the stack until ts owns it. */
+    {
+        uintptr_t fd = 0;
+        long long adopted_read_ms = 0, adopted_write_ms = 0;
 
-    if (have_port_arity) {
-        /* Build the TCP connection through the net prim (DNS, non-
-         * blocking connect, winsock init all live there), then adopt
-         * its descriptor. prim_net_connect allocates GC values; the
-         * malloc'd ts is not GC-tracked, so no pin is needed. */
-        mino_val *port_args = mino_cons(S, a1,
-                                        mino_cons(S, a2,
-                                                  mino_cons(S, opts,
-                                                            mino_nil(S))));
-        mino_val *sock_val = prim_net_connect(S, port_args, env);
-        if (sock_val == NULL) {
-            free(ts);
-            gc_unpin(1);
-            return NULL;
+        if (have_port_arity) {
+            /* Build the TCP connection through the net prim (DNS,
+             * non-blocking connect, winsock init all live there),
+             * then adopt its descriptor. prim_net_connect allocates
+             * GC values; nothing malloc'd is live across it. */
+            mino_val *port_args = mino_cons(S, a1,
+                                            mino_cons(S, a2,
+                                                      mino_cons(S, opts,
+                                                                mino_nil(S))));
+            mino_val *sock_val = prim_net_connect(S, port_args, env);
+            if (sock_val == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
+            if (mino_net_adopt(S, sock_val, &fd, &adopted_read_ms,
+                               &adopted_write_ms) != 0) {
+                gc_unpin(1);
+                return NULL;
+            }
+        } else {
+            if (mino_net_adopt(S, a1, &fd, &adopted_read_ms,
+                               &adopted_write_ms) != 0) {
+                gc_unpin(1);
+                return NULL;
+            }
         }
-        if (mino_net_adopt(S, sock_val, &ts->fd, &ts->read_timeout_ms,
-                           &ts->write_timeout_ms) != 0) {
-            free(ts);
+
+        ts = (mino_tls_sock_t *)calloc(1, sizeof *ts);
+        if (ts == NULL) {
+            mino_net_close_raw(fd);
             gc_unpin(1);
-            return NULL;
+            return prim_throw_classified(S, "internal", "MIN001",
+                                         "tls-connect: out of memory");
         }
-    } else {
-        if (mino_net_adopt(S, a1, &ts->fd, &ts->read_timeout_ms,
-                           &ts->write_timeout_ms) != 0) {
-            free(ts);
-            gc_unpin(1);
-            return NULL;
-        }
+        ts->fd = fd;
+        (void)adopted_read_ms;
+        (void)adopted_write_ms;
     }
 
     ts->read_timeout_ms  = read_ms;

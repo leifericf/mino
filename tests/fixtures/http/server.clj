@@ -67,6 +67,14 @@
   so the wire bytes are stable across runs."
   "H4sIAAAAAAAAA0uv0s3MK0lNL0osyczP000f5Y5yqcEFAEyeTMhYAgAA")
 
+(def ^:private fx-big
+  "Static /big payload: 100000 bytes of \"x\", built once at load.
+  Built per request it cost a 100k-element lazy reduce per /big hit
+  (measured 1.2 s under ASan on CI runners), which pushed the
+  body-cap test's client past its 3 s read-timeout and flipped the
+  expected :codec/limit into :net/timeout."
+  (apply str (repeat 100000 "x")))
+
 ;;;; request parsing
 
 (defn- fx-bytes-text
@@ -240,7 +248,7 @@
       (= p "/conncount") [{:code 200 :body (str @(:accepts srv))} false]
       (= p "/close") [{:code 200 :body "bye-close"
                        :headers [["Connection" "close"]]} true]
-      (= p "/big") [{:code 200 :body (apply str (repeat 100000 "x"))}
+      (= p "/big") [{:code 200 :body fx-big}
                     false]
       (= p "/http10")
       [{:raw (str "HTTP/1.0 200 OK\r\n"

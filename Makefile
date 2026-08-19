@@ -37,6 +37,14 @@ LIBS = -lm -lws2_32 -lbcrypt
 # STATUS_DLL_NOT_FOUND (0xC0000135) — the GHA runner has the DLLs,
 # but a Scoop / Homebrew end user doesn't.
 LDFLAGS += -static
+# mingw's ld defaults the PE main-thread stack reserve to 2 MiB;
+# POSIX hosts give the main thread 8 MiB (and mino spawns every
+# worker with 8 MiB). Deep-but-legal recursion in the regex matcher
+# (matchgroup cap 10000) and interpreter error paths overflow a
+# 2 MiB main stack with STATUS_STACK_OVERFLOW (0xC00000FD) — seen
+# as suite crashes on the windows-2022 runner. Match the 8 MiB
+# default every other host assumes (MINO_WORKER_STACK_DEFAULT).
+LDFLAGS += -Wl,--stack,8388608
 else
 EXE  =
 LIBS = -lm -lpthread
