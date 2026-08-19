@@ -224,7 +224,8 @@
    ["lib/clojure/test/check.clj"      "clojure.test.check"      "lib_clojure_test_check"]
    ["lib/mino/deps.clj"               "mino.deps"               "lib_mino_deps"]
    ["lib/mino/tasks.clj"              "mino.tasks"              "lib_mino_tasks"]
-   ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]])
+   ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]
+   ["lib/mino/http.clj"               "mino.http"               "lib_mino_http"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

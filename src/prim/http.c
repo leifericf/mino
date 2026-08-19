@@ -3455,5 +3455,6 @@ void mino_install_http_client(mino_state *S, mino_env *env)
                                        k_prims_http_client,
                                        k_prims_http_client_count,
                                        "net");
+    mino_install_mino_http(S, env);
     S->caps_installed |= MINO_CAP_NET;
 }
