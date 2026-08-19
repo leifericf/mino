@@ -23,13 +23,13 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initiali
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
-           -Isrc/vendor/bearssl
+           -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
-# advapi32: BearSSL's vendored OS entropy path (CryptGenRandom in
-# src/vendor/bearssl/src/rand/sysrng.c) links against it.
-LIBS = -lm -lws2_32 -ladvapi32
+# bcrypt: the TLS layer's BCryptGenRandom entropy seeder links
+# against it (src/prim/tls.c replaces BearSSL's vendored sysrng unit).
+LIBS = -lm -lws2_32 -lbcrypt
 # Static link on Windows so mino.exe doesn't depend on mingw runtime
 # DLLs (libgcc_s_seh-1.dll, libwinpthread-1.dll). Without -static the
 # exe fails to start on a fresh Windows install with

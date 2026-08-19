@@ -42,9 +42,9 @@ rechecks both:
   amalgam. Units with x86 or POWER8 intrinsics normally set it before
   including `inner.h`; with collapsed includes the global define
   replaces the per-unit ones and is inert elsewhere.
-- The MSVC `#pragma comment(lib, "advapi32")` line in
-  `src/rand/sysrng.c` is dropped (unknown-pragma noise under
-  clang/gcc).
+- The `#pragma comment` line-drop edit (MSVC linker directives, which
+  are unknown-pragma noise under clang/gcc) is now inert: the only
+  unit that carried one was `sysrng.c`, excluded from the file list.
 
 A scoped `#pragma GCC diagnostic ignored "-Wunused-function"` wraps the
 pasted public headers only: collapsing them into one TU exposes their
@@ -63,12 +63,10 @@ Excluded from upstream v0.6:
 - PEM codec (`pemdec`, `pemenc`), `skey_decoder`, x509 encoder TUs.
 - `hkdf`, `eax`, `aesctr_drbg`.
 - `tools/`, `test/`, `samples/`, the T0 compiler sources, docs.
-- Upstream `Rand` file `sysrng.c` is **kept** for now: the SSL engine
-  references `br_prng_seeder_system`. It is why Windows links
-  `-ladvapi32` (CryptGenRandom). The plan is for the TLS runtime layer
-  to supply its own seeder over getentropy (POSIX) and
-  BCryptGenRandom (Windows), drop `sysrng.c` from the generator's file
-  list, and remove the advapi32 dependency.
+- Upstream `Rand` file `sysrng.c`: the runtime's TLS layer
+  (`src/prim/tls.c`) supplies `br_prng_seeder_system` itself, over
+  getentropy (POSIX) and BCryptGenRandom (Windows), so no advapi32
+  dependency exists on Windows (the link flag there is `-lbcrypt`).
 
 Included beyond the strict minimum (TLS client needs or the default
 selectors reference them): 3DES suites, single-RSA and single-EC

@@ -26363,176 +26363,6 @@ const br_prng_class br_hmac_drbg_vtable = {
 		&br_hmac_drbg_update
 };
 
-/* === src/rand/sysrng.c === */
-#line 1 "src/rand/sysrng.c"
-/*
- * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining 
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be 
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
-#define BR_ENABLE_INTRINSICS_u86   1
-
-#if BR_USE_URANDOM
-#include <sys/types.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
-#endif
-
-#if BR_USE_WIN32_RAND
-#include <windows.h>
-#include <wincrypt.h>
-#endif
-
-#if BR_RDRAND
-BR_TARGETS_X86_UP
-BR_TARGET("rdrnd")
-static int
-seeder_rdrand_u86(const br_prng_class **ctx)
-{
-	unsigned char tmp[32];
-	size_t u;
-
-	for (u = 0; u < sizeof tmp; u += sizeof(uint32_t)) {
-		int j;
-		uint32_t x;
-
-		/*
-		 * We use the 32-bit intrinsic so that code is compatible
-		 * with both 32-bit and 64-bit architectures.
-		 *
-		 * Intel recommends trying at least 10 times in case of
-		 * failure.
-		 */
-		for (j = 0; j < 10; j ++) {
-			if (_rdrand32_step(&x)) {
-				goto next_word;
-			}
-		}
-		return 0;
-	next_word:
-		br_enc32le(tmp + u, x);
-	}
-	(*ctx)->update(ctx, tmp, sizeof tmp);
-	return 1;
-}
-BR_TARGETS_X86_DOWN
-
-static int
-rdrand_supported_u86(void)
-{
-	/*
-	 * The RDRND support is bit 30 of ECX, as returned by CPUID.
-	 */
-	return br_cpuid(0, 0, 0x40000000, 0);
-}
-
-#endif
-
-#if BR_USE_URANDOM
-static int
-seeder_urandom_u86(const br_prng_class **ctx)
-{
-	int f;
-
-	f = open("/dev/urandom", O_RDONLY);
-	if (f >= 0) {
-		unsigned char tmp[32];
-		size_t u;
-
-		for (u = 0; u < sizeof tmp;) {
-			ssize_t len;
-
-			len = read(f, tmp + u, (sizeof tmp) - u);
-			if (len < 0) {
-				if (errno == EINTR) {
-					continue;
-				}
-				break;
-			}
-			u += (size_t)len;
-		}
-		close(f);
-		if (u == sizeof tmp) {
-			(*ctx)->update(ctx, tmp, sizeof tmp);
-			return 1;
-		}
-	}
-	return 0;
-}
-#endif
-
-#if BR_USE_WIN32_RAND
-static int
-seeder_win32_u86(const br_prng_class **ctx)
-{
-	HCRYPTPROV hp;
-
-	if (CryptAcquireContext(&hp, 0, 0, PROV_RSA_FULL,
-		CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
-	{
-		BYTE buf[32];
-		BOOL r;
-
-		r = CryptGenRandom(hp, sizeof buf, buf);
-		CryptReleaseContext(hp, 0);
-		if (r) {
-			(*ctx)->update(ctx, buf, sizeof buf);
-			return 1;
-		}
-	}
-	return 0;
-}
-#endif
-
-/* see bearssl_rand.h */
-br_prng_seeder
-br_prng_seeder_system(const char **name)
-{
-#if BR_RDRAND
-	if (rdrand_supported_u86()) {
-		if (name != NULL) {
-			*name = "rdrand";
-		}
-		return &seeder_rdrand_u86;
-	}
-#endif
-#if BR_USE_URANDOM
-	if (name != NULL) {
-		*name = "urandom";
-	}
-	return &seeder_urandom_u86;
-#elif BR_USE_WIN32_RAND
-	if (name != NULL) {
-		*name = "win32";
-	}
-	return &seeder_win32_u86;
-#endif
-	if (name != NULL) {
-		*name = "none";
-	}
-	return 0;
-}
-
 /* === src/rsa/rsa_default_modulus.c === */
 #line 1 "src/rsa/rsa_default_modulus.c"
 /*
@@ -27188,8 +27018,8 @@ br_rsa_i15_pkcs1_vrfy(const unsigned char *x, size_t xlen,
  */
 
 
-#define U_u101      (2 + ((BR_MAX_RSA_FACTOR + 14) / 15))
-#define TLEN_u101   (8 * U_u101)
+#define U_u100      (2 + ((BR_MAX_RSA_FACTOR + 14) / 15))
+#define TLEN_u100   (8 * U_u100)
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -27200,7 +27030,7 @@ br_rsa_i15_private(unsigned char *x, const br_rsa_private_key *sk)
 	size_t fwlen;
 	uint16_t p0i, q0i;
 	size_t xlen, u;
-	uint16_t tmp[1 + TLEN_u101];
+	uint16_t tmp[1 + TLEN_u100];
 	long z;
 	uint16_t *mp, *mq, *s1, *s2, *t1, *t2, *t3;
 	uint32_t r;
@@ -27240,7 +27070,7 @@ br_rsa_i15_private(unsigned char *x, const br_rsa_private_key *sk)
 	/*
 	 * We need to fit at least 6 values in the stack buffer.
 	 */
-	if (6 * fwlen > TLEN_u101) {
+	if (6 * fwlen > TLEN_u100) {
 		return 0;
 	}
 
@@ -27312,7 +27142,7 @@ br_rsa_i15_private(unsigned char *x, const br_rsa_private_key *sk)
 	s2 = mq + fwlen;
 	br_i15_decode_reduce(s2, x, xlen, mq);
 	r &= br_i15_modpow_opt(s2, sk->dq, sk->dqlen, mq, q0i,
-		mq + 3 * fwlen, TLEN_u101 - 3 * fwlen);
+		mq + 3 * fwlen, TLEN_u100 - 3 * fwlen);
 
 	/*
 	 * Compute s1 = x^dq mod q.
@@ -27321,7 +27151,7 @@ br_rsa_i15_private(unsigned char *x, const br_rsa_private_key *sk)
 	s1 = mq + 3 * fwlen;
 	br_i15_decode_reduce(s1, x, xlen, mp);
 	r &= br_i15_modpow_opt(s1, sk->dp, sk->dplen, mp, p0i,
-		mq + 4 * fwlen, TLEN_u101 - 4 * fwlen);
+		mq + 4 * fwlen, TLEN_u100 - 4 * fwlen);
 
 	/*
 	 * Compute:
@@ -27725,7 +27555,7 @@ br_rsa_i15_compute_privexp(void *d,
  * As a strict minimum, we need four buffers that can hold a
  * modular integer.
  */
-#define TLEN_u103   (4 * (2 + ((BR_MAX_RSA_SIZE + 14) / 15)))
+#define TLEN_u102   (4 * (2 + ((BR_MAX_RSA_SIZE + 14) / 15)))
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -27734,7 +27564,7 @@ br_rsa_i15_public(unsigned char *x, size_t xlen,
 {
 	const unsigned char *n;
 	size_t nlen;
-	uint16_t tmp[1 + TLEN_u103];
+	uint16_t tmp[1 + TLEN_u102];
 	uint16_t *m, *a, *t;
 	size_t fwlen;
 	long z;
@@ -27800,7 +27630,7 @@ br_rsa_i15_public(unsigned char *x, size_t xlen,
 	/*
 	 * Compute the modular exponentiation.
 	 */
-	br_i15_modpow_opt(a, pk->e, pk->elen, m, m0i, t, TLEN_u103 - 2 * fwlen);
+	br_i15_modpow_opt(a, pk->e, pk->elen, m, m0i, t, TLEN_u102 - 2 * fwlen);
 
 	/*
 	 * Encode the result.
@@ -27841,7 +27671,7 @@ br_rsa_i15_public(unsigned char *x, size_t xlen,
  * exponent dp.
  */
 static uint32_t
-get_pubexp_u104(const unsigned char *pbuf, size_t plen,
+get_pubexp_u103(const unsigned char *pbuf, size_t plen,
 	const unsigned char *dpbuf, size_t dplen)
 {
 	/*
@@ -27958,8 +27788,8 @@ br_rsa_i15_compute_pubexp(const br_rsa_private_key *sk)
 	 */
 	uint32_t ep, eq;
 
-	ep = get_pubexp_u104(sk->p, sk->plen, sk->dp, sk->dplen);
-	eq = get_pubexp_u104(sk->q, sk->qlen, sk->dq, sk->dqlen);
+	ep = get_pubexp_u103(sk->p, sk->plen, sk->dp, sk->dplen);
+	eq = get_pubexp_u103(sk->q, sk->qlen, sk->dq, sk->dqlen);
 	return ep & -EQ(ep, eq);
 }
 
@@ -28264,8 +28094,8 @@ br_rsa_i31_pkcs1_vrfy(const unsigned char *x, size_t xlen,
  */
 
 
-#define U_u110      (2 + ((BR_MAX_RSA_FACTOR + 30) / 31))
-#define TLEN_u110   (8 * U_u110)
+#define U_u109      (2 + ((BR_MAX_RSA_FACTOR + 30) / 31))
+#define TLEN_u109   (8 * U_u109)
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -28276,7 +28106,7 @@ br_rsa_i31_private(unsigned char *x, const br_rsa_private_key *sk)
 	size_t fwlen;
 	uint32_t p0i, q0i;
 	size_t xlen, u;
-	uint32_t tmp[1 + TLEN_u110];
+	uint32_t tmp[1 + TLEN_u109];
 	long z;
 	uint32_t *mp, *mq, *s1, *s2, *t1, *t2, *t3;
 	uint32_t r;
@@ -28317,7 +28147,7 @@ br_rsa_i31_private(unsigned char *x, const br_rsa_private_key *sk)
 	/*
 	 * We need to fit at least 6 values in the stack buffer.
 	 */
-	if (6 * fwlen > TLEN_u110) {
+	if (6 * fwlen > TLEN_u109) {
 		return 0;
 	}
 
@@ -28382,7 +28212,7 @@ br_rsa_i31_private(unsigned char *x, const br_rsa_private_key *sk)
 	s2 = mq + fwlen;
 	br_i31_decode_reduce(s2, x, xlen, mq);
 	r &= br_i31_modpow_opt(s2, sk->dq, sk->dqlen, mq, q0i,
-		mq + 3 * fwlen, TLEN_u110 - 3 * fwlen);
+		mq + 3 * fwlen, TLEN_u109 - 3 * fwlen);
 
 	/*
 	 * Compute s1 = x^dp mod p.
@@ -28391,7 +28221,7 @@ br_rsa_i31_private(unsigned char *x, const br_rsa_private_key *sk)
 	s1 = mq + 3 * fwlen;
 	br_i31_decode_reduce(s1, x, xlen, mp);
 	r &= br_i31_modpow_opt(s1, sk->dp, sk->dplen, mp, p0i,
-		mq + 4 * fwlen, TLEN_u110 - 4 * fwlen);
+		mq + 4 * fwlen, TLEN_u109 - 4 * fwlen);
 
 	/*
 	 * Compute:
@@ -28793,7 +28623,7 @@ br_rsa_i31_compute_privexp(void *d,
  * As a strict minimum, we need four buffers that can hold a
  * modular integer.
  */
-#define TLEN_u112   (4 * (2 + ((BR_MAX_RSA_SIZE + 30) / 31)))
+#define TLEN_u111   (4 * (2 + ((BR_MAX_RSA_SIZE + 30) / 31)))
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -28802,7 +28632,7 @@ br_rsa_i31_public(unsigned char *x, size_t xlen,
 {
 	const unsigned char *n;
 	size_t nlen;
-	uint32_t tmp[1 + TLEN_u112];
+	uint32_t tmp[1 + TLEN_u111];
 	uint32_t *m, *a, *t;
 	size_t fwlen;
 	long z;
@@ -28861,7 +28691,7 @@ br_rsa_i31_public(unsigned char *x, size_t xlen,
 	/*
 	 * Compute the modular exponentiation.
 	 */
-	br_i31_modpow_opt(a, pk->e, pk->elen, m, m0i, t, TLEN_u112 - 2 * fwlen);
+	br_i31_modpow_opt(a, pk->e, pk->elen, m, m0i, t, TLEN_u111 - 2 * fwlen);
 
 	/*
 	 * Encode the result.
@@ -28902,7 +28732,7 @@ br_rsa_i31_public(unsigned char *x, size_t xlen,
  * exponent dp.
  */
 static uint32_t
-get_pubexp_u113(const unsigned char *pbuf, size_t plen,
+get_pubexp_u112(const unsigned char *pbuf, size_t plen,
 	const unsigned char *dpbuf, size_t dplen)
 {
 	/*
@@ -29019,8 +28849,8 @@ br_rsa_i31_compute_pubexp(const br_rsa_private_key *sk)
 	 */
 	uint32_t ep, eq;
 
-	ep = get_pubexp_u113(sk->p, sk->plen, sk->dp, sk->dplen);
-	eq = get_pubexp_u113(sk->q, sk->qlen, sk->dq, sk->dqlen);
+	ep = get_pubexp_u112(sk->p, sk->plen, sk->dp, sk->dplen);
+	eq = get_pubexp_u112(sk->q, sk->qlen, sk->dq, sk->dqlen);
 	return ep & -EQ(ep, eq);
 }
 
@@ -29224,7 +29054,7 @@ br_rsa_i32_pkcs1_vrfy(const unsigned char *x, size_t xlen,
  */
 
 
-#define U_u118   (1 + (BR_MAX_RSA_FACTOR >> 5))
+#define U_u117   (1 + (BR_MAX_RSA_FACTOR >> 5))
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -29232,7 +29062,7 @@ br_rsa_i32_private(unsigned char *x, const br_rsa_private_key *sk)
 {
 	const unsigned char *p, *q;
 	size_t plen, qlen;
-	uint32_t tmp[6 * U_u118];
+	uint32_t tmp[6 * U_u117];
 	uint32_t *mp, *mq, *s1, *s2, *t1, *t2, *t3;
 	uint32_t p0i, q0i;
 	size_t xlen, u;
@@ -29247,11 +29077,11 @@ br_rsa_i32_private(unsigned char *x, const br_rsa_private_key *sk)
 	 * in that order (this is important, see below).
 	 */
 	mq = tmp;
-	mp = tmp + U_u118;
-	t2 = tmp + 2 * U_u118;
-	s2 = tmp + 3 * U_u118;
-	s1 = tmp + 4 * U_u118;
-	t1 = tmp + 5 * U_u118;
+	mp = tmp + U_u117;
+	t2 = tmp + 2 * U_u117;
+	s2 = tmp + 3 * U_u117;
+	s1 = tmp + 4 * U_u117;
+	t1 = tmp + 5 * U_u117;
 	t3 = s2;
 
 	/*
@@ -29288,14 +29118,14 @@ br_rsa_i32_private(unsigned char *x, const br_rsa_private_key *sk)
 	br_i32_zero(t2, mp[0]);
 	br_i32_mulacc(t2, mp, mq);
 	xlen = (sk->n_bitlen + 7) >> 3;
-	br_i32_encode(t2 + 2 * U_u118, xlen, t2);
+	br_i32_encode(t2 + 2 * U_u117, xlen, t2);
 	u = xlen;
 	r = 0;
 	while (u > 0) {
 		uint32_t wn, wx;
 
 		u --;
-		wn = ((unsigned char *)(t2 + 2 * U_u118))[u];
+		wn = ((unsigned char *)(t2 + 2 * U_u117))[u];
 		wx = x[u];
 		r = ((wx - (wn + r)) >> 8) & 1;
 	}
@@ -29720,8 +29550,8 @@ br_rsa_i62_pkcs1_vrfy_get(void)
 
 #if BR_INT128 || BR_UMUL128
 
-#define U_u124      (2 + ((BR_MAX_RSA_FACTOR + 30) / 31))
-#define TLEN_u124   (4 * U_u124)  /* TLEN_u124 is counted in 64-bit words */
+#define U_u123      (2 + ((BR_MAX_RSA_FACTOR + 30) / 31))
+#define TLEN_u123   (4 * U_u123)  /* TLEN_u123 is counted in 64-bit words */
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -29732,7 +29562,7 @@ br_rsa_i62_private(unsigned char *x, const br_rsa_private_key *sk)
 	size_t fwlen;
 	uint32_t p0i, q0i;
 	size_t xlen, u;
-	uint64_t tmp[TLEN_u124];
+	uint64_t tmp[TLEN_u123];
 	long z;
 	uint32_t *mp, *mq, *s1, *s2, *t1, *t2, *t3;
 	uint32_t r;
@@ -29773,7 +29603,7 @@ br_rsa_i62_private(unsigned char *x, const br_rsa_private_key *sk)
 	/*
 	 * We need to fit at least 6 values in the stack buffer.
 	 */
-	if (6 * fwlen > TLEN_u124) {
+	if (6 * fwlen > TLEN_u123) {
 		return 0;
 	}
 
@@ -29838,7 +29668,7 @@ br_rsa_i62_private(unsigned char *x, const br_rsa_private_key *sk)
 	s2 = (uint32_t *)(tmp + fwlen);
 	br_i31_decode_reduce(s2, x, xlen, mq);
 	r &= br_i62_modpow_opt(s2, sk->dq, sk->dqlen, mq, q0i,
-		tmp + 3 * fwlen, TLEN_u124 - 3 * fwlen);
+		tmp + 3 * fwlen, TLEN_u123 - 3 * fwlen);
 
 	/*
 	 * Compute s1 = x^dp mod p.
@@ -29847,7 +29677,7 @@ br_rsa_i62_private(unsigned char *x, const br_rsa_private_key *sk)
 	s1 = (uint32_t *)(tmp + 3 * fwlen);
 	br_i31_decode_reduce(s1, x, xlen, mp);
 	r &= br_i62_modpow_opt(s1, sk->dp, sk->dplen, mp, p0i,
-		tmp + 4 * fwlen, TLEN_u124 - 4 * fwlen);
+		tmp + 4 * fwlen, TLEN_u123 - 4 * fwlen);
 
 	/*
 	 * Compute:
@@ -29947,9 +29777,9 @@ br_rsa_i62_private_get(void)
 
 /*
  * As a strict minimum, we need four buffers that can hold a
- * modular integer. But TLEN_u125 is expressed in 64-bit words.
+ * modular integer. But TLEN_u124 is expressed in 64-bit words.
  */
-#define TLEN_u125   (2 * (2 + ((BR_MAX_RSA_SIZE + 30) / 31)))
+#define TLEN_u124   (2 * (2 + ((BR_MAX_RSA_SIZE + 30) / 31)))
 
 /* see bearssl_rsa.h */
 uint32_t
@@ -29958,7 +29788,7 @@ br_rsa_i62_public(unsigned char *x, size_t xlen,
 {
 	const unsigned char *n;
 	size_t nlen;
-	uint64_t tmp[TLEN_u125];
+	uint64_t tmp[TLEN_u124];
 	uint32_t *m, *a;
 	size_t fwlen;
 	long z;
@@ -30016,7 +29846,7 @@ br_rsa_i62_public(unsigned char *x, size_t xlen,
 	 * Compute the modular exponentiation.
 	 */
 	br_i62_modpow_opt(a, pk->e, pk->elen, m, m0i,
-		tmp + 2 * fwlen, TLEN_u125 - 2 * fwlen);
+		tmp + 2 * fwlen, TLEN_u124 - 2 * fwlen);
 
 	/*
 	 * Encode the result.
@@ -30076,7 +29906,7 @@ br_rsa_i62_public_get(void)
  * of the hash.
  */
 static void
-hash_data_u126(const br_hash_class *dig, void *dst, const void *src, size_t len)
+hash_data_u125(const br_hash_class *dig, void *dst, const void *src, size_t len)
 {
 	br_hash_compat_context hc;
 
@@ -30131,7 +29961,7 @@ br_rsa_oaep_pad(const br_prng_class **rnd, const br_hash_class *dig,
 	 * overlaps between source and destination buffers are supported.
 	 */
 	memmove(buf + k - src_len, src, src_len);
-	hash_data_u126(dig, buf + 1 + hlen, label, label_len);
+	hash_data_u125(dig, buf + 1 + hlen, label, label_len);
 	memset(buf + 1 + (hlen << 1), 0, k - src_len - (hlen << 1) - 2);
 	buf[k - src_len - 1] = 0x01;
 
@@ -30190,7 +30020,7 @@ br_rsa_oaep_pad(const br_prng_class **rnd, const br_hash_class *dig,
  * context is done only for the duration of the hash.
  */
 static void
-xor_hash_data_u127(const br_hash_class *dig, void *dst, const void *src, size_t len)
+xor_hash_data_u126(const br_hash_class *dig, void *dst, const void *src, size_t len)
 {
 	br_hash_compat_context hc;
 	unsigned char tmp[64];
@@ -30239,7 +30069,7 @@ br_rsa_oaep_unpad(const br_hash_class *dig,
 	 * Hash the label and XOR it with the value in the array; if
 	 * they are equal then these should yield only zeros.
 	 */
-	xor_hash_data_u127(dig, buf + 1 + hlen, label, label_len);
+	xor_hash_data_u126(dig, buf + 1 + hlen, label, label_len);
 
 	/*
 	 * At that point, if the padding was correct, when we should
@@ -30439,7 +30269,7 @@ br_rsa_pkcs1_sig_unpad(const unsigned char *sig, size_t sig_len,
 	const unsigned char *hash_oid, size_t hash_len,
 	unsigned char *hash_out)
 {
-	static const unsigned char pad1_u129[] = {
+	static const unsigned char pad1_u128[] = {
 		0x00, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
 	};
 
@@ -30480,10 +30310,10 @@ br_rsa_pkcs1_sig_unpad(const unsigned char *sig, size_t sig_len,
 	 * The comparison is valid because we made sure that the signature
 	 * is at least 11 bytes long.
 	 */
-	if (memcmp(sig, pad1_u129, sizeof pad1_u129) != 0) {
+	if (memcmp(sig, pad1_u128, sizeof pad1_u128) != 0) {
 		return 0;
 	}
-	for (u = sizeof pad1_u129; u < sig_len; u ++) {
+	for (u = sizeof pad1_u128; u < sig_len; u ++) {
 		if (sig[u] != 0xFF) {
 			break;
 		}
@@ -30611,7 +30441,7 @@ br_rsa_ssl_decrypt(br_rsa_private core, const br_rsa_private_key *sk,
 
 
 static const unsigned char *
-api_generator_u131(int curve, size_t *len)
+api_generator_u130(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30624,7 +30454,7 @@ api_generator_u131(int curve, size_t *len)
 }
 
 static const unsigned char *
-api_order_u131(int curve, size_t *len)
+api_order_u130(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30637,7 +30467,7 @@ api_order_u131(int curve, size_t *len)
 }
 
 static size_t
-api_xoff_u131(int curve, size_t *len)
+api_xoff_u130(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30650,7 +30480,7 @@ api_xoff_u131(int curve, size_t *len)
 }
 
 static uint32_t
-api_mul_u131(unsigned char *G, size_t Glen,
+api_mul_u130(unsigned char *G, size_t Glen,
 	const unsigned char *kb, size_t kblen, int curve)
 {
 	switch (curve) {
@@ -30664,7 +30494,7 @@ api_mul_u131(unsigned char *G, size_t Glen,
 }
 
 static size_t
-api_mulgen_u131(unsigned char *R,
+api_mulgen_u130(unsigned char *R,
 	const unsigned char *x, size_t xlen, int curve)
 {
 	switch (curve) {
@@ -30678,7 +30508,7 @@ api_mulgen_u131(unsigned char *R,
 }
 
 static uint32_t
-api_muladd_u131(unsigned char *A, const unsigned char *B, size_t len,
+api_muladd_u130(unsigned char *A, const unsigned char *B, size_t len,
 	const unsigned char *x, size_t xlen,
 	const unsigned char *y, size_t ylen, int curve)
 {
@@ -30698,12 +30528,12 @@ api_muladd_u131(unsigned char *A, const unsigned char *B, size_t len,
 /* see bearssl_ec.h */
 const br_ec_impl br_ec_all_m15 = {
 	(uint32_t)0x23800000,
-	&api_generator_u131,
-	&api_order_u131,
-	&api_xoff_u131,
-	&api_mul_u131,
-	&api_mulgen_u131,
-	&api_muladd_u131
+	&api_generator_u130,
+	&api_order_u130,
+	&api_xoff_u130,
+	&api_mul_u130,
+	&api_mulgen_u130,
+	&api_muladd_u130
 };
 
 /* === src/ec/ec_all_m31.c === */
@@ -30734,7 +30564,7 @@ const br_ec_impl br_ec_all_m15 = {
 
 
 static const unsigned char *
-api_generator_u132(int curve, size_t *len)
+api_generator_u131(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30747,7 +30577,7 @@ api_generator_u132(int curve, size_t *len)
 }
 
 static const unsigned char *
-api_order_u132(int curve, size_t *len)
+api_order_u131(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30760,7 +30590,7 @@ api_order_u132(int curve, size_t *len)
 }
 
 static size_t
-api_xoff_u132(int curve, size_t *len)
+api_xoff_u131(int curve, size_t *len)
 {
 	switch (curve) {
 	case BR_EC_secp256r1:
@@ -30773,7 +30603,7 @@ api_xoff_u132(int curve, size_t *len)
 }
 
 static uint32_t
-api_mul_u132(unsigned char *G, size_t Glen,
+api_mul_u131(unsigned char *G, size_t Glen,
 	const unsigned char *kb, size_t kblen, int curve)
 {
 	switch (curve) {
@@ -30787,7 +30617,7 @@ api_mul_u132(unsigned char *G, size_t Glen,
 }
 
 static size_t
-api_mulgen_u132(unsigned char *R,
+api_mulgen_u131(unsigned char *R,
 	const unsigned char *x, size_t xlen, int curve)
 {
 	switch (curve) {
@@ -30801,7 +30631,7 @@ api_mulgen_u132(unsigned char *R,
 }
 
 static uint32_t
-api_muladd_u132(unsigned char *A, const unsigned char *B, size_t len,
+api_muladd_u131(unsigned char *A, const unsigned char *B, size_t len,
 	const unsigned char *x, size_t xlen,
 	const unsigned char *y, size_t ylen, int curve)
 {
@@ -30821,12 +30651,12 @@ api_muladd_u132(unsigned char *A, const unsigned char *B, size_t len,
 /* see bearssl_ec.h */
 const br_ec_impl br_ec_all_m31 = {
 	(uint32_t)0x23800000,
-	&api_generator_u132,
-	&api_order_u132,
-	&api_xoff_u132,
-	&api_mul_u132,
-	&api_mulgen_u132,
-	&api_muladd_u132
+	&api_generator_u131,
+	&api_order_u131,
+	&api_xoff_u131,
+	&api_mul_u131,
+	&api_mulgen_u131,
+	&api_muladd_u131
 };
 
 /* === src/ec/ec_c25519_i15.c === */
@@ -30862,16 +30692,16 @@ const br_ec_impl br_ec_all_m31 = {
  *   - R^2 mod p (R = 2^(15k) for the smallest k such that R >= p)
  */
 
-static const uint16_t C255_P_u133[] = {
+static const uint16_t C255_P_u132[] = {
 	0x0110,
 	0x7FED, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF,
 	0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF,
 	0x7FFF
 };
 
-#define P0I_u133   0x4A1B
+#define P0I_u132   0x4A1B
 
-static const uint16_t C255_R2_u133[] = {
+static const uint16_t C255_R2_u132[] = {
 	0x0110,
 	0x0169, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -30882,7 +30712,7 @@ static const uint16_t C255_R2_u133[] = {
 #include <stdio.h>
 #include <stdlib.h>
 static void
-print_int_mont_u133(const char *name, const uint16_t *x)
+print_int_mont_u132(const char *name, const uint16_t *x)
 {
 	uint16_t y[18];
 	unsigned char tmp[32];
@@ -30890,7 +30720,7 @@ print_int_mont_u133(const char *name, const uint16_t *x)
 
 	printf("%s = ", name);
 	memcpy(y, x, sizeof y);
-	br_i15_from_monty(y, C255_P_u133, P0I_u133);
+	br_i15_from_monty(y, C255_P_u132, P0I_u132);
 	br_i15_encode(tmp, sizeof tmp, y);
 	for (u = 0; u < sizeof tmp; u ++) {
 		printf("%02X", tmp[u]);
@@ -30899,12 +30729,409 @@ print_int_mont_u133(const char *name, const uint16_t *x)
 }
 */
 
-static const uint16_t C255_A24_u133[] = {
+static const uint16_t C255_A24_u132[] = {
 	0x0110,
 	0x45D3, 0x0046, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	0x0000
 };
+
+static const unsigned char GEN_u132[] = {
+	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+static const unsigned char ORDER_u132[] = {
+	0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+};
+
+static const unsigned char *
+api_generator_u132(int curve, size_t *len)
+{
+	(void)curve;
+	*len = 32;
+	return GEN_u132;
+}
+
+static const unsigned char *
+api_order_u132(int curve, size_t *len)
+{
+	(void)curve;
+	*len = 32;
+	return ORDER_u132;
+}
+
+static size_t
+api_xoff_u132(int curve, size_t *len)
+{
+	(void)curve;
+	*len = 32;
+	return 0;
+}
+
+static void
+cswap_u132(uint16_t *a, uint16_t *b, uint32_t ctl)
+{
+	int i;
+
+	ctl = -ctl;
+	for (i = 0; i < 18; i ++) {
+		uint32_t aw, bw, tw;
+
+		aw = a[i];
+		bw = b[i];
+		tw = ctl & (aw ^ bw);
+		a[i] = aw ^ tw;
+		b[i] = bw ^ tw;
+	}
+}
+
+static void
+c255_add_u132(uint16_t *d, const uint16_t *a, const uint16_t *b)
+{
+	uint32_t ctl;
+	uint16_t t[18];
+
+	memcpy(t, a, sizeof t);
+	ctl = br_i15_add(t, b, 1);
+	ctl |= NOT(br_i15_sub(t, C255_P_u132, 0));
+	br_i15_sub(t, C255_P_u132, ctl);
+	memcpy(d, t, sizeof t);
+}
+
+static void
+c255_sub_u132(uint16_t *d, const uint16_t *a, const uint16_t *b)
+{
+	uint16_t t[18];
+
+	memcpy(t, a, sizeof t);
+	br_i15_add(t, C255_P_u132, br_i15_sub(t, b, 1));
+	memcpy(d, t, sizeof t);
+}
+
+static void
+c255_mul_u132(uint16_t *d, const uint16_t *a, const uint16_t *b)
+{
+	uint16_t t[18];
+
+	br_i15_montymul(t, a, b, C255_P_u132, P0I_u132);
+	memcpy(d, t, sizeof t);
+}
+
+static void
+byteswap_u132(unsigned char *G)
+{
+	int i;
+
+	for (i = 0; i < 16; i ++) {
+		unsigned char t;
+
+		t = G[i];
+		G[i] = G[31 - i];
+		G[31 - i] = t;
+	}
+}
+
+static uint32_t
+api_mul_u132(unsigned char *G, size_t Glen,
+	const unsigned char *kb, size_t kblen, int curve)
+{
+#define ILEN_u132   (18 * sizeof(uint16_t))
+
+	/*
+	 * The a[] and b[] arrays have an extra word to allow for
+	 * decoding without using br_i15_decode_reduce().
+	 */
+	uint16_t x1[18], x2[18], x3[18], z2[18], z3[18];
+	uint16_t a[19], aa[18], b[19], bb[18];
+	uint16_t c[18], d[18], e[18], da[18], cb[18];
+	unsigned char k[32];
+	uint32_t swap;
+	int i;
+
+	(void)curve;
+
+	/*
+	 * Points are encoded over exactly 32 bytes. Multipliers must fit
+	 * in 32 bytes as well.
+	 * RFC 7748 mandates that the high bit of the last point byte must
+	 * be ignored/cleared.
+	 */
+	if (Glen != 32 || kblen > 32) {
+		return 0;
+	}
+	G[31] &= 0x7F;
+
+	/*
+	 * Byteswap the point encoding, because it uses little-endian, and
+	 * the generic decoding routine uses big-endian.
+	 */
+	byteswap_u132(G);
+
+	/*
+	 * Decode the point ('u' coordinate). This should be reduced
+	 * modulo p, but we prefer to avoid the dependency on
+	 * br_i15_decode_reduce(). Instead, we use br_i15_decode_mod()
+	 * with a synthetic modulus of value 2^255 (this must work
+	 * since G was truncated to 255 bits), then use a conditional
+	 * subtraction. We use br_i15_decode_mod() and not
+	 * br_i15_decode(), because the ec_prime_i15 implementation uses
+	 * the former but not the latter.
+	 *    br_i15_decode_reduce(a, G, 32, C255_P_u132);
+	 */
+	br_i15_zero(b, 0x111);
+	b[18] = 1;
+	br_i15_decode_mod(a, G, 32, b);
+	a[0] = 0x110;
+	br_i15_sub(a, C255_P_u132, NOT(br_i15_sub(a, C255_P_u132, 0)));
+
+	/*
+	 * Initialise variables x1, x2, z2, x3 and z3. We set all of them
+	 * into Montgomery representation.
+	 */
+	br_i15_montymul(x1, a, C255_R2_u132, C255_P_u132, P0I_u132);
+	memcpy(x3, x1, ILEN_u132);
+	br_i15_zero(z2, C255_P_u132[0]);
+	memcpy(x2, z2, ILEN_u132);
+	x2[1] = 19;
+	memcpy(z3, x2, ILEN_u132);
+
+	memcpy(k, kb, kblen);
+	memset(k + kblen, 0, (sizeof k) - kblen);
+	k[0] &= 0xF8;
+	k[31] &= 0x7F;
+	k[31] |= 0x40;
+
+	/* obsolete
+	print_int_mont_u132("x1", x1);
+	*/
+
+	swap = 0;
+	for (i = 254; i >= 0; i --) {
+		uint32_t kt;
+
+		kt = (k[i >> 3] >> (i & 7)) & 1;
+		swap ^= kt;
+		cswap_u132(x2, x3, swap);
+		cswap_u132(z2, z3, swap);
+		swap = kt;
+
+		/* obsolete
+		print_int_mont_u132("x2", x2);
+		print_int_mont_u132("z2", z2);
+		print_int_mont_u132("x3", x3);
+		print_int_mont_u132("z3", z3);
+		*/
+
+		c255_add_u132(a, x2, z2);
+		c255_mul_u132(aa, a, a);
+		c255_sub_u132(b, x2, z2);
+		c255_mul_u132(bb, b, b);
+		c255_sub_u132(e, aa, bb);
+		c255_add_u132(c, x3, z3);
+		c255_sub_u132(d, x3, z3);
+		c255_mul_u132(da, d, a);
+		c255_mul_u132(cb, c, b);
+
+		/* obsolete
+		print_int_mont_u132("a ", a);
+		print_int_mont_u132("aa", aa);
+		print_int_mont_u132("b ", b);
+		print_int_mont_u132("bb", bb);
+		print_int_mont_u132("e ", e);
+		print_int_mont_u132("c ", c);
+		print_int_mont_u132("d ", d);
+		print_int_mont_u132("da", da);
+		print_int_mont_u132("cb", cb);
+		*/
+
+		c255_add_u132(x3, da, cb);
+		c255_mul_u132(x3, x3, x3);
+		c255_sub_u132(z3, da, cb);
+		c255_mul_u132(z3, z3, z3);
+		c255_mul_u132(z3, z3, x1);
+		c255_mul_u132(x2, aa, bb);
+		c255_mul_u132(z2, C255_A24_u132, e);
+		c255_add_u132(z2, z2, aa);
+		c255_mul_u132(z2, e, z2);
+
+		/* obsolete
+		print_int_mont_u132("x2", x2);
+		print_int_mont_u132("z2", z2);
+		print_int_mont_u132("x3", x3);
+		print_int_mont_u132("z3", z3);
+		*/
+	}
+	cswap_u132(x2, x3, swap);
+	cswap_u132(z2, z3, swap);
+
+	/*
+	 * Inverse z2 with a modular exponentiation. This is a simple
+	 * square-and-multiply algorithm; we mutualise most non-squarings
+	 * since the exponent contains almost only ones.
+	 */
+	memcpy(a, z2, ILEN_u132);
+	for (i = 0; i < 15; i ++) {
+		c255_mul_u132(a, a, a);
+		c255_mul_u132(a, a, z2);
+	}
+	memcpy(b, a, ILEN_u132);
+	for (i = 0; i < 14; i ++) {
+		int j;
+
+		for (j = 0; j < 16; j ++) {
+			c255_mul_u132(b, b, b);
+		}
+		c255_mul_u132(b, b, a);
+	}
+	for (i = 14; i >= 0; i --) {
+		c255_mul_u132(b, b, b);
+		if ((0xFFEB >> i) & 1) {
+			c255_mul_u132(b, z2, b);
+		}
+	}
+	c255_mul_u132(b, x2, b);
+
+	/*
+	 * To avoid a dependency on br_i15_from_monty(), we use a
+	 * Montgomery multiplication with 1.
+	 *    memcpy(x2, b, ILEN_u132);
+	 *    br_i15_from_monty(x2, C255_P_u132, P0I_u132);
+	 */
+	br_i15_zero(a, C255_P_u132[0]);
+	a[1] = 1;
+	br_i15_montymul(x2, a, b, C255_P_u132, P0I_u132);
+
+	br_i15_encode(G, 32, x2);
+	byteswap_u132(G);
+	return 1;
+
+#undef ILEN_u132
+}
+
+static size_t
+api_mulgen_u132(unsigned char *R,
+	const unsigned char *x, size_t xlen, int curve)
+{
+	const unsigned char *G;
+	size_t Glen;
+
+	G = api_generator_u132(curve, &Glen);
+	memcpy(R, G, Glen);
+	api_mul_u132(R, Glen, x, xlen, curve);
+	return Glen;
+}
+
+static uint32_t
+api_muladd_u132(unsigned char *A, const unsigned char *B, size_t len,
+	const unsigned char *x, size_t xlen,
+	const unsigned char *y, size_t ylen, int curve)
+{
+	/*
+	 * We don't implement this method, since it is used for ECDSA
+	 * only, and there is no ECDSA over Curve25519 (which instead
+	 * uses EdDSA).
+	 */
+	(void)A;
+	(void)B;
+	(void)len;
+	(void)x;
+	(void)xlen;
+	(void)y;
+	(void)ylen;
+	(void)curve;
+	return 0;
+}
+
+/* see bearssl_ec.h */
+const br_ec_impl br_ec_c25519_i15 = {
+	(uint32_t)0x20000000,
+	&api_generator_u132,
+	&api_order_u132,
+	&api_xoff_u132,
+	&api_mul_u132,
+	&api_mulgen_u132,
+	&api_muladd_u132
+};
+
+/* === src/ec/ec_c25519_i31.c === */
+#line 1 "src/ec/ec_c25519_i31.c"
+/*
+ * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining 
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be 
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+
+/*
+ * Parameters for the field:
+ *   - field modulus p = 2^255-19
+ *   - R^2 mod p (R = 2^(31k) for the smallest k such that R >= p)
+ */
+
+static const uint32_t C255_P_u133[] = {
+	0x00000107,
+	0x7FFFFFED, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x0000007F
+};
+
+#define P0I_u133   0x286BCA1B
+
+static const uint32_t C255_R2_u133[] = {
+	0x00000107,
+	0x00000000, 0x02D20000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000
+};
+
+static const uint32_t C255_A24_u133[] = {
+	0x00000107,
+	0x53000000, 0x0000468B, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000
+};
+
+/* obsolete
+#include <stdio.h>
+#include <stdlib.h>
+static void
+print_int_mont_u133(const char *name, const uint32_t *x)
+{
+	uint32_t y[10];
+	unsigned char tmp[32];
+	size_t u;
+
+	printf("%s = ", name);
+	memcpy(y, x, sizeof y);
+	br_i31_from_monty(y, C255_P_u133, P0I_u133);
+	br_i31_encode(tmp, sizeof tmp, y);
+	for (u = 0; u < sizeof tmp; u ++) {
+		printf("%02X", tmp[u]);
+	}
+	printf("\n");
+}
+*/
 
 static const unsigned char GEN_u133[] = {
 	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -30945,12 +31172,12 @@ api_xoff_u133(int curve, size_t *len)
 }
 
 static void
-cswap_u133(uint16_t *a, uint16_t *b, uint32_t ctl)
+cswap_u133(uint32_t *a, uint32_t *b, uint32_t ctl)
 {
 	int i;
 
 	ctl = -ctl;
-	for (i = 0; i < 18; i ++) {
+	for (i = 0; i < 10; i ++) {
 		uint32_t aw, bw, tw;
 
 		aw = a[i];
@@ -30962,34 +31189,34 @@ cswap_u133(uint16_t *a, uint16_t *b, uint32_t ctl)
 }
 
 static void
-c255_add_u133(uint16_t *d, const uint16_t *a, const uint16_t *b)
+c255_add_u133(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	uint32_t ctl;
-	uint16_t t[18];
+	uint32_t t[10];
 
 	memcpy(t, a, sizeof t);
-	ctl = br_i15_add(t, b, 1);
-	ctl |= NOT(br_i15_sub(t, C255_P_u133, 0));
-	br_i15_sub(t, C255_P_u133, ctl);
+	ctl = br_i31_add(t, b, 1);
+	ctl |= NOT(br_i31_sub(t, C255_P_u133, 0));
+	br_i31_sub(t, C255_P_u133, ctl);
 	memcpy(d, t, sizeof t);
 }
 
 static void
-c255_sub_u133(uint16_t *d, const uint16_t *a, const uint16_t *b)
+c255_sub_u133(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
-	uint16_t t[18];
+	uint32_t t[10];
 
 	memcpy(t, a, sizeof t);
-	br_i15_add(t, C255_P_u133, br_i15_sub(t, b, 1));
+	br_i31_add(t, C255_P_u133, br_i31_sub(t, b, 1));
 	memcpy(d, t, sizeof t);
 }
 
 static void
-c255_mul_u133(uint16_t *d, const uint16_t *a, const uint16_t *b)
+c255_mul_u133(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
-	uint16_t t[18];
+	uint32_t t[10];
 
-	br_i15_montymul(t, a, b, C255_P_u133, P0I_u133);
+	br_i31_montymul(t, a, b, C255_P_u133, P0I_u133);
 	memcpy(d, t, sizeof t);
 }
 
@@ -31011,15 +31238,9 @@ static uint32_t
 api_mul_u133(unsigned char *G, size_t Glen,
 	const unsigned char *kb, size_t kblen, int curve)
 {
-#define ILEN_u133   (18 * sizeof(uint16_t))
-
-	/*
-	 * The a[] and b[] arrays have an extra word to allow for
-	 * decoding without using br_i15_decode_reduce().
-	 */
-	uint16_t x1[18], x2[18], x3[18], z2[18], z3[18];
-	uint16_t a[19], aa[18], b[19], bb[18];
-	uint16_t c[18], d[18], e[18], da[18], cb[18];
+	uint32_t x1[10], x2[10], x3[10], z2[10], z3[10];
+	uint32_t a[10], aa[10], b[10], bb[10];
+	uint32_t c[10], d[10], e[10], da[10], cb[10];
 	unsigned char k[32];
 	uint32_t swap;
 	int i;
@@ -31046,30 +31267,30 @@ api_mul_u133(unsigned char *G, size_t Glen,
 	/*
 	 * Decode the point ('u' coordinate). This should be reduced
 	 * modulo p, but we prefer to avoid the dependency on
-	 * br_i15_decode_reduce(). Instead, we use br_i15_decode_mod()
+	 * br_i31_decode_reduce(). Instead, we use br_i31_decode_mod()
 	 * with a synthetic modulus of value 2^255 (this must work
 	 * since G was truncated to 255 bits), then use a conditional
-	 * subtraction. We use br_i15_decode_mod() and not
-	 * br_i15_decode(), because the ec_prime_i15 implementation uses
+	 * subtraction. We use br_i31_decode_mod() and not
+	 * br_i31_decode(), because the ec_prime_i31 implementation uses
 	 * the former but not the latter.
-	 *    br_i15_decode_reduce(a, G, 32, C255_P_u133);
+	 *    br_i31_decode_reduce(a, G, 32, C255_P_u133);
 	 */
-	br_i15_zero(b, 0x111);
-	b[18] = 1;
-	br_i15_decode_mod(a, G, 32, b);
-	a[0] = 0x110;
-	br_i15_sub(a, C255_P_u133, NOT(br_i15_sub(a, C255_P_u133, 0)));
+	br_i31_zero(b, 0x108);
+	b[9] = 0x0100;
+	br_i31_decode_mod(a, G, 32, b);
+	a[0] = 0x107;
+	br_i31_sub(a, C255_P_u133, NOT(br_i31_sub(a, C255_P_u133, 0)));
 
 	/*
 	 * Initialise variables x1, x2, z2, x3 and z3. We set all of them
 	 * into Montgomery representation.
 	 */
-	br_i15_montymul(x1, a, C255_R2_u133, C255_P_u133, P0I_u133);
-	memcpy(x3, x1, ILEN_u133);
-	br_i15_zero(z2, C255_P_u133[0]);
-	memcpy(x2, z2, ILEN_u133);
-	x2[1] = 19;
-	memcpy(z3, x2, ILEN_u133);
+	br_i31_montymul(x1, a, C255_R2_u133, C255_P_u133, P0I_u133);
+	memcpy(x3, x1, sizeof x1);
+	br_i31_zero(z2, C255_P_u133[0]);
+	memcpy(x2, z2, sizeof z2);
+	x2[1] = 0x13000000;
+	memcpy(z3, x2, sizeof x2);
 
 	memcpy(k, kb, kblen);
 	memset(k + kblen, 0, (sizeof k) - kblen);
@@ -31145,12 +31366,12 @@ api_mul_u133(unsigned char *G, size_t Glen,
 	 * square-and-multiply algorithm; we mutualise most non-squarings
 	 * since the exponent contains almost only ones.
 	 */
-	memcpy(a, z2, ILEN_u133);
+	memcpy(a, z2, sizeof z2);
 	for (i = 0; i < 15; i ++) {
 		c255_mul_u133(a, a, a);
 		c255_mul_u133(a, a, z2);
 	}
-	memcpy(b, a, ILEN_u133);
+	memcpy(b, a, sizeof a);
 	for (i = 0; i < 14; i ++) {
 		int j;
 
@@ -31168,20 +31389,18 @@ api_mul_u133(unsigned char *G, size_t Glen,
 	c255_mul_u133(b, x2, b);
 
 	/*
-	 * To avoid a dependency on br_i15_from_monty(), we use a
-	 * Montgomery multiplication with 1.
-	 *    memcpy(x2, b, ILEN_u133);
-	 *    br_i15_from_monty(x2, C255_P_u133, P0I_u133);
+	 * To avoid a dependency on br_i31_from_monty(), we use
+	 * a Montgomery multiplication with 1.
+	 *    memcpy(x2, b, sizeof b);
+	 *    br_i31_from_monty(x2, C255_P_u133, P0I_u133);
 	 */
-	br_i15_zero(a, C255_P_u133[0]);
+	br_i31_zero(a, C255_P_u133[0]);
 	a[1] = 1;
-	br_i15_montymul(x2, a, b, C255_P_u133, P0I_u133);
+	br_i31_montymul(x2, a, b, C255_P_u133, P0I_u133);
 
-	br_i15_encode(G, 32, x2);
+	br_i31_encode(G, 32, x2);
 	byteswap_u133(G);
 	return 1;
-
-#undef ILEN_u133
 }
 
 static size_t
@@ -31219,7 +31438,7 @@ api_muladd_u133(unsigned char *A, const unsigned char *B, size_t len,
 }
 
 /* see bearssl_ec.h */
-const br_ec_impl br_ec_c25519_i15 = {
+const br_ec_impl br_ec_c25519_i31 = {
 	(uint32_t)0x20000000,
 	&api_generator_u133,
 	&api_order_u133,
@@ -31227,395 +31446,6 @@ const br_ec_impl br_ec_c25519_i15 = {
 	&api_mul_u133,
 	&api_mulgen_u133,
 	&api_muladd_u133
-};
-
-/* === src/ec/ec_c25519_i31.c === */
-#line 1 "src/ec/ec_c25519_i31.c"
-/*
- * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining 
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be 
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
-
-/*
- * Parameters for the field:
- *   - field modulus p = 2^255-19
- *   - R^2 mod p (R = 2^(31k) for the smallest k such that R >= p)
- */
-
-static const uint32_t C255_P_u134[] = {
-	0x00000107,
-	0x7FFFFFED, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x0000007F
-};
-
-#define P0I_u134   0x286BCA1B
-
-static const uint32_t C255_R2_u134[] = {
-	0x00000107,
-	0x00000000, 0x02D20000, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000, 0x00000000, 0x00000000, 0x00000000
-};
-
-static const uint32_t C255_A24_u134[] = {
-	0x00000107,
-	0x53000000, 0x0000468B, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000, 0x00000000, 0x00000000, 0x00000000
-};
-
-/* obsolete
-#include <stdio.h>
-#include <stdlib.h>
-static void
-print_int_mont_u134(const char *name, const uint32_t *x)
-{
-	uint32_t y[10];
-	unsigned char tmp[32];
-	size_t u;
-
-	printf("%s = ", name);
-	memcpy(y, x, sizeof y);
-	br_i31_from_monty(y, C255_P_u134, P0I_u134);
-	br_i31_encode(tmp, sizeof tmp, y);
-	for (u = 0; u < sizeof tmp; u ++) {
-		printf("%02X", tmp[u]);
-	}
-	printf("\n");
-}
-*/
-
-static const unsigned char GEN_u134[] = {
-	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-};
-
-static const unsigned char ORDER_u134[] = {
-	0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-};
-
-static const unsigned char *
-api_generator_u134(int curve, size_t *len)
-{
-	(void)curve;
-	*len = 32;
-	return GEN_u134;
-}
-
-static const unsigned char *
-api_order_u134(int curve, size_t *len)
-{
-	(void)curve;
-	*len = 32;
-	return ORDER_u134;
-}
-
-static size_t
-api_xoff_u134(int curve, size_t *len)
-{
-	(void)curve;
-	*len = 32;
-	return 0;
-}
-
-static void
-cswap_u134(uint32_t *a, uint32_t *b, uint32_t ctl)
-{
-	int i;
-
-	ctl = -ctl;
-	for (i = 0; i < 10; i ++) {
-		uint32_t aw, bw, tw;
-
-		aw = a[i];
-		bw = b[i];
-		tw = ctl & (aw ^ bw);
-		a[i] = aw ^ tw;
-		b[i] = bw ^ tw;
-	}
-}
-
-static void
-c255_add_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t ctl;
-	uint32_t t[10];
-
-	memcpy(t, a, sizeof t);
-	ctl = br_i31_add(t, b, 1);
-	ctl |= NOT(br_i31_sub(t, C255_P_u134, 0));
-	br_i31_sub(t, C255_P_u134, ctl);
-	memcpy(d, t, sizeof t);
-}
-
-static void
-c255_sub_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t t[10];
-
-	memcpy(t, a, sizeof t);
-	br_i31_add(t, C255_P_u134, br_i31_sub(t, b, 1));
-	memcpy(d, t, sizeof t);
-}
-
-static void
-c255_mul_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t t[10];
-
-	br_i31_montymul(t, a, b, C255_P_u134, P0I_u134);
-	memcpy(d, t, sizeof t);
-}
-
-static void
-byteswap_u134(unsigned char *G)
-{
-	int i;
-
-	for (i = 0; i < 16; i ++) {
-		unsigned char t;
-
-		t = G[i];
-		G[i] = G[31 - i];
-		G[31 - i] = t;
-	}
-}
-
-static uint32_t
-api_mul_u134(unsigned char *G, size_t Glen,
-	const unsigned char *kb, size_t kblen, int curve)
-{
-	uint32_t x1[10], x2[10], x3[10], z2[10], z3[10];
-	uint32_t a[10], aa[10], b[10], bb[10];
-	uint32_t c[10], d[10], e[10], da[10], cb[10];
-	unsigned char k[32];
-	uint32_t swap;
-	int i;
-
-	(void)curve;
-
-	/*
-	 * Points are encoded over exactly 32 bytes. Multipliers must fit
-	 * in 32 bytes as well.
-	 * RFC 7748 mandates that the high bit of the last point byte must
-	 * be ignored/cleared.
-	 */
-	if (Glen != 32 || kblen > 32) {
-		return 0;
-	}
-	G[31] &= 0x7F;
-
-	/*
-	 * Byteswap the point encoding, because it uses little-endian, and
-	 * the generic decoding routine uses big-endian.
-	 */
-	byteswap_u134(G);
-
-	/*
-	 * Decode the point ('u' coordinate). This should be reduced
-	 * modulo p, but we prefer to avoid the dependency on
-	 * br_i31_decode_reduce(). Instead, we use br_i31_decode_mod()
-	 * with a synthetic modulus of value 2^255 (this must work
-	 * since G was truncated to 255 bits), then use a conditional
-	 * subtraction. We use br_i31_decode_mod() and not
-	 * br_i31_decode(), because the ec_prime_i31 implementation uses
-	 * the former but not the latter.
-	 *    br_i31_decode_reduce(a, G, 32, C255_P_u134);
-	 */
-	br_i31_zero(b, 0x108);
-	b[9] = 0x0100;
-	br_i31_decode_mod(a, G, 32, b);
-	a[0] = 0x107;
-	br_i31_sub(a, C255_P_u134, NOT(br_i31_sub(a, C255_P_u134, 0)));
-
-	/*
-	 * Initialise variables x1, x2, z2, x3 and z3. We set all of them
-	 * into Montgomery representation.
-	 */
-	br_i31_montymul(x1, a, C255_R2_u134, C255_P_u134, P0I_u134);
-	memcpy(x3, x1, sizeof x1);
-	br_i31_zero(z2, C255_P_u134[0]);
-	memcpy(x2, z2, sizeof z2);
-	x2[1] = 0x13000000;
-	memcpy(z3, x2, sizeof x2);
-
-	memcpy(k, kb, kblen);
-	memset(k + kblen, 0, (sizeof k) - kblen);
-	k[0] &= 0xF8;
-	k[31] &= 0x7F;
-	k[31] |= 0x40;
-
-	/* obsolete
-	print_int_mont_u134("x1", x1);
-	*/
-
-	swap = 0;
-	for (i = 254; i >= 0; i --) {
-		uint32_t kt;
-
-		kt = (k[i >> 3] >> (i & 7)) & 1;
-		swap ^= kt;
-		cswap_u134(x2, x3, swap);
-		cswap_u134(z2, z3, swap);
-		swap = kt;
-
-		/* obsolete
-		print_int_mont_u134("x2", x2);
-		print_int_mont_u134("z2", z2);
-		print_int_mont_u134("x3", x3);
-		print_int_mont_u134("z3", z3);
-		*/
-
-		c255_add_u134(a, x2, z2);
-		c255_mul_u134(aa, a, a);
-		c255_sub_u134(b, x2, z2);
-		c255_mul_u134(bb, b, b);
-		c255_sub_u134(e, aa, bb);
-		c255_add_u134(c, x3, z3);
-		c255_sub_u134(d, x3, z3);
-		c255_mul_u134(da, d, a);
-		c255_mul_u134(cb, c, b);
-
-		/* obsolete
-		print_int_mont_u134("a ", a);
-		print_int_mont_u134("aa", aa);
-		print_int_mont_u134("b ", b);
-		print_int_mont_u134("bb", bb);
-		print_int_mont_u134("e ", e);
-		print_int_mont_u134("c ", c);
-		print_int_mont_u134("d ", d);
-		print_int_mont_u134("da", da);
-		print_int_mont_u134("cb", cb);
-		*/
-
-		c255_add_u134(x3, da, cb);
-		c255_mul_u134(x3, x3, x3);
-		c255_sub_u134(z3, da, cb);
-		c255_mul_u134(z3, z3, z3);
-		c255_mul_u134(z3, z3, x1);
-		c255_mul_u134(x2, aa, bb);
-		c255_mul_u134(z2, C255_A24_u134, e);
-		c255_add_u134(z2, z2, aa);
-		c255_mul_u134(z2, e, z2);
-
-		/* obsolete
-		print_int_mont_u134("x2", x2);
-		print_int_mont_u134("z2", z2);
-		print_int_mont_u134("x3", x3);
-		print_int_mont_u134("z3", z3);
-		*/
-	}
-	cswap_u134(x2, x3, swap);
-	cswap_u134(z2, z3, swap);
-
-	/*
-	 * Inverse z2 with a modular exponentiation. This is a simple
-	 * square-and-multiply algorithm; we mutualise most non-squarings
-	 * since the exponent contains almost only ones.
-	 */
-	memcpy(a, z2, sizeof z2);
-	for (i = 0; i < 15; i ++) {
-		c255_mul_u134(a, a, a);
-		c255_mul_u134(a, a, z2);
-	}
-	memcpy(b, a, sizeof a);
-	for (i = 0; i < 14; i ++) {
-		int j;
-
-		for (j = 0; j < 16; j ++) {
-			c255_mul_u134(b, b, b);
-		}
-		c255_mul_u134(b, b, a);
-	}
-	for (i = 14; i >= 0; i --) {
-		c255_mul_u134(b, b, b);
-		if ((0xFFEB >> i) & 1) {
-			c255_mul_u134(b, z2, b);
-		}
-	}
-	c255_mul_u134(b, x2, b);
-
-	/*
-	 * To avoid a dependency on br_i31_from_monty(), we use
-	 * a Montgomery multiplication with 1.
-	 *    memcpy(x2, b, sizeof b);
-	 *    br_i31_from_monty(x2, C255_P_u134, P0I_u134);
-	 */
-	br_i31_zero(a, C255_P_u134[0]);
-	a[1] = 1;
-	br_i31_montymul(x2, a, b, C255_P_u134, P0I_u134);
-
-	br_i31_encode(G, 32, x2);
-	byteswap_u134(G);
-	return 1;
-}
-
-static size_t
-api_mulgen_u134(unsigned char *R,
-	const unsigned char *x, size_t xlen, int curve)
-{
-	const unsigned char *G;
-	size_t Glen;
-
-	G = api_generator_u134(curve, &Glen);
-	memcpy(R, G, Glen);
-	api_mul_u134(R, Glen, x, xlen, curve);
-	return Glen;
-}
-
-static uint32_t
-api_muladd_u134(unsigned char *A, const unsigned char *B, size_t len,
-	const unsigned char *x, size_t xlen,
-	const unsigned char *y, size_t ylen, int curve)
-{
-	/*
-	 * We don't implement this method, since it is used for ECDSA
-	 * only, and there is no ECDSA over Curve25519 (which instead
-	 * uses EdDSA).
-	 */
-	(void)A;
-	(void)B;
-	(void)len;
-	(void)x;
-	(void)xlen;
-	(void)y;
-	(void)ylen;
-	(void)curve;
-	return 0;
-}
-
-/* see bearssl_ec.h */
-const br_ec_impl br_ec_c25519_i31 = {
-	(uint32_t)0x20000000,
-	&api_generator_u134,
-	&api_order_u134,
-	&api_xoff_u134,
-	&api_mul_u134,
-	&api_mulgen_u134,
-	&api_muladd_u134
 };
 
 /* === src/ec/ec_c25519_m15.c === */
@@ -31649,7 +31479,7 @@ const br_ec_impl br_ec_c25519_i31 = {
 #include <stdio.h>
 #include <stdlib.h>
 static void
-print_int_u135(const char *name, const uint32_t *x)
+print_int_u134(const char *name, const uint32_t *x)
 {
 	size_t u;
 	unsigned char tmp[36];
@@ -31701,10 +31531,10 @@ print_int_u135(const char *name, const uint32_t *x)
  * arithmetic right shift opcode that could not be used otherwise.
  */
 #if BR_NO_ARITH_SHIFT
-#define ARSH_u135(x, n)   (((uint32_t)(x) >> (n)) \
+#define ARSH_u134(x, n)   (((uint32_t)(x) >> (n)) \
                     | ((-((uint32_t)(x) >> 31)) << (32 - (n))))
 #else
-#define ARSH_u135(x, n)   ((*(int32_t *)&(x)) >> (n))
+#define ARSH_u134(x, n)   ((*(int32_t *)&(x)) >> (n))
 #endif
 
 /*
@@ -31713,7 +31543,7 @@ print_int_u135(const char *name, const uint32_t *x)
  * returned.
  */
 static uint32_t
-le8_to_le13_u135(uint32_t *dst, const unsigned char *src, size_t len)
+le8_to_le13_u134(uint32_t *dst, const unsigned char *src, size_t len)
 {
 	uint32_t acc;
 	int acc_len;
@@ -31738,7 +31568,7 @@ le8_to_le13_u135(uint32_t *dst, const unsigned char *src, size_t len)
  * the destination bytes will be filled.
  */
 static void
-le13_to_le8_u135(unsigned char *dst, size_t len, const uint32_t *src)
+le13_to_le8_u134(unsigned char *dst, size_t len, const uint32_t *src)
 {
 	uint32_t acc;
 	int acc_len;
@@ -31762,7 +31592,7 @@ le13_to_le8_u135(unsigned char *dst, size_t len, const uint32_t *src)
  * arrays may be identical, but shall not overlap partially.
  */
 static inline uint32_t
-norm13_u135(uint32_t *d, const uint32_t *w, size_t len)
+norm13_u134(uint32_t *d, const uint32_t *w, size_t len)
 {
 	size_t u;
 	uint32_t cc;
@@ -31773,17 +31603,17 @@ norm13_u135(uint32_t *d, const uint32_t *w, size_t len)
 
 		z = w[u] + cc;
 		d[u] = z & 0x1FFF;
-		cc = ARSH_u135(z, 13);
+		cc = ARSH_u134(z, 13);
 	}
 	return cc;
 }
 
 /*
- * mul20_u135() multiplies two 260-bit integers together. Each word must fit
+ * mul20_u134() multiplies two 260-bit integers together. Each word must fit
  * on 13 bits; source operands use 20 words, destination operand
  * receives 40 words. All overlaps allowed.
  *
- * square20_u135() computes the square of a 260-bit integer. Each word must
+ * square20_u134() computes the square of a 260-bit integer. Each word must
  * fit on 13 bits; source operand uses 20 words, destination operand
  * receives 40 words. All overlaps allowed.
  */
@@ -31791,7 +31621,7 @@ norm13_u135(uint32_t *d, const uint32_t *w, size_t len)
 #if BR_SLOW_MUL15
 
 static void
-mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul20_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * Two-level Karatsuba: turns a 20x20 multiplication into
@@ -31815,7 +31645,7 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	uint32_t cc;
 	int i;
 
-#define ZADD_u135(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
+#define ZADD_u134(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
 		(dw)[5 * (d_off) + 0] = (s1w)[5 * (s1_off) + 0] \
 			+ (s2w)[5 * (s2_off) + 0]; \
 		(dw)[5 * (d_off) + 1] = (s1w)[5 * (s1_off) + 1] \
@@ -31828,7 +31658,7 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 			+ (s2w)[5 * (s2_off) + 4]; \
 	} while (0)
 
-#define ZADDT_u135(dw, d_off, sw, s_off)   do { \
+#define ZADDT_u134(dw, d_off, sw, s_off)   do { \
 		(dw)[5 * (d_off) + 0] += (sw)[5 * (s_off) + 0]; \
 		(dw)[5 * (d_off) + 1] += (sw)[5 * (s_off) + 1]; \
 		(dw)[5 * (d_off) + 2] += (sw)[5 * (s_off) + 2]; \
@@ -31836,7 +31666,7 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		(dw)[5 * (d_off) + 4] += (sw)[5 * (s_off) + 4]; \
 	} while (0)
 
-#define ZSUB2F_u135(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
+#define ZSUB2F_u134(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
 		(dw)[5 * (d_off) + 0] -= (s1w)[5 * (s1_off) + 0] \
 			+ (s2w)[5 * (s2_off) + 0]; \
 		(dw)[5 * (d_off) + 1] -= (s1w)[5 * (s1_off) + 1] \
@@ -31849,40 +31679,40 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 			+ (s2w)[5 * (s2_off) + 4]; \
 	} while (0)
 
-#define CPR1_u135(w, cprcc)   do { \
+#define CPR1_u134(w, cprcc)   do { \
 		uint32_t cprz = (w) + cprcc; \
 		(w) = cprz & 0x1FFF; \
 		cprcc = cprz >> 13; \
 	} while (0)
 
-#define CPR_u135(dw, d_off)   do { \
+#define CPR_u134(dw, d_off)   do { \
 		uint32_t cprcc; \
 		cprcc = 0; \
-		CPR1_u135((dw)[(d_off) + 0], cprcc); \
-		CPR1_u135((dw)[(d_off) + 1], cprcc); \
-		CPR1_u135((dw)[(d_off) + 2], cprcc); \
-		CPR1_u135((dw)[(d_off) + 3], cprcc); \
-		CPR1_u135((dw)[(d_off) + 4], cprcc); \
-		CPR1_u135((dw)[(d_off) + 5], cprcc); \
-		CPR1_u135((dw)[(d_off) + 6], cprcc); \
-		CPR1_u135((dw)[(d_off) + 7], cprcc); \
-		CPR1_u135((dw)[(d_off) + 8], cprcc); \
+		CPR1_u134((dw)[(d_off) + 0], cprcc); \
+		CPR1_u134((dw)[(d_off) + 1], cprcc); \
+		CPR1_u134((dw)[(d_off) + 2], cprcc); \
+		CPR1_u134((dw)[(d_off) + 3], cprcc); \
+		CPR1_u134((dw)[(d_off) + 4], cprcc); \
+		CPR1_u134((dw)[(d_off) + 5], cprcc); \
+		CPR1_u134((dw)[(d_off) + 6], cprcc); \
+		CPR1_u134((dw)[(d_off) + 7], cprcc); \
+		CPR1_u134((dw)[(d_off) + 8], cprcc); \
 		(dw)[(d_off) + 9] = cprcc; \
 	} while (0)
 
 	memcpy(u, a, 20 * sizeof *a);
-	ZADD_u135(u, 4, a, 0, a, 1);
-	ZADD_u135(u, 5, a, 2, a, 3);
-	ZADD_u135(u, 6, a, 0, a, 2);
-	ZADD_u135(u, 7, a, 1, a, 3);
-	ZADD_u135(u, 8, u, 6, u, 7);
+	ZADD_u134(u, 4, a, 0, a, 1);
+	ZADD_u134(u, 5, a, 2, a, 3);
+	ZADD_u134(u, 6, a, 0, a, 2);
+	ZADD_u134(u, 7, a, 1, a, 3);
+	ZADD_u134(u, 8, u, 6, u, 7);
 
 	memcpy(v, b, 20 * sizeof *b);
-	ZADD_u135(v, 4, b, 0, b, 1);
-	ZADD_u135(v, 5, b, 2, b, 3);
-	ZADD_u135(v, 6, b, 0, b, 2);
-	ZADD_u135(v, 7, b, 1, b, 3);
-	ZADD_u135(v, 8, v, 6, v, 7);
+	ZADD_u134(v, 4, b, 0, b, 1);
+	ZADD_u134(v, 5, b, 2, b, 3);
+	ZADD_u134(v, 6, b, 0, b, 2);
+	ZADD_u134(v, 7, b, 1, b, 3);
+	ZADD_u134(v, 8, v, 6, v, 7);
 
 	/*
 	 * Do the eight first 8x8 muls. Source words are at most 16382
@@ -31956,7 +31786,7 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		+ MUL15(u[40 + 4], v[40 + 3]);
 	w[80 + 8] = MUL15(u[40 + 4], v[40 + 4]);
 
-	CPR_u135(w, 80);
+	CPR_u134(w, 80);
 
 	w[80 + 4] += MUL15(u[40 + 4], v[40 + 0]);
 
@@ -31968,64 +31798,64 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	 * However, 10*(16382^2) does not fit. So we must perform a
 	 * bit of reduction here.
 	 */
-	CPR_u135(w, 60);
-	CPR_u135(w, 70);
+	CPR_u134(w, 60);
+	CPR_u134(w, 70);
 
 	/*
 	 * Recompose results.
 	 */
 
 	/* 0..1*0..1 into 0..3 */
-	ZSUB2F_u135(w, 8, w, 0, w, 2);
-	ZSUB2F_u135(w, 9, w, 1, w, 3);
-	ZADDT_u135(w, 1, w, 8);
-	ZADDT_u135(w, 2, w, 9);
+	ZSUB2F_u134(w, 8, w, 0, w, 2);
+	ZSUB2F_u134(w, 9, w, 1, w, 3);
+	ZADDT_u134(w, 1, w, 8);
+	ZADDT_u134(w, 2, w, 9);
 
 	/* 2..3*2..3 into 4..7 */
-	ZSUB2F_u135(w, 10, w, 4, w, 6);
-	ZSUB2F_u135(w, 11, w, 5, w, 7);
-	ZADDT_u135(w, 5, w, 10);
-	ZADDT_u135(w, 6, w, 11);
+	ZSUB2F_u134(w, 10, w, 4, w, 6);
+	ZSUB2F_u134(w, 11, w, 5, w, 7);
+	ZADDT_u134(w, 5, w, 10);
+	ZADDT_u134(w, 6, w, 11);
 
 	/* (0..1+2..3)*(0..1+2..3) into 12..15 */
-	ZSUB2F_u135(w, 16, w, 12, w, 14);
-	ZSUB2F_u135(w, 17, w, 13, w, 15);
-	ZADDT_u135(w, 13, w, 16);
-	ZADDT_u135(w, 14, w, 17);
+	ZSUB2F_u134(w, 16, w, 12, w, 14);
+	ZSUB2F_u134(w, 17, w, 13, w, 15);
+	ZADDT_u134(w, 13, w, 16);
+	ZADDT_u134(w, 14, w, 17);
 
 	/* first-level recomposition */
-	ZSUB2F_u135(w, 12, w, 0, w, 4);
-	ZSUB2F_u135(w, 13, w, 1, w, 5);
-	ZSUB2F_u135(w, 14, w, 2, w, 6);
-	ZSUB2F_u135(w, 15, w, 3, w, 7);
-	ZADDT_u135(w, 2, w, 12);
-	ZADDT_u135(w, 3, w, 13);
-	ZADDT_u135(w, 4, w, 14);
-	ZADDT_u135(w, 5, w, 15);
+	ZSUB2F_u134(w, 12, w, 0, w, 4);
+	ZSUB2F_u134(w, 13, w, 1, w, 5);
+	ZSUB2F_u134(w, 14, w, 2, w, 6);
+	ZSUB2F_u134(w, 15, w, 3, w, 7);
+	ZADDT_u134(w, 2, w, 12);
+	ZADDT_u134(w, 3, w, 13);
+	ZADDT_u134(w, 4, w, 14);
+	ZADDT_u134(w, 5, w, 15);
 
 	/*
 	 * Perform carry propagation to bring all words down to 13 bits.
 	 */
-	cc = norm13_u135(d, w, 40);
+	cc = norm13_u134(d, w, 40);
 	d[39] += (cc << 13);
 
-#undef ZADD_u135
-#undef ZADDT_u135
-#undef ZSUB2F_u135
-#undef CPR1_u135
-#undef CPR_u135
+#undef ZADD_u134
+#undef ZADDT_u134
+#undef ZSUB2F_u134
+#undef CPR1_u134
+#undef CPR_u134
 }
 
 static inline void
-square20_u135(uint32_t *d, const uint32_t *a)
+square20_u134(uint32_t *d, const uint32_t *a)
 {
-	mul20_u135(d, a, a);
+	mul20_u134(d, a, a);
 }
 
 #else
 
 static void
-mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul20_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	uint32_t t[39];
 
@@ -32430,11 +32260,11 @@ mul20_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		+ MUL15(a[19], b[18]);
 	t[38] = MUL15(a[19], b[19]);
 
-	d[39] = norm13_u135(d, t, 39);
+	d[39] = norm13_u134(d, t, 39);
 }
 
 static void
-square20_u135(uint32_t *d, const uint32_t *a)
+square20_u134(uint32_t *d, const uint32_t *a)
 {
 	uint32_t t[39];
 
@@ -32649,7 +32479,7 @@ square20_u135(uint32_t *d, const uint32_t *a)
 	t[37] = ((MUL15(a[18], a[19])) << 1);
 	t[38] = MUL15(a[19], a[19]);
 
-	d[39] = norm13_u135(d, t, 39);
+	d[39] = norm13_u134(d, t, 39);
 }
 
 #endif
@@ -32662,7 +32492,7 @@ square20_u135(uint32_t *d, const uint32_t *a)
  * returns 0.
  */
 static uint32_t
-reduce_final_f255_u135(uint32_t *d)
+reduce_final_f255_u134(uint32_t *d)
 {
 	uint32_t t[20];
 	uint32_t cc;
@@ -32684,7 +32514,7 @@ reduce_final_f255_u135(uint32_t *d)
 }
 
 static void
-f255_mulgen_u135(uint32_t *d, const uint32_t *a, const uint32_t *b, int square)
+f255_mulgen_u134(uint32_t *d, const uint32_t *a, const uint32_t *b, int square)
 {
 	uint32_t t[40], cc, w;
 
@@ -32694,9 +32524,9 @@ f255_mulgen_u135(uint32_t *d, const uint32_t *a, const uint32_t *b, int square)
 	 * of two 256-bit integers must fit on 512 bits.
 	 */
 	if (square) {
-		square20_u135(t, a);
+		square20_u134(t, a);
 	} else {
-		mul20_u135(t, a, b);
+		mul20_u134(t, a, b);
 	}
 
 	/*
@@ -32709,66 +32539,66 @@ f255_mulgen_u135(uint32_t *d, const uint32_t *a, const uint32_t *b, int square)
 	cc = MUL15(t[19] >> 8, 19);
 	t[19] &= 0xFF;
 
-#define MM1_u135(x)   do { \
+#define MM1_u134(x)   do { \
 		w = t[x] + cc + MUL15(t[(x) + 20], 608); \
 		t[x] = w & 0x1FFF; \
 		cc = w >> 13; \
 	} while (0)
 
-	MM1_u135( 0);
-	MM1_u135( 1);
-	MM1_u135( 2);
-	MM1_u135( 3);
-	MM1_u135( 4);
-	MM1_u135( 5);
-	MM1_u135( 6);
-	MM1_u135( 7);
-	MM1_u135( 8);
-	MM1_u135( 9);
-	MM1_u135(10);
-	MM1_u135(11);
-	MM1_u135(12);
-	MM1_u135(13);
-	MM1_u135(14);
-	MM1_u135(15);
-	MM1_u135(16);
-	MM1_u135(17);
-	MM1_u135(18);
-	MM1_u135(19);
+	MM1_u134( 0);
+	MM1_u134( 1);
+	MM1_u134( 2);
+	MM1_u134( 3);
+	MM1_u134( 4);
+	MM1_u134( 5);
+	MM1_u134( 6);
+	MM1_u134( 7);
+	MM1_u134( 8);
+	MM1_u134( 9);
+	MM1_u134(10);
+	MM1_u134(11);
+	MM1_u134(12);
+	MM1_u134(13);
+	MM1_u134(14);
+	MM1_u134(15);
+	MM1_u134(16);
+	MM1_u134(17);
+	MM1_u134(18);
+	MM1_u134(19);
 
-#undef MM1_u135
+#undef MM1_u134
 
 	cc = MUL15(w >> 8, 19);
 	t[19] &= 0xFF;
 
-#define MM2_u135(x)   do { \
+#define MM2_u134(x)   do { \
 		w = t[x] + cc; \
 		d[x] = w & 0x1FFF; \
 		cc = w >> 13; \
 	} while (0)
 
-	MM2_u135( 0);
-	MM2_u135( 1);
-	MM2_u135( 2);
-	MM2_u135( 3);
-	MM2_u135( 4);
-	MM2_u135( 5);
-	MM2_u135( 6);
-	MM2_u135( 7);
-	MM2_u135( 8);
-	MM2_u135( 9);
-	MM2_u135(10);
-	MM2_u135(11);
-	MM2_u135(12);
-	MM2_u135(13);
-	MM2_u135(14);
-	MM2_u135(15);
-	MM2_u135(16);
-	MM2_u135(17);
-	MM2_u135(18);
-	MM2_u135(19);
+	MM2_u134( 0);
+	MM2_u134( 1);
+	MM2_u134( 2);
+	MM2_u134( 3);
+	MM2_u134( 4);
+	MM2_u134( 5);
+	MM2_u134( 6);
+	MM2_u134( 7);
+	MM2_u134( 8);
+	MM2_u134( 9);
+	MM2_u134(10);
+	MM2_u134(11);
+	MM2_u134(12);
+	MM2_u134(13);
+	MM2_u134(14);
+	MM2_u134(15);
+	MM2_u134(16);
+	MM2_u134(17);
+	MM2_u134(18);
+	MM2_u134(19);
 
-#undef MM2_u135
+#undef MM2_u134
 }
 
 /*
@@ -32777,18 +32607,18 @@ f255_mulgen_u135(uint32_t *d, const uint32_t *a, const uint32_t *b, int square)
  * little-endian order. Input value may be up to 2^256-1; on output, value
  * fits on 256 bits and is lower than twice the modulus.
  *
- * f255_mul_u135() is the general multiplication, f255_square_u135() is specialised
+ * f255_mul_u134() is the general multiplication, f255_square_u134() is specialised
  * for squarings.
  */
-#define f255_mul_u135(d, a, b)   f255_mulgen_u135(d, a, b, 0)
-#define f255_square_u135(d, a)   f255_mulgen_u135(d, a, a, 1)
+#define f255_mul_u134(d, a, b)   f255_mulgen_u134(d, a, b, 0)
+#define f255_square_u134(d, a)   f255_mulgen_u134(d, a, a, 1)
 
 /*
  * Add two values in F255. Partial reduction is performed (down to less
  * than twice the modulus).
  */
 static void
-f255_add_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
+f255_add_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	int i;
 	uint32_t cc, w;
@@ -32813,7 +32643,7 @@ f255_add_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * performed (down to less than twice the modulus).
  */
 static void
-f255_sub_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
+f255_sub_u134(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * We actually compute a - b + 2*p, so that the final value is
@@ -32826,7 +32656,7 @@ f255_sub_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	for (i = 0; i < 20; i ++) {
 		w = a[i] - b[i] + cc;
 		d[i] = w & 0x1FFF;
-		cc = ARSH_u135(w, 13);
+		cc = ARSH_u134(w, 13);
 	}
 	cc = MUL15((w + 0x200) >> 8, 19);
 	d[19] &= 0xFF;
@@ -32842,7 +32672,7 @@ f255_sub_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * is performed (down to less than twice the modulus).
  */
 static void
-f255_mul_a24_u135(uint32_t *d, const uint32_t *a)
+f255_mul_a24_u134(uint32_t *d, const uint32_t *a)
 {
 	int i;
 	uint32_t cc, w;
@@ -32862,14 +32692,14 @@ f255_mul_a24_u135(uint32_t *d, const uint32_t *a)
 	}
 }
 
-static const unsigned char GEN_u135[] = {
+static const unsigned char GEN_u134[] = {
 	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-static const unsigned char ORDER_u135[] = {
+static const unsigned char ORDER_u134[] = {
 	0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -32877,23 +32707,23 @@ static const unsigned char ORDER_u135[] = {
 };
 
 static const unsigned char *
-api_generator_u135(int curve, size_t *len)
+api_generator_u134(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
-	return GEN_u135;
+	return GEN_u134;
 }
 
 static const unsigned char *
-api_order_u135(int curve, size_t *len)
+api_order_u134(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
-	return ORDER_u135;
+	return ORDER_u134;
 }
 
 static size_t
-api_xoff_u135(int curve, size_t *len)
+api_xoff_u134(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
@@ -32901,7 +32731,7 @@ api_xoff_u135(int curve, size_t *len)
 }
 
 static void
-cswap_u135(uint32_t *a, uint32_t *b, uint32_t ctl)
+cswap_u134(uint32_t *a, uint32_t *b, uint32_t ctl)
 {
 	int i;
 
@@ -32918,7 +32748,7 @@ cswap_u135(uint32_t *a, uint32_t *b, uint32_t ctl)
 }
 
 static uint32_t
-api_mul_u135(unsigned char *G, size_t Glen,
+api_mul_u134(unsigned char *G, size_t Glen,
 	const unsigned char *kb, size_t kblen, int curve)
 {
 	uint32_t x1[20], x2[20], x3[20], z2[20], z3[20];
@@ -32945,7 +32775,7 @@ api_mul_u135(unsigned char *G, size_t Glen,
 	 * Initialise variables x1, x2, z2, x3 and z3. We set all of them
 	 * into Montgomery representation.
 	 */
-	x1[19] = le8_to_le13_u135(x1, G, 32);
+	x1[19] = le8_to_le13_u134(x1, G, 32);
 	memcpy(x3, x1, sizeof x1);
 	memset(z2, 0, sizeof z2);
 	memset(x2, 0, sizeof x2);
@@ -32960,7 +32790,7 @@ api_mul_u135(unsigned char *G, size_t Glen,
 	k[31] |= 0x40;
 
 	/* obsolete
-	print_int_u135("x1", x1);
+	print_int_u134("x1", x1);
 	*/
 
 	swap = 0;
@@ -32969,58 +32799,58 @@ api_mul_u135(unsigned char *G, size_t Glen,
 
 		kt = (k[i >> 3] >> (i & 7)) & 1;
 		swap ^= kt;
-		cswap_u135(x2, x3, swap);
-		cswap_u135(z2, z3, swap);
+		cswap_u134(x2, x3, swap);
+		cswap_u134(z2, z3, swap);
 		swap = kt;
 
 		/* obsolete
-		print_int_u135("x2", x2);
-		print_int_u135("z2", z2);
-		print_int_u135("x3", x3);
-		print_int_u135("z3", z3);
+		print_int_u134("x2", x2);
+		print_int_u134("z2", z2);
+		print_int_u134("x3", x3);
+		print_int_u134("z3", z3);
 		*/
 
-		f255_add_u135(a, x2, z2);
-		f255_square_u135(aa, a);
-		f255_sub_u135(b, x2, z2);
-		f255_square_u135(bb, b);
-		f255_sub_u135(e, aa, bb);
-		f255_add_u135(c, x3, z3);
-		f255_sub_u135(d, x3, z3);
-		f255_mul_u135(da, d, a);
-		f255_mul_u135(cb, c, b);
+		f255_add_u134(a, x2, z2);
+		f255_square_u134(aa, a);
+		f255_sub_u134(b, x2, z2);
+		f255_square_u134(bb, b);
+		f255_sub_u134(e, aa, bb);
+		f255_add_u134(c, x3, z3);
+		f255_sub_u134(d, x3, z3);
+		f255_mul_u134(da, d, a);
+		f255_mul_u134(cb, c, b);
 
 		/* obsolete
-		print_int_u135("a ", a);
-		print_int_u135("aa", aa);
-		print_int_u135("b ", b);
-		print_int_u135("bb", bb);
-		print_int_u135("e ", e);
-		print_int_u135("c ", c);
-		print_int_u135("d ", d);
-		print_int_u135("da", da);
-		print_int_u135("cb", cb);
+		print_int_u134("a ", a);
+		print_int_u134("aa", aa);
+		print_int_u134("b ", b);
+		print_int_u134("bb", bb);
+		print_int_u134("e ", e);
+		print_int_u134("c ", c);
+		print_int_u134("d ", d);
+		print_int_u134("da", da);
+		print_int_u134("cb", cb);
 		*/
 
-		f255_add_u135(x3, da, cb);
-		f255_square_u135(x3, x3);
-		f255_sub_u135(z3, da, cb);
-		f255_square_u135(z3, z3);
-		f255_mul_u135(z3, z3, x1);
-		f255_mul_u135(x2, aa, bb);
-		f255_mul_a24_u135(z2, e);
-		f255_add_u135(z2, z2, aa);
-		f255_mul_u135(z2, e, z2);
+		f255_add_u134(x3, da, cb);
+		f255_square_u134(x3, x3);
+		f255_sub_u134(z3, da, cb);
+		f255_square_u134(z3, z3);
+		f255_mul_u134(z3, z3, x1);
+		f255_mul_u134(x2, aa, bb);
+		f255_mul_a24_u134(z2, e);
+		f255_add_u134(z2, z2, aa);
+		f255_mul_u134(z2, e, z2);
 
 		/* obsolete
-		print_int_u135("x2", x2);
-		print_int_u135("z2", z2);
-		print_int_u135("x3", x3);
-		print_int_u135("z3", z3);
+		print_int_u134("x2", x2);
+		print_int_u134("z2", z2);
+		print_int_u134("x3", x3);
+		print_int_u134("z3", z3);
 		*/
 	}
-	cswap_u135(x2, x3, swap);
-	cswap_u135(z2, z3, swap);
+	cswap_u134(x2, x3, swap);
+	cswap_u134(z2, z3, swap);
 
 	/*
 	 * Inverse z2 with a modular exponentiation. This is a simple
@@ -33029,45 +32859,45 @@ api_mul_u135(unsigned char *G, size_t Glen,
 	 */
 	memcpy(a, z2, sizeof z2);
 	for (i = 0; i < 15; i ++) {
-		f255_square_u135(a, a);
-		f255_mul_u135(a, a, z2);
+		f255_square_u134(a, a);
+		f255_mul_u134(a, a, z2);
 	}
 	memcpy(b, a, sizeof a);
 	for (i = 0; i < 14; i ++) {
 		int j;
 
 		for (j = 0; j < 16; j ++) {
-			f255_square_u135(b, b);
+			f255_square_u134(b, b);
 		}
-		f255_mul_u135(b, b, a);
+		f255_mul_u134(b, b, a);
 	}
 	for (i = 14; i >= 0; i --) {
-		f255_square_u135(b, b);
+		f255_square_u134(b, b);
 		if ((0xFFEB >> i) & 1) {
-			f255_mul_u135(b, z2, b);
+			f255_mul_u134(b, z2, b);
 		}
 	}
-	f255_mul_u135(x2, x2, b);
-	reduce_final_f255_u135(x2);
-	le13_to_le8_u135(G, 32, x2);
+	f255_mul_u134(x2, x2, b);
+	reduce_final_f255_u134(x2);
+	le13_to_le8_u134(G, 32, x2);
 	return 1;
 }
 
 static size_t
-api_mulgen_u135(unsigned char *R,
+api_mulgen_u134(unsigned char *R,
 	const unsigned char *x, size_t xlen, int curve)
 {
 	const unsigned char *G;
 	size_t Glen;
 
-	G = api_generator_u135(curve, &Glen);
+	G = api_generator_u134(curve, &Glen);
 	memcpy(R, G, Glen);
-	api_mul_u135(R, Glen, x, xlen, curve);
+	api_mul_u134(R, Glen, x, xlen, curve);
 	return Glen;
 }
 
 static uint32_t
-api_muladd_u135(unsigned char *A, const unsigned char *B, size_t len,
+api_muladd_u134(unsigned char *A, const unsigned char *B, size_t len,
 	const unsigned char *x, size_t xlen,
 	const unsigned char *y, size_t ylen, int curve)
 {
@@ -33090,12 +32920,12 @@ api_muladd_u135(unsigned char *A, const unsigned char *B, size_t len,
 /* see bearssl_ec.h */
 const br_ec_impl br_ec_c25519_m15 = {
 	(uint32_t)0x20000000,
-	&api_generator_u135,
-	&api_order_u135,
-	&api_xoff_u135,
-	&api_mul_u135,
-	&api_mulgen_u135,
-	&api_muladd_u135
+	&api_generator_u134,
+	&api_order_u134,
+	&api_xoff_u134,
+	&api_mul_u134,
+	&api_mulgen_u134,
+	&api_muladd_u134
 };
 
 /* === src/ec/ec_c25519_m31.c === */
@@ -33129,7 +32959,7 @@ const br_ec_impl br_ec_c25519_m15 = {
 #include <stdio.h>
 #include <stdlib.h>
 static void
-print_int_u136(const char *name, const uint32_t *x)
+print_int_u135(const char *name, const uint32_t *x)
 {
 	size_t u;
 	unsigned char tmp[40];
@@ -33181,10 +33011,10 @@ print_int_u136(const char *name, const uint32_t *x)
  * arithmetic right shift opcode that could not be used otherwise.
  */
 #if BR_NO_ARITH_SHIFT
-#define ARSH_u136(x, n)   (((uint32_t)(x) >> (n)) \
+#define ARSH_u135(x, n)   (((uint32_t)(x) >> (n)) \
                     | ((-((uint32_t)(x) >> 31)) << (32 - (n))))
 #else
-#define ARSH_u136(x, n)   ((*(int32_t *)&(x)) >> (n))
+#define ARSH_u135(x, n)   ((*(int32_t *)&(x)) >> (n))
 #endif
 
 /*
@@ -33193,7 +33023,7 @@ print_int_u136(const char *name, const uint32_t *x)
  * returned.
  */
 static uint32_t
-le8_to_le30_u136(uint32_t *dst, const unsigned char *src, size_t len)
+le8_to_le30_u135(uint32_t *dst, const unsigned char *src, size_t len)
 {
 	uint32_t acc;
 	int acc_len;
@@ -33222,7 +33052,7 @@ le8_to_le30_u136(uint32_t *dst, const unsigned char *src, size_t len)
  * the destination bytes will be filled.
  */
 static void
-le30_to_le8_u136(unsigned char *dst, size_t len, const uint32_t *src)
+le30_to_le8_u135(unsigned char *dst, size_t len, const uint32_t *src)
 {
 	uint32_t acc;
 	int acc_len;
@@ -33251,7 +33081,7 @@ le30_to_le8_u136(unsigned char *dst, size_t len, const uint32_t *src)
  * 18 words of 30 bits each.
  */
 static void
-mul9_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul9_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * Maximum intermediate result is no more than
@@ -33369,7 +33199,7 @@ mul9_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * Result uses 18 words of 30 bits each.
  */
 static void
-square9_u136(uint32_t *d, const uint32_t *a)
+square9_u135(uint32_t *d, const uint32_t *a)
 {
 	uint64_t t[17];
 	uint64_t cc;
@@ -33443,7 +33273,7 @@ square9_u136(uint32_t *d, const uint32_t *a)
  * returns 0.
  */
 static uint32_t
-reduce_final_f255_u136(uint32_t *d)
+reduce_final_f255_u135(uint32_t *d)
 {
 	uint32_t t[9];
 	uint32_t cc;
@@ -33471,7 +33301,7 @@ reduce_final_f255_u136(uint32_t *d)
  * fits on 256 bits and is lower than twice the modulus.
  */
 static void
-f255_mul_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
+f255_mul_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	uint32_t t[18];
 	uint64_t cc, w;
@@ -33482,7 +33312,7 @@ f255_mul_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	 * each; upper word (t[17]) must fit on 2 bits, since the product
 	 * of two 256-bit integers must fit on 512 bits.
 	 */
-	mul9_u136(t, a, b);
+	mul9_u135(t, a, b);
 
 	/*
 	 * Modular reduction: each high word is added where necessary.
@@ -33514,7 +33344,7 @@ f255_mul_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * fits on 256 bits and is lower than twice the modulus.
  */
 static void
-f255_square_u136(uint32_t *d, const uint32_t *a)
+f255_square_u135(uint32_t *d, const uint32_t *a)
 {
 	uint32_t t[18];
 	uint64_t cc, w;
@@ -33525,7 +33355,7 @@ f255_square_u136(uint32_t *d, const uint32_t *a)
 	 * each; upper word (t[17]) must fit on 2 bits, since the square
 	 * of a 256-bit integers must fit on 512 bits.
 	 */
-	square9_u136(t, a);
+	square9_u135(t, a);
 
 	/*
 	 * Modular reduction: each high word is added where necessary.
@@ -33555,7 +33385,7 @@ f255_square_u136(uint32_t *d, const uint32_t *a)
  * than twice the modulus).
  */
 static void
-f255_add_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
+f255_add_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * Since operand words fit on 30 bits, we can use 32-bit
@@ -33584,7 +33414,7 @@ f255_add_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * performed (down to less than twice the modulus).
  */
 static void
-f255_sub_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
+f255_sub_u135(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * We actually compute a - b + 2*p, so that the final value is
@@ -33597,7 +33427,7 @@ f255_sub_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	for (i = 0; i < 9; i ++) {
 		w = a[i] - b[i] + cc;
 		d[i] = w & 0x3FFFFFFF;
-		cc = ARSH_u136(w, 30);
+		cc = ARSH_u135(w, 30);
 	}
 	cc = MUL15((w + 0x10000) >> 15, 19);
 	d[8] &= 0x7FFF;
@@ -33613,7 +33443,7 @@ f255_sub_u136(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * is performed (down to less than twice the modulus).
  */
 static void
-f255_mul_a24_u136(uint32_t *d, const uint32_t *a)
+f255_mul_a24_u135(uint32_t *d, const uint32_t *a)
 {
 	int i;
 	uint64_t cc, w;
@@ -33633,14 +33463,14 @@ f255_mul_a24_u136(uint32_t *d, const uint32_t *a)
 	}
 }
 
-static const unsigned char GEN_u136[] = {
+static const unsigned char GEN_u135[] = {
 	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-static const unsigned char ORDER_u136[] = {
+static const unsigned char ORDER_u135[] = {
 	0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -33648,23 +33478,23 @@ static const unsigned char ORDER_u136[] = {
 };
 
 static const unsigned char *
-api_generator_u136(int curve, size_t *len)
+api_generator_u135(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
-	return GEN_u136;
+	return GEN_u135;
 }
 
 static const unsigned char *
-api_order_u136(int curve, size_t *len)
+api_order_u135(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
-	return ORDER_u136;
+	return ORDER_u135;
 }
 
 static size_t
-api_xoff_u136(int curve, size_t *len)
+api_xoff_u135(int curve, size_t *len)
 {
 	(void)curve;
 	*len = 32;
@@ -33672,7 +33502,7 @@ api_xoff_u136(int curve, size_t *len)
 }
 
 static void
-cswap_u136(uint32_t *a, uint32_t *b, uint32_t ctl)
+cswap_u135(uint32_t *a, uint32_t *b, uint32_t ctl)
 {
 	int i;
 
@@ -33689,7 +33519,7 @@ cswap_u136(uint32_t *a, uint32_t *b, uint32_t ctl)
 }
 
 static uint32_t
-api_mul_u136(unsigned char *G, size_t Glen,
+api_mul_u135(unsigned char *G, size_t Glen,
 	const unsigned char *kb, size_t kblen, int curve)
 {
 	uint32_t x1[9], x2[9], x3[9], z2[9], z3[9];
@@ -33716,7 +33546,7 @@ api_mul_u136(unsigned char *G, size_t Glen,
 	 * Initialise variables x1, x2, z2, x3 and z3. We set all of them
 	 * into Montgomery representation.
 	 */
-	x1[8] = le8_to_le30_u136(x1, G, 32);
+	x1[8] = le8_to_le30_u135(x1, G, 32);
 	memcpy(x3, x1, sizeof x1);
 	memset(z2, 0, sizeof z2);
 	memset(x2, 0, sizeof x2);
@@ -33731,7 +33561,7 @@ api_mul_u136(unsigned char *G, size_t Glen,
 	k[31] |= 0x40;
 
 	/* obsolete
-	print_int_u136("x1", x1);
+	print_int_u135("x1", x1);
 	*/
 
 	swap = 0;
@@ -33740,58 +33570,58 @@ api_mul_u136(unsigned char *G, size_t Glen,
 
 		kt = (k[i >> 3] >> (i & 7)) & 1;
 		swap ^= kt;
-		cswap_u136(x2, x3, swap);
-		cswap_u136(z2, z3, swap);
+		cswap_u135(x2, x3, swap);
+		cswap_u135(z2, z3, swap);
 		swap = kt;
 
 		/* obsolete
-		print_int_u136("x2", x2);
-		print_int_u136("z2", z2);
-		print_int_u136("x3", x3);
-		print_int_u136("z3", z3);
+		print_int_u135("x2", x2);
+		print_int_u135("z2", z2);
+		print_int_u135("x3", x3);
+		print_int_u135("z3", z3);
 		*/
 
-		f255_add_u136(a, x2, z2);
-		f255_square_u136(aa, a);
-		f255_sub_u136(b, x2, z2);
-		f255_square_u136(bb, b);
-		f255_sub_u136(e, aa, bb);
-		f255_add_u136(c, x3, z3);
-		f255_sub_u136(d, x3, z3);
-		f255_mul_u136(da, d, a);
-		f255_mul_u136(cb, c, b);
+		f255_add_u135(a, x2, z2);
+		f255_square_u135(aa, a);
+		f255_sub_u135(b, x2, z2);
+		f255_square_u135(bb, b);
+		f255_sub_u135(e, aa, bb);
+		f255_add_u135(c, x3, z3);
+		f255_sub_u135(d, x3, z3);
+		f255_mul_u135(da, d, a);
+		f255_mul_u135(cb, c, b);
 
 		/* obsolete
-		print_int_u136("a ", a);
-		print_int_u136("aa", aa);
-		print_int_u136("b ", b);
-		print_int_u136("bb", bb);
-		print_int_u136("e ", e);
-		print_int_u136("c ", c);
-		print_int_u136("d ", d);
-		print_int_u136("da", da);
-		print_int_u136("cb", cb);
+		print_int_u135("a ", a);
+		print_int_u135("aa", aa);
+		print_int_u135("b ", b);
+		print_int_u135("bb", bb);
+		print_int_u135("e ", e);
+		print_int_u135("c ", c);
+		print_int_u135("d ", d);
+		print_int_u135("da", da);
+		print_int_u135("cb", cb);
 		*/
 
-		f255_add_u136(x3, da, cb);
-		f255_square_u136(x3, x3);
-		f255_sub_u136(z3, da, cb);
-		f255_square_u136(z3, z3);
-		f255_mul_u136(z3, z3, x1);
-		f255_mul_u136(x2, aa, bb);
-		f255_mul_a24_u136(z2, e);
-		f255_add_u136(z2, z2, aa);
-		f255_mul_u136(z2, e, z2);
+		f255_add_u135(x3, da, cb);
+		f255_square_u135(x3, x3);
+		f255_sub_u135(z3, da, cb);
+		f255_square_u135(z3, z3);
+		f255_mul_u135(z3, z3, x1);
+		f255_mul_u135(x2, aa, bb);
+		f255_mul_a24_u135(z2, e);
+		f255_add_u135(z2, z2, aa);
+		f255_mul_u135(z2, e, z2);
 
 		/* obsolete
-		print_int_u136("x2", x2);
-		print_int_u136("z2", z2);
-		print_int_u136("x3", x3);
-		print_int_u136("z3", z3);
+		print_int_u135("x2", x2);
+		print_int_u135("z2", z2);
+		print_int_u135("x3", x3);
+		print_int_u135("z3", z3);
 		*/
 	}
-	cswap_u136(x2, x3, swap);
-	cswap_u136(z2, z3, swap);
+	cswap_u135(x2, x3, swap);
+	cswap_u135(z2, z3, swap);
 
 	/*
 	 * Inverse z2 with a modular exponentiation. This is a simple
@@ -33800,45 +33630,45 @@ api_mul_u136(unsigned char *G, size_t Glen,
 	 */
 	memcpy(a, z2, sizeof z2);
 	for (i = 0; i < 15; i ++) {
-		f255_square_u136(a, a);
-		f255_mul_u136(a, a, z2);
+		f255_square_u135(a, a);
+		f255_mul_u135(a, a, z2);
 	}
 	memcpy(b, a, sizeof a);
 	for (i = 0; i < 14; i ++) {
 		int j;
 
 		for (j = 0; j < 16; j ++) {
-			f255_square_u136(b, b);
+			f255_square_u135(b, b);
 		}
-		f255_mul_u136(b, b, a);
+		f255_mul_u135(b, b, a);
 	}
 	for (i = 14; i >= 0; i --) {
-		f255_square_u136(b, b);
+		f255_square_u135(b, b);
 		if ((0xFFEB >> i) & 1) {
-			f255_mul_u136(b, z2, b);
+			f255_mul_u135(b, z2, b);
 		}
 	}
-	f255_mul_u136(x2, x2, b);
-	reduce_final_f255_u136(x2);
-	le30_to_le8_u136(G, 32, x2);
+	f255_mul_u135(x2, x2, b);
+	reduce_final_f255_u135(x2);
+	le30_to_le8_u135(G, 32, x2);
 	return 1;
 }
 
 static size_t
-api_mulgen_u136(unsigned char *R,
+api_mulgen_u135(unsigned char *R,
 	const unsigned char *x, size_t xlen, int curve)
 {
 	const unsigned char *G;
 	size_t Glen;
 
-	G = api_generator_u136(curve, &Glen);
+	G = api_generator_u135(curve, &Glen);
 	memcpy(R, G, Glen);
-	api_mul_u136(R, Glen, x, xlen, curve);
+	api_mul_u135(R, Glen, x, xlen, curve);
 	return Glen;
 }
 
 static uint32_t
-api_muladd_u136(unsigned char *A, const unsigned char *B, size_t len,
+api_muladd_u135(unsigned char *A, const unsigned char *B, size_t len,
 	const unsigned char *x, size_t xlen,
 	const unsigned char *y, size_t ylen, int curve)
 {
@@ -33861,12 +33691,12 @@ api_muladd_u136(unsigned char *A, const unsigned char *B, size_t len,
 /* see bearssl_ec.h */
 const br_ec_impl br_ec_c25519_m31 = {
 	(uint32_t)0x20000000,
-	&api_generator_u136,
-	&api_order_u136,
-	&api_xoff_u136,
-	&api_mul_u136,
-	&api_mulgen_u136,
-	&api_muladd_u136
+	&api_generator_u135,
+	&api_order_u135,
+	&api_xoff_u135,
+	&api_mul_u135,
+	&api_mulgen_u135,
+	&api_muladd_u135
 };
 
 /* === src/ec/ec_curve25519.c === */
@@ -33896,14 +33726,14 @@ const br_ec_impl br_ec_c25519_m31 = {
  */
 
 
-static const unsigned char GEN_u137[] = {
+static const unsigned char GEN_u136[] = {
 	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-static const unsigned char ORDER_u137[] = {
+static const unsigned char ORDER_u136[] = {
 	0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -33913,8 +33743,8 @@ static const unsigned char ORDER_u137[] = {
 /* see inner.h */
 const br_ec_curve_def br_curve25519 = {
 	BR_EC_curve25519,
-	ORDER_u137, sizeof ORDER_u137,
-	GEN_u137, sizeof GEN_u137
+	ORDER_u136, sizeof ORDER_u136,
+	GEN_u136, sizeof GEN_u136
 };
 
 /* === src/ec/ec_default.c === */
@@ -33993,10 +33823,10 @@ br_ec_get_default(void)
  * arithmetic right shift opcode that could not be used otherwise.
  */
 #if BR_NO_ARITH_SHIFT
-#define ARSH_u139(x, n)   (((uint32_t)(x) >> (n)) \
+#define ARSH_u138(x, n)   (((uint32_t)(x) >> (n)) \
                     | ((-((uint32_t)(x) >> 31)) << (32 - (n))))
 #else
-#define ARSH_u139(x, n)   ((*(int32_t *)&(x)) >> (n))
+#define ARSH_u138(x, n)   ((*(int32_t *)&(x)) >> (n))
 #endif
 
 /*
@@ -34005,7 +33835,7 @@ br_ec_get_default(void)
  * returned.
  */
 static uint32_t
-be8_to_le13_u139(uint32_t *dst, const unsigned char *src, size_t len)
+be8_to_le13_u138(uint32_t *dst, const unsigned char *src, size_t len)
 {
 	uint32_t acc;
 	int acc_len;
@@ -34030,7 +33860,7 @@ be8_to_le13_u139(uint32_t *dst, const unsigned char *src, size_t len)
  * the destination bytes will be filled.
  */
 static void
-le13_to_be8_u139(unsigned char *dst, size_t len, const uint32_t *src)
+le13_to_be8_u138(unsigned char *dst, size_t len, const uint32_t *src)
 {
 	uint32_t acc;
 	int acc_len;
@@ -34054,7 +33884,7 @@ le13_to_be8_u139(unsigned char *dst, size_t len, const uint32_t *src)
  * arrays may be identical, but shall not overlap partially.
  */
 static inline uint32_t
-norm13_u139(uint32_t *d, const uint32_t *w, size_t len)
+norm13_u138(uint32_t *d, const uint32_t *w, size_t len)
 {
 	size_t u;
 	uint32_t cc;
@@ -34065,17 +33895,17 @@ norm13_u139(uint32_t *d, const uint32_t *w, size_t len)
 
 		z = w[u] + cc;
 		d[u] = z & 0x1FFF;
-		cc = ARSH_u139(z, 13);
+		cc = ARSH_u138(z, 13);
 	}
 	return cc;
 }
 
 /*
- * mul20_u139() multiplies two 260-bit integers together. Each word must fit
+ * mul20_u138() multiplies two 260-bit integers together. Each word must fit
  * on 13 bits; source operands use 20 words, destination operand
  * receives 40 words. All overlaps allowed.
  *
- * square20_u139() computes the square of a 260-bit integer. Each word must
+ * square20_u138() computes the square of a 260-bit integer. Each word must
  * fit on 13 bits; source operand uses 20 words, destination operand
  * receives 40 words. All overlaps allowed.
  */
@@ -34083,7 +33913,7 @@ norm13_u139(uint32_t *d, const uint32_t *w, size_t len)
 #if BR_SLOW_MUL15
 
 static void
-mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul20_u138(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	/*
 	 * Two-level Karatsuba: turns a 20x20 multiplication into
@@ -34107,7 +33937,7 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	uint32_t cc;
 	int i;
 
-#define ZADD_u139(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
+#define ZADD_u138(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
 		(dw)[5 * (d_off) + 0] = (s1w)[5 * (s1_off) + 0] \
 			+ (s2w)[5 * (s2_off) + 0]; \
 		(dw)[5 * (d_off) + 1] = (s1w)[5 * (s1_off) + 1] \
@@ -34120,7 +33950,7 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 			+ (s2w)[5 * (s2_off) + 4]; \
 	} while (0)
 
-#define ZADDT_u139(dw, d_off, sw, s_off)   do { \
+#define ZADDT_u138(dw, d_off, sw, s_off)   do { \
 		(dw)[5 * (d_off) + 0] += (sw)[5 * (s_off) + 0]; \
 		(dw)[5 * (d_off) + 1] += (sw)[5 * (s_off) + 1]; \
 		(dw)[5 * (d_off) + 2] += (sw)[5 * (s_off) + 2]; \
@@ -34128,7 +33958,7 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		(dw)[5 * (d_off) + 4] += (sw)[5 * (s_off) + 4]; \
 	} while (0)
 
-#define ZSUB2F_u139(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
+#define ZSUB2F_u138(dw, d_off, s1w, s1_off, s2w, s2_off)   do { \
 		(dw)[5 * (d_off) + 0] -= (s1w)[5 * (s1_off) + 0] \
 			+ (s2w)[5 * (s2_off) + 0]; \
 		(dw)[5 * (d_off) + 1] -= (s1w)[5 * (s1_off) + 1] \
@@ -34141,40 +33971,40 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 			+ (s2w)[5 * (s2_off) + 4]; \
 	} while (0)
 
-#define CPR1_u139(w, cprcc)   do { \
+#define CPR1_u138(w, cprcc)   do { \
 		uint32_t cprz = (w) + cprcc; \
 		(w) = cprz & 0x1FFF; \
 		cprcc = cprz >> 13; \
 	} while (0)
 
-#define CPR_u139(dw, d_off)   do { \
+#define CPR_u138(dw, d_off)   do { \
 		uint32_t cprcc; \
 		cprcc = 0; \
-		CPR1_u139((dw)[(d_off) + 0], cprcc); \
-		CPR1_u139((dw)[(d_off) + 1], cprcc); \
-		CPR1_u139((dw)[(d_off) + 2], cprcc); \
-		CPR1_u139((dw)[(d_off) + 3], cprcc); \
-		CPR1_u139((dw)[(d_off) + 4], cprcc); \
-		CPR1_u139((dw)[(d_off) + 5], cprcc); \
-		CPR1_u139((dw)[(d_off) + 6], cprcc); \
-		CPR1_u139((dw)[(d_off) + 7], cprcc); \
-		CPR1_u139((dw)[(d_off) + 8], cprcc); \
+		CPR1_u138((dw)[(d_off) + 0], cprcc); \
+		CPR1_u138((dw)[(d_off) + 1], cprcc); \
+		CPR1_u138((dw)[(d_off) + 2], cprcc); \
+		CPR1_u138((dw)[(d_off) + 3], cprcc); \
+		CPR1_u138((dw)[(d_off) + 4], cprcc); \
+		CPR1_u138((dw)[(d_off) + 5], cprcc); \
+		CPR1_u138((dw)[(d_off) + 6], cprcc); \
+		CPR1_u138((dw)[(d_off) + 7], cprcc); \
+		CPR1_u138((dw)[(d_off) + 8], cprcc); \
 		(dw)[(d_off) + 9] = cprcc; \
 	} while (0)
 
 	memcpy(u, a, 20 * sizeof *a);
-	ZADD_u139(u, 4, a, 0, a, 1);
-	ZADD_u139(u, 5, a, 2, a, 3);
-	ZADD_u139(u, 6, a, 0, a, 2);
-	ZADD_u139(u, 7, a, 1, a, 3);
-	ZADD_u139(u, 8, u, 6, u, 7);
+	ZADD_u138(u, 4, a, 0, a, 1);
+	ZADD_u138(u, 5, a, 2, a, 3);
+	ZADD_u138(u, 6, a, 0, a, 2);
+	ZADD_u138(u, 7, a, 1, a, 3);
+	ZADD_u138(u, 8, u, 6, u, 7);
 
 	memcpy(v, b, 20 * sizeof *b);
-	ZADD_u139(v, 4, b, 0, b, 1);
-	ZADD_u139(v, 5, b, 2, b, 3);
-	ZADD_u139(v, 6, b, 0, b, 2);
-	ZADD_u139(v, 7, b, 1, b, 3);
-	ZADD_u139(v, 8, v, 6, v, 7);
+	ZADD_u138(v, 4, b, 0, b, 1);
+	ZADD_u138(v, 5, b, 2, b, 3);
+	ZADD_u138(v, 6, b, 0, b, 2);
+	ZADD_u138(v, 7, b, 1, b, 3);
+	ZADD_u138(v, 8, v, 6, v, 7);
 
 	/*
 	 * Do the eight first 8x8 muls. Source words are at most 16382
@@ -34248,7 +34078,7 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		+ MUL15(u[40 + 4], v[40 + 3]);
 	w[80 + 8] = MUL15(u[40 + 4], v[40 + 4]);
 
-	CPR_u139(w, 80);
+	CPR_u138(w, 80);
 
 	w[80 + 4] += MUL15(u[40 + 4], v[40 + 0]);
 
@@ -34260,64 +34090,64 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	 * However, 10*(16382^2) does not fit. So we must perform a
 	 * bit of reduction here.
 	 */
-	CPR_u139(w, 60);
-	CPR_u139(w, 70);
+	CPR_u138(w, 60);
+	CPR_u138(w, 70);
 
 	/*
 	 * Recompose results.
 	 */
 
 	/* 0..1*0..1 into 0..3 */
-	ZSUB2F_u139(w, 8, w, 0, w, 2);
-	ZSUB2F_u139(w, 9, w, 1, w, 3);
-	ZADDT_u139(w, 1, w, 8);
-	ZADDT_u139(w, 2, w, 9);
+	ZSUB2F_u138(w, 8, w, 0, w, 2);
+	ZSUB2F_u138(w, 9, w, 1, w, 3);
+	ZADDT_u138(w, 1, w, 8);
+	ZADDT_u138(w, 2, w, 9);
 
 	/* 2..3*2..3 into 4..7 */
-	ZSUB2F_u139(w, 10, w, 4, w, 6);
-	ZSUB2F_u139(w, 11, w, 5, w, 7);
-	ZADDT_u139(w, 5, w, 10);
-	ZADDT_u139(w, 6, w, 11);
+	ZSUB2F_u138(w, 10, w, 4, w, 6);
+	ZSUB2F_u138(w, 11, w, 5, w, 7);
+	ZADDT_u138(w, 5, w, 10);
+	ZADDT_u138(w, 6, w, 11);
 
 	/* (0..1+2..3)*(0..1+2..3) into 12..15 */
-	ZSUB2F_u139(w, 16, w, 12, w, 14);
-	ZSUB2F_u139(w, 17, w, 13, w, 15);
-	ZADDT_u139(w, 13, w, 16);
-	ZADDT_u139(w, 14, w, 17);
+	ZSUB2F_u138(w, 16, w, 12, w, 14);
+	ZSUB2F_u138(w, 17, w, 13, w, 15);
+	ZADDT_u138(w, 13, w, 16);
+	ZADDT_u138(w, 14, w, 17);
 
 	/* first-level recomposition */
-	ZSUB2F_u139(w, 12, w, 0, w, 4);
-	ZSUB2F_u139(w, 13, w, 1, w, 5);
-	ZSUB2F_u139(w, 14, w, 2, w, 6);
-	ZSUB2F_u139(w, 15, w, 3, w, 7);
-	ZADDT_u139(w, 2, w, 12);
-	ZADDT_u139(w, 3, w, 13);
-	ZADDT_u139(w, 4, w, 14);
-	ZADDT_u139(w, 5, w, 15);
+	ZSUB2F_u138(w, 12, w, 0, w, 4);
+	ZSUB2F_u138(w, 13, w, 1, w, 5);
+	ZSUB2F_u138(w, 14, w, 2, w, 6);
+	ZSUB2F_u138(w, 15, w, 3, w, 7);
+	ZADDT_u138(w, 2, w, 12);
+	ZADDT_u138(w, 3, w, 13);
+	ZADDT_u138(w, 4, w, 14);
+	ZADDT_u138(w, 5, w, 15);
 
 	/*
 	 * Perform carry propagation to bring all words down to 13 bits.
 	 */
-	cc = norm13_u139(d, w, 40);
+	cc = norm13_u138(d, w, 40);
 	d[39] += (cc << 13);
 
-#undef ZADD_u139
-#undef ZADDT_u139
-#undef ZSUB2F_u139
-#undef CPR1_u139
-#undef CPR_u139
+#undef ZADD_u138
+#undef ZADDT_u138
+#undef ZSUB2F_u138
+#undef CPR1_u138
+#undef CPR_u138
 }
 
 static inline void
-square20_u139(uint32_t *d, const uint32_t *a)
+square20_u138(uint32_t *d, const uint32_t *a)
 {
-	mul20_u139(d, a, a);
+	mul20_u138(d, a, a);
 }
 
 #else
 
 static void
-mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul20_u138(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	uint32_t t[39];
 
@@ -34721,11 +34551,11 @@ mul20_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	t[37] = MUL15(a[18], b[19])
 		+ MUL15(a[19], b[18]);
 	t[38] = MUL15(a[19], b[19]);
-	d[39] = norm13_u139(d, t, 39);
+	d[39] = norm13_u138(d, t, 39);
 }
 
 static void
-square20_u139(uint32_t *d, const uint32_t *a)
+square20_u138(uint32_t *d, const uint32_t *a)
 {
 	uint32_t t[39];
 
@@ -34939,15 +34769,15 @@ square20_u139(uint32_t *d, const uint32_t *a)
 		+ ((MUL15(a[17], a[19])) << 1);
 	t[37] = ((MUL15(a[18], a[19])) << 1);
 	t[38] = MUL15(a[19], a[19]);
-	d[39] = norm13_u139(d, t, 39);
+	d[39] = norm13_u138(d, t, 39);
 }
 
 #endif
 
 /*
- * Modulus for field F256_u139 (field for point coordinates in curve P-256).
+ * Modulus for field F256_u138 (field for point coordinates in curve P-256).
  */
-static const uint32_t F256_u139[] = {
+static const uint32_t F256_u138[] = {
 	0x1FFF, 0x1FFF, 0x1FFF, 0x1FFF, 0x1FFF, 0x1FFF, 0x1FFF, 0x001F,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0400, 0x0000,
 	0x0000, 0x1FF8, 0x1FFF, 0x01FF
@@ -34956,19 +34786,19 @@ static const uint32_t F256_u139[] = {
 /*
  * The 'b' curve equation coefficient for P-256.
  */
-static const uint32_t P256_B_u139[] = {
+static const uint32_t P256_B_u138[] = {
 	0x004B, 0x1E93, 0x0F89, 0x1C78, 0x03BC, 0x187B, 0x114E, 0x1619,
 	0x1D06, 0x0328, 0x01AF, 0x0D31, 0x1557, 0x15DE, 0x1ECF, 0x127C,
 	0x0A3A, 0x0EC5, 0x118D, 0x00B5
 };
 
 /*
- * Perform a "short reduction" in field F256_u139 (field for curve P-256).
+ * Perform a "short reduction" in field F256_u138 (field for curve P-256).
  * The source value should be less than 262 bits; on output, it will
  * be at most 257 bits, and less than twice the modulus.
  */
 static void
-reduce_f256_u139(uint32_t *d)
+reduce_f256_u138(uint32_t *d)
 {
 	uint32_t x;
 
@@ -34978,18 +34808,18 @@ reduce_f256_u139(uint32_t *d)
 	d[14] -= x << 10;
 	d[7] -= x << 5;
 	d[0] += x;
-	norm13_u139(d, d, 20);
+	norm13_u138(d, d, 20);
 }
 
 /*
- * Perform a "final reduction" in field F256_u139 (field for curve P-256).
+ * Perform a "final reduction" in field F256_u138 (field for curve P-256).
  * The source value must be less than twice the modulus. If the value
  * is not lower than the modulus, then the modulus is subtracted and
  * this function returns 1; otherwise, it leaves it untouched and it
  * returns 0.
  */
 static uint32_t
-reduce_final_f256_u139(uint32_t *d)
+reduce_final_f256_u138(uint32_t *d)
 {
 	uint32_t t[20];
 	uint32_t cc;
@@ -35000,7 +34830,7 @@ reduce_final_f256_u139(uint32_t *d)
 	for (i = 0; i < 20; i ++) {
 		uint32_t w;
 
-		w = t[i] - F256_u139[i] - cc;
+		w = t[i] - F256_u138[i] - cc;
 		cc = w >> 31;
 		t[i] = w & 0x1FFF;
 	}
@@ -35017,7 +34847,7 @@ reduce_final_f256_u139(uint32_t *d)
  * on output, value fits on 257 bits and is lower than twice the modulus.
  */
 static void
-mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+mul_f256_u138(uint32_t *d, const uint32_t *a, const uint32_t *b)
 {
 	uint32_t t[40], cc;
 	int i;
@@ -35026,7 +34856,7 @@ mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	 * Compute raw multiplication. All result words fit in 13 bits
 	 * each.
 	 */
-	mul20_u139(t, a, b);
+	mul20_u138(t, a, b);
 
 	/*
 	 * Modular reduction: each high word in added/subtracted where
@@ -35048,13 +34878,13 @@ mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 		uint32_t x;
 
 		x = t[i];
-		t[i - 2] += ARSH_u139(x, 6);
+		t[i - 2] += ARSH_u138(x, 6);
 		t[i - 3] += (x << 7) & 0x1FFF;
-		t[i - 4] -= ARSH_u139(x, 12);
+		t[i - 4] -= ARSH_u138(x, 12);
 		t[i - 5] -= (x << 1) & 0x1FFF;
-		t[i - 12] -= ARSH_u139(x, 4);
+		t[i - 12] -= ARSH_u138(x, 4);
 		t[i - 13] -= (x << 9) & 0x1FFF;
-		t[i - 19] += ARSH_u139(x, 9);
+		t[i - 19] += ARSH_u138(x, 9);
 		t[i - 20] += (x << 4) & 0x1FFF;
 	}
 
@@ -35066,7 +34896,7 @@ mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	 * starting values are 13-bit each, all words fit on 20 bits
 	 * (21 to account for the sign bit).
 	 */
-	cc = norm13_u139(t, t, 20);
+	cc = norm13_u138(t, t, 20);
 
 	/*
 	 * Perform modular reduction again for the bits beyond 256 (the carry
@@ -35096,7 +34926,7 @@ mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
 	t[17] -= cc << 3;
 	t[19] += cc << 9;
 
-	norm13_u139(d, t, 20);
+	norm13_u138(d, t, 20);
 }
 
 /*
@@ -35107,7 +34937,7 @@ mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
  * and is lower than twice the modulus.
  */
 static void
-square_f256_u139(uint32_t *d, const uint32_t *a)
+square_f256_u138(uint32_t *d, const uint32_t *a)
 {
 	uint32_t t[40], cc;
 	int i;
@@ -35115,7 +34945,7 @@ square_f256_u139(uint32_t *d, const uint32_t *a)
 	/*
 	 * Compute raw square. All result words fit in 13 bits each.
 	 */
-	square20_u139(t, a);
+	square20_u138(t, a);
 
 	/*
 	 * Modular reduction: each high word in added/subtracted where
@@ -35137,13 +34967,13 @@ square_f256_u139(uint32_t *d, const uint32_t *a)
 		uint32_t x;
 
 		x = t[i];
-		t[i - 2] += ARSH_u139(x, 6);
+		t[i - 2] += ARSH_u138(x, 6);
 		t[i - 3] += (x << 7) & 0x1FFF;
-		t[i - 4] -= ARSH_u139(x, 12);
+		t[i - 4] -= ARSH_u138(x, 12);
 		t[i - 5] -= (x << 1) & 0x1FFF;
-		t[i - 12] -= ARSH_u139(x, 4);
+		t[i - 12] -= ARSH_u138(x, 4);
 		t[i - 13] -= (x << 9) & 0x1FFF;
-		t[i - 19] += ARSH_u139(x, 9);
+		t[i - 19] += ARSH_u138(x, 9);
 		t[i - 20] += (x << 4) & 0x1FFF;
 	}
 
@@ -35155,7 +34985,7 @@ square_f256_u139(uint32_t *d, const uint32_t *a)
 	 * starting values are 13-bit each, all words fit on 20 bits
 	 * (21 to account for the sign bit).
 	 */
-	cc = norm13_u139(t, t, 20);
+	cc = norm13_u138(t, t, 20);
 
 	/*
 	 * Perform modular reduction again for the bits beyond 256 (the carry
@@ -35185,7 +35015,7 @@ square_f256_u139(uint32_t *d, const uint32_t *a)
 	t[17] -= cc << 3;
 	t[19] += cc << 9;
 
-	norm13_u139(d, t, 20);
+	norm13_u138(d, t, 20);
 }
 
 /*
@@ -35204,6 +35034,1543 @@ typedef struct {
 	uint32_t x[20];
 	uint32_t y[20];
 	uint32_t z[20];
+} p256_jacobian_u138;
+
+/*
+ * Convert a point to affine coordinates:
+ *  - If the point is the point at infinity, then all three coordinates
+ *    are set to 0.
+ *  - Otherwise, the 'z' coordinate is set to 1, and the 'x' and 'y'
+ *    coordinates are the 'X' and 'Y' affine coordinates.
+ * The coordinates are guaranteed to be lower than the modulus.
+ */
+static void
+p256_to_affine_u138(p256_jacobian_u138 *P)
+{
+	uint32_t t1[20], t2[20];
+	int i;
+
+	/*
+	 * Invert z with a modular exponentiation: the modulus is
+	 * p = 2^256 - 2^224 + 2^192 + 2^96 - 1, and the exponent is
+	 * p-2. Exponent bit pattern (from high to low) is:
+	 *  - 32 bits of value 1
+	 *  - 31 bits of value 0
+	 *  - 1 bit of value 1
+	 *  - 96 bits of value 0
+	 *  - 94 bits of value 1
+	 *  - 1 bit of value 0
+	 *  - 1 bit of value 1
+	 * Thus, we precompute z^(2^31-1) to speed things up.
+	 *
+	 * If z = 0 (point at infinity) then the modular exponentiation
+	 * will yield 0, which leads to the expected result (all three
+	 * coordinates set to 0).
+	 */
+
+	/*
+	 * A simple square-and-multiply for z^(2^31-1). We could save about
+	 * two dozen multiplications here with an addition chain, but
+	 * this would require a bit more code, and extra stack buffers.
+	 */
+	memcpy(t1, P->z, sizeof P->z);
+	for (i = 0; i < 30; i ++) {
+		square_f256_u138(t1, t1);
+		mul_f256_u138(t1, t1, P->z);
+	}
+
+	/*
+	 * Square-and-multiply. Apart from the squarings, we have a few
+	 * multiplications to set bits to 1; we multiply by the original z
+	 * for setting 1 bit, and by t1 for setting 31 bits.
+	 */
+	memcpy(t2, P->z, sizeof P->z);
+	for (i = 1; i < 256; i ++) {
+		square_f256_u138(t2, t2);
+		switch (i) {
+		case 31:
+		case 190:
+		case 221:
+		case 252:
+			mul_f256_u138(t2, t2, t1);
+			break;
+		case 63:
+		case 253:
+		case 255:
+			mul_f256_u138(t2, t2, P->z);
+			break;
+		}
+	}
+
+	/*
+	 * Now that we have 1/z, multiply x by 1/z^2 and y by 1/z^3.
+	 */
+	mul_f256_u138(t1, t2, t2);
+	mul_f256_u138(P->x, t1, P->x);
+	mul_f256_u138(t1, t1, t2);
+	mul_f256_u138(P->y, t1, P->y);
+	reduce_final_f256_u138(P->x);
+	reduce_final_f256_u138(P->y);
+
+	/*
+	 * Multiply z by 1/z. If z = 0, then this will yield 0, otherwise
+	 * this will set z to 1.
+	 */
+	mul_f256_u138(P->z, P->z, t2);
+	reduce_final_f256_u138(P->z);
+}
+
+/*
+ * Double a point in P-256. This function works for all valid points,
+ * including the point at infinity.
+ */
+static void
+p256_double_u138(p256_jacobian_u138 *Q)
+{
+	/*
+	 * Doubling formulas are:
+	 *
+	 *   s = 4*x*y^2
+	 *   m = 3*(x + z^2)*(x - z^2)
+	 *   x' = m^2 - 2*s
+	 *   y' = m*(s - x') - 8*y^4
+	 *   z' = 2*y*z
+	 *
+	 * These formulas work for all points, including points of order 2
+	 * and points at infinity:
+	 *   - If y = 0 then z' = 0. But there is no such point in P-256
+	 *     anyway.
+	 *   - If z = 0 then z' = 0.
+	 */
+	uint32_t t1[20], t2[20], t3[20], t4[20];
+	int i;
+
+	/*
+	 * Compute z^2 in t1.
+	 */
+	square_f256_u138(t1, Q->z);
+
+	/*
+	 * Compute x-z^2 in t2 and x+z^2 in t1.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t2[i] = (F256_u138[i] << 1) + Q->x[i] - t1[i];
+		t1[i] += Q->x[i];
+	}
+	norm13_u138(t1, t1, 20);
+	norm13_u138(t2, t2, 20);
+
+	/*
+	 * Compute 3*(x+z^2)*(x-z^2) in t1.
+	 */
+	mul_f256_u138(t3, t1, t2);
+	for (i = 0; i < 20; i ++) {
+		t1[i] = MUL15(3, t3[i]);
+	}
+	norm13_u138(t1, t1, 20);
+
+	/*
+	 * Compute 4*x*y^2 (in t2) and 2*y^2 (in t3).
+	 */
+	square_f256_u138(t3, Q->y);
+	for (i = 0; i < 20; i ++) {
+		t3[i] <<= 1;
+	}
+	norm13_u138(t3, t3, 20);
+	mul_f256_u138(t2, Q->x, t3);
+	for (i = 0; i < 20; i ++) {
+		t2[i] <<= 1;
+	}
+	norm13_u138(t2, t2, 20);
+	reduce_f256_u138(t2);
+
+	/*
+	 * Compute x' = m^2 - 2*s.
+	 */
+	square_f256_u138(Q->x, t1);
+	for (i = 0; i < 20; i ++) {
+		Q->x[i] += (F256_u138[i] << 2) - (t2[i] << 1);
+	}
+	norm13_u138(Q->x, Q->x, 20);
+	reduce_f256_u138(Q->x);
+
+	/*
+	 * Compute z' = 2*y*z.
+	 */
+	mul_f256_u138(t4, Q->y, Q->z);
+	for (i = 0; i < 20; i ++) {
+		Q->z[i] = t4[i] << 1;
+	}
+	norm13_u138(Q->z, Q->z, 20);
+	reduce_f256_u138(Q->z);
+
+	/*
+	 * Compute y' = m*(s - x') - 8*y^4. Note that we already have
+	 * 2*y^2 in t3.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t2[i] += (F256_u138[i] << 1) - Q->x[i];
+	}
+	norm13_u138(t2, t2, 20);
+	mul_f256_u138(Q->y, t1, t2);
+	square_f256_u138(t4, t3);
+	for (i = 0; i < 20; i ++) {
+		Q->y[i] += (F256_u138[i] << 2) - (t4[i] << 1);
+	}
+	norm13_u138(Q->y, Q->y, 20);
+	reduce_f256_u138(Q->y);
+}
+
+/*
+ * Add point P2 to point P1.
+ *
+ * This function computes the wrong result in the following cases:
+ *
+ *   - If P1 == 0 but P2 != 0
+ *   - If P1 != 0 but P2 == 0
+ *   - If P1 == P2
+ *
+ * In all three cases, P1 is set to the point at infinity.
+ *
+ * Returned value is 0 if one of the following occurs:
+ *
+ *   - P1 and P2 have the same Y coordinate
+ *   - P1 == 0 and P2 == 0
+ *   - The Y coordinate of one of the points is 0 and the other point is
+ *     the point at infinity.
+ *
+ * The third case cannot actually happen with valid points, since a point
+ * with Y == 0 is a point of order 2, and there is no point of order 2 on
+ * curve P-256.
+ *
+ * Therefore, assuming that P1 != 0 and P2 != 0 on input, then the caller
+ * can apply the following:
+ *
+ *   - If the result is not the point at infinity, then it is correct.
+ *   - Otherwise, if the returned value is 1, then this is a case of
+ *     P1+P2 == 0, so the result is indeed the point at infinity.
+ *   - Otherwise, P1 == P2, so a "double" operation should have been
+ *     performed.
+ */
+static uint32_t
+p256_add_u138(p256_jacobian_u138 *P1, const p256_jacobian_u138 *P2)
+{
+	/*
+	 * Addtions formulas are:
+	 *
+	 *   u1 = x1 * z2^2
+	 *   u2 = x2 * z1^2
+	 *   s1 = y1 * z2^3
+	 *   s2 = y2 * z1^3
+	 *   h = u2 - u1
+	 *   r = s2 - s1
+	 *   x3 = r^2 - h^3 - 2 * u1 * h^2
+	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
+	 *   z3 = h * z1 * z2
+	 */
+	uint32_t t1[20], t2[20], t3[20], t4[20], t5[20], t6[20], t7[20];
+	uint32_t ret;
+	int i;
+
+	/*
+	 * Compute u1 = x1*z2^2 (in t1) and s1 = y1*z2^3 (in t3).
+	 */
+	square_f256_u138(t3, P2->z);
+	mul_f256_u138(t1, P1->x, t3);
+	mul_f256_u138(t4, P2->z, t3);
+	mul_f256_u138(t3, P1->y, t4);
+
+	/*
+	 * Compute u2 = x2*z1^2 (in t2) and s2 = y2*z1^3 (in t4).
+	 */
+	square_f256_u138(t4, P1->z);
+	mul_f256_u138(t2, P2->x, t4);
+	mul_f256_u138(t5, P1->z, t4);
+	mul_f256_u138(t4, P2->y, t5);
+
+	/*
+	 * Compute h = h2 - u1 (in t2) and r = s2 - s1 (in t4).
+	 * We need to test whether r is zero, so we will do some extra
+	 * reduce.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t2[i] += (F256_u138[i] << 1) - t1[i];
+		t4[i] += (F256_u138[i] << 1) - t3[i];
+	}
+	norm13_u138(t2, t2, 20);
+	norm13_u138(t4, t4, 20);
+	reduce_f256_u138(t4);
+	reduce_final_f256_u138(t4);
+	ret = 0;
+	for (i = 0; i < 20; i ++) {
+		ret |= t4[i];
+	}
+	ret = (ret | -ret) >> 31;
+
+	/*
+	 * Compute u1*h^2 (in t6) and h^3 (in t5);
+	 */
+	square_f256_u138(t7, t2);
+	mul_f256_u138(t6, t1, t7);
+	mul_f256_u138(t5, t7, t2);
+
+	/*
+	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
+	 */
+	square_f256_u138(P1->x, t4);
+	for (i = 0; i < 20; i ++) {
+		P1->x[i] += (F256_u138[i] << 3) - t5[i] - (t6[i] << 1);
+	}
+	norm13_u138(P1->x, P1->x, 20);
+	reduce_f256_u138(P1->x);
+
+	/*
+	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t6[i] += (F256_u138[i] << 1) - P1->x[i];
+	}
+	norm13_u138(t6, t6, 20);
+	mul_f256_u138(P1->y, t4, t6);
+	mul_f256_u138(t1, t5, t3);
+	for (i = 0; i < 20; i ++) {
+		P1->y[i] += (F256_u138[i] << 1) - t1[i];
+	}
+	norm13_u138(P1->y, P1->y, 20);
+	reduce_f256_u138(P1->y);
+
+	/*
+	 * Compute z3 = h*z1*z2.
+	 */
+	mul_f256_u138(t1, P1->z, P2->z);
+	mul_f256_u138(P1->z, t1, t2);
+
+	return ret;
+}
+
+/*
+ * Add point P2 to point P1. This is a specialised function for the
+ * case when P2 is a non-zero point in affine coordinate.
+ *
+ * This function computes the wrong result in the following cases:
+ *
+ *   - If P1 == 0
+ *   - If P1 == P2
+ *
+ * In both cases, P1 is set to the point at infinity.
+ *
+ * Returned value is 0 if one of the following occurs:
+ *
+ *   - P1 and P2 have the same Y coordinate
+ *   - The Y coordinate of P2 is 0 and P1 is the point at infinity.
+ *
+ * The second case cannot actually happen with valid points, since a point
+ * with Y == 0 is a point of order 2, and there is no point of order 2 on
+ * curve P-256.
+ *
+ * Therefore, assuming that P1 != 0 on input, then the caller
+ * can apply the following:
+ *
+ *   - If the result is not the point at infinity, then it is correct.
+ *   - Otherwise, if the returned value is 1, then this is a case of
+ *     P1+P2 == 0, so the result is indeed the point at infinity.
+ *   - Otherwise, P1 == P2, so a "double" operation should have been
+ *     performed.
+ */
+static uint32_t
+p256_add_mixed_u138(p256_jacobian_u138 *P1, const p256_jacobian_u138 *P2)
+{
+	/*
+	 * Addtions formulas are:
+	 *
+	 *   u1 = x1
+	 *   u2 = x2 * z1^2
+	 *   s1 = y1
+	 *   s2 = y2 * z1^3
+	 *   h = u2 - u1
+	 *   r = s2 - s1
+	 *   x3 = r^2 - h^3 - 2 * u1 * h^2
+	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
+	 *   z3 = h * z1
+	 */
+	uint32_t t1[20], t2[20], t3[20], t4[20], t5[20], t6[20], t7[20];
+	uint32_t ret;
+	int i;
+
+	/*
+	 * Compute u1 = x1 (in t1) and s1 = y1 (in t3).
+	 */
+	memcpy(t1, P1->x, sizeof t1);
+	memcpy(t3, P1->y, sizeof t3);
+
+	/*
+	 * Compute u2 = x2*z1^2 (in t2) and s2 = y2*z1^3 (in t4).
+	 */
+	square_f256_u138(t4, P1->z);
+	mul_f256_u138(t2, P2->x, t4);
+	mul_f256_u138(t5, P1->z, t4);
+	mul_f256_u138(t4, P2->y, t5);
+
+	/*
+	 * Compute h = h2 - u1 (in t2) and r = s2 - s1 (in t4).
+	 * We need to test whether r is zero, so we will do some extra
+	 * reduce.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t2[i] += (F256_u138[i] << 1) - t1[i];
+		t4[i] += (F256_u138[i] << 1) - t3[i];
+	}
+	norm13_u138(t2, t2, 20);
+	norm13_u138(t4, t4, 20);
+	reduce_f256_u138(t4);
+	reduce_final_f256_u138(t4);
+	ret = 0;
+	for (i = 0; i < 20; i ++) {
+		ret |= t4[i];
+	}
+	ret = (ret | -ret) >> 31;
+
+	/*
+	 * Compute u1*h^2 (in t6) and h^3 (in t5);
+	 */
+	square_f256_u138(t7, t2);
+	mul_f256_u138(t6, t1, t7);
+	mul_f256_u138(t5, t7, t2);
+
+	/*
+	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
+	 */
+	square_f256_u138(P1->x, t4);
+	for (i = 0; i < 20; i ++) {
+		P1->x[i] += (F256_u138[i] << 3) - t5[i] - (t6[i] << 1);
+	}
+	norm13_u138(P1->x, P1->x, 20);
+	reduce_f256_u138(P1->x);
+
+	/*
+	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
+	 */
+	for (i = 0; i < 20; i ++) {
+		t6[i] += (F256_u138[i] << 1) - P1->x[i];
+	}
+	norm13_u138(t6, t6, 20);
+	mul_f256_u138(P1->y, t4, t6);
+	mul_f256_u138(t1, t5, t3);
+	for (i = 0; i < 20; i ++) {
+		P1->y[i] += (F256_u138[i] << 1) - t1[i];
+	}
+	norm13_u138(P1->y, P1->y, 20);
+	reduce_f256_u138(P1->y);
+
+	/*
+	 * Compute z3 = h*z1*z2.
+	 */
+	mul_f256_u138(P1->z, P1->z, t2);
+
+	return ret;
+}
+
+/*
+ * Decode a P-256 point. This function does not support the point at
+ * infinity. Returned value is 0 if the point is invalid, 1 otherwise.
+ */
+static uint32_t
+p256_decode_u138(p256_jacobian_u138 *P, const void *src, size_t len)
+{
+	const unsigned char *buf;
+	uint32_t tx[20], ty[20], t1[20], t2[20];
+	uint32_t bad;
+	int i;
+
+	if (len != 65) {
+		return 0;
+	}
+	buf = src;
+
+	/*
+	 * First byte must be 0x04 (uncompressed format). We could support
+	 * "hybrid format" (first byte is 0x06 or 0x07, and encodes the
+	 * least significant bit of the Y coordinate), but it is explicitly
+	 * forbidden by RFC 5480 (section 2.2).
+	 */
+	bad = NEQ(buf[0], 0x04);
+
+	/*
+	 * Decode the coordinates, and check that they are both lower
+	 * than the modulus.
+	 */
+	tx[19] = be8_to_le13_u138(tx, buf + 1, 32);
+	ty[19] = be8_to_le13_u138(ty, buf + 33, 32);
+	bad |= reduce_final_f256_u138(tx);
+	bad |= reduce_final_f256_u138(ty);
+
+	/*
+	 * Check curve equation.
+	 */
+	square_f256_u138(t1, tx);
+	mul_f256_u138(t1, tx, t1);
+	square_f256_u138(t2, ty);
+	for (i = 0; i < 20; i ++) {
+		t1[i] += (F256_u138[i] << 3) - MUL15(3, tx[i]) + P256_B_u138[i] - t2[i];
+	}
+	norm13_u138(t1, t1, 20);
+	reduce_f256_u138(t1);
+	reduce_final_f256_u138(t1);
+	for (i = 0; i < 20; i ++) {
+		bad |= t1[i];
+	}
+
+	/*
+	 * Copy coordinates to the point structure.
+	 */
+	memcpy(P->x, tx, sizeof tx);
+	memcpy(P->y, ty, sizeof ty);
+	memset(P->z, 0, sizeof P->z);
+	P->z[0] = 1;
+	return NEQ(bad, 0) ^ 1;
+}
+
+/*
+ * Encode a point into a buffer. This function assumes that the point is
+ * valid, in affine coordinates, and not the point at infinity.
+ */
+static void
+p256_encode_u138(void *dst, const p256_jacobian_u138 *P)
+{
+	unsigned char *buf;
+
+	buf = dst;
+	buf[0] = 0x04;
+	le13_to_be8_u138(buf + 1, 32, P->x);
+	le13_to_be8_u138(buf + 33, 32, P->y);
+}
+
+/*
+ * Multiply a curve point by an integer. The integer is assumed to be
+ * lower than the curve order, and the base point must not be the point
+ * at infinity.
+ */
+static void
+p256_mul_u138(p256_jacobian_u138 *P, const unsigned char *x, size_t xlen)
+{
+	/*
+	 * qz is a flag that is initially 1, and remains equal to 1
+	 * as long as the point is the point at infinity.
+	 *
+	 * We use a 2-bit window to handle multiplier bits by pairs.
+	 * The precomputed window really is the points P2 and P3.
+	 */
+	uint32_t qz;
+	p256_jacobian_u138 P2, P3, Q, T, U;
+
+	/*
+	 * Compute window values.
+	 */
+	P2 = *P;
+	p256_double_u138(&P2);
+	P3 = *P;
+	p256_add_u138(&P3, &P2);
+
+	/*
+	 * We start with Q = 0. We process multiplier bits 2 by 2.
+	 */
+	memset(&Q, 0, sizeof Q);
+	qz = 1;
+	while (xlen -- > 0) {
+		int k;
+
+		for (k = 6; k >= 0; k -= 2) {
+			uint32_t bits;
+			uint32_t bnz;
+
+			p256_double_u138(&Q);
+			p256_double_u138(&Q);
+			T = *P;
+			U = Q;
+			bits = (*x >> k) & (uint32_t)3;
+			bnz = NEQ(bits, 0);
+			CCOPY(EQ(bits, 2), &T, &P2, sizeof T);
+			CCOPY(EQ(bits, 3), &T, &P3, sizeof T);
+			p256_add_u138(&U, &T);
+			CCOPY(bnz & qz, &Q, &T, sizeof Q);
+			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
+			qz &= ~bnz;
+		}
+		x ++;
+	}
+	*P = Q;
+}
+
+/*
+ * Precomputed window: k*G points, where G is the curve generator, and k
+ * is an integer from 1 to 15 (inclusive). The X and Y coordinates of
+ * the point are encoded as 20 words of 13 bits each (little-endian
+ * order); 13-bit words are then grouped 2-by-2 into 32-bit words
+ * (little-endian order within each word).
+ */
+static const uint32_t Gwin_u138[15][20] = {
+
+	{ 0x04C60296, 0x02721176, 0x19D00F4A, 0x102517AC,
+	  0x13B8037D, 0x0748103C, 0x1E730E56, 0x08481FE2,
+	  0x0F97012C, 0x00D605F4, 0x1DFA11F5, 0x0C801A0D,
+	  0x0F670CBB, 0x0AED0CC5, 0x115E0E33, 0x181F0785,
+	  0x13F514A7, 0x0FF30E3B, 0x17171E1A, 0x009F18D0 },
+
+	{ 0x1B341978, 0x16911F11, 0x0D9A1A60, 0x1C4E1FC8,
+	  0x1E040969, 0x096A06B0, 0x091C0030, 0x09EF1A29,
+	  0x18C40D03, 0x00F91C9E, 0x13C313D1, 0x096F0748,
+	  0x011419E0, 0x1CC713A6, 0x1DD31DAD, 0x1EE80C36,
+	  0x1ECD0C69, 0x1A0800A4, 0x08861B8E, 0x000E1DD5 },
+
+	{ 0x173F1D6C, 0x02CC06F1, 0x14C21FB4, 0x043D1EB6,
+	  0x0F3606B7, 0x1A971C59, 0x1BF71951, 0x01481323,
+	  0x068D0633, 0x00BD12F9, 0x13EA1032, 0x136209E8,
+	  0x1C1E19A7, 0x06C7013E, 0x06C10AB0, 0x14C908BB,
+	  0x05830CE1, 0x1FEF18DD, 0x00620998, 0x010E0D19 },
+
+	{ 0x18180852, 0x0604111A, 0x0B771509, 0x1B6F0156,
+	  0x00181FE2, 0x1DCC0AF4, 0x16EF0659, 0x11F70E80,
+	  0x11A912D0, 0x01C414D2, 0x027618C6, 0x05840FC6,
+	  0x100215C4, 0x187E0C3B, 0x12771C96, 0x150C0B5D,
+	  0x0FF705FD, 0x07981C67, 0x1AD20C63, 0x01C11C55 },
+
+	{ 0x1E8113ED, 0x0A940370, 0x12920215, 0x1FA31D6F,
+	  0x1F7C0C82, 0x10CD03F7, 0x02640560, 0x081A0B5E,
+	  0x1BD21151, 0x00A21642, 0x0D0B0DA4, 0x0176113F,
+	  0x04440D1D, 0x001A1360, 0x1068012F, 0x1F141E49,
+	  0x10DF136B, 0x0E4F162B, 0x0D44104A, 0x01C1105F },
+
+	{ 0x011411A9, 0x01551A4F, 0x0ADA0C6B, 0x01BD0EC8,
+	  0x18120C74, 0x112F1778, 0x099202CB, 0x0C05124B,
+	  0x195316A4, 0x01600685, 0x1E3B1FE2, 0x189014E3,
+	  0x0B5E1FD7, 0x0E0311F8, 0x08E000F7, 0x174E00DE,
+	  0x160702DF, 0x1B5A15BF, 0x03A11237, 0x01D01704 },
+
+	{ 0x0C3D12A3, 0x0C501C0C, 0x17AD1300, 0x1715003F,
+	  0x03F719F8, 0x18031ED8, 0x1D980667, 0x0F681896,
+	  0x1B7D00BF, 0x011C14CE, 0x0FA000B4, 0x1C3501B0,
+	  0x0D901C55, 0x06790C10, 0x029E0736, 0x0DEB0400,
+	  0x034F183A, 0x030619B4, 0x0DEF0033, 0x00E71AC7 },
+
+	{ 0x1B7D1393, 0x1B3B1076, 0x0BED1B4D, 0x13011F3A,
+	  0x0E0E1238, 0x156A132B, 0x013A02D3, 0x160A0D01,
+	  0x1CED1EE9, 0x00C5165D, 0x184C157E, 0x08141A83,
+	  0x153C0DA5, 0x1ED70F9D, 0x05170D51, 0x02CF13B8,
+	  0x18AE1771, 0x1B04113F, 0x05EC11E9, 0x015A16B3 },
+
+	{ 0x04A41EE0, 0x1D1412E4, 0x1C591D79, 0x118511B7,
+	  0x14F00ACB, 0x1AE31E1C, 0x049C0D51, 0x016E061E,
+	  0x1DB71EDF, 0x01D41A35, 0x0E8208FA, 0x14441293,
+	  0x011F1E85, 0x1D54137A, 0x026B114F, 0x151D0832,
+	  0x00A50964, 0x1F9C1E1C, 0x064B12C9, 0x005409D1 },
+
+	{ 0x062B123F, 0x0C0D0501, 0x183704C3, 0x08E31120,
+	  0x0A2E0A6C, 0x14440FED, 0x090A0D1E, 0x13271964,
+	  0x0B590A3A, 0x019D1D9B, 0x05780773, 0x09770A91,
+	  0x0F770CA3, 0x053F19D4, 0x02C80DED, 0x1A761304,
+	  0x091E0DD9, 0x15D201B8, 0x151109AA, 0x010F0198 },
+
+	{ 0x05E101D1, 0x072314DD, 0x045F1433, 0x1A041541,
+	  0x10B3142E, 0x01840736, 0x1C1B19DB, 0x098B0418,
+	  0x1DBC083B, 0x007D1444, 0x01511740, 0x11DD1F3A,
+	  0x04ED0E2F, 0x1B4B1A62, 0x10480D04, 0x09E911A2,
+	  0x04211AFA, 0x19140893, 0x04D60CC4, 0x01210648 },
+
+	{ 0x112703C4, 0x018B1BA1, 0x164C1D50, 0x05160BE0,
+	  0x0BCC1830, 0x01CB1554, 0x13291732, 0x1B2B1918,
+	  0x0DED0817, 0x00E80775, 0x0A2401D3, 0x0BFE08B3,
+	  0x0E531199, 0x058616E9, 0x04770B91, 0x110F0C55,
+	  0x19C11554, 0x0BFB1159, 0x03541C38, 0x000E1C2D },
+
+	{ 0x10390C01, 0x02BB0751, 0x0AC5098E, 0x096C17AB,
+	  0x03C90E28, 0x10BD18BF, 0x002E1F2D, 0x092B0986,
+	  0x1BD700AC, 0x002E1F20, 0x1E3D1FD8, 0x077718BB,
+	  0x06F919C4, 0x187407ED, 0x11370E14, 0x081E139C,
+	  0x00481ADB, 0x14AB0289, 0x066A0EBE, 0x00C70ED6 },
+
+	{ 0x0694120B, 0x124E1CC9, 0x0E2F0570, 0x17CF081A,
+	  0x078906AC, 0x066D17CF, 0x1B3207F4, 0x0C5705E9,
+	  0x10001C38, 0x00A919DE, 0x06851375, 0x0F900BD8,
+	  0x080401BA, 0x0EEE0D42, 0x1B8B11EA, 0x0B4519F0,
+	  0x090F18C0, 0x062E1508, 0x0DD909F4, 0x01EB067C },
+
+	{ 0x0CDC1D5F, 0x0D1818F9, 0x07781636, 0x125B18E8,
+	  0x0D7003AF, 0x13110099, 0x1D9B1899, 0x175C1EB7,
+	  0x0E34171A, 0x01E01153, 0x081A0F36, 0x0B391783,
+	  0x1D1F147E, 0x19CE16D7, 0x11511B21, 0x1F2C10F9,
+	  0x12CA0E51, 0x05A31D39, 0x171A192E, 0x016B0E4F }
+};
+
+/*
+ * Lookup one of the Gwin_u138[] values, by index. This is constant-time.
+ */
+static void
+lookup_Gwin_u138(p256_jacobian_u138 *T, uint32_t idx)
+{
+	uint32_t xy[20];
+	uint32_t k;
+	size_t u;
+
+	memset(xy, 0, sizeof xy);
+	for (k = 0; k < 15; k ++) {
+		uint32_t m;
+
+		m = -EQ(idx, k + 1);
+		for (u = 0; u < 20; u ++) {
+			xy[u] |= m & Gwin_u138[k][u];
+		}
+	}
+	for (u = 0; u < 10; u ++) {
+		T->x[(u << 1) + 0] = xy[u] & 0xFFFF;
+		T->x[(u << 1) + 1] = xy[u] >> 16;
+		T->y[(u << 1) + 0] = xy[u + 10] & 0xFFFF;
+		T->y[(u << 1) + 1] = xy[u + 10] >> 16;
+	}
+	memset(T->z, 0, sizeof T->z);
+	T->z[0] = 1;
+}
+
+/*
+ * Multiply the generator by an integer. The integer is assumed non-zero
+ * and lower than the curve order.
+ */
+static void
+p256_mulgen_u138(p256_jacobian_u138 *P, const unsigned char *x, size_t xlen)
+{
+	/*
+	 * qz is a flag that is initially 1, and remains equal to 1
+	 * as long as the point is the point at infinity.
+	 *
+	 * We use a 4-bit window to handle multiplier bits by groups
+	 * of 4. The precomputed window is constant static data, with
+	 * points in affine coordinates; we use a constant-time lookup.
+	 */
+	p256_jacobian_u138 Q;
+	uint32_t qz;
+
+	memset(&Q, 0, sizeof Q);
+	qz = 1;
+	while (xlen -- > 0) {
+		int k;
+		unsigned bx;
+
+		bx = *x ++;
+		for (k = 0; k < 2; k ++) {
+			uint32_t bits;
+			uint32_t bnz;
+			p256_jacobian_u138 T, U;
+
+			p256_double_u138(&Q);
+			p256_double_u138(&Q);
+			p256_double_u138(&Q);
+			p256_double_u138(&Q);
+			bits = (bx >> 4) & 0x0F;
+			bnz = NEQ(bits, 0);
+			lookup_Gwin_u138(&T, bits);
+			U = Q;
+			p256_add_mixed_u138(&U, &T);
+			CCOPY(bnz & qz, &Q, &T, sizeof Q);
+			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
+			qz &= ~bnz;
+			bx <<= 4;
+		}
+	}
+	*P = Q;
+}
+
+static const unsigned char P256_G_u138[] = {
+	0x04, 0x6B, 0x17, 0xD1, 0xF2, 0xE1, 0x2C, 0x42, 0x47, 0xF8,
+	0xBC, 0xE6, 0xE5, 0x63, 0xA4, 0x40, 0xF2, 0x77, 0x03, 0x7D,
+	0x81, 0x2D, 0xEB, 0x33, 0xA0, 0xF4, 0xA1, 0x39, 0x45, 0xD8,
+	0x98, 0xC2, 0x96, 0x4F, 0xE3, 0x42, 0xE2, 0xFE, 0x1A, 0x7F,
+	0x9B, 0x8E, 0xE7, 0xEB, 0x4A, 0x7C, 0x0F, 0x9E, 0x16, 0x2B,
+	0xCE, 0x33, 0x57, 0x6B, 0x31, 0x5E, 0xCE, 0xCB, 0xB6, 0x40,
+	0x68, 0x37, 0xBF, 0x51, 0xF5
+};
+
+static const unsigned char P256_N_u138[] = {
+	0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBC, 0xE6, 0xFA, 0xAD,
+	0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63,
+	0x25, 0x51
+};
+
+static const unsigned char *
+api_generator_u138(int curve, size_t *len)
+{
+	(void)curve;
+	*len = sizeof P256_G_u138;
+	return P256_G_u138;
+}
+
+static const unsigned char *
+api_order_u138(int curve, size_t *len)
+{
+	(void)curve;
+	*len = sizeof P256_N_u138;
+	return P256_N_u138;
+}
+
+static size_t
+api_xoff_u138(int curve, size_t *len)
+{
+	(void)curve;
+	*len = 32;
+	return 1;
+}
+
+static uint32_t
+api_mul_u138(unsigned char *G, size_t Glen,
+	const unsigned char *x, size_t xlen, int curve)
+{
+	uint32_t r;
+	p256_jacobian_u138 P;
+
+	(void)curve;
+	r = p256_decode_u138(&P, G, Glen);
+	p256_mul_u138(&P, x, xlen);
+	if (Glen >= 65) {
+		p256_to_affine_u138(&P);
+		p256_encode_u138(G, &P);
+	}
+	return r;
+}
+
+static size_t
+api_mulgen_u138(unsigned char *R,
+	const unsigned char *x, size_t xlen, int curve)
+{
+	p256_jacobian_u138 P;
+
+	(void)curve;
+	p256_mulgen_u138(&P, x, xlen);
+	p256_to_affine_u138(&P);
+	p256_encode_u138(R, &P);
+	return 65;
+
+	/*
+	const unsigned char *G;
+	size_t Glen;
+
+	G = api_generator_u138(curve, &Glen);
+	memcpy(R, G, Glen);
+	api_mul_u138(R, Glen, x, xlen, curve);
+	return Glen;
+	*/
+}
+
+static uint32_t
+api_muladd_u138(unsigned char *A, const unsigned char *B, size_t len,
+	const unsigned char *x, size_t xlen,
+	const unsigned char *y, size_t ylen, int curve)
+{
+	p256_jacobian_u138 P, Q;
+	uint32_t r, t, z;
+	int i;
+
+	(void)curve;
+	r = p256_decode_u138(&P, A, len);
+	p256_mul_u138(&P, x, xlen);
+	if (B == NULL) {
+		p256_mulgen_u138(&Q, y, ylen);
+	} else {
+		r &= p256_decode_u138(&Q, B, len);
+		p256_mul_u138(&Q, y, ylen);
+	}
+
+	/*
+	 * The final addition may fail in case both points are equal.
+	 */
+	t = p256_add_u138(&P, &Q);
+	reduce_final_f256_u138(P.z);
+	z = 0;
+	for (i = 0; i < 20; i ++) {
+		z |= P.z[i];
+	}
+	z = EQ(z, 0);
+	p256_double_u138(&Q);
+
+	/*
+	 * If z is 1 then either P+Q = 0 (t = 1) or P = Q (t = 0). So we
+	 * have the following:
+	 *
+	 *   z = 0, t = 0   return P (normal addition)
+	 *   z = 0, t = 1   return P (normal addition)
+	 *   z = 1, t = 0   return Q (a 'double' case)
+	 *   z = 1, t = 1   report an error (P+Q = 0)
+	 */
+	CCOPY(z & ~t, &P, &Q, sizeof Q);
+	p256_to_affine_u138(&P);
+	p256_encode_u138(A, &P);
+	r &= ~(z & t);
+	return r;
+}
+
+/* see bearssl_ec.h */
+const br_ec_impl br_ec_p256_m15 = {
+	(uint32_t)0x00800000,
+	&api_generator_u138,
+	&api_order_u138,
+	&api_xoff_u138,
+	&api_mul_u138,
+	&api_mulgen_u138,
+	&api_muladd_u138
+};
+
+/* === src/ec/ec_p256_m31.c === */
+#line 1 "src/ec/ec_p256_m31.c"
+/*
+ * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining 
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be 
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+
+/*
+ * If BR_NO_ARITH_SHIFT is undefined, or defined to 0, then we _assume_
+ * that right-shifting a signed negative integer copies the sign bit
+ * (arithmetic right-shift). This is "implementation-defined behaviour",
+ * i.e. it is not undefined, but it may differ between compilers. Each
+ * compiler is supposed to document its behaviour in that respect. GCC
+ * explicitly defines that an arithmetic right shift is used. We expect
+ * all other compilers to do the same, because underlying CPU offer an
+ * arithmetic right shift opcode that could not be used otherwise.
+ */
+#if BR_NO_ARITH_SHIFT
+#define ARSH_u139(x, n)    (((uint32_t)(x) >> (n)) \
+                      | ((-((uint32_t)(x) >> 31)) << (32 - (n))))
+#define ARSHW_u139(x, n)   (((uint64_t)(x) >> (n)) \
+                      | ((-((uint64_t)(x) >> 63)) << (64 - (n))))
+#else
+#define ARSH_u139(x, n)    ((*(int32_t *)&(x)) >> (n))
+#define ARSHW_u139(x, n)   ((*(int64_t *)&(x)) >> (n))
+#endif
+
+/*
+ * Convert an integer from unsigned big-endian encoding to a sequence of
+ * 30-bit words in little-endian order. The final "partial" word is
+ * returned.
+ */
+static uint32_t
+be8_to_le30_u139(uint32_t *dst, const unsigned char *src, size_t len)
+{
+	uint32_t acc;
+	int acc_len;
+
+	acc = 0;
+	acc_len = 0;
+	while (len -- > 0) {
+		uint32_t b;
+
+		b = src[len];
+		if (acc_len < 22) {
+			acc |= b << acc_len;
+			acc_len += 8;
+		} else {
+			*dst ++ = (acc | (b << acc_len)) & 0x3FFFFFFF;
+			acc = b >> (30 - acc_len);
+			acc_len -= 22;
+		}
+	}
+	return acc;
+}
+
+/*
+ * Convert an integer (30-bit words, little-endian) to unsigned
+ * big-endian encoding. The total encoding length is provided; all
+ * the destination bytes will be filled.
+ */
+static void
+le30_to_be8_u139(unsigned char *dst, size_t len, const uint32_t *src)
+{
+	uint32_t acc;
+	int acc_len;
+
+	acc = 0;
+	acc_len = 0;
+	while (len -- > 0) {
+		if (acc_len < 8) {
+			uint32_t w;
+
+			w = *src ++;
+			dst[len] = (unsigned char)(acc | (w << acc_len));
+			acc = w >> (8 - acc_len);
+			acc_len += 22;
+		} else {
+			dst[len] = (unsigned char)acc;
+			acc >>= 8;
+			acc_len -= 8;
+		}
+	}
+}
+
+/*
+ * Multiply two integers. Source integers are represented as arrays of
+ * nine 30-bit words, for values up to 2^270-1. Result is encoded over
+ * 18 words of 30 bits each.
+ */
+static void
+mul9_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+{
+	/*
+	 * Maximum intermediate result is no more than
+	 * 10376293531797946367, which fits in 64 bits. Reason:
+	 *
+	 *   10376293531797946367 = 9 * (2^30-1)^2 + 9663676406
+	 *   10376293531797946367 < 9663676407 * 2^30
+	 *
+	 * Thus, adding together 9 products of 30-bit integers, with
+	 * a carry of at most 9663676406, yields an integer that fits
+	 * on 64 bits and generates a carry of at most 9663676406.
+	 */
+	uint64_t t[17];
+	uint64_t cc;
+	int i;
+
+	t[ 0] = MUL31(a[0], b[0]);
+	t[ 1] = MUL31(a[0], b[1])
+		+ MUL31(a[1], b[0]);
+	t[ 2] = MUL31(a[0], b[2])
+		+ MUL31(a[1], b[1])
+		+ MUL31(a[2], b[0]);
+	t[ 3] = MUL31(a[0], b[3])
+		+ MUL31(a[1], b[2])
+		+ MUL31(a[2], b[1])
+		+ MUL31(a[3], b[0]);
+	t[ 4] = MUL31(a[0], b[4])
+		+ MUL31(a[1], b[3])
+		+ MUL31(a[2], b[2])
+		+ MUL31(a[3], b[1])
+		+ MUL31(a[4], b[0]);
+	t[ 5] = MUL31(a[0], b[5])
+		+ MUL31(a[1], b[4])
+		+ MUL31(a[2], b[3])
+		+ MUL31(a[3], b[2])
+		+ MUL31(a[4], b[1])
+		+ MUL31(a[5], b[0]);
+	t[ 6] = MUL31(a[0], b[6])
+		+ MUL31(a[1], b[5])
+		+ MUL31(a[2], b[4])
+		+ MUL31(a[3], b[3])
+		+ MUL31(a[4], b[2])
+		+ MUL31(a[5], b[1])
+		+ MUL31(a[6], b[0]);
+	t[ 7] = MUL31(a[0], b[7])
+		+ MUL31(a[1], b[6])
+		+ MUL31(a[2], b[5])
+		+ MUL31(a[3], b[4])
+		+ MUL31(a[4], b[3])
+		+ MUL31(a[5], b[2])
+		+ MUL31(a[6], b[1])
+		+ MUL31(a[7], b[0]);
+	t[ 8] = MUL31(a[0], b[8])
+		+ MUL31(a[1], b[7])
+		+ MUL31(a[2], b[6])
+		+ MUL31(a[3], b[5])
+		+ MUL31(a[4], b[4])
+		+ MUL31(a[5], b[3])
+		+ MUL31(a[6], b[2])
+		+ MUL31(a[7], b[1])
+		+ MUL31(a[8], b[0]);
+	t[ 9] = MUL31(a[1], b[8])
+		+ MUL31(a[2], b[7])
+		+ MUL31(a[3], b[6])
+		+ MUL31(a[4], b[5])
+		+ MUL31(a[5], b[4])
+		+ MUL31(a[6], b[3])
+		+ MUL31(a[7], b[2])
+		+ MUL31(a[8], b[1]);
+	t[10] = MUL31(a[2], b[8])
+		+ MUL31(a[3], b[7])
+		+ MUL31(a[4], b[6])
+		+ MUL31(a[5], b[5])
+		+ MUL31(a[6], b[4])
+		+ MUL31(a[7], b[3])
+		+ MUL31(a[8], b[2]);
+	t[11] = MUL31(a[3], b[8])
+		+ MUL31(a[4], b[7])
+		+ MUL31(a[5], b[6])
+		+ MUL31(a[6], b[5])
+		+ MUL31(a[7], b[4])
+		+ MUL31(a[8], b[3]);
+	t[12] = MUL31(a[4], b[8])
+		+ MUL31(a[5], b[7])
+		+ MUL31(a[6], b[6])
+		+ MUL31(a[7], b[5])
+		+ MUL31(a[8], b[4]);
+	t[13] = MUL31(a[5], b[8])
+		+ MUL31(a[6], b[7])
+		+ MUL31(a[7], b[6])
+		+ MUL31(a[8], b[5]);
+	t[14] = MUL31(a[6], b[8])
+		+ MUL31(a[7], b[7])
+		+ MUL31(a[8], b[6]);
+	t[15] = MUL31(a[7], b[8])
+		+ MUL31(a[8], b[7]);
+	t[16] = MUL31(a[8], b[8]);
+
+	/*
+	 * Propagate carries.
+	 */
+	cc = 0;
+	for (i = 0; i < 17; i ++) {
+		uint64_t w;
+
+		w = t[i] + cc;
+		d[i] = (uint32_t)w & 0x3FFFFFFF;
+		cc = w >> 30;
+	}
+	d[17] = (uint32_t)cc;
+}
+
+/*
+ * Square a 270-bit integer, represented as an array of nine 30-bit words.
+ * Result uses 18 words of 30 bits each.
+ */
+static void
+square9_u139(uint32_t *d, const uint32_t *a)
+{
+	uint64_t t[17];
+	uint64_t cc;
+	int i;
+
+	t[ 0] = MUL31(a[0], a[0]);
+	t[ 1] = ((MUL31(a[0], a[1])) << 1);
+	t[ 2] = MUL31(a[1], a[1])
+		+ ((MUL31(a[0], a[2])) << 1);
+	t[ 3] = ((MUL31(a[0], a[3])
+		+ MUL31(a[1], a[2])) << 1);
+	t[ 4] = MUL31(a[2], a[2])
+		+ ((MUL31(a[0], a[4])
+		+ MUL31(a[1], a[3])) << 1);
+	t[ 5] = ((MUL31(a[0], a[5])
+		+ MUL31(a[1], a[4])
+		+ MUL31(a[2], a[3])) << 1);
+	t[ 6] = MUL31(a[3], a[3])
+		+ ((MUL31(a[0], a[6])
+		+ MUL31(a[1], a[5])
+		+ MUL31(a[2], a[4])) << 1);
+	t[ 7] = ((MUL31(a[0], a[7])
+		+ MUL31(a[1], a[6])
+		+ MUL31(a[2], a[5])
+		+ MUL31(a[3], a[4])) << 1);
+	t[ 8] = MUL31(a[4], a[4])
+		+ ((MUL31(a[0], a[8])
+		+ MUL31(a[1], a[7])
+		+ MUL31(a[2], a[6])
+		+ MUL31(a[3], a[5])) << 1);
+	t[ 9] = ((MUL31(a[1], a[8])
+		+ MUL31(a[2], a[7])
+		+ MUL31(a[3], a[6])
+		+ MUL31(a[4], a[5])) << 1);
+	t[10] = MUL31(a[5], a[5])
+		+ ((MUL31(a[2], a[8])
+		+ MUL31(a[3], a[7])
+		+ MUL31(a[4], a[6])) << 1);
+	t[11] = ((MUL31(a[3], a[8])
+		+ MUL31(a[4], a[7])
+		+ MUL31(a[5], a[6])) << 1);
+	t[12] = MUL31(a[6], a[6])
+		+ ((MUL31(a[4], a[8])
+		+ MUL31(a[5], a[7])) << 1);
+	t[13] = ((MUL31(a[5], a[8])
+		+ MUL31(a[6], a[7])) << 1);
+	t[14] = MUL31(a[7], a[7])
+		+ ((MUL31(a[6], a[8])) << 1);
+	t[15] = ((MUL31(a[7], a[8])) << 1);
+	t[16] = MUL31(a[8], a[8]);
+
+	/*
+	 * Propagate carries.
+	 */
+	cc = 0;
+	for (i = 0; i < 17; i ++) {
+		uint64_t w;
+
+		w = t[i] + cc;
+		d[i] = (uint32_t)w & 0x3FFFFFFF;
+		cc = w >> 30;
+	}
+	d[17] = (uint32_t)cc;
+}
+
+/*
+ * Base field modulus for P-256.
+ */
+static const uint32_t F256_u139[] = {
+
+	0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x0000003F, 0x00000000,
+	0x00000000, 0x00001000, 0x3FFFC000, 0x0000FFFF
+};
+
+/*
+ * The 'b' curve equation coefficient for P-256.
+ */
+static const uint32_t P256_B_u139[] = {
+
+	0x27D2604B, 0x2F38F0F8, 0x053B0F63, 0x0741AC33, 0x1886BC65,
+	0x2EF555DA, 0x293E7B3E, 0x0D762A8E, 0x00005AC6
+};
+
+/*
+ * Addition in the field. Source operands shall fit on 257 bits; output
+ * will be lower than twice the modulus.
+ */
+static void
+add_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+{
+	uint32_t w, cc;
+	int i;
+
+	cc = 0;
+	for (i = 0; i < 9; i ++) {
+		w = a[i] + b[i] + cc;
+		d[i] = w & 0x3FFFFFFF;
+		cc = w >> 30;
+	}
+	w >>= 16;
+	d[8] &= 0xFFFF;
+	d[3] -= w << 6;
+	d[6] -= w << 12;
+	d[7] += w << 14;
+	cc = w;
+	for (i = 0; i < 9; i ++) {
+		w = d[i] + cc;
+		d[i] = w & 0x3FFFFFFF;
+		cc = ARSH_u139(w, 30);
+	}
+}
+
+/*
+ * Subtraction in the field. Source operands shall be smaller than twice
+ * the modulus; the result will fulfil the same property.
+ */
+static void
+sub_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+{
+	uint32_t w, cc;
+	int i;
+
+	/*
+	 * We really compute a - b + 2*p to make sure that the result is
+	 * positive.
+	 */
+	w = a[0] - b[0] - 0x00002;
+	d[0] = w & 0x3FFFFFFF;
+	w = a[1] - b[1] + ARSH_u139(w, 30);
+	d[1] = w & 0x3FFFFFFF;
+	w = a[2] - b[2] + ARSH_u139(w, 30);
+	d[2] = w & 0x3FFFFFFF;
+	w = a[3] - b[3] + ARSH_u139(w, 30) + 0x00080;
+	d[3] = w & 0x3FFFFFFF;
+	w = a[4] - b[4] + ARSH_u139(w, 30);
+	d[4] = w & 0x3FFFFFFF;
+	w = a[5] - b[5] + ARSH_u139(w, 30);
+	d[5] = w & 0x3FFFFFFF;
+	w = a[6] - b[6] + ARSH_u139(w, 30) + 0x02000;
+	d[6] = w & 0x3FFFFFFF;
+	w = a[7] - b[7] + ARSH_u139(w, 30) - 0x08000;
+	d[7] = w & 0x3FFFFFFF;
+	w = a[8] - b[8] + ARSH_u139(w, 30) + 0x20000;
+	d[8] = w & 0xFFFF;
+	w >>= 16;
+	d[8] &= 0xFFFF;
+	d[3] -= w << 6;
+	d[6] -= w << 12;
+	d[7] += w << 14;
+	cc = w;
+	for (i = 0; i < 9; i ++) {
+		w = d[i] + cc;
+		d[i] = w & 0x3FFFFFFF;
+		cc = ARSH_u139(w, 30);
+	}
+}
+
+/*
+ * Compute a multiplication in F256_u139. Source operands shall be less than
+ * twice the modulus.
+ */
+static void
+mul_f256_u139(uint32_t *d, const uint32_t *a, const uint32_t *b)
+{
+	uint32_t t[18];
+	uint64_t s[18];
+	uint64_t cc, x;
+	uint32_t z, c;
+	int i;
+
+	mul9_u139(t, a, b);
+
+	/*
+	 * Modular reduction: each high word in added/subtracted where
+	 * necessary.
+	 *
+	 * The modulus is:
+	 *    p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+	 * Therefore:
+	 *    2^256 = 2^224 - 2^192 - 2^96 + 1 mod p
+	 *
+	 * For a word x at bit offset n (n >= 256), we have:
+	 *    x*2^n = x*2^(n-32) - x*2^(n-64)
+	 *            - x*2^(n - 160) + x*2^(n-256) mod p
+	 *
+	 * Thus, we can nullify the high word if we reinject it at some
+	 * proper emplacements.
+	 *
+	 * We use 64-bit intermediate words to allow for carries to
+	 * accumulate easily, before performing the final propagation.
+	 */
+	for (i = 0; i < 18; i ++) {
+		s[i] = t[i];
+	}
+
+	for (i = 17; i >= 9; i --) {
+		uint64_t y;
+
+		y = s[i];
+		s[i - 1] += ARSHW_u139(y, 2);
+		s[i - 2] += (y << 28) & 0x3FFFFFFF;
+		s[i - 2] -= ARSHW_u139(y, 4);
+		s[i - 3] -= (y << 26) & 0x3FFFFFFF;
+		s[i - 5] -= ARSHW_u139(y, 10);
+		s[i - 6] -= (y << 20) & 0x3FFFFFFF;
+		s[i - 8] += ARSHW_u139(y, 16);
+		s[i - 9] += (y << 14) & 0x3FFFFFFF;
+	}
+
+	/*
+	 * Carry propagation must be signed. Moreover, we may have overdone
+	 * it a bit, and obtain a negative result.
+	 *
+	 * The loop above ran 9 times; each time, each word was augmented
+	 * by at most one extra word (in absolute value). Thus, the top
+	 * word must in fine fit in 39 bits, so the carry below will fit
+	 * on 9 bits.
+	 */
+	cc = 0;
+	for (i = 0; i < 9; i ++) {
+		x = s[i] + cc;
+		d[i] = (uint32_t)x & 0x3FFFFFFF;
+		cc = ARSHW_u139(x, 30);
+	}
+
+	/*
+	 * All nine words fit on 30 bits, but there may be an extra
+	 * carry for a few bits (at most 9), and that carry may be
+	 * negative. Moreover, we want the result to fit on 257 bits.
+	 * The two lines below ensure that the word in d[] has length
+	 * 256 bits, and the (signed) carry (beyond 2^256) is in cc. The
+	 * significant length of cc is less than 24 bits, so we will be
+	 * able to switch to 32-bit operations.
+	 */
+	cc = ARSHW_u139(x, 16);
+	d[8] &= 0xFFFF;
+
+	/*
+	 * One extra round of reduction, for cc*2^256, which means
+	 * adding cc*(2^224-2^192-2^96+1) to a 256-bit (nonnegative)
+	 * value. If cc is negative, then it may happen (rarely, but
+	 * not neglectibly so) that the result would be negative. In
+	 * order to avoid that, if cc is negative, then we add the
+	 * modulus once. Note that if cc is negative, then propagating
+	 * that carry must yield a value lower than the modulus, so
+	 * adding the modulus once will keep the final result under
+	 * twice the modulus.
+	 */
+	z = (uint32_t)cc;
+	d[3] -= z << 6;
+	d[6] -= (z << 12) & 0x3FFFFFFF;
+	d[7] -= ARSH_u139(z, 18);
+	d[7] += (z << 14) & 0x3FFFFFFF;
+	d[8] += ARSH_u139(z, 16);
+	c = z >> 31;
+	d[0] -= c;
+	d[3] += c << 6;
+	d[6] += c << 12;
+	d[7] -= c << 14;
+	d[8] += c << 16;
+	for (i = 0; i < 9; i ++) {
+		uint32_t w;
+
+		w = d[i] + z;
+		d[i] = w & 0x3FFFFFFF;
+		z = ARSH_u139(w, 30);
+	}
+}
+
+/*
+ * Compute a square in F256_u139. Source operand shall be less than
+ * twice the modulus.
+ */
+static void
+square_f256_u139(uint32_t *d, const uint32_t *a)
+{
+	uint32_t t[18];
+	uint64_t s[18];
+	uint64_t cc, x;
+	uint32_t z, c;
+	int i;
+
+	square9_u139(t, a);
+
+	/*
+	 * Modular reduction: each high word in added/subtracted where
+	 * necessary.
+	 *
+	 * The modulus is:
+	 *    p = 2^256 - 2^224 + 2^192 + 2^96 - 1
+	 * Therefore:
+	 *    2^256 = 2^224 - 2^192 - 2^96 + 1 mod p
+	 *
+	 * For a word x at bit offset n (n >= 256), we have:
+	 *    x*2^n = x*2^(n-32) - x*2^(n-64)
+	 *            - x*2^(n - 160) + x*2^(n-256) mod p
+	 *
+	 * Thus, we can nullify the high word if we reinject it at some
+	 * proper emplacements.
+	 *
+	 * We use 64-bit intermediate words to allow for carries to
+	 * accumulate easily, before performing the final propagation.
+	 */
+	for (i = 0; i < 18; i ++) {
+		s[i] = t[i];
+	}
+
+	for (i = 17; i >= 9; i --) {
+		uint64_t y;
+
+		y = s[i];
+		s[i - 1] += ARSHW_u139(y, 2);
+		s[i - 2] += (y << 28) & 0x3FFFFFFF;
+		s[i - 2] -= ARSHW_u139(y, 4);
+		s[i - 3] -= (y << 26) & 0x3FFFFFFF;
+		s[i - 5] -= ARSHW_u139(y, 10);
+		s[i - 6] -= (y << 20) & 0x3FFFFFFF;
+		s[i - 8] += ARSHW_u139(y, 16);
+		s[i - 9] += (y << 14) & 0x3FFFFFFF;
+	}
+
+	/*
+	 * Carry propagation must be signed. Moreover, we may have overdone
+	 * it a bit, and obtain a negative result.
+	 *
+	 * The loop above ran 9 times; each time, each word was augmented
+	 * by at most one extra word (in absolute value). Thus, the top
+	 * word must in fine fit in 39 bits, so the carry below will fit
+	 * on 9 bits.
+	 */
+	cc = 0;
+	for (i = 0; i < 9; i ++) {
+		x = s[i] + cc;
+		d[i] = (uint32_t)x & 0x3FFFFFFF;
+		cc = ARSHW_u139(x, 30);
+	}
+
+	/*
+	 * All nine words fit on 30 bits, but there may be an extra
+	 * carry for a few bits (at most 9), and that carry may be
+	 * negative. Moreover, we want the result to fit on 257 bits.
+	 * The two lines below ensure that the word in d[] has length
+	 * 256 bits, and the (signed) carry (beyond 2^256) is in cc. The
+	 * significant length of cc is less than 24 bits, so we will be
+	 * able to switch to 32-bit operations.
+	 */
+	cc = ARSHW_u139(x, 16);
+	d[8] &= 0xFFFF;
+
+	/*
+	 * One extra round of reduction, for cc*2^256, which means
+	 * adding cc*(2^224-2^192-2^96+1) to a 256-bit (nonnegative)
+	 * value. If cc is negative, then it may happen (rarely, but
+	 * not neglectibly so) that the result would be negative. In
+	 * order to avoid that, if cc is negative, then we add the
+	 * modulus once. Note that if cc is negative, then propagating
+	 * that carry must yield a value lower than the modulus, so
+	 * adding the modulus once will keep the final result under
+	 * twice the modulus.
+	 */
+	z = (uint32_t)cc;
+	d[3] -= z << 6;
+	d[6] -= (z << 12) & 0x3FFFFFFF;
+	d[7] -= ARSH_u139(z, 18);
+	d[7] += (z << 14) & 0x3FFFFFFF;
+	d[8] += ARSH_u139(z, 16);
+	c = z >> 31;
+	d[0] -= c;
+	d[3] += c << 6;
+	d[6] += c << 12;
+	d[7] -= c << 14;
+	d[8] += c << 16;
+	for (i = 0; i < 9; i ++) {
+		uint32_t w;
+
+		w = d[i] + z;
+		d[i] = w & 0x3FFFFFFF;
+		z = ARSH_u139(w, 30);
+	}
+}
+
+/*
+ * Perform a "final reduction" in field F256_u139 (field for curve P-256).
+ * The source value must be less than twice the modulus. If the value
+ * is not lower than the modulus, then the modulus is subtracted and
+ * this function returns 1; otherwise, it leaves it untouched and it
+ * returns 0.
+ */
+static uint32_t
+reduce_final_f256_u139(uint32_t *d)
+{
+	uint32_t t[9];
+	uint32_t cc;
+	int i;
+
+	cc = 0;
+	for (i = 0; i < 9; i ++) {
+		uint32_t w;
+
+		w = d[i] - F256_u139[i] - cc;
+		cc = w >> 31;
+		t[i] = w & 0x3FFFFFFF;
+	}
+	cc ^= 1;
+	CCOPY(cc, d, t, sizeof t);
+	return cc;
+}
+
+/*
+ * Jacobian coordinates for a point in P-256: affine coordinates (X,Y)
+ * are such that:
+ *   X = x / z^2
+ *   Y = y / z^3
+ * For the point at infinity, z = 0.
+ * Each point thus admits many possible representations.
+ *
+ * Coordinates are represented in arrays of 32-bit integers, each holding
+ * 30 bits of data. Values may also be slightly greater than the modulus,
+ * but they will always be lower than twice the modulus.
+ */
+typedef struct {
+	uint32_t x[9];
+	uint32_t y[9];
+	uint32_t z[9];
 } p256_jacobian_u139;
 
 /*
@@ -35217,7 +36584,7 @@ typedef struct {
 static void
 p256_to_affine_u139(p256_jacobian_u139 *P)
 {
-	uint32_t t1[20], t2[20];
+	uint32_t t1[9], t2[9];
 	int i;
 
 	/*
@@ -35312,8 +36679,7 @@ p256_double_u139(p256_jacobian_u139 *Q)
 	 *     anyway.
 	 *   - If z = 0 then z' = 0.
 	 */
-	uint32_t t1[20], t2[20], t3[20], t4[20];
-	int i;
+	uint32_t t1[9], t2[9], t3[9], t4[9];
 
 	/*
 	 * Compute z^2 in t1.
@@ -35323,72 +36689,46 @@ p256_double_u139(p256_jacobian_u139 *Q)
 	/*
 	 * Compute x-z^2 in t2 and x+z^2 in t1.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t2[i] = (F256_u139[i] << 1) + Q->x[i] - t1[i];
-		t1[i] += Q->x[i];
-	}
-	norm13_u139(t1, t1, 20);
-	norm13_u139(t2, t2, 20);
+	add_f256_u139(t2, Q->x, t1);
+	sub_f256_u139(t1, Q->x, t1);
 
 	/*
 	 * Compute 3*(x+z^2)*(x-z^2) in t1.
 	 */
 	mul_f256_u139(t3, t1, t2);
-	for (i = 0; i < 20; i ++) {
-		t1[i] = MUL15(3, t3[i]);
-	}
-	norm13_u139(t1, t1, 20);
+	add_f256_u139(t1, t3, t3);
+	add_f256_u139(t1, t3, t1);
 
 	/*
 	 * Compute 4*x*y^2 (in t2) and 2*y^2 (in t3).
 	 */
 	square_f256_u139(t3, Q->y);
-	for (i = 0; i < 20; i ++) {
-		t3[i] <<= 1;
-	}
-	norm13_u139(t3, t3, 20);
+	add_f256_u139(t3, t3, t3);
 	mul_f256_u139(t2, Q->x, t3);
-	for (i = 0; i < 20; i ++) {
-		t2[i] <<= 1;
-	}
-	norm13_u139(t2, t2, 20);
-	reduce_f256_u139(t2);
+	add_f256_u139(t2, t2, t2);
 
 	/*
 	 * Compute x' = m^2 - 2*s.
 	 */
 	square_f256_u139(Q->x, t1);
-	for (i = 0; i < 20; i ++) {
-		Q->x[i] += (F256_u139[i] << 2) - (t2[i] << 1);
-	}
-	norm13_u139(Q->x, Q->x, 20);
-	reduce_f256_u139(Q->x);
+	sub_f256_u139(Q->x, Q->x, t2);
+	sub_f256_u139(Q->x, Q->x, t2);
 
 	/*
 	 * Compute z' = 2*y*z.
 	 */
 	mul_f256_u139(t4, Q->y, Q->z);
-	for (i = 0; i < 20; i ++) {
-		Q->z[i] = t4[i] << 1;
-	}
-	norm13_u139(Q->z, Q->z, 20);
-	reduce_f256_u139(Q->z);
+	add_f256_u139(Q->z, t4, t4);
 
 	/*
 	 * Compute y' = m*(s - x') - 8*y^4. Note that we already have
 	 * 2*y^2 in t3.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t2[i] += (F256_u139[i] << 1) - Q->x[i];
-	}
-	norm13_u139(t2, t2, 20);
+	sub_f256_u139(t2, t2, Q->x);
 	mul_f256_u139(Q->y, t1, t2);
 	square_f256_u139(t4, t3);
-	for (i = 0; i < 20; i ++) {
-		Q->y[i] += (F256_u139[i] << 2) - (t4[i] << 1);
-	}
-	norm13_u139(Q->y, Q->y, 20);
-	reduce_f256_u139(Q->y);
+	add_f256_u139(t4, t4, t4);
+	sub_f256_u139(Q->y, Q->y, t4);
 }
 
 /*
@@ -35438,7 +36778,7 @@ p256_add_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
 	 *   z3 = h * z1 * z2
 	 */
-	uint32_t t1[20], t2[20], t3[20], t4[20], t5[20], t6[20], t7[20];
+	uint32_t t1[9], t2[9], t3[9], t4[9], t5[9], t6[9], t7[9];
 	uint32_t ret;
 	int i;
 
@@ -35463,16 +36803,11 @@ p256_add_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 * We need to test whether r is zero, so we will do some extra
 	 * reduce.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t2[i] += (F256_u139[i] << 1) - t1[i];
-		t4[i] += (F256_u139[i] << 1) - t3[i];
-	}
-	norm13_u139(t2, t2, 20);
-	norm13_u139(t4, t4, 20);
-	reduce_f256_u139(t4);
+	sub_f256_u139(t2, t2, t1);
+	sub_f256_u139(t4, t4, t3);
 	reduce_final_f256_u139(t4);
 	ret = 0;
-	for (i = 0; i < 20; i ++) {
+	for (i = 0; i < 9; i ++) {
 		ret |= t4[i];
 	}
 	ret = (ret | -ret) >> 31;
@@ -35488,26 +36823,17 @@ p256_add_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
 	 */
 	square_f256_u139(P1->x, t4);
-	for (i = 0; i < 20; i ++) {
-		P1->x[i] += (F256_u139[i] << 3) - t5[i] - (t6[i] << 1);
-	}
-	norm13_u139(P1->x, P1->x, 20);
-	reduce_f256_u139(P1->x);
+	sub_f256_u139(P1->x, P1->x, t5);
+	sub_f256_u139(P1->x, P1->x, t6);
+	sub_f256_u139(P1->x, P1->x, t6);
 
 	/*
 	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t6[i] += (F256_u139[i] << 1) - P1->x[i];
-	}
-	norm13_u139(t6, t6, 20);
+	sub_f256_u139(t6, t6, P1->x);
 	mul_f256_u139(P1->y, t4, t6);
 	mul_f256_u139(t1, t5, t3);
-	for (i = 0; i < 20; i ++) {
-		P1->y[i] += (F256_u139[i] << 1) - t1[i];
-	}
-	norm13_u139(P1->y, P1->y, 20);
-	reduce_f256_u139(P1->y);
+	sub_f256_u139(P1->y, P1->y, t1);
 
 	/*
 	 * Compute z3 = h*z1*z2.
@@ -35563,7 +36889,7 @@ p256_add_mixed_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
 	 *   z3 = h * z1
 	 */
-	uint32_t t1[20], t2[20], t3[20], t4[20], t5[20], t6[20], t7[20];
+	uint32_t t1[9], t2[9], t3[9], t4[9], t5[9], t6[9], t7[9];
 	uint32_t ret;
 	int i;
 
@@ -35586,16 +36912,11 @@ p256_add_mixed_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 * We need to test whether r is zero, so we will do some extra
 	 * reduce.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t2[i] += (F256_u139[i] << 1) - t1[i];
-		t4[i] += (F256_u139[i] << 1) - t3[i];
-	}
-	norm13_u139(t2, t2, 20);
-	norm13_u139(t4, t4, 20);
-	reduce_f256_u139(t4);
+	sub_f256_u139(t2, t2, t1);
+	sub_f256_u139(t4, t4, t3);
 	reduce_final_f256_u139(t4);
 	ret = 0;
-	for (i = 0; i < 20; i ++) {
+	for (i = 0; i < 9; i ++) {
 		ret |= t4[i];
 	}
 	ret = (ret | -ret) >> 31;
@@ -35611,26 +36932,17 @@ p256_add_mixed_u139(p256_jacobian_u139 *P1, const p256_jacobian_u139 *P2)
 	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
 	 */
 	square_f256_u139(P1->x, t4);
-	for (i = 0; i < 20; i ++) {
-		P1->x[i] += (F256_u139[i] << 3) - t5[i] - (t6[i] << 1);
-	}
-	norm13_u139(P1->x, P1->x, 20);
-	reduce_f256_u139(P1->x);
+	sub_f256_u139(P1->x, P1->x, t5);
+	sub_f256_u139(P1->x, P1->x, t6);
+	sub_f256_u139(P1->x, P1->x, t6);
 
 	/*
 	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
 	 */
-	for (i = 0; i < 20; i ++) {
-		t6[i] += (F256_u139[i] << 1) - P1->x[i];
-	}
-	norm13_u139(t6, t6, 20);
+	sub_f256_u139(t6, t6, P1->x);
 	mul_f256_u139(P1->y, t4, t6);
 	mul_f256_u139(t1, t5, t3);
-	for (i = 0; i < 20; i ++) {
-		P1->y[i] += (F256_u139[i] << 1) - t1[i];
-	}
-	norm13_u139(P1->y, P1->y, 20);
-	reduce_f256_u139(P1->y);
+	sub_f256_u139(P1->y, P1->y, t1);
 
 	/*
 	 * Compute z3 = h*z1*z2.
@@ -35648,7 +36960,7 @@ static uint32_t
 p256_decode_u139(p256_jacobian_u139 *P, const void *src, size_t len)
 {
 	const unsigned char *buf;
-	uint32_t tx[20], ty[20], t1[20], t2[20];
+	uint32_t tx[9], ty[9], t1[9], t2[9];
 	uint32_t bad;
 	int i;
 
@@ -35669,8 +36981,8 @@ p256_decode_u139(p256_jacobian_u139 *P, const void *src, size_t len)
 	 * Decode the coordinates, and check that they are both lower
 	 * than the modulus.
 	 */
-	tx[19] = be8_to_le13_u139(tx, buf + 1, 32);
-	ty[19] = be8_to_le13_u139(ty, buf + 33, 32);
+	tx[8] = be8_to_le30_u139(tx, buf + 1, 32);
+	ty[8] = be8_to_le30_u139(ty, buf + 33, 32);
 	bad |= reduce_final_f256_u139(tx);
 	bad |= reduce_final_f256_u139(ty);
 
@@ -35680,13 +36992,13 @@ p256_decode_u139(p256_jacobian_u139 *P, const void *src, size_t len)
 	square_f256_u139(t1, tx);
 	mul_f256_u139(t1, tx, t1);
 	square_f256_u139(t2, ty);
-	for (i = 0; i < 20; i ++) {
-		t1[i] += (F256_u139[i] << 3) - MUL15(3, tx[i]) + P256_B_u139[i] - t2[i];
-	}
-	norm13_u139(t1, t1, 20);
-	reduce_f256_u139(t1);
+	sub_f256_u139(t1, t1, tx);
+	sub_f256_u139(t1, t1, tx);
+	sub_f256_u139(t1, t1, tx);
+	add_f256_u139(t1, t1, P256_B_u139);
+	sub_f256_u139(t1, t1, t2);
 	reduce_final_f256_u139(t1);
-	for (i = 0; i < 20; i ++) {
+	for (i = 0; i < 9; i ++) {
 		bad |= t1[i];
 	}
 
@@ -35711,8 +37023,8 @@ p256_encode_u139(void *dst, const p256_jacobian_u139 *P)
 
 	buf = dst;
 	buf[0] = 0x04;
-	le13_to_be8_u139(buf + 1, 32, P->x);
-	le13_to_be8_u139(buf + 33, 32, P->y);
+	le30_to_be8_u139(buf + 1, 32, P->x);
+	le30_to_be8_u139(buf + 33, 32, P->y);
 }
 
 /*
@@ -35774,101 +37086,100 @@ p256_mul_u139(p256_jacobian_u139 *P, const unsigned char *x, size_t xlen)
 /*
  * Precomputed window: k*G points, where G is the curve generator, and k
  * is an integer from 1 to 15 (inclusive). The X and Y coordinates of
- * the point are encoded as 20 words of 13 bits each (little-endian
- * order); 13-bit words are then grouped 2-by-2 into 32-bit words
- * (little-endian order within each word).
+ * the point are encoded as 9 words of 30 bits each (little-endian
+ * order).
  */
-static const uint32_t Gwin_u139[15][20] = {
+static const uint32_t Gwin_u139[15][18] = {
 
-	{ 0x04C60296, 0x02721176, 0x19D00F4A, 0x102517AC,
-	  0x13B8037D, 0x0748103C, 0x1E730E56, 0x08481FE2,
-	  0x0F97012C, 0x00D605F4, 0x1DFA11F5, 0x0C801A0D,
-	  0x0F670CBB, 0x0AED0CC5, 0x115E0E33, 0x181F0785,
-	  0x13F514A7, 0x0FF30E3B, 0x17171E1A, 0x009F18D0 },
+	{ 0x1898C296, 0x1284E517, 0x1EB33A0F, 0x00DF604B,
+	  0x2440F277, 0x339B958E, 0x04247F8B, 0x347CB84B,
+	  0x00006B17, 0x37BF51F5, 0x2ED901A0, 0x3315ECEC,
+	  0x338CD5DA, 0x0F9E162B, 0x1FAD29F0, 0x27F9B8EE,
+	  0x10B8BF86, 0x00004FE3 },
 
-	{ 0x1B341978, 0x16911F11, 0x0D9A1A60, 0x1C4E1FC8,
-	  0x1E040969, 0x096A06B0, 0x091C0030, 0x09EF1A29,
-	  0x18C40D03, 0x00F91C9E, 0x13C313D1, 0x096F0748,
-	  0x011419E0, 0x1CC713A6, 0x1DD31DAD, 0x1EE80C36,
-	  0x1ECD0C69, 0x1A0800A4, 0x08861B8E, 0x000E1DD5 },
+	{ 0x07669978, 0x182D23F1, 0x3F21B35A, 0x225A789D,
+	  0x351AC3C0, 0x08E00C12, 0x34F7E8A5, 0x1EC62340,
+	  0x00007CF2, 0x227873D1, 0x3812DE74, 0x0E982299,
+	  0x1F6B798F, 0x3430DBBA, 0x366B1A7D, 0x2D040293,
+	  0x154436E3, 0x00000777 },
 
-	{ 0x173F1D6C, 0x02CC06F1, 0x14C21FB4, 0x043D1EB6,
-	  0x0F3606B7, 0x1A971C59, 0x1BF71951, 0x01481323,
-	  0x068D0633, 0x00BD12F9, 0x13EA1032, 0x136209E8,
-	  0x1C1E19A7, 0x06C7013E, 0x06C10AB0, 0x14C908BB,
-	  0x05830CE1, 0x1FEF18DD, 0x00620998, 0x010E0D19 },
+	{ 0x06E7FD6C, 0x2D05986F, 0x3ADA985F, 0x31ADC87B,
+	  0x0BF165E6, 0x1FBE5475, 0x30A44C8F, 0x3934698C,
+	  0x00005ECB, 0x227D5032, 0x29E6C49E, 0x04FB83D9,
+	  0x0AAC0D8E, 0x24A2ECD8, 0x2C1B3869, 0x0FF7E374,
+	  0x19031266, 0x00008734 },
 
-	{ 0x18180852, 0x0604111A, 0x0B771509, 0x1B6F0156,
-	  0x00181FE2, 0x1DCC0AF4, 0x16EF0659, 0x11F70E80,
-	  0x11A912D0, 0x01C414D2, 0x027618C6, 0x05840FC6,
-	  0x100215C4, 0x187E0C3B, 0x12771C96, 0x150C0B5D,
-	  0x0FF705FD, 0x07981C67, 0x1AD20C63, 0x01C11C55 },
+	{ 0x2B030852, 0x024C0911, 0x05596EF5, 0x07F8B6DE,
+	  0x262BD003, 0x3779967B, 0x08FBBA02, 0x128D4CB4,
+	  0x0000E253, 0x184ED8C6, 0x310B08FC, 0x30EE0055,
+	  0x3F25B0FC, 0x062D764E, 0x3FB97F6A, 0x33CC719D,
+	  0x15D69318, 0x0000E0F1 },
 
-	{ 0x1E8113ED, 0x0A940370, 0x12920215, 0x1FA31D6F,
-	  0x1F7C0C82, 0x10CD03F7, 0x02640560, 0x081A0B5E,
-	  0x1BD21151, 0x00A21642, 0x0D0B0DA4, 0x0176113F,
-	  0x04440D1D, 0x001A1360, 0x1068012F, 0x1F141E49,
-	  0x10DF136B, 0x0E4F162B, 0x0D44104A, 0x01C1105F },
+	{ 0x03D033ED, 0x05552837, 0x35BE5242, 0x2320BF47,
+	  0x268FDFEF, 0x13215821, 0x140D2D78, 0x02DE9454,
+	  0x00005159, 0x3DA16DA4, 0x0742ED13, 0x0D80888D,
+	  0x004BC035, 0x0A79260D, 0x06FCDAFE, 0x2727D8AE,
+	  0x1F6A2412, 0x0000E0C1 },
 
-	{ 0x011411A9, 0x01551A4F, 0x0ADA0C6B, 0x01BD0EC8,
-	  0x18120C74, 0x112F1778, 0x099202CB, 0x0C05124B,
-	  0x195316A4, 0x01600685, 0x1E3B1FE2, 0x189014E3,
-	  0x0B5E1FD7, 0x0E0311F8, 0x08E000F7, 0x174E00DE,
-	  0x160702DF, 0x1B5A15BF, 0x03A11237, 0x01D01704 },
+	{ 0x3C2291A9, 0x1AC2ABA4, 0x3B215B4C, 0x131D037A,
+	  0x17DDE302, 0x0C90B2E2, 0x0602C92D, 0x05CA9DA9,
+	  0x0000B01A, 0x0FC77FE2, 0x35F1214E, 0x07E16BDF,
+	  0x003DDC07, 0x2703791C, 0x3038B7EE, 0x3DAD56FE,
+	  0x041D0C8D, 0x0000E85C },
 
-	{ 0x0C3D12A3, 0x0C501C0C, 0x17AD1300, 0x1715003F,
-	  0x03F719F8, 0x18031ED8, 0x1D980667, 0x0F681896,
-	  0x1B7D00BF, 0x011C14CE, 0x0FA000B4, 0x1C3501B0,
-	  0x0D901C55, 0x06790C10, 0x029E0736, 0x0DEB0400,
-	  0x034F183A, 0x030619B4, 0x0DEF0033, 0x00E71AC7 },
+	{ 0x3187B2A3, 0x0018A1C0, 0x00FEF5B3, 0x3E7E2E2A,
+	  0x01FB607E, 0x2CC199F0, 0x37B4625B, 0x0EDBE82F,
+	  0x00008E53, 0x01F400B4, 0x15786A1B, 0x3041B21C,
+	  0x31CD8CF2, 0x35900053, 0x1A7E0E9B, 0x318366D0,
+	  0x076F780C, 0x000073EB },
 
-	{ 0x1B7D1393, 0x1B3B1076, 0x0BED1B4D, 0x13011F3A,
-	  0x0E0E1238, 0x156A132B, 0x013A02D3, 0x160A0D01,
-	  0x1CED1EE9, 0x00C5165D, 0x184C157E, 0x08141A83,
-	  0x153C0DA5, 0x1ED70F9D, 0x05170D51, 0x02CF13B8,
-	  0x18AE1771, 0x1B04113F, 0x05EC11E9, 0x015A16B3 },
+	{ 0x1B6FB393, 0x13767707, 0x3CE97DBB, 0x348E2603,
+	  0x354CADC1, 0x09D0B4EA, 0x1B053404, 0x1DE76FBA,
+	  0x000062D9, 0x0F09957E, 0x295029A8, 0x3E76A78D,
+	  0x3B547DAE, 0x27CEE0A2, 0x0575DC45, 0x1D8244FF,
+	  0x332F647A, 0x0000AD5A },
 
-	{ 0x04A41EE0, 0x1D1412E4, 0x1C591D79, 0x118511B7,
-	  0x14F00ACB, 0x1AE31E1C, 0x049C0D51, 0x016E061E,
-	  0x1DB71EDF, 0x01D41A35, 0x0E8208FA, 0x14441293,
-	  0x011F1E85, 0x1D54137A, 0x026B114F, 0x151D0832,
-	  0x00A50964, 0x1F9C1E1C, 0x064B12C9, 0x005409D1 },
+	{ 0x10949EE0, 0x1E7A292E, 0x06DF8B3D, 0x02B2E30B,
+	  0x31F8729E, 0x24E35475, 0x30B71878, 0x35EDBFB7,
+	  0x0000EA68, 0x0DD048FA, 0x21688929, 0x0DE823FE,
+	  0x1C53FAA9, 0x0EA0C84D, 0x052A592A, 0x1FCE7870,
+	  0x11325CB2, 0x00002A27 },
 
-	{ 0x062B123F, 0x0C0D0501, 0x183704C3, 0x08E31120,
-	  0x0A2E0A6C, 0x14440FED, 0x090A0D1E, 0x13271964,
-	  0x0B590A3A, 0x019D1D9B, 0x05780773, 0x09770A91,
-	  0x0F770CA3, 0x053F19D4, 0x02C80DED, 0x1A761304,
-	  0x091E0DD9, 0x15D201B8, 0x151109AA, 0x010F0198 },
+	{ 0x04C5723F, 0x30D81A50, 0x048306E4, 0x329B11C7,
+	  0x223FB545, 0x085347A8, 0x2993E591, 0x1B5ACA8E,
+	  0x0000CEF6, 0x04AF0773, 0x28D2EEA9, 0x2751EEEC,
+	  0x037B4A7F, 0x3B4C1059, 0x08F37674, 0x2AE906E1,
+	  0x18A88A6A, 0x00008786 },
 
-	{ 0x05E101D1, 0x072314DD, 0x045F1433, 0x1A041541,
-	  0x10B3142E, 0x01840736, 0x1C1B19DB, 0x098B0418,
-	  0x1DBC083B, 0x007D1444, 0x01511740, 0x11DD1F3A,
-	  0x04ED0E2F, 0x1B4B1A62, 0x10480D04, 0x09E911A2,
-	  0x04211AFA, 0x19140893, 0x04D60CC4, 0x01210648 },
+	{ 0x34BC21D1, 0x0CCE474D, 0x15048BF4, 0x1D0BB409,
+	  0x021CDA16, 0x20DE76C3, 0x34C59063, 0x04EDE20E,
+	  0x00003ED1, 0x282A3740, 0x0BE3BBF3, 0x29889DAE,
+	  0x03413697, 0x34C68A09, 0x210EBE93, 0x0C8A224C,
+	  0x0826B331, 0x00009099 },
 
-	{ 0x112703C4, 0x018B1BA1, 0x164C1D50, 0x05160BE0,
-	  0x0BCC1830, 0x01CB1554, 0x13291732, 0x1B2B1918,
-	  0x0DED0817, 0x00E80775, 0x0A2401D3, 0x0BFE08B3,
-	  0x0E531199, 0x058616E9, 0x04770B91, 0x110F0C55,
-	  0x19C11554, 0x0BFB1159, 0x03541C38, 0x000E1C2D },
+	{ 0x0624E3C4, 0x140317BA, 0x2F82C99D, 0x260C0A2C,
+	  0x25D55179, 0x194DCC83, 0x3D95E462, 0x356F6A05,
+	  0x0000741D, 0x0D4481D3, 0x2657FC8B, 0x1BA5CA71,
+	  0x3AE44B0D, 0x07B1548E, 0x0E0D5522, 0x05FDC567,
+	  0x2D1AA70E, 0x00000770 },
 
-	{ 0x10390C01, 0x02BB0751, 0x0AC5098E, 0x096C17AB,
-	  0x03C90E28, 0x10BD18BF, 0x002E1F2D, 0x092B0986,
-	  0x1BD700AC, 0x002E1F20, 0x1E3D1FD8, 0x077718BB,
-	  0x06F919C4, 0x187407ED, 0x11370E14, 0x081E139C,
-	  0x00481ADB, 0x14AB0289, 0x066A0EBE, 0x00C70ED6 },
+	{ 0x06072C01, 0x23857675, 0x1EAD58A9, 0x0B8A12D9,
+	  0x1EE2FC79, 0x0177CB61, 0x0495A618, 0x20DEB82B,
+	  0x0000177C, 0x2FC7BFD8, 0x310EEF8B, 0x1FB4DF39,
+	  0x3B8530E8, 0x0F4E7226, 0x0246B6D0, 0x2A558A24,
+	  0x163353AF, 0x000063BB },
 
-	{ 0x0694120B, 0x124E1CC9, 0x0E2F0570, 0x17CF081A,
-	  0x078906AC, 0x066D17CF, 0x1B3207F4, 0x0C5705E9,
-	  0x10001C38, 0x00A919DE, 0x06851375, 0x0F900BD8,
-	  0x080401BA, 0x0EEE0D42, 0x1B8B11EA, 0x0B4519F0,
-	  0x090F18C0, 0x062E1508, 0x0DD909F4, 0x01EB067C },
+	{ 0x24D2920B, 0x1C249DCC, 0x2069C5E5, 0x09AB2F9E,
+	  0x36DF3CF1, 0x1991FD0C, 0x062B97A7, 0x1E80070E,
+	  0x000054E7, 0x20D0B375, 0x2E9F20BD, 0x35090081,
+	  0x1C7A9DDC, 0x22E7C371, 0x087E3016, 0x03175421,
+	  0x3C6ECA7D, 0x0000F599 },
 
-	{ 0x0CDC1D5F, 0x0D1818F9, 0x07781636, 0x125B18E8,
-	  0x0D7003AF, 0x13110099, 0x1D9B1899, 0x175C1EB7,
-	  0x0E34171A, 0x01E01153, 0x081A0F36, 0x0B391783,
-	  0x1D1F147E, 0x19CE16D7, 0x11511B21, 0x1F2C10F9,
-	  0x12CA0E51, 0x05A31D39, 0x171A192E, 0x016B0E4F }
+	{ 0x259B9D5F, 0x0D9A318F, 0x23A0EF16, 0x00EBE4B7,
+	  0x088265AE, 0x2CDE2666, 0x2BAE7ADF, 0x1371A5C6,
+	  0x0000F045, 0x0D034F36, 0x1F967378, 0x1B5FA3F4,
+	  0x0EC8739D, 0x1643E62A, 0x1653947E, 0x22D1F4E6,
+	  0x0FB8D64B, 0x0000B5B9 }
 };
 
 /*
@@ -35877,7 +37188,7 @@ static const uint32_t Gwin_u139[15][20] = {
 static void
 lookup_Gwin_u139(p256_jacobian_u139 *T, uint32_t idx)
 {
-	uint32_t xy[20];
+	uint32_t xy[18];
 	uint32_t k;
 	size_t u;
 
@@ -35886,16 +37197,12 @@ lookup_Gwin_u139(p256_jacobian_u139 *T, uint32_t idx)
 		uint32_t m;
 
 		m = -EQ(idx, k + 1);
-		for (u = 0; u < 20; u ++) {
+		for (u = 0; u < 18; u ++) {
 			xy[u] |= m & Gwin_u139[k][u];
 		}
 	}
-	for (u = 0; u < 10; u ++) {
-		T->x[(u << 1) + 0] = xy[u] & 0xFFFF;
-		T->x[(u << 1) + 1] = xy[u] >> 16;
-		T->y[(u << 1) + 0] = xy[u + 10] & 0xFFFF;
-		T->y[(u << 1) + 1] = xy[u + 10] >> 16;
-	}
+	memcpy(T->x, &xy[0], sizeof T->x);
+	memcpy(T->y, &xy[9], sizeof T->y);
 	memset(T->z, 0, sizeof T->z);
 	T->z[0] = 1;
 }
@@ -36054,7 +37361,7 @@ api_muladd_u139(unsigned char *A, const unsigned char *B, size_t len,
 	t = p256_add_u139(&P, &Q);
 	reduce_final_f256_u139(P.z);
 	z = 0;
-	for (i = 0; i < 20; i ++) {
+	for (i = 0; i < 9; i ++) {
 		z |= P.z[i];
 	}
 	z = EQ(z, 0);
@@ -36077,7 +37384,7 @@ api_muladd_u139(unsigned char *A, const unsigned char *B, size_t len,
 }
 
 /* see bearssl_ec.h */
-const br_ec_impl br_ec_p256_m15 = {
+const br_ec_impl br_ec_p256_m31 = {
 	(uint32_t)0x00800000,
 	&api_generator_u139,
 	&api_order_u139,
@@ -36085,1483 +37392,6 @@ const br_ec_impl br_ec_p256_m15 = {
 	&api_mul_u139,
 	&api_mulgen_u139,
 	&api_muladd_u139
-};
-
-/* === src/ec/ec_p256_m31.c === */
-#line 1 "src/ec/ec_p256_m31.c"
-/*
- * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining 
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be 
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
-
-/*
- * If BR_NO_ARITH_SHIFT is undefined, or defined to 0, then we _assume_
- * that right-shifting a signed negative integer copies the sign bit
- * (arithmetic right-shift). This is "implementation-defined behaviour",
- * i.e. it is not undefined, but it may differ between compilers. Each
- * compiler is supposed to document its behaviour in that respect. GCC
- * explicitly defines that an arithmetic right shift is used. We expect
- * all other compilers to do the same, because underlying CPU offer an
- * arithmetic right shift opcode that could not be used otherwise.
- */
-#if BR_NO_ARITH_SHIFT
-#define ARSH_u140(x, n)    (((uint32_t)(x) >> (n)) \
-                      | ((-((uint32_t)(x) >> 31)) << (32 - (n))))
-#define ARSHW_u140(x, n)   (((uint64_t)(x) >> (n)) \
-                      | ((-((uint64_t)(x) >> 63)) << (64 - (n))))
-#else
-#define ARSH_u140(x, n)    ((*(int32_t *)&(x)) >> (n))
-#define ARSHW_u140(x, n)   ((*(int64_t *)&(x)) >> (n))
-#endif
-
-/*
- * Convert an integer from unsigned big-endian encoding to a sequence of
- * 30-bit words in little-endian order. The final "partial" word is
- * returned.
- */
-static uint32_t
-be8_to_le30_u140(uint32_t *dst, const unsigned char *src, size_t len)
-{
-	uint32_t acc;
-	int acc_len;
-
-	acc = 0;
-	acc_len = 0;
-	while (len -- > 0) {
-		uint32_t b;
-
-		b = src[len];
-		if (acc_len < 22) {
-			acc |= b << acc_len;
-			acc_len += 8;
-		} else {
-			*dst ++ = (acc | (b << acc_len)) & 0x3FFFFFFF;
-			acc = b >> (30 - acc_len);
-			acc_len -= 22;
-		}
-	}
-	return acc;
-}
-
-/*
- * Convert an integer (30-bit words, little-endian) to unsigned
- * big-endian encoding. The total encoding length is provided; all
- * the destination bytes will be filled.
- */
-static void
-le30_to_be8_u140(unsigned char *dst, size_t len, const uint32_t *src)
-{
-	uint32_t acc;
-	int acc_len;
-
-	acc = 0;
-	acc_len = 0;
-	while (len -- > 0) {
-		if (acc_len < 8) {
-			uint32_t w;
-
-			w = *src ++;
-			dst[len] = (unsigned char)(acc | (w << acc_len));
-			acc = w >> (8 - acc_len);
-			acc_len += 22;
-		} else {
-			dst[len] = (unsigned char)acc;
-			acc >>= 8;
-			acc_len -= 8;
-		}
-	}
-}
-
-/*
- * Multiply two integers. Source integers are represented as arrays of
- * nine 30-bit words, for values up to 2^270-1. Result is encoded over
- * 18 words of 30 bits each.
- */
-static void
-mul9_u140(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	/*
-	 * Maximum intermediate result is no more than
-	 * 10376293531797946367, which fits in 64 bits. Reason:
-	 *
-	 *   10376293531797946367 = 9 * (2^30-1)^2 + 9663676406
-	 *   10376293531797946367 < 9663676407 * 2^30
-	 *
-	 * Thus, adding together 9 products of 30-bit integers, with
-	 * a carry of at most 9663676406, yields an integer that fits
-	 * on 64 bits and generates a carry of at most 9663676406.
-	 */
-	uint64_t t[17];
-	uint64_t cc;
-	int i;
-
-	t[ 0] = MUL31(a[0], b[0]);
-	t[ 1] = MUL31(a[0], b[1])
-		+ MUL31(a[1], b[0]);
-	t[ 2] = MUL31(a[0], b[2])
-		+ MUL31(a[1], b[1])
-		+ MUL31(a[2], b[0]);
-	t[ 3] = MUL31(a[0], b[3])
-		+ MUL31(a[1], b[2])
-		+ MUL31(a[2], b[1])
-		+ MUL31(a[3], b[0]);
-	t[ 4] = MUL31(a[0], b[4])
-		+ MUL31(a[1], b[3])
-		+ MUL31(a[2], b[2])
-		+ MUL31(a[3], b[1])
-		+ MUL31(a[4], b[0]);
-	t[ 5] = MUL31(a[0], b[5])
-		+ MUL31(a[1], b[4])
-		+ MUL31(a[2], b[3])
-		+ MUL31(a[3], b[2])
-		+ MUL31(a[4], b[1])
-		+ MUL31(a[5], b[0]);
-	t[ 6] = MUL31(a[0], b[6])
-		+ MUL31(a[1], b[5])
-		+ MUL31(a[2], b[4])
-		+ MUL31(a[3], b[3])
-		+ MUL31(a[4], b[2])
-		+ MUL31(a[5], b[1])
-		+ MUL31(a[6], b[0]);
-	t[ 7] = MUL31(a[0], b[7])
-		+ MUL31(a[1], b[6])
-		+ MUL31(a[2], b[5])
-		+ MUL31(a[3], b[4])
-		+ MUL31(a[4], b[3])
-		+ MUL31(a[5], b[2])
-		+ MUL31(a[6], b[1])
-		+ MUL31(a[7], b[0]);
-	t[ 8] = MUL31(a[0], b[8])
-		+ MUL31(a[1], b[7])
-		+ MUL31(a[2], b[6])
-		+ MUL31(a[3], b[5])
-		+ MUL31(a[4], b[4])
-		+ MUL31(a[5], b[3])
-		+ MUL31(a[6], b[2])
-		+ MUL31(a[7], b[1])
-		+ MUL31(a[8], b[0]);
-	t[ 9] = MUL31(a[1], b[8])
-		+ MUL31(a[2], b[7])
-		+ MUL31(a[3], b[6])
-		+ MUL31(a[4], b[5])
-		+ MUL31(a[5], b[4])
-		+ MUL31(a[6], b[3])
-		+ MUL31(a[7], b[2])
-		+ MUL31(a[8], b[1]);
-	t[10] = MUL31(a[2], b[8])
-		+ MUL31(a[3], b[7])
-		+ MUL31(a[4], b[6])
-		+ MUL31(a[5], b[5])
-		+ MUL31(a[6], b[4])
-		+ MUL31(a[7], b[3])
-		+ MUL31(a[8], b[2]);
-	t[11] = MUL31(a[3], b[8])
-		+ MUL31(a[4], b[7])
-		+ MUL31(a[5], b[6])
-		+ MUL31(a[6], b[5])
-		+ MUL31(a[7], b[4])
-		+ MUL31(a[8], b[3]);
-	t[12] = MUL31(a[4], b[8])
-		+ MUL31(a[5], b[7])
-		+ MUL31(a[6], b[6])
-		+ MUL31(a[7], b[5])
-		+ MUL31(a[8], b[4]);
-	t[13] = MUL31(a[5], b[8])
-		+ MUL31(a[6], b[7])
-		+ MUL31(a[7], b[6])
-		+ MUL31(a[8], b[5]);
-	t[14] = MUL31(a[6], b[8])
-		+ MUL31(a[7], b[7])
-		+ MUL31(a[8], b[6]);
-	t[15] = MUL31(a[7], b[8])
-		+ MUL31(a[8], b[7]);
-	t[16] = MUL31(a[8], b[8]);
-
-	/*
-	 * Propagate carries.
-	 */
-	cc = 0;
-	for (i = 0; i < 17; i ++) {
-		uint64_t w;
-
-		w = t[i] + cc;
-		d[i] = (uint32_t)w & 0x3FFFFFFF;
-		cc = w >> 30;
-	}
-	d[17] = (uint32_t)cc;
-}
-
-/*
- * Square a 270-bit integer, represented as an array of nine 30-bit words.
- * Result uses 18 words of 30 bits each.
- */
-static void
-square9_u140(uint32_t *d, const uint32_t *a)
-{
-	uint64_t t[17];
-	uint64_t cc;
-	int i;
-
-	t[ 0] = MUL31(a[0], a[0]);
-	t[ 1] = ((MUL31(a[0], a[1])) << 1);
-	t[ 2] = MUL31(a[1], a[1])
-		+ ((MUL31(a[0], a[2])) << 1);
-	t[ 3] = ((MUL31(a[0], a[3])
-		+ MUL31(a[1], a[2])) << 1);
-	t[ 4] = MUL31(a[2], a[2])
-		+ ((MUL31(a[0], a[4])
-		+ MUL31(a[1], a[3])) << 1);
-	t[ 5] = ((MUL31(a[0], a[5])
-		+ MUL31(a[1], a[4])
-		+ MUL31(a[2], a[3])) << 1);
-	t[ 6] = MUL31(a[3], a[3])
-		+ ((MUL31(a[0], a[6])
-		+ MUL31(a[1], a[5])
-		+ MUL31(a[2], a[4])) << 1);
-	t[ 7] = ((MUL31(a[0], a[7])
-		+ MUL31(a[1], a[6])
-		+ MUL31(a[2], a[5])
-		+ MUL31(a[3], a[4])) << 1);
-	t[ 8] = MUL31(a[4], a[4])
-		+ ((MUL31(a[0], a[8])
-		+ MUL31(a[1], a[7])
-		+ MUL31(a[2], a[6])
-		+ MUL31(a[3], a[5])) << 1);
-	t[ 9] = ((MUL31(a[1], a[8])
-		+ MUL31(a[2], a[7])
-		+ MUL31(a[3], a[6])
-		+ MUL31(a[4], a[5])) << 1);
-	t[10] = MUL31(a[5], a[5])
-		+ ((MUL31(a[2], a[8])
-		+ MUL31(a[3], a[7])
-		+ MUL31(a[4], a[6])) << 1);
-	t[11] = ((MUL31(a[3], a[8])
-		+ MUL31(a[4], a[7])
-		+ MUL31(a[5], a[6])) << 1);
-	t[12] = MUL31(a[6], a[6])
-		+ ((MUL31(a[4], a[8])
-		+ MUL31(a[5], a[7])) << 1);
-	t[13] = ((MUL31(a[5], a[8])
-		+ MUL31(a[6], a[7])) << 1);
-	t[14] = MUL31(a[7], a[7])
-		+ ((MUL31(a[6], a[8])) << 1);
-	t[15] = ((MUL31(a[7], a[8])) << 1);
-	t[16] = MUL31(a[8], a[8]);
-
-	/*
-	 * Propagate carries.
-	 */
-	cc = 0;
-	for (i = 0; i < 17; i ++) {
-		uint64_t w;
-
-		w = t[i] + cc;
-		d[i] = (uint32_t)w & 0x3FFFFFFF;
-		cc = w >> 30;
-	}
-	d[17] = (uint32_t)cc;
-}
-
-/*
- * Base field modulus for P-256.
- */
-static const uint32_t F256_u140[] = {
-
-	0x3FFFFFFF, 0x3FFFFFFF, 0x3FFFFFFF, 0x0000003F, 0x00000000,
-	0x00000000, 0x00001000, 0x3FFFC000, 0x0000FFFF
-};
-
-/*
- * The 'b' curve equation coefficient for P-256.
- */
-static const uint32_t P256_B_u140[] = {
-
-	0x27D2604B, 0x2F38F0F8, 0x053B0F63, 0x0741AC33, 0x1886BC65,
-	0x2EF555DA, 0x293E7B3E, 0x0D762A8E, 0x00005AC6
-};
-
-/*
- * Addition in the field. Source operands shall fit on 257 bits; output
- * will be lower than twice the modulus.
- */
-static void
-add_f256_u140(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t w, cc;
-	int i;
-
-	cc = 0;
-	for (i = 0; i < 9; i ++) {
-		w = a[i] + b[i] + cc;
-		d[i] = w & 0x3FFFFFFF;
-		cc = w >> 30;
-	}
-	w >>= 16;
-	d[8] &= 0xFFFF;
-	d[3] -= w << 6;
-	d[6] -= w << 12;
-	d[7] += w << 14;
-	cc = w;
-	for (i = 0; i < 9; i ++) {
-		w = d[i] + cc;
-		d[i] = w & 0x3FFFFFFF;
-		cc = ARSH_u140(w, 30);
-	}
-}
-
-/*
- * Subtraction in the field. Source operands shall be smaller than twice
- * the modulus; the result will fulfil the same property.
- */
-static void
-sub_f256_u140(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t w, cc;
-	int i;
-
-	/*
-	 * We really compute a - b + 2*p to make sure that the result is
-	 * positive.
-	 */
-	w = a[0] - b[0] - 0x00002;
-	d[0] = w & 0x3FFFFFFF;
-	w = a[1] - b[1] + ARSH_u140(w, 30);
-	d[1] = w & 0x3FFFFFFF;
-	w = a[2] - b[2] + ARSH_u140(w, 30);
-	d[2] = w & 0x3FFFFFFF;
-	w = a[3] - b[3] + ARSH_u140(w, 30) + 0x00080;
-	d[3] = w & 0x3FFFFFFF;
-	w = a[4] - b[4] + ARSH_u140(w, 30);
-	d[4] = w & 0x3FFFFFFF;
-	w = a[5] - b[5] + ARSH_u140(w, 30);
-	d[5] = w & 0x3FFFFFFF;
-	w = a[6] - b[6] + ARSH_u140(w, 30) + 0x02000;
-	d[6] = w & 0x3FFFFFFF;
-	w = a[7] - b[7] + ARSH_u140(w, 30) - 0x08000;
-	d[7] = w & 0x3FFFFFFF;
-	w = a[8] - b[8] + ARSH_u140(w, 30) + 0x20000;
-	d[8] = w & 0xFFFF;
-	w >>= 16;
-	d[8] &= 0xFFFF;
-	d[3] -= w << 6;
-	d[6] -= w << 12;
-	d[7] += w << 14;
-	cc = w;
-	for (i = 0; i < 9; i ++) {
-		w = d[i] + cc;
-		d[i] = w & 0x3FFFFFFF;
-		cc = ARSH_u140(w, 30);
-	}
-}
-
-/*
- * Compute a multiplication in F256_u140. Source operands shall be less than
- * twice the modulus.
- */
-static void
-mul_f256_u140(uint32_t *d, const uint32_t *a, const uint32_t *b)
-{
-	uint32_t t[18];
-	uint64_t s[18];
-	uint64_t cc, x;
-	uint32_t z, c;
-	int i;
-
-	mul9_u140(t, a, b);
-
-	/*
-	 * Modular reduction: each high word in added/subtracted where
-	 * necessary.
-	 *
-	 * The modulus is:
-	 *    p = 2^256 - 2^224 + 2^192 + 2^96 - 1
-	 * Therefore:
-	 *    2^256 = 2^224 - 2^192 - 2^96 + 1 mod p
-	 *
-	 * For a word x at bit offset n (n >= 256), we have:
-	 *    x*2^n = x*2^(n-32) - x*2^(n-64)
-	 *            - x*2^(n - 160) + x*2^(n-256) mod p
-	 *
-	 * Thus, we can nullify the high word if we reinject it at some
-	 * proper emplacements.
-	 *
-	 * We use 64-bit intermediate words to allow for carries to
-	 * accumulate easily, before performing the final propagation.
-	 */
-	for (i = 0; i < 18; i ++) {
-		s[i] = t[i];
-	}
-
-	for (i = 17; i >= 9; i --) {
-		uint64_t y;
-
-		y = s[i];
-		s[i - 1] += ARSHW_u140(y, 2);
-		s[i - 2] += (y << 28) & 0x3FFFFFFF;
-		s[i - 2] -= ARSHW_u140(y, 4);
-		s[i - 3] -= (y << 26) & 0x3FFFFFFF;
-		s[i - 5] -= ARSHW_u140(y, 10);
-		s[i - 6] -= (y << 20) & 0x3FFFFFFF;
-		s[i - 8] += ARSHW_u140(y, 16);
-		s[i - 9] += (y << 14) & 0x3FFFFFFF;
-	}
-
-	/*
-	 * Carry propagation must be signed. Moreover, we may have overdone
-	 * it a bit, and obtain a negative result.
-	 *
-	 * The loop above ran 9 times; each time, each word was augmented
-	 * by at most one extra word (in absolute value). Thus, the top
-	 * word must in fine fit in 39 bits, so the carry below will fit
-	 * on 9 bits.
-	 */
-	cc = 0;
-	for (i = 0; i < 9; i ++) {
-		x = s[i] + cc;
-		d[i] = (uint32_t)x & 0x3FFFFFFF;
-		cc = ARSHW_u140(x, 30);
-	}
-
-	/*
-	 * All nine words fit on 30 bits, but there may be an extra
-	 * carry for a few bits (at most 9), and that carry may be
-	 * negative. Moreover, we want the result to fit on 257 bits.
-	 * The two lines below ensure that the word in d[] has length
-	 * 256 bits, and the (signed) carry (beyond 2^256) is in cc. The
-	 * significant length of cc is less than 24 bits, so we will be
-	 * able to switch to 32-bit operations.
-	 */
-	cc = ARSHW_u140(x, 16);
-	d[8] &= 0xFFFF;
-
-	/*
-	 * One extra round of reduction, for cc*2^256, which means
-	 * adding cc*(2^224-2^192-2^96+1) to a 256-bit (nonnegative)
-	 * value. If cc is negative, then it may happen (rarely, but
-	 * not neglectibly so) that the result would be negative. In
-	 * order to avoid that, if cc is negative, then we add the
-	 * modulus once. Note that if cc is negative, then propagating
-	 * that carry must yield a value lower than the modulus, so
-	 * adding the modulus once will keep the final result under
-	 * twice the modulus.
-	 */
-	z = (uint32_t)cc;
-	d[3] -= z << 6;
-	d[6] -= (z << 12) & 0x3FFFFFFF;
-	d[7] -= ARSH_u140(z, 18);
-	d[7] += (z << 14) & 0x3FFFFFFF;
-	d[8] += ARSH_u140(z, 16);
-	c = z >> 31;
-	d[0] -= c;
-	d[3] += c << 6;
-	d[6] += c << 12;
-	d[7] -= c << 14;
-	d[8] += c << 16;
-	for (i = 0; i < 9; i ++) {
-		uint32_t w;
-
-		w = d[i] + z;
-		d[i] = w & 0x3FFFFFFF;
-		z = ARSH_u140(w, 30);
-	}
-}
-
-/*
- * Compute a square in F256_u140. Source operand shall be less than
- * twice the modulus.
- */
-static void
-square_f256_u140(uint32_t *d, const uint32_t *a)
-{
-	uint32_t t[18];
-	uint64_t s[18];
-	uint64_t cc, x;
-	uint32_t z, c;
-	int i;
-
-	square9_u140(t, a);
-
-	/*
-	 * Modular reduction: each high word in added/subtracted where
-	 * necessary.
-	 *
-	 * The modulus is:
-	 *    p = 2^256 - 2^224 + 2^192 + 2^96 - 1
-	 * Therefore:
-	 *    2^256 = 2^224 - 2^192 - 2^96 + 1 mod p
-	 *
-	 * For a word x at bit offset n (n >= 256), we have:
-	 *    x*2^n = x*2^(n-32) - x*2^(n-64)
-	 *            - x*2^(n - 160) + x*2^(n-256) mod p
-	 *
-	 * Thus, we can nullify the high word if we reinject it at some
-	 * proper emplacements.
-	 *
-	 * We use 64-bit intermediate words to allow for carries to
-	 * accumulate easily, before performing the final propagation.
-	 */
-	for (i = 0; i < 18; i ++) {
-		s[i] = t[i];
-	}
-
-	for (i = 17; i >= 9; i --) {
-		uint64_t y;
-
-		y = s[i];
-		s[i - 1] += ARSHW_u140(y, 2);
-		s[i - 2] += (y << 28) & 0x3FFFFFFF;
-		s[i - 2] -= ARSHW_u140(y, 4);
-		s[i - 3] -= (y << 26) & 0x3FFFFFFF;
-		s[i - 5] -= ARSHW_u140(y, 10);
-		s[i - 6] -= (y << 20) & 0x3FFFFFFF;
-		s[i - 8] += ARSHW_u140(y, 16);
-		s[i - 9] += (y << 14) & 0x3FFFFFFF;
-	}
-
-	/*
-	 * Carry propagation must be signed. Moreover, we may have overdone
-	 * it a bit, and obtain a negative result.
-	 *
-	 * The loop above ran 9 times; each time, each word was augmented
-	 * by at most one extra word (in absolute value). Thus, the top
-	 * word must in fine fit in 39 bits, so the carry below will fit
-	 * on 9 bits.
-	 */
-	cc = 0;
-	for (i = 0; i < 9; i ++) {
-		x = s[i] + cc;
-		d[i] = (uint32_t)x & 0x3FFFFFFF;
-		cc = ARSHW_u140(x, 30);
-	}
-
-	/*
-	 * All nine words fit on 30 bits, but there may be an extra
-	 * carry for a few bits (at most 9), and that carry may be
-	 * negative. Moreover, we want the result to fit on 257 bits.
-	 * The two lines below ensure that the word in d[] has length
-	 * 256 bits, and the (signed) carry (beyond 2^256) is in cc. The
-	 * significant length of cc is less than 24 bits, so we will be
-	 * able to switch to 32-bit operations.
-	 */
-	cc = ARSHW_u140(x, 16);
-	d[8] &= 0xFFFF;
-
-	/*
-	 * One extra round of reduction, for cc*2^256, which means
-	 * adding cc*(2^224-2^192-2^96+1) to a 256-bit (nonnegative)
-	 * value. If cc is negative, then it may happen (rarely, but
-	 * not neglectibly so) that the result would be negative. In
-	 * order to avoid that, if cc is negative, then we add the
-	 * modulus once. Note that if cc is negative, then propagating
-	 * that carry must yield a value lower than the modulus, so
-	 * adding the modulus once will keep the final result under
-	 * twice the modulus.
-	 */
-	z = (uint32_t)cc;
-	d[3] -= z << 6;
-	d[6] -= (z << 12) & 0x3FFFFFFF;
-	d[7] -= ARSH_u140(z, 18);
-	d[7] += (z << 14) & 0x3FFFFFFF;
-	d[8] += ARSH_u140(z, 16);
-	c = z >> 31;
-	d[0] -= c;
-	d[3] += c << 6;
-	d[6] += c << 12;
-	d[7] -= c << 14;
-	d[8] += c << 16;
-	for (i = 0; i < 9; i ++) {
-		uint32_t w;
-
-		w = d[i] + z;
-		d[i] = w & 0x3FFFFFFF;
-		z = ARSH_u140(w, 30);
-	}
-}
-
-/*
- * Perform a "final reduction" in field F256_u140 (field for curve P-256).
- * The source value must be less than twice the modulus. If the value
- * is not lower than the modulus, then the modulus is subtracted and
- * this function returns 1; otherwise, it leaves it untouched and it
- * returns 0.
- */
-static uint32_t
-reduce_final_f256_u140(uint32_t *d)
-{
-	uint32_t t[9];
-	uint32_t cc;
-	int i;
-
-	cc = 0;
-	for (i = 0; i < 9; i ++) {
-		uint32_t w;
-
-		w = d[i] - F256_u140[i] - cc;
-		cc = w >> 31;
-		t[i] = w & 0x3FFFFFFF;
-	}
-	cc ^= 1;
-	CCOPY(cc, d, t, sizeof t);
-	return cc;
-}
-
-/*
- * Jacobian coordinates for a point in P-256: affine coordinates (X,Y)
- * are such that:
- *   X = x / z^2
- *   Y = y / z^3
- * For the point at infinity, z = 0.
- * Each point thus admits many possible representations.
- *
- * Coordinates are represented in arrays of 32-bit integers, each holding
- * 30 bits of data. Values may also be slightly greater than the modulus,
- * but they will always be lower than twice the modulus.
- */
-typedef struct {
-	uint32_t x[9];
-	uint32_t y[9];
-	uint32_t z[9];
-} p256_jacobian_u140;
-
-/*
- * Convert a point to affine coordinates:
- *  - If the point is the point at infinity, then all three coordinates
- *    are set to 0.
- *  - Otherwise, the 'z' coordinate is set to 1, and the 'x' and 'y'
- *    coordinates are the 'X' and 'Y' affine coordinates.
- * The coordinates are guaranteed to be lower than the modulus.
- */
-static void
-p256_to_affine_u140(p256_jacobian_u140 *P)
-{
-	uint32_t t1[9], t2[9];
-	int i;
-
-	/*
-	 * Invert z with a modular exponentiation: the modulus is
-	 * p = 2^256 - 2^224 + 2^192 + 2^96 - 1, and the exponent is
-	 * p-2. Exponent bit pattern (from high to low) is:
-	 *  - 32 bits of value 1
-	 *  - 31 bits of value 0
-	 *  - 1 bit of value 1
-	 *  - 96 bits of value 0
-	 *  - 94 bits of value 1
-	 *  - 1 bit of value 0
-	 *  - 1 bit of value 1
-	 * Thus, we precompute z^(2^31-1) to speed things up.
-	 *
-	 * If z = 0 (point at infinity) then the modular exponentiation
-	 * will yield 0, which leads to the expected result (all three
-	 * coordinates set to 0).
-	 */
-
-	/*
-	 * A simple square-and-multiply for z^(2^31-1). We could save about
-	 * two dozen multiplications here with an addition chain, but
-	 * this would require a bit more code, and extra stack buffers.
-	 */
-	memcpy(t1, P->z, sizeof P->z);
-	for (i = 0; i < 30; i ++) {
-		square_f256_u140(t1, t1);
-		mul_f256_u140(t1, t1, P->z);
-	}
-
-	/*
-	 * Square-and-multiply. Apart from the squarings, we have a few
-	 * multiplications to set bits to 1; we multiply by the original z
-	 * for setting 1 bit, and by t1 for setting 31 bits.
-	 */
-	memcpy(t2, P->z, sizeof P->z);
-	for (i = 1; i < 256; i ++) {
-		square_f256_u140(t2, t2);
-		switch (i) {
-		case 31:
-		case 190:
-		case 221:
-		case 252:
-			mul_f256_u140(t2, t2, t1);
-			break;
-		case 63:
-		case 253:
-		case 255:
-			mul_f256_u140(t2, t2, P->z);
-			break;
-		}
-	}
-
-	/*
-	 * Now that we have 1/z, multiply x by 1/z^2 and y by 1/z^3.
-	 */
-	mul_f256_u140(t1, t2, t2);
-	mul_f256_u140(P->x, t1, P->x);
-	mul_f256_u140(t1, t1, t2);
-	mul_f256_u140(P->y, t1, P->y);
-	reduce_final_f256_u140(P->x);
-	reduce_final_f256_u140(P->y);
-
-	/*
-	 * Multiply z by 1/z. If z = 0, then this will yield 0, otherwise
-	 * this will set z to 1.
-	 */
-	mul_f256_u140(P->z, P->z, t2);
-	reduce_final_f256_u140(P->z);
-}
-
-/*
- * Double a point in P-256. This function works for all valid points,
- * including the point at infinity.
- */
-static void
-p256_double_u140(p256_jacobian_u140 *Q)
-{
-	/*
-	 * Doubling formulas are:
-	 *
-	 *   s = 4*x*y^2
-	 *   m = 3*(x + z^2)*(x - z^2)
-	 *   x' = m^2 - 2*s
-	 *   y' = m*(s - x') - 8*y^4
-	 *   z' = 2*y*z
-	 *
-	 * These formulas work for all points, including points of order 2
-	 * and points at infinity:
-	 *   - If y = 0 then z' = 0. But there is no such point in P-256
-	 *     anyway.
-	 *   - If z = 0 then z' = 0.
-	 */
-	uint32_t t1[9], t2[9], t3[9], t4[9];
-
-	/*
-	 * Compute z^2 in t1.
-	 */
-	square_f256_u140(t1, Q->z);
-
-	/*
-	 * Compute x-z^2 in t2 and x+z^2 in t1.
-	 */
-	add_f256_u140(t2, Q->x, t1);
-	sub_f256_u140(t1, Q->x, t1);
-
-	/*
-	 * Compute 3*(x+z^2)*(x-z^2) in t1.
-	 */
-	mul_f256_u140(t3, t1, t2);
-	add_f256_u140(t1, t3, t3);
-	add_f256_u140(t1, t3, t1);
-
-	/*
-	 * Compute 4*x*y^2 (in t2) and 2*y^2 (in t3).
-	 */
-	square_f256_u140(t3, Q->y);
-	add_f256_u140(t3, t3, t3);
-	mul_f256_u140(t2, Q->x, t3);
-	add_f256_u140(t2, t2, t2);
-
-	/*
-	 * Compute x' = m^2 - 2*s.
-	 */
-	square_f256_u140(Q->x, t1);
-	sub_f256_u140(Q->x, Q->x, t2);
-	sub_f256_u140(Q->x, Q->x, t2);
-
-	/*
-	 * Compute z' = 2*y*z.
-	 */
-	mul_f256_u140(t4, Q->y, Q->z);
-	add_f256_u140(Q->z, t4, t4);
-
-	/*
-	 * Compute y' = m*(s - x') - 8*y^4. Note that we already have
-	 * 2*y^2 in t3.
-	 */
-	sub_f256_u140(t2, t2, Q->x);
-	mul_f256_u140(Q->y, t1, t2);
-	square_f256_u140(t4, t3);
-	add_f256_u140(t4, t4, t4);
-	sub_f256_u140(Q->y, Q->y, t4);
-}
-
-/*
- * Add point P2 to point P1.
- *
- * This function computes the wrong result in the following cases:
- *
- *   - If P1 == 0 but P2 != 0
- *   - If P1 != 0 but P2 == 0
- *   - If P1 == P2
- *
- * In all three cases, P1 is set to the point at infinity.
- *
- * Returned value is 0 if one of the following occurs:
- *
- *   - P1 and P2 have the same Y coordinate
- *   - P1 == 0 and P2 == 0
- *   - The Y coordinate of one of the points is 0 and the other point is
- *     the point at infinity.
- *
- * The third case cannot actually happen with valid points, since a point
- * with Y == 0 is a point of order 2, and there is no point of order 2 on
- * curve P-256.
- *
- * Therefore, assuming that P1 != 0 and P2 != 0 on input, then the caller
- * can apply the following:
- *
- *   - If the result is not the point at infinity, then it is correct.
- *   - Otherwise, if the returned value is 1, then this is a case of
- *     P1+P2 == 0, so the result is indeed the point at infinity.
- *   - Otherwise, P1 == P2, so a "double" operation should have been
- *     performed.
- */
-static uint32_t
-p256_add_u140(p256_jacobian_u140 *P1, const p256_jacobian_u140 *P2)
-{
-	/*
-	 * Addtions formulas are:
-	 *
-	 *   u1 = x1 * z2^2
-	 *   u2 = x2 * z1^2
-	 *   s1 = y1 * z2^3
-	 *   s2 = y2 * z1^3
-	 *   h = u2 - u1
-	 *   r = s2 - s1
-	 *   x3 = r^2 - h^3 - 2 * u1 * h^2
-	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
-	 *   z3 = h * z1 * z2
-	 */
-	uint32_t t1[9], t2[9], t3[9], t4[9], t5[9], t6[9], t7[9];
-	uint32_t ret;
-	int i;
-
-	/*
-	 * Compute u1 = x1*z2^2 (in t1) and s1 = y1*z2^3 (in t3).
-	 */
-	square_f256_u140(t3, P2->z);
-	mul_f256_u140(t1, P1->x, t3);
-	mul_f256_u140(t4, P2->z, t3);
-	mul_f256_u140(t3, P1->y, t4);
-
-	/*
-	 * Compute u2 = x2*z1^2 (in t2) and s2 = y2*z1^3 (in t4).
-	 */
-	square_f256_u140(t4, P1->z);
-	mul_f256_u140(t2, P2->x, t4);
-	mul_f256_u140(t5, P1->z, t4);
-	mul_f256_u140(t4, P2->y, t5);
-
-	/*
-	 * Compute h = h2 - u1 (in t2) and r = s2 - s1 (in t4).
-	 * We need to test whether r is zero, so we will do some extra
-	 * reduce.
-	 */
-	sub_f256_u140(t2, t2, t1);
-	sub_f256_u140(t4, t4, t3);
-	reduce_final_f256_u140(t4);
-	ret = 0;
-	for (i = 0; i < 9; i ++) {
-		ret |= t4[i];
-	}
-	ret = (ret | -ret) >> 31;
-
-	/*
-	 * Compute u1*h^2 (in t6) and h^3 (in t5);
-	 */
-	square_f256_u140(t7, t2);
-	mul_f256_u140(t6, t1, t7);
-	mul_f256_u140(t5, t7, t2);
-
-	/*
-	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
-	 */
-	square_f256_u140(P1->x, t4);
-	sub_f256_u140(P1->x, P1->x, t5);
-	sub_f256_u140(P1->x, P1->x, t6);
-	sub_f256_u140(P1->x, P1->x, t6);
-
-	/*
-	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
-	 */
-	sub_f256_u140(t6, t6, P1->x);
-	mul_f256_u140(P1->y, t4, t6);
-	mul_f256_u140(t1, t5, t3);
-	sub_f256_u140(P1->y, P1->y, t1);
-
-	/*
-	 * Compute z3 = h*z1*z2.
-	 */
-	mul_f256_u140(t1, P1->z, P2->z);
-	mul_f256_u140(P1->z, t1, t2);
-
-	return ret;
-}
-
-/*
- * Add point P2 to point P1. This is a specialised function for the
- * case when P2 is a non-zero point in affine coordinate.
- *
- * This function computes the wrong result in the following cases:
- *
- *   - If P1 == 0
- *   - If P1 == P2
- *
- * In both cases, P1 is set to the point at infinity.
- *
- * Returned value is 0 if one of the following occurs:
- *
- *   - P1 and P2 have the same Y coordinate
- *   - The Y coordinate of P2 is 0 and P1 is the point at infinity.
- *
- * The second case cannot actually happen with valid points, since a point
- * with Y == 0 is a point of order 2, and there is no point of order 2 on
- * curve P-256.
- *
- * Therefore, assuming that P1 != 0 on input, then the caller
- * can apply the following:
- *
- *   - If the result is not the point at infinity, then it is correct.
- *   - Otherwise, if the returned value is 1, then this is a case of
- *     P1+P2 == 0, so the result is indeed the point at infinity.
- *   - Otherwise, P1 == P2, so a "double" operation should have been
- *     performed.
- */
-static uint32_t
-p256_add_mixed_u140(p256_jacobian_u140 *P1, const p256_jacobian_u140 *P2)
-{
-	/*
-	 * Addtions formulas are:
-	 *
-	 *   u1 = x1
-	 *   u2 = x2 * z1^2
-	 *   s1 = y1
-	 *   s2 = y2 * z1^3
-	 *   h = u2 - u1
-	 *   r = s2 - s1
-	 *   x3 = r^2 - h^3 - 2 * u1 * h^2
-	 *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
-	 *   z3 = h * z1
-	 */
-	uint32_t t1[9], t2[9], t3[9], t4[9], t5[9], t6[9], t7[9];
-	uint32_t ret;
-	int i;
-
-	/*
-	 * Compute u1 = x1 (in t1) and s1 = y1 (in t3).
-	 */
-	memcpy(t1, P1->x, sizeof t1);
-	memcpy(t3, P1->y, sizeof t3);
-
-	/*
-	 * Compute u2 = x2*z1^2 (in t2) and s2 = y2*z1^3 (in t4).
-	 */
-	square_f256_u140(t4, P1->z);
-	mul_f256_u140(t2, P2->x, t4);
-	mul_f256_u140(t5, P1->z, t4);
-	mul_f256_u140(t4, P2->y, t5);
-
-	/*
-	 * Compute h = h2 - u1 (in t2) and r = s2 - s1 (in t4).
-	 * We need to test whether r is zero, so we will do some extra
-	 * reduce.
-	 */
-	sub_f256_u140(t2, t2, t1);
-	sub_f256_u140(t4, t4, t3);
-	reduce_final_f256_u140(t4);
-	ret = 0;
-	for (i = 0; i < 9; i ++) {
-		ret |= t4[i];
-	}
-	ret = (ret | -ret) >> 31;
-
-	/*
-	 * Compute u1*h^2 (in t6) and h^3 (in t5);
-	 */
-	square_f256_u140(t7, t2);
-	mul_f256_u140(t6, t1, t7);
-	mul_f256_u140(t5, t7, t2);
-
-	/*
-	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
-	 */
-	square_f256_u140(P1->x, t4);
-	sub_f256_u140(P1->x, P1->x, t5);
-	sub_f256_u140(P1->x, P1->x, t6);
-	sub_f256_u140(P1->x, P1->x, t6);
-
-	/*
-	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
-	 */
-	sub_f256_u140(t6, t6, P1->x);
-	mul_f256_u140(P1->y, t4, t6);
-	mul_f256_u140(t1, t5, t3);
-	sub_f256_u140(P1->y, P1->y, t1);
-
-	/*
-	 * Compute z3 = h*z1*z2.
-	 */
-	mul_f256_u140(P1->z, P1->z, t2);
-
-	return ret;
-}
-
-/*
- * Decode a P-256 point. This function does not support the point at
- * infinity. Returned value is 0 if the point is invalid, 1 otherwise.
- */
-static uint32_t
-p256_decode_u140(p256_jacobian_u140 *P, const void *src, size_t len)
-{
-	const unsigned char *buf;
-	uint32_t tx[9], ty[9], t1[9], t2[9];
-	uint32_t bad;
-	int i;
-
-	if (len != 65) {
-		return 0;
-	}
-	buf = src;
-
-	/*
-	 * First byte must be 0x04 (uncompressed format). We could support
-	 * "hybrid format" (first byte is 0x06 or 0x07, and encodes the
-	 * least significant bit of the Y coordinate), but it is explicitly
-	 * forbidden by RFC 5480 (section 2.2).
-	 */
-	bad = NEQ(buf[0], 0x04);
-
-	/*
-	 * Decode the coordinates, and check that they are both lower
-	 * than the modulus.
-	 */
-	tx[8] = be8_to_le30_u140(tx, buf + 1, 32);
-	ty[8] = be8_to_le30_u140(ty, buf + 33, 32);
-	bad |= reduce_final_f256_u140(tx);
-	bad |= reduce_final_f256_u140(ty);
-
-	/*
-	 * Check curve equation.
-	 */
-	square_f256_u140(t1, tx);
-	mul_f256_u140(t1, tx, t1);
-	square_f256_u140(t2, ty);
-	sub_f256_u140(t1, t1, tx);
-	sub_f256_u140(t1, t1, tx);
-	sub_f256_u140(t1, t1, tx);
-	add_f256_u140(t1, t1, P256_B_u140);
-	sub_f256_u140(t1, t1, t2);
-	reduce_final_f256_u140(t1);
-	for (i = 0; i < 9; i ++) {
-		bad |= t1[i];
-	}
-
-	/*
-	 * Copy coordinates to the point structure.
-	 */
-	memcpy(P->x, tx, sizeof tx);
-	memcpy(P->y, ty, sizeof ty);
-	memset(P->z, 0, sizeof P->z);
-	P->z[0] = 1;
-	return NEQ(bad, 0) ^ 1;
-}
-
-/*
- * Encode a point into a buffer. This function assumes that the point is
- * valid, in affine coordinates, and not the point at infinity.
- */
-static void
-p256_encode_u140(void *dst, const p256_jacobian_u140 *P)
-{
-	unsigned char *buf;
-
-	buf = dst;
-	buf[0] = 0x04;
-	le30_to_be8_u140(buf + 1, 32, P->x);
-	le30_to_be8_u140(buf + 33, 32, P->y);
-}
-
-/*
- * Multiply a curve point by an integer. The integer is assumed to be
- * lower than the curve order, and the base point must not be the point
- * at infinity.
- */
-static void
-p256_mul_u140(p256_jacobian_u140 *P, const unsigned char *x, size_t xlen)
-{
-	/*
-	 * qz is a flag that is initially 1, and remains equal to 1
-	 * as long as the point is the point at infinity.
-	 *
-	 * We use a 2-bit window to handle multiplier bits by pairs.
-	 * The precomputed window really is the points P2 and P3.
-	 */
-	uint32_t qz;
-	p256_jacobian_u140 P2, P3, Q, T, U;
-
-	/*
-	 * Compute window values.
-	 */
-	P2 = *P;
-	p256_double_u140(&P2);
-	P3 = *P;
-	p256_add_u140(&P3, &P2);
-
-	/*
-	 * We start with Q = 0. We process multiplier bits 2 by 2.
-	 */
-	memset(&Q, 0, sizeof Q);
-	qz = 1;
-	while (xlen -- > 0) {
-		int k;
-
-		for (k = 6; k >= 0; k -= 2) {
-			uint32_t bits;
-			uint32_t bnz;
-
-			p256_double_u140(&Q);
-			p256_double_u140(&Q);
-			T = *P;
-			U = Q;
-			bits = (*x >> k) & (uint32_t)3;
-			bnz = NEQ(bits, 0);
-			CCOPY(EQ(bits, 2), &T, &P2, sizeof T);
-			CCOPY(EQ(bits, 3), &T, &P3, sizeof T);
-			p256_add_u140(&U, &T);
-			CCOPY(bnz & qz, &Q, &T, sizeof Q);
-			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
-			qz &= ~bnz;
-		}
-		x ++;
-	}
-	*P = Q;
-}
-
-/*
- * Precomputed window: k*G points, where G is the curve generator, and k
- * is an integer from 1 to 15 (inclusive). The X and Y coordinates of
- * the point are encoded as 9 words of 30 bits each (little-endian
- * order).
- */
-static const uint32_t Gwin_u140[15][18] = {
-
-	{ 0x1898C296, 0x1284E517, 0x1EB33A0F, 0x00DF604B,
-	  0x2440F277, 0x339B958E, 0x04247F8B, 0x347CB84B,
-	  0x00006B17, 0x37BF51F5, 0x2ED901A0, 0x3315ECEC,
-	  0x338CD5DA, 0x0F9E162B, 0x1FAD29F0, 0x27F9B8EE,
-	  0x10B8BF86, 0x00004FE3 },
-
-	{ 0x07669978, 0x182D23F1, 0x3F21B35A, 0x225A789D,
-	  0x351AC3C0, 0x08E00C12, 0x34F7E8A5, 0x1EC62340,
-	  0x00007CF2, 0x227873D1, 0x3812DE74, 0x0E982299,
-	  0x1F6B798F, 0x3430DBBA, 0x366B1A7D, 0x2D040293,
-	  0x154436E3, 0x00000777 },
-
-	{ 0x06E7FD6C, 0x2D05986F, 0x3ADA985F, 0x31ADC87B,
-	  0x0BF165E6, 0x1FBE5475, 0x30A44C8F, 0x3934698C,
-	  0x00005ECB, 0x227D5032, 0x29E6C49E, 0x04FB83D9,
-	  0x0AAC0D8E, 0x24A2ECD8, 0x2C1B3869, 0x0FF7E374,
-	  0x19031266, 0x00008734 },
-
-	{ 0x2B030852, 0x024C0911, 0x05596EF5, 0x07F8B6DE,
-	  0x262BD003, 0x3779967B, 0x08FBBA02, 0x128D4CB4,
-	  0x0000E253, 0x184ED8C6, 0x310B08FC, 0x30EE0055,
-	  0x3F25B0FC, 0x062D764E, 0x3FB97F6A, 0x33CC719D,
-	  0x15D69318, 0x0000E0F1 },
-
-	{ 0x03D033ED, 0x05552837, 0x35BE5242, 0x2320BF47,
-	  0x268FDFEF, 0x13215821, 0x140D2D78, 0x02DE9454,
-	  0x00005159, 0x3DA16DA4, 0x0742ED13, 0x0D80888D,
-	  0x004BC035, 0x0A79260D, 0x06FCDAFE, 0x2727D8AE,
-	  0x1F6A2412, 0x0000E0C1 },
-
-	{ 0x3C2291A9, 0x1AC2ABA4, 0x3B215B4C, 0x131D037A,
-	  0x17DDE302, 0x0C90B2E2, 0x0602C92D, 0x05CA9DA9,
-	  0x0000B01A, 0x0FC77FE2, 0x35F1214E, 0x07E16BDF,
-	  0x003DDC07, 0x2703791C, 0x3038B7EE, 0x3DAD56FE,
-	  0x041D0C8D, 0x0000E85C },
-
-	{ 0x3187B2A3, 0x0018A1C0, 0x00FEF5B3, 0x3E7E2E2A,
-	  0x01FB607E, 0x2CC199F0, 0x37B4625B, 0x0EDBE82F,
-	  0x00008E53, 0x01F400B4, 0x15786A1B, 0x3041B21C,
-	  0x31CD8CF2, 0x35900053, 0x1A7E0E9B, 0x318366D0,
-	  0x076F780C, 0x000073EB },
-
-	{ 0x1B6FB393, 0x13767707, 0x3CE97DBB, 0x348E2603,
-	  0x354CADC1, 0x09D0B4EA, 0x1B053404, 0x1DE76FBA,
-	  0x000062D9, 0x0F09957E, 0x295029A8, 0x3E76A78D,
-	  0x3B547DAE, 0x27CEE0A2, 0x0575DC45, 0x1D8244FF,
-	  0x332F647A, 0x0000AD5A },
-
-	{ 0x10949EE0, 0x1E7A292E, 0x06DF8B3D, 0x02B2E30B,
-	  0x31F8729E, 0x24E35475, 0x30B71878, 0x35EDBFB7,
-	  0x0000EA68, 0x0DD048FA, 0x21688929, 0x0DE823FE,
-	  0x1C53FAA9, 0x0EA0C84D, 0x052A592A, 0x1FCE7870,
-	  0x11325CB2, 0x00002A27 },
-
-	{ 0x04C5723F, 0x30D81A50, 0x048306E4, 0x329B11C7,
-	  0x223FB545, 0x085347A8, 0x2993E591, 0x1B5ACA8E,
-	  0x0000CEF6, 0x04AF0773, 0x28D2EEA9, 0x2751EEEC,
-	  0x037B4A7F, 0x3B4C1059, 0x08F37674, 0x2AE906E1,
-	  0x18A88A6A, 0x00008786 },
-
-	{ 0x34BC21D1, 0x0CCE474D, 0x15048BF4, 0x1D0BB409,
-	  0x021CDA16, 0x20DE76C3, 0x34C59063, 0x04EDE20E,
-	  0x00003ED1, 0x282A3740, 0x0BE3BBF3, 0x29889DAE,
-	  0x03413697, 0x34C68A09, 0x210EBE93, 0x0C8A224C,
-	  0x0826B331, 0x00009099 },
-
-	{ 0x0624E3C4, 0x140317BA, 0x2F82C99D, 0x260C0A2C,
-	  0x25D55179, 0x194DCC83, 0x3D95E462, 0x356F6A05,
-	  0x0000741D, 0x0D4481D3, 0x2657FC8B, 0x1BA5CA71,
-	  0x3AE44B0D, 0x07B1548E, 0x0E0D5522, 0x05FDC567,
-	  0x2D1AA70E, 0x00000770 },
-
-	{ 0x06072C01, 0x23857675, 0x1EAD58A9, 0x0B8A12D9,
-	  0x1EE2FC79, 0x0177CB61, 0x0495A618, 0x20DEB82B,
-	  0x0000177C, 0x2FC7BFD8, 0x310EEF8B, 0x1FB4DF39,
-	  0x3B8530E8, 0x0F4E7226, 0x0246B6D0, 0x2A558A24,
-	  0x163353AF, 0x000063BB },
-
-	{ 0x24D2920B, 0x1C249DCC, 0x2069C5E5, 0x09AB2F9E,
-	  0x36DF3CF1, 0x1991FD0C, 0x062B97A7, 0x1E80070E,
-	  0x000054E7, 0x20D0B375, 0x2E9F20BD, 0x35090081,
-	  0x1C7A9DDC, 0x22E7C371, 0x087E3016, 0x03175421,
-	  0x3C6ECA7D, 0x0000F599 },
-
-	{ 0x259B9D5F, 0x0D9A318F, 0x23A0EF16, 0x00EBE4B7,
-	  0x088265AE, 0x2CDE2666, 0x2BAE7ADF, 0x1371A5C6,
-	  0x0000F045, 0x0D034F36, 0x1F967378, 0x1B5FA3F4,
-	  0x0EC8739D, 0x1643E62A, 0x1653947E, 0x22D1F4E6,
-	  0x0FB8D64B, 0x0000B5B9 }
-};
-
-/*
- * Lookup one of the Gwin_u140[] values, by index. This is constant-time.
- */
-static void
-lookup_Gwin_u140(p256_jacobian_u140 *T, uint32_t idx)
-{
-	uint32_t xy[18];
-	uint32_t k;
-	size_t u;
-
-	memset(xy, 0, sizeof xy);
-	for (k = 0; k < 15; k ++) {
-		uint32_t m;
-
-		m = -EQ(idx, k + 1);
-		for (u = 0; u < 18; u ++) {
-			xy[u] |= m & Gwin_u140[k][u];
-		}
-	}
-	memcpy(T->x, &xy[0], sizeof T->x);
-	memcpy(T->y, &xy[9], sizeof T->y);
-	memset(T->z, 0, sizeof T->z);
-	T->z[0] = 1;
-}
-
-/*
- * Multiply the generator by an integer. The integer is assumed non-zero
- * and lower than the curve order.
- */
-static void
-p256_mulgen_u140(p256_jacobian_u140 *P, const unsigned char *x, size_t xlen)
-{
-	/*
-	 * qz is a flag that is initially 1, and remains equal to 1
-	 * as long as the point is the point at infinity.
-	 *
-	 * We use a 4-bit window to handle multiplier bits by groups
-	 * of 4. The precomputed window is constant static data, with
-	 * points in affine coordinates; we use a constant-time lookup.
-	 */
-	p256_jacobian_u140 Q;
-	uint32_t qz;
-
-	memset(&Q, 0, sizeof Q);
-	qz = 1;
-	while (xlen -- > 0) {
-		int k;
-		unsigned bx;
-
-		bx = *x ++;
-		for (k = 0; k < 2; k ++) {
-			uint32_t bits;
-			uint32_t bnz;
-			p256_jacobian_u140 T, U;
-
-			p256_double_u140(&Q);
-			p256_double_u140(&Q);
-			p256_double_u140(&Q);
-			p256_double_u140(&Q);
-			bits = (bx >> 4) & 0x0F;
-			bnz = NEQ(bits, 0);
-			lookup_Gwin_u140(&T, bits);
-			U = Q;
-			p256_add_mixed_u140(&U, &T);
-			CCOPY(bnz & qz, &Q, &T, sizeof Q);
-			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
-			qz &= ~bnz;
-			bx <<= 4;
-		}
-	}
-	*P = Q;
-}
-
-static const unsigned char P256_G_u140[] = {
-	0x04, 0x6B, 0x17, 0xD1, 0xF2, 0xE1, 0x2C, 0x42, 0x47, 0xF8,
-	0xBC, 0xE6, 0xE5, 0x63, 0xA4, 0x40, 0xF2, 0x77, 0x03, 0x7D,
-	0x81, 0x2D, 0xEB, 0x33, 0xA0, 0xF4, 0xA1, 0x39, 0x45, 0xD8,
-	0x98, 0xC2, 0x96, 0x4F, 0xE3, 0x42, 0xE2, 0xFE, 0x1A, 0x7F,
-	0x9B, 0x8E, 0xE7, 0xEB, 0x4A, 0x7C, 0x0F, 0x9E, 0x16, 0x2B,
-	0xCE, 0x33, 0x57, 0x6B, 0x31, 0x5E, 0xCE, 0xCB, 0xB6, 0x40,
-	0x68, 0x37, 0xBF, 0x51, 0xF5
-};
-
-static const unsigned char P256_N_u140[] = {
-	0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF,
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBC, 0xE6, 0xFA, 0xAD,
-	0xA7, 0x17, 0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63,
-	0x25, 0x51
-};
-
-static const unsigned char *
-api_generator_u140(int curve, size_t *len)
-{
-	(void)curve;
-	*len = sizeof P256_G_u140;
-	return P256_G_u140;
-}
-
-static const unsigned char *
-api_order_u140(int curve, size_t *len)
-{
-	(void)curve;
-	*len = sizeof P256_N_u140;
-	return P256_N_u140;
-}
-
-static size_t
-api_xoff_u140(int curve, size_t *len)
-{
-	(void)curve;
-	*len = 32;
-	return 1;
-}
-
-static uint32_t
-api_mul_u140(unsigned char *G, size_t Glen,
-	const unsigned char *x, size_t xlen, int curve)
-{
-	uint32_t r;
-	p256_jacobian_u140 P;
-
-	(void)curve;
-	r = p256_decode_u140(&P, G, Glen);
-	p256_mul_u140(&P, x, xlen);
-	if (Glen >= 65) {
-		p256_to_affine_u140(&P);
-		p256_encode_u140(G, &P);
-	}
-	return r;
-}
-
-static size_t
-api_mulgen_u140(unsigned char *R,
-	const unsigned char *x, size_t xlen, int curve)
-{
-	p256_jacobian_u140 P;
-
-	(void)curve;
-	p256_mulgen_u140(&P, x, xlen);
-	p256_to_affine_u140(&P);
-	p256_encode_u140(R, &P);
-	return 65;
-
-	/*
-	const unsigned char *G;
-	size_t Glen;
-
-	G = api_generator_u140(curve, &Glen);
-	memcpy(R, G, Glen);
-	api_mul_u140(R, Glen, x, xlen, curve);
-	return Glen;
-	*/
-}
-
-static uint32_t
-api_muladd_u140(unsigned char *A, const unsigned char *B, size_t len,
-	const unsigned char *x, size_t xlen,
-	const unsigned char *y, size_t ylen, int curve)
-{
-	p256_jacobian_u140 P, Q;
-	uint32_t r, t, z;
-	int i;
-
-	(void)curve;
-	r = p256_decode_u140(&P, A, len);
-	p256_mul_u140(&P, x, xlen);
-	if (B == NULL) {
-		p256_mulgen_u140(&Q, y, ylen);
-	} else {
-		r &= p256_decode_u140(&Q, B, len);
-		p256_mul_u140(&Q, y, ylen);
-	}
-
-	/*
-	 * The final addition may fail in case both points are equal.
-	 */
-	t = p256_add_u140(&P, &Q);
-	reduce_final_f256_u140(P.z);
-	z = 0;
-	for (i = 0; i < 9; i ++) {
-		z |= P.z[i];
-	}
-	z = EQ(z, 0);
-	p256_double_u140(&Q);
-
-	/*
-	 * If z is 1 then either P+Q = 0 (t = 1) or P = Q (t = 0). So we
-	 * have the following:
-	 *
-	 *   z = 0, t = 0   return P (normal addition)
-	 *   z = 0, t = 1   return P (normal addition)
-	 *   z = 1, t = 0   return Q (a 'double' case)
-	 *   z = 1, t = 1   report an error (P+Q = 0)
-	 */
-	CCOPY(z & ~t, &P, &Q, sizeof Q);
-	p256_to_affine_u140(&P);
-	p256_encode_u140(A, &P);
-	r &= ~(z & t);
-	return r;
-}
-
-/* see bearssl_ec.h */
-const br_ec_impl br_ec_p256_m31 = {
-	(uint32_t)0x00800000,
-	&api_generator_u140,
-	&api_order_u140,
-	&api_xoff_u140,
-	&api_mul_u140,
-	&api_mulgen_u140,
-	&api_muladd_u140
 };
 
 /* === src/ec/ec_prime_i15.c === */
@@ -37598,28 +37428,28 @@ const br_ec_impl br_ec_p256_m31 = {
  *   - b*R mod p (b is the second curve equation parameter)
  */
 
-static const uint16_t P256_P_u141[] = {
+static const uint16_t P256_P_u140[] = {
 	0x0111,
 	0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x003F, 0x0000,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x1000, 0x0000, 0x4000, 0x7FFF,
 	0x7FFF, 0x0001
 };
 
-static const uint16_t P256_R2_u141[] = {
+static const uint16_t P256_R2_u140[] = {
 	0x0111,
 	0x0000, 0x6000, 0x0000, 0x0000, 0x0000, 0x0000, 0x7FFC, 0x7FFF,
 	0x7FBF, 0x7FFF, 0x7FBF, 0x7FFF, 0x7FFF, 0x7FFF, 0x77FF, 0x7FFF,
 	0x4FFF, 0x0000
 };
 
-static const uint16_t P256_B_u141[] = {
+static const uint16_t P256_B_u140[] = {
 	0x0111,
 	0x770C, 0x5EEF, 0x29C4, 0x3EC4, 0x6273, 0x0486, 0x4543, 0x3993,
 	0x3C01, 0x6B56, 0x212E, 0x57EE, 0x4882, 0x204B, 0x7483, 0x3C16,
 	0x0187, 0x0000
 };
 
-static const uint16_t P384_P_u141[] = {
+static const uint16_t P384_P_u140[] = {
 	0x0199,
 	0x7FFF, 0x7FFF, 0x0003, 0x0000, 0x0000, 0x0000, 0x7FC0, 0x7FFF,
 	0x7EFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF,
@@ -37627,7 +37457,7 @@ static const uint16_t P384_P_u141[] = {
 	0x7FFF, 0x01FF
 };
 
-static const uint16_t P384_R2_u141[] = {
+static const uint16_t P384_R2_u140[] = {
 	0x0199,
 	0x1000, 0x0000, 0x0000, 0x7FFF, 0x7FFF, 0x0001, 0x0000, 0x0010,
 	0x0000, 0x0000, 0x0000, 0x7F00, 0x7FFF, 0x01FF, 0x0000, 0x1000,
@@ -37635,7 +37465,7 @@ static const uint16_t P384_R2_u141[] = {
 	0x0000, 0x0000
 };
 
-static const uint16_t P384_B_u141[] = {
+static const uint16_t P384_B_u140[] = {
 	0x0199,
 	0x7333, 0x2096, 0x70D1, 0x2310, 0x3020, 0x6197, 0x1464, 0x35BB,
 	0x70CA, 0x0117, 0x1920, 0x4136, 0x5FC8, 0x5713, 0x4938, 0x7DD2,
@@ -37643,7 +37473,7 @@ static const uint16_t P384_B_u141[] = {
 	0x0452, 0x0084
 };
 
-static const uint16_t P521_P_u141[] = {
+static const uint16_t P521_P_u140[] = {
 	0x022B,
 	0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF,
 	0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF,
@@ -37652,7 +37482,7 @@ static const uint16_t P521_P_u141[] = {
 	0x7FFF, 0x7FFF, 0x07FF
 };
 
-static const uint16_t P521_R2_u141[] = {
+static const uint16_t P521_R2_u140[] = {
 	0x022B,
 	0x0100, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
 	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
@@ -37661,7 +37491,7 @@ static const uint16_t P521_R2_u141[] = {
 	0x0000, 0x0000, 0x0000
 };
 
-static const uint16_t P521_B_u141[] = {
+static const uint16_t P521_B_u140[] = {
 	0x022B,
 	0x7002, 0x6A07, 0x751A, 0x228F, 0x71EF, 0x5869, 0x20F4, 0x1EFC,
 	0x7357, 0x37E0, 0x4EEC, 0x605E, 0x1652, 0x26F6, 0x31FA, 0x4A8F,
@@ -37676,21 +37506,21 @@ typedef struct {
 	const uint16_t *R2;
 	uint16_t p0i;
 	size_t point_len;
-} curve_params_u141;
+} curve_params_u140;
 
-static inline const curve_params_u141 *
-id_to_curve_u141(int curve)
+static inline const curve_params_u140 *
+id_to_curve_u140(int curve)
 {
-	static const curve_params_u141 pp_u141[] = {
-		{ P256_P_u141, P256_B_u141, P256_R2_u141, 0x0001,  65 },
-		{ P384_P_u141, P384_B_u141, P384_R2_u141, 0x0001,  97 },
-		{ P521_P_u141, P521_B_u141, P521_R2_u141, 0x0001, 133 }
+	static const curve_params_u140 pp_u140[] = {
+		{ P256_P_u140, P256_B_u140, P256_R2_u140, 0x0001,  65 },
+		{ P384_P_u140, P384_B_u140, P384_R2_u140, 0x0001,  97 },
+		{ P521_P_u140, P521_B_u140, P521_R2_u140, 0x0001, 133 }
 	};
 
-	return &pp_u141[curve - BR_EC_secp256r1];
+	return &pp_u140[curve - BR_EC_secp256r1];
 }
 
-#define I15_LEN_u141   ((BR_MAX_EC_SIZE + 29) / 15)
+#define I15_LEN_u140   ((BR_MAX_EC_SIZE + 29) / 15)
 
 /*
  * Type for a point in Jacobian coordinates:
@@ -37699,7 +37529,827 @@ id_to_curve_u141(int curve)
  * -- for the point at infinity, z = 0
  */
 typedef struct {
-	uint16_t c[3][I15_LEN_u141];
+	uint16_t c[3][I15_LEN_u140];
+} jacobian_u140;
+
+/*
+ * We use a custom interpreter that uses a dozen registers, and
+ * only six operations:
+ *    MSET_u140(d, a)       copy a into d
+ *    MADD_u140(d, a)       d = d+a (modular)
+ *    MSUB_u140(d, a)       d = d-a (modular)
+ *    MMUL_u140(d, a, b)    d = a*b (Montgomery multiplication)
+ *    MINV_u140(d, a, b)    invert d modulo p; a and b are used as scratch registers
+ *    MTZ_u140(d)           clear return value if d = 0
+ * Destination of MMUL_u140 (d) must be distinct from operands (a and b).
+ * There is no such constraint for MSUB_u140 and MADD_u140.
+ *
+ * Registers include the operand coordinates, and temporaries.
+ */
+#define MSET_u140(d, a)      (0x0000 + ((d) << 8) + ((a) << 4))
+#define MADD_u140(d, a)      (0x1000 + ((d) << 8) + ((a) << 4))
+#define MSUB_u140(d, a)      (0x2000 + ((d) << 8) + ((a) << 4))
+#define MMUL_u140(d, a, b)   (0x3000 + ((d) << 8) + ((a) << 4) + (b))
+#define MINV_u140(d, a, b)   (0x4000 + ((d) << 8) + ((a) << 4) + (b))
+#define MTZ_u140(d)          (0x5000 + ((d) << 8))
+#define ENDCODE_u140         0
+
+/*
+ * Registers for the input operands.
+ */
+#define P1x_u140    0
+#define P1y_u140    1
+#define P1z_u140    2
+#define P2x_u140    3
+#define P2y_u140    4
+#define P2z_u140    5
+
+/*
+ * Alternate names for the first input operand.
+ */
+#define Px_u140     0
+#define Py_u140     1
+#define Pz_u140     2
+
+/*
+ * Temporaries.
+ */
+#define t1_u140     6
+#define t2_u140     7
+#define t3_u140     8
+#define t4_u140     9
+#define t5_u140    10
+#define t6_u140    11
+#define t7_u140    12
+
+/*
+ * Extra scratch registers available when there is no second operand (e.g.
+ * for "double" and "affine").
+ */
+#define t8_u140     3
+#define t9_u140     4
+#define t10_u140    5
+
+/*
+ * Doubling formulas are:
+ *
+ *   s = 4*x*y^2
+ *   m = 3*(x + z^2)*(x - z^2)
+ *   x' = m^2 - 2*s
+ *   y' = m*(s - x') - 8*y^4
+ *   z' = 2*y*z
+ *
+ * If y = 0 (P has order 2) then this yields infinity (z' = 0), as it
+ * should. This case should not happen anyway, because our curves have
+ * prime order, and thus do not contain any point of order 2.
+ *
+ * If P is infinity (z = 0), then again the formulas yield infinity,
+ * which is correct. Thus, this code works for all points.
+ *
+ * Cost: 8 multiplications
+ */
+static const uint16_t code_double_u140[] = {
+	/*
+	 * Compute z^2 (in t1_u140).
+	 */
+	MMUL_u140(t1_u140, Pz_u140, Pz_u140),
+
+	/*
+	 * Compute x-z^2 (in t2_u140) and then x+z^2 (in t1_u140).
+	 */
+	MSET_u140(t2_u140, Px_u140),
+	MSUB_u140(t2_u140, t1_u140),
+	MADD_u140(t1_u140, Px_u140),
+
+	/*
+	 * Compute m = 3*(x+z^2)*(x-z^2) (in t1_u140).
+	 */
+	MMUL_u140(t3_u140, t1_u140, t2_u140),
+	MSET_u140(t1_u140, t3_u140),
+	MADD_u140(t1_u140, t3_u140),
+	MADD_u140(t1_u140, t3_u140),
+
+	/*
+	 * Compute s = 4*x*y^2 (in t2_u140) and 2*y^2 (in t3_u140).
+	 */
+	MMUL_u140(t3_u140, Py_u140, Py_u140),
+	MADD_u140(t3_u140, t3_u140),
+	MMUL_u140(t2_u140, Px_u140, t3_u140),
+	MADD_u140(t2_u140, t2_u140),
+
+	/*
+	 * Compute x' = m^2 - 2*s.
+	 */
+	MMUL_u140(Px_u140, t1_u140, t1_u140),
+	MSUB_u140(Px_u140, t2_u140),
+	MSUB_u140(Px_u140, t2_u140),
+
+	/*
+	 * Compute z' = 2*y*z.
+	 */
+	MMUL_u140(t4_u140, Py_u140, Pz_u140),
+	MSET_u140(Pz_u140, t4_u140),
+	MADD_u140(Pz_u140, t4_u140),
+
+	/*
+	 * Compute y' = m*(s - x') - 8*y^4. Note that we already have
+	 * 2*y^2 in t3_u140.
+	 */
+	MSUB_u140(t2_u140, Px_u140),
+	MMUL_u140(Py_u140, t1_u140, t2_u140),
+	MMUL_u140(t4_u140, t3_u140, t3_u140),
+	MSUB_u140(Py_u140, t4_u140),
+	MSUB_u140(Py_u140, t4_u140),
+
+	ENDCODE_u140
+};
+
+/*
+ * Addtions formulas are:
+ *
+ *   u1 = x1 * z2^2
+ *   u2 = x2 * z1^2
+ *   s1 = y1 * z2^3
+ *   s2 = y2 * z1^3
+ *   h = u2 - u1
+ *   r = s2 - s1
+ *   x3 = r^2 - h^3 - 2 * u1 * h^2
+ *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
+ *   z3 = h * z1 * z2
+ *
+ * If both P1 and P2 are infinity, then z1 == 0 and z2 == 0, implying that
+ * z3 == 0, so the result is correct.
+ * If either of P1 or P2 is infinity, but not both, then z3 == 0, which is
+ * not correct.
+ * h == 0 only if u1 == u2; this happens in two cases:
+ * -- if s1 == s2 then P1 and/or P2 is infinity, or P1 == P2
+ * -- if s1 != s2 then P1 + P2 == infinity (but neither P1 or P2 is infinity)
+ *
+ * Thus, the following situations are not handled correctly:
+ * -- P1 = 0 and P2 != 0
+ * -- P1 != 0 and P2 = 0
+ * -- P1 = P2
+ * All other cases are properly computed. However, even in "incorrect"
+ * situations, the three coordinates still are properly formed field
+ * elements.
+ *
+ * The returned flag is cleared if r == 0. This happens in the following
+ * cases:
+ * -- Both points are on the same horizontal line (same Y coordinate).
+ * -- Both points are infinity.
+ * -- One point is infinity and the other is on line Y = 0.
+ * The third case cannot happen with our curves (there is no valid point
+ * on line Y = 0 since that would be a point of order 2). If the two
+ * source points are non-infinity, then remains only the case where the
+ * two points are on the same horizontal line.
+ *
+ * This allows us to detect the "P1 == P2" case, assuming that P1 != 0 and
+ * P2 != 0:
+ * -- If the returned value is not the point at infinity, then it was properly
+ * computed.
+ * -- Otherwise, if the returned flag is 1, then P1+P2 = 0, and the result
+ * is indeed the point at infinity.
+ * -- Otherwise (result is infinity, flag is 0), then P1 = P2 and we should
+ * use the 'double' code.
+ *
+ * Cost: 16 multiplications
+ */
+static const uint16_t code_add_u140[] = {
+	/*
+	 * Compute u1 = x1*z2^2 (in t1_u140) and s1 = y1*z2^3 (in t3_u140).
+	 */
+	MMUL_u140(t3_u140, P2z_u140, P2z_u140),
+	MMUL_u140(t1_u140, P1x_u140, t3_u140),
+	MMUL_u140(t4_u140, P2z_u140, t3_u140),
+	MMUL_u140(t3_u140, P1y_u140, t4_u140),
+
+	/*
+	 * Compute u2 = x2*z1^2 (in t2_u140) and s2 = y2*z1^3 (in t4_u140).
+	 */
+	MMUL_u140(t4_u140, P1z_u140, P1z_u140),
+	MMUL_u140(t2_u140, P2x_u140, t4_u140),
+	MMUL_u140(t5_u140, P1z_u140, t4_u140),
+	MMUL_u140(t4_u140, P2y_u140, t5_u140),
+
+	/*
+	 * Compute h = u2 - u1 (in t2_u140) and r = s2 - s1 (in t4_u140).
+	 */
+	MSUB_u140(t2_u140, t1_u140),
+	MSUB_u140(t4_u140, t3_u140),
+
+	/*
+	 * Report cases where r = 0 through the returned flag.
+	 */
+	MTZ_u140(t4_u140),
+
+	/*
+	 * Compute u1*h^2 (in t6_u140) and h^3 (in t5_u140).
+	 */
+	MMUL_u140(t7_u140, t2_u140, t2_u140),
+	MMUL_u140(t6_u140, t1_u140, t7_u140),
+	MMUL_u140(t5_u140, t7_u140, t2_u140),
+
+	/*
+	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
+	 * t1_u140 and t7_u140 can be used as scratch registers.
+	 */
+	MMUL_u140(P1x_u140, t4_u140, t4_u140),
+	MSUB_u140(P1x_u140, t5_u140),
+	MSUB_u140(P1x_u140, t6_u140),
+	MSUB_u140(P1x_u140, t6_u140),
+
+	/*
+	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
+	 */
+	MSUB_u140(t6_u140, P1x_u140),
+	MMUL_u140(P1y_u140, t4_u140, t6_u140),
+	MMUL_u140(t1_u140, t5_u140, t3_u140),
+	MSUB_u140(P1y_u140, t1_u140),
+
+	/*
+	 * Compute z3 = h*z1*z2.
+	 */
+	MMUL_u140(t1_u140, P1z_u140, P2z_u140),
+	MMUL_u140(P1z_u140, t1_u140, t2_u140),
+
+	ENDCODE_u140
+};
+
+/*
+ * Check that the point is on the curve. This code snippet assumes the
+ * following conventions:
+ * -- Coordinates x and y have been freshly decoded in P1 (but not
+ * converted to Montgomery coordinates yet).
+ * -- P2x_u140, P2y_u140 and P2z_u140 are set to, respectively, R^2, b*R and 1.
+ */
+static const uint16_t code_check_u140[] = {
+
+	/* Convert x and y to Montgomery representation. */
+	MMUL_u140(t1_u140, P1x_u140, P2x_u140),
+	MMUL_u140(t2_u140, P1y_u140, P2x_u140),
+	MSET_u140(P1x_u140, t1_u140),
+	MSET_u140(P1y_u140, t2_u140),
+
+	/* Compute x^3 in t1_u140. */
+	MMUL_u140(t2_u140, P1x_u140, P1x_u140),
+	MMUL_u140(t1_u140, P1x_u140, t2_u140),
+
+	/* Subtract 3*x from t1_u140. */
+	MSUB_u140(t1_u140, P1x_u140),
+	MSUB_u140(t1_u140, P1x_u140),
+	MSUB_u140(t1_u140, P1x_u140),
+
+	/* Add b. */
+	MADD_u140(t1_u140, P2y_u140),
+
+	/* Compute y^2 in t2_u140. */
+	MMUL_u140(t2_u140, P1y_u140, P1y_u140),
+
+	/* Compare y^2 with x^3 - 3*x + b; they must match. */
+	MSUB_u140(t1_u140, t2_u140),
+	MTZ_u140(t1_u140),
+
+	/* Set z to 1 (in Montgomery representation). */
+	MMUL_u140(P1z_u140, P2x_u140, P2z_u140),
+
+	ENDCODE_u140
+};
+
+/*
+ * Conversion back to affine coordinates. This code snippet assumes that
+ * the z coordinate of P2 is set to 1 (not in Montgomery representation).
+ */
+static const uint16_t code_affine_u140[] = {
+
+	/* Save z*R in t1_u140. */
+	MSET_u140(t1_u140, P1z_u140),
+
+	/* Compute z^3 in t2_u140. */
+	MMUL_u140(t2_u140, P1z_u140, P1z_u140),
+	MMUL_u140(t3_u140, P1z_u140, t2_u140),
+	MMUL_u140(t2_u140, t3_u140, P2z_u140),
+
+	/* Invert to (1/z^3) in t2_u140. */
+	MINV_u140(t2_u140, t3_u140, t4_u140),
+
+	/* Compute y. */
+	MSET_u140(t3_u140, P1y_u140),
+	MMUL_u140(P1y_u140, t2_u140, t3_u140),
+
+	/* Compute (1/z^2) in t3_u140. */
+	MMUL_u140(t3_u140, t2_u140, t1_u140),
+
+	/* Compute x. */
+	MSET_u140(t2_u140, P1x_u140),
+	MMUL_u140(P1x_u140, t2_u140, t3_u140),
+
+	ENDCODE_u140
+};
+
+static uint32_t
+run_code_u140(jacobian_u140 *P1, const jacobian_u140 *P2,
+	const curve_params_u140 *cc, const uint16_t *code)
+{
+	uint32_t r;
+	uint16_t t[13][I15_LEN_u140];
+	size_t u;
+
+	r = 1;
+
+	/*
+	 * Copy the two operands in the dedicated registers.
+	 */
+	memcpy(t[P1x_u140], P1->c, 3 * I15_LEN_u140 * sizeof(uint16_t));
+	memcpy(t[P2x_u140], P2->c, 3 * I15_LEN_u140 * sizeof(uint16_t));
+
+	/*
+	 * Run formulas.
+	 */
+	for (u = 0;; u ++) {
+		unsigned op, d, a, b;
+
+		op = code[u];
+		if (op == 0) {
+			break;
+		}
+		d = (op >> 8) & 0x0F;
+		a = (op >> 4) & 0x0F;
+		b = op & 0x0F;
+		op >>= 12;
+		switch (op) {
+			uint32_t ctl;
+			size_t plen;
+			unsigned char tp[(BR_MAX_EC_SIZE + 7) >> 3];
+
+		case 0:
+			memcpy(t[d], t[a], I15_LEN_u140 * sizeof(uint16_t));
+			break;
+		case 1:
+			ctl = br_i15_add(t[d], t[a], 1);
+			ctl |= NOT(br_i15_sub(t[d], cc->p, 0));
+			br_i15_sub(t[d], cc->p, ctl);
+			break;
+		case 2:
+			br_i15_add(t[d], cc->p, br_i15_sub(t[d], t[a], 1));
+			break;
+		case 3:
+			br_i15_montymul(t[d], t[a], t[b], cc->p, cc->p0i);
+			break;
+		case 4:
+			plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
+			br_i15_encode(tp, plen, cc->p);
+			tp[plen - 1] -= 2;
+			br_i15_modpow(t[d], tp, plen,
+				cc->p, cc->p0i, t[a], t[b]);
+			break;
+		default:
+			r &= ~br_i15_iszero(t[d]);
+			break;
+		}
+	}
+
+	/*
+	 * Copy back result.
+	 */
+	memcpy(P1->c, t[P1x_u140], 3 * I15_LEN_u140 * sizeof(uint16_t));
+	return r;
+}
+
+static void
+set_one_u140(uint16_t *x, const uint16_t *p)
+{
+	size_t plen;
+
+	plen = (p[0] + 31) >> 4;
+	memset(x, 0, plen * sizeof *x);
+	x[0] = p[0];
+	x[1] = 0x0001;
+}
+
+static void
+point_zero_u140(jacobian_u140 *P, const curve_params_u140 *cc)
+{
+	memset(P, 0, sizeof *P);
+	P->c[0][0] = P->c[1][0] = P->c[2][0] = cc->p[0];
+}
+
+static inline void
+point_double_u140(jacobian_u140 *P, const curve_params_u140 *cc)
+{
+	run_code_u140(P, P, cc, code_double_u140);
+}
+
+static inline uint32_t
+point_add_u140(jacobian_u140 *P1, const jacobian_u140 *P2, const curve_params_u140 *cc)
+{
+	return run_code_u140(P1, P2, cc, code_add_u140);
+}
+
+static void
+point_mul_u140(jacobian_u140 *P, const unsigned char *x, size_t xlen,
+	const curve_params_u140 *cc)
+{
+	/*
+	 * We do a simple double-and-add ladder with a 2-bit window
+	 * to make only one add every two doublings. We thus first
+	 * precompute 2P and 3P in some local buffers.
+	 *
+	 * We always perform two doublings and one addition; the
+	 * addition is with P, 2P and 3P and is done in a temporary
+	 * array.
+	 *
+	 * The addition code cannot handle cases where one of the
+	 * operands is infinity, which is the case at the start of the
+	 * ladder. We therefore need to maintain a flag that controls
+	 * this situation.
+	 */
+	uint32_t qz;
+	jacobian_u140 P2, P3, Q, T, U;
+
+	memcpy(&P2, P, sizeof P2);
+	point_double_u140(&P2, cc);
+	memcpy(&P3, P, sizeof P3);
+	point_add_u140(&P3, &P2, cc);
+
+	point_zero_u140(&Q, cc);
+	qz = 1;
+	while (xlen -- > 0) {
+		int k;
+
+		for (k = 6; k >= 0; k -= 2) {
+			uint32_t bits;
+			uint32_t bnz;
+
+			point_double_u140(&Q, cc);
+			point_double_u140(&Q, cc);
+			memcpy(&T, P, sizeof T);
+			memcpy(&U, &Q, sizeof U);
+			bits = (*x >> k) & (uint32_t)3;
+			bnz = NEQ(bits, 0);
+			CCOPY(EQ(bits, 2), &T, &P2, sizeof T);
+			CCOPY(EQ(bits, 3), &T, &P3, sizeof T);
+			point_add_u140(&U, &T, cc);
+			CCOPY(bnz & qz, &Q, &T, sizeof Q);
+			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
+			qz &= ~bnz;
+		}
+		x ++;
+	}
+	memcpy(P, &Q, sizeof Q);
+}
+
+/*
+ * Decode point into Jacobian coordinates. This function does not support
+ * the point at infinity. If the point is invalid then this returns 0, but
+ * the coordinates are still set to properly formed field elements.
+ */
+static uint32_t
+point_decode_u140(jacobian_u140 *P, const void *src, size_t len, const curve_params_u140 *cc)
+{
+	/*
+	 * Points must use uncompressed format:
+	 * -- first byte is 0x04;
+	 * -- coordinates X and Y use unsigned big-endian, with the same
+	 *    length as the field modulus.
+	 *
+	 * We don't support hybrid format (uncompressed, but first byte
+	 * has value 0x06 or 0x07, depending on the least significant bit
+	 * of Y) because it is rather useless, and explicitly forbidden
+	 * by PKIX (RFC 5480, section 2.2).
+	 *
+	 * We don't support compressed format either, because it is not
+	 * much used in practice (there are or were patent-related
+	 * concerns about point compression, which explains the lack of
+	 * generalised support). Also, point compression support would
+	 * need a bit more code.
+	 */
+	const unsigned char *buf;
+	size_t plen, zlen;
+	uint32_t r;
+	jacobian_u140 Q;
+
+	buf = src;
+	point_zero_u140(P, cc);
+	plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
+	if (len != 1 + (plen << 1)) {
+		return 0;
+	}
+	r = br_i15_decode_mod(P->c[0], buf + 1, plen, cc->p);
+	r &= br_i15_decode_mod(P->c[1], buf + 1 + plen, plen, cc->p);
+
+	/*
+	 * Check first byte.
+	 */
+	r &= EQ(buf[0], 0x04);
+	/* obsolete
+	r &= EQ(buf[0], 0x04) | (EQ(buf[0] & 0xFE, 0x06)
+		& ~(uint32_t)(buf[0] ^ buf[plen << 1]));
+	*/
+
+	/*
+	 * Convert coordinates and check that the point is valid.
+	 */
+	zlen = ((cc->p[0] + 31) >> 4) * sizeof(uint16_t);
+	memcpy(Q.c[0], cc->R2, zlen);
+	memcpy(Q.c[1], cc->b, zlen);
+	set_one_u140(Q.c[2], cc->p);
+	r &= ~run_code_u140(P, &Q, cc, code_check_u140);
+	return r;
+}
+
+/*
+ * Encode a point. This method assumes that the point is correct and is
+ * not the point at infinity. Encoded size is always 1+2*plen, where
+ * plen is the field modulus length, in bytes.
+ */
+static void
+point_encode_u140(void *dst, const jacobian_u140 *P, const curve_params_u140 *cc)
+{
+	unsigned char *buf;
+	size_t plen;
+	jacobian_u140 Q, T;
+
+	buf = dst;
+	plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
+	buf[0] = 0x04;
+	memcpy(&Q, P, sizeof *P);
+	set_one_u140(T.c[2], cc->p);
+	run_code_u140(&Q, &T, cc, code_affine_u140);
+	br_i15_encode(buf + 1, plen, Q.c[0]);
+	br_i15_encode(buf + 1 + plen, plen, Q.c[1]);
+}
+
+static const br_ec_curve_def *
+id_to_curve_def_u140(int curve)
+{
+	switch (curve) {
+	case BR_EC_secp256r1:
+		return &br_secp256r1;
+	case BR_EC_secp384r1:
+		return &br_secp384r1;
+	case BR_EC_secp521r1:
+		return &br_secp521r1;
+	}
+	return NULL;
+}
+
+static const unsigned char *
+api_generator_u140(int curve, size_t *len)
+{
+	const br_ec_curve_def *cd;
+
+	cd = id_to_curve_def_u140(curve);
+	*len = cd->generator_len;
+	return cd->generator;
+}
+
+static const unsigned char *
+api_order_u140(int curve, size_t *len)
+{
+	const br_ec_curve_def *cd;
+
+	cd = id_to_curve_def_u140(curve);
+	*len = cd->order_len;
+	return cd->order;
+}
+
+static size_t
+api_xoff_u140(int curve, size_t *len)
+{
+	api_generator_u140(curve, len);
+	*len >>= 1;
+	return 1;
+}
+
+static uint32_t
+api_mul_u140(unsigned char *G, size_t Glen,
+	const unsigned char *x, size_t xlen, int curve)
+{
+	uint32_t r;
+	const curve_params_u140 *cc;
+	jacobian_u140 P;
+
+	cc = id_to_curve_u140(curve);
+	r = point_decode_u140(&P, G, Glen, cc);
+	point_mul_u140(&P, x, xlen, cc);
+	if (Glen == cc->point_len) {
+		point_encode_u140(G, &P, cc);
+	}
+	return r;
+}
+
+static size_t
+api_mulgen_u140(unsigned char *R,
+	const unsigned char *x, size_t xlen, int curve)
+{
+	const unsigned char *G;
+	size_t Glen;
+
+	G = api_generator_u140(curve, &Glen);
+	memcpy(R, G, Glen);
+	api_mul_u140(R, Glen, x, xlen, curve);
+	return Glen;
+}
+
+static uint32_t
+api_muladd_u140(unsigned char *A, const unsigned char *B, size_t len,
+	const unsigned char *x, size_t xlen,
+	const unsigned char *y, size_t ylen, int curve)
+{
+	uint32_t r, t, z;
+	const curve_params_u140 *cc;
+	jacobian_u140 P, Q;
+
+	/*
+	 * TODO: see about merging the two ladders. Right now, we do
+	 * two independent point multiplications, which is a bit
+	 * wasteful of CPU resources (but yields short code).
+	 */
+
+	cc = id_to_curve_u140(curve);
+	r = point_decode_u140(&P, A, len, cc);
+	if (B == NULL) {
+		size_t Glen;
+
+		B = api_generator_u140(curve, &Glen);
+	}
+	r &= point_decode_u140(&Q, B, len, cc);
+	point_mul_u140(&P, x, xlen, cc);
+	point_mul_u140(&Q, y, ylen, cc);
+
+	/*
+	 * We want to compute P+Q. Since the base points A and B are distinct
+	 * from infinity, and the multipliers are non-zero and lower than the
+	 * curve order, then we know that P and Q are non-infinity. This
+	 * leaves two special situations to test for:
+	 * -- If P = Q then we must use point_double_u140().
+	 * -- If P+Q = 0 then we must report an error.
+	 */
+	t = point_add_u140(&P, &Q, cc);
+	point_double_u140(&Q, cc);
+	z = br_i15_iszero(P.c[2]);
+
+	/*
+	 * If z is 1 then either P+Q = 0 (t = 1) or P = Q (t = 0). So we
+	 * have the following:
+	 *
+	 *   z = 0, t = 0   return P (normal addition)
+	 *   z = 0, t = 1   return P (normal addition)
+	 *   z = 1, t = 0   return Q (a 'double' case)
+	 *   z = 1, t = 1   report an error (P+Q = 0)
+	 */
+	CCOPY(z & ~t, &P, &Q, sizeof Q);
+	point_encode_u140(A, &P, cc);
+	r &= ~(z & t);
+
+	return r;
+}
+
+/* see bearssl_ec.h */
+const br_ec_impl br_ec_prime_i15 = {
+	(uint32_t)0x03800000,
+	&api_generator_u140,
+	&api_order_u140,
+	&api_xoff_u140,
+	&api_mul_u140,
+	&api_mulgen_u140,
+	&api_muladd_u140
+};
+
+/* === src/ec/ec_prime_i31.c === */
+#line 1 "src/ec/ec_prime_i31.c"
+/*
+ * Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining 
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be 
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+ * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+
+/*
+ * Parameters for supported curves (field modulus, and 'b' equation
+ * parameter; both values use the 'i31' format, and 'b' is in Montgomery
+ * representation).
+ */
+
+static const uint32_t P256_P_u141[] = {
+	0x00000108,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x00000007,
+	0x00000000, 0x00000000, 0x00000040, 0x7FFFFF80,
+	0x000000FF
+};
+
+static const uint32_t P256_R2_u141[] = {
+	0x00000108,
+	0x00014000, 0x00018000, 0x00000000, 0x7FF40000,
+	0x7FEFFFFF, 0x7FF7FFFF, 0x7FAFFFFF, 0x005FFFFF,
+	0x00000000
+};
+
+static const uint32_t P256_B_u141[] = {
+	0x00000108,
+	0x6FEE1803, 0x6229C4BD, 0x21B139BE, 0x327150AA,
+	0x3567802E, 0x3F7212ED, 0x012E4355, 0x782DD38D,
+	0x0000000E
+};
+
+static const uint32_t P384_P_u141[] = {
+	0x0000018C,
+	0x7FFFFFFF, 0x00000001, 0x00000000, 0x7FFFFFF8,
+	0x7FFFFFEF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x00000FFF
+};
+
+static const uint32_t P384_R2_u141[] = {
+	0x0000018C,
+	0x00000000, 0x00000080, 0x7FFFFE00, 0x000001FF,
+	0x00000800, 0x00000000, 0x7FFFE000, 0x00001FFF,
+	0x00008000, 0x00008000, 0x00000000, 0x00000000,
+	0x00000000
+};
+
+static const uint32_t P384_B_u141[] = {
+	0x0000018C,
+	0x6E666840, 0x070D0392, 0x5D810231, 0x7651D50C,
+	0x17E218D6, 0x1B192002, 0x44EFE441, 0x3A524E2B,
+	0x2719BA5F, 0x41F02209, 0x36C5643E, 0x5813EFFE,
+	0x000008A5
+};
+
+static const uint32_t P521_P_u141[] = {
+	0x00000219,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
+	0x01FFFFFF
+};
+
+static const uint32_t P521_R2_u141[] = {
+	0x00000219,
+	0x00001000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000, 0x00000000, 0x00000000, 0x00000000,
+	0x00000000
+};
+
+static const uint32_t P521_B_u141[] = {
+	0x00000219,
+	0x540FC00A, 0x228FEA35, 0x2C34F1EF, 0x67BF107A,
+	0x46FC1CD5, 0x1605E9DD, 0x6937B165, 0x272A3D8F,
+	0x42785586, 0x44C8C778, 0x15F3B8B4, 0x64B73366,
+	0x03BA8B69, 0x0D05B42A, 0x21F929A2, 0x2C31C393,
+	0x00654FAE
+};
+
+typedef struct {
+	const uint32_t *p;
+	const uint32_t *b;
+	const uint32_t *R2;
+	uint32_t p0i;
+} curve_params_u141;
+
+static inline const curve_params_u141 *
+id_to_curve_u141(int curve)
+{
+	static const curve_params_u141 pp_u141[] = {
+		{ P256_P_u141, P256_B_u141, P256_R2_u141, 0x00000001 },
+		{ P384_P_u141, P384_B_u141, P384_R2_u141, 0x00000001 },
+		{ P521_P_u141, P521_B_u141, P521_R2_u141, 0x00000001 }
+	};
+
+	return &pp_u141[curve - BR_EC_secp256r1];
+}
+
+#define I31_LEN_u141   ((BR_MAX_EC_SIZE + 61) / 31)
+
+/*
+ * Type for a point in Jacobian coordinates:
+ * -- three values, x, y and z, in Montgomery representation
+ * -- affine coordinates are X = x / z^2 and Y = y / z^3
+ * -- for the point at infinity, z = 0
+ */
+typedef struct {
+	uint32_t c[3][I31_LEN_u141];
 } jacobian_u141;
 
 /*
@@ -38021,7 +38671,7 @@ run_code_u141(jacobian_u141 *P1, const jacobian_u141 *P2,
 	const curve_params_u141 *cc, const uint16_t *code)
 {
 	uint32_t r;
-	uint16_t t[13][I15_LEN_u141];
+	uint32_t t[13][I31_LEN_u141];
 	size_t u;
 
 	r = 1;
@@ -38029,8 +38679,8 @@ run_code_u141(jacobian_u141 *P1, const jacobian_u141 *P2,
 	/*
 	 * Copy the two operands in the dedicated registers.
 	 */
-	memcpy(t[P1x_u141], P1->c, 3 * I15_LEN_u141 * sizeof(uint16_t));
-	memcpy(t[P2x_u141], P2->c, 3 * I15_LEN_u141 * sizeof(uint16_t));
+	memcpy(t[P1x_u141], P1->c, 3 * I31_LEN_u141 * sizeof(uint32_t));
+	memcpy(t[P2x_u141], P2->c, 3 * I31_LEN_u141 * sizeof(uint32_t));
 
 	/*
 	 * Run formulas.
@@ -38052,28 +38702,28 @@ run_code_u141(jacobian_u141 *P1, const jacobian_u141 *P2,
 			unsigned char tp[(BR_MAX_EC_SIZE + 7) >> 3];
 
 		case 0:
-			memcpy(t[d], t[a], I15_LEN_u141 * sizeof(uint16_t));
+			memcpy(t[d], t[a], I31_LEN_u141 * sizeof(uint32_t));
 			break;
 		case 1:
-			ctl = br_i15_add(t[d], t[a], 1);
-			ctl |= NOT(br_i15_sub(t[d], cc->p, 0));
-			br_i15_sub(t[d], cc->p, ctl);
+			ctl = br_i31_add(t[d], t[a], 1);
+			ctl |= NOT(br_i31_sub(t[d], cc->p, 0));
+			br_i31_sub(t[d], cc->p, ctl);
 			break;
 		case 2:
-			br_i15_add(t[d], cc->p, br_i15_sub(t[d], t[a], 1));
+			br_i31_add(t[d], cc->p, br_i31_sub(t[d], t[a], 1));
 			break;
 		case 3:
-			br_i15_montymul(t[d], t[a], t[b], cc->p, cc->p0i);
+			br_i31_montymul(t[d], t[a], t[b], cc->p, cc->p0i);
 			break;
 		case 4:
-			plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
-			br_i15_encode(tp, plen, cc->p);
+			plen = (cc->p[0] - (cc->p[0] >> 5) + 7) >> 3;
+			br_i31_encode(tp, plen, cc->p);
 			tp[plen - 1] -= 2;
-			br_i15_modpow(t[d], tp, plen,
+			br_i31_modpow(t[d], tp, plen,
 				cc->p, cc->p0i, t[a], t[b]);
 			break;
 		default:
-			r &= ~br_i15_iszero(t[d]);
+			r &= ~br_i31_iszero(t[d]);
 			break;
 		}
 	}
@@ -38081,19 +38731,19 @@ run_code_u141(jacobian_u141 *P1, const jacobian_u141 *P2,
 	/*
 	 * Copy back result.
 	 */
-	memcpy(P1->c, t[P1x_u141], 3 * I15_LEN_u141 * sizeof(uint16_t));
+	memcpy(P1->c, t[P1x_u141], 3 * I31_LEN_u141 * sizeof(uint32_t));
 	return r;
 }
 
 static void
-set_one_u141(uint16_t *x, const uint16_t *p)
+set_one_u141(uint32_t *x, const uint32_t *p)
 {
 	size_t plen;
 
-	plen = (p[0] + 31) >> 4;
+	plen = (p[0] + 63) >> 5;
 	memset(x, 0, plen * sizeof *x);
 	x[0] = p[0];
-	x[1] = 0x0001;
+	x[1] = 0x00000001;
 }
 
 static void
@@ -38200,12 +38850,12 @@ point_decode_u141(jacobian_u141 *P, const void *src, size_t len, const curve_par
 
 	buf = src;
 	point_zero_u141(P, cc);
-	plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
+	plen = (cc->p[0] - (cc->p[0] >> 5) + 7) >> 3;
 	if (len != 1 + (plen << 1)) {
 		return 0;
 	}
-	r = br_i15_decode_mod(P->c[0], buf + 1, plen, cc->p);
-	r &= br_i15_decode_mod(P->c[1], buf + 1 + plen, plen, cc->p);
+	r = br_i31_decode_mod(P->c[0], buf + 1, plen, cc->p);
+	r &= br_i31_decode_mod(P->c[1], buf + 1 + plen, plen, cc->p);
 
 	/*
 	 * Check first byte.
@@ -38219,7 +38869,7 @@ point_decode_u141(jacobian_u141 *P, const void *src, size_t len, const curve_par
 	/*
 	 * Convert coordinates and check that the point is valid.
 	 */
-	zlen = ((cc->p[0] + 31) >> 4) * sizeof(uint16_t);
+	zlen = ((cc->p[0] + 63) >> 5) * sizeof(uint32_t);
 	memcpy(Q.c[0], cc->R2, zlen);
 	memcpy(Q.c[1], cc->b, zlen);
 	set_one_u141(Q.c[2], cc->p);
@@ -38236,17 +38886,20 @@ static void
 point_encode_u141(void *dst, const jacobian_u141 *P, const curve_params_u141 *cc)
 {
 	unsigned char *buf;
+	uint32_t xbl;
 	size_t plen;
 	jacobian_u141 Q, T;
 
 	buf = dst;
-	plen = (cc->p[0] - (cc->p[0] >> 4) + 7) >> 3;
+	xbl = cc->p[0];
+	xbl -= (xbl >> 5);
+	plen = (xbl + 7) >> 3;
 	buf[0] = 0x04;
 	memcpy(&Q, P, sizeof *P);
 	set_one_u141(T.c[2], cc->p);
 	run_code_u141(&Q, &T, cc, code_affine_u141);
-	br_i15_encode(buf + 1, plen, Q.c[0]);
-	br_i15_encode(buf + 1 + plen, plen, Q.c[1]);
+	br_i31_encode(buf + 1, plen, Q.c[0]);
+	br_i31_encode(buf + 1 + plen, plen, Q.c[1]);
 }
 
 static const br_ec_curve_def *
@@ -38302,9 +38955,7 @@ api_mul_u141(unsigned char *G, size_t Glen,
 	cc = id_to_curve_u141(curve);
 	r = point_decode_u141(&P, G, Glen, cc);
 	point_mul_u141(&P, x, xlen, cc);
-	if (Glen == cc->point_len) {
-		point_encode_u141(G, &P, cc);
-	}
+	point_encode_u141(G, &P, cc);
 	return r;
 }
 
@@ -38357,7 +39008,7 @@ api_muladd_u141(unsigned char *A, const unsigned char *B, size_t len,
 	 */
 	t = point_add_u141(&P, &Q, cc);
 	point_double_u141(&Q, cc);
-	z = br_i15_iszero(P.c[2]);
+	z = br_i31_iszero(P.c[2]);
 
 	/*
 	 * If z is 1 then either P+Q = 0 (t = 1) or P = Q (t = 0). So we
@@ -38376,7 +39027,7 @@ api_muladd_u141(unsigned char *A, const unsigned char *B, size_t len,
 }
 
 /* see bearssl_ec.h */
-const br_ec_impl br_ec_prime_i15 = {
+const br_ec_impl br_ec_prime_i31 = {
 	(uint32_t)0x03800000,
 	&api_generator_u141,
 	&api_order_u141,
@@ -38384,827 +39035,6 @@ const br_ec_impl br_ec_prime_i15 = {
 	&api_mul_u141,
 	&api_mulgen_u141,
 	&api_muladd_u141
-};
-
-/* === src/ec/ec_prime_i31.c === */
-#line 1 "src/ec/ec_prime_i31.c"
-/*
- * Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining 
- * a copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be 
- * included in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
- * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
- * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
- * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
-
-
-/*
- * Parameters for supported curves (field modulus, and 'b' equation
- * parameter; both values use the 'i31' format, and 'b' is in Montgomery
- * representation).
- */
-
-static const uint32_t P256_P_u142[] = {
-	0x00000108,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x00000007,
-	0x00000000, 0x00000000, 0x00000040, 0x7FFFFF80,
-	0x000000FF
-};
-
-static const uint32_t P256_R2_u142[] = {
-	0x00000108,
-	0x00014000, 0x00018000, 0x00000000, 0x7FF40000,
-	0x7FEFFFFF, 0x7FF7FFFF, 0x7FAFFFFF, 0x005FFFFF,
-	0x00000000
-};
-
-static const uint32_t P256_B_u142[] = {
-	0x00000108,
-	0x6FEE1803, 0x6229C4BD, 0x21B139BE, 0x327150AA,
-	0x3567802E, 0x3F7212ED, 0x012E4355, 0x782DD38D,
-	0x0000000E
-};
-
-static const uint32_t P384_P_u142[] = {
-	0x0000018C,
-	0x7FFFFFFF, 0x00000001, 0x00000000, 0x7FFFFFF8,
-	0x7FFFFFEF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x00000FFF
-};
-
-static const uint32_t P384_R2_u142[] = {
-	0x0000018C,
-	0x00000000, 0x00000080, 0x7FFFFE00, 0x000001FF,
-	0x00000800, 0x00000000, 0x7FFFE000, 0x00001FFF,
-	0x00008000, 0x00008000, 0x00000000, 0x00000000,
-	0x00000000
-};
-
-static const uint32_t P384_B_u142[] = {
-	0x0000018C,
-	0x6E666840, 0x070D0392, 0x5D810231, 0x7651D50C,
-	0x17E218D6, 0x1B192002, 0x44EFE441, 0x3A524E2B,
-	0x2719BA5F, 0x41F02209, 0x36C5643E, 0x5813EFFE,
-	0x000008A5
-};
-
-static const uint32_t P521_P_u142[] = {
-	0x00000219,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF,
-	0x01FFFFFF
-};
-
-static const uint32_t P521_R2_u142[] = {
-	0x00000219,
-	0x00001000, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000, 0x00000000, 0x00000000, 0x00000000,
-	0x00000000
-};
-
-static const uint32_t P521_B_u142[] = {
-	0x00000219,
-	0x540FC00A, 0x228FEA35, 0x2C34F1EF, 0x67BF107A,
-	0x46FC1CD5, 0x1605E9DD, 0x6937B165, 0x272A3D8F,
-	0x42785586, 0x44C8C778, 0x15F3B8B4, 0x64B73366,
-	0x03BA8B69, 0x0D05B42A, 0x21F929A2, 0x2C31C393,
-	0x00654FAE
-};
-
-typedef struct {
-	const uint32_t *p;
-	const uint32_t *b;
-	const uint32_t *R2;
-	uint32_t p0i;
-} curve_params_u142;
-
-static inline const curve_params_u142 *
-id_to_curve_u142(int curve)
-{
-	static const curve_params_u142 pp_u142[] = {
-		{ P256_P_u142, P256_B_u142, P256_R2_u142, 0x00000001 },
-		{ P384_P_u142, P384_B_u142, P384_R2_u142, 0x00000001 },
-		{ P521_P_u142, P521_B_u142, P521_R2_u142, 0x00000001 }
-	};
-
-	return &pp_u142[curve - BR_EC_secp256r1];
-}
-
-#define I31_LEN_u142   ((BR_MAX_EC_SIZE + 61) / 31)
-
-/*
- * Type for a point in Jacobian coordinates:
- * -- three values, x, y and z, in Montgomery representation
- * -- affine coordinates are X = x / z^2 and Y = y / z^3
- * -- for the point at infinity, z = 0
- */
-typedef struct {
-	uint32_t c[3][I31_LEN_u142];
-} jacobian_u142;
-
-/*
- * We use a custom interpreter that uses a dozen registers, and
- * only six operations:
- *    MSET_u142(d, a)       copy a into d
- *    MADD_u142(d, a)       d = d+a (modular)
- *    MSUB_u142(d, a)       d = d-a (modular)
- *    MMUL_u142(d, a, b)    d = a*b (Montgomery multiplication)
- *    MINV_u142(d, a, b)    invert d modulo p; a and b are used as scratch registers
- *    MTZ_u142(d)           clear return value if d = 0
- * Destination of MMUL_u142 (d) must be distinct from operands (a and b).
- * There is no such constraint for MSUB_u142 and MADD_u142.
- *
- * Registers include the operand coordinates, and temporaries.
- */
-#define MSET_u142(d, a)      (0x0000 + ((d) << 8) + ((a) << 4))
-#define MADD_u142(d, a)      (0x1000 + ((d) << 8) + ((a) << 4))
-#define MSUB_u142(d, a)      (0x2000 + ((d) << 8) + ((a) << 4))
-#define MMUL_u142(d, a, b)   (0x3000 + ((d) << 8) + ((a) << 4) + (b))
-#define MINV_u142(d, a, b)   (0x4000 + ((d) << 8) + ((a) << 4) + (b))
-#define MTZ_u142(d)          (0x5000 + ((d) << 8))
-#define ENDCODE_u142         0
-
-/*
- * Registers for the input operands.
- */
-#define P1x_u142    0
-#define P1y_u142    1
-#define P1z_u142    2
-#define P2x_u142    3
-#define P2y_u142    4
-#define P2z_u142    5
-
-/*
- * Alternate names for the first input operand.
- */
-#define Px_u142     0
-#define Py_u142     1
-#define Pz_u142     2
-
-/*
- * Temporaries.
- */
-#define t1_u142     6
-#define t2_u142     7
-#define t3_u142     8
-#define t4_u142     9
-#define t5_u142    10
-#define t6_u142    11
-#define t7_u142    12
-
-/*
- * Extra scratch registers available when there is no second operand (e.g.
- * for "double" and "affine").
- */
-#define t8_u142     3
-#define t9_u142     4
-#define t10_u142    5
-
-/*
- * Doubling formulas are:
- *
- *   s = 4*x*y^2
- *   m = 3*(x + z^2)*(x - z^2)
- *   x' = m^2 - 2*s
- *   y' = m*(s - x') - 8*y^4
- *   z' = 2*y*z
- *
- * If y = 0 (P has order 2) then this yields infinity (z' = 0), as it
- * should. This case should not happen anyway, because our curves have
- * prime order, and thus do not contain any point of order 2.
- *
- * If P is infinity (z = 0), then again the formulas yield infinity,
- * which is correct. Thus, this code works for all points.
- *
- * Cost: 8 multiplications
- */
-static const uint16_t code_double_u142[] = {
-	/*
-	 * Compute z^2 (in t1_u142).
-	 */
-	MMUL_u142(t1_u142, Pz_u142, Pz_u142),
-
-	/*
-	 * Compute x-z^2 (in t2_u142) and then x+z^2 (in t1_u142).
-	 */
-	MSET_u142(t2_u142, Px_u142),
-	MSUB_u142(t2_u142, t1_u142),
-	MADD_u142(t1_u142, Px_u142),
-
-	/*
-	 * Compute m = 3*(x+z^2)*(x-z^2) (in t1_u142).
-	 */
-	MMUL_u142(t3_u142, t1_u142, t2_u142),
-	MSET_u142(t1_u142, t3_u142),
-	MADD_u142(t1_u142, t3_u142),
-	MADD_u142(t1_u142, t3_u142),
-
-	/*
-	 * Compute s = 4*x*y^2 (in t2_u142) and 2*y^2 (in t3_u142).
-	 */
-	MMUL_u142(t3_u142, Py_u142, Py_u142),
-	MADD_u142(t3_u142, t3_u142),
-	MMUL_u142(t2_u142, Px_u142, t3_u142),
-	MADD_u142(t2_u142, t2_u142),
-
-	/*
-	 * Compute x' = m^2 - 2*s.
-	 */
-	MMUL_u142(Px_u142, t1_u142, t1_u142),
-	MSUB_u142(Px_u142, t2_u142),
-	MSUB_u142(Px_u142, t2_u142),
-
-	/*
-	 * Compute z' = 2*y*z.
-	 */
-	MMUL_u142(t4_u142, Py_u142, Pz_u142),
-	MSET_u142(Pz_u142, t4_u142),
-	MADD_u142(Pz_u142, t4_u142),
-
-	/*
-	 * Compute y' = m*(s - x') - 8*y^4. Note that we already have
-	 * 2*y^2 in t3_u142.
-	 */
-	MSUB_u142(t2_u142, Px_u142),
-	MMUL_u142(Py_u142, t1_u142, t2_u142),
-	MMUL_u142(t4_u142, t3_u142, t3_u142),
-	MSUB_u142(Py_u142, t4_u142),
-	MSUB_u142(Py_u142, t4_u142),
-
-	ENDCODE_u142
-};
-
-/*
- * Addtions formulas are:
- *
- *   u1 = x1 * z2^2
- *   u2 = x2 * z1^2
- *   s1 = y1 * z2^3
- *   s2 = y2 * z1^3
- *   h = u2 - u1
- *   r = s2 - s1
- *   x3 = r^2 - h^3 - 2 * u1 * h^2
- *   y3 = r * (u1 * h^2 - x3) - s1 * h^3
- *   z3 = h * z1 * z2
- *
- * If both P1 and P2 are infinity, then z1 == 0 and z2 == 0, implying that
- * z3 == 0, so the result is correct.
- * If either of P1 or P2 is infinity, but not both, then z3 == 0, which is
- * not correct.
- * h == 0 only if u1 == u2; this happens in two cases:
- * -- if s1 == s2 then P1 and/or P2 is infinity, or P1 == P2
- * -- if s1 != s2 then P1 + P2 == infinity (but neither P1 or P2 is infinity)
- *
- * Thus, the following situations are not handled correctly:
- * -- P1 = 0 and P2 != 0
- * -- P1 != 0 and P2 = 0
- * -- P1 = P2
- * All other cases are properly computed. However, even in "incorrect"
- * situations, the three coordinates still are properly formed field
- * elements.
- *
- * The returned flag is cleared if r == 0. This happens in the following
- * cases:
- * -- Both points are on the same horizontal line (same Y coordinate).
- * -- Both points are infinity.
- * -- One point is infinity and the other is on line Y = 0.
- * The third case cannot happen with our curves (there is no valid point
- * on line Y = 0 since that would be a point of order 2). If the two
- * source points are non-infinity, then remains only the case where the
- * two points are on the same horizontal line.
- *
- * This allows us to detect the "P1 == P2" case, assuming that P1 != 0 and
- * P2 != 0:
- * -- If the returned value is not the point at infinity, then it was properly
- * computed.
- * -- Otherwise, if the returned flag is 1, then P1+P2 = 0, and the result
- * is indeed the point at infinity.
- * -- Otherwise (result is infinity, flag is 0), then P1 = P2 and we should
- * use the 'double' code.
- *
- * Cost: 16 multiplications
- */
-static const uint16_t code_add_u142[] = {
-	/*
-	 * Compute u1 = x1*z2^2 (in t1_u142) and s1 = y1*z2^3 (in t3_u142).
-	 */
-	MMUL_u142(t3_u142, P2z_u142, P2z_u142),
-	MMUL_u142(t1_u142, P1x_u142, t3_u142),
-	MMUL_u142(t4_u142, P2z_u142, t3_u142),
-	MMUL_u142(t3_u142, P1y_u142, t4_u142),
-
-	/*
-	 * Compute u2 = x2*z1^2 (in t2_u142) and s2 = y2*z1^3 (in t4_u142).
-	 */
-	MMUL_u142(t4_u142, P1z_u142, P1z_u142),
-	MMUL_u142(t2_u142, P2x_u142, t4_u142),
-	MMUL_u142(t5_u142, P1z_u142, t4_u142),
-	MMUL_u142(t4_u142, P2y_u142, t5_u142),
-
-	/*
-	 * Compute h = u2 - u1 (in t2_u142) and r = s2 - s1 (in t4_u142).
-	 */
-	MSUB_u142(t2_u142, t1_u142),
-	MSUB_u142(t4_u142, t3_u142),
-
-	/*
-	 * Report cases where r = 0 through the returned flag.
-	 */
-	MTZ_u142(t4_u142),
-
-	/*
-	 * Compute u1*h^2 (in t6_u142) and h^3 (in t5_u142).
-	 */
-	MMUL_u142(t7_u142, t2_u142, t2_u142),
-	MMUL_u142(t6_u142, t1_u142, t7_u142),
-	MMUL_u142(t5_u142, t7_u142, t2_u142),
-
-	/*
-	 * Compute x3 = r^2 - h^3 - 2*u1*h^2.
-	 * t1_u142 and t7_u142 can be used as scratch registers.
-	 */
-	MMUL_u142(P1x_u142, t4_u142, t4_u142),
-	MSUB_u142(P1x_u142, t5_u142),
-	MSUB_u142(P1x_u142, t6_u142),
-	MSUB_u142(P1x_u142, t6_u142),
-
-	/*
-	 * Compute y3 = r*(u1*h^2 - x3) - s1*h^3.
-	 */
-	MSUB_u142(t6_u142, P1x_u142),
-	MMUL_u142(P1y_u142, t4_u142, t6_u142),
-	MMUL_u142(t1_u142, t5_u142, t3_u142),
-	MSUB_u142(P1y_u142, t1_u142),
-
-	/*
-	 * Compute z3 = h*z1*z2.
-	 */
-	MMUL_u142(t1_u142, P1z_u142, P2z_u142),
-	MMUL_u142(P1z_u142, t1_u142, t2_u142),
-
-	ENDCODE_u142
-};
-
-/*
- * Check that the point is on the curve. This code snippet assumes the
- * following conventions:
- * -- Coordinates x and y have been freshly decoded in P1 (but not
- * converted to Montgomery coordinates yet).
- * -- P2x_u142, P2y_u142 and P2z_u142 are set to, respectively, R^2, b*R and 1.
- */
-static const uint16_t code_check_u142[] = {
-
-	/* Convert x and y to Montgomery representation. */
-	MMUL_u142(t1_u142, P1x_u142, P2x_u142),
-	MMUL_u142(t2_u142, P1y_u142, P2x_u142),
-	MSET_u142(P1x_u142, t1_u142),
-	MSET_u142(P1y_u142, t2_u142),
-
-	/* Compute x^3 in t1_u142. */
-	MMUL_u142(t2_u142, P1x_u142, P1x_u142),
-	MMUL_u142(t1_u142, P1x_u142, t2_u142),
-
-	/* Subtract 3*x from t1_u142. */
-	MSUB_u142(t1_u142, P1x_u142),
-	MSUB_u142(t1_u142, P1x_u142),
-	MSUB_u142(t1_u142, P1x_u142),
-
-	/* Add b. */
-	MADD_u142(t1_u142, P2y_u142),
-
-	/* Compute y^2 in t2_u142. */
-	MMUL_u142(t2_u142, P1y_u142, P1y_u142),
-
-	/* Compare y^2 with x^3 - 3*x + b; they must match. */
-	MSUB_u142(t1_u142, t2_u142),
-	MTZ_u142(t1_u142),
-
-	/* Set z to 1 (in Montgomery representation). */
-	MMUL_u142(P1z_u142, P2x_u142, P2z_u142),
-
-	ENDCODE_u142
-};
-
-/*
- * Conversion back to affine coordinates. This code snippet assumes that
- * the z coordinate of P2 is set to 1 (not in Montgomery representation).
- */
-static const uint16_t code_affine_u142[] = {
-
-	/* Save z*R in t1_u142. */
-	MSET_u142(t1_u142, P1z_u142),
-
-	/* Compute z^3 in t2_u142. */
-	MMUL_u142(t2_u142, P1z_u142, P1z_u142),
-	MMUL_u142(t3_u142, P1z_u142, t2_u142),
-	MMUL_u142(t2_u142, t3_u142, P2z_u142),
-
-	/* Invert to (1/z^3) in t2_u142. */
-	MINV_u142(t2_u142, t3_u142, t4_u142),
-
-	/* Compute y. */
-	MSET_u142(t3_u142, P1y_u142),
-	MMUL_u142(P1y_u142, t2_u142, t3_u142),
-
-	/* Compute (1/z^2) in t3_u142. */
-	MMUL_u142(t3_u142, t2_u142, t1_u142),
-
-	/* Compute x. */
-	MSET_u142(t2_u142, P1x_u142),
-	MMUL_u142(P1x_u142, t2_u142, t3_u142),
-
-	ENDCODE_u142
-};
-
-static uint32_t
-run_code_u142(jacobian_u142 *P1, const jacobian_u142 *P2,
-	const curve_params_u142 *cc, const uint16_t *code)
-{
-	uint32_t r;
-	uint32_t t[13][I31_LEN_u142];
-	size_t u;
-
-	r = 1;
-
-	/*
-	 * Copy the two operands in the dedicated registers.
-	 */
-	memcpy(t[P1x_u142], P1->c, 3 * I31_LEN_u142 * sizeof(uint32_t));
-	memcpy(t[P2x_u142], P2->c, 3 * I31_LEN_u142 * sizeof(uint32_t));
-
-	/*
-	 * Run formulas.
-	 */
-	for (u = 0;; u ++) {
-		unsigned op, d, a, b;
-
-		op = code[u];
-		if (op == 0) {
-			break;
-		}
-		d = (op >> 8) & 0x0F;
-		a = (op >> 4) & 0x0F;
-		b = op & 0x0F;
-		op >>= 12;
-		switch (op) {
-			uint32_t ctl;
-			size_t plen;
-			unsigned char tp[(BR_MAX_EC_SIZE + 7) >> 3];
-
-		case 0:
-			memcpy(t[d], t[a], I31_LEN_u142 * sizeof(uint32_t));
-			break;
-		case 1:
-			ctl = br_i31_add(t[d], t[a], 1);
-			ctl |= NOT(br_i31_sub(t[d], cc->p, 0));
-			br_i31_sub(t[d], cc->p, ctl);
-			break;
-		case 2:
-			br_i31_add(t[d], cc->p, br_i31_sub(t[d], t[a], 1));
-			break;
-		case 3:
-			br_i31_montymul(t[d], t[a], t[b], cc->p, cc->p0i);
-			break;
-		case 4:
-			plen = (cc->p[0] - (cc->p[0] >> 5) + 7) >> 3;
-			br_i31_encode(tp, plen, cc->p);
-			tp[plen - 1] -= 2;
-			br_i31_modpow(t[d], tp, plen,
-				cc->p, cc->p0i, t[a], t[b]);
-			break;
-		default:
-			r &= ~br_i31_iszero(t[d]);
-			break;
-		}
-	}
-
-	/*
-	 * Copy back result.
-	 */
-	memcpy(P1->c, t[P1x_u142], 3 * I31_LEN_u142 * sizeof(uint32_t));
-	return r;
-}
-
-static void
-set_one_u142(uint32_t *x, const uint32_t *p)
-{
-	size_t plen;
-
-	plen = (p[0] + 63) >> 5;
-	memset(x, 0, plen * sizeof *x);
-	x[0] = p[0];
-	x[1] = 0x00000001;
-}
-
-static void
-point_zero_u142(jacobian_u142 *P, const curve_params_u142 *cc)
-{
-	memset(P, 0, sizeof *P);
-	P->c[0][0] = P->c[1][0] = P->c[2][0] = cc->p[0];
-}
-
-static inline void
-point_double_u142(jacobian_u142 *P, const curve_params_u142 *cc)
-{
-	run_code_u142(P, P, cc, code_double_u142);
-}
-
-static inline uint32_t
-point_add_u142(jacobian_u142 *P1, const jacobian_u142 *P2, const curve_params_u142 *cc)
-{
-	return run_code_u142(P1, P2, cc, code_add_u142);
-}
-
-static void
-point_mul_u142(jacobian_u142 *P, const unsigned char *x, size_t xlen,
-	const curve_params_u142 *cc)
-{
-	/*
-	 * We do a simple double-and-add ladder with a 2-bit window
-	 * to make only one add every two doublings. We thus first
-	 * precompute 2P and 3P in some local buffers.
-	 *
-	 * We always perform two doublings and one addition; the
-	 * addition is with P, 2P and 3P and is done in a temporary
-	 * array.
-	 *
-	 * The addition code cannot handle cases where one of the
-	 * operands is infinity, which is the case at the start of the
-	 * ladder. We therefore need to maintain a flag that controls
-	 * this situation.
-	 */
-	uint32_t qz;
-	jacobian_u142 P2, P3, Q, T, U;
-
-	memcpy(&P2, P, sizeof P2);
-	point_double_u142(&P2, cc);
-	memcpy(&P3, P, sizeof P3);
-	point_add_u142(&P3, &P2, cc);
-
-	point_zero_u142(&Q, cc);
-	qz = 1;
-	while (xlen -- > 0) {
-		int k;
-
-		for (k = 6; k >= 0; k -= 2) {
-			uint32_t bits;
-			uint32_t bnz;
-
-			point_double_u142(&Q, cc);
-			point_double_u142(&Q, cc);
-			memcpy(&T, P, sizeof T);
-			memcpy(&U, &Q, sizeof U);
-			bits = (*x >> k) & (uint32_t)3;
-			bnz = NEQ(bits, 0);
-			CCOPY(EQ(bits, 2), &T, &P2, sizeof T);
-			CCOPY(EQ(bits, 3), &T, &P3, sizeof T);
-			point_add_u142(&U, &T, cc);
-			CCOPY(bnz & qz, &Q, &T, sizeof Q);
-			CCOPY(bnz & ~qz, &Q, &U, sizeof Q);
-			qz &= ~bnz;
-		}
-		x ++;
-	}
-	memcpy(P, &Q, sizeof Q);
-}
-
-/*
- * Decode point into Jacobian coordinates. This function does not support
- * the point at infinity. If the point is invalid then this returns 0, but
- * the coordinates are still set to properly formed field elements.
- */
-static uint32_t
-point_decode_u142(jacobian_u142 *P, const void *src, size_t len, const curve_params_u142 *cc)
-{
-	/*
-	 * Points must use uncompressed format:
-	 * -- first byte is 0x04;
-	 * -- coordinates X and Y use unsigned big-endian, with the same
-	 *    length as the field modulus.
-	 *
-	 * We don't support hybrid format (uncompressed, but first byte
-	 * has value 0x06 or 0x07, depending on the least significant bit
-	 * of Y) because it is rather useless, and explicitly forbidden
-	 * by PKIX (RFC 5480, section 2.2).
-	 *
-	 * We don't support compressed format either, because it is not
-	 * much used in practice (there are or were patent-related
-	 * concerns about point compression, which explains the lack of
-	 * generalised support). Also, point compression support would
-	 * need a bit more code.
-	 */
-	const unsigned char *buf;
-	size_t plen, zlen;
-	uint32_t r;
-	jacobian_u142 Q;
-
-	buf = src;
-	point_zero_u142(P, cc);
-	plen = (cc->p[0] - (cc->p[0] >> 5) + 7) >> 3;
-	if (len != 1 + (plen << 1)) {
-		return 0;
-	}
-	r = br_i31_decode_mod(P->c[0], buf + 1, plen, cc->p);
-	r &= br_i31_decode_mod(P->c[1], buf + 1 + plen, plen, cc->p);
-
-	/*
-	 * Check first byte.
-	 */
-	r &= EQ(buf[0], 0x04);
-	/* obsolete
-	r &= EQ(buf[0], 0x04) | (EQ(buf[0] & 0xFE, 0x06)
-		& ~(uint32_t)(buf[0] ^ buf[plen << 1]));
-	*/
-
-	/*
-	 * Convert coordinates and check that the point is valid.
-	 */
-	zlen = ((cc->p[0] + 63) >> 5) * sizeof(uint32_t);
-	memcpy(Q.c[0], cc->R2, zlen);
-	memcpy(Q.c[1], cc->b, zlen);
-	set_one_u142(Q.c[2], cc->p);
-	r &= ~run_code_u142(P, &Q, cc, code_check_u142);
-	return r;
-}
-
-/*
- * Encode a point. This method assumes that the point is correct and is
- * not the point at infinity. Encoded size is always 1+2*plen, where
- * plen is the field modulus length, in bytes.
- */
-static void
-point_encode_u142(void *dst, const jacobian_u142 *P, const curve_params_u142 *cc)
-{
-	unsigned char *buf;
-	uint32_t xbl;
-	size_t plen;
-	jacobian_u142 Q, T;
-
-	buf = dst;
-	xbl = cc->p[0];
-	xbl -= (xbl >> 5);
-	plen = (xbl + 7) >> 3;
-	buf[0] = 0x04;
-	memcpy(&Q, P, sizeof *P);
-	set_one_u142(T.c[2], cc->p);
-	run_code_u142(&Q, &T, cc, code_affine_u142);
-	br_i31_encode(buf + 1, plen, Q.c[0]);
-	br_i31_encode(buf + 1 + plen, plen, Q.c[1]);
-}
-
-static const br_ec_curve_def *
-id_to_curve_def_u142(int curve)
-{
-	switch (curve) {
-	case BR_EC_secp256r1:
-		return &br_secp256r1;
-	case BR_EC_secp384r1:
-		return &br_secp384r1;
-	case BR_EC_secp521r1:
-		return &br_secp521r1;
-	}
-	return NULL;
-}
-
-static const unsigned char *
-api_generator_u142(int curve, size_t *len)
-{
-	const br_ec_curve_def *cd;
-
-	cd = id_to_curve_def_u142(curve);
-	*len = cd->generator_len;
-	return cd->generator;
-}
-
-static const unsigned char *
-api_order_u142(int curve, size_t *len)
-{
-	const br_ec_curve_def *cd;
-
-	cd = id_to_curve_def_u142(curve);
-	*len = cd->order_len;
-	return cd->order;
-}
-
-static size_t
-api_xoff_u142(int curve, size_t *len)
-{
-	api_generator_u142(curve, len);
-	*len >>= 1;
-	return 1;
-}
-
-static uint32_t
-api_mul_u142(unsigned char *G, size_t Glen,
-	const unsigned char *x, size_t xlen, int curve)
-{
-	uint32_t r;
-	const curve_params_u142 *cc;
-	jacobian_u142 P;
-
-	cc = id_to_curve_u142(curve);
-	r = point_decode_u142(&P, G, Glen, cc);
-	point_mul_u142(&P, x, xlen, cc);
-	point_encode_u142(G, &P, cc);
-	return r;
-}
-
-static size_t
-api_mulgen_u142(unsigned char *R,
-	const unsigned char *x, size_t xlen, int curve)
-{
-	const unsigned char *G;
-	size_t Glen;
-
-	G = api_generator_u142(curve, &Glen);
-	memcpy(R, G, Glen);
-	api_mul_u142(R, Glen, x, xlen, curve);
-	return Glen;
-}
-
-static uint32_t
-api_muladd_u142(unsigned char *A, const unsigned char *B, size_t len,
-	const unsigned char *x, size_t xlen,
-	const unsigned char *y, size_t ylen, int curve)
-{
-	uint32_t r, t, z;
-	const curve_params_u142 *cc;
-	jacobian_u142 P, Q;
-
-	/*
-	 * TODO: see about merging the two ladders. Right now, we do
-	 * two independent point multiplications, which is a bit
-	 * wasteful of CPU resources (but yields short code).
-	 */
-
-	cc = id_to_curve_u142(curve);
-	r = point_decode_u142(&P, A, len, cc);
-	if (B == NULL) {
-		size_t Glen;
-
-		B = api_generator_u142(curve, &Glen);
-	}
-	r &= point_decode_u142(&Q, B, len, cc);
-	point_mul_u142(&P, x, xlen, cc);
-	point_mul_u142(&Q, y, ylen, cc);
-
-	/*
-	 * We want to compute P+Q. Since the base points A and B are distinct
-	 * from infinity, and the multipliers are non-zero and lower than the
-	 * curve order, then we know that P and Q are non-infinity. This
-	 * leaves two special situations to test for:
-	 * -- If P = Q then we must use point_double_u142().
-	 * -- If P+Q = 0 then we must report an error.
-	 */
-	t = point_add_u142(&P, &Q, cc);
-	point_double_u142(&Q, cc);
-	z = br_i31_iszero(P.c[2]);
-
-	/*
-	 * If z is 1 then either P+Q = 0 (t = 1) or P = Q (t = 0). So we
-	 * have the following:
-	 *
-	 *   z = 0, t = 0   return P (normal addition)
-	 *   z = 0, t = 1   return P (normal addition)
-	 *   z = 1, t = 0   return Q (a 'double' case)
-	 *   z = 1, t = 1   report an error (P+Q = 0)
-	 */
-	CCOPY(z & ~t, &P, &Q, sizeof Q);
-	point_encode_u142(A, &P, cc);
-	r &= ~(z & t);
-
-	return r;
-}
-
-/* see bearssl_ec.h */
-const br_ec_impl br_ec_prime_i31 = {
-	(uint32_t)0x03800000,
-	&api_generator_u142,
-	&api_order_u142,
-	&api_xoff_u142,
-	&api_mul_u142,
-	&api_mulgen_u142,
-	&api_muladd_u142
 };
 
 /* === src/ec/ec_pubkey.c === */
@@ -39234,7 +39064,7 @@ const br_ec_impl br_ec_prime_i31 = {
  */
 
 
-static const unsigned char POINT_LEN_u143[] = {
+static const unsigned char POINT_LEN_u142[] = {
 	  0,   /* 0: not a valid curve ID */
 	 43,   /* sect163k1 */
 	 43,   /* sect163r1 */
@@ -39277,13 +39107,13 @@ br_ec_compute_pub(const br_ec_impl *impl, br_ec_public_key *pk,
 	size_t len;
 
 	curve = sk->curve;
-	if (curve < 0 || curve >= 32 || curve >= (int)(sizeof POINT_LEN_u143)
+	if (curve < 0 || curve >= 32 || curve >= (int)(sizeof POINT_LEN_u142)
 		|| ((impl->supported_curves >> curve) & 1) == 0)
 	{
 		return 0;
 	}
 	if (kbuf == NULL) {
-		return POINT_LEN_u143[curve];
+		return POINT_LEN_u142[curve];
 	}
 	len = impl->mulgen(kbuf, sk->x, sk->xlen, curve);
 	if (pk != NULL) {
@@ -39321,14 +39151,14 @@ br_ec_compute_pub(const br_ec_impl *impl, br_ec_public_key *pk,
  */
 
 
-static const unsigned char P256_N_u144[] = {
+static const unsigned char P256_N_u143[] = {
 	0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17, 0x9E, 0x84,
 	0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51
 };
 
-static const unsigned char P256_G_u144[] = {
+static const unsigned char P256_G_u143[] = {
 	0x04, 0x6B, 0x17, 0xD1, 0xF2, 0xE1, 0x2C, 0x42,
 	0x47, 0xF8, 0xBC, 0xE6, 0xE5, 0x63, 0xA4, 0x40,
 	0xF2, 0x77, 0x03, 0x7D, 0x81, 0x2D, 0xEB, 0x33,
@@ -39343,8 +39173,8 @@ static const unsigned char P256_G_u144[] = {
 /* see inner.h */
 const br_ec_curve_def br_secp256r1 = {
 	BR_EC_secp256r1,
-	P256_N_u144, sizeof P256_N_u144,
-	P256_G_u144, sizeof P256_G_u144
+	P256_N_u143, sizeof P256_N_u143,
+	P256_G_u143, sizeof P256_G_u143
 };
 
 /* === src/ec/ec_secp384r1.c === */
@@ -39374,7 +39204,7 @@ const br_ec_curve_def br_secp256r1 = {
  */
 
 
-static const unsigned char P384_N_u145[] = {
+static const unsigned char P384_N_u144[] = {
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 
@@ -39383,7 +39213,7 @@ static const unsigned char P384_N_u145[] = {
 	0xEC, 0xEC, 0x19, 0x6A, 0xCC, 0xC5, 0x29, 0x73
 };
 
-static const unsigned char P384_G_u145[] = {
+static const unsigned char P384_G_u144[] = {
 	0x04, 0xAA, 0x87, 0xCA, 0x22, 0xBE, 0x8B, 0x05,
 	0x37, 0x8E, 0xB1, 0xC7, 0x1E, 0xF3, 0x20, 0xAD,
 	0x74, 0x6E, 0x1D, 0x3B, 0x62, 0x8B, 0xA7, 0x9B,
@@ -39402,8 +39232,8 @@ static const unsigned char P384_G_u145[] = {
 /* see inner.h */
 const br_ec_curve_def br_secp384r1 = {
 	BR_EC_secp384r1,
-	P384_N_u145, sizeof P384_N_u145,
-	P384_G_u145, sizeof P384_G_u145
+	P384_N_u144, sizeof P384_N_u144,
+	P384_G_u144, sizeof P384_G_u144
 };
 
 /* === src/ec/ec_secp521r1.c === */
@@ -39433,7 +39263,7 @@ const br_ec_curve_def br_secp384r1 = {
  */
 
 
-static const unsigned char P521_N_u146[] = {
+static const unsigned char P521_N_u145[] = {
 	0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
@@ -39445,7 +39275,7 @@ static const unsigned char P521_N_u146[] = {
 	0x64, 0x09
 };
 
-static const unsigned char P521_G_u146[] = {
+static const unsigned char P521_G_u145[] = {
 	0x04, 0x00, 0xC6, 0x85, 0x8E, 0x06, 0xB7, 0x04,
 	0x04, 0xE9, 0xCD, 0x9E, 0x3E, 0xCB, 0x66, 0x23,
 	0x95, 0xB4, 0x42, 0x9C, 0x64, 0x81, 0x39, 0x05,
@@ -39468,8 +39298,8 @@ static const unsigned char P521_G_u146[] = {
 /* see inner.h */
 const br_ec_curve_def br_secp521r1 = {
 	BR_EC_secp521r1,
-	P521_N_u146, sizeof P521_N_u146,
-	P521_G_u146, sizeof P521_G_u146
+	P521_N_u145, sizeof P521_N_u145,
+	P521_G_u145, sizeof P521_G_u145
 };
 
 /* === src/ec/ecdsa_atr.c === */
@@ -39836,7 +39666,7 @@ br_ecdsa_i15_bits2int(uint16_t *x,
  */
 
 
-#define ORDER_LEN_u153   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define ORDER_LEN_u152   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 size_t
@@ -39844,7 +39674,7 @@ br_ecdsa_i15_sign_asn1(const br_ec_impl *impl,
 	const br_hash_class *hf, const void *hash_value,
 	const br_ec_private_key *sk, void *sig)
 {
-	unsigned char rsig[(ORDER_LEN_u153 << 1) + 12];
+	unsigned char rsig[(ORDER_LEN_u152 << 1) + 12];
 	size_t sig_len;
 
 	sig_len = br_ecdsa_i15_sign_raw(impl, hf, hash_value, sk, rsig);
@@ -39883,9 +39713,9 @@ br_ecdsa_i15_sign_asn1(const br_ec_impl *impl,
  */
 
 
-#define I15_LEN_u154     ((BR_MAX_EC_SIZE + 29) / 15)
-#define POINT_LEN_u154   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
-#define ORDER_LEN_u154   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define I15_LEN_u153     ((BR_MAX_EC_SIZE + 29) / 15)
+#define POINT_LEN_u153   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
+#define ORDER_LEN_u153   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 size_t
@@ -39901,10 +39731,10 @@ br_ecdsa_i15_sign_raw(const br_ec_impl *impl,
 	 * from 0 and 1.
 	 */
 	const br_ec_curve_def *cd;
-	uint16_t n[I15_LEN_u154], r[I15_LEN_u154], s[I15_LEN_u154], x[I15_LEN_u154];
-	uint16_t m[I15_LEN_u154], k[I15_LEN_u154], t1[I15_LEN_u154], t2[I15_LEN_u154];
-	unsigned char tt[ORDER_LEN_u154 << 1];
-	unsigned char eU[POINT_LEN_u154];
+	uint16_t n[I15_LEN_u153], r[I15_LEN_u153], s[I15_LEN_u153], x[I15_LEN_u153];
+	uint16_t m[I15_LEN_u153], k[I15_LEN_u153], t1[I15_LEN_u153], t2[I15_LEN_u153];
+	unsigned char tt[ORDER_LEN_u153 << 1];
+	unsigned char eU[POINT_LEN_u153];
 	size_t hash_len, nlen, ulen;
 	uint16_t n0i;
 	uint32_t ctl;
@@ -40059,7 +39889,7 @@ br_ecdsa_i15_sign_raw(const br_ec_impl *impl,
  */
 
 
-#define FIELD_LEN_u155   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define FIELD_LEN_u154   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 uint32_t
@@ -40072,7 +39902,7 @@ br_ecdsa_i15_vrfy_asn1(const br_ec_impl *impl,
 	 * We use a double-sized buffer because a malformed ASN.1 signature
 	 * may trigger a size expansion when converting to "raw" format.
 	 */
-	unsigned char rsig[(FIELD_LEN_u155 << 2) + 24];
+	unsigned char rsig[(FIELD_LEN_u154 << 2) + 24];
 
 	if (sig_len > ((sizeof rsig) >> 1)) {
 		return 0;
@@ -40109,8 +39939,8 @@ br_ecdsa_i15_vrfy_asn1(const br_ec_impl *impl,
  */
 
 
-#define I15_LEN_u156     ((BR_MAX_EC_SIZE + 29) / 15)
-#define POINT_LEN_u156   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
+#define I15_LEN_u155     ((BR_MAX_EC_SIZE + 29) / 15)
+#define POINT_LEN_u155   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
 
 /* see bearssl_ec.h */
 uint32_t
@@ -40125,10 +39955,10 @@ br_ecdsa_i15_vrfy_raw(const br_ec_impl *impl,
 	 * coordinate of a point can be done with a simple subtraction.
 	 */
 	const br_ec_curve_def *cd;
-	uint16_t n[I15_LEN_u156], r[I15_LEN_u156], s[I15_LEN_u156], t1[I15_LEN_u156], t2[I15_LEN_u156];
+	uint16_t n[I15_LEN_u155], r[I15_LEN_u155], s[I15_LEN_u155], t1[I15_LEN_u155], t2[I15_LEN_u155];
 	unsigned char tx[(BR_MAX_EC_SIZE + 7) >> 3];
 	unsigned char ty[(BR_MAX_EC_SIZE + 7) >> 3];
-	unsigned char eU[POINT_LEN_u156];
+	unsigned char eU[POINT_LEN_u155];
 	size_t nlen, rlen, ulen;
 	uint16_t n0i;
 	uint32_t res;
@@ -40326,7 +40156,7 @@ br_ecdsa_i31_bits2int(uint32_t *x,
  */
 
 
-#define ORDER_LEN_u158   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define ORDER_LEN_u157   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 size_t
@@ -40334,7 +40164,7 @@ br_ecdsa_i31_sign_asn1(const br_ec_impl *impl,
 	const br_hash_class *hf, const void *hash_value,
 	const br_ec_private_key *sk, void *sig)
 {
-	unsigned char rsig[(ORDER_LEN_u158 << 1) + 12];
+	unsigned char rsig[(ORDER_LEN_u157 << 1) + 12];
 	size_t sig_len;
 
 	sig_len = br_ecdsa_i31_sign_raw(impl, hf, hash_value, sk, rsig);
@@ -40373,9 +40203,9 @@ br_ecdsa_i31_sign_asn1(const br_ec_impl *impl,
  */
 
 
-#define I31_LEN_u159     ((BR_MAX_EC_SIZE + 61) / 31)
-#define POINT_LEN_u159   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
-#define ORDER_LEN_u159   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define I31_LEN_u158     ((BR_MAX_EC_SIZE + 61) / 31)
+#define POINT_LEN_u158   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
+#define ORDER_LEN_u158   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 size_t
@@ -40391,10 +40221,10 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	 * from 0 and 1.
 	 */
 	const br_ec_curve_def *cd;
-	uint32_t n[I31_LEN_u159], r[I31_LEN_u159], s[I31_LEN_u159], x[I31_LEN_u159];
-	uint32_t m[I31_LEN_u159], k[I31_LEN_u159], t1[I31_LEN_u159], t2[I31_LEN_u159];
-	unsigned char tt[ORDER_LEN_u159 << 1];
-	unsigned char eU[POINT_LEN_u159];
+	uint32_t n[I31_LEN_u158], r[I31_LEN_u158], s[I31_LEN_u158], x[I31_LEN_u158];
+	uint32_t m[I31_LEN_u158], k[I31_LEN_u158], t1[I31_LEN_u158], t2[I31_LEN_u158];
+	unsigned char tt[ORDER_LEN_u158 << 1];
+	unsigned char eU[POINT_LEN_u158];
 	size_t hash_len, nlen, ulen;
 	uint32_t n0i, ctl;
 	br_hmac_drbg_context drbg;
@@ -40548,7 +40378,7 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
  */
 
 
-#define FIELD_LEN_u160   ((BR_MAX_EC_SIZE + 7) >> 3)
+#define FIELD_LEN_u159   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 uint32_t
@@ -40561,7 +40391,7 @@ br_ecdsa_i31_vrfy_asn1(const br_ec_impl *impl,
 	 * We use a double-sized buffer because a malformed ASN.1 signature
 	 * may trigger a size expansion when converting to "raw" format.
 	 */
-	unsigned char rsig[(FIELD_LEN_u160 << 2) + 24];
+	unsigned char rsig[(FIELD_LEN_u159 << 2) + 24];
 
 	if (sig_len > ((sizeof rsig) >> 1)) {
 		return 0;
@@ -40598,8 +40428,8 @@ br_ecdsa_i31_vrfy_asn1(const br_ec_impl *impl,
  */
 
 
-#define I31_LEN_u161     ((BR_MAX_EC_SIZE + 61) / 31)
-#define POINT_LEN_u161   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
+#define I31_LEN_u160     ((BR_MAX_EC_SIZE + 61) / 31)
+#define POINT_LEN_u160   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
 
 /* see bearssl_ec.h */
 uint32_t
@@ -40614,10 +40444,10 @@ br_ecdsa_i31_vrfy_raw(const br_ec_impl *impl,
 	 * coordinate of a point can be done with a simple subtraction.
 	 */
 	const br_ec_curve_def *cd;
-	uint32_t n[I31_LEN_u161], r[I31_LEN_u161], s[I31_LEN_u161], t1[I31_LEN_u161], t2[I31_LEN_u161];
+	uint32_t n[I31_LEN_u160], r[I31_LEN_u160], s[I31_LEN_u160], t1[I31_LEN_u160], t2[I31_LEN_u160];
 	unsigned char tx[(BR_MAX_EC_SIZE + 7) >> 3];
 	unsigned char ty[(BR_MAX_EC_SIZE + 7) >> 3];
-	unsigned char eU[POINT_LEN_u161];
+	unsigned char eU[POINT_LEN_u160];
 	size_t nlen, rlen, ulen;
 	uint32_t n0i, res;
 
@@ -40773,7 +40603,7 @@ br_ecdsa_i31_vrfy_raw(const br_ec_impl *impl,
  * bit).
  */
 static size_t
-asn1_int_length_u162(const unsigned char *x, size_t xlen)
+asn1_int_length_u161(const unsigned char *x, size_t xlen)
 {
 	while (xlen > 0 && *x == 0) {
 		x ++;
@@ -40808,8 +40638,8 @@ br_ecdsa_raw_to_asn1(void *sig, size_t sig_len)
 	 * Compute lengths for the two integers.
 	 */
 	hlen = sig_len >> 1;
-	rlen = asn1_int_length_u162(buf, hlen);
-	slen = asn1_int_length_u162(buf + hlen, hlen);
+	rlen = asn1_int_length_u161(buf, hlen);
+	slen = asn1_int_length_u161(buf + hlen, hlen);
 	if (rlen > 125 || slen > 125) {
 		return 0;
 	}
@@ -41038,7 +40868,7 @@ br_aes_big_ctr_init(br_aes_big_ctr_keys *ctx,
 }
 
 static void
-xorbuf_u165(void *dst, const void *src, size_t len)
+xorbuf_u164(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -41065,10 +40895,10 @@ br_aes_big_ctr_run(const br_aes_big_ctr_keys *ctx,
 		br_enc32be(tmp + 12, cc ++);
 		br_aes_big_encrypt(ctx->num_rounds, ctx->skey, tmp);
 		if (len <= 16) {
-			xorbuf_u165(buf, tmp, len);
+			xorbuf_u164(buf, tmp, len);
 			break;
 		}
-		xorbuf_u165(buf, tmp, 16);
+		xorbuf_u164(buf, tmp, 16);
 		buf += 16;
 		len -= 16;
 	}
@@ -41124,7 +40954,7 @@ br_aes_big_ctrcbc_init(br_aes_big_ctrcbc_keys *ctx,
 }
 
 static void
-xorbuf_u166(void *dst, const void *src, size_t len)
+xorbuf_u165(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -41159,7 +40989,7 @@ br_aes_big_ctrcbc_ctr(const br_aes_big_ctrcbc_keys *ctx,
 		br_enc32be(tmp +  8, cc1);
 		br_enc32be(tmp + 12, cc0);
 		br_aes_big_encrypt(ctx->num_rounds, ctx->skey, tmp);
-		xorbuf_u166(buf, tmp, 16);
+		xorbuf_u165(buf, tmp, 16);
 		buf += 16;
 		len -= 16;
 		cc0 ++;
@@ -41185,7 +41015,7 @@ br_aes_big_ctrcbc_mac(const br_aes_big_ctrcbc_keys *ctx,
 
 	buf = data;
 	while (len > 0) {
-		xorbuf_u166(cbcmac, buf, 16);
+		xorbuf_u165(cbcmac, buf, 16);
 		br_aes_big_encrypt(ctx->num_rounds, ctx->skey, cbcmac);
 		buf += 16;
 		len -= 16;
@@ -41261,7 +41091,7 @@ const br_block_ctrcbc_class br_aes_big_ctrcbc_vtable = {
 /*
  * Inverse S-box (used in key schedule for decryption).
  */
-static const unsigned char iS_u167[] = {
+static const unsigned char iS_u166[] = {
 	0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E,
 	0x81, 0xF3, 0xD7, 0xFB, 0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87,
 	0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB, 0x54, 0x7B, 0x94, 0x32,
@@ -41286,7 +41116,7 @@ static const unsigned char iS_u167[] = {
 	0x55, 0x21, 0x0C, 0x7D
 };
 
-static const uint32_t iSsm0_u167[] = {
+static const uint32_t iSsm0_u166[] = {
 	0x51F4A750, 0x7E416553, 0x1A17A4C3, 0x3A275E96, 0x3BAB6BCB, 0x1F9D45F1,
 	0xACFA58AB, 0x4BE30393, 0x2030FA55, 0xAD766DF6, 0x88CC7691, 0xF5024C25,
 	0x4FE5D7FC, 0xC52ACBD7, 0x26354480, 0xB562A38F, 0xDEB15A49, 0x25BA1B67,
@@ -41333,44 +41163,44 @@ static const uint32_t iSsm0_u167[] = {
 };
 
 static unsigned
-mul2_u167(unsigned x)
+mul2_u166(unsigned x)
 {
 	x <<= 1;
 	return x ^ ((unsigned)(-(int)(x >> 8)) & 0x11B);
 }
 
 static unsigned
-mul9_u167(unsigned x)
+mul9_u166(unsigned x)
 {
-	return x ^ mul2_u167(mul2_u167(mul2_u167(x)));
+	return x ^ mul2_u166(mul2_u166(mul2_u166(x)));
 }
 
 static unsigned
-mulb_u167(unsigned x)
+mulb_u166(unsigned x)
 {
 	unsigned x2;
 	
-	x2 = mul2_u167(x);
-	return x ^ x2 ^ mul2_u167(mul2_u167(x2));
+	x2 = mul2_u166(x);
+	return x ^ x2 ^ mul2_u166(mul2_u166(x2));
 }
 
 static unsigned
-muld_u167(unsigned x)
+muld_u166(unsigned x)
 {
 	unsigned x4;
 
-	x4 = mul2_u167(mul2_u167(x));
-	return x ^ x4 ^ mul2_u167(x4);
+	x4 = mul2_u166(mul2_u166(x));
+	return x ^ x4 ^ mul2_u166(x4);
 }
 
 static unsigned
-mule_u167(unsigned x)
+mule_u166(unsigned x)
 {
 	unsigned x2, x4;
 
-	x2 = mul2_u167(x);
-	x4 = mul2_u167(x2);
-	return x2 ^ x4 ^ mul2_u167(x4);
+	x2 = mul2_u166(x);
+	x4 = mul2_u166(x2);
+	return x2 ^ x4 ^ mul2_u166(x4);
 }
 
 /* see inner.h */
@@ -41397,25 +41227,25 @@ br_aes_big_keysched_inv(uint32_t *skey, const void *key, size_t key_len)
 		p1 = (p >> 16) & 0xFF;
 		p2 = (p >> 8) & 0xFF;
 		p3 = p & 0xFF;
-		q0 = mule_u167(p0) ^ mulb_u167(p1) ^ muld_u167(p2) ^ mul9_u167(p3);
-		q1 = mul9_u167(p0) ^ mule_u167(p1) ^ mulb_u167(p2) ^ muld_u167(p3);
-		q2 = muld_u167(p0) ^ mul9_u167(p1) ^ mule_u167(p2) ^ mulb_u167(p3);
-		q3 = mulb_u167(p0) ^ muld_u167(p1) ^ mul9_u167(p2) ^ mule_u167(p3);
+		q0 = mule_u166(p0) ^ mulb_u166(p1) ^ muld_u166(p2) ^ mul9_u166(p3);
+		q1 = mul9_u166(p0) ^ mule_u166(p1) ^ mulb_u166(p2) ^ muld_u166(p3);
+		q2 = muld_u166(p0) ^ mul9_u166(p1) ^ mule_u166(p2) ^ mulb_u166(p3);
+		q3 = mulb_u166(p0) ^ muld_u166(p1) ^ mul9_u166(p2) ^ mule_u166(p3);
 		skey[i] = (q0 << 24) | (q1 << 16) | (q2 << 8) | q3;
 	}
 	return num_rounds;
 }
 
 static inline uint32_t
-rotr_u167(uint32_t x, int n)
+rotr_u166(uint32_t x, int n)
 {
 	return (x << (32 - n)) | (x >> n);
 }
 
-#define iSboxExt0_u167(x)   (iSsm0_u167[x])
-#define iSboxExt1_u167(x)   (rotr_u167(iSsm0_u167[x], 8))
-#define iSboxExt2_u167(x)   (rotr_u167(iSsm0_u167[x], 16))
-#define iSboxExt3_u167(x)   (rotr_u167(iSsm0_u167[x], 24))
+#define iSboxExt0_u166(x)   (iSsm0_u166[x])
+#define iSboxExt1_u166(x)   (rotr_u166(iSsm0_u166[x], 8))
+#define iSboxExt2_u166(x)   (rotr_u166(iSsm0_u166[x], 16))
+#define iSboxExt3_u166(x)   (rotr_u166(iSsm0_u166[x], 24))
 
 /* see bearssl.h */
 void
@@ -41436,22 +41266,22 @@ br_aes_big_decrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 	s2 ^= skey[(num_rounds << 2) + 2];
 	s3 ^= skey[(num_rounds << 2) + 3];
 	for (u = num_rounds - 1; u > 0; u --) {
-		uint32_t v0 = iSboxExt0_u167(s0 >> 24)
-			^ iSboxExt1_u167((s3 >> 16) & 0xFF)
-			^ iSboxExt2_u167((s2 >> 8) & 0xFF)
-			^ iSboxExt3_u167(s1 & 0xFF);
-		uint32_t v1 = iSboxExt0_u167(s1 >> 24)
-			^ iSboxExt1_u167((s0 >> 16) & 0xFF)
-			^ iSboxExt2_u167((s3 >> 8) & 0xFF)
-			^ iSboxExt3_u167(s2 & 0xFF);
-		uint32_t v2 = iSboxExt0_u167(s2 >> 24)
-			^ iSboxExt1_u167((s1 >> 16) & 0xFF)
-			^ iSboxExt2_u167((s0 >> 8) & 0xFF)
-			^ iSboxExt3_u167(s3 & 0xFF);
-		uint32_t v3 = iSboxExt0_u167(s3 >> 24)
-			^ iSboxExt1_u167((s2 >> 16) & 0xFF)
-			^ iSboxExt2_u167((s1 >> 8) & 0xFF)
-			^ iSboxExt3_u167(s0 & 0xFF);
+		uint32_t v0 = iSboxExt0_u166(s0 >> 24)
+			^ iSboxExt1_u166((s3 >> 16) & 0xFF)
+			^ iSboxExt2_u166((s2 >> 8) & 0xFF)
+			^ iSboxExt3_u166(s1 & 0xFF);
+		uint32_t v1 = iSboxExt0_u166(s1 >> 24)
+			^ iSboxExt1_u166((s0 >> 16) & 0xFF)
+			^ iSboxExt2_u166((s3 >> 8) & 0xFF)
+			^ iSboxExt3_u166(s2 & 0xFF);
+		uint32_t v2 = iSboxExt0_u166(s2 >> 24)
+			^ iSboxExt1_u166((s1 >> 16) & 0xFF)
+			^ iSboxExt2_u166((s0 >> 8) & 0xFF)
+			^ iSboxExt3_u166(s3 & 0xFF);
+		uint32_t v3 = iSboxExt0_u166(s3 >> 24)
+			^ iSboxExt1_u166((s2 >> 16) & 0xFF)
+			^ iSboxExt2_u166((s1 >> 8) & 0xFF)
+			^ iSboxExt3_u166(s0 & 0xFF);
 		s0 = v0;
 		s1 = v1;
 		s2 = v2;
@@ -41461,22 +41291,22 @@ br_aes_big_decrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 		s2 ^= skey[(u << 2) + 2];
 		s3 ^= skey[(u << 2) + 3];
 	}
-	t0 = ((uint32_t)iS_u167[s0 >> 24] << 24)
-		| ((uint32_t)iS_u167[(s3 >> 16) & 0xFF] << 16)
-		| ((uint32_t)iS_u167[(s2 >> 8) & 0xFF] << 8)
-		| (uint32_t)iS_u167[s1 & 0xFF];
-	t1 = ((uint32_t)iS_u167[s1 >> 24] << 24)
-		| ((uint32_t)iS_u167[(s0 >> 16) & 0xFF] << 16)
-		| ((uint32_t)iS_u167[(s3 >> 8) & 0xFF] << 8)
-		| (uint32_t)iS_u167[s2 & 0xFF];
-	t2 = ((uint32_t)iS_u167[s2 >> 24] << 24)
-		| ((uint32_t)iS_u167[(s1 >> 16) & 0xFF] << 16)
-		| ((uint32_t)iS_u167[(s0 >> 8) & 0xFF] << 8)
-		| (uint32_t)iS_u167[s3 & 0xFF];
-	t3 = ((uint32_t)iS_u167[s3 >> 24] << 24)
-		| ((uint32_t)iS_u167[(s2 >> 16) & 0xFF] << 16)
-		| ((uint32_t)iS_u167[(s1 >> 8) & 0xFF] << 8)
-		| (uint32_t)iS_u167[s0 & 0xFF];
+	t0 = ((uint32_t)iS_u166[s0 >> 24] << 24)
+		| ((uint32_t)iS_u166[(s3 >> 16) & 0xFF] << 16)
+		| ((uint32_t)iS_u166[(s2 >> 8) & 0xFF] << 8)
+		| (uint32_t)iS_u166[s1 & 0xFF];
+	t1 = ((uint32_t)iS_u166[s1 >> 24] << 24)
+		| ((uint32_t)iS_u166[(s0 >> 16) & 0xFF] << 16)
+		| ((uint32_t)iS_u166[(s3 >> 8) & 0xFF] << 8)
+		| (uint32_t)iS_u166[s2 & 0xFF];
+	t2 = ((uint32_t)iS_u166[s2 >> 24] << 24)
+		| ((uint32_t)iS_u166[(s1 >> 16) & 0xFF] << 16)
+		| ((uint32_t)iS_u166[(s0 >> 8) & 0xFF] << 8)
+		| (uint32_t)iS_u166[s3 & 0xFF];
+	t3 = ((uint32_t)iS_u166[s3 >> 24] << 24)
+		| ((uint32_t)iS_u166[(s2 >> 16) & 0xFF] << 16)
+		| ((uint32_t)iS_u166[(s1 >> 8) & 0xFF] << 8)
+		| (uint32_t)iS_u166[s0 & 0xFF];
 	s0 = t0 ^ skey[0];
 	s1 = t1 ^ skey[1];
 	s2 = t2 ^ skey[2];
@@ -41514,9 +41344,9 @@ br_aes_big_decrypt(unsigned num_rounds, const uint32_t *skey, void *data)
  */
 
 
-#define S_u168   br_aes_S
+#define S_u167   br_aes_S
 
-static const uint32_t Ssm0_u168[] = {
+static const uint32_t Ssm0_u167[] = {
 	0xC66363A5, 0xF87C7C84, 0xEE777799, 0xF67B7B8D, 0xFFF2F20D, 0xD66B6BBD,
 	0xDE6F6FB1, 0x91C5C554, 0x60303050, 0x02010103, 0xCE6767A9, 0x562B2B7D,
 	0xE7FEFE19, 0xB5D7D762, 0x4DABABE6, 0xEC76769A, 0x8FCACA45, 0x1F82829D,
@@ -41563,15 +41393,15 @@ static const uint32_t Ssm0_u168[] = {
 };
 
 static inline uint32_t
-rotr_u168(uint32_t x, int n)
+rotr_u167(uint32_t x, int n)
 {
 	return (x << (32 - n)) | (x >> n);
 }
 
-#define SboxExt0_u168(x)   (Ssm0_u168[x])
-#define SboxExt1_u168(x)   (rotr_u168(Ssm0_u168[x], 8))
-#define SboxExt2_u168(x)   (rotr_u168(Ssm0_u168[x], 16))
-#define SboxExt3_u168(x)   (rotr_u168(Ssm0_u168[x], 24))
+#define SboxExt0_u167(x)   (Ssm0_u167[x])
+#define SboxExt1_u167(x)   (rotr_u167(Ssm0_u167[x], 8))
+#define SboxExt2_u167(x)   (rotr_u167(Ssm0_u167[x], 16))
+#define SboxExt3_u167(x)   (rotr_u167(Ssm0_u167[x], 24))
 
 
 /* see bearssl.h */
@@ -41595,22 +41425,22 @@ br_aes_big_encrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 	for (u = 1; u < num_rounds; u ++) {
 		uint32_t v0, v1, v2, v3;
 
-		v0 = SboxExt0_u168(s0 >> 24)
-			^ SboxExt1_u168((s1 >> 16) & 0xFF)
-			^ SboxExt2_u168((s2 >> 8) & 0xFF)
-			^ SboxExt3_u168(s3 & 0xFF);
-		v1 = SboxExt0_u168(s1 >> 24)
-			^ SboxExt1_u168((s2 >> 16) & 0xFF)
-			^ SboxExt2_u168((s3 >> 8) & 0xFF)
-			^ SboxExt3_u168(s0 & 0xFF);
-		v2 = SboxExt0_u168(s2 >> 24)
-			^ SboxExt1_u168((s3 >> 16) & 0xFF)
-			^ SboxExt2_u168((s0 >> 8) & 0xFF)
-			^ SboxExt3_u168(s1 & 0xFF);
-		v3 = SboxExt0_u168(s3 >> 24)
-			^ SboxExt1_u168((s0 >> 16) & 0xFF)
-			^ SboxExt2_u168((s1 >> 8) & 0xFF)
-			^ SboxExt3_u168(s2 & 0xFF);
+		v0 = SboxExt0_u167(s0 >> 24)
+			^ SboxExt1_u167((s1 >> 16) & 0xFF)
+			^ SboxExt2_u167((s2 >> 8) & 0xFF)
+			^ SboxExt3_u167(s3 & 0xFF);
+		v1 = SboxExt0_u167(s1 >> 24)
+			^ SboxExt1_u167((s2 >> 16) & 0xFF)
+			^ SboxExt2_u167((s3 >> 8) & 0xFF)
+			^ SboxExt3_u167(s0 & 0xFF);
+		v2 = SboxExt0_u167(s2 >> 24)
+			^ SboxExt1_u167((s3 >> 16) & 0xFF)
+			^ SboxExt2_u167((s0 >> 8) & 0xFF)
+			^ SboxExt3_u167(s1 & 0xFF);
+		v3 = SboxExt0_u167(s3 >> 24)
+			^ SboxExt1_u167((s0 >> 16) & 0xFF)
+			^ SboxExt2_u167((s1 >> 8) & 0xFF)
+			^ SboxExt3_u167(s2 & 0xFF);
 		s0 = v0;
 		s1 = v1;
 		s2 = v2;
@@ -41620,22 +41450,22 @@ br_aes_big_encrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 		s2 ^= skey[(u << 2) + 2];
 		s3 ^= skey[(u << 2) + 3];
 	}
-	t0 = ((uint32_t)S_u168[s0 >> 24] << 24)
-		| ((uint32_t)S_u168[(s1 >> 16) & 0xFF] << 16)
-		| ((uint32_t)S_u168[(s2 >> 8) & 0xFF] << 8)
-		| (uint32_t)S_u168[s3 & 0xFF];
-	t1 = ((uint32_t)S_u168[s1 >> 24] << 24)
-		| ((uint32_t)S_u168[(s2 >> 16) & 0xFF] << 16)
-		| ((uint32_t)S_u168[(s3 >> 8) & 0xFF] << 8)
-		| (uint32_t)S_u168[s0 & 0xFF];
-	t2 = ((uint32_t)S_u168[s2 >> 24] << 24)
-		| ((uint32_t)S_u168[(s3 >> 16) & 0xFF] << 16)
-		| ((uint32_t)S_u168[(s0 >> 8) & 0xFF] << 8)
-		| (uint32_t)S_u168[s1 & 0xFF];
-	t3 = ((uint32_t)S_u168[s3 >> 24] << 24)
-		| ((uint32_t)S_u168[(s0 >> 16) & 0xFF] << 16)
-		| ((uint32_t)S_u168[(s1 >> 8) & 0xFF] << 8)
-		| (uint32_t)S_u168[s2 & 0xFF];
+	t0 = ((uint32_t)S_u167[s0 >> 24] << 24)
+		| ((uint32_t)S_u167[(s1 >> 16) & 0xFF] << 16)
+		| ((uint32_t)S_u167[(s2 >> 8) & 0xFF] << 8)
+		| (uint32_t)S_u167[s3 & 0xFF];
+	t1 = ((uint32_t)S_u167[s1 >> 24] << 24)
+		| ((uint32_t)S_u167[(s2 >> 16) & 0xFF] << 16)
+		| ((uint32_t)S_u167[(s3 >> 8) & 0xFF] << 8)
+		| (uint32_t)S_u167[s0 & 0xFF];
+	t2 = ((uint32_t)S_u167[s2 >> 24] << 24)
+		| ((uint32_t)S_u167[(s3 >> 16) & 0xFF] << 16)
+		| ((uint32_t)S_u167[(s0 >> 8) & 0xFF] << 8)
+		| (uint32_t)S_u167[s1 & 0xFF];
+	t3 = ((uint32_t)S_u167[s3 >> 24] << 24)
+		| ((uint32_t)S_u167[(s0 >> 16) & 0xFF] << 16)
+		| ((uint32_t)S_u167[(s1 >> 8) & 0xFF] << 8)
+		| (uint32_t)S_u167[s2 & 0xFF];
 	s0 = t0 ^ skey[num_rounds << 2];
 	s1 = t1 ^ skey[(num_rounds << 2) + 1];
 	s2 = t2 ^ skey[(num_rounds << 2) + 2];
@@ -41673,12 +41503,12 @@ br_aes_big_encrypt(unsigned num_rounds, const uint32_t *skey, void *data)
  */
 
 
-static const uint32_t Rcon_u169[] = {
+static const uint32_t Rcon_u168[] = {
 	0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000,
 	0x40000000, 0x80000000, 0x1B000000, 0x36000000
 };
 
-#define S_u169   br_aes_S
+#define S_u168   br_aes_S
 
 /* see inner.h */
 const unsigned char br_aes_S[] = {
@@ -41707,12 +41537,12 @@ const unsigned char br_aes_S[] = {
 };
 
 static uint32_t
-SubWord_u169(uint32_t x)
+SubWord_u168(uint32_t x)
 {
-	return ((uint32_t)S_u169[x >> 24] << 24)
-		| ((uint32_t)S_u169[(x >> 16) & 0xFF] << 16)
-		| ((uint32_t)S_u169[(x >> 8) & 0xFF] << 8)
-		| (uint32_t)S_u169[x & 0xFF];
+	return ((uint32_t)S_u168[x >> 24] << 24)
+		| ((uint32_t)S_u168[(x >> 16) & 0xFF] << 16)
+		| ((uint32_t)S_u168[(x >> 8) & 0xFF] << 8)
+		| (uint32_t)S_u168[x & 0xFF];
 }
 
 /* see inner.h */
@@ -41747,9 +41577,9 @@ br_aes_keysched(uint32_t *skey, const void *key, size_t key_len)
 		tmp = skey[i - 1];
 		if (j == 0) {
 			tmp = (tmp << 8) | (tmp >> 24);
-			tmp = SubWord_u169(tmp) ^ Rcon_u169[k];
+			tmp = SubWord_u168(tmp) ^ Rcon_u168[k];
 		} else if (nk > 6 && j == 4) {
-			tmp = SubWord_u169(tmp);
+			tmp = SubWord_u168(tmp);
 		}
 		skey[i] = skey[i - nk] ^ tmp;
 		if (++ j == nk) {
@@ -41968,7 +41798,7 @@ br_aes_ct_bitslice_Sbox(uint32_t *q)
 void
 br_aes_ct_ortho(uint32_t *q)
 {
-#define SWAPN_u170(cl, ch, s, x, y)   do { \
+#define SWAPN_u169(cl, ch, s, x, y)   do { \
 		uint32_t a, b; \
 		a = (x); \
 		b = (y); \
@@ -41976,32 +41806,32 @@ br_aes_ct_ortho(uint32_t *q)
 		(y) = ((a & (uint32_t)ch) >> (s)) | (b & (uint32_t)ch); \
 	} while (0)
 
-#define SWAP2_u170(x, y)   SWAPN_u170(0x55555555, 0xAAAAAAAA, 1, x, y)
-#define SWAP4_u170(x, y)   SWAPN_u170(0x33333333, 0xCCCCCCCC, 2, x, y)
-#define SWAP8_u170(x, y)   SWAPN_u170(0x0F0F0F0F, 0xF0F0F0F0, 4, x, y)
+#define SWAP2_u169(x, y)   SWAPN_u169(0x55555555, 0xAAAAAAAA, 1, x, y)
+#define SWAP4_u169(x, y)   SWAPN_u169(0x33333333, 0xCCCCCCCC, 2, x, y)
+#define SWAP8_u169(x, y)   SWAPN_u169(0x0F0F0F0F, 0xF0F0F0F0, 4, x, y)
 
-	SWAP2_u170(q[0], q[1]);
-	SWAP2_u170(q[2], q[3]);
-	SWAP2_u170(q[4], q[5]);
-	SWAP2_u170(q[6], q[7]);
+	SWAP2_u169(q[0], q[1]);
+	SWAP2_u169(q[2], q[3]);
+	SWAP2_u169(q[4], q[5]);
+	SWAP2_u169(q[6], q[7]);
 
-	SWAP4_u170(q[0], q[2]);
-	SWAP4_u170(q[1], q[3]);
-	SWAP4_u170(q[4], q[6]);
-	SWAP4_u170(q[5], q[7]);
+	SWAP4_u169(q[0], q[2]);
+	SWAP4_u169(q[1], q[3]);
+	SWAP4_u169(q[4], q[6]);
+	SWAP4_u169(q[5], q[7]);
 
-	SWAP8_u170(q[0], q[4]);
-	SWAP8_u170(q[1], q[5]);
-	SWAP8_u170(q[2], q[6]);
-	SWAP8_u170(q[3], q[7]);
+	SWAP8_u169(q[0], q[4]);
+	SWAP8_u169(q[1], q[5]);
+	SWAP8_u169(q[2], q[6]);
+	SWAP8_u169(q[3], q[7]);
 }
 
-static const unsigned char Rcon_u170[] = {
+static const unsigned char Rcon_u169[] = {
 	0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
 };
 
 static uint32_t
-sub_word_u170(uint32_t x)
+sub_word_u169(uint32_t x)
 {
 	uint32_t q[8];
 	int i;
@@ -42049,9 +41879,9 @@ br_aes_ct_keysched(uint32_t *comp_skey, const void *key, size_t key_len)
 	for (i = nk, j = 0, k = 0; i < nkf; i ++) {
 		if (j == 0) {
 			tmp = (tmp << 24) | (tmp >> 8);
-			tmp = sub_word_u170(tmp) ^ Rcon_u170[k];
+			tmp = sub_word_u169(tmp) ^ Rcon_u169[k];
 		} else if (nk > 6 && j == 4) {
-			tmp = sub_word_u170(tmp);
+			tmp = sub_word_u169(tmp);
 		}
 		tmp ^= skey[(i - nk) << 1];
 		skey[(i << 1) + 0] = tmp;
@@ -42298,7 +42128,7 @@ br_aes_ct64_bitslice_Sbox(uint64_t *q)
 void
 br_aes_ct64_ortho(uint64_t *q)
 {
-#define SWAPN_u171(cl, ch, s, x, y)   do { \
+#define SWAPN_u170(cl, ch, s, x, y)   do { \
 		uint64_t a, b; \
 		a = (x); \
 		b = (y); \
@@ -42306,24 +42136,24 @@ br_aes_ct64_ortho(uint64_t *q)
 		(y) = ((a & (uint64_t)ch) >> (s)) | (b & (uint64_t)ch); \
 	} while (0)
 
-#define SWAP2_u171(x, y)    SWAPN_u171(0x5555555555555555, 0xAAAAAAAAAAAAAAAA,  1, x, y)
-#define SWAP4_u171(x, y)    SWAPN_u171(0x3333333333333333, 0xCCCCCCCCCCCCCCCC,  2, x, y)
-#define SWAP8_u171(x, y)    SWAPN_u171(0x0F0F0F0F0F0F0F0F, 0xF0F0F0F0F0F0F0F0,  4, x, y)
+#define SWAP2_u170(x, y)    SWAPN_u170(0x5555555555555555, 0xAAAAAAAAAAAAAAAA,  1, x, y)
+#define SWAP4_u170(x, y)    SWAPN_u170(0x3333333333333333, 0xCCCCCCCCCCCCCCCC,  2, x, y)
+#define SWAP8_u170(x, y)    SWAPN_u170(0x0F0F0F0F0F0F0F0F, 0xF0F0F0F0F0F0F0F0,  4, x, y)
 
-	SWAP2_u171(q[0], q[1]);
-	SWAP2_u171(q[2], q[3]);
-	SWAP2_u171(q[4], q[5]);
-	SWAP2_u171(q[6], q[7]);
+	SWAP2_u170(q[0], q[1]);
+	SWAP2_u170(q[2], q[3]);
+	SWAP2_u170(q[4], q[5]);
+	SWAP2_u170(q[6], q[7]);
 
-	SWAP4_u171(q[0], q[2]);
-	SWAP4_u171(q[1], q[3]);
-	SWAP4_u171(q[4], q[6]);
-	SWAP4_u171(q[5], q[7]);
+	SWAP4_u170(q[0], q[2]);
+	SWAP4_u170(q[1], q[3]);
+	SWAP4_u170(q[4], q[6]);
+	SWAP4_u170(q[5], q[7]);
 
-	SWAP8_u171(q[0], q[4]);
-	SWAP8_u171(q[1], q[5]);
-	SWAP8_u171(q[2], q[6]);
-	SWAP8_u171(q[3], q[7]);
+	SWAP8_u170(q[0], q[4]);
+	SWAP8_u170(q[1], q[5]);
+	SWAP8_u170(q[2], q[6]);
+	SWAP8_u170(q[3], q[7]);
 }
 
 /* see inner.h */
@@ -42380,12 +42210,12 @@ br_aes_ct64_interleave_out(uint32_t *w, uint64_t q0, uint64_t q1)
 	w[3] = (uint32_t)x3 | (uint32_t)(x3 >> 16);
 }
 
-static const unsigned char Rcon_u171[] = {
+static const unsigned char Rcon_u170[] = {
 	0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1B, 0x36
 };
 
 static uint32_t
-sub_word_u171(uint32_t x)
+sub_word_u170(uint32_t x)
 {
 	uint64_t q[8];
 
@@ -42427,9 +42257,9 @@ br_aes_ct64_keysched(uint64_t *comp_skey, const void *key, size_t key_len)
 	for (i = nk, j = 0, k = 0; i < nkf; i ++) {
 		if (j == 0) {
 			tmp = (tmp << 24) | (tmp >> 8);
-			tmp = sub_word_u171(tmp) ^ Rcon_u171[k];
+			tmp = sub_word_u170(tmp) ^ Rcon_u170[k];
 		} else if (nk > 6 && j == 4) {
-			tmp = sub_word_u171(tmp);
+			tmp = sub_word_u170(tmp);
 		}
 		tmp ^= skey[i - nk];
 		skey[i] = tmp;
@@ -42716,7 +42546,7 @@ br_aes_ct64_ctr_init(br_aes_ct64_ctr_keys *ctx,
 }
 
 static void
-xorbuf_u174(void *dst, const void *src, size_t len)
+xorbuf_u173(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -42771,11 +42601,11 @@ br_aes_ct64_ctr_run(const br_aes_ct64_ctr_keys *ctx,
 		}
 		br_range_enc32le(tmp, w, 16);
 		if (len <= 64) {
-			xorbuf_u174(buf, tmp, len);
+			xorbuf_u173(buf, tmp, len);
 			cc += (uint32_t)len >> 4;
 			break;
 		}
-		xorbuf_u174(buf, tmp, 64);
+		xorbuf_u173(buf, tmp, 64);
 		buf += 64;
 		len -= 64;
 		cc += 4;
@@ -42832,7 +42662,7 @@ br_aes_ct64_ctrcbc_init(br_aes_ct64_ctrcbc_keys *ctx,
 }
 
 static void
-xorbuf_u175(void *dst, const void *src, size_t len)
+xorbuf_u174(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -42910,10 +42740,10 @@ br_aes_ct64_ctrcbc_ctr(const br_aes_ct64_ctrcbc_keys *ctx,
 
 		br_range_enc32le(tmp, w, 16);
 		if (len <= 64) {
-			xorbuf_u175(buf, tmp, len);
+			xorbuf_u174(buf, tmp, len);
 			break;
 		}
-		xorbuf_u175(buf, tmp, 64);
+		xorbuf_u174(buf, tmp, 64);
 		buf += 64;
 		len -= 64;
 	}
@@ -43190,7 +43020,7 @@ br_aes_ct64_ctrcbc_decrypt(const br_aes_ct64_ctrcbc_keys *ctx,
 		br_enc32le(tmp +  4, w[1]);
 		br_enc32le(tmp +  8, w[2]);
 		br_enc32le(tmp + 12, w[3]);
-		xorbuf_u175(buf, tmp, 16);
+		xorbuf_u174(buf, tmp, 16);
 		cm0 = w[4];
 		cm1 = w[5];
 		cm2 = w[6];
@@ -43305,7 +43135,7 @@ br_aes_ct64_bitslice_invSbox(uint64_t *q)
 }
 
 static void
-add_round_key_u176(uint64_t *q, const uint64_t *sk)
+add_round_key_u175(uint64_t *q, const uint64_t *sk)
 {
 	int i;
 
@@ -43315,7 +43145,7 @@ add_round_key_u176(uint64_t *q, const uint64_t *sk)
 }
 
 static void
-inv_shift_rows_u176(uint64_t *q)
+inv_shift_rows_u175(uint64_t *q)
 {
 	int i;
 
@@ -43334,13 +43164,13 @@ inv_shift_rows_u176(uint64_t *q)
 }
 
 static inline uint64_t
-rotr32_u176(uint64_t x)
+rotr32_u175(uint64_t x)
 {
 	return (x << 32) | (x >> 32);
 }
 
 static void
-inv_mix_columns_u176(uint64_t *q)
+inv_mix_columns_u175(uint64_t *q)
 {
 	uint64_t q0, q1, q2, q3, q4, q5, q6, q7;
 	uint64_t r0, r1, r2, r3, r4, r5, r6, r7;
@@ -43362,14 +43192,14 @@ inv_mix_columns_u176(uint64_t *q)
 	r6 = (q6 >> 16) | (q6 << 48);
 	r7 = (q7 >> 16) | (q7 << 48);
 
-	q[0] = q5 ^ q6 ^ q7 ^ r0 ^ r5 ^ r7 ^ rotr32_u176(q0 ^ q5 ^ q6 ^ r0 ^ r5);
-	q[1] = q0 ^ q5 ^ r0 ^ r1 ^ r5 ^ r6 ^ r7 ^ rotr32_u176(q1 ^ q5 ^ q7 ^ r1 ^ r5 ^ r6);
-	q[2] = q0 ^ q1 ^ q6 ^ r1 ^ r2 ^ r6 ^ r7 ^ rotr32_u176(q0 ^ q2 ^ q6 ^ r2 ^ r6 ^ r7);
-	q[3] = q0 ^ q1 ^ q2 ^ q5 ^ q6 ^ r0 ^ r2 ^ r3 ^ r5 ^ rotr32_u176(q0 ^ q1 ^ q3 ^ q5 ^ q6 ^ q7 ^ r0 ^ r3 ^ r5 ^ r7);
-	q[4] = q1 ^ q2 ^ q3 ^ q5 ^ r1 ^ r3 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr32_u176(q1 ^ q2 ^ q4 ^ q5 ^ q7 ^ r1 ^ r4 ^ r5 ^ r6);
-	q[5] = q2 ^ q3 ^ q4 ^ q6 ^ r2 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr32_u176(q2 ^ q3 ^ q5 ^ q6 ^ r2 ^ r5 ^ r6 ^ r7);
-	q[6] = q3 ^ q4 ^ q5 ^ q7 ^ r3 ^ r5 ^ r6 ^ r7 ^ rotr32_u176(q3 ^ q4 ^ q6 ^ q7 ^ r3 ^ r6 ^ r7);
-	q[7] = q4 ^ q5 ^ q6 ^ r4 ^ r6 ^ r7 ^ rotr32_u176(q4 ^ q5 ^ q7 ^ r4 ^ r7);
+	q[0] = q5 ^ q6 ^ q7 ^ r0 ^ r5 ^ r7 ^ rotr32_u175(q0 ^ q5 ^ q6 ^ r0 ^ r5);
+	q[1] = q0 ^ q5 ^ r0 ^ r1 ^ r5 ^ r6 ^ r7 ^ rotr32_u175(q1 ^ q5 ^ q7 ^ r1 ^ r5 ^ r6);
+	q[2] = q0 ^ q1 ^ q6 ^ r1 ^ r2 ^ r6 ^ r7 ^ rotr32_u175(q0 ^ q2 ^ q6 ^ r2 ^ r6 ^ r7);
+	q[3] = q0 ^ q1 ^ q2 ^ q5 ^ q6 ^ r0 ^ r2 ^ r3 ^ r5 ^ rotr32_u175(q0 ^ q1 ^ q3 ^ q5 ^ q6 ^ q7 ^ r0 ^ r3 ^ r5 ^ r7);
+	q[4] = q1 ^ q2 ^ q3 ^ q5 ^ r1 ^ r3 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr32_u175(q1 ^ q2 ^ q4 ^ q5 ^ q7 ^ r1 ^ r4 ^ r5 ^ r6);
+	q[5] = q2 ^ q3 ^ q4 ^ q6 ^ r2 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr32_u175(q2 ^ q3 ^ q5 ^ q6 ^ r2 ^ r5 ^ r6 ^ r7);
+	q[6] = q3 ^ q4 ^ q5 ^ q7 ^ r3 ^ r5 ^ r6 ^ r7 ^ rotr32_u175(q3 ^ q4 ^ q6 ^ q7 ^ r3 ^ r6 ^ r7);
+	q[7] = q4 ^ q5 ^ q6 ^ r4 ^ r6 ^ r7 ^ rotr32_u175(q4 ^ q5 ^ q7 ^ r4 ^ r7);
 }
 
 /* see inner.h */
@@ -43379,16 +43209,16 @@ br_aes_ct64_bitslice_decrypt(unsigned num_rounds,
 {
 	unsigned u;
 
-	add_round_key_u176(q, skey + (num_rounds << 3));
+	add_round_key_u175(q, skey + (num_rounds << 3));
 	for (u = num_rounds - 1; u > 0; u --) {
-		inv_shift_rows_u176(q);
+		inv_shift_rows_u175(q);
 		br_aes_ct64_bitslice_invSbox(q);
-		add_round_key_u176(q, skey + (u << 3));
-		inv_mix_columns_u176(q);
+		add_round_key_u175(q, skey + (u << 3));
+		inv_mix_columns_u175(q);
 	}
-	inv_shift_rows_u176(q);
+	inv_shift_rows_u175(q);
 	br_aes_ct64_bitslice_invSbox(q);
-	add_round_key_u176(q, skey);
+	add_round_key_u175(q, skey);
 }
 
 /* === src/symcipher/aes_ct64_enc.c === */
@@ -43419,7 +43249,7 @@ br_aes_ct64_bitslice_decrypt(unsigned num_rounds,
 
 
 static inline void
-add_round_key_u177(uint64_t *q, const uint64_t *sk)
+add_round_key_u176(uint64_t *q, const uint64_t *sk)
 {
 	q[0] ^= sk[0];
 	q[1] ^= sk[1];
@@ -43432,7 +43262,7 @@ add_round_key_u177(uint64_t *q, const uint64_t *sk)
 }
 
 static inline void
-shift_rows_u177(uint64_t *q)
+shift_rows_u176(uint64_t *q)
 {
 	int i;
 
@@ -43451,13 +43281,13 @@ shift_rows_u177(uint64_t *q)
 }
 
 static inline uint64_t
-rotr32_u177(uint64_t x)
+rotr32_u176(uint64_t x)
 {
 	return (x << 32) | (x >> 32);
 }
 
 static inline void
-mix_columns_u177(uint64_t *q)
+mix_columns_u176(uint64_t *q)
 {
 	uint64_t q0, q1, q2, q3, q4, q5, q6, q7;
 	uint64_t r0, r1, r2, r3, r4, r5, r6, r7;
@@ -43479,14 +43309,14 @@ mix_columns_u177(uint64_t *q)
 	r6 = (q6 >> 16) | (q6 << 48);
 	r7 = (q7 >> 16) | (q7 << 48);
 
-	q[0] = q7 ^ r7 ^ r0 ^ rotr32_u177(q0 ^ r0);
-	q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ rotr32_u177(q1 ^ r1);
-	q[2] = q1 ^ r1 ^ r2 ^ rotr32_u177(q2 ^ r2);
-	q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ rotr32_u177(q3 ^ r3);
-	q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ rotr32_u177(q4 ^ r4);
-	q[5] = q4 ^ r4 ^ r5 ^ rotr32_u177(q5 ^ r5);
-	q[6] = q5 ^ r5 ^ r6 ^ rotr32_u177(q6 ^ r6);
-	q[7] = q6 ^ r6 ^ r7 ^ rotr32_u177(q7 ^ r7);
+	q[0] = q7 ^ r7 ^ r0 ^ rotr32_u176(q0 ^ r0);
+	q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ rotr32_u176(q1 ^ r1);
+	q[2] = q1 ^ r1 ^ r2 ^ rotr32_u176(q2 ^ r2);
+	q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ rotr32_u176(q3 ^ r3);
+	q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ rotr32_u176(q4 ^ r4);
+	q[5] = q4 ^ r4 ^ r5 ^ rotr32_u176(q5 ^ r5);
+	q[6] = q5 ^ r5 ^ r6 ^ rotr32_u176(q6 ^ r6);
+	q[7] = q6 ^ r6 ^ r7 ^ rotr32_u176(q7 ^ r7);
 }
 
 /* see inner.h */
@@ -43496,16 +43326,16 @@ br_aes_ct64_bitslice_encrypt(unsigned num_rounds,
 {
 	unsigned u;
 
-	add_round_key_u177(q, skey);
+	add_round_key_u176(q, skey);
 	for (u = 1; u < num_rounds; u ++) {
 		br_aes_ct64_bitslice_Sbox(q);
-		shift_rows_u177(q);
-		mix_columns_u177(q);
-		add_round_key_u177(q, skey + (u << 3));
+		shift_rows_u176(q);
+		mix_columns_u176(q);
+		add_round_key_u176(q, skey + (u << 3));
 	}
 	br_aes_ct64_bitslice_Sbox(q);
-	shift_rows_u177(q);
-	add_round_key_u177(q, skey + (num_rounds << 3));
+	shift_rows_u176(q);
+	add_round_key_u176(q, skey + (num_rounds << 3));
 }
 
 /* === src/symcipher/aes_ct_cbcdec.c === */
@@ -43751,7 +43581,7 @@ br_aes_ct_ctr_init(br_aes_ct_ctr_keys *ctx,
 }
 
 static void
-xorbuf_u180(void *dst, const void *src, size_t len)
+xorbuf_u179(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -43805,14 +43635,14 @@ br_aes_ct_ctr_run(const br_aes_ct_ctr_keys *ctx,
 		br_enc32le(tmp + 28, q[7]);
 
 		if (len <= 32) {
-			xorbuf_u180(buf, tmp, len);
+			xorbuf_u179(buf, tmp, len);
 			cc ++;
 			if (len > 16) {
 				cc ++;
 			}
 			break;
 		}
-		xorbuf_u180(buf, tmp, 32);
+		xorbuf_u179(buf, tmp, 32);
 		buf += 32;
 		len -= 32;
 		cc += 2;
@@ -43869,7 +43699,7 @@ br_aes_ct_ctrcbc_init(br_aes_ct_ctrcbc_keys *ctx,
 }
 
 static void
-xorbuf_u181(void *dst, const void *src, size_t len)
+xorbuf_u180(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -43952,10 +43782,10 @@ br_aes_ct_ctrcbc_ctr(const br_aes_ct_ctrcbc_keys *ctx,
 		br_enc32le(tmp + 28, q[7]);
 
 		if (len <= 32) {
-			xorbuf_u181(buf, tmp, len);
+			xorbuf_u180(buf, tmp, len);
 			break;
 		}
-		xorbuf_u181(buf, tmp, 32);
+		xorbuf_u180(buf, tmp, 32);
 		buf += 32;
 		len -= 32;
 	}
@@ -44216,7 +44046,7 @@ br_aes_ct_ctrcbc_decrypt(const br_aes_ct_ctrcbc_keys *ctx,
 		br_enc32le(tmp +  4, q[2]);
 		br_enc32le(tmp +  8, q[4]);
 		br_enc32le(tmp + 12, q[6]);
-		xorbuf_u181(buf, tmp, 16);
+		xorbuf_u180(buf, tmp, 16);
 		cm0 = q[1];
 		cm1 = q[3];
 		cm2 = q[5];
@@ -44345,7 +44175,7 @@ br_aes_ct_bitslice_invSbox(uint32_t *q)
 }
 
 static void
-add_round_key_u182(uint32_t *q, const uint32_t *sk)
+add_round_key_u181(uint32_t *q, const uint32_t *sk)
 {
 	int i;
 
@@ -44355,7 +44185,7 @@ add_round_key_u182(uint32_t *q, const uint32_t *sk)
 }
 
 static void
-inv_shift_rows_u182(uint32_t *q)
+inv_shift_rows_u181(uint32_t *q)
 {
 	int i;
 
@@ -44371,13 +44201,13 @@ inv_shift_rows_u182(uint32_t *q)
 }
 
 static inline uint32_t
-rotr16_u182(uint32_t x)
+rotr16_u181(uint32_t x)
 {
 	return (x << 16) | (x >> 16);
 }
 
 static void
-inv_mix_columns_u182(uint32_t *q)
+inv_mix_columns_u181(uint32_t *q)
 {
 	uint32_t q0, q1, q2, q3, q4, q5, q6, q7;
 	uint32_t r0, r1, r2, r3, r4, r5, r6, r7;
@@ -44399,14 +44229,14 @@ inv_mix_columns_u182(uint32_t *q)
 	r6 = (q6 >> 8) | (q6 << 24);
 	r7 = (q7 >> 8) | (q7 << 24);
 
-	q[0] = q5 ^ q6 ^ q7 ^ r0 ^ r5 ^ r7 ^ rotr16_u182(q0 ^ q5 ^ q6 ^ r0 ^ r5);
-	q[1] = q0 ^ q5 ^ r0 ^ r1 ^ r5 ^ r6 ^ r7 ^ rotr16_u182(q1 ^ q5 ^ q7 ^ r1 ^ r5 ^ r6);
-	q[2] = q0 ^ q1 ^ q6 ^ r1 ^ r2 ^ r6 ^ r7 ^ rotr16_u182(q0 ^ q2 ^ q6 ^ r2 ^ r6 ^ r7);
-	q[3] = q0 ^ q1 ^ q2 ^ q5 ^ q6 ^ r0 ^ r2 ^ r3 ^ r5 ^ rotr16_u182(q0 ^ q1 ^ q3 ^ q5 ^ q6 ^ q7 ^ r0 ^ r3 ^ r5 ^ r7);
-	q[4] = q1 ^ q2 ^ q3 ^ q5 ^ r1 ^ r3 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr16_u182(q1 ^ q2 ^ q4 ^ q5 ^ q7 ^ r1 ^ r4 ^ r5 ^ r6);
-	q[5] = q2 ^ q3 ^ q4 ^ q6 ^ r2 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr16_u182(q2 ^ q3 ^ q5 ^ q6 ^ r2 ^ r5 ^ r6 ^ r7);
-	q[6] = q3 ^ q4 ^ q5 ^ q7 ^ r3 ^ r5 ^ r6 ^ r7 ^ rotr16_u182(q3 ^ q4 ^ q6 ^ q7 ^ r3 ^ r6 ^ r7);
-	q[7] = q4 ^ q5 ^ q6 ^ r4 ^ r6 ^ r7 ^ rotr16_u182(q4 ^ q5 ^ q7 ^ r4 ^ r7);
+	q[0] = q5 ^ q6 ^ q7 ^ r0 ^ r5 ^ r7 ^ rotr16_u181(q0 ^ q5 ^ q6 ^ r0 ^ r5);
+	q[1] = q0 ^ q5 ^ r0 ^ r1 ^ r5 ^ r6 ^ r7 ^ rotr16_u181(q1 ^ q5 ^ q7 ^ r1 ^ r5 ^ r6);
+	q[2] = q0 ^ q1 ^ q6 ^ r1 ^ r2 ^ r6 ^ r7 ^ rotr16_u181(q0 ^ q2 ^ q6 ^ r2 ^ r6 ^ r7);
+	q[3] = q0 ^ q1 ^ q2 ^ q5 ^ q6 ^ r0 ^ r2 ^ r3 ^ r5 ^ rotr16_u181(q0 ^ q1 ^ q3 ^ q5 ^ q6 ^ q7 ^ r0 ^ r3 ^ r5 ^ r7);
+	q[4] = q1 ^ q2 ^ q3 ^ q5 ^ r1 ^ r3 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr16_u181(q1 ^ q2 ^ q4 ^ q5 ^ q7 ^ r1 ^ r4 ^ r5 ^ r6);
+	q[5] = q2 ^ q3 ^ q4 ^ q6 ^ r2 ^ r4 ^ r5 ^ r6 ^ r7 ^ rotr16_u181(q2 ^ q3 ^ q5 ^ q6 ^ r2 ^ r5 ^ r6 ^ r7);
+	q[6] = q3 ^ q4 ^ q5 ^ q7 ^ r3 ^ r5 ^ r6 ^ r7 ^ rotr16_u181(q3 ^ q4 ^ q6 ^ q7 ^ r3 ^ r6 ^ r7);
+	q[7] = q4 ^ q5 ^ q6 ^ r4 ^ r6 ^ r7 ^ rotr16_u181(q4 ^ q5 ^ q7 ^ r4 ^ r7);
 }
 
 /* see inner.h */
@@ -44416,16 +44246,16 @@ br_aes_ct_bitslice_decrypt(unsigned num_rounds,
 {
 	unsigned u;
 
-	add_round_key_u182(q, skey + (num_rounds << 3));
+	add_round_key_u181(q, skey + (num_rounds << 3));
 	for (u = num_rounds - 1; u > 0; u --) {
-		inv_shift_rows_u182(q);
+		inv_shift_rows_u181(q);
 		br_aes_ct_bitslice_invSbox(q);
-		add_round_key_u182(q, skey + (u << 3));
-		inv_mix_columns_u182(q);
+		add_round_key_u181(q, skey + (u << 3));
+		inv_mix_columns_u181(q);
 	}
-	inv_shift_rows_u182(q);
+	inv_shift_rows_u181(q);
 	br_aes_ct_bitslice_invSbox(q);
-	add_round_key_u182(q, skey);
+	add_round_key_u181(q, skey);
 }
 
 /* === src/symcipher/aes_ct_enc.c === */
@@ -44456,7 +44286,7 @@ br_aes_ct_bitslice_decrypt(unsigned num_rounds,
 
 
 static inline void
-add_round_key_u183(uint32_t *q, const uint32_t *sk)
+add_round_key_u182(uint32_t *q, const uint32_t *sk)
 {
 	q[0] ^= sk[0];
 	q[1] ^= sk[1];
@@ -44469,7 +44299,7 @@ add_round_key_u183(uint32_t *q, const uint32_t *sk)
 }
 
 static inline void
-shift_rows_u183(uint32_t *q)
+shift_rows_u182(uint32_t *q)
 {
 	int i;
 
@@ -44485,13 +44315,13 @@ shift_rows_u183(uint32_t *q)
 }
 
 static inline uint32_t
-rotr16_u183(uint32_t x)
+rotr16_u182(uint32_t x)
 {
 	return (x << 16) | (x >> 16);
 }
 
 static inline void
-mix_columns_u183(uint32_t *q)
+mix_columns_u182(uint32_t *q)
 {
 	uint32_t q0, q1, q2, q3, q4, q5, q6, q7;
 	uint32_t r0, r1, r2, r3, r4, r5, r6, r7;
@@ -44513,14 +44343,14 @@ mix_columns_u183(uint32_t *q)
 	r6 = (q6 >> 8) | (q6 << 24);
 	r7 = (q7 >> 8) | (q7 << 24);
 
-	q[0] = q7 ^ r7 ^ r0 ^ rotr16_u183(q0 ^ r0);
-	q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ rotr16_u183(q1 ^ r1);
-	q[2] = q1 ^ r1 ^ r2 ^ rotr16_u183(q2 ^ r2);
-	q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ rotr16_u183(q3 ^ r3);
-	q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ rotr16_u183(q4 ^ r4);
-	q[5] = q4 ^ r4 ^ r5 ^ rotr16_u183(q5 ^ r5);
-	q[6] = q5 ^ r5 ^ r6 ^ rotr16_u183(q6 ^ r6);
-	q[7] = q6 ^ r6 ^ r7 ^ rotr16_u183(q7 ^ r7);
+	q[0] = q7 ^ r7 ^ r0 ^ rotr16_u182(q0 ^ r0);
+	q[1] = q0 ^ r0 ^ q7 ^ r7 ^ r1 ^ rotr16_u182(q1 ^ r1);
+	q[2] = q1 ^ r1 ^ r2 ^ rotr16_u182(q2 ^ r2);
+	q[3] = q2 ^ r2 ^ q7 ^ r7 ^ r3 ^ rotr16_u182(q3 ^ r3);
+	q[4] = q3 ^ r3 ^ q7 ^ r7 ^ r4 ^ rotr16_u182(q4 ^ r4);
+	q[5] = q4 ^ r4 ^ r5 ^ rotr16_u182(q5 ^ r5);
+	q[6] = q5 ^ r5 ^ r6 ^ rotr16_u182(q6 ^ r6);
+	q[7] = q6 ^ r6 ^ r7 ^ rotr16_u182(q7 ^ r7);
 }
 
 /* see inner.h */
@@ -44530,16 +44360,16 @@ br_aes_ct_bitslice_encrypt(unsigned num_rounds,
 {
 	unsigned u;
 
-	add_round_key_u183(q, skey);
+	add_round_key_u182(q, skey);
 	for (u = 1; u < num_rounds; u ++) {
 		br_aes_ct_bitslice_Sbox(q);
-		shift_rows_u183(q);
-		mix_columns_u183(q);
-		add_round_key_u183(q, skey + (u << 3));
+		shift_rows_u182(q);
+		mix_columns_u182(q);
+		add_round_key_u182(q, skey + (u << 3));
 	}
 	br_aes_ct_bitslice_Sbox(q);
-	shift_rows_u183(q);
-	add_round_key_u183(q, skey + (num_rounds << 3));
+	shift_rows_u182(q);
+	add_round_key_u182(q, skey + (num_rounds << 3));
 }
 
 /* === src/symcipher/aes_pwr8.c === */
@@ -44568,7 +44398,7 @@ br_aes_ct_bitslice_encrypt(unsigned num_rounds,
  * SOFTWARE.
  */
 
-#define BR_POWER_ASM_MACROS_u184   1
+#define BR_POWER_ASM_MACROS_u183   1
 
 /*
  * This code contains the AES key schedule implementation using the
@@ -44578,13 +44408,13 @@ br_aes_ct_bitslice_encrypt(unsigned num_rounds,
 #if BR_POWER8
 
 static void
-key_schedule_128_u184(unsigned char *sk, const unsigned char *key)
+key_schedule_128_u183(unsigned char *sk, const unsigned char *key)
 {
 	long cc;
 
-	static const uint32_t fmod_u184[] = { 0x11B, 0x11B, 0x11B, 0x11B };
+	static const uint32_t fmod_u183[] = { 0x11B, 0x11B, 0x11B, 0x11B };
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u184[] = {
+	static const uint32_t idx2be_u183[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -44617,9 +44447,9 @@ key_schedule_128_u184(unsigned char *sk, const unsigned char *key)
 		lxvw4x(34, 0, %[key])
 		vspltisw(3, 1)
 		vspltisw(6, 8)
-		lxvw4x(39, 0, %[fmod_u184])
+		lxvw4x(39, 0, %[fmod_u183])
 #if BR_POWER8_LE
-		lxvw4x(40, 0, %[idx2be_u184])
+		lxvw4x(40, 0, %[idx2be_u183])
 #endif
 
 		/*
@@ -44679,21 +44509,21 @@ key_schedule_128_u184(unsigned char *sk, const unsigned char *key)
 		bdnz(loop)
 
 : [sk] "+b" (sk), [cc] "+b" (cc)
-: [key] "b" (key), [fmod_u184] "b" (fmod_u184)
+: [key] "b" (key), [fmod_u183] "b" (fmod_u183)
 #if BR_POWER8_LE
-	, [idx2be_u184] "b" (idx2be_u184)
+	, [idx2be_u183] "b" (idx2be_u183)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "ctr", "memory"
 	);
 }
 
 static void
-key_schedule_192_u184(unsigned char *sk, const unsigned char *key)
+key_schedule_192_u183(unsigned char *sk, const unsigned char *key)
 {
 	long cc;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u184[] = {
+	static const uint32_t idx2be_u183[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -44734,7 +44564,7 @@ key_schedule_192_u184(unsigned char *sk, const unsigned char *key)
 #endif
 		vspltisw(6, 8)
 #if BR_POWER8_LE
-		lxvw4x(40, 0, %[idx2be_u184])
+		lxvw4x(40, 0, %[idx2be_u183])
 #endif
 
 		/*
@@ -44818,7 +44648,7 @@ key_schedule_192_u184(unsigned char *sk, const unsigned char *key)
 : [sk] "+b" (sk), [cc] "+b" (cc)
 : [key] "b" (key)
 #if BR_POWER8_LE
-	, [idx2be_u184] "b" (idx2be_u184)
+	, [idx2be_u183] "b" (idx2be_u183)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
   "v8", "v9", "v10", "v11", "v12", "v13", "v14", "ctr", "memory"
@@ -44826,12 +44656,12 @@ key_schedule_192_u184(unsigned char *sk, const unsigned char *key)
 }
 
 static void
-key_schedule_256_u184(unsigned char *sk, const unsigned char *key)
+key_schedule_256_u183(unsigned char *sk, const unsigned char *key)
 {
 	long cc;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u184[] = {
+	static const uint32_t idx2be_u183[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -44871,7 +44701,7 @@ key_schedule_256_u184(unsigned char *sk, const unsigned char *key)
 #endif
 		vspltisw(7, 8)
 #if BR_POWER8_LE
-		lxvw4x(40, 0, %[idx2be_u184])
+		lxvw4x(40, 0, %[idx2be_u183])
 #endif
 
 		/*
@@ -44956,7 +44786,7 @@ key_schedule_256_u184(unsigned char *sk, const unsigned char *key)
 : [sk] "+b" (sk), [cc] "+b" (cc)
 : [key] "b" (key)
 #if BR_POWER8_LE
-	, [idx2be_u184] "b" (idx2be_u184)
+	, [idx2be_u183] "b" (idx2be_u183)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
   "v8", "v9", "v10", "v11", "v12", "v13", "v14", "ctr", "memory"
@@ -44976,13 +44806,13 @@ br_aes_pwr8_keysched(unsigned char *sk, const void *key, size_t len)
 {
 	switch (len) {
 	case 16:
-		key_schedule_128_u184(sk, key);
+		key_schedule_128_u183(sk, key);
 		return 10;
 	case 24:
-		key_schedule_192_u184(sk, key);
+		key_schedule_192_u183(sk, key);
 		return 12;
 	default:
-		key_schedule_256_u184(sk, key);
+		key_schedule_256_u183(sk, key);
 		return 14;
 	}
 }
@@ -45015,7 +44845,7 @@ br_aes_pwr8_keysched(unsigned char *sk, const void *key, size_t len)
  * SOFTWARE.
  */
 
-#define BR_POWER_ASM_MACROS_u185   1
+#define BR_POWER_ASM_MACROS_u184   1
 
 #if BR_POWER8
 
@@ -45029,13 +44859,13 @@ br_aes_pwr8_cbcdec_init(br_aes_pwr8_cbcdec_keys *ctx,
 }
 
 static void
-cbcdec_128_u185(const unsigned char *sk,
+cbcdec_128_u184(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u185[] = {
+	static const uint32_t idx2be_u184[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45076,7 +44906,7 @@ cbcdec_128_u185(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u185])
+		lxvw4x(47, 0, %[idx2be_u184])
 #endif
 		/*
 		 * Load IV into v24.
@@ -45190,7 +45020,7 @@ cbcdec_128_u185(const unsigned char *sk,
   [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (num_blocks >> 2)
 #if BR_POWER8_LE
-	, [idx2be_u185] "b" (idx2be_u185)
+	, [idx2be_u184] "b" (idx2be_u184)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -45200,13 +45030,13 @@ cbcdec_128_u185(const unsigned char *sk,
 }
 
 static void
-cbcdec_192_u185(const unsigned char *sk,
+cbcdec_192_u184(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u185[] = {
+	static const uint32_t idx2be_u184[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45251,7 +45081,7 @@ cbcdec_192_u185(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u185])
+		lxvw4x(47, 0, %[idx2be_u184])
 #endif
 		/*
 		 * Load IV into v24.
@@ -45373,7 +45203,7 @@ cbcdec_192_u185(const unsigned char *sk,
   [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (num_blocks >> 2)
 #if BR_POWER8_LE
-	, [idx2be_u185] "b" (idx2be_u185)
+	, [idx2be_u184] "b" (idx2be_u184)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -45383,13 +45213,13 @@ cbcdec_192_u185(const unsigned char *sk,
 }
 
 static void
-cbcdec_256_u185(const unsigned char *sk,
+cbcdec_256_u184(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u185[] = {
+	static const uint32_t idx2be_u184[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45438,7 +45268,7 @@ cbcdec_256_u185(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u185])
+		lxvw4x(47, 0, %[idx2be_u184])
 #endif
 		/*
 		 * Load IV into v24.
@@ -45568,7 +45398,7 @@ cbcdec_256_u185(const unsigned char *sk,
   [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (num_blocks >> 2)
 #if BR_POWER8_LE
-	, [idx2be_u185] "b" (idx2be_u185)
+	, [idx2be_u184] "b" (idx2be_u184)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -45598,13 +45428,13 @@ br_aes_pwr8_cbcdec_run(const br_aes_pwr8_cbcdec_keys *ctx,
 		memcpy(tmp, buf + (num_blocks << 4) - 16, 16);
 		switch (ctx->num_rounds) {
 		case 10:
-			cbcdec_128_u185(ctx->skey.skni, iv, buf, num_blocks);
+			cbcdec_128_u184(ctx->skey.skni, iv, buf, num_blocks);
 			break;
 		case 12:
-			cbcdec_192_u185(ctx->skey.skni, iv, buf, num_blocks);
+			cbcdec_192_u184(ctx->skey.skni, iv, buf, num_blocks);
 			break;
 		default:
-			cbcdec_256_u185(ctx->skey.skni, iv, buf, num_blocks);
+			cbcdec_256_u184(ctx->skey.skni, iv, buf, num_blocks);
 			break;
 		}
 		buf += num_blocks << 4;
@@ -45618,13 +45448,13 @@ br_aes_pwr8_cbcdec_run(const br_aes_pwr8_cbcdec_keys *ctx,
 		memset(tmp + len, 0, (sizeof tmp) - len);
 		switch (ctx->num_rounds) {
 		case 10:
-			cbcdec_128_u185(ctx->skey.skni, iv, tmp, 4);
+			cbcdec_128_u184(ctx->skey.skni, iv, tmp, 4);
 			break;
 		case 12:
-			cbcdec_192_u185(ctx->skey.skni, iv, tmp, 4);
+			cbcdec_192_u184(ctx->skey.skni, iv, tmp, 4);
 			break;
 		default:
-			cbcdec_256_u185(ctx->skey.skni, iv, tmp, 4);
+			cbcdec_256_u184(ctx->skey.skni, iv, tmp, 4);
 			break;
 		}
 		memcpy(buf, tmp, len);
@@ -45687,7 +45517,7 @@ br_aes_pwr8_cbcdec_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_POWER_ASM_MACROS_u186   1
+#define BR_POWER_ASM_MACROS_u185   1
 
 #if BR_POWER8
 
@@ -45701,13 +45531,13 @@ br_aes_pwr8_cbcenc_init(br_aes_pwr8_cbcenc_keys *ctx,
 }
 
 static void
-cbcenc_128_u186(const unsigned char *sk,
+cbcenc_128_u185(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t len)
 {
 	long cc;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u186[] = {
+	static const uint32_t idx2be_u185[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45744,7 +45574,7 @@ cbcenc_128_u186(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u186])
+		lxvw4x(47, 0, %[idx2be_u185])
 #endif
 		/*
 		 * Load IV into v16.
@@ -45796,7 +45626,7 @@ cbcenc_128_u186(const unsigned char *sk,
 : [cc] "+b" (cc), [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (len >> 4)
 #if BR_POWER8_LE
-	, [idx2be_u186] "b" (idx2be_u186)
+	, [idx2be_u185] "b" (idx2be_u185)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -45805,13 +45635,13 @@ cbcenc_128_u186(const unsigned char *sk,
 }
 
 static void
-cbcenc_192_u186(const unsigned char *sk,
+cbcenc_192_u185(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t len)
 {
 	long cc;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u186[] = {
+	static const uint32_t idx2be_u185[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45852,7 +45682,7 @@ cbcenc_192_u186(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u186])
+		lxvw4x(47, 0, %[idx2be_u185])
 #endif
 		/*
 		 * Load IV into v16.
@@ -45906,7 +45736,7 @@ cbcenc_192_u186(const unsigned char *sk,
 : [cc] "+b" (cc), [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (len >> 4)
 #if BR_POWER8_LE
-	, [idx2be_u186] "b" (idx2be_u186)
+	, [idx2be_u185] "b" (idx2be_u185)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -45915,13 +45745,13 @@ cbcenc_192_u186(const unsigned char *sk,
 }
 
 static void
-cbcenc_256_u186(const unsigned char *sk,
+cbcenc_256_u185(const unsigned char *sk,
 	const unsigned char *iv, unsigned char *buf, size_t len)
 {
 	long cc;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u186[] = {
+	static const uint32_t idx2be_u185[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
@@ -45966,7 +45796,7 @@ cbcenc_256_u186(const unsigned char *sk,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u186])
+		lxvw4x(47, 0, %[idx2be_u185])
 #endif
 		/*
 		 * Load IV into v16.
@@ -46022,7 +45852,7 @@ cbcenc_256_u186(const unsigned char *sk,
 : [cc] "+b" (cc), [buf] "+b" (buf)
 : [sk] "b" (sk), [iv] "b" (iv), [num_blocks] "b" (len >> 4)
 #if BR_POWER8_LE
-	, [idx2be_u186] "b" (idx2be_u186)
+	, [idx2be_u185] "b" (idx2be_u185)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -46038,13 +45868,13 @@ br_aes_pwr8_cbcenc_run(const br_aes_pwr8_cbcenc_keys *ctx,
 	if (len > 0) {
 		switch (ctx->num_rounds) {
 		case 10:
-			cbcenc_128_u186(ctx->skey.skni, iv, data, len);
+			cbcenc_128_u185(ctx->skey.skni, iv, data, len);
 			break;
 		case 12:
-			cbcenc_192_u186(ctx->skey.skni, iv, data, len);
+			cbcenc_192_u185(ctx->skey.skni, iv, data, len);
 			break;
 		default:
-			cbcenc_256_u186(ctx->skey.skni, iv, data, len);
+			cbcenc_256_u185(ctx->skey.skni, iv, data, len);
 			break;
 		}
 		memcpy(iv, (unsigned char *)data + (len - 16), 16);
@@ -46106,7 +45936,7 @@ br_aes_pwr8_cbcenc_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_POWER_ASM_MACROS_u187   1
+#define BR_POWER_ASM_MACROS_u186   1
 
 #if BR_POWER8
 
@@ -46120,17 +45950,17 @@ br_aes_pwr8_ctr_init(br_aes_pwr8_ctr_keys *ctx,
 }
 
 static void
-ctr_128_u187(const unsigned char *sk, const unsigned char *ivbuf,
+ctr_128_u186(const unsigned char *sk, const unsigned char *ivbuf,
 	unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u187[] = {
+	static const uint32_t idx2be_u186[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
-	static const uint32_t ctrinc_u187[] = {
+	static const uint32_t ctrinc_u186[] = {
 		0, 0, 0, 4
 	};
 
@@ -46170,12 +46000,12 @@ ctr_128_u187(const unsigned char *sk, const unsigned char *ivbuf,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u187])
+		lxvw4x(47, 0, %[idx2be_u186])
 #endif
 		/*
 		 * v28 = increment for IV counter.
 		 */
-		lxvw4x(60, 0, %[ctrinc_u187])
+		lxvw4x(60, 0, %[ctrinc_u186])
 
 		/*
 		 * Load IV into v16..v19
@@ -46292,9 +46122,9 @@ ctr_128_u187(const unsigned char *sk, const unsigned char *ivbuf,
 : [cc0] "+b" (cc0), [cc1] "+b" (cc1), [cc2] "+b" (cc2), [cc3] "+b" (cc3),
   [buf] "+b" (buf)
 : [sk] "b" (sk), [ivbuf] "b" (ivbuf), [num_blocks] "b" (num_blocks >> 2),
-  [ctrinc_u187] "b" (ctrinc_u187)
+  [ctrinc_u186] "b" (ctrinc_u186)
 #if BR_POWER8_LE
-	, [idx2be_u187] "b" (idx2be_u187)
+	, [idx2be_u186] "b" (idx2be_u186)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -46304,17 +46134,17 @@ ctr_128_u187(const unsigned char *sk, const unsigned char *ivbuf,
 }
 
 static void
-ctr_192_u187(const unsigned char *sk, const unsigned char *ivbuf,
+ctr_192_u186(const unsigned char *sk, const unsigned char *ivbuf,
 	unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u187[] = {
+	static const uint32_t idx2be_u186[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
-	static const uint32_t ctrinc_u187[] = {
+	static const uint32_t ctrinc_u186[] = {
 		0, 0, 0, 4
 	};
 
@@ -46358,12 +46188,12 @@ ctr_192_u187(const unsigned char *sk, const unsigned char *ivbuf,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u187])
+		lxvw4x(47, 0, %[idx2be_u186])
 #endif
 		/*
 		 * v28 = increment for IV counter.
 		 */
-		lxvw4x(60, 0, %[ctrinc_u187])
+		lxvw4x(60, 0, %[ctrinc_u186])
 
 		/*
 		 * Load IV into v16..v19
@@ -46488,9 +46318,9 @@ ctr_192_u187(const unsigned char *sk, const unsigned char *ivbuf,
 : [cc0] "+b" (cc0), [cc1] "+b" (cc1), [cc2] "+b" (cc2), [cc3] "+b" (cc3),
   [buf] "+b" (buf)
 : [sk] "b" (sk), [ivbuf] "b" (ivbuf), [num_blocks] "b" (num_blocks >> 2),
-  [ctrinc_u187] "b" (ctrinc_u187)
+  [ctrinc_u186] "b" (ctrinc_u186)
 #if BR_POWER8_LE
-	, [idx2be_u187] "b" (idx2be_u187)
+	, [idx2be_u186] "b" (idx2be_u186)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -46500,17 +46330,17 @@ ctr_192_u187(const unsigned char *sk, const unsigned char *ivbuf,
 }
 
 static void
-ctr_256_u187(const unsigned char *sk, const unsigned char *ivbuf,
+ctr_256_u186(const unsigned char *sk, const unsigned char *ivbuf,
 	unsigned char *buf, size_t num_blocks)
 {
 	long cc0, cc1, cc2, cc3;
 
 #if BR_POWER8_LE
-	static const uint32_t idx2be_u187[] = {
+	static const uint32_t idx2be_u186[] = {
 		0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 	};
 #endif
-	static const uint32_t ctrinc_u187[] = {
+	static const uint32_t ctrinc_u186[] = {
 		0, 0, 0, 4
 	};
 
@@ -46558,12 +46388,12 @@ ctr_256_u187(const unsigned char *sk, const unsigned char *ivbuf,
 		/*
 		 * v15 = constant for byteswapping words
 		 */
-		lxvw4x(47, 0, %[idx2be_u187])
+		lxvw4x(47, 0, %[idx2be_u186])
 #endif
 		/*
 		 * v28 = increment for IV counter.
 		 */
-		lxvw4x(60, 0, %[ctrinc_u187])
+		lxvw4x(60, 0, %[ctrinc_u186])
 
 		/*
 		 * Load IV into v16..v19
@@ -46696,9 +46526,9 @@ ctr_256_u187(const unsigned char *sk, const unsigned char *ivbuf,
 : [cc0] "+b" (cc0), [cc1] "+b" (cc1), [cc2] "+b" (cc2), [cc3] "+b" (cc3),
   [buf] "+b" (buf)
 : [sk] "b" (sk), [ivbuf] "b" (ivbuf), [num_blocks] "b" (num_blocks >> 2),
-  [ctrinc_u187] "b" (ctrinc_u187)
+  [ctrinc_u186] "b" (ctrinc_u186)
 #if BR_POWER8_LE
-	, [idx2be_u187] "b" (idx2be_u187)
+	, [idx2be_u186] "b" (idx2be_u186)
 #endif
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9",
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
@@ -46727,15 +46557,15 @@ br_aes_pwr8_ctr_run(const br_aes_pwr8_ctr_keys *ctx,
 		br_enc32be(ivbuf + 60, cc + 3);
 		switch (ctx->num_rounds) {
 		case 10:
-			ctr_128_u187(ctx->skey.skni, ivbuf, buf,
+			ctr_128_u186(ctx->skey.skni, ivbuf, buf,
 				(len >> 4) & ~(size_t)3);
 			break;
 		case 12:
-			ctr_192_u187(ctx->skey.skni, ivbuf, buf,
+			ctr_192_u186(ctx->skey.skni, ivbuf, buf,
 				(len >> 4) & ~(size_t)3);
 			break;
 		default:
-			ctr_256_u187(ctx->skey.skni, ivbuf, buf,
+			ctr_256_u186(ctx->skey.skni, ivbuf, buf,
 				(len >> 4) & ~(size_t)3);
 			break;
 		}
@@ -46754,13 +46584,13 @@ br_aes_pwr8_ctr_run(const br_aes_pwr8_ctr_keys *ctx,
 		br_enc32be(ivbuf + 60, cc + 3);
 		switch (ctx->num_rounds) {
 		case 10:
-			ctr_128_u187(ctx->skey.skni, ivbuf, tmp, 4);
+			ctr_128_u186(ctx->skey.skni, ivbuf, tmp, 4);
 			break;
 		case 12:
-			ctr_192_u187(ctx->skey.skni, ivbuf, tmp, 4);
+			ctr_192_u186(ctx->skey.skni, ivbuf, tmp, 4);
 			break;
 		default:
-			ctr_256_u187(ctx->skey.skni, ivbuf, tmp, 4);
+			ctr_256_u186(ctx->skey.skni, ivbuf, tmp, 4);
 			break;
 		}
 		memcpy(buf, tmp, len);
@@ -46825,7 +46655,7 @@ br_aes_pwr8_ctr_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_POWER_ASM_MACROS_u188   1
+#define BR_POWER_ASM_MACROS_u187   1
 
 #if BR_POWER8
 
@@ -46848,7 +46678,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 /*
  * Register conventions for CTR + CBC-MAC:
  *
- *   AES subkeys are in registers 0 to 10/12/14 (depending on keys size_u188)
+ *   AES subkeys are in registers 0 to 10/12/14 (depending on keys size_u187)
  *   Register v15 contains the byteswap index register (little-endian only)
  *   Register v16 contains the CTR counter value
  *   Register v17 contains the CBC-MAC current value
@@ -46857,14 +46687,14 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
  *
  * For CTR alone:
  *  
- *   AES subkeys are in registers 0 to 10/12/14 (depending on keys size_u188)
+ *   AES subkeys are in registers 0 to 10/12/14 (depending on keys size_u187)
  *   Register v15 contains the byteswap index register (little-endian only)
  *   Registers v16 to v19 contain the CTR counter values (four blocks)
  *   Registers v20 to v27 are scratch
  *   Counter increment uses v28, v29 and v30
  */
 
-#define LOAD_SUBKEYS_128_u188 \
+#define LOAD_SUBKEYS_128_u187 \
 		lxvw4x(32, %[cc], %[sk])   \
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(33, %[cc], %[sk])   \
@@ -46887,21 +46717,21 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(42, %[cc], %[sk])
 
-#define LOAD_SUBKEYS_192_u188 \
-		LOAD_SUBKEYS_128_u188 \
+#define LOAD_SUBKEYS_192_u187 \
+		LOAD_SUBKEYS_128_u187 \
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(43, %[cc], %[sk])   \
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(44, %[cc], %[sk])
 
-#define LOAD_SUBKEYS_256_u188 \
-		LOAD_SUBKEYS_192_u188 \
+#define LOAD_SUBKEYS_256_u187 \
+		LOAD_SUBKEYS_192_u187 \
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(45, %[cc], %[sk])   \
 		addi(%[cc], %[cc], 16)     \
 		lxvw4x(46, %[cc], %[sk])
 
-#define BLOCK_ENCRYPT_128_u188(x) \
+#define BLOCK_ENCRYPT_128_u187(x) \
 		vxor(x, x, 0) \
 		vcipher(x, x, 1) \
 		vcipher(x, x, 2) \
@@ -46914,7 +46744,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipher(x, x, 9) \
 		vcipherlast(x, x, 10)
 
-#define BLOCK_ENCRYPT_192_u188(x) \
+#define BLOCK_ENCRYPT_192_u187(x) \
 		vxor(x, x, 0) \
 		vcipher(x, x, 1) \
 		vcipher(x, x, 2) \
@@ -46929,7 +46759,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipher(x, x, 11) \
 		vcipherlast(x, x, 12)
 
-#define BLOCK_ENCRYPT_256_u188(x) \
+#define BLOCK_ENCRYPT_256_u187(x) \
 		vxor(x, x, 0) \
 		vcipher(x, x, 1) \
 		vcipher(x, x, 2) \
@@ -46946,7 +46776,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipher(x, x, 13) \
 		vcipherlast(x, x, 14)
 
-#define BLOCK_ENCRYPT_X2_128_u188(x, y) \
+#define BLOCK_ENCRYPT_X2_128_u187(x, y) \
 		vxor(x, x, 0) \
 		vxor(y, y, 0) \
 		vcipher(x, x, 1) \
@@ -46970,7 +46800,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x, x, 10) \
 		vcipherlast(y, y, 10)
 
-#define BLOCK_ENCRYPT_X2_192_u188(x, y) \
+#define BLOCK_ENCRYPT_X2_192_u187(x, y) \
 		vxor(x, x, 0) \
 		vxor(y, y, 0) \
 		vcipher(x, x, 1) \
@@ -46998,7 +46828,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x, x, 12) \
 		vcipherlast(y, y, 12)
 
-#define BLOCK_ENCRYPT_X2_256_u188(x, y) \
+#define BLOCK_ENCRYPT_X2_256_u187(x, y) \
 		vxor(x, x, 0) \
 		vxor(y, y, 0) \
 		vcipher(x, x, 1) \
@@ -47030,7 +46860,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x, x, 14) \
 		vcipherlast(y, y, 14)
 
-#define BLOCK_ENCRYPT_X4_128_u188(x0, x1, x2, x3) \
+#define BLOCK_ENCRYPT_X4_128_u187(x0, x1, x2, x3) \
 		vxor(x0, x0, 0) \
 		vxor(x1, x1, 0) \
 		vxor(x2, x2, 0) \
@@ -47076,7 +46906,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x2, x2, 10) \
 		vcipherlast(x3, x3, 10)
 
-#define BLOCK_ENCRYPT_X4_192_u188(x0, x1, x2, x3) \
+#define BLOCK_ENCRYPT_X4_192_u187(x0, x1, x2, x3) \
 		vxor(x0, x0, 0) \
 		vxor(x1, x1, 0) \
 		vxor(x2, x2, 0) \
@@ -47130,7 +46960,7 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x2, x2, 12) \
 		vcipherlast(x3, x3, 12)
 
-#define BLOCK_ENCRYPT_X4_256_u188(x0, x1, x2, x3) \
+#define BLOCK_ENCRYPT_X4_256_u187(x0, x1, x2, x3) \
 		vxor(x0, x0, 0) \
 		vxor(x1, x1, 0) \
 		vxor(x2, x2, 0) \
@@ -47193,29 +47023,29 @@ br_aes_pwr8_ctrcbc_init(br_aes_pwr8_ctrcbc_keys *ctx,
 		vcipherlast(x3, x3, 14)
 
 #if BR_POWER8_LE
-static const uint32_t idx2be_u188[] = {
+static const uint32_t idx2be_u187[] = {
 	0x03020100, 0x07060504, 0x0B0A0908, 0x0F0E0D0C
 };
-#define BYTESWAP_INIT_u188     lxvw4x(47, 0, %[idx2be_u188])
-#define BYTESWAP_u188(x)       vperm(x, x, x, 15)
-#define BYTESWAPX_u188(d, s)   vperm(d, s, s, 15)
-#define BYTESWAP_REG_u188      , [idx2be_u188] "b" (idx2be_u188)
+#define BYTESWAP_INIT_u187     lxvw4x(47, 0, %[idx2be_u187])
+#define BYTESWAP_u187(x)       vperm(x, x, x, 15)
+#define BYTESWAPX_u187(d, s)   vperm(d, s, s, 15)
+#define BYTESWAP_REG_u187      , [idx2be_u187] "b" (idx2be_u187)
 #else
-#define BYTESWAP_INIT_u188
-#define BYTESWAP_u188(x)
-#define BYTESWAPX_u188(d, s)   vand(d, s, s)
-#define BYTESWAP_REG_u188
+#define BYTESWAP_INIT_u187
+#define BYTESWAP_u187(x)
+#define BYTESWAPX_u187(d, s)   vand(d, s, s)
+#define BYTESWAP_REG_u187
 #endif
 
-static const uint32_t ctrinc_u188[] = {
+static const uint32_t ctrinc_u187[] = {
 	0, 0, 0, 1
 };
-static const uint32_t ctrinc_x4_u188[] = {
+static const uint32_t ctrinc_x4_u187[] = {
 	0, 0, 0, 4
 };
-#define INCR_128_INIT_u188      lxvw4x(60, 0, %[ctrinc_u188])
-#define INCR_128_X4_INIT_u188   lxvw4x(60, 0, %[ctrinc_x4_u188])
-#define INCR_128_u188(d, s) \
+#define INCR_128_INIT_u187      lxvw4x(60, 0, %[ctrinc_u187])
+#define INCR_128_X4_INIT_u187   lxvw4x(60, 0, %[ctrinc_x4_u187])
+#define INCR_128_u187(d, s) \
 		vaddcuw(29, s, 28) \
 		vadduwm(d, s, 28) \
 		vsldoi(30, 29, 29, 4) \
@@ -47227,9 +47057,9 @@ static const uint32_t ctrinc_x4_u188[] = {
 		vsldoi(30, 29, 29, 4) \
 		vadduwm(d, d, 30)
 
-#define MKCTR_u188(size_u188) \
+#define MKCTR_u187(size_u187) \
 static void \
-ctr_ ## size_u188(const unsigned char *sk, \
+ctr_ ## size_u187(const unsigned char *sk, \
 	unsigned char *ctrbuf, unsigned char *buf, size_t num_blocks_x4) \
 { \
 	long cc, cc0, cc1, cc2, cc3; \
@@ -47244,11 +47074,11 @@ ctr_ ## size_u188(const unsigned char *sk, \
 		/* \
 		 * Load subkeys into v0..v10 \
 		 */ \
-		LOAD_SUBKEYS_ ## size_u188 \
+		LOAD_SUBKEYS_ ## size_u187 \
 		li(%[cc], 0) \
  \
-		BYTESWAP_INIT_u188 \
-		INCR_128_X4_INIT_u188 \
+		BYTESWAP_INIT_u187 \
+		INCR_128_X4_INIT_u187 \
  \
 		/* \
 		 * Load current CTR counters into v16 to v19. \
@@ -47257,10 +47087,10 @@ ctr_ ## size_u188(const unsigned char *sk, \
 		lxvw4x(49, %[cc1], %[ctrbuf]) \
 		lxvw4x(50, %[cc2], %[ctrbuf]) \
 		lxvw4x(51, %[cc3], %[ctrbuf]) \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
-		BYTESWAP_u188(18) \
-		BYTESWAP_u188(19) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
+		BYTESWAP_u187(18) \
+		BYTESWAP_u187(19) \
  \
 		mtctr(%[num_blocks_x4]) \
  \
@@ -47268,10 +47098,10 @@ ctr_ ## size_u188(const unsigned char *sk, \
 		/* \
 		 * Compute next counter values into v20..v23. \
 		 */ \
-		INCR_128_u188(20, 16) \
-		INCR_128_u188(21, 17) \
-		INCR_128_u188(22, 18) \
-		INCR_128_u188(23, 19) \
+		INCR_128_u187(20, 16) \
+		INCR_128_u187(21, 17) \
+		INCR_128_u187(22, 18) \
+		INCR_128_u187(23, 19) \
  \
 		/* \
 		 * Encrypt counter values and XOR into next data blocks. \
@@ -47280,19 +47110,19 @@ ctr_ ## size_u188(const unsigned char *sk, \
 		lxvw4x(57, %[cc1], %[buf]) \
 		lxvw4x(58, %[cc2], %[buf]) \
 		lxvw4x(59, %[cc3], %[buf]) \
-		BYTESWAP_u188(24) \
-		BYTESWAP_u188(25) \
-		BYTESWAP_u188(26) \
-		BYTESWAP_u188(27) \
-		BLOCK_ENCRYPT_X4_ ## size_u188(16, 17, 18, 19) \
+		BYTESWAP_u187(24) \
+		BYTESWAP_u187(25) \
+		BYTESWAP_u187(26) \
+		BYTESWAP_u187(27) \
+		BLOCK_ENCRYPT_X4_ ## size_u187(16, 17, 18, 19) \
 		vxor(16, 16, 24) \
 		vxor(17, 17, 25) \
 		vxor(18, 18, 26) \
 		vxor(19, 19, 27) \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
-		BYTESWAP_u188(18) \
-		BYTESWAP_u188(19) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
+		BYTESWAP_u187(18) \
+		BYTESWAP_u187(19) \
 		stxvw4x(48, %[cc0], %[buf]) \
 		stxvw4x(49, %[cc1], %[buf]) \
 		stxvw4x(50, %[cc2], %[buf]) \
@@ -47312,10 +47142,10 @@ ctr_ ## size_u188(const unsigned char *sk, \
 		/* \
 		 * Write back new counter values. \
 		 */ \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
-		BYTESWAP_u188(18) \
-		BYTESWAP_u188(19) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
+		BYTESWAP_u187(18) \
+		BYTESWAP_u187(19) \
 		stxvw4x(48, %[cc0], %[ctrbuf]) \
 		stxvw4x(49, %[cc1], %[ctrbuf]) \
 		stxvw4x(50, %[cc2], %[ctrbuf]) \
@@ -47324,8 +47154,8 @@ ctr_ ## size_u188(const unsigned char *sk, \
 : [cc] "+b" (cc), [buf] "+b" (buf), \
 	[cc0] "+b" (cc0), [cc1] "+b" (cc1), [cc2] "+b" (cc2), [cc3] "+b" (cc3) \
 : [sk] "b" (sk), [ctrbuf] "b" (ctrbuf), \
-	[num_blocks_x4] "b" (num_blocks_x4), [ctrinc_x4_u188] "b" (ctrinc_x4_u188) \
-	BYTESWAP_REG_u188 \
+	[num_blocks_x4] "b" (num_blocks_x4), [ctrinc_x4_u187] "b" (ctrinc_x4_u187) \
+	BYTESWAP_REG_u187 \
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", \
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", \
   "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", \
@@ -47333,13 +47163,13 @@ ctr_ ## size_u188(const unsigned char *sk, \
 	); \
 }
 
-MKCTR_u188(128)
-MKCTR_u188(192)
-MKCTR_u188(256)
+MKCTR_u187(128)
+MKCTR_u187(192)
+MKCTR_u187(256)
 
-#define MKCBCMAC_u188(size_u188) \
+#define MKCBCMAC_u187(size_u187) \
 static void \
-cbcmac_ ## size_u188(const unsigned char *sk, \
+cbcmac_ ## size_u187(const unsigned char *sk, \
 	unsigned char *cbcmac, const unsigned char *buf, size_t num_blocks) \
 { \
 	long cc; \
@@ -47350,16 +47180,16 @@ cbcmac_ ## size_u188(const unsigned char *sk, \
 		/* \
 		 * Load subkeys into v0..v10 \
 		 */ \
-		LOAD_SUBKEYS_ ## size_u188 \
+		LOAD_SUBKEYS_ ## size_u187 \
 		li(%[cc], 0) \
  \
-		BYTESWAP_INIT_u188 \
+		BYTESWAP_INIT_u187 \
  \
 		/* \
 		 * Load current CBC-MAC value into v16. \
 		 */ \
 		lxvw4x(48, %[cc], %[cbcmac]) \
-		BYTESWAP_u188(16) \
+		BYTESWAP_u187(16) \
  \
 		mtctr(%[num_blocks]) \
  \
@@ -47369,9 +47199,9 @@ cbcmac_ ## size_u188(const unsigned char *sk, \
 		 * and then encrypt it. \
 		 */ \
 		lxvw4x(49, %[cc], %[buf]) \
-		BYTESWAP_u188(17) \
+		BYTESWAP_u187(17) \
 		vxor(16, 16, 17) \
-		BLOCK_ENCRYPT_ ## size_u188(16) \
+		BLOCK_ENCRYPT_ ## size_u187(16) \
 		addi(%[buf], %[buf], 16) \
  \
 		bdnz(loop) \
@@ -47379,12 +47209,12 @@ cbcmac_ ## size_u188(const unsigned char *sk, \
 		/* \
 		 * Write back new CBC-MAC value. \
 		 */ \
-		BYTESWAP_u188(16) \
+		BYTESWAP_u187(16) \
 		stxvw4x(48, %[cc], %[cbcmac]) \
  \
 : [cc] "+b" (cc), [buf] "+b" (buf) \
 : [sk] "b" (sk), [cbcmac] "b" (cbcmac), [num_blocks] "b" (num_blocks) \
-	BYTESWAP_REG_u188 \
+	BYTESWAP_REG_u187 \
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", \
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", \
   "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", \
@@ -47392,13 +47222,13 @@ cbcmac_ ## size_u188(const unsigned char *sk, \
 	); \
 }
 
-MKCBCMAC_u188(128)
-MKCBCMAC_u188(192)
-MKCBCMAC_u188(256)
+MKCBCMAC_u187(128)
+MKCBCMAC_u187(192)
+MKCBCMAC_u187(256)
 
-#define MKENCRYPT_u188(size_u188) \
+#define MKENCRYPT_u187(size_u187) \
 static void \
-ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
+ctrcbc_ ## size_u187 ## _encrypt_u187(const unsigned char *sk, \
 	unsigned char *ctr, unsigned char *cbcmac, unsigned char *buf, \
 	size_t num_blocks) \
 { \
@@ -47410,11 +47240,11 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
 		/* \
 		 * Load subkeys into v0..v10 \
 		 */ \
-		LOAD_SUBKEYS_ ## size_u188 \
+		LOAD_SUBKEYS_ ## size_u187 \
 		li(%[cc], 0) \
  \
-		BYTESWAP_INIT_u188 \
-		INCR_128_INIT_u188 \
+		BYTESWAP_INIT_u187 \
+		INCR_128_INIT_u187 \
  \
 		/* \
 		 * Load current CTR counter into v16, and current \
@@ -47422,8 +47252,8 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
 		 */ \
 		lxvw4x(48, %[cc], %[ctr]) \
 		lxvw4x(49, %[cc], %[cbcmac]) \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
  \
 		/* \
 		 * At each iteration, we do two parallel encryption: \
@@ -47439,11 +47269,11 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
 		 * Encrypt first block (into v20). \
 		 */ \
 		lxvw4x(52, %[cc], %[buf]) \
-		BYTESWAP_u188(20) \
-		INCR_128_u188(22, 16) \
-		BLOCK_ENCRYPT_ ## size_u188(16) \
+		BYTESWAP_u187(20) \
+		INCR_128_u187(22, 16) \
+		BLOCK_ENCRYPT_ ## size_u187(16) \
 		vxor(20, 20, 16) \
-		BYTESWAPX_u188(21, 20) \
+		BYTESWAPX_u187(21, 20) \
 		stxvw4x(53, %[cc], %[buf]) \
 		vand(16, 22, 22) \
 		addi(%[buf], %[buf], 16) \
@@ -47464,12 +47294,12 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
 		 *    v20   encrypted previous block \
 		 */ \
 		vxor(17, 17, 20) \
-		INCR_128_u188(22, 16) \
+		INCR_128_u187(22, 16) \
 		lxvw4x(52, %[cc], %[buf]) \
-		BYTESWAP_u188(20) \
-		BLOCK_ENCRYPT_X2_ ## size_u188(16, 17) \
+		BYTESWAP_u187(20) \
+		BLOCK_ENCRYPT_X2_ ## size_u187(16, 17) \
 		vxor(20, 20, 16) \
-		BYTESWAPX_u188(21, 20) \
+		BYTESWAPX_u187(21, 20) \
 		stxvw4x(53, %[cc], %[buf]) \
 		addi(%[buf], %[buf], 16) \
 		vand(16, 22, 22) \
@@ -47478,16 +47308,16 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
  \
 	label(fastexit) \
 		vxor(17, 17, 20) \
-		BLOCK_ENCRYPT_ ## size_u188(17) \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
+		BLOCK_ENCRYPT_ ## size_u187(17) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
 		stxvw4x(48, %[cc], %[ctr]) \
 		stxvw4x(49, %[cc], %[cbcmac]) \
  \
 : [cc] "+b" (cc), [buf] "+b" (buf) \
 : [sk] "b" (sk), [ctr] "b" (ctr), [cbcmac] "b" (cbcmac), \
-	[num_blocks] "b" (num_blocks), [ctrinc_u188] "b" (ctrinc_u188) \
-	BYTESWAP_REG_u188 \
+	[num_blocks] "b" (num_blocks), [ctrinc_u187] "b" (ctrinc_u187) \
+	BYTESWAP_REG_u187 \
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", \
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", \
   "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", \
@@ -47495,13 +47325,13 @@ ctrcbc_ ## size_u188 ## _encrypt_u188(const unsigned char *sk, \
 	); \
 }
 
-MKENCRYPT_u188(128)
-MKENCRYPT_u188(192)
-MKENCRYPT_u188(256)
+MKENCRYPT_u187(128)
+MKENCRYPT_u187(192)
+MKENCRYPT_u187(256)
 
-#define MKDECRYPT_u188(size_u188) \
+#define MKDECRYPT_u187(size_u187) \
 static void \
-ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
+ctrcbc_ ## size_u187 ## _decrypt_u187(const unsigned char *sk, \
 	unsigned char *ctr, unsigned char *cbcmac, unsigned char *buf, \
 	size_t num_blocks) \
 { \
@@ -47513,11 +47343,11 @@ ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
 		/* \
 		 * Load subkeys into v0..v10 \
 		 */ \
-		LOAD_SUBKEYS_ ## size_u188 \
+		LOAD_SUBKEYS_ ## size_u187 \
 		li(%[cc], 0) \
  \
-		BYTESWAP_INIT_u188 \
-		INCR_128_INIT_u188 \
+		BYTESWAP_INIT_u187 \
+		INCR_128_INIT_u187 \
  \
 		/* \
 		 * Load current CTR counter into v16, and current \
@@ -47525,8 +47355,8 @@ ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
 		 */ \
 		lxvw4x(48, %[cc], %[ctr]) \
 		lxvw4x(49, %[cc], %[cbcmac]) \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
  \
 		/* \
 		 * At each iteration, we do two parallel encryption: \
@@ -47546,12 +47376,12 @@ ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
 		 *    v17   current CBC-MAC value \
 		 */ \
 		lxvw4x(52, %[cc], %[buf]) \
-		BYTESWAP_u188(20) \
+		BYTESWAP_u187(20) \
 		vxor(17, 17, 20) \
-		INCR_128_u188(22, 16) \
-		BLOCK_ENCRYPT_X2_ ## size_u188(16, 17) \
+		INCR_128_u187(22, 16) \
+		BLOCK_ENCRYPT_X2_ ## size_u187(16, 17) \
 		vxor(20, 20, 16) \
-		BYTESWAPX_u188(21, 20) \
+		BYTESWAPX_u187(21, 20) \
 		stxvw4x(53, %[cc], %[buf]) \
 		addi(%[buf], %[buf], 16) \
 		vand(16, 22, 22) \
@@ -47561,15 +47391,15 @@ ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
 		/* \
 		 * Store back counter and CBC-MAC value. \
 		 */ \
-		BYTESWAP_u188(16) \
-		BYTESWAP_u188(17) \
+		BYTESWAP_u187(16) \
+		BYTESWAP_u187(17) \
 		stxvw4x(48, %[cc], %[ctr]) \
 		stxvw4x(49, %[cc], %[cbcmac]) \
  \
 : [cc] "+b" (cc), [buf] "+b" (buf) \
 : [sk] "b" (sk), [ctr] "b" (ctr), [cbcmac] "b" (cbcmac), \
-	[num_blocks] "b" (num_blocks), [ctrinc_u188] "b" (ctrinc_u188) \
-	BYTESWAP_REG_u188 \
+	[num_blocks] "b" (num_blocks), [ctrinc_u187] "b" (ctrinc_u187) \
+	BYTESWAP_REG_u187 \
 : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", \
   "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19", \
   "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29", \
@@ -47577,9 +47407,9 @@ ctrcbc_ ## size_u188 ## _decrypt_u188(const unsigned char *sk, \
 	); \
 }
 
-MKDECRYPT_u188(128)
-MKDECRYPT_u188(192)
-MKDECRYPT_u188(256)
+MKDECRYPT_u187(128)
+MKDECRYPT_u187(192)
+MKDECRYPT_u187(256)
 
 /* see bearssl_block.h */
 void
@@ -47624,7 +47454,7 @@ br_aes_pwr8_ctrcbc_decrypt(const br_aes_pwr8_ctrcbc_keys *ctx,
 }
 
 static inline void
-incr_ctr_u188(void *dst, const void *src)
+incr_ctr_u187(void *dst, const void *src)
 {
 	uint64_t hi, lo;
 
@@ -47644,9 +47474,9 @@ br_aes_pwr8_ctrcbc_ctr(const br_aes_pwr8_ctrcbc_keys *ctx,
 	unsigned char ctrbuf[64];
 
 	memcpy(ctrbuf, ctr, 16);
-	incr_ctr_u188(ctrbuf + 16, ctrbuf);
-	incr_ctr_u188(ctrbuf + 32, ctrbuf + 16);
-	incr_ctr_u188(ctrbuf + 48, ctrbuf + 32);
+	incr_ctr_u187(ctrbuf + 16, ctrbuf);
+	incr_ctr_u187(ctrbuf + 32, ctrbuf + 16);
+	incr_ctr_u187(ctrbuf + 48, ctrbuf + 32);
 	if (len >= 64) {
 		switch (ctx->num_rounds) {
 		case 10:
@@ -47924,7 +47754,7 @@ br_aes_small_ctr_init(br_aes_small_ctr_keys *ctx,
 }
 
 static void
-xorbuf_u191(void *dst, const void *src, size_t len)
+xorbuf_u190(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -47951,10 +47781,10 @@ br_aes_small_ctr_run(const br_aes_small_ctr_keys *ctx,
 		br_enc32be(tmp + 12, cc ++);
 		br_aes_small_encrypt(ctx->num_rounds, ctx->skey, tmp);
 		if (len <= 16) {
-			xorbuf_u191(buf, tmp, len);
+			xorbuf_u190(buf, tmp, len);
 			break;
 		}
-		xorbuf_u191(buf, tmp, 16);
+		xorbuf_u190(buf, tmp, 16);
 		buf += 16;
 		len -= 16;
 	}
@@ -48010,7 +47840,7 @@ br_aes_small_ctrcbc_init(br_aes_small_ctrcbc_keys *ctx,
 }
 
 static void
-xorbuf_u192(void *dst, const void *src, size_t len)
+xorbuf_u191(void *dst, const void *src, size_t len)
 {
 	unsigned char *d;
 	const unsigned char *s;
@@ -48045,7 +47875,7 @@ br_aes_small_ctrcbc_ctr(const br_aes_small_ctrcbc_keys *ctx,
 		br_enc32be(tmp +  8, cc1);
 		br_enc32be(tmp + 12, cc0);
 		br_aes_small_encrypt(ctx->num_rounds, ctx->skey, tmp);
-		xorbuf_u192(buf, tmp, 16);
+		xorbuf_u191(buf, tmp, 16);
 		buf += 16;
 		len -= 16;
 		cc0 ++;
@@ -48071,7 +47901,7 @@ br_aes_small_ctrcbc_mac(const br_aes_small_ctrcbc_keys *ctx,
 
 	buf = data;
 	while (len > 0) {
-		xorbuf_u192(cbcmac, buf, 16);
+		xorbuf_u191(cbcmac, buf, 16);
 		br_aes_small_encrypt(ctx->num_rounds, ctx->skey, cbcmac);
 		buf += 16;
 		len -= 16;
@@ -48147,7 +47977,7 @@ const br_block_ctrcbc_class br_aes_small_ctrcbc_vtable = {
 /*
  * Inverse S-box.
  */
-static const unsigned char iS_u193[] = {
+static const unsigned char iS_u192[] = {
 	0x52, 0x09, 0x6A, 0xD5, 0x30, 0x36, 0xA5, 0x38, 0xBF, 0x40, 0xA3, 0x9E,
 	0x81, 0xF3, 0xD7, 0xFB, 0x7C, 0xE3, 0x39, 0x82, 0x9B, 0x2F, 0xFF, 0x87,
 	0x34, 0x8E, 0x43, 0x44, 0xC4, 0xDE, 0xE9, 0xCB, 0x54, 0x7B, 0x94, 0x32,
@@ -48173,7 +48003,7 @@ static const unsigned char iS_u193[] = {
 };
 
 static void
-add_round_key_u193(unsigned *state, const uint32_t *skeys)
+add_round_key_u192(unsigned *state, const uint32_t *skeys)
 {
 	int i;
 
@@ -48189,17 +48019,17 @@ add_round_key_u193(unsigned *state, const uint32_t *skeys)
 }
 
 static void
-inv_sub_bytes_u193(unsigned *state)
+inv_sub_bytes_u192(unsigned *state)
 {
 	int i;
 
 	for (i = 0; i < 16; i ++) {
-		state[i] = iS_u193[state[i]];
+		state[i] = iS_u192[state[i]];
 	}
 }
 
 static void
-inv_shift_rows_u193(unsigned *state)
+inv_shift_rows_u192(unsigned *state)
 {
 	unsigned tmp;
 
@@ -48224,7 +48054,7 @@ inv_shift_rows_u193(unsigned *state)
 }
 
 static inline unsigned
-gf256red_u193(unsigned x)
+gf256red_u192(unsigned x)
 {
 	unsigned y;
 
@@ -48233,7 +48063,7 @@ gf256red_u193(unsigned x)
 }
 
 static void
-inv_mix_columns_u193(unsigned *state)
+inv_mix_columns_u192(unsigned *state)
 {
 	int i;
 
@@ -48261,10 +48091,10 @@ inv_mix_columns_u193(unsigned *state)
 			^ s1 ^ (s1 << 2) ^ (s1 << 3)
 			^ s2 ^ (s2 << 3)
 			^ (s3 << 1) ^ (s3 << 2) ^ (s3 << 3);
-		state[i + 0] = gf256red_u193(t0);
-		state[i + 1] = gf256red_u193(t1);
-		state[i + 2] = gf256red_u193(t2);
-		state[i + 3] = gf256red_u193(t3);
+		state[i + 0] = gf256red_u192(t0);
+		state[i + 1] = gf256red_u192(t1);
+		state[i + 2] = gf256red_u192(t2);
+		state[i + 3] = gf256red_u192(t3);
 	}
 }
 
@@ -48280,16 +48110,16 @@ br_aes_small_decrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 	for (u = 0; u < 16; u ++) {
 		state[u] = buf[u];
 	}
-	add_round_key_u193(state, skey + (num_rounds << 2));
+	add_round_key_u192(state, skey + (num_rounds << 2));
 	for (u = num_rounds - 1; u > 0; u --) {
-		inv_shift_rows_u193(state);
-		inv_sub_bytes_u193(state);
-		add_round_key_u193(state, skey + (u << 2));
-		inv_mix_columns_u193(state);
+		inv_shift_rows_u192(state);
+		inv_sub_bytes_u192(state);
+		add_round_key_u192(state, skey + (u << 2));
+		inv_mix_columns_u192(state);
 	}
-	inv_shift_rows_u193(state);
-	inv_sub_bytes_u193(state);
-	add_round_key_u193(state, skey);
+	inv_shift_rows_u192(state);
+	inv_sub_bytes_u192(state);
+	add_round_key_u192(state, skey);
 	for (u = 0; u < 16; u ++) {
 		buf[u] = state[u];
 	}
@@ -48322,10 +48152,10 @@ br_aes_small_decrypt(unsigned num_rounds, const uint32_t *skey, void *data)
  */
 
 
-#define S_u194   br_aes_S
+#define S_u193   br_aes_S
 
 static void
-add_round_key_u194(unsigned *state, const uint32_t *skeys)
+add_round_key_u193(unsigned *state, const uint32_t *skeys)
 {
 	int i;
 
@@ -48341,17 +48171,17 @@ add_round_key_u194(unsigned *state, const uint32_t *skeys)
 }
 
 static void
-sub_bytes_u194(unsigned *state)
+sub_bytes_u193(unsigned *state)
 {
 	int i;
 
 	for (i = 0; i < 16; i ++) {
-		state[i] = S_u194[state[i]];
+		state[i] = S_u193[state[i]];
 	}
 }
 
 static void
-shift_rows_u194(unsigned *state)
+shift_rows_u193(unsigned *state)
 {
 	unsigned tmp;
 
@@ -48376,7 +48206,7 @@ shift_rows_u194(unsigned *state)
 }
 
 static void
-mix_columns_u194(unsigned *state)
+mix_columns_u193(unsigned *state)
 {
 	int i;
 
@@ -48411,16 +48241,16 @@ br_aes_small_encrypt(unsigned num_rounds, const uint32_t *skey, void *data)
 	for (u = 0; u < 16; u ++) {
 		state[u] = buf[u];
 	}
-	add_round_key_u194(state, skey);
+	add_round_key_u193(state, skey);
 	for (u = 1; u < num_rounds; u ++) {
-		sub_bytes_u194(state);
-		shift_rows_u194(state);
-		mix_columns_u194(state);
-		add_round_key_u194(state, skey + (u << 2));
+		sub_bytes_u193(state);
+		shift_rows_u193(state);
+		mix_columns_u193(state);
+		add_round_key_u193(state, skey + (u << 2));
 	}
-	sub_bytes_u194(state);
-	shift_rows_u194(state);
-	add_round_key_u194(state, skey + (num_rounds << 2));
+	sub_bytes_u193(state);
+	shift_rows_u193(state);
+	add_round_key_u193(state, skey + (num_rounds << 2));
 	for (u = 0; u < 16; u ++) {
 		buf[u] = state[u];
 	}
@@ -48452,7 +48282,7 @@ br_aes_small_encrypt(unsigned num_rounds, const uint32_t *skey, void *data)
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u195   1
+#define BR_ENABLE_INTRINSICS_u194   1
 
 /*
  * This code contains the AES key schedule implementation using the
@@ -48477,7 +48307,7 @@ BR_TARGETS_X86_UP
 
 BR_TARGET("sse2,aes")
 static inline __m128i
-expand_step128_u195(__m128i k, __m128i k2)
+expand_step128_u194(__m128i k, __m128i k2)
 {
 	k = _mm_xor_si128(k, _mm_slli_si128(k, 4));
 	k = _mm_xor_si128(k, _mm_slli_si128(k, 4));
@@ -48488,7 +48318,7 @@ expand_step128_u195(__m128i k, __m128i k2)
 
 BR_TARGET("sse2,aes")
 static inline void
-expand_step192_u195(__m128i *t1, __m128i *t2, __m128i *t3)
+expand_step192_u194(__m128i *t1, __m128i *t2, __m128i *t3)
 {
 	__m128i t4;
 
@@ -48508,7 +48338,7 @@ expand_step192_u195(__m128i *t1, __m128i *t2, __m128i *t3)
 
 BR_TARGET("sse2,aes")
 static inline void
-expand_step256_1_u195(__m128i *t1, __m128i *t2)
+expand_step256_1_u194(__m128i *t1, __m128i *t2)
 {
 	__m128i t4;
 
@@ -48524,7 +48354,7 @@ expand_step256_1_u195(__m128i *t1, __m128i *t2)
 
 BR_TARGET("sse2,aes")
 static inline void
-expand_step256_2_u195(__m128i *t1, __m128i *t3)
+expand_step256_2_u194(__m128i *t1, __m128i *t3)
 {
 	__m128i t2, t4;
 
@@ -48546,20 +48376,20 @@ expand_step256_2_u195(__m128i *t1, __m128i *t3)
  */
 BR_TARGET("sse2,aes")
 static unsigned
-x86ni_keysched_u195(__m128i *sk, const void *key, size_t len)
+x86ni_keysched_u194(__m128i *sk, const void *key, size_t len)
 {
 	const unsigned char *kb;
 
-#define KEXP128_u195(k, i, rcon)   do { \
-		k = expand_step128_u195(k, _mm_aeskeygenassist_si128(k, rcon)); \
+#define KEXP128_u194(k, i, rcon)   do { \
+		k = expand_step128_u194(k, _mm_aeskeygenassist_si128(k, rcon)); \
 		sk[i] = k; \
 	} while (0)
 
-#define KEXP192_u195(i, rcon1, rcon2)   do { \
+#define KEXP192_u194(i, rcon1, rcon2)   do { \
 		sk[(i) + 0] = t1; \
 		sk[(i) + 1] = t3; \
 		t2 = _mm_aeskeygenassist_si128(t3, rcon1); \
-		expand_step192_u195(&t1, &t2, &t3); \
+		expand_step192_u194(&t1, &t2, &t3); \
 		sk[(i) + 1] = _mm_castpd_si128(_mm_shuffle_pd( \
 			_mm_castsi128_pd(sk[(i) + 1]), \
 			_mm_castsi128_pd(t1), 0)); \
@@ -48567,15 +48397,15 @@ x86ni_keysched_u195(__m128i *sk, const void *key, size_t len)
 			_mm_castsi128_pd(t1), \
 			_mm_castsi128_pd(t3), 1)); \
 		t2 = _mm_aeskeygenassist_si128(t3, rcon2); \
-		expand_step192_u195(&t1, &t2, &t3); \
+		expand_step192_u194(&t1, &t2, &t3); \
 	} while (0)
 
-#define KEXP256_u195(i, rcon)   do { \
+#define KEXP256_u194(i, rcon)   do { \
 		sk[(i) + 0] = t3; \
 		t2 = _mm_aeskeygenassist_si128(t3, rcon); \
-		expand_step256_1_u195(&t1, &t2); \
+		expand_step256_1_u194(&t1, &t2); \
 		sk[(i) + 1] = t1; \
-		expand_step256_2_u195(&t1, &t3); \
+		expand_step256_2_u194(&t1, &t3); \
 	} while (0)
 
 	kb = key;
@@ -48585,26 +48415,26 @@ x86ni_keysched_u195(__m128i *sk, const void *key, size_t len)
 	case 16:
 		t1 = _mm_loadu_si128((const void *)kb);
 		sk[0] = t1;
-		KEXP128_u195(t1,  1, 0x01);
-		KEXP128_u195(t1,  2, 0x02);
-		KEXP128_u195(t1,  3, 0x04);
-		KEXP128_u195(t1,  4, 0x08);
-		KEXP128_u195(t1,  5, 0x10);
-		KEXP128_u195(t1,  6, 0x20);
-		KEXP128_u195(t1,  7, 0x40);
-		KEXP128_u195(t1,  8, 0x80);
-		KEXP128_u195(t1,  9, 0x1B);
-		KEXP128_u195(t1, 10, 0x36);
+		KEXP128_u194(t1,  1, 0x01);
+		KEXP128_u194(t1,  2, 0x02);
+		KEXP128_u194(t1,  3, 0x04);
+		KEXP128_u194(t1,  4, 0x08);
+		KEXP128_u194(t1,  5, 0x10);
+		KEXP128_u194(t1,  6, 0x20);
+		KEXP128_u194(t1,  7, 0x40);
+		KEXP128_u194(t1,  8, 0x80);
+		KEXP128_u194(t1,  9, 0x1B);
+		KEXP128_u194(t1, 10, 0x36);
 		return 10;
 
 	case 24:
 		t1 = _mm_loadu_si128((const void *)kb);
 		t3 = _mm_loadu_si128((const void *)(kb + 8));
 		t3 = _mm_shuffle_epi32(t3, 0x4E);
-		KEXP192_u195(0, 0x01, 0x02);
-		KEXP192_u195(3, 0x04, 0x08);
-		KEXP192_u195(6, 0x10, 0x20);
-		KEXP192_u195(9, 0x40, 0x80);
+		KEXP192_u194(0, 0x01, 0x02);
+		KEXP192_u194(3, 0x04, 0x08);
+		KEXP192_u194(6, 0x10, 0x20);
+		KEXP192_u194(9, 0x40, 0x80);
 		sk[12] = t1;
 		return 12;
 
@@ -48612,15 +48442,15 @@ x86ni_keysched_u195(__m128i *sk, const void *key, size_t len)
 		t1 = _mm_loadu_si128((const void *)kb);
 		t3 = _mm_loadu_si128((const void *)(kb + 16));
 		sk[0] = t1;
-		KEXP256_u195( 1, 0x01);
-		KEXP256_u195( 3, 0x02);
-		KEXP256_u195( 5, 0x04);
-		KEXP256_u195( 7, 0x08);
-		KEXP256_u195( 9, 0x10);
-		KEXP256_u195(11, 0x20);
+		KEXP256_u194( 1, 0x01);
+		KEXP256_u194( 3, 0x02);
+		KEXP256_u194( 5, 0x04);
+		KEXP256_u194( 7, 0x08);
+		KEXP256_u194( 9, 0x10);
+		KEXP256_u194(11, 0x20);
 		sk[13] = t3;
 		t2 = _mm_aeskeygenassist_si128(t3, 0x40);
-		expand_step256_1_u195(&t1, &t2);
+		expand_step256_1_u194(&t1, &t2);
 		sk[14] = t1;
 		return 14;
 
@@ -48628,9 +48458,9 @@ x86ni_keysched_u195(__m128i *sk, const void *key, size_t len)
 		return 0;
 	}
 
-#undef KEXP128_u195
-#undef KEXP192_u195
-#undef KEXP256_u195
+#undef KEXP128_u194
+#undef KEXP192_u194
+#undef KEXP256_u194
 }
 
 /* see inner.h */
@@ -48641,7 +48471,7 @@ br_aes_x86ni_keysched_enc(unsigned char *skni, const void *key, size_t len)
 	__m128i sk[15];
 	unsigned num_rounds;
 
-	num_rounds = x86ni_keysched_u195(sk, key, len);
+	num_rounds = x86ni_keysched_u194(sk, key, len);
 	memcpy(skni, sk, (num_rounds + 1) << 4);
 	return num_rounds;
 }
@@ -48654,7 +48484,7 @@ br_aes_x86ni_keysched_dec(unsigned char *skni, const void *key, size_t len)
 	__m128i sk[15];
 	unsigned u, num_rounds;
 
-	num_rounds = x86ni_keysched_u195(sk, key, len);
+	num_rounds = x86ni_keysched_u194(sk, key, len);
 	_mm_storeu_si128((void *)skni, sk[num_rounds]);
 	for (u = 1; u < num_rounds; u ++) {
 		_mm_storeu_si128((void *)(skni + (u << 4)),
@@ -48694,7 +48524,7 @@ BR_TARGETS_X86_DOWN
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u196   1
+#define BR_ENABLE_INTRINSICS_u195   1
 
 #if BR_AES_X86NI
 
@@ -48919,7 +48749,7 @@ br_aes_x86ni_cbcdec_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u197   1
+#define BR_ENABLE_INTRINSICS_u196   1
 
 #if BR_AES_X86NI
 
@@ -49043,7 +48873,7 @@ br_aes_x86ni_cbcenc_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u198   1
+#define BR_ENABLE_INTRINSICS_u197   1
 
 #if BR_AES_X86NI
 
@@ -49256,7 +49086,7 @@ br_aes_x86ni_ctr_get_vtable(void)
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u199   1
+#define BR_ENABLE_INTRINSICS_u198   1
 
 #if BR_AES_X86NI
 
@@ -49864,7 +49694,7 @@ br_chacha20_ct_run(const void *key,
 	uint32_t kw[8], ivw[3];
 	size_t u;
 
-	static const uint32_t CW_u200[] = {
+	static const uint32_t CW_u199[] = {
 		0x61707865, 0x3320646e, 0x79622d32, 0x6b206574
 	};
 
@@ -49881,13 +49711,13 @@ br_chacha20_ct_run(const void *key,
 		size_t clen;
 		unsigned char tmp[64];
 
-		memcpy(&state[0], CW_u200, sizeof CW_u200);
+		memcpy(&state[0], CW_u199, sizeof CW_u199);
 		memcpy(&state[4], kw, sizeof kw);
 		state[12] = cc;
 		memcpy(&state[13], ivw, sizeof ivw);
 		for (i = 0; i < 10; i ++) {
 
-#define QROUND_u200(a, b, c, d)   do { \
+#define QROUND_u199(a, b, c, d)   do { \
 		state[a] += state[b]; \
 		state[d] ^= state[a]; \
 		state[d] = (state[d] << 16) | (state[d] >> 16); \
@@ -49902,20 +49732,20 @@ br_chacha20_ct_run(const void *key,
 		state[b] = (state[b] <<  7) | (state[b] >> 25); \
 	} while (0)
 
-			QROUND_u200( 0,  4,  8, 12);
-			QROUND_u200( 1,  5,  9, 13);
-			QROUND_u200( 2,  6, 10, 14);
-			QROUND_u200( 3,  7, 11, 15);
-			QROUND_u200( 0,  5, 10, 15);
-			QROUND_u200( 1,  6, 11, 12);
-			QROUND_u200( 2,  7,  8, 13);
-			QROUND_u200( 3,  4,  9, 14);
+			QROUND_u199( 0,  4,  8, 12);
+			QROUND_u199( 1,  5,  9, 13);
+			QROUND_u199( 2,  6, 10, 14);
+			QROUND_u199( 3,  7, 11, 15);
+			QROUND_u199( 0,  5, 10, 15);
+			QROUND_u199( 1,  6, 11, 12);
+			QROUND_u199( 2,  7,  8, 13);
+			QROUND_u199( 3,  4,  9, 14);
 
-#undef QROUND_u200
+#undef QROUND_u199
 
 		}
 		for (u = 0; u < 4; u ++) {
-			br_enc32le(&tmp[u << 2], state[u] + CW_u200[u]);
+			br_enc32le(&tmp[u << 2], state[u] + CW_u199[u]);
 		}
 		for (u = 4; u < 12; u ++) {
 			br_enc32le(&tmp[u << 2], state[u] + kw[u - 4]);
@@ -49962,7 +49792,7 @@ br_chacha20_ct_run(const void *key,
  * SOFTWARE.
  */
 
-#define BR_ENABLE_INTRINSICS_u201   1
+#define BR_ENABLE_INTRINSICS_u200   1
 
 #if BR_SSE2
 
@@ -50011,7 +49841,7 @@ br_chacha20_sse2_run(const void *key,
 	__m128i iw, cw;
 	__m128i one;
 
-	static const uint32_t CW_u201[] = {
+	static const uint32_t CW_u200[] = {
 		0x61707865, 0x3320646e, 0x79622d32, 0x6b206574
 	};
 
@@ -50021,7 +49851,7 @@ br_chacha20_sse2_run(const void *key,
 	ivtmp[0] = cc;
 	memcpy(ivtmp + 1, iv, 12);
 	iw = _mm_loadu_si128((const void *)ivtmp);
-	cw = _mm_loadu_si128((const void *)CW_u201);
+	cw = _mm_loadu_si128((const void *)CW_u200);
 	one = _mm_set_epi32(0, 0, 0, 1);
 
 	while (len > 0) {
@@ -50208,28 +50038,28 @@ br_chacha20_sse2_get(void)
  * of two 28-bit words (kl and kr), and we store these bits into two
  * 32-bit words sk0 and sk1.
  *
- *  -- bit 16+x of sk0 comes from bit QL0_u202[x] of kl
- *  -- bit x of sk0 comes from bit QR0_u202[x] of kr
- *  -- bit 16+x of sk1 comes from bit QL1_u202[x] of kl
- *  -- bit x of sk1 comes from bit QR1_u202[x] of kr
+ *  -- bit 16+x of sk0 comes from bit QL0_u201[x] of kl
+ *  -- bit x of sk0 comes from bit QR0_u201[x] of kr
+ *  -- bit 16+x of sk1 comes from bit QL1_u201[x] of kl
+ *  -- bit x of sk1 comes from bit QR1_u201[x] of kr
  */
 
-static const unsigned char QL0_u202[] = {
+static const unsigned char QL0_u201[] = {
 	17,  4, 27, 23, 13, 22,  7, 18,
 	16, 24,  2, 20,  1,  8, 15, 26
 };
 
-static const unsigned char QR0_u202[] = {
+static const unsigned char QR0_u201[] = {
 	25, 19,  9,  1,  5, 11, 23,  8,
 	17,  0, 22,  3,  6, 20, 27, 24
 };
 
-static const unsigned char QL1_u202[] = {
+static const unsigned char QL1_u201[] = {
 	28, 28, 14, 11, 28, 28, 25,  0,
 	28, 28,  5,  9, 28, 28, 12, 21
 };
 
-static const unsigned char QR1_u202[] = {
+static const unsigned char QR1_u201[] = {
 	28, 28, 15,  4, 28, 28, 26, 16,
 	28, 28, 12,  7, 28, 28, 10, 14
 };
@@ -50239,7 +50069,7 @@ static const unsigned char QR1_u202[] = {
  * rotation and use the local architecture rotation opcode (if available).
  */
 static inline uint32_t
-rotl_u202(uint32_t x, int n)
+rotl_u201(uint32_t x, int n)
 {
 	return (x << n) | (x >> (32 - n));
 }
@@ -50248,7 +50078,7 @@ rotl_u202(uint32_t x, int n)
  * Compute key schedule for 8 key bytes (produces 32 subkey words).
  */
 static void
-keysched_unit_u202(uint32_t *skey, const void *key)
+keysched_unit_u201(uint32_t *skey, const void *key)
 {
 	int i;
 
@@ -50268,10 +50098,10 @@ keysched_unit_u202(uint32_t *skey, const void *key)
 		for (j = 0; j < 16; j ++) {
 			sk0 <<= 1;
 			sk1 <<= 1;
-			sk0 |= ((kl >> QL0_u202[j]) & (uint32_t)1) << 16;
-			sk0 |= (kr >> QR0_u202[j]) & (uint32_t)1;
-			sk1 |= ((kl >> QL1_u202[j]) & (uint32_t)1) << 16;
-			sk1 |= (kr >> QR1_u202[j]) & (uint32_t)1;
+			sk0 |= ((kl >> QL0_u201[j]) & (uint32_t)1) << 16;
+			sk0 |= (kr >> QR0_u201[j]) & (uint32_t)1;
+			sk1 |= ((kl >> QL1_u201[j]) & (uint32_t)1) << 16;
+			sk1 |= (kr >> QR1_u201[j]) & (uint32_t)1;
 		}
 
 		skey[(i << 1) + 0] = sk0;
@@ -50300,7 +50130,7 @@ keysched_unit_u202(uint32_t *skey, const void *key)
 		sk0 |= kr & (uint32_t)0x00000100;
 		sk0 |= (kr & (uint32_t)0x00000008) << 1;
 		sk0 |= (kr & (uint32_t)0x00000200) << 4;
-		sk0 |= rotl_u202(kr & (uint32_t)0x08000021, 6);
+		sk0 |= rotl_u201(kr & (uint32_t)0x08000021, 6);
 		sk0 |= (kr & (uint32_t)0x01000000) >> 24;
 		sk0 |= (kr & (uint32_t)0x00000002) << 11;
 		sk0 |= (kr & (uint32_t)0x00100000) >> 18;
@@ -50337,19 +50167,19 @@ br_des_ct_keysched(uint32_t *skey, const void *key, size_t key_len)
 {
 	switch (key_len) {
 	case 8:
-		keysched_unit_u202(skey, key);
+		keysched_unit_u201(skey, key);
 		return 1;
 	case 16:
-		keysched_unit_u202(skey, key);
-		keysched_unit_u202(skey + 32, (const unsigned char *)key + 8);
+		keysched_unit_u201(skey, key);
+		keysched_unit_u201(skey + 32, (const unsigned char *)key + 8);
 		br_des_rev_skey(skey + 32);
 		memcpy(skey + 64, skey, 32 * sizeof *skey);
 		return 3;
 	default:
-		keysched_unit_u202(skey, key);
-		keysched_unit_u202(skey + 32, (const unsigned char *)key + 8);
+		keysched_unit_u201(skey, key);
+		keysched_unit_u201(skey + 32, (const unsigned char *)key + 8);
 		br_des_rev_skey(skey + 32);
-		keysched_unit_u202(skey + 64, (const unsigned char *)key + 16);
+		keysched_unit_u201(skey + 64, (const unsigned char *)key + 16);
 		return 3;
 	}
 }
@@ -50359,7 +50189,7 @@ br_des_ct_keysched(uint32_t *skey, const void *key, size_t key_len)
  * 48 bits), XOR with subkey, S-boxes, and permutation P.
  */
 static inline uint32_t
-Fconf_u202(uint32_t r0, const uint32_t *sk)
+Fconf_u201(uint32_t r0, const uint32_t *sk)
 {
 	/*
 	 * Each 6->4 S-box is virtually turned into four 6->1 boxes; we
@@ -50497,21 +50327,21 @@ Fconf_u202(uint32_t r0, const uint32_t *sk)
 	 */
 	z0 = (y0 & (uint32_t)0x00000004) << 3;
 	z0 |= (y0 & (uint32_t)0x00004000) << 4;
-	z0 |= rotl_u202(y0 & 0x12020120, 5);
+	z0 |= rotl_u201(y0 & 0x12020120, 5);
 	z0 |= (y0 & (uint32_t)0x00100000) << 6;
 	z0 |= (y0 & (uint32_t)0x00008000) << 9;
 	z0 |= (y0 & (uint32_t)0x04000000) >> 22;
 	z0 |= (y0 & (uint32_t)0x00000001) << 11;
-	z0 |= rotl_u202(y0 & 0x20000200, 12);
+	z0 |= rotl_u201(y0 & 0x20000200, 12);
 	z0 |= (y0 & (uint32_t)0x00200000) >> 19;
 	z0 |= (y0 & (uint32_t)0x00000040) << 14;
 	z0 |= (y0 & (uint32_t)0x00010000) << 15;
 	z0 |= (y0 & (uint32_t)0x00000002) << 16;
-	z0 |= rotl_u202(y0 & 0x40801800, 17);
+	z0 |= rotl_u201(y0 & 0x40801800, 17);
 	z0 |= (y0 & (uint32_t)0x00080000) >> 13;
 	z0 |= (y0 & (uint32_t)0x00000010) << 21;
 	z0 |= (y0 & (uint32_t)0x01000000) >> 10;
-	z0 |= rotl_u202(y0 & 0x88000008, 24);
+	z0 |= rotl_u201(y0 & 0x88000008, 24);
 	z0 |= (y0 & (uint32_t)0x00000480) >> 7;
 	z0 |= (y0 & (uint32_t)0x00442000) >> 6;
 	return z0;
@@ -50522,7 +50352,7 @@ Fconf_u202(uint32_t r0, const uint32_t *sk)
  * in the final round.
  */
 static void
-process_block_unit_u202(uint32_t *pl, uint32_t *pr, const uint32_t *sk_exp)
+process_block_unit_u201(uint32_t *pl, uint32_t *pr, const uint32_t *sk_exp)
 {
 	int i;
 	uint32_t l, r;
@@ -50532,7 +50362,7 @@ process_block_unit_u202(uint32_t *pl, uint32_t *pr, const uint32_t *sk_exp)
 	for (i = 0; i < 16; i ++) {
 		uint32_t t;
 
-		t = l ^ Fconf_u202(r, sk_exp);
+		t = l ^ Fconf_u201(r, sk_exp);
 		l = r;
 		r = t;
 		sk_exp += 6;
@@ -50554,7 +50384,7 @@ br_des_ct_process_block(unsigned num_rounds,
 	r = br_dec32be(buf + 4);
 	br_des_do_IP(&l, &r);
 	while (num_rounds -- > 0) {
-		process_block_unit_u202(&l, &r, sk_exp);
+		process_block_unit_u201(&l, &r, sk_exp);
 		sk_exp += 96;
 	}
 	br_des_do_invIP(&l, &r);
@@ -50944,11 +50774,11 @@ br_des_rev_skey(uint32_t *skey)
 
 
 /*
- * PC2left_u206[x] tells where bit x goes when applying PC-2. 'x' is a bit
+ * PC2left_u205[x] tells where bit x goes when applying PC-2. 'x' is a bit
  * position in the left rotated key word. Both position are in normal
  * order (rightmost bit is 0).
  */
-static const unsigned char PC2left_u206[] = {
+static const unsigned char PC2left_u205[] = {
 	16,  3,  7, 24, 20, 11, 24,
 	13,  2, 10, 24, 22,  5, 15,
 	23,  1,  9, 21, 12, 24,  6,
@@ -50956,9 +50786,9 @@ static const unsigned char PC2left_u206[] = {
 };
 
 /*
- * Similar to PC2left_u206[x], for the right rotated key word.
+ * Similar to PC2left_u205[x], for the right rotated key word.
  */
-static const unsigned char PC2right_u206[] = {
+static const unsigned char PC2right_u205[] = {
 	 8, 18, 24,  6, 22, 15,  3,
 	10, 12, 19,  5, 14, 11, 24,
 	 4, 23, 16,  9, 24, 20,  2,
@@ -50968,7 +50798,7 @@ static const unsigned char PC2right_u206[] = {
 /*
  * S-boxes and PC-1 merged.
  */
-static const uint32_t S1_u206[] = {
+static const uint32_t S1_u205[] = {
 	0x00808200, 0x00000000, 0x00008000, 0x00808202,
 	0x00808002, 0x00008202, 0x00000002, 0x00008000,
 	0x00000200, 0x00808200, 0x00808202, 0x00000200,
@@ -50987,7 +50817,7 @@ static const uint32_t S1_u206[] = {
 	0x00008002, 0x00008200, 0x00000000, 0x00808002
 };
 
-static const uint32_t S2_u206[] = {
+static const uint32_t S2_u205[] = {
 	0x40084010, 0x40004000, 0x00004000, 0x00084010,
 	0x00080000, 0x00000010, 0x40080010, 0x40004010,
 	0x40000010, 0x40084010, 0x40084000, 0x40000000,
@@ -51006,7 +50836,7 @@ static const uint32_t S2_u206[] = {
 	0x40000000, 0x40080010, 0x40084010, 0x00084000
 };
 
-static const uint32_t S3_u206[] = {
+static const uint32_t S3_u205[] = {
 	0x00000104, 0x04010100, 0x00000000, 0x04010004,
 	0x04000100, 0x00000000, 0x00010104, 0x04000100,
 	0x00010004, 0x04000004, 0x04000004, 0x00010000,
@@ -51025,7 +50855,7 @@ static const uint32_t S3_u206[] = {
 	0x00010104, 0x00000004, 0x04010004, 0x00010100
 };
 
-static const uint32_t S4_u206[] = {
+static const uint32_t S4_u205[] = {
 	0x80401000, 0x80001040, 0x80001040, 0x00000040,
 	0x00401040, 0x80400040, 0x80400000, 0x80001000,
 	0x00000000, 0x00401000, 0x00401000, 0x80401040,
@@ -51044,7 +50874,7 @@ static const uint32_t S4_u206[] = {
 	0x00000040, 0x00400000, 0x00001000, 0x00401040
 };
 
-static const uint32_t S5_u206[] = {
+static const uint32_t S5_u205[] = {
 	0x00000080, 0x01040080, 0x01040000, 0x21000080,
 	0x00040000, 0x00000080, 0x20000000, 0x01040000,
 	0x20040080, 0x00040000, 0x01000080, 0x20040080,
@@ -51063,7 +50893,7 @@ static const uint32_t S5_u206[] = {
 	0x00000000, 0x20040000, 0x01040080, 0x20000080
 };
 
-static const uint32_t S6_u206[] = {
+static const uint32_t S6_u205[] = {
 	0x10000008, 0x10200000, 0x00002000, 0x10202008,
 	0x10200000, 0x00000008, 0x10202008, 0x00200000,
 	0x10002000, 0x00202008, 0x00200000, 0x10000008,
@@ -51082,7 +50912,7 @@ static const uint32_t S6_u206[] = {
 	0x10202000, 0x10000000, 0x00200008, 0x10002008
 };
 
-static const uint32_t S7_u206[] = {
+static const uint32_t S7_u205[] = {
 	0x00100000, 0x02100001, 0x02000401, 0x00000000,
 	0x00000400, 0x02000401, 0x00100401, 0x02100400,
 	0x02100401, 0x00100000, 0x00000000, 0x02000001,
@@ -51101,7 +50931,7 @@ static const uint32_t S7_u206[] = {
 	0x02000001, 0x02000400, 0x00000400, 0x00100001
 };
 
-static const uint32_t S8_u206[] = {
+static const uint32_t S8_u205[] = {
 	0x08000820, 0x00000800, 0x00020000, 0x08020820,
 	0x08000000, 0x08000820, 0x00000020, 0x08000000,
 	0x00020020, 0x08020000, 0x08020820, 0x00020800,
@@ -51121,24 +50951,24 @@ static const uint32_t S8_u206[] = {
 };
 
 static inline uint32_t
-Fconf_u206(uint32_t r0, uint32_t skl, uint32_t skr)
+Fconf_u205(uint32_t r0, uint32_t skl, uint32_t skr)
 {
 	uint32_t r1;
 
 	r1 = (r0 << 16) | (r0 >> 16);
 	return
-		  S1_u206[((r1 >> 11) ^ (skl >> 18)) & 0x3F]
-		| S2_u206[((r0 >> 23) ^ (skl >> 12)) & 0x3F]
-		| S3_u206[((r0 >> 19) ^ (skl >>  6)) & 0x3F]
-		| S4_u206[((r0 >> 15) ^ (skl      )) & 0x3F]
-		| S5_u206[((r0 >> 11) ^ (skr >> 18)) & 0x3F]
-		| S6_u206[((r0 >>  7) ^ (skr >> 12)) & 0x3F]
-		| S7_u206[((r0 >>  3) ^ (skr >>  6)) & 0x3F]
-		| S8_u206[((r1 >> 15) ^ (skr      )) & 0x3F];
+		  S1_u205[((r1 >> 11) ^ (skl >> 18)) & 0x3F]
+		| S2_u205[((r0 >> 23) ^ (skl >> 12)) & 0x3F]
+		| S3_u205[((r0 >> 19) ^ (skl >>  6)) & 0x3F]
+		| S4_u205[((r0 >> 15) ^ (skl      )) & 0x3F]
+		| S5_u205[((r0 >> 11) ^ (skr >> 18)) & 0x3F]
+		| S6_u205[((r0 >>  7) ^ (skr >> 12)) & 0x3F]
+		| S7_u205[((r0 >>  3) ^ (skr >>  6)) & 0x3F]
+		| S8_u205[((r1 >> 15) ^ (skr      )) & 0x3F];
 }
 
 static void
-process_block_unit_u206(uint32_t *pl, uint32_t *pr, const uint32_t *skey)
+process_block_unit_u205(uint32_t *pl, uint32_t *pr, const uint32_t *skey)
 {
 	int i;
 	uint32_t l, r;
@@ -51148,7 +50978,7 @@ process_block_unit_u206(uint32_t *pl, uint32_t *pr, const uint32_t *skey)
 	for (i = 0; i < 16; i ++) {
 		uint32_t t;
 
-		t = l ^ Fconf_u206(r, skey[(i << 1) + 0], skey[(i << 1) + 1]);
+		t = l ^ Fconf_u205(r, skey[(i << 1) + 0], skey[(i << 1) + 1]);
 		l = r;
 		r = t;
 	}
@@ -51168,7 +50998,7 @@ br_des_tab_process_block(unsigned num_rounds, const uint32_t *skey, void *block)
 	r = br_dec32be(buf + 4);
 	br_des_do_IP(&l, &r);
 	while (num_rounds -- > 0) {
-		process_block_unit_u206(&l, &r, skey);
+		process_block_unit_u205(&l, &r, skey);
 		skey += 32;
 	}
 	br_des_do_invIP(&l, &r);
@@ -51177,7 +51007,7 @@ br_des_tab_process_block(unsigned num_rounds, const uint32_t *skey, void *block)
 }
 
 static void
-keysched_unit_u206(uint32_t *skey, const void *key)
+keysched_unit_u205(uint32_t *skey, const void *key)
 {
 	int i;
 
@@ -51195,8 +51025,8 @@ keysched_unit_u206(uint32_t *skey, const void *key)
 		ul = 0;
 		ur = 0;
 		for (j = 0; j < 28; j ++) {
-			ul |= (xl & 1) << PC2left_u206[j];
-			ur |= (xr & 1) << PC2right_u206[j];
+			ul |= (xl & 1) << PC2left_u205[j];
+			ur |= (xr & 1) << PC2right_u205[j];
 			xl >>= 1;
 			xr >>= 1;
 		}
@@ -51211,19 +51041,19 @@ br_des_tab_keysched(uint32_t *skey, const void *key, size_t key_len)
 {
 	switch (key_len) {
 	case 8:
-		keysched_unit_u206(skey, key);
+		keysched_unit_u205(skey, key);
 		return 1;
 	case 16:
-		keysched_unit_u206(skey, key);
-		keysched_unit_u206(skey + 32, (const unsigned char *)key + 8);
+		keysched_unit_u205(skey, key);
+		keysched_unit_u205(skey + 32, (const unsigned char *)key + 8);
 		br_des_rev_skey(skey + 32);
 		memcpy(skey + 64, skey, 32 * sizeof *skey);
 		return 3;
 	default:
-		keysched_unit_u206(skey, key);
-		keysched_unit_u206(skey + 32, (const unsigned char *)key + 8);
+		keysched_unit_u205(skey, key);
+		keysched_unit_u205(skey + 32, (const unsigned char *)key + 8);
 		br_des_rev_skey(skey + 32);
-		keysched_unit_u206(skey + 64, (const unsigned char *)key + 16);
+		keysched_unit_u205(skey + 64, (const unsigned char *)key + 16);
 		return 3;
 	}
 }
@@ -51420,7 +51250,7 @@ const br_block_cbcenc_class br_des_tab_cbcenc_vtable = {
  * may be slightly larger (but by a very small amount only).
  */
 static void
-poly1305_inner_u209(uint32_t *acc, const uint32_t *r, const void *data, size_t len)
+poly1305_inner_u208(uint32_t *acc, const uint32_t *r, const void *data, size_t len)
 {
 	/*
 	 * Implementation notes: we split the 130-bit values into five
@@ -51484,15 +51314,15 @@ poly1305_inner_u209(uint32_t *acc, const uint32_t *r, const void *data, size_t l
 		/*
 		 * Compute multiplication.
 		 */
-#define M_u209(x, y)   ((uint64_t)(x) * (uint64_t)(y))
+#define M_u208(x, y)   ((uint64_t)(x) * (uint64_t)(y))
 
-		w0 = M_u209(a0, r0) + M_u209(a1, u4) + M_u209(a2, u3) + M_u209(a3, u2) + M_u209(a4, u1);
-		w1 = M_u209(a0, r1) + M_u209(a1, r0) + M_u209(a2, u4) + M_u209(a3, u3) + M_u209(a4, u2);
-		w2 = M_u209(a0, r2) + M_u209(a1, r1) + M_u209(a2, r0) + M_u209(a3, u4) + M_u209(a4, u3);
-		w3 = M_u209(a0, r3) + M_u209(a1, r2) + M_u209(a2, r1) + M_u209(a3, r0) + M_u209(a4, u4);
-		w4 = M_u209(a0, r4) + M_u209(a1, r3) + M_u209(a2, r2) + M_u209(a3, r1) + M_u209(a4, r0);
+		w0 = M_u208(a0, r0) + M_u208(a1, u4) + M_u208(a2, u3) + M_u208(a3, u2) + M_u208(a4, u1);
+		w1 = M_u208(a0, r1) + M_u208(a1, r0) + M_u208(a2, u4) + M_u208(a3, u3) + M_u208(a4, u2);
+		w2 = M_u208(a0, r2) + M_u208(a1, r1) + M_u208(a2, r0) + M_u208(a3, u4) + M_u208(a4, u3);
+		w3 = M_u208(a0, r3) + M_u208(a1, r2) + M_u208(a2, r1) + M_u208(a3, r0) + M_u208(a4, u4);
+		w4 = M_u208(a0, r4) + M_u208(a1, r3) + M_u208(a2, r2) + M_u208(a3, r1) + M_u208(a4, r0);
 
-#undef M_u209
+#undef M_u208
 		/*
 		 * Perform some (partial) modular reduction. This step is
 		 * enough to keep values in ranges such that there won't
@@ -51584,9 +51414,9 @@ br_poly1305_ctmul_run(const void *key, const void *iv,
 	 */
 	br_enc64le(foot, (uint64_t)aad_len);
 	br_enc64le(foot + 8, (uint64_t)len);
-	poly1305_inner_u209(acc, r, aad, aad_len);
-	poly1305_inner_u209(acc, r, data, len);
-	poly1305_inner_u209(acc, r, foot, sizeof foot);
+	poly1305_inner_u208(acc, r, aad, aad_len);
+	poly1305_inner_u208(acc, r, data, len);
+	poly1305_inner_u208(acc, r, foot, sizeof foot);
 
 	/*
 	 * Finalise modular reduction. This is done with carry propagation
@@ -51677,7 +51507,7 @@ br_poly1305_ctmul_run(const void *key, const void *iv,
  * Perform the inner processing of blocks for Poly1305.
  */
 static void
-poly1305_inner_u210(uint32_t *a, const uint32_t *r, const void *data, size_t len)
+poly1305_inner_u209(uint32_t *a, const uint32_t *r, const void *data, size_t len)
 {
 	/*
 	 * Implementation notes: we split the 130-bit values into ten
@@ -51880,9 +51710,9 @@ br_poly1305_ctmul32_run(const void *key, const void *iv,
 	 */
 	br_enc64le(foot, (uint64_t)aad_len);
 	br_enc64le(foot + 8, (uint64_t)len);
-	poly1305_inner_u210(acc, r, aad, aad_len);
-	poly1305_inner_u210(acc, r, data, len);
-	poly1305_inner_u210(acc, r, foot, sizeof foot);
+	poly1305_inner_u209(acc, r, aad, aad_len);
+	poly1305_inner_u209(acc, r, data, len);
+	poly1305_inner_u209(acc, r, foot, sizeof foot);
 
 	/*
 	 * Finalise modular reduction. This is done with carry propagation
@@ -51976,7 +51806,7 @@ br_poly1305_ctmul32_run(const void *key, const void *iv,
 
 #if BR_INT128
 
-#define MUL128_u211(hi, lo, x, y)   do { \
+#define MUL128_u210(hi, lo, x, y)   do { \
 		unsigned __int128 mul128tmp; \
 		mul128tmp = (unsigned __int128)(x) * (unsigned __int128)(y); \
 		(hi) = (uint64_t)(mul128tmp >> 64); \
@@ -51987,14 +51817,14 @@ br_poly1305_ctmul32_run(const void *key, const void *iv,
 
 #include <intrin.h>
 
-#define MUL128_u211(hi, lo, x, y)   do { \
+#define MUL128_u210(hi, lo, x, y)   do { \
 		(lo) = _umul128((x), (y), &(hi)); \
 	} while (0)
 
 #endif
 
-#define MASK42_u211   ((uint64_t)0x000003FFFFFFFFFF)
-#define MASK44_u211   ((uint64_t)0x00000FFFFFFFFFFF)
+#define MASK42_u210   ((uint64_t)0x000003FFFFFFFFFF)
+#define MASK44_u210   ((uint64_t)0x00000FFFFFFFFFFF)
 
 /*
  * The "accumulator" word is nominally a 130-bit value. We split it into
@@ -52053,18 +51883,18 @@ br_poly1305_ctmul32_run(const void *key, const void *iv,
  */
 
 static void
-poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len)
+poly1305_inner_big_u210(uint64_t *acc, uint64_t *r, const void *data, size_t len)
 {
 
-#define MX_u211(hi, lo, m0, m1, m2)   do { \
+#define MX_u210(hi, lo, m0, m1, m2)   do { \
 		uint64_t mxhi, mxlo; \
-		MUL128_u211(mxhi, mxlo, a0, m0); \
+		MUL128_u210(mxhi, mxlo, a0, m0); \
 		(hi) = mxhi; \
 		(lo) = mxlo >> 20; \
-		MUL128_u211(mxhi, mxlo, a1, m1); \
+		MUL128_u210(mxhi, mxlo, a1, m1); \
 		(hi) += mxhi; \
 		(lo) += mxlo >> 20; \
-		MUL128_u211(mxhi, mxlo, a2, m2); \
+		MUL128_u210(mxhi, mxlo, a2, m2); \
 		(hi) += mxhi; \
 		(lo) += mxlo >> 20; \
 	} while (0)
@@ -52091,14 +51921,14 @@ poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len
 		v0 = br_dec64le(buf + 0);
 		v1 = br_dec64le(buf + 8);
 		v2 = v1 >> 24;
-		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u211;
-		v0 &= MASK44_u211;
+		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u210;
+		v0 &= MASK44_u210;
 		a0 += v0;
 		a1 += v1;
 		a2 += v2 + ((uint64_t)1 << 40);
-		MX_u211(d0, c0, r0, u2, t1);
-		MX_u211(d1, c1, r1, r0, t2);
-		MX_u211(d2, c2, r2, r1, r0);
+		MX_u210(d0, c0, r0, u2, t1);
+		MX_u210(d1, c1, r1, r0, t2);
+		MX_u210(d2, c2, r2, r1, r0);
 		a0 = c0 + 20 * d2;
 		a1 = c1 + d0;
 		a2 = c2 + d1;
@@ -52106,14 +51936,14 @@ poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len
 		v0 = br_dec64le(buf + 16);
 		v1 = br_dec64le(buf + 24);
 		v2 = v1 >> 24;
-		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u211;
-		v0 &= MASK44_u211;
+		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u210;
+		v0 &= MASK44_u210;
 		a0 += v0;
 		a1 += v1;
 		a2 += v2 + ((uint64_t)1 << 40);
-		MX_u211(d0, c0, r0, u2, t1);
-		MX_u211(d1, c1, r1, r0, t2);
-		MX_u211(d2, c2, r2, r1, r0);
+		MX_u210(d0, c0, r0, u2, t1);
+		MX_u210(d1, c1, r1, r0, t2);
+		MX_u210(d2, c2, r2, r1, r0);
 		a0 = c0 + 20 * d2;
 		a1 = c1 + d0;
 		a2 = c2 + d1;
@@ -52121,14 +51951,14 @@ poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len
 		v0 = br_dec64le(buf + 32);
 		v1 = br_dec64le(buf + 40);
 		v2 = v1 >> 24;
-		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u211;
-		v0 &= MASK44_u211;
+		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u210;
+		v0 &= MASK44_u210;
 		a0 += v0;
 		a1 += v1;
 		a2 += v2 + ((uint64_t)1 << 40);
-		MX_u211(d0, c0, r0, u2, t1);
-		MX_u211(d1, c1, r1, r0, t2);
-		MX_u211(d2, c2, r2, r1, r0);
+		MX_u210(d0, c0, r0, u2, t1);
+		MX_u210(d1, c1, r1, r0, t2);
+		MX_u210(d2, c2, r2, r1, r0);
 		a0 = c0 + 20 * d2;
 		a1 = c1 + d0;
 		a2 = c2 + d1;
@@ -52136,24 +51966,24 @@ poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len
 		v0 = br_dec64le(buf + 48);
 		v1 = br_dec64le(buf + 56);
 		v2 = v1 >> 24;
-		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u211;
-		v0 &= MASK44_u211;
+		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u210;
+		v0 &= MASK44_u210;
 		a0 += v0;
 		a1 += v1;
 		a2 += v2 + ((uint64_t)1 << 40);
-		MX_u211(d0, c0, r0, u2, t1);
-		MX_u211(d1, c1, r1, r0, t2);
-		MX_u211(d2, c2, r2, r1, r0);
+		MX_u210(d0, c0, r0, u2, t1);
+		MX_u210(d1, c1, r1, r0, t2);
+		MX_u210(d2, c2, r2, r1, r0);
 		a0 = c0 + 20 * d2;
 		a1 = c1 + d0;
 		a2 = c2 + d1;
 
 		a1 += a0 >> 44;
-		a0 &= MASK44_u211;
+		a0 &= MASK44_u210;
 		a2 += a1 >> 44;
-		a1 &= MASK44_u211;
+		a1 &= MASK44_u210;
 		a0 += 20 * (a2 >> 44);
-		a2 &= MASK44_u211;
+		a2 &= MASK44_u210;
 
 		buf += 64;
 		len -= 64;
@@ -52162,11 +51992,11 @@ poly1305_inner_big_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len
 	acc[1] = a1;
 	acc[2] = a2;
 
-#undef MX_u211
+#undef MX_u210
 }
 
 static void
-poly1305_inner_small_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len)
+poly1305_inner_small_u210(uint64_t *acc, uint64_t *r, const void *data, size_t len)
 {
 	const unsigned char *buf;
 	uint64_t a0, a1, a2;
@@ -52198,42 +52028,42 @@ poly1305_inner_small_u211(uint64_t *acc, uint64_t *r, const void *data, size_t l
 		v1 = br_dec64le(buf + 8);
 
 		v2 = v1 >> 24;
-		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u211;
-		v0 &= MASK44_u211;
+		v1 = ((v0 >> 44) | (v1 << 20)) & MASK44_u210;
+		v0 &= MASK44_u210;
 
 		a0 += v0;
 		a1 += v1;
 		a2 += v2 + ((uint64_t)1 << 40);
 
-#define MX_u211(hi, lo, m0, m1, m2)   do { \
+#define MX_u210(hi, lo, m0, m1, m2)   do { \
 		uint64_t mxhi, mxlo; \
-		MUL128_u211(mxhi, mxlo, a0, m0); \
+		MUL128_u210(mxhi, mxlo, a0, m0); \
 		(hi) = mxhi; \
 		(lo) = mxlo >> 20; \
-		MUL128_u211(mxhi, mxlo, a1, m1); \
+		MUL128_u210(mxhi, mxlo, a1, m1); \
 		(hi) += mxhi; \
 		(lo) += mxlo >> 20; \
-		MUL128_u211(mxhi, mxlo, a2, m2); \
+		MUL128_u210(mxhi, mxlo, a2, m2); \
 		(hi) += mxhi; \
 		(lo) += mxlo >> 20; \
 	} while (0)
 
-		MX_u211(d0, c0, r0, u2, t1);
-		MX_u211(d1, c1, r1, r0, t2);
-		MX_u211(d2, c2, r2, r1, r0);
+		MX_u210(d0, c0, r0, u2, t1);
+		MX_u210(d1, c1, r1, r0, t2);
+		MX_u210(d2, c2, r2, r1, r0);
 
-#undef MX_u211
+#undef MX_u210
 
 		a0 = c0 + 20 * d2;
 		a1 = c1 + d0;
 		a2 = c2 + d1;
 
 		a1 += a0 >> 44;
-		a0 &= MASK44_u211;
+		a0 &= MASK44_u210;
 		a2 += a1 >> 44;
-		a1 &= MASK44_u211;
+		a1 &= MASK44_u210;
 		a0 += 20 * (a2 >> 44);
-		a2 &= MASK44_u211;
+		a2 &= MASK44_u210;
 
 		buf += 16;
 		len -= 16;
@@ -52244,18 +52074,18 @@ poly1305_inner_small_u211(uint64_t *acc, uint64_t *r, const void *data, size_t l
 }
 
 static inline void
-poly1305_inner_u211(uint64_t *acc, uint64_t *r, const void *data, size_t len)
+poly1305_inner_u210(uint64_t *acc, uint64_t *r, const void *data, size_t len)
 {
 	if (len >= 64) {
 		size_t len2;
 
 		len2 = len & ~(size_t)63;
-		poly1305_inner_big_u211(acc, r, data, len2);
+		poly1305_inner_big_u210(acc, r, data, len2);
 		data = (const unsigned char *)data + len2;
 		len -= len2;
 	}
 	if (len > 0) {
-		poly1305_inner_small_u211(acc, r, data, len);
+		poly1305_inner_small_u210(acc, r, data, len);
 	}
 }
 
@@ -52331,9 +52161,9 @@ br_poly1305_ctmulq_run(const void *key, const void *iv,
 	 */
 	br_enc64le(foot, (uint64_t)aad_len);
 	br_enc64le(foot + 8, (uint64_t)len);
-	poly1305_inner_u211(acc, r, aad, aad_len);
-	poly1305_inner_u211(acc, r, data, len);
-	poly1305_inner_small_u211(acc, r, foot, sizeof foot);
+	poly1305_inner_u210(acc, r, aad, aad_len);
+	poly1305_inner_u210(acc, r, data, len);
+	poly1305_inner_small_u210(acc, r, foot, sizeof foot);
 
 	/*
 	 * Finalise modular reduction. At that point, the value consists
@@ -52341,17 +52171,17 @@ br_poly1305_ctmulq_run(const void *key, const void *iv,
 	 * 2^44). Two loops shall be sufficient.
 	 */
 	acc[1] += (acc[0] >> 44);
-	acc[0] &= MASK44_u211;
+	acc[0] &= MASK44_u210;
 	acc[2] += (acc[1] >> 44);
-	acc[1] &= MASK44_u211;
+	acc[1] &= MASK44_u210;
 	acc[0] += 5 * (acc[2] >> 42);
-	acc[2] &= MASK42_u211;
+	acc[2] &= MASK42_u210;
 	acc[1] += (acc[0] >> 44);
-	acc[0] &= MASK44_u211;
+	acc[0] &= MASK44_u210;
 	acc[2] += (acc[1] >> 44);
-	acc[1] &= MASK44_u211;
+	acc[1] &= MASK44_u210;
 	acc[0] += 5 * (acc[2] >> 42);
-	acc[2] &= MASK42_u211;
+	acc[2] &= MASK42_u210;
 
 	/*
 	 * The value may still fall in the 2^130-5..2^130-1 range, in
@@ -52459,7 +52289,7 @@ br_poly1305_ctmulq_get(void)
 /*
  * Modulus: 2^130-5.
  */
-static const uint16_t P1305_u212[] = {
+static const uint16_t P1305_u211[] = {
 	0x008A,
 	0x7FFB, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF, 0x03FF
 };
@@ -52467,13 +52297,13 @@ static const uint16_t P1305_u212[] = {
 /*
  * -p mod 2^15.
  */
-#define P0I_u212   0x4CCD
+#define P0I_u211   0x4CCD
 
 /*
  * R^2 mod p, for conversion to Montgomery representation (R = 2^135,
  * since we use 9 words of 15 bits each, and 15*9 = 135).
  */
-static const uint16_t R2_u212[] = {
+static const uint16_t R2_u211[] = {
 	0x008A,
 	0x6400, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000
 };
@@ -52483,7 +52313,7 @@ static const uint16_t R2_u212[] = {
  * is in Montgomery representation, while the "a" array is not.
  */
 static void
-poly1305_inner_u212(uint16_t *a, const uint16_t *r, const void *data, size_t len)
+poly1305_inner_u211(uint16_t *a, const uint16_t *r, const void *data, size_t len)
 {
 	const unsigned char *buf;
 
@@ -52511,7 +52341,7 @@ poly1305_inner_u212(uint16_t *a, const uint16_t *r, const void *data, size_t len
 		for (i = 0; i < 16; i ++) {
 			rev[i] = buf[15 - i];
 		}
-		br_i15_decode_mod(b, rev, sizeof rev, P1305_u212);
+		br_i15_decode_mod(b, rev, sizeof rev, P1305_u211);
 		b[9] |= 0x0100;
 
 		/*
@@ -52519,13 +52349,13 @@ poly1305_inner_u212(uint16_t *a, const uint16_t *r, const void *data, size_t len
 		 * addition).
 		 */
 		ctl = br_i15_add(b, a, 1);
-		ctl |= NOT(br_i15_sub(b, P1305_u212, 0));
-		br_i15_sub(b, P1305_u212, ctl);
+		ctl |= NOT(br_i15_sub(b, P1305_u211, 0));
+		br_i15_sub(b, P1305_u211, ctl);
 
 		/*
 		 * Multiply by r, result is the new accumulator value.
 		 */
-		br_i15_montymul(a, b, r, P1305_u212, P0I_u212);
+		br_i15_montymul(a, b, r, P1305_u211, P0I_u211);
 
 		buf += 16;
 		len -= 16;
@@ -52536,7 +52366,7 @@ poly1305_inner_u212(uint16_t *a, const uint16_t *r, const void *data, size_t len
  * Byteswap a 16-byte value.
  */
 static void
-byteswap16_u212(unsigned char *buf)
+byteswap16_u211(unsigned char *buf)
 {
 	int i;
 
@@ -52595,13 +52425,13 @@ br_poly1305_i15_run(const void *key, const void *iv,
 	 * Decode the clamped 'r' value. Decoding should use little-endian
 	 * so we must byteswap the value first.
 	 */
-	byteswap16_u212(pkey);
-	br_i15_decode_mod(t, pkey, 16, P1305_u212);
+	byteswap16_u211(pkey);
+	br_i15_decode_mod(t, pkey, 16, P1305_u211);
 
 	/*
 	 * Convert 'r' to Montgomery representation.
 	 */
-	br_i15_montymul(r, t, R2_u212, P1305_u212, P0I_u212);
+	br_i15_montymul(r, t, R2_u211, P1305_u211, P0I_u211);
 
 	/*
 	 * Accumulator is 0.
@@ -52614,15 +52444,15 @@ br_poly1305_i15_run(const void *key, const void *iv,
 	 */
 	br_enc64le(foot, (uint64_t)aad_len);
 	br_enc64le(foot + 8, (uint64_t)len);
-	poly1305_inner_u212(acc, r, aad, aad_len);
-	poly1305_inner_u212(acc, r, data, len);
-	poly1305_inner_u212(acc, r, foot, sizeof foot);
+	poly1305_inner_u211(acc, r, aad, aad_len);
+	poly1305_inner_u211(acc, r, data, len);
+	poly1305_inner_u211(acc, r, foot, sizeof foot);
 
 	/*
 	 * Decode the value 's'. Again, a byteswap is needed.
 	 */
-	byteswap16_u212(pkey + 16);
-	br_i15_decode_mod(t, pkey + 16, 16, P1305_u212);
+	byteswap16_u211(pkey + 16);
+	br_i15_decode_mod(t, pkey + 16, 16, P1305_u211);
 
 	/*
 	 * Add the value 's' to the accumulator. That addition is done
@@ -52635,7 +52465,7 @@ br_poly1305_i15_run(const void *key, const void *iv,
 	 * be little-endian.
 	 */
 	br_i15_encode(tag, 16, acc);
-	byteswap16_u212(tag);
+	byteswap16_u211(tag);
 
 	/*
 	 * If decrypting, then ChaCha20 runs _after_ Poly1305.
@@ -53537,20 +53367,20 @@ br_tls12_sha384_prf(void *dst, size_t len,
 
 
 static void
-cc_none0_u219(const br_ssl_client_certificate_class **pctx)
+cc_none0_u218(const br_ssl_client_certificate_class **pctx)
 {
 	(void)pctx;
 }
 
 static void
-cc_none1_u219(const br_ssl_client_certificate_class **pctx, size_t len)
+cc_none1_u218(const br_ssl_client_certificate_class **pctx, size_t len)
 {
 	(void)pctx;
 	(void)len;
 }
 
 static void
-cc_none2_u219(const br_ssl_client_certificate_class **pctx,
+cc_none2_u218(const br_ssl_client_certificate_class **pctx,
 	const unsigned char *data, size_t len)
 {
 	(void)pctx;
@@ -53559,7 +53389,7 @@ cc_none2_u219(const br_ssl_client_certificate_class **pctx,
 }
 
 static void
-cc_choose_u219(const br_ssl_client_certificate_class **pctx,
+cc_choose_u218(const br_ssl_client_certificate_class **pctx,
 	const br_ssl_client_context *cc, uint32_t auth_types,
 	br_ssl_client_certificate *choices)
 {
@@ -53600,7 +53430,7 @@ cc_choose_u219(const br_ssl_client_certificate_class **pctx,
 }
 
 static uint32_t
-cc_do_keyx_u219(const br_ssl_client_certificate_class **pctx,
+cc_do_keyx_u218(const br_ssl_client_certificate_class **pctx,
 	unsigned char *data, size_t *len)
 {
 	br_ssl_client_certificate_ec_context *zc;
@@ -53616,7 +53446,7 @@ cc_do_keyx_u219(const br_ssl_client_certificate_class **pctx,
 }
 
 static size_t
-cc_do_sign_u219(const br_ssl_client_certificate_class **pctx,
+cc_do_sign_u218(const br_ssl_client_certificate_class **pctx,
 	int hash_id, size_t hv_len, unsigned char *data, size_t len)
 {
 	br_ssl_client_certificate_ec_context *zc;
@@ -53635,16 +53465,16 @@ cc_do_sign_u219(const br_ssl_client_certificate_class **pctx,
 	return zc->iecdsa(zc->iec, hc, hv, zc->sk, data);
 }
 
-static const br_ssl_client_certificate_class ccert_vtable_u219 = {
+static const br_ssl_client_certificate_class ccert_vtable_u218 = {
 	sizeof(br_ssl_client_certificate_ec_context),
-	cc_none0_u219, /* start_name_list */
-	cc_none1_u219, /* start_name */
-	cc_none2_u219, /* append_name */
-	cc_none0_u219, /* end_name */
-	cc_none0_u219, /* end_name_list */
-	cc_choose_u219,
-	cc_do_keyx_u219,
-	cc_do_sign_u219
+	cc_none0_u218, /* start_name_list */
+	cc_none1_u218, /* start_name */
+	cc_none2_u218, /* append_name */
+	cc_none0_u218, /* end_name */
+	cc_none0_u218, /* end_name_list */
+	cc_choose_u218,
+	cc_do_keyx_u218,
+	cc_do_sign_u218
 };
 
 /* see bearssl_ssl.h */
@@ -53655,7 +53485,7 @@ br_ssl_client_set_single_ec(br_ssl_client_context *cc,
 	unsigned cert_issuer_key_type,
 	const br_ec_impl *iec, br_ecdsa_sign iecdsa)
 {
-	cc->client_auth.single_ec.vtable = &ccert_vtable_u219;
+	cc->client_auth.single_ec.vtable = &ccert_vtable_u218;
 	cc->client_auth.single_ec.chain = chain;
 	cc->client_auth.single_ec.chain_len = chain_len;
 	cc->client_auth.single_ec.sk = sk;
@@ -53695,20 +53525,20 @@ br_ssl_client_set_single_ec(br_ssl_client_context *cc,
 
 
 static void
-cc_none0_u220(const br_ssl_client_certificate_class **pctx)
+cc_none0_u219(const br_ssl_client_certificate_class **pctx)
 {
 	(void)pctx;
 }
 
 static void
-cc_none1_u220(const br_ssl_client_certificate_class **pctx, size_t len)
+cc_none1_u219(const br_ssl_client_certificate_class **pctx, size_t len)
 {
 	(void)pctx;
 	(void)len;
 }
 
 static void
-cc_none2_u220(const br_ssl_client_certificate_class **pctx,
+cc_none2_u219(const br_ssl_client_certificate_class **pctx,
 	const unsigned char *data, size_t len)
 {
 	(void)pctx;
@@ -53717,7 +53547,7 @@ cc_none2_u220(const br_ssl_client_certificate_class **pctx,
 }
 
 static void
-cc_choose_u220(const br_ssl_client_certificate_class **pctx,
+cc_choose_u219(const br_ssl_client_certificate_class **pctx,
 	const br_ssl_client_context *cc, uint32_t auth_types,
 	br_ssl_client_certificate *choices)
 {
@@ -53739,36 +53569,36 @@ cc_choose_u220(const br_ssl_client_certificate_class **pctx,
 /*
  * OID for hash functions in RSA signatures.
  */
-static const unsigned char HASH_OID_SHA1_u220[] = {
+static const unsigned char HASH_OID_SHA1_u219[] = {
 	0x05, 0x2B, 0x0E, 0x03, 0x02, 0x1A
 };
 
-static const unsigned char HASH_OID_SHA224_u220[] = {
+static const unsigned char HASH_OID_SHA224_u219[] = {
 	0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x04
 };
 
-static const unsigned char HASH_OID_SHA256_u220[] = {
+static const unsigned char HASH_OID_SHA256_u219[] = {
 	0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01
 };
 
-static const unsigned char HASH_OID_SHA384_u220[] = {
+static const unsigned char HASH_OID_SHA384_u219[] = {
 	0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02
 };
 
-static const unsigned char HASH_OID_SHA512_u220[] = {
+static const unsigned char HASH_OID_SHA512_u219[] = {
 	0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03
 };
 
-static const unsigned char *HASH_OID_u220[] = {
-	HASH_OID_SHA1_u220,
-	HASH_OID_SHA224_u220,
-	HASH_OID_SHA256_u220,
-	HASH_OID_SHA384_u220,
-	HASH_OID_SHA512_u220
+static const unsigned char *HASH_OID_u219[] = {
+	HASH_OID_SHA1_u219,
+	HASH_OID_SHA224_u219,
+	HASH_OID_SHA256_u219,
+	HASH_OID_SHA384_u219,
+	HASH_OID_SHA512_u219
 };
 
 static size_t
-cc_do_sign_u220(const br_ssl_client_certificate_class **pctx,
+cc_do_sign_u219(const br_ssl_client_certificate_class **pctx,
 	int hash_id, size_t hv_len, unsigned char *data, size_t len)
 {
 	br_ssl_client_certificate_rsa_context *zc;
@@ -53781,7 +53611,7 @@ cc_do_sign_u220(const br_ssl_client_certificate_class **pctx,
 	if (hash_id == 0) {
 		hash_oid = NULL;
 	} else if (hash_id >= 2 && hash_id <= 6) {
-		hash_oid = HASH_OID_u220[hash_id - 2];
+		hash_oid = HASH_OID_u219[hash_id - 2];
 	} else {
 		return 0;
 	}
@@ -53792,16 +53622,16 @@ cc_do_sign_u220(const br_ssl_client_certificate_class **pctx,
 	return zc->irsasign(hash_oid, hv, hv_len, zc->sk, data) ? sig_len : 0;
 }
 
-static const br_ssl_client_certificate_class ccert_vtable_u220 = {
+static const br_ssl_client_certificate_class ccert_vtable_u219 = {
 	sizeof(br_ssl_client_certificate_rsa_context),
-	cc_none0_u220, /* start_name_list */
-	cc_none1_u220, /* start_name */
-	cc_none2_u220, /* append_name */
-	cc_none0_u220, /* end_name */
-	cc_none0_u220, /* end_name_list */
-	cc_choose_u220,
+	cc_none0_u219, /* start_name_list */
+	cc_none1_u219, /* start_name */
+	cc_none2_u219, /* append_name */
+	cc_none0_u219, /* end_name */
+	cc_none0_u219, /* end_name_list */
+	cc_choose_u219,
 	0,
-	cc_do_sign_u220
+	cc_do_sign_u219
 };
 
 /* see bearssl_ssl.h */
@@ -53810,7 +53640,7 @@ br_ssl_client_set_single_rsa(br_ssl_client_context *cc,
 	const br_x509_certificate *chain, size_t chain_len,
 	const br_rsa_private_key *sk, br_rsa_pkcs1_sign irsasign)
 {
-	cc->client_auth.single_rsa.vtable = &ccert_vtable_u220;
+	cc->client_auth.single_rsa.vtable = &ccert_vtable_u219;
 	cc->client_auth.single_rsa.chain = chain;
 	cc->client_auth.single_rsa.chain_len = chain_len;
 	cc->client_auth.single_rsa.sk = sk;
@@ -53966,7 +53796,7 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	const br_x509_trust_anchor *trust_anchors, size_t trust_anchors_num)
 {
 	/*
-	 * The "full" profile supports all implemented cipher suites_u223.
+	 * The "full" profile supports all implemented cipher suites_u222.
 	 *
 	 * Rationale for suite order, from most important to least
 	 * important rule:
@@ -53984,7 +53814,7 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	 * -- AES-128 is preferred over AES-256 (AES-128 is already
 	 *    strong enough, and AES-256 is 40% more expensive).
 	 */
-	static const uint16_t suites_u223[] = {
+	static const uint16_t suites_u222[] = {
 		BR_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 		BR_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
 		BR_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
@@ -54037,7 +53867,7 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	 * Note: the X.509 validation engine will nonetheless refuse to
 	 * validate signatures that use MD5 as hash function.
 	 */
-	static const br_hash_class *hashes_u223[] = {
+	static const br_hash_class *hashes_u222[] = {
 		&br_md5_vtable,
 		&br_sha1_vtable,
 		&br_sha224_vtable,
@@ -54063,13 +53893,13 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 		trust_anchors, trust_anchors_num);
 
 	/*
-	 * Set suites_u223 and asymmetric crypto implementations. We use the
+	 * Set suites_u222 and asymmetric crypto implementations. We use the
 	 * "i31" code for RSA (it is somewhat faster than the "i32"
 	 * implementation).
 	 * TODO: change that when better implementations are made available.
 	 */
-	br_ssl_engine_set_suites(&cc->eng, suites_u223,
-		(sizeof suites_u223) / (sizeof suites_u223[0]));
+	br_ssl_engine_set_suites(&cc->eng, suites_u222,
+		(sizeof suites_u222) / (sizeof suites_u222[0]));
 	br_ssl_client_set_default_rsapub(cc);
 	br_ssl_engine_set_default_rsavrfy(&cc->eng);
 	br_ssl_engine_set_default_ecdsa(&cc->eng);
@@ -54085,7 +53915,7 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	for (id = br_md5_ID; id <= br_sha512_ID; id ++) {
 		const br_hash_class *hc;
 
-		hc = hashes_u223[id - 1];
+		hc = hashes_u222[id - 1];
 		br_ssl_engine_set_hash(&cc->eng, id, hc);
 		br_x509_minimal_set_hash(xc, id, hc);
 	}
@@ -54144,10 +53974,10 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 /* obsolete */
 
 /*
- * If BR_USE_URANDOM_u224 is not defined, then try to autodetect its presence
+ * If BR_USE_URANDOM_u223 is not defined, then try to autodetect its presence
  * through compiler macros.
  */
-#ifndef BR_USE_URANDOM_u224
+#ifndef BR_USE_URANDOM_u223
 
 /*
  * Macro values documented on:
@@ -54165,30 +53995,30 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
 	|| defined __linux__ \
 	|| (defined __sun && (defined __SVR4 || defined __svr4__)) \
 	|| (defined __APPLE__ && defined __MACH__)
-#define BR_USE_URANDOM_u224   1
+#define BR_USE_URANDOM_u223   1
 #endif
 
 #endif
 
 /*
- * If BR_USE_WIN32_RAND_u224 is not defined, perform autodetection here.
+ * If BR_USE_WIN32_RAND_u223 is not defined, perform autodetection here.
  */
-#ifndef BR_USE_WIN32_RAND_u224
+#ifndef BR_USE_WIN32_RAND_u223
 
 #if defined _WIN32 || defined _WIN64
-#define BR_USE_WIN32_RAND_u224   1
+#define BR_USE_WIN32_RAND_u223   1
 #endif
 
 #endif
 
-#if BR_USE_URANDOM_u224
+#if BR_USE_URANDOM_u223
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #endif
 
-#if BR_USE_WIN32_RAND_u224
+#if BR_USE_WIN32_RAND_u223
 #include <windows.h>
 #include <wincrypt.h>
 #endif
@@ -54394,8 +54224,8 @@ br_ssl_client_init_full(br_ssl_client_context *cc,
  * may start at a larger offset (e.g. because of an explicit IV).
  */
 
-#define MAX_OUT_OVERHEAD_u224    85
-#define MAX_IN_OVERHEAD_u224    325
+#define MAX_OUT_OVERHEAD_u223    85
+#define MAX_IN_OVERHEAD_u223    325
 
 /* see inner.h */
 void
@@ -54411,7 +54241,7 @@ br_ssl_engine_fail(br_ssl_engine_context *rc, int err)
  * Adjust registers for a new incoming record.
  */
 static void
-make_ready_in_u224(br_ssl_engine_context *rc)
+make_ready_in_u223(br_ssl_engine_context *rc)
 {
 	rc->ixa = rc->ixb = 0;
 	rc->ixc = 5;
@@ -54424,7 +54254,7 @@ make_ready_in_u224(br_ssl_engine_context *rc)
  * Adjust registers for a new outgoing record.
  */
 static void
-make_ready_out_u224(br_ssl_engine_context *rc)
+make_ready_out_u223(br_ssl_engine_context *rc)
 {
 	size_t a, b;
 
@@ -54482,18 +54312,18 @@ br_ssl_engine_set_buffer(br_ssl_engine_context *rc,
 		if (bidi) {
 			size_t w;
 
-			if (buf_len < (512 + MAX_IN_OVERHEAD_u224
-				+ 512 + MAX_OUT_OVERHEAD_u224))
+			if (buf_len < (512 + MAX_IN_OVERHEAD_u223
+				+ 512 + MAX_OUT_OVERHEAD_u223))
 			{
 				rc->iomode = BR_IO_FAILED;
 				rc->err = BR_ERR_BAD_PARAM;
 				return;
-			} else if (buf_len < (16384 + MAX_IN_OVERHEAD_u224
-				+ 512 + MAX_OUT_OVERHEAD_u224))
+			} else if (buf_len < (16384 + MAX_IN_OVERHEAD_u223
+				+ 512 + MAX_OUT_OVERHEAD_u223))
 			{
-				w = 512 + MAX_OUT_OVERHEAD_u224;
+				w = 512 + MAX_OUT_OVERHEAD_u223;
 			} else {
-				w = buf_len - (16384 + MAX_IN_OVERHEAD_u224);
+				w = buf_len - (16384 + MAX_IN_OVERHEAD_u223);
 			}
 			br_ssl_engine_set_buffers_bidi(rc,
 				buf, buf_len - w,
@@ -54545,8 +54375,8 @@ br_ssl_engine_set_buffers_bidi(br_ssl_engine_context *rc,
 			size_t flen;
 
 			flen = (size_t)1 << u;
-			if (obuf_len >= flen + MAX_OUT_OVERHEAD_u224
-				&& ibuf_len >= flen + MAX_IN_OVERHEAD_u224)
+			if (obuf_len >= flen + MAX_OUT_OVERHEAD_u223
+				&& ibuf_len >= flen + MAX_IN_OVERHEAD_u223)
 			{
 				break;
 			}
@@ -54562,18 +54392,18 @@ br_ssl_engine_set_buffers_bidi(br_ssl_engine_context *rc,
 		rc->peer_log_max_frag_len = 0;
 	}
 	rc->out.vtable = &br_sslrec_out_clear_vtable;
-	make_ready_in_u224(rc);
-	make_ready_out_u224(rc);
+	make_ready_in_u223(rc);
+	make_ready_out_u223(rc);
 }
 
 /*
  * Clear buffers in both directions.
  */
 static void
-engine_clearbuf_u224(br_ssl_engine_context *rc)
+engine_clearbuf_u223(br_ssl_engine_context *rc)
 {
-	make_ready_in_u224(rc);
-	make_ready_out_u224(rc);
+	make_ready_in_u223(rc);
+	make_ready_out_u223(rc);
 }
 
 /*
@@ -54581,7 +54411,7 @@ engine_clearbuf_u224(br_ssl_engine_context *rc)
  * seeded properly yet).
  */
 static int
-rng_init_u224(br_ssl_engine_context *cc)
+rng_init_u223(br_ssl_engine_context *cc)
 {
 	const br_hash_class *h;
 
@@ -54622,7 +54452,7 @@ rng_init_u224(br_ssl_engine_context *cc)
 int
 br_ssl_engine_init_rand(br_ssl_engine_context *cc)
 {
-	if (!rng_init_u224(cc)) {
+	if (!rng_init_u223(cc)) {
 		return 0;
 	}
 
@@ -54658,7 +54488,7 @@ br_ssl_engine_inject_entropy(br_ssl_engine_context *cc,
 	 * could be initialised at all, then we marked the RNG as
 	 * "properly seeded".
 	 */
-	if (!rng_init_u224(cc)) {
+	if (!rng_init_u223(cc)) {
 		return;
 	}
 	br_hmac_drbg_update(&cc->rng, data, len);
@@ -54671,14 +54501,14 @@ br_ssl_engine_inject_entropy(br_ssl_engine_context *cc,
  * functions) is built upon these function, with special processing for
  * records which are not of type "application data".
  *
- *   recvrec_buf_u224, recvrec_ack_u224     receives bytes from transport medium
- *   sendrec_buf_u224, sendrec_ack_u224     send bytes to transport medium
- *   recvpld_buf_u224, recvpld_ack_u224     receives payload data from engine
- *   sendpld_buf_u224, sendpld_ack_u224     send payload data to engine
+ *   recvrec_buf_u223, recvrec_ack_u223     receives bytes from transport medium
+ *   sendrec_buf_u223, sendrec_ack_u223     send bytes to transport medium
+ *   recvpld_buf_u223, recvpld_ack_u223     receives payload data from engine
+ *   sendpld_buf_u223, sendpld_ack_u223     send payload data to engine
  */
 
 static unsigned char *
-recvrec_buf_u224(const br_ssl_engine_context *rc, size_t *len)
+recvrec_buf_u223(const br_ssl_engine_context *rc, size_t *len)
 {
 	if (rc->shutdown_recv) {
 		*len = 0;
@@ -54715,7 +54545,7 @@ recvrec_buf_u224(const br_ssl_engine_context *rc, size_t *len)
 }
 
 static void
-recvrec_ack_u224(br_ssl_engine_context *rc, size_t len)
+recvrec_ack_u223(br_ssl_engine_context *rc, size_t len)
 {
 	unsigned char *pbuf;
 	size_t pbuf_len;
@@ -54824,7 +54654,7 @@ recvrec_ack_u224(br_ssl_engine_context *rc, size_t len)
 		 * going on, e.g. interaction with a human user.
 		 */
 		if (rlen == 0) {
-			make_ready_in_u224(rc);
+			make_ready_in_u223(rc);
 		} else {
 			rc->ixa = rc->ixb = 5;
 			rc->ixc = rlen;
@@ -54869,7 +54699,7 @@ recvrec_ack_u224(br_ssl_engine_context *rc, size_t len)
 	 * we get back to "ready" state immediately.
 	 */
 	if (rc->ixa == rc->ixb) {
-		make_ready_in_u224(rc);
+		make_ready_in_u223(rc);
 	}
 }
 
@@ -54887,7 +54717,7 @@ br_ssl_engine_recvrec_finished(const br_ssl_engine_context *rc)
 }
 
 static unsigned char *
-recvpld_buf_u224(const br_ssl_engine_context *rc, size_t *len)
+recvpld_buf_u223(const br_ssl_engine_context *rc, size_t *len)
 {
 	/*
 	 * There is payload data to be read only if the mode is
@@ -54905,7 +54735,7 @@ recvpld_buf_u224(const br_ssl_engine_context *rc, size_t *len)
 }
 
 static void
-recvpld_ack_u224(br_ssl_engine_context *rc, size_t len)
+recvpld_ack_u223(br_ssl_engine_context *rc, size_t len)
 {
 	rc->ixa += len;
 
@@ -54917,7 +54747,7 @@ recvpld_ack_u224(br_ssl_engine_context *rc, size_t len)
 	 */
 	if (rc->ixa == rc->ixb) {
 		if (rc->ixc == 0) {
-			make_ready_in_u224(rc);
+			make_ready_in_u223(rc);
 		} else {
 			rc->ixa = rc->ixb = 5;
 		}
@@ -54925,7 +54755,7 @@ recvpld_ack_u224(br_ssl_engine_context *rc, size_t len)
 }
 
 static unsigned char *
-sendpld_buf_u224(const br_ssl_engine_context *rc, size_t *len)
+sendpld_buf_u223(const br_ssl_engine_context *rc, size_t *len)
 {
 	/*
 	 * Payload data can be injected only if the current mode is
@@ -54951,7 +54781,7 @@ sendpld_buf_u224(const br_ssl_engine_context *rc, size_t *len)
  * is not currently ready to receive payload bytes to send.
  */
 static void
-sendpld_flush_u224(br_ssl_engine_context *rc, int force)
+sendpld_flush_u223(br_ssl_engine_context *rc, int force)
 {
 	size_t xlen;
 	unsigned char *buf;
@@ -54971,7 +54801,7 @@ sendpld_flush_u224(br_ssl_engine_context *rc, int force)
 }
 
 static void
-sendpld_ack_u224(br_ssl_engine_context *rc, size_t len)
+sendpld_ack_u223(br_ssl_engine_context *rc, size_t len)
 {
 	/*
 	 * If using a shared buffer, then we may have to modify the
@@ -54983,17 +54813,17 @@ sendpld_ack_u224(br_ssl_engine_context *rc, size_t len)
 	rc->oxa += len;
 	if (rc->oxa >= rc->oxb) {
 		/*
-		 * Set oxb to one more than oxa so that sendpld_flush_u224()
+		 * Set oxb to one more than oxa so that sendpld_flush_u223()
 		 * does not mistakingly believe that a record is
 		 * already prepared and being sent.
 		 */
 		rc->oxb = rc->oxa + 1;
-		sendpld_flush_u224(rc, 0);
+		sendpld_flush_u223(rc, 0);
 	}
 }
 
 static unsigned char *
-sendrec_buf_u224(const br_ssl_engine_context *rc, size_t *len)
+sendrec_buf_u223(const br_ssl_engine_context *rc, size_t *len)
 {
 	/*
 	 * When still gathering payload bytes, oxc points to the start
@@ -55015,11 +54845,11 @@ sendrec_buf_u224(const br_ssl_engine_context *rc, size_t *len)
 }
 
 static void
-sendrec_ack_u224(br_ssl_engine_context *rc, size_t len)
+sendrec_ack_u223(br_ssl_engine_context *rc, size_t len)
 {
 	rc->oxb = (rc->oxa += len);
 	if (rc->oxa == rc->oxc) {
-		make_ready_out_u224(rc);
+		make_ready_out_u223(rc);
 	}
 }
 
@@ -55028,7 +54858,7 @@ sendrec_ack_u224(br_ssl_engine_context *rc, size_t len)
  * sent.
  */
 static inline int
-has_rec_tosend_u224(const br_ssl_engine_context *rc)
+has_rec_tosend_u223(const br_ssl_engine_context *rc)
 {
 	return rc->oxa == rc->oxb && rc->oxa != rc->oxc;
 }
@@ -55039,7 +54869,7 @@ has_rec_tosend_u224(const br_ssl_engine_context *rc)
  * is responsible for possibly enforcing a smaller fragment length.
  */
 static void
-clear_max_plaintext_u224(const br_sslrec_out_clear_context *cc,
+clear_max_plaintext_u223(const br_sslrec_out_clear_context *cc,
 	size_t *start, size_t *end)
 {
 	size_t len;
@@ -55056,7 +54886,7 @@ clear_max_plaintext_u224(const br_sslrec_out_clear_context *cc,
  * we just have to encode the header.
  */
 static unsigned char *
-clear_encrypt_u224(br_sslrec_out_clear_context *cc,
+clear_encrypt_u223(br_sslrec_out_clear_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf;
@@ -55074,10 +54904,10 @@ clear_encrypt_u224(br_sslrec_out_clear_context *cc,
 const br_sslrec_out_class br_sslrec_out_clear_vtable = {
 	sizeof(br_sslrec_out_clear_context),
 	(void (*)(const br_sslrec_out_class *const *, size_t *, size_t *))
-		&clear_max_plaintext_u224,
+		&clear_max_plaintext_u223,
 	(unsigned char *(*)(const br_sslrec_out_class **,
 		int, unsigned, void *, size_t *))
-		&clear_encrypt_u224
+		&clear_encrypt_u223
 };
 
 /* ==================================================================== */
@@ -55148,7 +54978,7 @@ br_ssl_engine_set_suites(br_ssl_engine_context *cc,
  * 2 for a renegotiation, or 0 for a jump due to I/O completion.
  */
 static void
-jump_handshake_u224(br_ssl_engine_context *cc, int action)
+jump_handshake_u223(br_ssl_engine_context *cc, int action)
 {
 	/*
 	 * We use a loop because the handshake processor actions may
@@ -55165,7 +54995,7 @@ jump_handshake_u224(br_ssl_engine_context *cc, int action)
 		 * get called with an explicit close or renegotiation
 		 * while there is application data ready to be read).
 		 */
-		cc->hbuf_in = recvpld_buf_u224(cc, &hlen_in);
+		cc->hbuf_in = recvpld_buf_u223(cc, &hlen_in);
 		if (cc->hbuf_in != NULL
 			&& cc->record_type_in == BR_SSL_APPLICATION_DATA)
 		{
@@ -55178,7 +55008,7 @@ jump_handshake_u224(br_ssl_engine_context *cc, int action)
 		 * buffered output, then it MUST be some application
 		 * data, so the processor cannot write to it.
 		 */
-		cc->saved_hbuf_out = cc->hbuf_out = sendpld_buf_u224(cc, &hlen_out);
+		cc->saved_hbuf_out = cc->hbuf_out = sendpld_buf_u223(cc, &hlen_out);
 		if (cc->hbuf_out != NULL && br_ssl_engine_has_pld_to_send(cc)) {
 			hlen_out = 0;
 		}
@@ -55197,10 +55027,10 @@ jump_handshake_u224(br_ssl_engine_context *cc, int action)
 			return;
 		}
 		if (cc->hbuf_out != cc->saved_hbuf_out) {
-			sendpld_ack_u224(cc, cc->hbuf_out - cc->saved_hbuf_out);
+			sendpld_ack_u223(cc, cc->hbuf_out - cc->saved_hbuf_out);
 		}
 		if (hlen_in != cc->hlen_in) {
-			recvpld_ack_u224(cc, hlen_in - cc->hlen_in);
+			recvpld_ack_u223(cc, hlen_in - cc->hlen_in);
 			if (cc->hlen_in == 0) {
 				/*
 				 * We read all data bytes, which may have
@@ -55222,12 +55052,12 @@ void
 br_ssl_engine_flush_record(br_ssl_engine_context *cc)
 {
 	if (cc->hbuf_out != cc->saved_hbuf_out) {
-		sendpld_ack_u224(cc, cc->hbuf_out - cc->saved_hbuf_out);
+		sendpld_ack_u223(cc, cc->hbuf_out - cc->saved_hbuf_out);
 	}
 	if (br_ssl_engine_has_pld_to_send(cc)) {
-		sendpld_flush_u224(cc, 0);
+		sendpld_flush_u223(cc, 0);
 	}
-	cc->saved_hbuf_out = cc->hbuf_out = sendpld_buf_u224(cc, &cc->hlen_out);
+	cc->saved_hbuf_out = cc->hbuf_out = sendpld_buf_u223(cc, &cc->hlen_out);
 }
 
 /* see bearssl_ssl.h */
@@ -55238,14 +55068,14 @@ br_ssl_engine_sendapp_buf(const br_ssl_engine_context *cc, size_t *len)
 		*len = 0;
 		return NULL;
 	}
-	return sendpld_buf_u224(cc, len);
+	return sendpld_buf_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
 void
 br_ssl_engine_sendapp_ack(br_ssl_engine_context *cc, size_t len)
 {
-	sendpld_ack_u224(cc, len);
+	sendpld_ack_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
@@ -55258,33 +55088,33 @@ br_ssl_engine_recvapp_buf(const br_ssl_engine_context *cc, size_t *len)
 		*len = 0;
 		return NULL;
 	}
-	return recvpld_buf_u224(cc, len);
+	return recvpld_buf_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
 void
 br_ssl_engine_recvapp_ack(br_ssl_engine_context *cc, size_t len)
 {
-	recvpld_ack_u224(cc, len);
+	recvpld_ack_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
 unsigned char *
 br_ssl_engine_sendrec_buf(const br_ssl_engine_context *cc, size_t *len)
 {
-	return sendrec_buf_u224(cc, len);
+	return sendrec_buf_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
 void
 br_ssl_engine_sendrec_ack(br_ssl_engine_context *cc, size_t len)
 {
-	sendrec_ack_u224(cc, len);
-	if (len != 0 && !has_rec_tosend_u224(cc)
+	sendrec_ack_u223(cc, len);
+	if (len != 0 && !has_rec_tosend_u223(cc)
 		&& (cc->record_type_out != BR_SSL_APPLICATION_DATA
 		|| (cc->application_data & 1) == 0))
 	{
-		jump_handshake_u224(cc, 0);
+		jump_handshake_u223(cc, 0);
 	}
 }
 
@@ -55292,7 +55122,7 @@ br_ssl_engine_sendrec_ack(br_ssl_engine_context *cc, size_t len)
 unsigned char *
 br_ssl_engine_recvrec_buf(const br_ssl_engine_context *cc, size_t *len)
 {
-	return recvrec_buf_u224(cc, len);
+	return recvrec_buf_u223(cc, len);
 }
 
 /* see bearssl_ssl.h */
@@ -55301,7 +55131,7 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 {
 	unsigned char *buf;
 
-	recvrec_ack_u224(cc, len);
+	recvrec_ack_u223(cc, len);
 	if (br_ssl_engine_closed(cc)) {
 		return;
 	}
@@ -55311,13 +55141,13 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 	 * yielded some payload bytes, in which case we must process
 	 * them according to the record type.
 	 */
-	buf = recvpld_buf_u224(cc, &len);
+	buf = recvpld_buf_u223(cc, &len);
 	if (buf != NULL) {
 		switch (cc->record_type_in) {
 		case BR_SSL_CHANGE_CIPHER_SPEC:
 		case BR_SSL_ALERT:
 		case BR_SSL_HANDSHAKE:
-			jump_handshake_u224(cc, 0);
+			jump_handshake_u223(cc, 0);
 			break;
 		case BR_SSL_APPLICATION_DATA:
 			if (cc->application_data == 1) {
@@ -55330,7 +55160,7 @@ br_ssl_engine_recvrec_ack(br_ssl_engine_context *cc, size_t len)
 			 * application data should be discarded.
 			 */
 			if (cc->application_data == 2) {
-				recvpld_ack_u224(cc, len);
+				recvpld_ack_u223(cc, len);
 				break;
 			}
 
@@ -55347,7 +55177,7 @@ void
 br_ssl_engine_close(br_ssl_engine_context *cc)
 {
 	if (!br_ssl_engine_closed(cc)) {
-		jump_handshake_u224(cc, 1);
+		jump_handshake_u223(cc, 1);
 	}
 }
 
@@ -55363,7 +55193,7 @@ br_ssl_engine_renegotiate(br_ssl_engine_context *cc)
 	{
 		return 0;
 	}
-	jump_handshake_u224(cc, 2);
+	jump_handshake_u223(cc, 2);
 	return 1;
 }
 
@@ -55399,7 +55229,7 @@ void
 br_ssl_engine_flush(br_ssl_engine_context *cc, int force)
 {
 	if (!br_ssl_engine_closed(cc) && (cc->application_data & 1) != 0) {
-		sendpld_flush_u224(cc, force);
+		sendpld_flush_u223(cc, force);
 	}
 }
 
@@ -55408,7 +55238,7 @@ void
 br_ssl_engine_hs_reset(br_ssl_engine_context *cc,
 	void (*hsinit)(void *), void (*hsrun)(void *))
 {
-	engine_clearbuf_u224(cc);
+	engine_clearbuf_u223(cc);
 	cc->cpu.dp = cc->dp_stack;
 	cc->cpu.rp = cc->rp_stack;
 	hsinit(&cc->cpu);
@@ -55416,7 +55246,7 @@ br_ssl_engine_hs_reset(br_ssl_engine_context *cc,
 	cc->shutdown_recv = 0;
 	cc->application_data = 0;
 	cc->alert = 0;
-	jump_handshake_u224(cc, 0);
+	jump_handshake_u223(cc, 0);
 }
 
 /* see inner.h */
@@ -55454,7 +55284,7 @@ br_ssl_engine_compute_master(br_ssl_engine_context *cc,
  * Compute key block.
  */
 static void
-compute_key_block_u224(br_ssl_engine_context *cc, int prf_id,
+compute_key_block_u223(br_ssl_engine_context *cc, int prf_id,
 	size_t half_len, unsigned char *kb)
 {
 	br_tls_prf_impl iprf;
@@ -55492,7 +55322,7 @@ br_ssl_engine_switch_cbc_in(br_ssl_engine_context *cc,
 	} else {
 		iv_len = bc_impl->block_size;
 	}
-	compute_key_block_u224(cc, prf_id,
+	compute_key_block_u223(cc, prf_id,
 		mac_key_len + cipher_key_len + iv_len, kb);
 	if (is_client) {
 		mac_key = &kb[mac_key_len];
@@ -55535,7 +55365,7 @@ br_ssl_engine_switch_cbc_out(br_ssl_engine_context *cc,
 	} else {
 		iv_len = bc_impl->block_size;
 	}
-	compute_key_block_u224(cc, prf_id,
+	compute_key_block_u223(cc, prf_id,
 		mac_key_len + cipher_key_len + iv_len, kb);
 	if (is_client) {
 		mac_key = &kb[0];
@@ -55563,7 +55393,7 @@ br_ssl_engine_switch_gcm_in(br_ssl_engine_context *cc,
 	unsigned char kb[72];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, cipher_key_len + 4, kb);
+	compute_key_block_u223(cc, prf_id, cipher_key_len + 4, kb);
 	if (is_client) {
 		cipher_key = &kb[cipher_key_len];
 		iv = &kb[(cipher_key_len << 1) + 4];
@@ -55585,7 +55415,7 @@ br_ssl_engine_switch_gcm_out(br_ssl_engine_context *cc,
 	unsigned char kb[72];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, cipher_key_len + 4, kb);
+	compute_key_block_u223(cc, prf_id, cipher_key_len + 4, kb);
 	if (is_client) {
 		cipher_key = &kb[0];
 		iv = &kb[cipher_key_len << 1];
@@ -55605,7 +55435,7 @@ br_ssl_engine_switch_chapol_in(br_ssl_engine_context *cc,
 	unsigned char kb[88];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, 44, kb);
+	compute_key_block_u223(cc, prf_id, 44, kb);
 	if (is_client) {
 		cipher_key = &kb[32];
 		iv = &kb[76];
@@ -55626,7 +55456,7 @@ br_ssl_engine_switch_chapol_out(br_ssl_engine_context *cc,
 	unsigned char kb[88];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, 44, kb);
+	compute_key_block_u223(cc, prf_id, 44, kb);
 	if (is_client) {
 		cipher_key = &kb[0];
 		iv = &kb[64];
@@ -55648,7 +55478,7 @@ br_ssl_engine_switch_ccm_in(br_ssl_engine_context *cc,
 	unsigned char kb[72];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, cipher_key_len + 4, kb);
+	compute_key_block_u223(cc, prf_id, cipher_key_len + 4, kb);
 	if (is_client) {
 		cipher_key = &kb[cipher_key_len];
 		iv = &kb[(cipher_key_len << 1) + 4];
@@ -55671,7 +55501,7 @@ br_ssl_engine_switch_ccm_out(br_ssl_engine_context *cc,
 	unsigned char kb[72];
 	unsigned char *cipher_key, *iv;
 
-	compute_key_block_u224(cc, prf_id, cipher_key_len + 4, kb);
+	compute_key_block_u223(cc, prf_id, cipher_key_len + 4, kb);
 	if (is_client) {
 		cipher_key = &kb[0];
 		iv = &kb[cipher_key_len << 1];
@@ -56158,16 +55988,16 @@ br_ssl_engine_set_default_rsavrfy(br_ssl_engine_context *cc)
 int
 br_ssl_choose_hash(unsigned bf)
 {
-	static const unsigned char pref_u233[] = {
+	static const unsigned char pref_u232[] = {
 		br_sha256_ID, br_sha384_ID, br_sha512_ID,
 		br_sha224_ID, br_sha1_ID
 	};
 	size_t u;
 
-	for (u = 0; u < sizeof pref_u233; u ++) {
+	for (u = 0; u < sizeof pref_u232; u ++) {
 		int x;
 
-		x = pref_u233[u];
+		x = pref_u232[u];
 		if ((bf >> x) & 1) {
 			return x;
 		}
@@ -56186,10 +56016,10 @@ typedef struct {
 	uint32_t *dp;
 	uint32_t *rp;
 	const unsigned char *ip;
-} t0_context_u234;
+} t0_context_u233;
 
 static uint32_t
-t0_parse7E_unsigned_u234(const unsigned char **p)
+t0_parse7E_unsigned_u233(const unsigned char **p)
 {
 	uint32_t x;
 
@@ -56206,7 +56036,7 @@ t0_parse7E_unsigned_u234(const unsigned char **p)
 }
 
 static int32_t
-t0_parse7E_signed_u234(const unsigned char **p)
+t0_parse7E_signed_u233(const unsigned char **p)
 {
 	int neg;
 	uint32_t x;
@@ -56228,16 +56058,16 @@ t0_parse7E_signed_u234(const unsigned char **p)
 	}
 }
 
-#define T0_VBYTE_u234(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
-#define T0_FBYTE_u234(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
-#define T0_SBYTE_u234(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
-#define T0_INT1_u234(x)       T0_FBYTE_u234(x, 0)
-#define T0_INT2_u234(x)       T0_VBYTE_u234(x, 7), T0_FBYTE_u234(x, 0)
-#define T0_INT3_u234(x)       T0_VBYTE_u234(x, 14), T0_VBYTE_u234(x, 7), T0_FBYTE_u234(x, 0)
-#define T0_INT4_u234(x)       T0_VBYTE_u234(x, 21), T0_VBYTE_u234(x, 14), T0_VBYTE_u234(x, 7), T0_FBYTE_u234(x, 0)
-#define T0_INT5_u234(x)       T0_SBYTE_u234(x), T0_VBYTE_u234(x, 21), T0_VBYTE_u234(x, 14), T0_VBYTE_u234(x, 7), T0_FBYTE_u234(x, 0)
+#define T0_VBYTE_u233(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
+#define T0_FBYTE_u233(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
+#define T0_SBYTE_u233(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
+#define T0_INT1_u233(x)       T0_FBYTE_u233(x, 0)
+#define T0_INT2_u233(x)       T0_VBYTE_u233(x, 7), T0_FBYTE_u233(x, 0)
+#define T0_INT3_u233(x)       T0_VBYTE_u233(x, 14), T0_VBYTE_u233(x, 7), T0_FBYTE_u233(x, 0)
+#define T0_INT4_u233(x)       T0_VBYTE_u233(x, 21), T0_VBYTE_u233(x, 14), T0_VBYTE_u233(x, 7), T0_FBYTE_u233(x, 0)
+#define T0_INT5_u233(x)       T0_SBYTE_u233(x), T0_VBYTE_u233(x, 21), T0_VBYTE_u233(x, 14), T0_VBYTE_u233(x, 7), T0_FBYTE_u233(x, 0)
 
-/* static const unsigned char t0_datablock_u234[]; */
+/* static const unsigned char t0_datablock_u233[]; */
 
 
 void br_ssl_hs_client_init_main(void *t0ctx);
@@ -56253,7 +56083,7 @@ void br_ssl_hs_client_run(void *t0ctx);
 /*
  * This macro evaluates to a pointer to the current engine context.
  */
-#define ENG_u234  ((br_ssl_engine_context *)(void *)((unsigned char *)t0ctx - offsetof(br_ssl_engine_context, cpu)))
+#define ENG_u233  ((br_ssl_engine_context *)(void *)((unsigned char *)t0ctx - offsetof(br_ssl_engine_context, cpu)))
 
 
 
@@ -56267,7 +56097,7 @@ void br_ssl_hs_client_run(void *t0ctx);
  * appropriate cast. This also means that "addresses" computed as offsets
  * within the structure work for both kinds of context.
  */
-#define CTX_u234  ((br_ssl_client_context *)ENG_u234)
+#define CTX_u233  ((br_ssl_client_context *)ENG_u233)
 
 /*
  * Generate the pre-master secret for RSA key exchange, and encrypt it
@@ -56279,7 +56109,7 @@ void br_ssl_hs_client_run(void *t0ctx);
  * i.e. it is of type RSA and suitable for encryption).
  */
 static int
-make_pms_rsa_u234(br_ssl_client_context *ctx, int prf_id)
+make_pms_rsa_u233(br_ssl_client_context *ctx, int prf_id)
 {
 	const br_x509_class **xc;
 	const br_x509_pkey *pk;
@@ -56348,7 +56178,7 @@ make_pms_rsa_u234(br_ssl_client_context *ctx, int prf_id)
 /*
  * OID for hash functions in RSA signatures.
  */
-static const unsigned char *HASH_OID_u234[] = {
+static const unsigned char *HASH_OID_u233[] = {
 	BR_HASH_OID_SHA1,
 	BR_HASH_OID_SHA224,
 	BR_HASH_OID_SHA256,
@@ -56366,7 +56196,7 @@ static const unsigned char *HASH_OID_u234[] = {
  * Returned value is 0 on success, or an error code.
  */
 static int
-verify_SKE_sig_u234(br_ssl_client_context *ctx,
+verify_SKE_sig_u233(br_ssl_client_context *ctx,
 	int hash, int use_rsa, size_t sig_len)
 {
 	const br_x509_class **xc;
@@ -56409,7 +56239,7 @@ verify_SKE_sig_u234(br_ssl_client_context *ctx,
 		const unsigned char *hash_oid;
 
 		if (hash) {
-			hash_oid = HASH_OID_u234[hash - 2];
+			hash_oid = HASH_OID_u233[hash - 2];
 		} else {
 			hash_oid = NULL;
 		}
@@ -56439,7 +56269,7 @@ verify_SKE_sig_u234(br_ssl_client_context *ctx,
  * (for static ECDH).
  */
 static int
-make_pms_ecdh_u234(br_ssl_client_context *ctx, unsigned ecdhe, int prf_id)
+make_pms_ecdh_u233(br_ssl_client_context *ctx, unsigned ecdhe, int prf_id)
 {
 	int curve;
 	unsigned char key[66], point[133];
@@ -56516,7 +56346,7 @@ make_pms_ecdh_u234(br_ssl_client_context *ctx, unsigned ecdhe, int prf_id)
  * Returned value is 0 on success, -1 on error.
  */
 static int
-make_pms_static_ecdh_u234(br_ssl_client_context *ctx, int prf_id)
+make_pms_static_ecdh_u233(br_ssl_client_context *ctx, int prf_id)
 {
 	unsigned char point[133];
 	size_t point_len;
@@ -56547,7 +56377,7 @@ make_pms_static_ecdh_u234(br_ssl_client_context *ctx, int prf_id)
  * error, 0 is returned.
  */
 static size_t
-make_client_sign_u234(br_ssl_client_context *ctx)
+make_client_sign_u233(br_ssl_client_context *ctx)
 {
 	size_t hv_len;
 
@@ -56574,7 +56404,7 @@ make_client_sign_u234(br_ssl_client_context *ctx)
 
 
 
-static const unsigned char t0_datablock_u234[] = {
+static const unsigned char t0_datablock_u233[] = {
 	0x00, 0x00, 0x0A, 0x00, 0x24, 0x00, 0x2F, 0x01, 0x24, 0x00, 0x35, 0x02,
 	0x24, 0x00, 0x3C, 0x01, 0x44, 0x00, 0x3D, 0x02, 0x44, 0x00, 0x9C, 0x03,
 	0x04, 0x00, 0x9D, 0x04, 0x05, 0xC0, 0x03, 0x40, 0x24, 0xC0, 0x04, 0x41,
@@ -56593,75 +56423,75 @@ static const unsigned char t0_datablock_u234[] = {
 	0x04, 0x00, 0x00
 };
 
-static const unsigned char t0_codeblock_u234[] = {
+static const unsigned char t0_codeblock_u233[] = {
 	0x00, 0x01, 0x00, 0x0A, 0x00, 0x00, 0x01, 0x00, 0x0D, 0x00, 0x00, 0x01,
 	0x00, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x0F, 0x00, 0x00, 0x01, 0x01, 0x08,
 	0x00, 0x00, 0x01, 0x01, 0x09, 0x00, 0x00, 0x01, 0x02, 0x08, 0x00, 0x00,
 	0x01, 0x02, 0x09, 0x00, 0x00, 0x25, 0x25, 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_CCS), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_CIPHER_SUITE), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_COMPRESSION), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_FINISHED), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_FRAGLEN), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_HANDSHAKE), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_HELLO_DONE), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_PARAM), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_SECRENEG), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_BAD_SNI), 0x00, 0x00, 0x01, T0_INT1_u234(BR_ERR_BAD_VERSION),
-	0x00, 0x00, 0x01, T0_INT1_u234(BR_ERR_EXTRA_EXTENSION), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_INVALID_ALGORITHM), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_LIMIT_EXCEEDED), 0x00, 0x00, 0x01, T0_INT1_u234(BR_ERR_OK),
-	0x00, 0x00, 0x01, T0_INT1_u234(BR_ERR_OVERSIZED_ID), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_RESUME_MISMATCH), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_UNEXPECTED), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_UNSUPPORTED_VERSION), 0x00, 0x00, 0x01,
-	T0_INT1_u234(BR_ERR_WRONG_KEY_USAGE), 0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, action)), 0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, alert)), 0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, application_data)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_client_context, auth_type)), 0x00, 0x00,
+	T0_INT1_u233(BR_ERR_BAD_CCS), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_CIPHER_SUITE), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_COMPRESSION), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_FINISHED), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_FRAGLEN), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_HANDSHAKE), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_HELLO_DONE), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_PARAM), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_SECRENEG), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_BAD_SNI), 0x00, 0x00, 0x01, T0_INT1_u233(BR_ERR_BAD_VERSION),
+	0x00, 0x00, 0x01, T0_INT1_u233(BR_ERR_EXTRA_EXTENSION), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_INVALID_ALGORITHM), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_LIMIT_EXCEEDED), 0x00, 0x00, 0x01, T0_INT1_u233(BR_ERR_OK),
+	0x00, 0x00, 0x01, T0_INT1_u233(BR_ERR_OVERSIZED_ID), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_RESUME_MISMATCH), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_UNEXPECTED), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_UNSUPPORTED_VERSION), 0x00, 0x00, 0x01,
+	T0_INT1_u233(BR_ERR_WRONG_KEY_USAGE), 0x00, 0x00, 0x01,
+	T0_INT2_u233(offsetof(br_ssl_engine_context, action)), 0x00, 0x00, 0x01,
+	T0_INT2_u233(offsetof(br_ssl_engine_context, alert)), 0x00, 0x00, 0x01,
+	T0_INT2_u233(offsetof(br_ssl_engine_context, application_data)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_client_context, auth_type)), 0x00, 0x00,
 	0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, cipher_suite)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, cipher_suite)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, client_random)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, close_received)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, ecdhe_curve)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, client_random)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, close_received)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, ecdhe_curve)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, ecdhe_point)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, ecdhe_point_len)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, flags)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_client_context, hash_id)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_client_context, hashes)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, log_max_frag_len)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, ecdhe_point)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, ecdhe_point_len)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, flags)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_client_context, hash_id)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_client_context, hashes)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, log_max_frag_len)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_client_context, min_clienthello_len)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, pad)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, protocol_names_num)),
+	T0_INT2_u233(offsetof(br_ssl_client_context, min_clienthello_len)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, pad)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, protocol_names_num)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, record_type_in)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, record_type_out)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, reneg)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, saved_finished)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, record_type_in)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, record_type_out)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, reneg)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, saved_finished)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, selected_protocol)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, server_name)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, selected_protocol)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, server_name)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, server_random)), 0x00, 0x00,
+	T0_INT2_u233(offsetof(br_ssl_engine_context, server_random)), 0x00, 0x00,
 	0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, session_id)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, session_id)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, session_id_len)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, session_id_len)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, shutdown_recv)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, suites_buf)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, suites_num)), 0x00, 0x00,
+	T0_INT2_u233(offsetof(br_ssl_engine_context, shutdown_recv)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, suites_buf)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, suites_num)), 0x00, 0x00,
 	0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, version)),
-	0x00, 0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, version_in)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, session) + offsetof(br_ssl_session_parameters, version)),
+	0x00, 0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, version_in)),
 	0x00, 0x00, 0x01,
-	T0_INT2_u234(offsetof(br_ssl_engine_context, version_max)), 0x00, 0x00,
-	0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, version_min)), 0x00,
-	0x00, 0x01, T0_INT2_u234(offsetof(br_ssl_engine_context, version_out)),
+	T0_INT2_u233(offsetof(br_ssl_engine_context, version_max)), 0x00, 0x00,
+	0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, version_min)), 0x00,
+	0x00, 0x01, T0_INT2_u233(offsetof(br_ssl_engine_context, version_out)),
 	0x00, 0x00, 0x09, 0x26, 0x58, 0x06, 0x02, 0x68, 0x28, 0x00, 0x00, 0x06,
 	0x08, 0x2C, 0x0E, 0x05, 0x02, 0x71, 0x28, 0x04, 0x01, 0x3C, 0x00, 0x00,
 	0x01, 0x01, 0x00, 0x01, 0x03, 0x00, 0x99, 0x26, 0x5E, 0x44, 0x9D, 0x26,
@@ -56675,7 +56505,7 @@ static const unsigned char t0_codeblock_u234[] = {
 	0x1A, 0x17, 0x06, 0x02, 0x6F, 0x28, 0xCF, 0x04, 0x76, 0x01, 0x01, 0x00,
 	0x77, 0x3E, 0x01, 0x16, 0x87, 0x3E, 0x01, 0x00, 0x8A, 0x3C, 0x34, 0xD5,
 	0x29, 0xB4, 0x06, 0x09, 0x01, 0x7F, 0xAF, 0x01, 0x7F, 0xD2, 0x04, 0x80,
-	0x53, 0xB1, 0x79, 0x2C, 0xA1, 0x01, T0_INT1_u234(BR_KEYTYPE_SIGN), 0x17,
+	0x53, 0xB1, 0x79, 0x2C, 0xA1, 0x01, T0_INT1_u233(BR_KEYTYPE_SIGN), 0x17,
 	0x06, 0x01, 0xB5, 0xB8, 0x26, 0x01, 0x0D, 0x0E, 0x06, 0x07, 0x25, 0xB7,
 	0xB8, 0x01, 0x7F, 0x04, 0x02, 0x01, 0x00, 0x03, 0x00, 0x01, 0x0E, 0x0E,
 	0x05, 0x02, 0x72, 0x28, 0x06, 0x02, 0x67, 0x28, 0x33, 0x06, 0x02, 0x72,
@@ -56685,15 +56515,15 @@ static const unsigned char t0_codeblock_u234[] = {
 	0xD2, 0x01, 0x7F, 0xAF, 0x01, 0x01, 0x77, 0x3E, 0x01, 0x17, 0x87, 0x3E,
 	0x00, 0x00, 0x38, 0x38, 0x00, 0x00, 0x9A, 0x01, 0x0C, 0x11, 0x01, 0x00,
 	0x38, 0x0E, 0x06, 0x05, 0x25, 0x01,
-	T0_INT1_u234(BR_KEYTYPE_RSA | BR_KEYTYPE_KEYX), 0x04, 0x30, 0x01, 0x01,
+	T0_INT1_u233(BR_KEYTYPE_RSA | BR_KEYTYPE_KEYX), 0x04, 0x30, 0x01, 0x01,
 	0x38, 0x0E, 0x06, 0x05, 0x25, 0x01,
-	T0_INT1_u234(BR_KEYTYPE_RSA | BR_KEYTYPE_SIGN), 0x04, 0x25, 0x01, 0x02,
+	T0_INT1_u233(BR_KEYTYPE_RSA | BR_KEYTYPE_SIGN), 0x04, 0x25, 0x01, 0x02,
 	0x38, 0x0E, 0x06, 0x05, 0x25, 0x01,
-	T0_INT1_u234(BR_KEYTYPE_EC  | BR_KEYTYPE_SIGN), 0x04, 0x1A, 0x01, 0x03,
+	T0_INT1_u233(BR_KEYTYPE_EC  | BR_KEYTYPE_SIGN), 0x04, 0x1A, 0x01, 0x03,
 	0x38, 0x0E, 0x06, 0x05, 0x25, 0x01,
-	T0_INT1_u234(BR_KEYTYPE_EC  | BR_KEYTYPE_KEYX), 0x04, 0x0F, 0x01, 0x04,
+	T0_INT1_u233(BR_KEYTYPE_EC  | BR_KEYTYPE_KEYX), 0x04, 0x0F, 0x01, 0x04,
 	0x38, 0x0E, 0x06, 0x05, 0x25, 0x01,
-	T0_INT1_u234(BR_KEYTYPE_EC  | BR_KEYTYPE_KEYX), 0x04, 0x04, 0x01, 0x00,
+	T0_INT1_u233(BR_KEYTYPE_EC  | BR_KEYTYPE_KEYX), 0x04, 0x04, 0x01, 0x00,
 	0x44, 0x25, 0x00, 0x00, 0x82, 0x2E, 0x01, 0x0E, 0x0E, 0x06, 0x04, 0x01,
 	0x00, 0x04, 0x02, 0x01, 0x05, 0x00, 0x00, 0x40, 0x06, 0x04, 0x01, 0x06,
 	0x04, 0x02, 0x01, 0x00, 0x00, 0x00, 0x88, 0x2E, 0x26, 0x06, 0x08, 0x01,
@@ -56916,7 +56746,7 @@ static const unsigned char t0_codeblock_u234[] = {
 	0x76
 };
 
-static const uint16_t t0_caddr_u234[] = {
+static const uint16_t t0_caddr_u233[] = {
 	0,
 	5,
 	10,
@@ -57054,30 +56884,30 @@ static const uint16_t t0_caddr_u234[] = {
 	3226
 };
 
-#define T0_INTERPRETED_u234   88
+#define T0_INTERPRETED_u233   88
 
-#define T0_ENTER_u234(ip, rp, slot)   do { \
+#define T0_ENTER_u233(ip, rp, slot)   do { \
 		const unsigned char *t0_newip; \
 		uint32_t t0_lnum; \
-		t0_newip = &t0_codeblock_u234[t0_caddr_u234[(slot) - T0_INTERPRETED_u234]]; \
-		t0_lnum = t0_parse7E_unsigned_u234(&t0_newip); \
+		t0_newip = &t0_codeblock_u233[t0_caddr_u233[(slot) - T0_INTERPRETED_u233]]; \
+		t0_lnum = t0_parse7E_unsigned_u233(&t0_newip); \
 		(rp) += t0_lnum; \
-		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u234[0]) + (t0_lnum << 16); \
+		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u233[0]) + (t0_lnum << 16); \
 		(ip) = t0_newip; \
 	} while (0)
 
-#define T0_DEFENTRY_u234(name, slot) \
+#define T0_DEFENTRY_u233(name, slot) \
 void \
 name(void *ctx) \
 { \
-	t0_context_u234 *t0ctx = ctx; \
-	t0ctx->ip = &t0_codeblock_u234[0]; \
-	T0_ENTER_u234(t0ctx->ip, t0ctx->rp, slot); \
+	t0_context_u233 *t0ctx = ctx; \
+	t0ctx->ip = &t0_codeblock_u233[0]; \
+	T0_ENTER_u233(t0ctx->ip, t0ctx->rp, slot); \
 }
 
-T0_DEFENTRY_u234(br_ssl_hs_client_init_main, 169)
+T0_DEFENTRY_u233(br_ssl_hs_client_init_main, 169)
 
-#define T0_NEXT_u234(t0ipp)   (*(*(t0ipp)) ++)
+#define T0_NEXT_u233(t0ipp)   (*(*(t0ipp)) ++)
 
 void
 br_ssl_hs_client_run(void *t0ctx)
@@ -57085,193 +56915,193 @@ br_ssl_hs_client_run(void *t0ctx)
 	uint32_t *dp, *rp;
 	const unsigned char *ip;
 
-#define T0_LOCAL_u234(x)    (*(rp - 2 - (x)))
-#define T0_POP_u234()       (*-- dp)
-#define T0_POPi_u234()      (*(int32_t *)(-- dp))
-#define T0_PEEK_u234(x)     (*(dp - 1 - (x)))
-#define T0_PEEKi_u234(x)    (*(int32_t *)(dp - 1 - (x)))
-#define T0_PUSH_u234(v)     do { *dp = (v); dp ++; } while (0)
-#define T0_PUSHi_u234(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
-#define T0_RPOP_u234()      (*-- rp)
-#define T0_RPOPi_u234()     (*(int32_t *)(-- rp))
-#define T0_RPUSH_u234(v)    do { *rp = (v); rp ++; } while (0)
-#define T0_RPUSHi_u234(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
-#define T0_ROLL_u234(x)     do { \
+#define T0_LOCAL_u233(x)    (*(rp - 2 - (x)))
+#define T0_POP_u233()       (*-- dp)
+#define T0_POPi_u233()      (*(int32_t *)(-- dp))
+#define T0_PEEK_u233(x)     (*(dp - 1 - (x)))
+#define T0_PEEKi_u233(x)    (*(int32_t *)(dp - 1 - (x)))
+#define T0_PUSH_u233(v)     do { *dp = (v); dp ++; } while (0)
+#define T0_PUSHi_u233(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
+#define T0_RPOP_u233()      (*-- rp)
+#define T0_RPOPi_u233()     (*(int32_t *)(-- rp))
+#define T0_RPUSH_u233(v)    do { *rp = (v); rp ++; } while (0)
+#define T0_RPUSHi_u233(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
+#define T0_ROLL_u233(x)     do { \
 	size_t t0len = (size_t)(x); \
 	uint32_t t0tmp = *(dp - 1 - t0len); \
 	memmove(dp - t0len - 1, dp - t0len, t0len * sizeof *dp); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_SWAP_u234()      do { \
+#define T0_SWAP_u233()      do { \
 	uint32_t t0tmp = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_ROT_u234()       do { \
+#define T0_ROT_u233()       do { \
 	uint32_t t0tmp = *(dp - 3); \
 	*(dp - 3) = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_NROT_u234()       do { \
+#define T0_NROT_u233()       do { \
 	uint32_t t0tmp = *(dp - 1); \
 	*(dp - 1) = *(dp - 2); \
 	*(dp - 2) = *(dp - 3); \
 	*(dp - 3) = t0tmp; \
 } while (0)
-#define T0_PICK_u234(x)      do { \
+#define T0_PICK_u233(x)      do { \
 	uint32_t t0depth = (x); \
-	T0_PUSH_u234(T0_PEEK_u234(t0depth)); \
+	T0_PUSH_u233(T0_PEEK_u233(t0depth)); \
 } while (0)
-#define T0_CO_u234()         do { \
+#define T0_CO_u233()         do { \
 	goto t0_exit; \
 } while (0)
-#define T0_RET_u234()        goto t0_next
+#define T0_RET_u233()        goto t0_next
 
-	dp = ((t0_context_u234 *)t0ctx)->dp;
-	rp = ((t0_context_u234 *)t0ctx)->rp;
-	ip = ((t0_context_u234 *)t0ctx)->ip;
+	dp = ((t0_context_u233 *)t0ctx)->dp;
+	rp = ((t0_context_u233 *)t0ctx)->rp;
+	ip = ((t0_context_u233 *)t0ctx)->ip;
 	goto t0_next;
 	for (;;) {
 		uint32_t t0x;
 
 	t0_next:
-		t0x = T0_NEXT_u234(&ip);
-		if (t0x < T0_INTERPRETED_u234) {
+		t0x = T0_NEXT_u233(&ip);
+		if (t0x < T0_INTERPRETED_u233) {
 			switch (t0x) {
 				int32_t t0off;
 
 			case 0: /* ret */
-				t0x = T0_RPOP_u234();
+				t0x = T0_RPOP_u233();
 				rp -= (t0x >> 16);
 				t0x &= 0xFFFF;
 				if (t0x == 0) {
 					ip = NULL;
 					goto t0_exit;
 				}
-				ip = &t0_codeblock_u234[t0x];
+				ip = &t0_codeblock_u233[t0x];
 				break;
 			case 1: /* literal constant */
-				T0_PUSHi_u234(t0_parse7E_signed_u234(&ip));
+				T0_PUSHi_u233(t0_parse7E_signed_u233(&ip));
 				break;
 			case 2: /* read local */
-				T0_PUSH_u234(T0_LOCAL_u234(t0_parse7E_unsigned_u234(&ip)));
+				T0_PUSH_u233(T0_LOCAL_u233(t0_parse7E_unsigned_u233(&ip)));
 				break;
 			case 3: /* write local */
-				T0_LOCAL_u234(t0_parse7E_unsigned_u234(&ip)) = T0_POP_u234();
+				T0_LOCAL_u233(t0_parse7E_unsigned_u233(&ip)) = T0_POP_u233();
 				break;
 			case 4: /* jump */
-				t0off = t0_parse7E_signed_u234(&ip);
+				t0off = t0_parse7E_signed_u233(&ip);
 				ip += t0off;
 				break;
 			case 5: /* jump if */
-				t0off = t0_parse7E_signed_u234(&ip);
-				if (T0_POP_u234()) {
+				t0off = t0_parse7E_signed_u233(&ip);
+				if (T0_POP_u233()) {
 					ip += t0off;
 				}
 				break;
 			case 6: /* jump if not */
-				t0off = t0_parse7E_signed_u234(&ip);
-				if (!T0_POP_u234()) {
+				t0off = t0_parse7E_signed_u233(&ip);
+				if (!T0_POP_u233()) {
 					ip += t0off;
 				}
 				break;
 			case 7: {
 				/* * */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(a * b);
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(a * b);
 
 				}
 				break;
 			case 8: {
 				/* + */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(a + b);
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(a + b);
 
 				}
 				break;
 			case 9: {
 				/* - */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(a - b);
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(a - b);
 
 				}
 				break;
 			case 10: {
 				/* < */
 
-	int32_t b = T0_POPi_u234();
-	int32_t a = T0_POPi_u234();
-	T0_PUSH_u234(-(uint32_t)(a < b));
+	int32_t b = T0_POPi_u233();
+	int32_t a = T0_POPi_u233();
+	T0_PUSH_u233(-(uint32_t)(a < b));
 
 				}
 				break;
 			case 11: {
 				/* << */
 
-	int c = (int)T0_POPi_u234();
-	uint32_t x = T0_POP_u234();
-	T0_PUSH_u234(x << c);
+	int c = (int)T0_POPi_u233();
+	uint32_t x = T0_POP_u233();
+	T0_PUSH_u233(x << c);
 
 				}
 				break;
 			case 12: {
 				/* <= */
 
-	int32_t b = T0_POPi_u234();
-	int32_t a = T0_POPi_u234();
-	T0_PUSH_u234(-(uint32_t)(a <= b));
+	int32_t b = T0_POPi_u233();
+	int32_t a = T0_POPi_u233();
+	T0_PUSH_u233(-(uint32_t)(a <= b));
 
 				}
 				break;
 			case 13: {
 				/* <> */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(-(uint32_t)(a != b));
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(-(uint32_t)(a != b));
 
 				}
 				break;
 			case 14: {
 				/* = */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(-(uint32_t)(a == b));
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(-(uint32_t)(a == b));
 
 				}
 				break;
 			case 15: {
 				/* > */
 
-	int32_t b = T0_POPi_u234();
-	int32_t a = T0_POPi_u234();
-	T0_PUSH_u234(-(uint32_t)(a > b));
+	int32_t b = T0_POPi_u233();
+	int32_t a = T0_POPi_u233();
+	T0_PUSH_u233(-(uint32_t)(a > b));
 
 				}
 				break;
 			case 16: {
 				/* >= */
 
-	int32_t b = T0_POPi_u234();
-	int32_t a = T0_POPi_u234();
-	T0_PUSH_u234(-(uint32_t)(a >= b));
+	int32_t b = T0_POPi_u233();
+	int32_t a = T0_POPi_u233();
+	T0_PUSH_u233(-(uint32_t)(a >= b));
 
 				}
 				break;
 			case 17: {
 				/* >> */
 
-	int c = (int)T0_POPi_u234();
-	int32_t x = T0_POPi_u234();
-	T0_PUSHi_u234(x >> c);
+	int c = (int)T0_POPi_u233();
+	int32_t x = T0_POPi_u233();
+	T0_PUSHi_u233(x >> c);
 
 				}
 				break;
@@ -57280,10 +57110,10 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	size_t len;
 
-	len = T0_POP_u234();
-	if (CTX_u234->client_auth_vtable != NULL) {
-		(*CTX_u234->client_auth_vtable)->append_name(
-			CTX_u234->client_auth_vtable, ENG_u234->pad, len);
+	len = T0_POP_u233();
+	if (CTX_u233->client_auth_vtable != NULL) {
+		(*CTX_u233->client_auth_vtable)->append_name(
+			CTX_u233->client_auth_vtable, ENG_u233->pad, len);
 	}
 
 				}
@@ -57291,9 +57121,9 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 19: {
 				/* anchor-dn-end-name */
 
-	if (CTX_u234->client_auth_vtable != NULL) {
-		(*CTX_u234->client_auth_vtable)->end_name(
-			CTX_u234->client_auth_vtable);
+	if (CTX_u233->client_auth_vtable != NULL) {
+		(*CTX_u233->client_auth_vtable)->end_name(
+			CTX_u233->client_auth_vtable);
 	}
 
 				}
@@ -57301,9 +57131,9 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 20: {
 				/* anchor-dn-end-name-list */
 
-	if (CTX_u234->client_auth_vtable != NULL) {
-		(*CTX_u234->client_auth_vtable)->end_name_list(
-			CTX_u234->client_auth_vtable);
+	if (CTX_u233->client_auth_vtable != NULL) {
+		(*CTX_u233->client_auth_vtable)->end_name_list(
+			CTX_u233->client_auth_vtable);
 	}
 
 				}
@@ -57313,10 +57143,10 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	size_t len;
 
-	len = T0_POP_u234();
-	if (CTX_u234->client_auth_vtable != NULL) {
-		(*CTX_u234->client_auth_vtable)->start_name(
-			CTX_u234->client_auth_vtable, len);
+	len = T0_POP_u233();
+	if (CTX_u233->client_auth_vtable != NULL) {
+		(*CTX_u233->client_auth_vtable)->start_name(
+			CTX_u233->client_auth_vtable, len);
 	}
 
 				}
@@ -57324,9 +57154,9 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 22: {
 				/* anchor-dn-start-name-list */
 
-	if (CTX_u234->client_auth_vtable != NULL) {
-		(*CTX_u234->client_auth_vtable)->start_name_list(
-			CTX_u234->client_auth_vtable);
+	if (CTX_u233->client_auth_vtable != NULL) {
+		(*CTX_u233->client_auth_vtable)->start_name_list(
+			CTX_u233->client_auth_vtable);
 	}
 
 				}
@@ -57334,23 +57164,23 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 23: {
 				/* and */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(a & b);
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(a & b);
 
 				}
 				break;
 			case 24: {
 				/* begin-cert */
 
-	if (ENG_u234->chain_len == 0) {
-		T0_PUSHi_u234(-1);
+	if (ENG_u233->chain_len == 0) {
+		T0_PUSHi_u233(-1);
 	} else {
-		ENG_u234->cert_cur = ENG_u234->chain->data;
-		ENG_u234->cert_len = ENG_u234->chain->data_len;
-		ENG_u234->chain ++;
-		ENG_u234->chain_len --;
-		T0_PUSH_u234(ENG_u234->cert_len);
+		ENG_u233->cert_cur = ENG_u233->chain->data;
+		ENG_u233->cert_len = ENG_u233->chain->data_len;
+		ENG_u233->chain ++;
+		ENG_u233->chain_len --;
+		T0_PUSH_u233(ENG_u233->cert_len);
 	}
 
 				}
@@ -57358,8 +57188,8 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 25: {
 				/* bzero */
 
-	size_t len = (size_t)T0_POP_u234();
-	void *addr = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
+	size_t len = (size_t)T0_POP_u233();
+	void *addr = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
 	memset(addr, 0, len);
 
 				}
@@ -57367,34 +57197,34 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 26: {
 				/* can-output? */
 
-	T0_PUSHi_u234(-(ENG_u234->hlen_out > 0));
+	T0_PUSHi_u233(-(ENG_u233->hlen_out > 0));
 
 				}
 				break;
 			case 27: {
 				/* co */
- T0_CO_u234(); 
+ T0_CO_u233(); 
 				}
 				break;
 			case 28: {
 				/* compute-Finished-inner */
 
-	int prf_id = T0_POP_u234();
-	int from_client = T0_POPi_u234();
+	int prf_id = T0_POP_u233();
+	int from_client = T0_POPi_u233();
 	unsigned char tmp[48];
 	br_tls_prf_seed_chunk seed;
 
-	br_tls_prf_impl prf = br_ssl_engine_get_PRF(ENG_u234, prf_id);
+	br_tls_prf_impl prf = br_ssl_engine_get_PRF(ENG_u233, prf_id);
 	seed.data = tmp;
-	if (ENG_u234->session.version >= BR_TLS12) {
-		seed.len = br_multihash_out(&ENG_u234->mhash, prf_id, tmp);
+	if (ENG_u233->session.version >= BR_TLS12) {
+		seed.len = br_multihash_out(&ENG_u233->mhash, prf_id, tmp);
 	} else {
-		br_multihash_out(&ENG_u234->mhash, br_md5_ID, tmp);
-		br_multihash_out(&ENG_u234->mhash, br_sha1_ID, tmp + 16);
+		br_multihash_out(&ENG_u233->mhash, br_md5_ID, tmp);
+		br_multihash_out(&ENG_u233->mhash, br_sha1_ID, tmp + 16);
 		seed.len = 36;
 	}
-	prf(ENG_u234->pad, 12, ENG_u234->session.master_secret,
-		sizeof ENG_u234->session.master_secret,
+	prf(ENG_u233->pad, 12, ENG_u233->session.master_secret,
+		sizeof ENG_u233->session.master_secret,
 		from_client ? "client finished" : "server finished",
 		1, &seed);
 
@@ -57405,39 +57235,39 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	size_t clen;
 
-	clen = ENG_u234->cert_len;
-	if (clen > sizeof ENG_u234->pad) {
-		clen = sizeof ENG_u234->pad;
+	clen = ENG_u233->cert_len;
+	if (clen > sizeof ENG_u233->pad) {
+		clen = sizeof ENG_u233->pad;
 	}
-	memcpy(ENG_u234->pad, ENG_u234->cert_cur, clen);
-	ENG_u234->cert_cur += clen;
-	ENG_u234->cert_len -= clen;
-	T0_PUSH_u234(clen);
+	memcpy(ENG_u233->pad, ENG_u233->cert_cur, clen);
+	ENG_u233->cert_cur += clen;
+	ENG_u233->cert_len -= clen;
+	T0_PUSH_u233(clen);
 
 				}
 				break;
 			case 30: {
 				/* copy-protocol-name */
 
-	size_t idx = T0_POP_u234();
-	size_t len = strlen(ENG_u234->protocol_names[idx]);
-	memcpy(ENG_u234->pad, ENG_u234->protocol_names[idx], len);
-	T0_PUSH_u234(len);
+	size_t idx = T0_POP_u233();
+	size_t len = strlen(ENG_u233->protocol_names[idx]);
+	memcpy(ENG_u233->pad, ENG_u233->protocol_names[idx], len);
+	T0_PUSH_u233(len);
 
 				}
 				break;
 			case 31: {
 				/* data-get8 */
 
-	size_t addr = T0_POP_u234();
-	T0_PUSH_u234(t0_datablock_u234[addr]);
+	size_t addr = T0_POP_u233();
+	T0_PUSH_u233(t0_datablock_u233[addr]);
 
 				}
 				break;
 			case 32: {
 				/* discard-input */
 
-	ENG_u234->hlen_in = 0;
+	ENG_u233->hlen_in = 0;
 
 				}
 				break;
@@ -57446,28 +57276,28 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	size_t sig_len;
 
-	sig_len = make_client_sign_u234(CTX_u234);
+	sig_len = make_client_sign_u233(CTX_u233);
 	if (sig_len == 0) {
-		br_ssl_engine_fail(ENG_u234, BR_ERR_INVALID_ALGORITHM);
-		T0_CO_u234();
+		br_ssl_engine_fail(ENG_u233, BR_ERR_INVALID_ALGORITHM);
+		T0_CO_u233();
 	}
-	T0_PUSH_u234(sig_len);
+	T0_PUSH_u233(sig_len);
 
 				}
 				break;
 			case 34: {
 				/* do-ecdh */
 
-	unsigned prf_id = T0_POP_u234();
-	unsigned ecdhe = T0_POP_u234();
+	unsigned prf_id = T0_POP_u233();
+	unsigned ecdhe = T0_POP_u233();
 	int x;
 
-	x = make_pms_ecdh_u234(CTX_u234, ecdhe, prf_id);
+	x = make_pms_ecdh_u233(CTX_u233, ecdhe, prf_id);
 	if (x < 0) {
-		br_ssl_engine_fail(ENG_u234, -x);
-		T0_CO_u234();
+		br_ssl_engine_fail(ENG_u233, -x);
+		T0_CO_u233();
 	} else {
-		T0_PUSH_u234(x);
+		T0_PUSH_u233(x);
 	}
 
 				}
@@ -57477,12 +57307,12 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	int x;
 
-	x = make_pms_rsa_u234(CTX_u234, T0_POP_u234());
+	x = make_pms_rsa_u233(CTX_u233, T0_POP_u233());
 	if (x < 0) {
-		br_ssl_engine_fail(ENG_u234, -x);
-		T0_CO_u234();
+		br_ssl_engine_fail(ENG_u233, -x);
+		T0_CO_u233();
 	} else {
-		T0_PUSH_u234(x);
+		T0_PUSH_u233(x);
 	}
 
 				}
@@ -57490,23 +57320,23 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 36: {
 				/* do-static-ecdh */
 
-	unsigned prf_id = T0_POP_u234();
+	unsigned prf_id = T0_POP_u233();
 
-	if (make_pms_static_ecdh_u234(CTX_u234, prf_id) < 0) {
-		br_ssl_engine_fail(ENG_u234, BR_ERR_INVALID_ALGORITHM);
-		T0_CO_u234();
+	if (make_pms_static_ecdh_u233(CTX_u233, prf_id) < 0) {
+		br_ssl_engine_fail(ENG_u233, BR_ERR_INVALID_ALGORITHM);
+		T0_CO_u233();
 	}
 
 				}
 				break;
 			case 37: {
 				/* drop */
- (void)T0_POP_u234(); 
+ (void)T0_POP_u233(); 
 				}
 				break;
 			case 38: {
 				/* dup */
- T0_PUSH_u234(T0_PEEK_u234(0)); 
+ T0_PUSH_u233(T0_PEEK_u233(0)); 
 				}
 				break;
 			case 39: {
@@ -57514,30 +57344,30 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	size_t u, len;
 
-	if (ENG_u234->protocol_names_num == 0) {
-		T0_PUSH_u234(0);
-		T0_RET_u234();
+	if (ENG_u233->protocol_names_num == 0) {
+		T0_PUSH_u233(0);
+		T0_RET_u233();
 	}
 	len = 6;
-	for (u = 0; u < ENG_u234->protocol_names_num; u ++) {
-		len += 1 + strlen(ENG_u234->protocol_names[u]);
+	for (u = 0; u < ENG_u233->protocol_names_num; u ++) {
+		len += 1 + strlen(ENG_u233->protocol_names[u]);
 	}
-	T0_PUSH_u234(len);
+	T0_PUSH_u233(len);
 
 				}
 				break;
 			case 40: {
 				/* fail */
 
-	br_ssl_engine_fail(ENG_u234, (int)T0_POPi_u234());
-	T0_CO_u234();
+	br_ssl_engine_fail(ENG_u233, (int)T0_POPi_u233());
+	T0_CO_u233();
 
 				}
 				break;
 			case 41: {
 				/* flush-record */
 
-	br_ssl_engine_flush_record(ENG_u234);
+	br_ssl_engine_flush_record(ENG_u233);
 
 				}
 				break;
@@ -57546,19 +57376,19 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	uint32_t auth_types;
 
-	auth_types = T0_POP_u234();
-	if (CTX_u234->client_auth_vtable != NULL) {
+	auth_types = T0_POP_u233();
+	if (CTX_u233->client_auth_vtable != NULL) {
 		br_ssl_client_certificate ux;
 
-		(*CTX_u234->client_auth_vtable)->choose(CTX_u234->client_auth_vtable,
-			CTX_u234, auth_types, &ux);
-		CTX_u234->auth_type = (unsigned char)ux.auth_type;
-		CTX_u234->hash_id = (unsigned char)ux.hash_id;
-		ENG_u234->chain = ux.chain;
-		ENG_u234->chain_len = ux.chain_len;
+		(*CTX_u233->client_auth_vtable)->choose(CTX_u233->client_auth_vtable,
+			CTX_u233, auth_types, &ux);
+		CTX_u233->auth_type = (unsigned char)ux.auth_type;
+		CTX_u233->hash_id = (unsigned char)ux.hash_id;
+		ENG_u233->chain = ux.chain;
+		ENG_u233->chain_len = ux.chain_len;
 	} else {
-		CTX_u234->hash_id = 0;
-		ENG_u234->chain_len = 0;
+		CTX_u233->hash_id = 0;
+		ENG_u233->chain_len = 0;
 	}
 
 				}
@@ -57570,12 +57400,12 @@ br_ssl_hs_client_run(void *t0ctx)
 	const br_x509_pkey *pk;
 	unsigned usages;
 
-	xc = *(ENG_u234->x509ctx);
-	pk = xc->get_pkey(ENG_u234->x509ctx, &usages);
+	xc = *(ENG_u233->x509ctx);
+	pk = xc->get_pkey(ENG_u233->x509ctx, &usages);
 	if (pk == NULL) {
-		T0_PUSH_u234(0);
+		T0_PUSH_u233(0);
 	} else {
-		T0_PUSH_u234(pk->key_type | usages);
+		T0_PUSH_u233(pk->key_type | usages);
 	}
 
 				}
@@ -57583,51 +57413,51 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 44: {
 				/* get16 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	T0_PUSH_u234(*(uint16_t *)(void *)((unsigned char *)ENG_u234 + addr));
+	size_t addr = (size_t)T0_POP_u233();
+	T0_PUSH_u233(*(uint16_t *)(void *)((unsigned char *)ENG_u233 + addr));
 
 				}
 				break;
 			case 45: {
 				/* get32 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	T0_PUSH_u234(*(uint32_t *)(void *)((unsigned char *)ENG_u234 + addr));
+	size_t addr = (size_t)T0_POP_u233();
+	T0_PUSH_u233(*(uint32_t *)(void *)((unsigned char *)ENG_u233 + addr));
 
 				}
 				break;
 			case 46: {
 				/* get8 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	T0_PUSH_u234(*((unsigned char *)ENG_u234 + addr));
+	size_t addr = (size_t)T0_POP_u233();
+	T0_PUSH_u233(*((unsigned char *)ENG_u233 + addr));
 
 				}
 				break;
 			case 47: {
 				/* has-input? */
 
-	T0_PUSHi_u234(-(ENG_u234->hlen_in != 0));
+	T0_PUSHi_u233(-(ENG_u233->hlen_in != 0));
 
 				}
 				break;
 			case 48: {
 				/* memcmp */
 
-	size_t len = (size_t)T0_POP_u234();
-	void *addr2 = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
-	void *addr1 = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
+	size_t len = (size_t)T0_POP_u233();
+	void *addr2 = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
+	void *addr1 = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
 	int x = memcmp(addr1, addr2, len);
-	T0_PUSH_u234((uint32_t)-(x == 0));
+	T0_PUSH_u233((uint32_t)-(x == 0));
 
 				}
 				break;
 			case 49: {
 				/* memcpy */
 
-	size_t len = (size_t)T0_POP_u234();
-	void *src = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
-	void *dst = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
+	size_t len = (size_t)T0_POP_u233();
+	void *src = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
+	void *dst = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
 	memcpy(dst, src, len);
 
 				}
@@ -57635,76 +57465,76 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 50: {
 				/* mkrand */
 
-	size_t len = (size_t)T0_POP_u234();
-	void *addr = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
-	br_hmac_drbg_generate(&ENG_u234->rng, addr, len);
+	size_t len = (size_t)T0_POP_u233();
+	void *addr = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
+	br_hmac_drbg_generate(&ENG_u233->rng, addr, len);
 
 				}
 				break;
 			case 51: {
 				/* more-incoming-bytes? */
 
-	T0_PUSHi_u234(ENG_u234->hlen_in != 0 || !br_ssl_engine_recvrec_finished(ENG_u234));
+	T0_PUSHi_u233(ENG_u233->hlen_in != 0 || !br_ssl_engine_recvrec_finished(ENG_u233));
 
 				}
 				break;
 			case 52: {
 				/* multihash-init */
 
-	br_multihash_init(&ENG_u234->mhash);
+	br_multihash_init(&ENG_u233->mhash);
 
 				}
 				break;
 			case 53: {
 				/* neg */
 
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(-a);
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(-a);
 
 				}
 				break;
 			case 54: {
 				/* not */
 
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(~a);
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(~a);
 
 				}
 				break;
 			case 55: {
 				/* or */
 
-	uint32_t b = T0_POP_u234();
-	uint32_t a = T0_POP_u234();
-	T0_PUSH_u234(a | b);
+	uint32_t b = T0_POP_u233();
+	uint32_t a = T0_POP_u233();
+	T0_PUSH_u233(a | b);
 
 				}
 				break;
 			case 56: {
 				/* over */
- T0_PUSH_u234(T0_PEEK_u234(1)); 
+ T0_PUSH_u233(T0_PEEK_u233(1)); 
 				}
 				break;
 			case 57: {
 				/* read-chunk-native */
 
-	size_t clen = ENG_u234->hlen_in;
+	size_t clen = ENG_u233->hlen_in;
 	if (clen > 0) {
 		uint32_t addr, len;
 
-		len = T0_POP_u234();
-		addr = T0_POP_u234();
+		len = T0_POP_u233();
+		addr = T0_POP_u233();
 		if ((size_t)len < clen) {
 			clen = (size_t)len;
 		}
-		memcpy((unsigned char *)ENG_u234 + addr, ENG_u234->hbuf_in, clen);
-		if (ENG_u234->record_type_in == BR_SSL_HANDSHAKE) {
-			br_multihash_update(&ENG_u234->mhash, ENG_u234->hbuf_in, clen);
+		memcpy((unsigned char *)ENG_u233 + addr, ENG_u233->hbuf_in, clen);
+		if (ENG_u233->record_type_in == BR_SSL_HANDSHAKE) {
+			br_multihash_update(&ENG_u233->mhash, ENG_u233->hbuf_in, clen);
 		}
-		T0_PUSH_u234(addr + (uint32_t)clen);
-		T0_PUSH_u234(len - (uint32_t)clen);
-		ENG_u234->hbuf_in += clen;
-		ENG_u234->hlen_in -= clen;
+		T0_PUSH_u233(addr + (uint32_t)clen);
+		T0_PUSH_u233(len - (uint32_t)clen);
+		ENG_u233->hbuf_in += clen;
+		ENG_u233->hlen_in -= clen;
 	}
 
 				}
@@ -57712,17 +57542,17 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 58: {
 				/* read8-native */
 
-	if (ENG_u234->hlen_in > 0) {
+	if (ENG_u233->hlen_in > 0) {
 		unsigned char x;
 
-		x = *ENG_u234->hbuf_in ++;
-		if (ENG_u234->record_type_in == BR_SSL_HANDSHAKE) {
-			br_multihash_update(&ENG_u234->mhash, &x, 1);
+		x = *ENG_u233->hbuf_in ++;
+		if (ENG_u233->record_type_in == BR_SSL_HANDSHAKE) {
+			br_multihash_update(&ENG_u233->mhash, &x, 1);
 		}
-		T0_PUSH_u234(x);
-		ENG_u234->hlen_in --;
+		T0_PUSH_u233(x);
+		ENG_u233->hlen_in --;
 	} else {
-		T0_PUSHi_u234(-1);
+		T0_PUSHi_u233(-1);
 	}
 
 				}
@@ -57733,9 +57563,9 @@ br_ssl_hs_client_run(void *t0ctx)
 	const br_x509_class *xc;
 	const br_x509_pkey *pk;
 
-	xc = *(ENG_u234->x509ctx);
-	pk = xc->get_pkey(ENG_u234->x509ctx, NULL);
-	CTX_u234->server_curve =
+	xc = *(ENG_u233->x509ctx);
+	pk = xc->get_pkey(ENG_u233->x509ctx, NULL);
+	CTX_u233->server_curve =
 		(pk->key_type == BR_KEYTYPE_EC) ? pk->key.ec.curve : 0;
 
 				}
@@ -57743,40 +57573,40 @@ br_ssl_hs_client_run(void *t0ctx)
 			case 60: {
 				/* set16 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	*(uint16_t *)(void *)((unsigned char *)ENG_u234 + addr) = (uint16_t)T0_POP_u234();
+	size_t addr = (size_t)T0_POP_u233();
+	*(uint16_t *)(void *)((unsigned char *)ENG_u233 + addr) = (uint16_t)T0_POP_u233();
 
 				}
 				break;
 			case 61: {
 				/* set32 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	*(uint32_t *)(void *)((unsigned char *)ENG_u234 + addr) = (uint32_t)T0_POP_u234();
+	size_t addr = (size_t)T0_POP_u233();
+	*(uint32_t *)(void *)((unsigned char *)ENG_u233 + addr) = (uint32_t)T0_POP_u233();
 
 				}
 				break;
 			case 62: {
 				/* set8 */
 
-	size_t addr = (size_t)T0_POP_u234();
-	*((unsigned char *)ENG_u234 + addr) = (unsigned char)T0_POP_u234();
+	size_t addr = (size_t)T0_POP_u233();
+	*((unsigned char *)ENG_u233 + addr) = (unsigned char)T0_POP_u233();
 
 				}
 				break;
 			case 63: {
 				/* strlen */
 
-	void *str = (unsigned char *)ENG_u234 + (size_t)T0_POP_u234();
-	T0_PUSH_u234((uint32_t)strlen(str));
+	void *str = (unsigned char *)ENG_u233 + (size_t)T0_POP_u233();
+	T0_PUSH_u233((uint32_t)strlen(str));
 
 				}
 				break;
 			case 64: {
 				/* supported-curves */
 
-	uint32_t x = ENG_u234->iec == NULL ? 0 : ENG_u234->iec->supported_curves;
-	T0_PUSH_u234(x);
+	uint32_t x = ENG_u233->iec == NULL ? 0 : ENG_u233->iec->supported_curves;
+	T0_PUSH_u233(x);
 
 				}
 				break;
@@ -57789,33 +57619,33 @@ br_ssl_hs_client_run(void *t0ctx)
 	x = 0;
 	num = 0;
 	for (i = br_sha1_ID; i <= br_sha512_ID; i ++) {
-		if (br_multihash_getimpl(&ENG_u234->mhash, i)) {
+		if (br_multihash_getimpl(&ENG_u233->mhash, i)) {
 			x |= 1U << i;
 			num ++;
 		}
 	}
-	T0_PUSH_u234(x);
-	T0_PUSH_u234(num);
+	T0_PUSH_u233(x);
+	T0_PUSH_u233(num);
 
 				}
 				break;
 			case 66: {
 				/* supports-ecdsa? */
 
-	T0_PUSHi_u234(-(ENG_u234->iecdsa != 0));
+	T0_PUSHi_u233(-(ENG_u233->iecdsa != 0));
 
 				}
 				break;
 			case 67: {
 				/* supports-rsa-sign? */
 
-	T0_PUSHi_u234(-(ENG_u234->irsavrfy != 0));
+	T0_PUSHi_u233(-(ENG_u233->irsavrfy != 0));
 
 				}
 				break;
 			case 68: {
 				/* swap */
- T0_SWAP_u234(); 
+ T0_SWAP_u233(); 
 				}
 				break;
 			case 69: {
@@ -57824,12 +57654,12 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id;
 	unsigned cipher_key_len, tag_len;
 
-	tag_len = T0_POP_u234();
-	cipher_key_len = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_ccm_in(ENG_u234, is_client, prf_id,
-		ENG_u234->iaes_ctrcbc, cipher_key_len, tag_len);
+	tag_len = T0_POP_u233();
+	cipher_key_len = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_ccm_in(ENG_u233, is_client, prf_id,
+		ENG_u233->iaes_ctrcbc, cipher_key_len, tag_len);
 
 				}
 				break;
@@ -57839,12 +57669,12 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id;
 	unsigned cipher_key_len, tag_len;
 
-	tag_len = T0_POP_u234();
-	cipher_key_len = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_ccm_out(ENG_u234, is_client, prf_id,
-		ENG_u234->iaes_ctrcbc, cipher_key_len, tag_len);
+	tag_len = T0_POP_u233();
+	cipher_key_len = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_ccm_out(ENG_u233, is_client, prf_id,
+		ENG_u233->iaes_ctrcbc, cipher_key_len, tag_len);
 
 				}
 				break;
@@ -57854,11 +57684,11 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id;
 	unsigned cipher_key_len;
 
-	cipher_key_len = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_gcm_in(ENG_u234, is_client, prf_id,
-		ENG_u234->iaes_ctr, cipher_key_len);
+	cipher_key_len = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_gcm_in(ENG_u233, is_client, prf_id,
+		ENG_u233->iaes_ctr, cipher_key_len);
 
 				}
 				break;
@@ -57868,11 +57698,11 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id;
 	unsigned cipher_key_len;
 
-	cipher_key_len = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_gcm_out(ENG_u234, is_client, prf_id,
-		ENG_u234->iaes_ctr, cipher_key_len);
+	cipher_key_len = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_gcm_out(ENG_u233, is_client, prf_id,
+		ENG_u233->iaes_ctr, cipher_key_len);
 
 				}
 				break;
@@ -57882,13 +57712,13 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id, mac_id, aes;
 	unsigned cipher_key_len;
 
-	cipher_key_len = T0_POP_u234();
-	aes = T0_POP_u234();
-	mac_id = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_cbc_in(ENG_u234, is_client, prf_id, mac_id,
-		aes ? ENG_u234->iaes_cbcdec : ENG_u234->ides_cbcdec, cipher_key_len);
+	cipher_key_len = T0_POP_u233();
+	aes = T0_POP_u233();
+	mac_id = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_cbc_in(ENG_u233, is_client, prf_id, mac_id,
+		aes ? ENG_u233->iaes_cbcdec : ENG_u233->ides_cbcdec, cipher_key_len);
 
 				}
 				break;
@@ -57898,13 +57728,13 @@ br_ssl_hs_client_run(void *t0ctx)
 	int is_client, prf_id, mac_id, aes;
 	unsigned cipher_key_len;
 
-	cipher_key_len = T0_POP_u234();
-	aes = T0_POP_u234();
-	mac_id = T0_POP_u234();
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_cbc_out(ENG_u234, is_client, prf_id, mac_id,
-		aes ? ENG_u234->iaes_cbcenc : ENG_u234->ides_cbcenc, cipher_key_len);
+	cipher_key_len = T0_POP_u233();
+	aes = T0_POP_u233();
+	mac_id = T0_POP_u233();
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_cbc_out(ENG_u233, is_client, prf_id, mac_id,
+		aes ? ENG_u233->iaes_cbcenc : ENG_u233->ides_cbcenc, cipher_key_len);
 
 				}
 				break;
@@ -57913,9 +57743,9 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	int is_client, prf_id;
 
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_chapol_in(ENG_u234, is_client, prf_id);
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_chapol_in(ENG_u233, is_client, prf_id);
 
 				}
 				break;
@@ -57924,28 +57754,28 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	int is_client, prf_id;
 
-	prf_id = T0_POP_u234();
-	is_client = T0_POP_u234();
-	br_ssl_engine_switch_chapol_out(ENG_u234, is_client, prf_id);
+	prf_id = T0_POP_u233();
+	is_client = T0_POP_u233();
+	br_ssl_engine_switch_chapol_out(ENG_u233, is_client, prf_id);
 
 				}
 				break;
 			case 77: {
 				/* test-protocol-name */
 
-	size_t len = T0_POP_u234();
+	size_t len = T0_POP_u233();
 	size_t u;
 
-	for (u = 0; u < ENG_u234->protocol_names_num; u ++) {
+	for (u = 0; u < ENG_u233->protocol_names_num; u ++) {
 		const char *name;
 
-		name = ENG_u234->protocol_names[u];
-		if (len == strlen(name) && memcmp(ENG_u234->pad, name, len) == 0) {
-			T0_PUSH_u234(u);
-			T0_RET_u234();
+		name = ENG_u233->protocol_names[u];
+		if (len == strlen(name) && memcmp(ENG_u233->pad, name, len) == 0) {
+			T0_PUSH_u233(u);
+			T0_RET_u233();
 		}
 	}
-	T0_PUSHi_u234(-1);
+	T0_PUSHi_u233(-1);
 
 				}
 				break;
@@ -57956,53 +57786,53 @@ br_ssl_hs_client_run(void *t0ctx)
 	uint32_t total;
 
 	total = 0;
-	for (u = 0; u < ENG_u234->chain_len; u ++) {
-		total += 3 + (uint32_t)ENG_u234->chain[u].data_len;
+	for (u = 0; u < ENG_u233->chain_len; u ++) {
+		total += 3 + (uint32_t)ENG_u233->chain[u].data_len;
 	}
-	T0_PUSH_u234(total);
+	T0_PUSH_u233(total);
 
 				}
 				break;
 			case 79: {
 				/* u>> */
 
-	int c = (int)T0_POPi_u234();
-	uint32_t x = T0_POP_u234();
-	T0_PUSH_u234(x >> c);
+	int c = (int)T0_POPi_u233();
+	uint32_t x = T0_POP_u233();
+	T0_PUSH_u233(x >> c);
 
 				}
 				break;
 			case 80: {
 				/* verify-SKE-sig */
 
-	size_t sig_len = T0_POP_u234();
-	int use_rsa = T0_POPi_u234();
-	int hash = T0_POPi_u234();
+	size_t sig_len = T0_POP_u233();
+	int use_rsa = T0_POPi_u233();
+	int hash = T0_POPi_u233();
 
-	T0_PUSH_u234(verify_SKE_sig_u234(CTX_u234, hash, use_rsa, sig_len));
+	T0_PUSH_u233(verify_SKE_sig_u233(CTX_u233, hash, use_rsa, sig_len));
 
 				}
 				break;
 			case 81: {
 				/* write-blob-chunk */
 
-	size_t clen = ENG_u234->hlen_out;
+	size_t clen = ENG_u233->hlen_out;
 	if (clen > 0) {
 		uint32_t addr, len;
 
-		len = T0_POP_u234();
-		addr = T0_POP_u234();
+		len = T0_POP_u233();
+		addr = T0_POP_u233();
 		if ((size_t)len < clen) {
 			clen = (size_t)len;
 		}
-		memcpy(ENG_u234->hbuf_out, (unsigned char *)ENG_u234 + addr, clen);
-		if (ENG_u234->record_type_out == BR_SSL_HANDSHAKE) {
-			br_multihash_update(&ENG_u234->mhash, ENG_u234->hbuf_out, clen);
+		memcpy(ENG_u233->hbuf_out, (unsigned char *)ENG_u233 + addr, clen);
+		if (ENG_u233->record_type_out == BR_SSL_HANDSHAKE) {
+			br_multihash_update(&ENG_u233->mhash, ENG_u233->hbuf_out, clen);
 		}
-		T0_PUSH_u234(addr + (uint32_t)clen);
-		T0_PUSH_u234(len - (uint32_t)clen);
-		ENG_u234->hbuf_out += clen;
-		ENG_u234->hlen_out -= clen;
+		T0_PUSH_u233(addr + (uint32_t)clen);
+		T0_PUSH_u233(len - (uint32_t)clen);
+		ENG_u233->hbuf_out += clen;
+		ENG_u233->hlen_out -= clen;
 	}
 
 				}
@@ -58012,16 +57842,16 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	unsigned char x;
 
-	x = (unsigned char)T0_POP_u234();
-	if (ENG_u234->hlen_out > 0) {
-		if (ENG_u234->record_type_out == BR_SSL_HANDSHAKE) {
-			br_multihash_update(&ENG_u234->mhash, &x, 1);
+	x = (unsigned char)T0_POP_u233();
+	if (ENG_u233->hlen_out > 0) {
+		if (ENG_u233->record_type_out == BR_SSL_HANDSHAKE) {
+			br_multihash_update(&ENG_u233->mhash, &x, 1);
 		}
-		*ENG_u234->hbuf_out ++ = x;
-		ENG_u234->hlen_out --;
-		T0_PUSHi_u234(-1);
+		*ENG_u233->hbuf_out ++ = x;
+		ENG_u233->hlen_out --;
+		T0_PUSHi_u233(-1);
 	} else {
-		T0_PUSHi_u234(0);
+		T0_PUSHi_u233(0);
 	}
 
 				}
@@ -58032,9 +57862,9 @@ br_ssl_hs_client_run(void *t0ctx)
 	const br_x509_class *xc;
 	size_t len;
 
-	xc = *(ENG_u234->x509ctx);
-	len = T0_POP_u234();
-	xc->append(ENG_u234->x509ctx, ENG_u234->pad, len);
+	xc = *(ENG_u233->x509ctx);
+	len = T0_POP_u233();
+	xc->append(ENG_u233->x509ctx, ENG_u233->pad, len);
 
 				}
 				break;
@@ -58043,8 +57873,8 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	const br_x509_class *xc;
 
-	xc = *(ENG_u234->x509ctx);
-	xc->end_cert(ENG_u234->x509ctx);
+	xc = *(ENG_u233->x509ctx);
+	xc->end_cert(ENG_u233->x509ctx);
 
 				}
 				break;
@@ -58053,8 +57883,8 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	const br_x509_class *xc;
 
-	xc = *(ENG_u234->x509ctx);
-	T0_PUSH_u234(xc->end_chain(ENG_u234->x509ctx));
+	xc = *(ENG_u233->x509ctx);
+	T0_PUSH_u233(xc->end_chain(ENG_u233->x509ctx));
 
 				}
 				break;
@@ -58063,8 +57893,8 @@ br_ssl_hs_client_run(void *t0ctx)
 
 	const br_x509_class *xc;
 
-	xc = *(ENG_u234->x509ctx);
-	xc->start_cert(ENG_u234->x509ctx, T0_POP_u234());
+	xc = *(ENG_u233->x509ctx);
+	xc->start_cert(ENG_u233->x509ctx, T0_POP_u233());
 
 				}
 				break;
@@ -58074,22 +57904,22 @@ br_ssl_hs_client_run(void *t0ctx)
 	const br_x509_class *xc;
 	uint32_t bc;
 
-	bc = T0_POP_u234();
-	xc = *(ENG_u234->x509ctx);
-	xc->start_chain(ENG_u234->x509ctx, bc ? ENG_u234->server_name : NULL);
+	bc = T0_POP_u233();
+	xc = *(ENG_u233->x509ctx);
+	xc->start_chain(ENG_u233->x509ctx, bc ? ENG_u233->server_name : NULL);
 
 				}
 				break;
 			}
 
 		} else {
-			T0_ENTER_u234(ip, rp, t0x);
+			T0_ENTER_u233(ip, rp, t0x);
 		}
 	}
 t0_exit:
-	((t0_context_u234 *)t0ctx)->dp = dp;
-	((t0_context_u234 *)t0ctx)->rp = rp;
-	((t0_context_u234 *)t0ctx)->ip = ip;
+	((t0_context_u233 *)t0ctx)->dp = dp;
+	((t0_context_u233 *)t0ctx)->rp = rp;
+	((t0_context_u233 *)t0ctx)->ip = ip;
 }
 
 /* === src/ssl/ssl_io.c === */
@@ -58144,7 +57974,7 @@ br_sslio_init(br_sslio_context *ctx,
  * achieved, this function returns 0. On error, it returns -1.
  */
 static int
-run_until_u235(br_sslio_context *ctx, unsigned target)
+run_until_u234(br_sslio_context *ctx, unsigned target)
 {
 	for (;;) {
 		unsigned state;
@@ -58247,7 +58077,7 @@ br_sslio_read(br_sslio_context *ctx, void *dst, size_t len)
 	if (len == 0) {
 		return 0;
 	}
-	if (run_until_u235(ctx, BR_SSL_RECVAPP) < 0) {
+	if (run_until_u234(ctx, BR_SSL_RECVAPP) < 0) {
 		return -1;
 	}
 	buf = br_ssl_engine_recvapp_buf(ctx->engine, &alen);
@@ -58289,7 +58119,7 @@ br_sslio_write(br_sslio_context *ctx, const void *src, size_t len)
 	if (len == 0) {
 		return 0;
 	}
-	if (run_until_u235(ctx, BR_SSL_SENDAPP) < 0) {
+	if (run_until_u234(ctx, BR_SSL_SENDAPP) < 0) {
 		return -1;
 	}
 	buf = br_ssl_engine_sendapp_buf(ctx->engine, &alen);
@@ -58328,12 +58158,12 @@ br_sslio_flush(br_sslio_context *ctx)
 	/*
 	 * We trigger a flush. We know the data is gone when there is
 	 * no longer any record data to send, and we can either read
-	 * or write application data. The call to run_until_u235() does the
+	 * or write application data. The call to run_until_u234() does the
 	 * job because it ensures that any assembled record data is
 	 * first sent down the wire before considering anything else.
 	 */
 	br_ssl_engine_flush(ctx->engine, 0);
-	return run_until_u235(ctx, BR_SSL_SENDAPP | BR_SSL_RECVAPP);
+	return run_until_u234(ctx, BR_SSL_SENDAPP | BR_SSL_RECVAPP);
 }
 
 /* see bearssl_ssl.h */
@@ -58347,7 +58177,7 @@ br_sslio_close(br_sslio_context *ctx)
 		 */
 		size_t len;
 
-		run_until_u235(ctx, BR_SSL_RECVAPP);
+		run_until_u234(ctx, BR_SSL_RECVAPP);
 		if (br_ssl_engine_recvapp_buf(ctx->engine, &len) != NULL) {
 			br_ssl_engine_recvapp_ack(ctx->engine, len);
 		}
@@ -58386,7 +58216,7 @@ br_sslio_close(br_sslio_context *ctx)
  * Supported cipher suites that use SHA-384 for the PRF when selected
  * for TLS 1.2. All other cipher suites are deemed to use SHA-256.
  */
-static const uint16_t suites_sha384_u236[] = {
+static const uint16_t suites_sha384_u235[] = {
 	BR_TLS_RSA_WITH_AES_256_GCM_SHA384,
 	BR_TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
 	BR_TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA384,
@@ -58428,8 +58258,8 @@ br_ssl_key_export(br_ssl_engine_context *cc,
 		num_chunks = 2;
 	}
 	prf_id = BR_SSLPRF_SHA256;
-	for (u = 0; u < (sizeof suites_sha384_u236) / sizeof(uint16_t); u ++) {
-		if (suites_sha384_u236[u] == cc->session.cipher_suite) {
+	for (u = 0; u < (sizeof suites_sha384_u235) / sizeof(uint16_t); u ++) {
+		if (suites_sha384_u235[u] == cc->session.cipher_suite) {
 			prf_id = BR_SSLPRF_SHA384;
 		}
 	}
@@ -58519,37 +58349,37 @@ br_ssl_key_export(br_ssl_engine_context *cc,
  * exponentially difficult for the attacker to maintain a large
  * imbalance.
  */
-#define SESSION_ID_LEN_u237       32
-#define MASTER_SECRET_LEN_u237    48
+#define SESSION_ID_LEN_u236       32
+#define MASTER_SECRET_LEN_u236    48
 
-#define SESSION_ID_OFF_u237        0
-#define MASTER_SECRET_OFF_u237    32
-#define VERSION_OFF_u237          80
-#define CIPHER_SUITE_OFF_u237     82
-#define LIST_PREV_OFF_u237        84
-#define LIST_NEXT_OFF_u237        88
-#define TREE_LEFT_OFF_u237        92
-#define TREE_RIGHT_OFF_u237       96
+#define SESSION_ID_OFF_u236        0
+#define MASTER_SECRET_OFF_u236    32
+#define VERSION_OFF_u236          80
+#define CIPHER_SUITE_OFF_u236     82
+#define LIST_PREV_OFF_u236        84
+#define LIST_NEXT_OFF_u236        88
+#define TREE_LEFT_OFF_u236        92
+#define TREE_RIGHT_OFF_u236       96
 
-#define LRU_ENTRY_LEN_u237       100
+#define LRU_ENTRY_LEN_u236       100
 
-#define ADDR_NULL_u237   ((uint32_t)-1)
+#define ADDR_NULL_u236   ((uint32_t)-1)
 
-#define GETSET_u237(name_u237, off) \
-static inline uint32_t get_ ## name_u237(br_ssl_session_cache_lru *cc, uint32_t x) \
+#define GETSET_u236(name_u236, off) \
+static inline uint32_t get_ ## name_u236(br_ssl_session_cache_lru *cc, uint32_t x) \
 { \
 	return br_dec32be(cc->store + x + (off)); \
 } \
-static inline void set_ ## name_u237(br_ssl_session_cache_lru *cc, \
+static inline void set_ ## name_u236(br_ssl_session_cache_lru *cc, \
 	uint32_t x, uint32_t val) \
 { \
 	br_enc32be(cc->store + x + (off), val); \
 }
 
-GETSET_u237(prev, LIST_PREV_OFF_u237)
-GETSET_u237(next, LIST_NEXT_OFF_u237)
-GETSET_u237(left, TREE_LEFT_OFF_u237)
-GETSET_u237(right, TREE_RIGHT_OFF_u237)
+GETSET_u236(prev, LIST_PREV_OFF_u236)
+GETSET_u236(next, LIST_NEXT_OFF_u236)
+GETSET_u236(left, TREE_LEFT_OFF_u236)
+GETSET_u236(right, TREE_RIGHT_OFF_u236)
 
 /*
  * Transform the session ID by replacing the first N bytes with a HMAC
@@ -58566,41 +58396,41 @@ GETSET_u237(right, TREE_RIGHT_OFF_u237)
  * Source and destination arrays msut be disjoint.
  */
 static void
-mask_id_u237(br_ssl_session_cache_lru *cc,
+mask_id_u236(br_ssl_session_cache_lru *cc,
 	const unsigned char *src, unsigned char *dst)
 {
 	br_hmac_key_context hkc;
 	br_hmac_context hc;
 
-	memcpy(dst, src, SESSION_ID_LEN_u237);
+	memcpy(dst, src, SESSION_ID_LEN_u236);
 	br_hmac_key_init(&hkc, cc->hash, cc->index_key, sizeof cc->index_key);
-	br_hmac_init(&hc, &hkc, SESSION_ID_LEN_u237);
-	br_hmac_update(&hc, src, SESSION_ID_LEN_u237);
+	br_hmac_init(&hc, &hkc, SESSION_ID_LEN_u236);
+	br_hmac_update(&hc, src, SESSION_ID_LEN_u236);
 	br_hmac_out(&hc, dst);
 }
 
 /*
- * Find a node by ID. Returned value is the node address, or ADDR_NULL_u237 if
+ * Find a node by ID. Returned value is the node address, or ADDR_NULL_u236 if
  * the node is not found.
  *
  * If addr_link is not NULL, then '*addr_link' is set to the address of the
  * last followed link. If the found node is the root, or if the tree is
- * empty, then '*addr_link' is set to ADDR_NULL_u237.
+ * empty, then '*addr_link' is set to ADDR_NULL_u236.
  */
 static uint32_t
-find_node_u237(br_ssl_session_cache_lru *cc, const unsigned char *id,
+find_node_u236(br_ssl_session_cache_lru *cc, const unsigned char *id,
 	uint32_t *addr_link)
 {
 	uint32_t x, y;
 
 	x = cc->root;
-	y = ADDR_NULL_u237;
-	while (x != ADDR_NULL_u237) {
+	y = ADDR_NULL_u236;
+	while (x != ADDR_NULL_u236) {
 		int r;
 
-		r = memcmp(id, cc->store + x + SESSION_ID_OFF_u237, SESSION_ID_LEN_u237);
+		r = memcmp(id, cc->store + x + SESSION_ID_OFF_u236, SESSION_ID_LEN_u236);
 		if (r < 0) {
-			y = x + TREE_LEFT_OFF_u237;
+			y = x + TREE_LEFT_OFF_u236;
 			x = get_left(cc, x);
 		} else if (r == 0) {
 			if (addr_link != NULL) {
@@ -58608,79 +58438,79 @@ find_node_u237(br_ssl_session_cache_lru *cc, const unsigned char *id,
 			}
 			return x;
 		} else {
-			y = x + TREE_RIGHT_OFF_u237;
+			y = x + TREE_RIGHT_OFF_u236;
 			x = get_right(cc, x);
 		}
 	}
 	if (addr_link != NULL) {
 		*addr_link = y;
 	}
-	return ADDR_NULL_u237;
+	return ADDR_NULL_u236;
 }
 
 /*
  * For node x, find its replacement upon removal.
  *
- *  -- If node x has no child, then this returns ADDR_NULL_u237.
+ *  -- If node x has no child, then this returns ADDR_NULL_u236.
  *  -- Otherwise, if node x has a left child, then the replacement is the
  *     rightmost left-descendent.
  *  -- Otherwise, the replacement is the leftmost right-descendent.
  *
  * If a node is returned, then '*al' is set to the address of the field
  * that points to that node. Otherwise (node x has no child), '*al' is
- * set to ADDR_NULL_u237.
+ * set to ADDR_NULL_u236.
  *
  * Note that the replacement node, when found, is always a descendent
  * of node 'x', so it cannot be the tree root. Thus, '*al' can be set
- * to ADDR_NULL_u237 only when no node is found and ADDR_NULL_u237 is returned.
+ * to ADDR_NULL_u236 only when no node is found and ADDR_NULL_u236 is returned.
  */
 static uint32_t
-find_replacement_node_u237(br_ssl_session_cache_lru *cc, uint32_t x, uint32_t *al)
+find_replacement_node_u236(br_ssl_session_cache_lru *cc, uint32_t x, uint32_t *al)
 {
 	uint32_t y1, y2;
 
 	y1 = get_left(cc, x);
-	if (y1 != ADDR_NULL_u237) {
-		y2 = x + TREE_LEFT_OFF_u237;
+	if (y1 != ADDR_NULL_u236) {
+		y2 = x + TREE_LEFT_OFF_u236;
 		for (;;) {
 			uint32_t z;
 
 			z = get_right(cc, y1);
-			if (z == ADDR_NULL_u237) {
+			if (z == ADDR_NULL_u236) {
 				*al = y2;
 				return y1;
 			}
-			y2 = y1 + TREE_RIGHT_OFF_u237;
+			y2 = y1 + TREE_RIGHT_OFF_u236;
 			y1 = z;
 		}
 	}
 	y1 = get_right(cc, x);
-	if (y1 != ADDR_NULL_u237) {
-		y2 = x + TREE_RIGHT_OFF_u237;
+	if (y1 != ADDR_NULL_u236) {
+		y2 = x + TREE_RIGHT_OFF_u236;
 		for (;;) {
 			uint32_t z;
 
 			z = get_left(cc, y1);
-			if (z == ADDR_NULL_u237) {
+			if (z == ADDR_NULL_u236) {
 				*al = y2;
 				return y1;
 			}
-			y2 = y1 + TREE_LEFT_OFF_u237;
+			y2 = y1 + TREE_LEFT_OFF_u236;
 			y1 = z;
 		}
 	}
-	*al = ADDR_NULL_u237;
-	return ADDR_NULL_u237;
+	*al = ADDR_NULL_u236;
+	return ADDR_NULL_u236;
 }
 
 /*
  * Set the link at address 'alx' to point to node 'x'. If 'alx' is
- * ADDR_NULL_u237, then this sets the tree root to 'x'.
+ * ADDR_NULL_u236, then this sets the tree root to 'x'.
  */
 static inline void
-set_link_u237(br_ssl_session_cache_lru *cc, uint32_t alx, uint32_t x)
+set_link_u236(br_ssl_session_cache_lru *cc, uint32_t alx, uint32_t x)
 {
-	if (alx == ADDR_NULL_u237) {
+	if (alx == ADDR_NULL_u236) {
 		cc->root = x;
 	} else {
 		br_enc32be(cc->store + alx, x);
@@ -58692,7 +58522,7 @@ set_link_u237(br_ssl_session_cache_lru *cc, uint32_t alx, uint32_t x)
  * node 'x' is not part of the tree.
  */
 static void
-remove_node_u237(br_ssl_session_cache_lru *cc, uint32_t x)
+remove_node_u236(br_ssl_session_cache_lru *cc, uint32_t x)
 {
 	uint32_t alx, y, aly;
 
@@ -58715,18 +58545,18 @@ remove_node_u237(br_ssl_session_cache_lru *cc, uint32_t x)
 
 	/*
 	 * Find node back and its ancestor link. If the node was the
-	 * root, then alx is set to ADDR_NULL_u237.
+	 * root, then alx is set to ADDR_NULL_u236.
 	 */
-	find_node_u237(cc, cc->store + x + SESSION_ID_OFF_u237, &alx);
+	find_node_u236(cc, cc->store + x + SESSION_ID_OFF_u236, &alx);
 
 	/*
 	 * Find replacement node 'y', and 'aly' is set to the address of
 	 * the link to that replacement node. If the removed node has no
-	 * child, then both 'y' and 'aly' are set to ADDR_NULL_u237.
+	 * child, then both 'y' and 'aly' are set to ADDR_NULL_u236.
 	 */
-	y = find_replacement_node_u237(cc, x, &aly);
+	y = find_replacement_node_u236(cc, x, &aly);
 
-	if (y != ADDR_NULL_u237) {
+	if (y != ADDR_NULL_u236) {
 		uint32_t z;
 
 		/*
@@ -58734,16 +58564,16 @@ remove_node_u237(br_ssl_session_cache_lru *cc, uint32_t x)
 		 * not two) that takes its place.
 		 */
 		z = get_left(cc, y);
-		if (z == ADDR_NULL_u237) {
+		if (z == ADDR_NULL_u236) {
 			z = get_right(cc, y);
 		}
-		set_link_u237(cc, aly, z);
+		set_link_u236(cc, aly, z);
 
 		/*
 		 * Link the replacement node in its new place, overwriting
 		 * the current link to the node 'x' (which removes 'x').
 		 */
-		set_link_u237(cc, alx, y);
+		set_link_u236(cc, alx, y);
 
 		/*
 		 * The replacement node adopts the left and right children
@@ -58757,17 +58587,17 @@ remove_node_u237(br_ssl_session_cache_lru *cc, uint32_t x)
 		/*
 		 * No replacement, we simply unlink the node 'x'.
 		 */
-		set_link_u237(cc, alx, ADDR_NULL_u237);
+		set_link_u236(cc, alx, ADDR_NULL_u236);
 	}
 }
 
 static void
-lru_save_u237(const br_ssl_session_cache_class **ctx,
+lru_save_u236(const br_ssl_session_cache_class **ctx,
 	br_ssl_server_context *server_ctx,
 	const br_ssl_session_parameters *params)
 {
 	br_ssl_session_cache_lru *cc;
-	unsigned char id[SESSION_ID_LEN_u237];
+	unsigned char id[SESSION_ID_LEN_u236];
 	uint32_t x, alx;
 
 	cc = (br_ssl_session_cache_lru *)ctx;
@@ -58776,7 +58606,7 @@ lru_save_u237(const br_ssl_session_cache_class **ctx,
 	 * If the buffer is too small, we don't record anything. This
 	 * test avoids problems in subsequent code.
 	 */
-	if (cc->store_len < LRU_ENTRY_LEN_u237) {
+	if (cc->store_len < LRU_ENTRY_LEN_u236) {
 		return;
 	}
 
@@ -58790,7 +58620,7 @@ lru_save_u237(const br_ssl_session_cache_class **ctx,
 		cc->hash = br_hmac_drbg_get_hash(&server_ctx->eng.rng);
 		cc->init_done = 1;
 	}
-	mask_id_u237(cc, params->session_id, id);
+	mask_id_u236(cc, params->session_id, id);
 
 	/*
 	 * Look for the node in the tree. If the same ID is already used,
@@ -58799,7 +58629,7 @@ lru_save_u237(const br_ssl_session_cache_class **ctx,
 	 * Note: we do NOT record the emplacement here, because the
 	 * removal of an entry may change the tree topology.
 	 */
-	if (find_node_u237(cc, id, NULL) != ADDR_NULL_u237) {
+	if (find_node_u236(cc, id, NULL) != ADDR_NULL_u236) {
 		return;
 	}
 
@@ -58811,69 +58641,69 @@ lru_save_u237(const br_ssl_session_cache_class **ctx,
 	 * cannot hold any entry at all; thus, if there is no room for an
 	 * extra entry, then the cache cannot be empty.
 	 */
-	if (cc->store_ptr > (cc->store_len - LRU_ENTRY_LEN_u237)) {
+	if (cc->store_ptr > (cc->store_len - LRU_ENTRY_LEN_u236)) {
 		/*
 		 * Evict tail. If the buffer has room for a single entry,
 		 * then this may also be the head.
 		 */
 		x = cc->tail;
 		cc->tail = get_prev(cc, x);
-		if (cc->tail == ADDR_NULL_u237) {
-			cc->head = ADDR_NULL_u237;
+		if (cc->tail == ADDR_NULL_u236) {
+			cc->head = ADDR_NULL_u236;
 		} else {
-			set_next(cc, cc->tail, ADDR_NULL_u237);
+			set_next(cc, cc->tail, ADDR_NULL_u236);
 		}
 
 		/*
 		 * Remove the node from the tree.
 		 */
-		remove_node_u237(cc, x);
+		remove_node_u236(cc, x);
 	} else {
 		/*
 		 * Allocate room for new node.
 		 */
 		x = cc->store_ptr;
-		cc->store_ptr += LRU_ENTRY_LEN_u237;
+		cc->store_ptr += LRU_ENTRY_LEN_u236;
 	}
 
 	/*
 	 * Find the emplacement for the new node, and link it.
 	 */
-	find_node_u237(cc, id, &alx);
-	set_link_u237(cc, alx, x);
-	set_left(cc, x, ADDR_NULL_u237);
-	set_right(cc, x, ADDR_NULL_u237);
+	find_node_u236(cc, id, &alx);
+	set_link_u236(cc, alx, x);
+	set_left(cc, x, ADDR_NULL_u236);
+	set_right(cc, x, ADDR_NULL_u236);
 
 	/*
 	 * New entry becomes new list head. It may also become the list
 	 * tail if the cache was empty at that point.
 	 */
-	if (cc->head == ADDR_NULL_u237) {
+	if (cc->head == ADDR_NULL_u236) {
 		cc->tail = x;
 	} else {
 		set_prev(cc, cc->head, x);
 	}
-	set_prev(cc, x, ADDR_NULL_u237);
+	set_prev(cc, x, ADDR_NULL_u236);
 	set_next(cc, x, cc->head);
 	cc->head = x;
 
 	/*
 	 * Fill data in the entry.
 	 */
-	memcpy(cc->store + x + SESSION_ID_OFF_u237, id, SESSION_ID_LEN_u237);
-	memcpy(cc->store + x + MASTER_SECRET_OFF_u237,
-		params->master_secret, MASTER_SECRET_LEN_u237);
-	br_enc16be(cc->store + x + VERSION_OFF_u237, params->version);
-	br_enc16be(cc->store + x + CIPHER_SUITE_OFF_u237, params->cipher_suite);
+	memcpy(cc->store + x + SESSION_ID_OFF_u236, id, SESSION_ID_LEN_u236);
+	memcpy(cc->store + x + MASTER_SECRET_OFF_u236,
+		params->master_secret, MASTER_SECRET_LEN_u236);
+	br_enc16be(cc->store + x + VERSION_OFF_u236, params->version);
+	br_enc16be(cc->store + x + CIPHER_SUITE_OFF_u236, params->cipher_suite);
 }
 
 static int
-lru_load_u237(const br_ssl_session_cache_class **ctx,
+lru_load_u236(const br_ssl_session_cache_class **ctx,
 	br_ssl_server_context *server_ctx,
 	br_ssl_session_parameters *params)
 {
 	br_ssl_session_cache_lru *cc;
-	unsigned char id[SESSION_ID_LEN_u237];
+	unsigned char id[SESSION_ID_LEN_u236];
 	uint32_t x;
 
 	(void)server_ctx;
@@ -58881,12 +58711,12 @@ lru_load_u237(const br_ssl_session_cache_class **ctx,
 	if (!cc->init_done) {
 		return 0;
 	}
-	mask_id_u237(cc, params->session_id, id);
-	x = find_node_u237(cc, id, NULL);
-	if (x != ADDR_NULL_u237) {
+	mask_id_u236(cc, params->session_id, id);
+	x = find_node_u236(cc, id, NULL);
+	if (x != ADDR_NULL_u236) {
 		unsigned version;
 
-		version = br_dec16be(cc->store + x + VERSION_OFF_u237);
+		version = br_dec16be(cc->store + x + VERSION_OFF_u236);
 		if (version == 0) {
 			/*
 			 * Entry is disabled, we pretend we did not find it.
@@ -58897,10 +58727,10 @@ lru_load_u237(const br_ssl_session_cache_class **ctx,
 		}
 		params->version = version;
 		params->cipher_suite = br_dec16be(
-			cc->store + x + CIPHER_SUITE_OFF_u237);
+			cc->store + x + CIPHER_SUITE_OFF_u236);
 		memcpy(params->master_secret,
-			cc->store + x + MASTER_SECRET_OFF_u237,
-			MASTER_SECRET_LEN_u237);
+			cc->store + x + MASTER_SECRET_OFF_u236,
+			MASTER_SECRET_LEN_u236);
 		if (x != cc->head) {
 			/*
 			 * Found node is not at list head, so move
@@ -58911,14 +58741,14 @@ lru_load_u237(const br_ssl_session_cache_class **ctx,
 			p = get_prev(cc, x);
 			n = get_next(cc, x);
 			set_next(cc, p, n);
-			if (n == ADDR_NULL_u237) {
+			if (n == ADDR_NULL_u236) {
 				cc->tail = p;
 			} else {
 				set_prev(cc, n, p);
 			}
 			set_prev(cc, cc->head, x);
 			set_next(cc, x, cc->head);
-			set_prev(cc, x, ADDR_NULL_u237);
+			set_prev(cc, x, ADDR_NULL_u236);
 			cc->head = x;
 		}
 		return 1;
@@ -58926,10 +58756,10 @@ lru_load_u237(const br_ssl_session_cache_class **ctx,
 	return 0;
 }
 
-static const br_ssl_session_cache_class lru_class_u237 = {
+static const br_ssl_session_cache_class lru_class_u236 = {
 	sizeof(br_ssl_session_cache_lru),
-	&lru_save_u237,
-	&lru_load_u237
+	&lru_save_u236,
+	&lru_load_u236
 };
 
 /* see inner.h */
@@ -58937,21 +58767,21 @@ void
 br_ssl_session_cache_lru_init(br_ssl_session_cache_lru *cc,
 	unsigned char *store, size_t store_len)
 {
-	cc->vtable = &lru_class_u237;
+	cc->vtable = &lru_class_u236;
 	cc->store = store;
 	cc->store_len = store_len;
 	cc->store_ptr = 0;
 	cc->init_done = 0;
-	cc->head = ADDR_NULL_u237;
-	cc->tail = ADDR_NULL_u237;
-	cc->root = ADDR_NULL_u237;
+	cc->head = ADDR_NULL_u236;
+	cc->tail = ADDR_NULL_u236;
+	cc->root = ADDR_NULL_u236;
 }
 
 /* see bearssl_ssl.h */
 void br_ssl_session_cache_lru_forget(
 	br_ssl_session_cache_lru *cc, const unsigned char *id)
 {
-	unsigned char mid[SESSION_ID_LEN_u237];
+	unsigned char mid[SESSION_ID_LEN_u236];
 	uint32_t addr;
 
 	/*
@@ -58972,10 +58802,10 @@ void br_ssl_session_cache_lru_forget(
 	 * should be a rare event, meant mostly for testing purposes,
 	 * so this is not worth the extra code size.
 	 */
-	mask_id_u237(cc, id, mid);
-	addr = find_node_u237(cc, mid, NULL);
-	if (addr != ADDR_NULL_u237) {
-		br_enc16be(cc->store + addr + VERSION_OFF_u237, 0);
+	mask_id_u236(cc, id, mid);
+	addr = find_node_u236(cc, mid, NULL);
+	if (addr != ADDR_NULL_u236) {
+		br_enc16be(cc->store + addr + VERSION_OFF_u236, 0);
 	}
 }
 
@@ -59007,7 +58837,7 @@ void br_ssl_session_cache_lru_forget(
 
 
 static void
-in_cbc_init_u238(br_sslrec_in_cbc_context *cc,
+in_cbc_init_u237(br_sslrec_in_cbc_context *cc,
 	const br_block_cbcdec_class *bc_impl,
 	const void *bc_key, size_t bc_key_len,
 	const br_hash_class *dig_impl,
@@ -59029,7 +58859,7 @@ in_cbc_init_u238(br_sslrec_in_cbc_context *cc,
 }
 
 static int
-cbc_check_length_u238(const br_sslrec_in_cbc_context *cc, size_t rlen)
+cbc_check_length_u237(const br_sslrec_in_cbc_context *cc, size_t rlen)
 {
 	/*
 	 * Plaintext size: at most 16384 bytes
@@ -59062,7 +58892,7 @@ cbc_check_length_u238(const br_sslrec_in_cbc_context *cc, size_t rlen)
  * than or equal to 64.
  */
 static void
-cond_rotate_u238(uint32_t ctl, unsigned char *buf, size_t len, size_t num)
+cond_rotate_u237(uint32_t ctl, unsigned char *buf, size_t len, size_t num)
 {
 	unsigned char tmp[64];
 	size_t u, v;
@@ -59077,7 +58907,7 @@ cond_rotate_u238(uint32_t ctl, unsigned char *buf, size_t len, size_t num)
 }
 
 static unsigned char *
-cbc_decrypt_u238(br_sslrec_in_cbc_context *cc,
+cbc_decrypt_u237(br_sslrec_in_cbc_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	/*
@@ -59167,7 +58997,7 @@ cbc_decrypt_u238(br_sslrec_in_cbc_context *cc,
 		uint32_t rc;
 
 		rc = (uint32_t)1 << i;
-		cond_rotate_u238(rot_count >> i, tmp1, cc->mac_len, rc);
+		cond_rotate_u237(rot_count >> i, tmp1, cc->mac_len, rc);
 		rot_count &= ~rc;
 	}
 
@@ -59216,16 +59046,16 @@ const br_sslrec_in_cbc_class br_sslrec_in_cbc_vtable = {
 	{
 		sizeof(br_sslrec_in_cbc_context),
 		(int (*)(const br_sslrec_in_class *const *, size_t))
-			&cbc_check_length_u238,
+			&cbc_check_length_u237,
 		(unsigned char *(*)(const br_sslrec_in_class **,
 			int, unsigned, void *, size_t *))
-			&cbc_decrypt_u238
+			&cbc_decrypt_u237
 	},
 	(void (*)(const br_sslrec_in_cbc_class **,
 		const br_block_cbcdec_class *, const void *, size_t,
 		const br_hash_class *, const void *, size_t, size_t,
 		const void *))
-		&in_cbc_init_u238
+		&in_cbc_init_u237
 };
 
 /*
@@ -59247,7 +59077,7 @@ const br_sslrec_in_cbc_class br_sslrec_in_cbc_vtable = {
  */
 
 static void
-out_cbc_init_u238(br_sslrec_out_cbc_context *cc,
+out_cbc_init_u237(br_sslrec_out_cbc_context *cc,
 	const br_block_cbcenc_class *bc_impl,
 	const void *bc_key, size_t bc_key_len,
 	const br_hash_class *dig_impl,
@@ -59269,7 +59099,7 @@ out_cbc_init_u238(br_sslrec_out_cbc_context *cc,
 }
 
 static void
-cbc_max_plaintext_u238(const br_sslrec_out_cbc_context *cc,
+cbc_max_plaintext_u237(const br_sslrec_out_cbc_context *cc,
 	size_t *start, size_t *end)
 {
 	size_t blen, len;
@@ -59289,7 +59119,7 @@ cbc_max_plaintext_u238(const br_sslrec_out_cbc_context *cc,
 }
 
 static unsigned char *
-cbc_encrypt_u238(br_sslrec_out_cbc_context *cc,
+cbc_encrypt_u237(br_sslrec_out_cbc_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf, *rbuf;
@@ -59337,7 +59167,7 @@ cbc_encrypt_u238(br_sslrec_out_cbc_context *cc,
 			 * record, so that the two resulting records end up
 			 * being sequential in RAM.
 			 *
-			 * We use here the fact that cbc_max_plaintext_u238()
+			 * We use here the fact that cbc_max_plaintext_u237()
 			 * adjusted the start offset to leave room for the
 			 * initial fragment.
 			 */
@@ -59347,7 +59177,7 @@ cbc_encrypt_u238(br_sslrec_out_cbc_context *cc,
 				- ((cc->mac_len + blen + 1) & ~(blen - 1));
 			rbuf[0] = buf[0];
 			xlen = 1;
-			rbuf = cbc_encrypt_u238(cc, record_type,
+			rbuf = cbc_encrypt_u237(cc, record_type,
 				version, rbuf, &xlen);
 			buf ++;
 			len --;
@@ -59409,16 +59239,16 @@ const br_sslrec_out_cbc_class br_sslrec_out_cbc_vtable = {
 		sizeof(br_sslrec_out_cbc_context),
 		(void (*)(const br_sslrec_out_class *const *,
 			size_t *, size_t *))
-			&cbc_max_plaintext_u238,
+			&cbc_max_plaintext_u237,
 		(unsigned char *(*)(const br_sslrec_out_class **,
 			int, unsigned, void *, size_t *))
-			&cbc_encrypt_u238
+			&cbc_encrypt_u237
 	},
 	(void (*)(const br_sslrec_out_cbc_class **,
 		const br_block_cbcenc_class *, const void *, size_t,
 		const br_hash_class *, const void *, size_t, size_t,
 		const void *))
-		&out_cbc_init_u238
+		&out_cbc_init_u237
 };
 
 /* === src/ssl/ssl_rec_ccm.c === */
@@ -59454,7 +59284,7 @@ const br_sslrec_out_cbc_class br_sslrec_out_cbc_vtable = {
  * decrypting.
  */
 static void
-gen_ccm_init_u239(br_sslrec_ccm_context *cc,
+gen_ccm_init_u238(br_sslrec_ccm_context *cc,
 	const br_block_ctrcbc_class *bc_impl,
 	const void *key, size_t key_len,
 	const void *iv, size_t tag_len)
@@ -59466,17 +59296,17 @@ gen_ccm_init_u239(br_sslrec_ccm_context *cc,
 }
 
 static void
-in_ccm_init_u239(br_sslrec_ccm_context *cc,
+in_ccm_init_u238(br_sslrec_ccm_context *cc,
 	const br_block_ctrcbc_class *bc_impl,
 	const void *key, size_t key_len,
 	const void *iv, size_t tag_len)
 {
 	cc->vtable.in = &br_sslrec_in_ccm_vtable;
-	gen_ccm_init_u239(cc, bc_impl, key, key_len, iv, tag_len);
+	gen_ccm_init_u238(cc, bc_impl, key, key_len, iv, tag_len);
 }
 
 static int
-ccm_check_length_u239(const br_sslrec_ccm_context *cc, size_t rlen)
+ccm_check_length_u238(const br_sslrec_ccm_context *cc, size_t rlen)
 {
 	/*
 	 * CCM overhead is 8 bytes for nonce_explicit, and the tag
@@ -59489,7 +59319,7 @@ ccm_check_length_u239(const br_sslrec_ccm_context *cc, size_t rlen)
 }
 
 static unsigned char *
-ccm_decrypt_u239(br_sslrec_ccm_context *cc,
+ccm_decrypt_u238(br_sslrec_ccm_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	br_ccm_context zc;
@@ -59534,29 +59364,29 @@ const br_sslrec_in_ccm_class br_sslrec_in_ccm_vtable = {
 	{
 		sizeof(br_sslrec_ccm_context),
 		(int (*)(const br_sslrec_in_class *const *, size_t))
-			&ccm_check_length_u239,
+			&ccm_check_length_u238,
 		(unsigned char *(*)(const br_sslrec_in_class **,
 			int, unsigned, void *, size_t *))
-			&ccm_decrypt_u239
+			&ccm_decrypt_u238
 	},
 	(void (*)(const br_sslrec_in_ccm_class **,
 		const br_block_ctrcbc_class *, const void *, size_t,
 		const void *, size_t))
-		&in_ccm_init_u239
+		&in_ccm_init_u238
 };
 
 static void
-out_ccm_init_u239(br_sslrec_ccm_context *cc,
+out_ccm_init_u238(br_sslrec_ccm_context *cc,
 	const br_block_ctrcbc_class *bc_impl,
 	const void *key, size_t key_len,
 	const void *iv, size_t tag_len)
 {
 	cc->vtable.out = &br_sslrec_out_ccm_vtable;
-	gen_ccm_init_u239(cc, bc_impl, key, key_len, iv, tag_len);
+	gen_ccm_init_u238(cc, bc_impl, key, key_len, iv, tag_len);
 }
 
 static void
-ccm_max_plaintext_u239(const br_sslrec_ccm_context *cc,
+ccm_max_plaintext_u238(const br_sslrec_ccm_context *cc,
 	size_t *start, size_t *end)
 {
 	size_t len;
@@ -59570,7 +59400,7 @@ ccm_max_plaintext_u239(const br_sslrec_ccm_context *cc,
 }
 
 static unsigned char *
-ccm_encrypt_u239(br_sslrec_ccm_context *cc,
+ccm_encrypt_u238(br_sslrec_ccm_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	br_ccm_context zc;
@@ -59625,15 +59455,15 @@ const br_sslrec_out_ccm_class br_sslrec_out_ccm_vtable = {
 		sizeof(br_sslrec_ccm_context),
 		(void (*)(const br_sslrec_out_class *const *,
 			size_t *, size_t *))
-			&ccm_max_plaintext_u239,
+			&ccm_max_plaintext_u238,
 		(unsigned char *(*)(const br_sslrec_out_class **,
 			int, unsigned, void *, size_t *))
-			&ccm_encrypt_u239
+			&ccm_encrypt_u238
 	},
 	(void (*)(const br_sslrec_out_ccm_class **,
 		const br_block_ctrcbc_class *, const void *, size_t,
 		const void *, size_t))
-		&out_ccm_init_u239
+		&out_ccm_init_u238
 };
 
 /* === src/ssl/ssl_rec_chapol.c === */
@@ -59664,7 +59494,7 @@ const br_sslrec_out_ccm_class br_sslrec_out_ccm_vtable = {
 
 
 static void
-gen_chapol_init_u240(br_sslrec_chapol_context *cc,
+gen_chapol_init_u239(br_sslrec_chapol_context *cc,
 	br_chacha20_run ichacha, br_poly1305_run ipoly,
 	const void *key, const void *iv)
 {
@@ -59676,7 +59506,7 @@ gen_chapol_init_u240(br_sslrec_chapol_context *cc,
 }
 
 static void
-gen_chapol_process_u240(br_sslrec_chapol_context *cc,
+gen_chapol_process_u239(br_sslrec_chapol_context *cc,
 	int record_type, unsigned version, void *data, size_t len,
 	void *tag, int encrypt)
 {
@@ -59700,16 +59530,16 @@ gen_chapol_process_u240(br_sslrec_chapol_context *cc,
 }
 
 static void
-in_chapol_init_u240(br_sslrec_chapol_context *cc,
+in_chapol_init_u239(br_sslrec_chapol_context *cc,
 	br_chacha20_run ichacha, br_poly1305_run ipoly,
 	const void *key, const void *iv)
 {
 	cc->vtable.in = &br_sslrec_in_chapol_vtable;
-	gen_chapol_init_u240(cc, ichacha, ipoly, key, iv);
+	gen_chapol_init_u239(cc, ichacha, ipoly, key, iv);
 }
 
 static int
-chapol_check_length_u240(const br_sslrec_chapol_context *cc, size_t rlen)
+chapol_check_length_u239(const br_sslrec_chapol_context *cc, size_t rlen)
 {
 	/*
 	 * Overhead is just the authentication tag (16 bytes).
@@ -59719,7 +59549,7 @@ chapol_check_length_u240(const br_sslrec_chapol_context *cc, size_t rlen)
 }
 
 static unsigned char *
-chapol_decrypt_u240(br_sslrec_chapol_context *cc,
+chapol_decrypt_u239(br_sslrec_chapol_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf;
@@ -59729,7 +59559,7 @@ chapol_decrypt_u240(br_sslrec_chapol_context *cc,
 
 	buf = data;
 	len = *data_len - 16;
-	gen_chapol_process_u240(cc, record_type, version, buf, len, tag, 0);
+	gen_chapol_process_u239(cc, record_type, version, buf, len, tag, 0);
 	bad = 0;
 	for (u = 0; u < 16; u ++) {
 		bad |= tag[u] ^ buf[len + u];
@@ -59746,28 +59576,28 @@ const br_sslrec_in_chapol_class br_sslrec_in_chapol_vtable = {
 	{
 		sizeof(br_sslrec_chapol_context),
 		(int (*)(const br_sslrec_in_class *const *, size_t))
-			&chapol_check_length_u240,
+			&chapol_check_length_u239,
 		(unsigned char *(*)(const br_sslrec_in_class **,
 			int, unsigned, void *, size_t *))
-			&chapol_decrypt_u240
+			&chapol_decrypt_u239
 	},
 	(void (*)(const br_sslrec_in_chapol_class **,
 		br_chacha20_run, br_poly1305_run,
 		const void *, const void *))
-		&in_chapol_init_u240
+		&in_chapol_init_u239
 };
 
 static void
-out_chapol_init_u240(br_sslrec_chapol_context *cc,
+out_chapol_init_u239(br_sslrec_chapol_context *cc,
 	br_chacha20_run ichacha, br_poly1305_run ipoly,
 	const void *key, const void *iv)
 {
 	cc->vtable.out = &br_sslrec_out_chapol_vtable;
-	gen_chapol_init_u240(cc, ichacha, ipoly, key, iv);
+	gen_chapol_init_u239(cc, ichacha, ipoly, key, iv);
 }
 
 static void
-chapol_max_plaintext_u240(const br_sslrec_chapol_context *cc,
+chapol_max_plaintext_u239(const br_sslrec_chapol_context *cc,
 	size_t *start, size_t *end)
 {
 	size_t len;
@@ -59781,7 +59611,7 @@ chapol_max_plaintext_u240(const br_sslrec_chapol_context *cc,
 }
 
 static unsigned char *
-chapol_encrypt_u240(br_sslrec_chapol_context *cc,
+chapol_encrypt_u239(br_sslrec_chapol_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf;
@@ -59789,7 +59619,7 @@ chapol_encrypt_u240(br_sslrec_chapol_context *cc,
 
 	buf = data;
 	len = *data_len;
-	gen_chapol_process_u240(cc, record_type, version, buf, len, buf + len, 1);
+	gen_chapol_process_u239(cc, record_type, version, buf, len, buf + len, 1);
 	buf -= 5;
 	buf[0] = (unsigned char)record_type;
 	br_enc16be(buf + 1, version);
@@ -59804,15 +59634,15 @@ const br_sslrec_out_chapol_class br_sslrec_out_chapol_vtable = {
 		sizeof(br_sslrec_chapol_context),
 		(void (*)(const br_sslrec_out_class *const *,
 			size_t *, size_t *))
-			&chapol_max_plaintext_u240,
+			&chapol_max_plaintext_u239,
 		(unsigned char *(*)(const br_sslrec_out_class **,
 			int, unsigned, void *, size_t *))
-			&chapol_encrypt_u240
+			&chapol_encrypt_u239
 	},
 	(void (*)(const br_sslrec_out_chapol_class **,
 		br_chacha20_run, br_poly1305_run,
 		const void *, const void *))
-		&out_chapol_init_u240
+		&out_chapol_init_u239
 };
 
 /* === src/ssl/ssl_rec_gcm.c === */
@@ -59848,7 +59678,7 @@ const br_sslrec_out_chapol_class br_sslrec_out_chapol_vtable = {
  * decrypting.
  */
 static void
-gen_gcm_init_u241(br_sslrec_gcm_context *cc,
+gen_gcm_init_u240(br_sslrec_gcm_context *cc,
 	const br_block_ctr_class *bc_impl,
 	const void *key, size_t key_len,
 	br_ghash gh_impl,
@@ -59866,18 +59696,18 @@ gen_gcm_init_u241(br_sslrec_gcm_context *cc,
 }
 
 static void
-in_gcm_init_u241(br_sslrec_gcm_context *cc,
+in_gcm_init_u240(br_sslrec_gcm_context *cc,
 	const br_block_ctr_class *bc_impl,
 	const void *key, size_t key_len,
 	br_ghash gh_impl,
 	const void *iv)
 {
 	cc->vtable.in = &br_sslrec_in_gcm_vtable;
-	gen_gcm_init_u241(cc, bc_impl, key, key_len, gh_impl, iv);
+	gen_gcm_init_u240(cc, bc_impl, key, key_len, gh_impl, iv);
 }
 
 static int
-gcm_check_length_u241(const br_sslrec_gcm_context *cc, size_t rlen)
+gcm_check_length_u240(const br_sslrec_gcm_context *cc, size_t rlen)
 {
 	/*
 	 * GCM adds a fixed overhead:
@@ -59893,7 +59723,7 @@ gcm_check_length_u241(const br_sslrec_gcm_context *cc, size_t rlen)
  * be CTR-encrypted.
  */
 static void
-do_tag_u241(br_sslrec_gcm_context *cc,
+do_tag_u240(br_sslrec_gcm_context *cc,
 	int record_type, unsigned version,
 	void *data, size_t len, void *tag)
 {
@@ -59926,7 +59756,7 @@ do_tag_u241(br_sslrec_gcm_context *cc,
  * processing of the authentication tag.
  */
 static void
-do_ctr_u241(br_sslrec_gcm_context *cc, const void *nonce, void *data, size_t len,
+do_ctr_u240(br_sslrec_gcm_context *cc, const void *nonce, void *data, size_t len,
 	void *xortag)
 {
 	unsigned char iv[12];
@@ -59938,7 +59768,7 @@ do_ctr_u241(br_sslrec_gcm_context *cc, const void *nonce, void *data, size_t len
 }
 
 static unsigned char *
-gcm_decrypt_u241(br_sslrec_gcm_context *cc,
+gcm_decrypt_u240(br_sslrec_gcm_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf;
@@ -59948,8 +59778,8 @@ gcm_decrypt_u241(br_sslrec_gcm_context *cc,
 
 	buf = (unsigned char *)data + 8;
 	len = *data_len - 24;
-	do_tag_u241(cc, record_type, version, buf, len, tag);
-	do_ctr_u241(cc, data, buf, len, tag);
+	do_tag_u240(cc, record_type, version, buf, len, tag);
+	do_ctr_u240(cc, data, buf, len, tag);
 
 	/*
 	 * Compare the computed tag with the value from the record. It
@@ -59972,30 +59802,30 @@ const br_sslrec_in_gcm_class br_sslrec_in_gcm_vtable = {
 	{
 		sizeof(br_sslrec_gcm_context),
 		(int (*)(const br_sslrec_in_class *const *, size_t))
-			&gcm_check_length_u241,
+			&gcm_check_length_u240,
 		(unsigned char *(*)(const br_sslrec_in_class **,
 			int, unsigned, void *, size_t *))
-			&gcm_decrypt_u241
+			&gcm_decrypt_u240
 	},
 	(void (*)(const br_sslrec_in_gcm_class **,
 		const br_block_ctr_class *, const void *, size_t,
 		br_ghash, const void *))
-		&in_gcm_init_u241
+		&in_gcm_init_u240
 };
 
 static void
-out_gcm_init_u241(br_sslrec_gcm_context *cc,
+out_gcm_init_u240(br_sslrec_gcm_context *cc,
 	const br_block_ctr_class *bc_impl,
 	const void *key, size_t key_len,
 	br_ghash gh_impl,
 	const void *iv)
 {
 	cc->vtable.out = &br_sslrec_out_gcm_vtable;
-	gen_gcm_init_u241(cc, bc_impl, key, key_len, gh_impl, iv);
+	gen_gcm_init_u240(cc, bc_impl, key, key_len, gh_impl, iv);
 }
 
 static void
-gcm_max_plaintext_u241(const br_sslrec_gcm_context *cc,
+gcm_max_plaintext_u240(const br_sslrec_gcm_context *cc,
 	size_t *start, size_t *end)
 {
 	size_t len;
@@ -60010,7 +59840,7 @@ gcm_max_plaintext_u241(const br_sslrec_gcm_context *cc,
 }
 
 static unsigned char *
-gcm_encrypt_u241(br_sslrec_gcm_context *cc,
+gcm_encrypt_u240(br_sslrec_gcm_context *cc,
 	int record_type, unsigned version, void *data, size_t *data_len)
 {
 	unsigned char *buf;
@@ -60021,8 +59851,8 @@ gcm_encrypt_u241(br_sslrec_gcm_context *cc,
 	len = *data_len;
 	memset(tmp, 0, sizeof tmp);
 	br_enc64be(buf - 8, cc->seq);
-	do_ctr_u241(cc, buf - 8, buf, len, tmp);
-	do_tag_u241(cc, record_type, version, buf, len, buf + len);
+	do_ctr_u240(cc, buf - 8, buf, len, tmp);
+	do_tag_u240(cc, record_type, version, buf, len, buf + len);
 	for (u = 0; u < 16; u ++) {
 		buf[len + u] ^= tmp[u];
 	}
@@ -60041,15 +59871,15 @@ const br_sslrec_out_gcm_class br_sslrec_out_gcm_vtable = {
 		sizeof(br_sslrec_gcm_context),
 		(void (*)(const br_sslrec_out_class *const *,
 			size_t *, size_t *))
-			&gcm_max_plaintext_u241,
+			&gcm_max_plaintext_u240,
 		(unsigned char *(*)(const br_sslrec_out_class **,
 			int, unsigned, void *, size_t *))
-			&gcm_encrypt_u241
+			&gcm_encrypt_u240
 	},
 	(void (*)(const br_sslrec_out_gcm_class **,
 		const br_block_ctr_class *, const void *, size_t,
 		br_ghash, const void *))
-		&out_gcm_init_u241
+		&out_gcm_init_u240
 };
 
 /* === src/x509/x509_decoder.c === */
@@ -60063,10 +59893,10 @@ typedef struct {
 	uint32_t *dp;
 	uint32_t *rp;
 	const unsigned char *ip;
-} t0_context_u242;
+} t0_context_u241;
 
 static uint32_t
-t0_parse7E_unsigned_u242(const unsigned char **p)
+t0_parse7E_unsigned_u241(const unsigned char **p)
 {
 	uint32_t x;
 
@@ -60083,7 +59913,7 @@ t0_parse7E_unsigned_u242(const unsigned char **p)
 }
 
 static int32_t
-t0_parse7E_signed_u242(const unsigned char **p)
+t0_parse7E_signed_u241(const unsigned char **p)
 {
 	int neg;
 	uint32_t x;
@@ -60105,16 +59935,16 @@ t0_parse7E_signed_u242(const unsigned char **p)
 	}
 }
 
-#define T0_VBYTE_u242(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
-#define T0_FBYTE_u242(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
-#define T0_SBYTE_u242(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
-#define T0_INT1_u242(x)       T0_FBYTE_u242(x, 0)
-#define T0_INT2_u242(x)       T0_VBYTE_u242(x, 7), T0_FBYTE_u242(x, 0)
-#define T0_INT3_u242(x)       T0_VBYTE_u242(x, 14), T0_VBYTE_u242(x, 7), T0_FBYTE_u242(x, 0)
-#define T0_INT4_u242(x)       T0_VBYTE_u242(x, 21), T0_VBYTE_u242(x, 14), T0_VBYTE_u242(x, 7), T0_FBYTE_u242(x, 0)
-#define T0_INT5_u242(x)       T0_SBYTE_u242(x), T0_VBYTE_u242(x, 21), T0_VBYTE_u242(x, 14), T0_VBYTE_u242(x, 7), T0_FBYTE_u242(x, 0)
+#define T0_VBYTE_u241(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
+#define T0_FBYTE_u241(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
+#define T0_SBYTE_u241(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
+#define T0_INT1_u241(x)       T0_FBYTE_u241(x, 0)
+#define T0_INT2_u241(x)       T0_VBYTE_u241(x, 7), T0_FBYTE_u241(x, 0)
+#define T0_INT3_u241(x)       T0_VBYTE_u241(x, 14), T0_VBYTE_u241(x, 7), T0_FBYTE_u241(x, 0)
+#define T0_INT4_u241(x)       T0_VBYTE_u241(x, 21), T0_VBYTE_u241(x, 14), T0_VBYTE_u241(x, 7), T0_FBYTE_u241(x, 0)
+#define T0_INT5_u241(x)       T0_SBYTE_u241(x), T0_VBYTE_u241(x, 21), T0_VBYTE_u241(x, 14), T0_VBYTE_u241(x, 7), T0_FBYTE_u241(x, 0)
 
-/* static const unsigned char t0_datablock_u242[]; */
+/* static const unsigned char t0_datablock_u241[]; */
 
 
 void br_x509_decoder_init_main(void *t0ctx);
@@ -60129,8 +59959,8 @@ void br_x509_decoder_run(void *t0ctx);
 
 
 
-#define CTX_u242   ((br_x509_decoder_context *)(void *)((unsigned char *)t0ctx - offsetof(br_x509_decoder_context, cpu)))
-#define CONTEXT_NAME_u242   br_x509_decoder_context
+#define CTX_u241   ((br_x509_decoder_context *)(void *)((unsigned char *)t0ctx - offsetof(br_x509_decoder_context, cpu)))
+#define CONTEXT_NAME_u241   br_x509_decoder_context
 
 /* see bearssl_x509.h */
 void
@@ -60164,7 +59994,7 @@ br_x509_decoder_push(br_x509_decoder_context *ctx,
 
 
 
-static const unsigned char t0_datablock_u242[] = {
+static const unsigned char t0_datablock_u241[] = {
 	0x00, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x09,
 	0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x05, 0x09, 0x2A, 0x86,
 	0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0E, 0x09, 0x2A, 0x86, 0x48, 0x86,
@@ -60183,36 +60013,36 @@ static const unsigned char t0_datablock_u242[] = {
 	0x29, 0xFF, 0x03, 0x55, 0x1D, 0x13
 };
 
-static const unsigned char t0_codeblock_u242[] = {
+static const unsigned char t0_codeblock_u241[] = {
 	0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x01, 0x00, 0x11, 0x00, 0x00, 0x01,
 	0x01, 0x09, 0x00, 0x00, 0x01, 0x01, 0x0A, 0x00, 0x00, 0x1A, 0x1A, 0x00,
-	0x00, 0x01, T0_INT1_u242(BR_ERR_X509_BAD_BOOLEAN), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_BAD_TAG_CLASS), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_BAD_TAG_VALUE), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_BAD_TIME), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_EXTRA_ELEMENT), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_INDEFINITE_LENGTH), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_INNER_TRUNC), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_LIMIT_EXCEEDED), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_NOT_CONSTRUCTED), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_NOT_PRIMITIVE), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_OVERFLOW), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_PARTIAL_BYTE), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_UNEXPECTED), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_ERR_X509_UNSUPPORTED), 0x00, 0x00, 0x01,
-	T0_INT1_u242(BR_KEYTYPE_EC), 0x00, 0x00, 0x01, T0_INT1_u242(BR_KEYTYPE_RSA),
-	0x00, 0x00, 0x01, T0_INT2_u242(offsetof(CONTEXT_NAME_u242, copy_dn)), 0x00, 0x00,
-	0x01, T0_INT2_u242(offsetof(CONTEXT_NAME_u242, decoded)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, isCA)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(br_x509_decoder_context, pkey_data)), 0x01,
-	T0_INT2_u242(BR_X509_BUFSIZE_KEY), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, notafter_days)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, notafter_seconds)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, notbefore_days)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, notbefore_seconds)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, pad)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, signer_hash_id)), 0x00, 0x00, 0x01,
-	T0_INT2_u242(offsetof(CONTEXT_NAME_u242, signer_key_type)), 0x00, 0x00, 0x01,
+	0x00, 0x01, T0_INT1_u241(BR_ERR_X509_BAD_BOOLEAN), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_BAD_TAG_CLASS), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_BAD_TAG_VALUE), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_BAD_TIME), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_EXTRA_ELEMENT), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_INDEFINITE_LENGTH), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_INNER_TRUNC), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_LIMIT_EXCEEDED), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_NOT_CONSTRUCTED), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_NOT_PRIMITIVE), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_OVERFLOW), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_PARTIAL_BYTE), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_UNEXPECTED), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_ERR_X509_UNSUPPORTED), 0x00, 0x00, 0x01,
+	T0_INT1_u241(BR_KEYTYPE_EC), 0x00, 0x00, 0x01, T0_INT1_u241(BR_KEYTYPE_RSA),
+	0x00, 0x00, 0x01, T0_INT2_u241(offsetof(CONTEXT_NAME_u241, copy_dn)), 0x00, 0x00,
+	0x01, T0_INT2_u241(offsetof(CONTEXT_NAME_u241, decoded)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, isCA)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(br_x509_decoder_context, pkey_data)), 0x01,
+	T0_INT2_u241(BR_X509_BUFSIZE_KEY), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, notafter_days)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, notafter_seconds)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, notbefore_days)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, notbefore_seconds)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, pad)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, signer_hash_id)), 0x00, 0x00, 0x01,
+	T0_INT2_u241(offsetof(CONTEXT_NAME_u241, signer_key_type)), 0x00, 0x00, 0x01,
 	0x80, 0x45, 0x00, 0x00, 0x01, 0x80, 0x4E, 0x00, 0x00, 0x01, 0x80, 0x54,
 	0x00, 0x00, 0x01, 0x81, 0x36, 0x00, 0x02, 0x03, 0x00, 0x03, 0x01, 0x1B,
 	0x02, 0x01, 0x13, 0x26, 0x02, 0x00, 0x0F, 0x15, 0x00, 0x00, 0x05, 0x02,
@@ -60314,7 +60144,7 @@ static const unsigned char t0_codeblock_u242[] = {
 	0x04, 0x76, 0x00, 0x00, 0x01, 0x00, 0x20, 0x21, 0x0B, 0x2B, 0x00
 };
 
-static const uint16_t t0_caddr_u242[] = {
+static const uint16_t t0_caddr_u241[] = {
 	0,
 	5,
 	10,
@@ -60403,30 +60233,30 @@ static const uint16_t t0_caddr_u242[] = {
 	1327
 };
 
-#define T0_INTERPRETED_u242   39
+#define T0_INTERPRETED_u241   39
 
-#define T0_ENTER_u242(ip, rp, slot)   do { \
+#define T0_ENTER_u241(ip, rp, slot)   do { \
 		const unsigned char *t0_newip; \
 		uint32_t t0_lnum; \
-		t0_newip = &t0_codeblock_u242[t0_caddr_u242[(slot) - T0_INTERPRETED_u242]]; \
-		t0_lnum = t0_parse7E_unsigned_u242(&t0_newip); \
+		t0_newip = &t0_codeblock_u241[t0_caddr_u241[(slot) - T0_INTERPRETED_u241]]; \
+		t0_lnum = t0_parse7E_unsigned_u241(&t0_newip); \
 		(rp) += t0_lnum; \
-		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u242[0]) + (t0_lnum << 16); \
+		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u241[0]) + (t0_lnum << 16); \
 		(ip) = t0_newip; \
 	} while (0)
 
-#define T0_DEFENTRY_u242(name, slot) \
+#define T0_DEFENTRY_u241(name, slot) \
 void \
 name(void *ctx) \
 { \
-	t0_context_u242 *t0ctx = ctx; \
-	t0ctx->ip = &t0_codeblock_u242[0]; \
-	T0_ENTER_u242(t0ctx->ip, t0ctx->rp, slot); \
+	t0_context_u241 *t0ctx = ctx; \
+	t0ctx->ip = &t0_codeblock_u241[0]; \
+	T0_ENTER_u241(t0ctx->ip, t0ctx->rp, slot); \
 }
 
-T0_DEFENTRY_u242(br_x509_decoder_init_main, 92)
+T0_DEFENTRY_u241(br_x509_decoder_init_main, 92)
 
-#define T0_NEXT_u242(t0ipp)   (*(*(t0ipp)) ++)
+#define T0_NEXT_u241(t0ipp)   (*(*(t0ipp)) ++)
 
 void
 br_x509_decoder_run(void *t0ctx)
@@ -60434,281 +60264,281 @@ br_x509_decoder_run(void *t0ctx)
 	uint32_t *dp, *rp;
 	const unsigned char *ip;
 
-#define T0_LOCAL_u242(x)    (*(rp - 2 - (x)))
-#define T0_POP_u242()       (*-- dp)
-#define T0_POPi_u242()      (*(int32_t *)(-- dp))
-#define T0_PEEK_u242(x)     (*(dp - 1 - (x)))
-#define T0_PEEKi_u242(x)    (*(int32_t *)(dp - 1 - (x)))
-#define T0_PUSH_u242(v)     do { *dp = (v); dp ++; } while (0)
-#define T0_PUSHi_u242(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
-#define T0_RPOP_u242()      (*-- rp)
-#define T0_RPOPi_u242()     (*(int32_t *)(-- rp))
-#define T0_RPUSH_u242(v)    do { *rp = (v); rp ++; } while (0)
-#define T0_RPUSHi_u242(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
-#define T0_ROLL_u242(x)     do { \
+#define T0_LOCAL_u241(x)    (*(rp - 2 - (x)))
+#define T0_POP_u241()       (*-- dp)
+#define T0_POPi_u241()      (*(int32_t *)(-- dp))
+#define T0_PEEK_u241(x)     (*(dp - 1 - (x)))
+#define T0_PEEKi_u241(x)    (*(int32_t *)(dp - 1 - (x)))
+#define T0_PUSH_u241(v)     do { *dp = (v); dp ++; } while (0)
+#define T0_PUSHi_u241(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
+#define T0_RPOP_u241()      (*-- rp)
+#define T0_RPOPi_u241()     (*(int32_t *)(-- rp))
+#define T0_RPUSH_u241(v)    do { *rp = (v); rp ++; } while (0)
+#define T0_RPUSHi_u241(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
+#define T0_ROLL_u241(x)     do { \
 	size_t t0len = (size_t)(x); \
 	uint32_t t0tmp = *(dp - 1 - t0len); \
 	memmove(dp - t0len - 1, dp - t0len, t0len * sizeof *dp); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_SWAP_u242()      do { \
+#define T0_SWAP_u241()      do { \
 	uint32_t t0tmp = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_ROT_u242()       do { \
+#define T0_ROT_u241()       do { \
 	uint32_t t0tmp = *(dp - 3); \
 	*(dp - 3) = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_NROT_u242()       do { \
+#define T0_NROT_u241()       do { \
 	uint32_t t0tmp = *(dp - 1); \
 	*(dp - 1) = *(dp - 2); \
 	*(dp - 2) = *(dp - 3); \
 	*(dp - 3) = t0tmp; \
 } while (0)
-#define T0_PICK_u242(x)      do { \
+#define T0_PICK_u241(x)      do { \
 	uint32_t t0depth = (x); \
-	T0_PUSH_u242(T0_PEEK_u242(t0depth)); \
+	T0_PUSH_u241(T0_PEEK_u241(t0depth)); \
 } while (0)
-#define T0_CO_u242()         do { \
+#define T0_CO_u241()         do { \
 	goto t0_exit; \
 } while (0)
-#define T0_RET_u242()        goto t0_next
+#define T0_RET_u241()        goto t0_next
 
-	dp = ((t0_context_u242 *)t0ctx)->dp;
-	rp = ((t0_context_u242 *)t0ctx)->rp;
-	ip = ((t0_context_u242 *)t0ctx)->ip;
+	dp = ((t0_context_u241 *)t0ctx)->dp;
+	rp = ((t0_context_u241 *)t0ctx)->rp;
+	ip = ((t0_context_u241 *)t0ctx)->ip;
 	goto t0_next;
 	for (;;) {
 		uint32_t t0x;
 
 	t0_next:
-		t0x = T0_NEXT_u242(&ip);
-		if (t0x < T0_INTERPRETED_u242) {
+		t0x = T0_NEXT_u241(&ip);
+		if (t0x < T0_INTERPRETED_u241) {
 			switch (t0x) {
 				int32_t t0off;
 
 			case 0: /* ret */
-				t0x = T0_RPOP_u242();
+				t0x = T0_RPOP_u241();
 				rp -= (t0x >> 16);
 				t0x &= 0xFFFF;
 				if (t0x == 0) {
 					ip = NULL;
 					goto t0_exit;
 				}
-				ip = &t0_codeblock_u242[t0x];
+				ip = &t0_codeblock_u241[t0x];
 				break;
 			case 1: /* literal constant */
-				T0_PUSHi_u242(t0_parse7E_signed_u242(&ip));
+				T0_PUSHi_u241(t0_parse7E_signed_u241(&ip));
 				break;
 			case 2: /* read local */
-				T0_PUSH_u242(T0_LOCAL_u242(t0_parse7E_unsigned_u242(&ip)));
+				T0_PUSH_u241(T0_LOCAL_u241(t0_parse7E_unsigned_u241(&ip)));
 				break;
 			case 3: /* write local */
-				T0_LOCAL_u242(t0_parse7E_unsigned_u242(&ip)) = T0_POP_u242();
+				T0_LOCAL_u241(t0_parse7E_unsigned_u241(&ip)) = T0_POP_u241();
 				break;
 			case 4: /* jump */
-				t0off = t0_parse7E_signed_u242(&ip);
+				t0off = t0_parse7E_signed_u241(&ip);
 				ip += t0off;
 				break;
 			case 5: /* jump if */
-				t0off = t0_parse7E_signed_u242(&ip);
-				if (T0_POP_u242()) {
+				t0off = t0_parse7E_signed_u241(&ip);
+				if (T0_POP_u241()) {
 					ip += t0off;
 				}
 				break;
 			case 6: /* jump if not */
-				t0off = t0_parse7E_signed_u242(&ip);
-				if (!T0_POP_u242()) {
+				t0off = t0_parse7E_signed_u241(&ip);
+				if (!T0_POP_u241()) {
 					ip += t0off;
 				}
 				break;
 			case 7: {
 				/* %25 */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSHi_u242(a % b);
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSHi_u241(a % b);
 
 				}
 				break;
 			case 8: {
 				/* * */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(a * b);
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(a * b);
 
 				}
 				break;
 			case 9: {
 				/* + */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(a + b);
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(a + b);
 
 				}
 				break;
 			case 10: {
 				/* - */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(a - b);
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(a - b);
 
 				}
 				break;
 			case 11: {
 				/* -rot */
- T0_NROT_u242(); 
+ T0_NROT_u241(); 
 				}
 				break;
 			case 12: {
 				/* / */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSHi_u242(a / b);
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSHi_u241(a / b);
 
 				}
 				break;
 			case 13: {
 				/* < */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSH_u242(-(uint32_t)(a < b));
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSH_u241(-(uint32_t)(a < b));
 
 				}
 				break;
 			case 14: {
 				/* << */
 
-	int c = (int)T0_POPi_u242();
-	uint32_t x = T0_POP_u242();
-	T0_PUSH_u242(x << c);
+	int c = (int)T0_POPi_u241();
+	uint32_t x = T0_POP_u241();
+	T0_PUSH_u241(x << c);
 
 				}
 				break;
 			case 15: {
 				/* <= */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSH_u242(-(uint32_t)(a <= b));
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSH_u241(-(uint32_t)(a <= b));
 
 				}
 				break;
 			case 16: {
 				/* <> */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(-(uint32_t)(a != b));
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(-(uint32_t)(a != b));
 
 				}
 				break;
 			case 17: {
 				/* = */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(-(uint32_t)(a == b));
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(-(uint32_t)(a == b));
 
 				}
 				break;
 			case 18: {
 				/* > */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSH_u242(-(uint32_t)(a > b));
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSH_u241(-(uint32_t)(a > b));
 
 				}
 				break;
 			case 19: {
 				/* >= */
 
-	int32_t b = T0_POPi_u242();
-	int32_t a = T0_POPi_u242();
-	T0_PUSH_u242(-(uint32_t)(a >= b));
+	int32_t b = T0_POPi_u241();
+	int32_t a = T0_POPi_u241();
+	T0_PUSH_u241(-(uint32_t)(a >= b));
 
 				}
 				break;
 			case 20: {
 				/* >> */
 
-	int c = (int)T0_POPi_u242();
-	int32_t x = T0_POPi_u242();
-	T0_PUSHi_u242(x >> c);
+	int c = (int)T0_POPi_u241();
+	int32_t x = T0_POPi_u241();
+	T0_PUSHi_u241(x >> c);
 
 				}
 				break;
 			case 21: {
 				/* and */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(a & b);
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(a & b);
 
 				}
 				break;
 			case 22: {
 				/* co */
- T0_CO_u242(); 
+ T0_CO_u241(); 
 				}
 				break;
 			case 23: {
 				/* copy-ec-pkey */
 
-	size_t qlen = T0_POP_u242();
-	uint32_t curve = T0_POP_u242();
-	CTX_u242->pkey.key_type = BR_KEYTYPE_EC;
-	CTX_u242->pkey.key.ec.curve = curve;
-	CTX_u242->pkey.key.ec.q = CTX_u242->pkey_data;
-	CTX_u242->pkey.key.ec.qlen = qlen;
+	size_t qlen = T0_POP_u241();
+	uint32_t curve = T0_POP_u241();
+	CTX_u241->pkey.key_type = BR_KEYTYPE_EC;
+	CTX_u241->pkey.key.ec.curve = curve;
+	CTX_u241->pkey.key.ec.q = CTX_u241->pkey_data;
+	CTX_u241->pkey.key.ec.qlen = qlen;
 
 				}
 				break;
 			case 24: {
 				/* copy-rsa-pkey */
 
-	size_t elen = T0_POP_u242();
-	size_t nlen = T0_POP_u242();
-	CTX_u242->pkey.key_type = BR_KEYTYPE_RSA;
-	CTX_u242->pkey.key.rsa.n = CTX_u242->pkey_data;
-	CTX_u242->pkey.key.rsa.nlen = nlen;
-	CTX_u242->pkey.key.rsa.e = CTX_u242->pkey_data + nlen;
-	CTX_u242->pkey.key.rsa.elen = elen;
+	size_t elen = T0_POP_u241();
+	size_t nlen = T0_POP_u241();
+	CTX_u241->pkey.key_type = BR_KEYTYPE_RSA;
+	CTX_u241->pkey.key.rsa.n = CTX_u241->pkey_data;
+	CTX_u241->pkey.key.rsa.nlen = nlen;
+	CTX_u241->pkey.key.rsa.e = CTX_u241->pkey_data + nlen;
+	CTX_u241->pkey.key.rsa.elen = elen;
 
 				}
 				break;
 			case 25: {
 				/* data-get8 */
 
-	size_t addr = T0_POP_u242();
-	T0_PUSH_u242(t0_datablock_u242[addr]);
+	size_t addr = T0_POP_u241();
+	T0_PUSH_u241(t0_datablock_u241[addr]);
 
 				}
 				break;
 			case 26: {
 				/* drop */
- (void)T0_POP_u242(); 
+ (void)T0_POP_u241(); 
 				}
 				break;
 			case 27: {
 				/* dup */
- T0_PUSH_u242(T0_PEEK_u242(0)); 
+ T0_PUSH_u241(T0_PEEK_u241(0)); 
 				}
 				break;
 			case 28: {
 				/* eqOID */
 
-	const unsigned char *a2 = &t0_datablock_u242[T0_POP_u242()];
-	const unsigned char *a1 = &CTX_u242->pad[0];
+	const unsigned char *a2 = &t0_datablock_u241[T0_POP_u241()];
+	const unsigned char *a1 = &CTX_u241->pad[0];
 	size_t len = a1[0];
 	int x;
 	if (len == a2[0]) {
@@ -60716,114 +60546,114 @@ br_x509_decoder_run(void *t0ctx)
 	} else {
 		x = 0;
 	}
-	T0_PUSH_u242((uint32_t)x);
+	T0_PUSH_u241((uint32_t)x);
 
 				}
 				break;
 			case 29: {
 				/* fail */
 
-	CTX_u242->err = T0_POPi_u242();
-	T0_CO_u242();
+	CTX_u241->err = T0_POPi_u241();
+	T0_CO_u241();
 
 				}
 				break;
 			case 30: {
 				/* neg */
 
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(-a);
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(-a);
 
 				}
 				break;
 			case 31: {
 				/* or */
 
-	uint32_t b = T0_POP_u242();
-	uint32_t a = T0_POP_u242();
-	T0_PUSH_u242(a | b);
+	uint32_t b = T0_POP_u241();
+	uint32_t a = T0_POP_u241();
+	T0_PUSH_u241(a | b);
 
 				}
 				break;
 			case 32: {
 				/* over */
- T0_PUSH_u242(T0_PEEK_u242(1)); 
+ T0_PUSH_u241(T0_PEEK_u241(1)); 
 				}
 				break;
 			case 33: {
 				/* read-blob-inner */
 
-	uint32_t len = T0_POP_u242();
-	uint32_t addr = T0_POP_u242();
-	size_t clen = CTX_u242->hlen;
+	uint32_t len = T0_POP_u241();
+	uint32_t addr = T0_POP_u241();
+	size_t clen = CTX_u241->hlen;
 	if (clen > len) {
 		clen = (size_t)len;
 	}
 	if (addr != 0) {
-		memcpy((unsigned char *)CTX_u242 + addr, CTX_u242->hbuf, clen);
+		memcpy((unsigned char *)CTX_u241 + addr, CTX_u241->hbuf, clen);
 	}
-	if (CTX_u242->copy_dn && CTX_u242->append_dn) {
-		CTX_u242->append_dn(CTX_u242->append_dn_ctx, CTX_u242->hbuf, clen);
+	if (CTX_u241->copy_dn && CTX_u241->append_dn) {
+		CTX_u241->append_dn(CTX_u241->append_dn_ctx, CTX_u241->hbuf, clen);
 	}
-	CTX_u242->hbuf += clen;
-	CTX_u242->hlen -= clen;
-	T0_PUSH_u242(addr + clen);
-	T0_PUSH_u242(len - clen);
+	CTX_u241->hbuf += clen;
+	CTX_u241->hlen -= clen;
+	T0_PUSH_u241(addr + clen);
+	T0_PUSH_u241(len - clen);
 
 				}
 				break;
 			case 34: {
 				/* read8-low */
 
-	if (CTX_u242->hlen == 0) {
-		T0_PUSHi_u242(-1);
+	if (CTX_u241->hlen == 0) {
+		T0_PUSHi_u241(-1);
 	} else {
-		unsigned char x = *CTX_u242->hbuf ++;
-		if (CTX_u242->copy_dn && CTX_u242->append_dn) {
-			CTX_u242->append_dn(CTX_u242->append_dn_ctx, &x, 1);
+		unsigned char x = *CTX_u241->hbuf ++;
+		if (CTX_u241->copy_dn && CTX_u241->append_dn) {
+			CTX_u241->append_dn(CTX_u241->append_dn_ctx, &x, 1);
 		}
-		CTX_u242->hlen --;
-		T0_PUSH_u242(x);
+		CTX_u241->hlen --;
+		T0_PUSH_u241(x);
 	}
 
 				}
 				break;
 			case 35: {
 				/* rot */
- T0_ROT_u242(); 
+ T0_ROT_u241(); 
 				}
 				break;
 			case 36: {
 				/* set32 */
 
-	uint32_t addr = T0_POP_u242();
-	*(uint32_t *)(void *)((unsigned char *)CTX_u242 + addr) = T0_POP_u242();
+	uint32_t addr = T0_POP_u241();
+	*(uint32_t *)(void *)((unsigned char *)CTX_u241 + addr) = T0_POP_u241();
 
 				}
 				break;
 			case 37: {
 				/* set8 */
 
-	uint32_t addr = T0_POP_u242();
-	*((unsigned char *)CTX_u242 + addr) = (unsigned char)T0_POP_u242();
+	uint32_t addr = T0_POP_u241();
+	*((unsigned char *)CTX_u241 + addr) = (unsigned char)T0_POP_u241();
 
 				}
 				break;
 			case 38: {
 				/* swap */
- T0_SWAP_u242(); 
+ T0_SWAP_u241(); 
 				}
 				break;
 			}
 
 		} else {
-			T0_ENTER_u242(ip, rp, t0x);
+			T0_ENTER_u241(ip, rp, t0x);
 		}
 	}
 t0_exit:
-	((t0_context_u242 *)t0ctx)->dp = dp;
-	((t0_context_u242 *)t0ctx)->rp = rp;
-	((t0_context_u242 *)t0ctx)->ip = ip;
+	((t0_context_u241 *)t0ctx)->dp = dp;
+	((t0_context_u241 *)t0ctx)->rp = rp;
+	((t0_context_u241 *)t0ctx)->ip = ip;
 }
 
 /* === src/x509/x509_knownkey.c === */
@@ -60876,21 +60706,21 @@ br_x509_knownkey_init_ec(br_x509_knownkey_context *ctx,
 }
 
 static void
-kk_start_chain_u243(const br_x509_class **ctx, const char *server_name)
+kk_start_chain_u242(const br_x509_class **ctx, const char *server_name)
 {
 	(void)ctx;
 	(void)server_name;
 }
 
 static void
-kk_start_cert_u243(const br_x509_class **ctx, uint32_t length)
+kk_start_cert_u242(const br_x509_class **ctx, uint32_t length)
 {
 	(void)ctx;
 	(void)length;
 }
 
 static void
-kk_append_u243(const br_x509_class **ctx, const unsigned char *buf, size_t len)
+kk_append_u242(const br_x509_class **ctx, const unsigned char *buf, size_t len)
 {
 	(void)ctx;
 	(void)buf;
@@ -60898,20 +60728,20 @@ kk_append_u243(const br_x509_class **ctx, const unsigned char *buf, size_t len)
 }
 
 static void
-kk_end_cert_u243(const br_x509_class **ctx)
+kk_end_cert_u242(const br_x509_class **ctx)
 {
 	(void)ctx;
 }
 
 static unsigned
-kk_end_chain_u243(const br_x509_class **ctx)
+kk_end_chain_u242(const br_x509_class **ctx)
 {
 	(void)ctx;
 	return 0;
 }
 
 static const br_x509_pkey *
-kk_get_pkey_u243(const br_x509_class *const *ctx, unsigned *usages)
+kk_get_pkey_u242(const br_x509_class *const *ctx, unsigned *usages)
 {
 	const br_x509_knownkey_context *xc;
 
@@ -60925,12 +60755,12 @@ kk_get_pkey_u243(const br_x509_class *const *ctx, unsigned *usages)
 /* see bearssl_x509.h */
 const br_x509_class br_x509_knownkey_vtable = {
 	sizeof(br_x509_knownkey_context),
-	kk_start_chain_u243,
-	kk_start_cert_u243,
-	kk_append_u243,
-	kk_end_cert_u243,
-	kk_end_chain_u243,
-	kk_get_pkey_u243
+	kk_start_chain_u242,
+	kk_start_cert_u242,
+	kk_append_u242,
+	kk_end_cert_u242,
+	kk_end_chain_u242,
+	kk_get_pkey_u242
 };
 
 /* === src/x509/x509_minimal.c === */
@@ -60944,10 +60774,10 @@ typedef struct {
 	uint32_t *dp;
 	uint32_t *rp;
 	const unsigned char *ip;
-} t0_context_u244;
+} t0_context_u243;
 
 static uint32_t
-t0_parse7E_unsigned_u244(const unsigned char **p)
+t0_parse7E_unsigned_u243(const unsigned char **p)
 {
 	uint32_t x;
 
@@ -60964,7 +60794,7 @@ t0_parse7E_unsigned_u244(const unsigned char **p)
 }
 
 static int32_t
-t0_parse7E_signed_u244(const unsigned char **p)
+t0_parse7E_signed_u243(const unsigned char **p)
 {
 	int neg;
 	uint32_t x;
@@ -60986,16 +60816,16 @@ t0_parse7E_signed_u244(const unsigned char **p)
 	}
 }
 
-#define T0_VBYTE_u244(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
-#define T0_FBYTE_u244(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
-#define T0_SBYTE_u244(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
-#define T0_INT1_u244(x)       T0_FBYTE_u244(x, 0)
-#define T0_INT2_u244(x)       T0_VBYTE_u244(x, 7), T0_FBYTE_u244(x, 0)
-#define T0_INT3_u244(x)       T0_VBYTE_u244(x, 14), T0_VBYTE_u244(x, 7), T0_FBYTE_u244(x, 0)
-#define T0_INT4_u244(x)       T0_VBYTE_u244(x, 21), T0_VBYTE_u244(x, 14), T0_VBYTE_u244(x, 7), T0_FBYTE_u244(x, 0)
-#define T0_INT5_u244(x)       T0_SBYTE_u244(x), T0_VBYTE_u244(x, 21), T0_VBYTE_u244(x, 14), T0_VBYTE_u244(x, 7), T0_FBYTE_u244(x, 0)
+#define T0_VBYTE_u243(x, n)   (unsigned char)((((uint32_t)(x) >> (n)) & 0x7F) | 0x80)
+#define T0_FBYTE_u243(x, n)   (unsigned char)(((uint32_t)(x) >> (n)) & 0x7F)
+#define T0_SBYTE_u243(x)      (unsigned char)((((uint32_t)(x) >> 28) + 0xF8) ^ 0xF8)
+#define T0_INT1_u243(x)       T0_FBYTE_u243(x, 0)
+#define T0_INT2_u243(x)       T0_VBYTE_u243(x, 7), T0_FBYTE_u243(x, 0)
+#define T0_INT3_u243(x)       T0_VBYTE_u243(x, 14), T0_VBYTE_u243(x, 7), T0_FBYTE_u243(x, 0)
+#define T0_INT4_u243(x)       T0_VBYTE_u243(x, 21), T0_VBYTE_u243(x, 14), T0_VBYTE_u243(x, 7), T0_FBYTE_u243(x, 0)
+#define T0_INT5_u243(x)       T0_SBYTE_u243(x), T0_VBYTE_u243(x, 21), T0_VBYTE_u243(x, 14), T0_VBYTE_u243(x, 7), T0_FBYTE_u243(x, 0)
 
-/* static const unsigned char t0_datablock_u244[]; */
+/* static const unsigned char t0_datablock_u243[]; */
 
 
 void br_x509_minimal_init_main(void *t0ctx);
@@ -61165,7 +60995,7 @@ br_x509_minimal_init(br_x509_minimal_context *ctx,
 }
 
 static void
-xm_start_chain_u244(const br_x509_class **ctx, const char *server_name)
+xm_start_chain_u243(const br_x509_class **ctx, const char *server_name)
 {
 	br_x509_minimal_context *cc;
 	size_t u;
@@ -61189,7 +61019,7 @@ xm_start_chain_u244(const br_x509_class **ctx, const char *server_name)
 }
 
 static void
-xm_start_cert_u244(const br_x509_class **ctx, uint32_t length)
+xm_start_cert_u243(const br_x509_class **ctx, uint32_t length)
 {
 	br_x509_minimal_context *cc;
 
@@ -61205,7 +61035,7 @@ xm_start_cert_u244(const br_x509_class **ctx, uint32_t length)
 }
 
 static void
-xm_append_u244(const br_x509_class **ctx, const unsigned char *buf, size_t len)
+xm_append_u243(const br_x509_class **ctx, const unsigned char *buf, size_t len)
 {
 	br_x509_minimal_context *cc;
 
@@ -61219,7 +61049,7 @@ xm_append_u244(const br_x509_class **ctx, const unsigned char *buf, size_t len)
 }
 
 static void
-xm_end_cert_u244(const br_x509_class **ctx)
+xm_end_cert_u243(const br_x509_class **ctx)
 {
 	br_x509_minimal_context *cc;
 
@@ -61231,7 +61061,7 @@ xm_end_cert_u244(const br_x509_class **ctx)
 }
 
 static unsigned
-xm_end_chain_u244(const br_x509_class **ctx)
+xm_end_chain_u243(const br_x509_class **ctx)
 {
 	br_x509_minimal_context *cc;
 
@@ -61249,7 +61079,7 @@ xm_end_chain_u244(const br_x509_class **ctx)
 }
 
 static const br_x509_pkey *
-xm_get_pkey_u244(const br_x509_class *const *ctx, unsigned *usages)
+xm_get_pkey_u243(const br_x509_class *const *ctx, unsigned *usages)
 {
 	br_x509_minimal_context *cc;
 
@@ -61269,18 +61099,18 @@ xm_get_pkey_u244(const br_x509_class *const *ctx, unsigned *usages)
 /* see bearssl_x509.h */
 const br_x509_class br_x509_minimal_vtable = {
 	sizeof(br_x509_minimal_context),
-	xm_start_chain_u244,
-	xm_start_cert_u244,
-	xm_append_u244,
-	xm_end_cert_u244,
-	xm_end_chain_u244,
-	xm_get_pkey_u244
+	xm_start_chain_u243,
+	xm_start_cert_u243,
+	xm_append_u243,
+	xm_end_cert_u243,
+	xm_end_chain_u243,
+	xm_get_pkey_u243
 };
 
-#define CTX_u244   ((br_x509_minimal_context *)(void *)((unsigned char *)t0ctx - offsetof(br_x509_minimal_context, cpu)))
-#define CONTEXT_NAME_u244   br_x509_minimal_context
+#define CTX_u243   ((br_x509_minimal_context *)(void *)((unsigned char *)t0ctx - offsetof(br_x509_minimal_context, cpu)))
+#define CONTEXT_NAME_u243   br_x509_minimal_context
 
-#define DNHASH_LEN_u244   ((CTX_u244->dn_hash_impl->desc >> BR_HASHDESC_OUT_OFF) & BR_HASHDESC_OUT_MASK)
+#define DNHASH_LEN_u243   ((CTX_u243->dn_hash_impl->desc >> BR_HASHDESC_OUT_OFF) & BR_HASHDESC_OUT_MASK)
 
 /*
  * Hash a DN (from a trust anchor) into the provided buffer. This uses the
@@ -61288,7 +61118,7 @@ const br_x509_class br_x509_minimal_vtable = {
  * context.
  */
 static void
-hash_dn_u244(br_x509_minimal_context *ctx, const void *dn, size_t len,
+hash_dn_u243(br_x509_minimal_context *ctx, const void *dn, size_t len,
 	unsigned char *out)
 {
 	ctx->dn_hash_impl->init(&ctx->dn_hash.vtable);
@@ -61301,7 +61131,7 @@ hash_dn_u244(br_x509_minimal_context *ctx, const void *dn, size_t len,
  * encoding; extra leading bytes (of value 0) are allowed.
  */
 static int
-eqbigint_u244(const unsigned char *b1, size_t len1,
+eqbigint_u243(const unsigned char *b1, size_t len1,
 	const unsigned char *b2, size_t len2)
 {
 	while (len1 > 0 && *b1 == 0) {
@@ -61323,7 +61153,7 @@ eqbigint_u244(const unsigned char *b1, size_t len1,
  * function handles casing only for ASCII letters.
  */
 static int
-eqnocase_u244(const void *s1, const void *s2, size_t len)
+eqnocase_u243(const void *s1, const void *s2, size_t len)
 {
 	const unsigned char *buf1, *buf2;
 
@@ -61347,12 +61177,12 @@ eqnocase_u244(const void *s1, const void *s2, size_t len)
 	return 1;
 }
 
-static int verify_signature_u244(br_x509_minimal_context *ctx,
+static int verify_signature_u243(br_x509_minimal_context *ctx,
 	const br_x509_pkey *pk);
 
 
 
-static const unsigned char t0_datablock_u244[] = {
+static const unsigned char t0_datablock_u243[] = {
 	0x00, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01, 0x09,
 	0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x05, 0x09, 0x2A, 0x86,
 	0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0E, 0x09, 0x2A, 0x86, 0x48, 0x86,
@@ -61380,48 +61210,48 @@ static const unsigned char t0_datablock_u244[] = {
 	0x01, 0x01, 0x08, 0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x0B
 };
 
-static const unsigned char t0_codeblock_u244[] = {
+static const unsigned char t0_codeblock_u243[] = {
 	0x00, 0x01, 0x00, 0x0D, 0x00, 0x00, 0x01, 0x00, 0x10, 0x00, 0x00, 0x01,
 	0x00, 0x11, 0x00, 0x00, 0x01, 0x01, 0x09, 0x00, 0x00, 0x01, 0x01, 0x0A,
 	0x00, 0x00, 0x24, 0x24, 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_BOOLEAN), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_DN), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_SERVER_NAME), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_TAG_CLASS), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_TAG_VALUE), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_BAD_TIME), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_CRITICAL_EXTENSION), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_DN_MISMATCH), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_EXPIRED), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_EXTRA_ELEMENT), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_FORBIDDEN_KEY_USAGE), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_INDEFINITE_LENGTH), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_INNER_TRUNC), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_LIMIT_EXCEEDED), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_NOT_CA), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_NOT_CONSTRUCTED), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_NOT_PRIMITIVE), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_OVERFLOW), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_PARTIAL_BYTE), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_UNEXPECTED), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_UNSUPPORTED), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_ERR_X509_WEAK_PUBLIC_KEY), 0x00, 0x00, 0x01,
-	T0_INT1_u244(BR_KEYTYPE_EC), 0x00, 0x00, 0x01, T0_INT1_u244(BR_KEYTYPE_RSA),
-	0x00, 0x00, 0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_length)), 0x00,
-	0x00, 0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_sig)), 0x00, 0x00,
-	0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_sig_hash_len)), 0x00, 0x00,
-	0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_sig_hash_oid)), 0x00, 0x00,
-	0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_sig_len)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, cert_signer_key_type)), 0x00, 0x00,
-	0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, current_dn_hash)), 0x00, 0x00,
-	0x01, T0_INT2_u244(offsetof(CONTEXT_NAME_u244, key_usages)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(br_x509_minimal_context, pkey_data)), 0x01,
-	T0_INT2_u244(BR_X509_BUFSIZE_KEY), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, min_rsa_size)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, next_dn_hash)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, num_certs)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, pad)), 0x00, 0x00, 0x01,
-	T0_INT2_u244(offsetof(CONTEXT_NAME_u244, saved_dn_hash)), 0x00, 0x00, 0xC9, 0x71,
+	T0_INT1_u243(BR_ERR_X509_BAD_BOOLEAN), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_BAD_DN), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_BAD_SERVER_NAME), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_BAD_TAG_CLASS), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_BAD_TAG_VALUE), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_BAD_TIME), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_CRITICAL_EXTENSION), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_DN_MISMATCH), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_EXPIRED), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_EXTRA_ELEMENT), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_FORBIDDEN_KEY_USAGE), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_INDEFINITE_LENGTH), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_INNER_TRUNC), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_LIMIT_EXCEEDED), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_NOT_CA), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_NOT_CONSTRUCTED), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_NOT_PRIMITIVE), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_OVERFLOW), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_PARTIAL_BYTE), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_UNEXPECTED), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_UNSUPPORTED), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_ERR_X509_WEAK_PUBLIC_KEY), 0x00, 0x00, 0x01,
+	T0_INT1_u243(BR_KEYTYPE_EC), 0x00, 0x00, 0x01, T0_INT1_u243(BR_KEYTYPE_RSA),
+	0x00, 0x00, 0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_length)), 0x00,
+	0x00, 0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_sig)), 0x00, 0x00,
+	0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_sig_hash_len)), 0x00, 0x00,
+	0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_sig_hash_oid)), 0x00, 0x00,
+	0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_sig_len)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, cert_signer_key_type)), 0x00, 0x00,
+	0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, current_dn_hash)), 0x00, 0x00,
+	0x01, T0_INT2_u243(offsetof(CONTEXT_NAME_u243, key_usages)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(br_x509_minimal_context, pkey_data)), 0x01,
+	T0_INT2_u243(BR_X509_BUFSIZE_KEY), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, min_rsa_size)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, next_dn_hash)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, num_certs)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, pad)), 0x00, 0x00, 0x01,
+	T0_INT2_u243(offsetof(CONTEXT_NAME_u243, saved_dn_hash)), 0x00, 0x00, 0xC9, 0x71,
 	0x00, 0x00, 0x01, 0x80, 0x73, 0x00, 0x00, 0x01, 0x80, 0x7C, 0x00, 0x00,
 	0x01, 0x81, 0x02, 0x00, 0x00, 0x92, 0x05, 0x05, 0x34, 0x42, 0x01, 0x00,
 	0x00, 0x34, 0x01, 0x0A, 0x0E, 0x09, 0x01, 0x9A, 0xFF, 0xB8, 0x00, 0x0A,
@@ -61486,7 +61316,7 @@ static const unsigned char t0_codeblock_u244[] = {
 	0x06, 0x01, 0x05, 0x59, 0x8D, 0x04, 0x0C, 0x83, 0x26, 0x06, 0x06, 0x01,
 	0x06, 0x59, 0x8E, 0x04, 0x02, 0x57, 0x28, 0x5E, 0x35, 0x60, 0x37, 0x1B,
 	0x25, 0x05, 0x02, 0x57, 0x28, 0x5D, 0x37, 0x04, 0x02, 0x57, 0x28, 0xC2,
-	0xA4, 0x25, 0x01, T0_INT2_u244(BR_X509_BUFSIZE_SIG), 0x12, 0x06, 0x02, 0x50,
+	0xA4, 0x25, 0x01, T0_INT2_u243(BR_X509_BUFSIZE_SIG), 0x12, 0x06, 0x02, 0x50,
 	0x28, 0x25, 0x5F, 0x35, 0x5C, 0xA5, 0x79, 0x79, 0x01, 0x00, 0x5B, 0x36,
 	0x18, 0x00, 0x00, 0x01, 0x30, 0x0A, 0x25, 0x01, 0x00, 0x01, 0x09, 0x72,
 	0x05, 0x02, 0x48, 0x28, 0x00, 0x00, 0x30, 0x30, 0x00, 0x00, 0x01, 0x81,
@@ -61644,7 +61474,7 @@ static const unsigned char t0_codeblock_u244[] = {
 	0x83, 0xFF, 0x7F, 0x15, 0x01, 0x83, 0xFF, 0x7E, 0x0D, 0x00
 };
 
-static const uint16_t t0_caddr_u244[] = {
+static const uint16_t t0_caddr_u243[] = {
 	0,
 	5,
 	10,
@@ -61789,30 +61619,30 @@ static const uint16_t t0_caddr_u244[] = {
 	2792
 };
 
-#define T0_INTERPRETED_u244   61
+#define T0_INTERPRETED_u243   61
 
-#define T0_ENTER_u244(ip, rp, slot)   do { \
+#define T0_ENTER_u243(ip, rp, slot)   do { \
 		const unsigned char *t0_newip; \
 		uint32_t t0_lnum; \
-		t0_newip = &t0_codeblock_u244[t0_caddr_u244[(slot) - T0_INTERPRETED_u244]]; \
-		t0_lnum = t0_parse7E_unsigned_u244(&t0_newip); \
+		t0_newip = &t0_codeblock_u243[t0_caddr_u243[(slot) - T0_INTERPRETED_u243]]; \
+		t0_lnum = t0_parse7E_unsigned_u243(&t0_newip); \
 		(rp) += t0_lnum; \
-		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u244[0]) + (t0_lnum << 16); \
+		*((rp) ++) = (uint32_t)((ip) - &t0_codeblock_u243[0]) + (t0_lnum << 16); \
 		(ip) = t0_newip; \
 	} while (0)
 
-#define T0_DEFENTRY_u244(name, slot) \
+#define T0_DEFENTRY_u243(name, slot) \
 void \
 name(void *ctx) \
 { \
-	t0_context_u244 *t0ctx = ctx; \
-	t0ctx->ip = &t0_codeblock_u244[0]; \
-	T0_ENTER_u244(t0ctx->ip, t0ctx->rp, slot); \
+	t0_context_u243 *t0ctx = ctx; \
+	t0ctx->ip = &t0_codeblock_u243[0]; \
+	T0_ENTER_u243(t0ctx->ip, t0ctx->rp, slot); \
 }
 
-T0_DEFENTRY_u244(br_x509_minimal_init_main, 147)
+T0_DEFENTRY_u243(br_x509_minimal_init_main, 147)
 
-#define T0_NEXT_u244(t0ipp)   (*(*(t0ipp)) ++)
+#define T0_NEXT_u243(t0ipp)   (*(*(t0ipp)) ++)
 
 void
 br_x509_minimal_run(void *t0ctx)
@@ -61820,234 +61650,234 @@ br_x509_minimal_run(void *t0ctx)
 	uint32_t *dp, *rp;
 	const unsigned char *ip;
 
-#define T0_LOCAL_u244(x)    (*(rp - 2 - (x)))
-#define T0_POP_u244()       (*-- dp)
-#define T0_POPi_u244()      (*(int32_t *)(-- dp))
-#define T0_PEEK_u244(x)     (*(dp - 1 - (x)))
-#define T0_PEEKi_u244(x)    (*(int32_t *)(dp - 1 - (x)))
-#define T0_PUSH_u244(v)     do { *dp = (v); dp ++; } while (0)
-#define T0_PUSHi_u244(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
-#define T0_RPOP_u244()      (*-- rp)
-#define T0_RPOPi_u244()     (*(int32_t *)(-- rp))
-#define T0_RPUSH_u244(v)    do { *rp = (v); rp ++; } while (0)
-#define T0_RPUSHi_u244(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
-#define T0_ROLL_u244(x)     do { \
+#define T0_LOCAL_u243(x)    (*(rp - 2 - (x)))
+#define T0_POP_u243()       (*-- dp)
+#define T0_POPi_u243()      (*(int32_t *)(-- dp))
+#define T0_PEEK_u243(x)     (*(dp - 1 - (x)))
+#define T0_PEEKi_u243(x)    (*(int32_t *)(dp - 1 - (x)))
+#define T0_PUSH_u243(v)     do { *dp = (v); dp ++; } while (0)
+#define T0_PUSHi_u243(v)    do { *(int32_t *)dp = (v); dp ++; } while (0)
+#define T0_RPOP_u243()      (*-- rp)
+#define T0_RPOPi_u243()     (*(int32_t *)(-- rp))
+#define T0_RPUSH_u243(v)    do { *rp = (v); rp ++; } while (0)
+#define T0_RPUSHi_u243(v)   do { *(int32_t *)rp = (v); rp ++; } while (0)
+#define T0_ROLL_u243(x)     do { \
 	size_t t0len = (size_t)(x); \
 	uint32_t t0tmp = *(dp - 1 - t0len); \
 	memmove(dp - t0len - 1, dp - t0len, t0len * sizeof *dp); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_SWAP_u244()      do { \
+#define T0_SWAP_u243()      do { \
 	uint32_t t0tmp = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_ROT_u244()       do { \
+#define T0_ROT_u243()       do { \
 	uint32_t t0tmp = *(dp - 3); \
 	*(dp - 3) = *(dp - 2); \
 	*(dp - 2) = *(dp - 1); \
 	*(dp - 1) = t0tmp; \
 } while (0)
-#define T0_NROT_u244()       do { \
+#define T0_NROT_u243()       do { \
 	uint32_t t0tmp = *(dp - 1); \
 	*(dp - 1) = *(dp - 2); \
 	*(dp - 2) = *(dp - 3); \
 	*(dp - 3) = t0tmp; \
 } while (0)
-#define T0_PICK_u244(x)      do { \
+#define T0_PICK_u243(x)      do { \
 	uint32_t t0depth = (x); \
-	T0_PUSH_u244(T0_PEEK_u244(t0depth)); \
+	T0_PUSH_u243(T0_PEEK_u243(t0depth)); \
 } while (0)
-#define T0_CO_u244()         do { \
+#define T0_CO_u243()         do { \
 	goto t0_exit; \
 } while (0)
-#define T0_RET_u244()        goto t0_next
+#define T0_RET_u243()        goto t0_next
 
-	dp = ((t0_context_u244 *)t0ctx)->dp;
-	rp = ((t0_context_u244 *)t0ctx)->rp;
-	ip = ((t0_context_u244 *)t0ctx)->ip;
+	dp = ((t0_context_u243 *)t0ctx)->dp;
+	rp = ((t0_context_u243 *)t0ctx)->rp;
+	ip = ((t0_context_u243 *)t0ctx)->ip;
 	goto t0_next;
 	for (;;) {
 		uint32_t t0x;
 
 	t0_next:
-		t0x = T0_NEXT_u244(&ip);
-		if (t0x < T0_INTERPRETED_u244) {
+		t0x = T0_NEXT_u243(&ip);
+		if (t0x < T0_INTERPRETED_u243) {
 			switch (t0x) {
 				int32_t t0off;
 
 			case 0: /* ret */
-				t0x = T0_RPOP_u244();
+				t0x = T0_RPOP_u243();
 				rp -= (t0x >> 16);
 				t0x &= 0xFFFF;
 				if (t0x == 0) {
 					ip = NULL;
 					goto t0_exit;
 				}
-				ip = &t0_codeblock_u244[t0x];
+				ip = &t0_codeblock_u243[t0x];
 				break;
 			case 1: /* literal constant */
-				T0_PUSHi_u244(t0_parse7E_signed_u244(&ip));
+				T0_PUSHi_u243(t0_parse7E_signed_u243(&ip));
 				break;
 			case 2: /* read local */
-				T0_PUSH_u244(T0_LOCAL_u244(t0_parse7E_unsigned_u244(&ip)));
+				T0_PUSH_u243(T0_LOCAL_u243(t0_parse7E_unsigned_u243(&ip)));
 				break;
 			case 3: /* write local */
-				T0_LOCAL_u244(t0_parse7E_unsigned_u244(&ip)) = T0_POP_u244();
+				T0_LOCAL_u243(t0_parse7E_unsigned_u243(&ip)) = T0_POP_u243();
 				break;
 			case 4: /* jump */
-				t0off = t0_parse7E_signed_u244(&ip);
+				t0off = t0_parse7E_signed_u243(&ip);
 				ip += t0off;
 				break;
 			case 5: /* jump if */
-				t0off = t0_parse7E_signed_u244(&ip);
-				if (T0_POP_u244()) {
+				t0off = t0_parse7E_signed_u243(&ip);
+				if (T0_POP_u243()) {
 					ip += t0off;
 				}
 				break;
 			case 6: /* jump if not */
-				t0off = t0_parse7E_signed_u244(&ip);
-				if (!T0_POP_u244()) {
+				t0off = t0_parse7E_signed_u243(&ip);
+				if (!T0_POP_u243()) {
 					ip += t0off;
 				}
 				break;
 			case 7: {
 				/* %25 */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSHi_u244(a % b);
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSHi_u243(a % b);
 
 				}
 				break;
 			case 8: {
 				/* * */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(a * b);
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(a * b);
 
 				}
 				break;
 			case 9: {
 				/* + */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(a + b);
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(a + b);
 
 				}
 				break;
 			case 10: {
 				/* - */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(a - b);
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(a - b);
 
 				}
 				break;
 			case 11: {
 				/* -rot */
- T0_NROT_u244(); 
+ T0_NROT_u243(); 
 				}
 				break;
 			case 12: {
 				/* / */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSHi_u244(a / b);
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSHi_u243(a / b);
 
 				}
 				break;
 			case 13: {
 				/* < */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSH_u244(-(uint32_t)(a < b));
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSH_u243(-(uint32_t)(a < b));
 
 				}
 				break;
 			case 14: {
 				/* << */
 
-	int c = (int)T0_POPi_u244();
-	uint32_t x = T0_POP_u244();
-	T0_PUSH_u244(x << c);
+	int c = (int)T0_POPi_u243();
+	uint32_t x = T0_POP_u243();
+	T0_PUSH_u243(x << c);
 
 				}
 				break;
 			case 15: {
 				/* <= */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSH_u244(-(uint32_t)(a <= b));
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSH_u243(-(uint32_t)(a <= b));
 
 				}
 				break;
 			case 16: {
 				/* <> */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(-(uint32_t)(a != b));
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(-(uint32_t)(a != b));
 
 				}
 				break;
 			case 17: {
 				/* = */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(-(uint32_t)(a == b));
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(-(uint32_t)(a == b));
 
 				}
 				break;
 			case 18: {
 				/* > */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSH_u244(-(uint32_t)(a > b));
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSH_u243(-(uint32_t)(a > b));
 
 				}
 				break;
 			case 19: {
 				/* >= */
 
-	int32_t b = T0_POPi_u244();
-	int32_t a = T0_POPi_u244();
-	T0_PUSH_u244(-(uint32_t)(a >= b));
+	int32_t b = T0_POPi_u243();
+	int32_t a = T0_POPi_u243();
+	T0_PUSH_u243(-(uint32_t)(a >= b));
 
 				}
 				break;
 			case 20: {
 				/* >> */
 
-	int c = (int)T0_POPi_u244();
-	int32_t x = T0_POPi_u244();
-	T0_PUSHi_u244(x >> c);
+	int c = (int)T0_POPi_u243();
+	int32_t x = T0_POPi_u243();
+	T0_PUSHi_u243(x >> c);
 
 				}
 				break;
 			case 21: {
 				/* and */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(a & b);
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(a & b);
 
 				}
 				break;
 			case 22: {
 				/* blobcopy */
 
-	size_t len = T0_POP_u244();
-	unsigned char *src = (unsigned char *)CTX_u244 + T0_POP_u244();
-	unsigned char *dst = (unsigned char *)CTX_u244 + T0_POP_u244();
+	size_t len = T0_POP_u243();
+	unsigned char *src = (unsigned char *)CTX_u243 + T0_POP_u243();
+	unsigned char *dst = (unsigned char *)CTX_u243 + T0_POP_u243();
 	memcpy(dst, src, len);
 
 				}
@@ -62057,32 +61887,32 @@ br_x509_minimal_run(void *t0ctx)
 
 	size_t u;
 
-	for (u = 0; u < CTX_u244->trust_anchors_num; u ++) {
+	for (u = 0; u < CTX_u243->trust_anchors_num; u ++) {
 		const br_x509_trust_anchor *ta;
 		unsigned char hashed_DN[64];
 		int kt;
 
-		ta = &CTX_u244->trust_anchors[u];
+		ta = &CTX_u243->trust_anchors[u];
 		if (ta->flags & BR_X509_TA_CA) {
 			continue;
 		}
-		hash_dn_u244(CTX_u244, ta->dn.data, ta->dn.len, hashed_DN);
-		if (memcmp(hashed_DN, CTX_u244->current_dn_hash, DNHASH_LEN_u244)) {
+		hash_dn_u243(CTX_u243, ta->dn.data, ta->dn.len, hashed_DN);
+		if (memcmp(hashed_DN, CTX_u243->current_dn_hash, DNHASH_LEN_u243)) {
 			continue;
 		}
-		kt = CTX_u244->pkey.key_type;
+		kt = CTX_u243->pkey.key_type;
 		if ((ta->pkey.key_type & 0x0F) != kt) {
 			continue;
 		}
 		switch (kt) {
 
 		case BR_KEYTYPE_RSA:
-			if (!eqbigint_u244(CTX_u244->pkey.key.rsa.n,
-				CTX_u244->pkey.key.rsa.nlen,
+			if (!eqbigint_u243(CTX_u243->pkey.key.rsa.n,
+				CTX_u243->pkey.key.rsa.nlen,
 				ta->pkey.key.rsa.n,
 				ta->pkey.key.rsa.nlen)
-				|| !eqbigint_u244(CTX_u244->pkey.key.rsa.e,
-				CTX_u244->pkey.key.rsa.elen,
+				|| !eqbigint_u243(CTX_u243->pkey.key.rsa.e,
+				CTX_u243->pkey.key.rsa.elen,
 				ta->pkey.key.rsa.e,
 				ta->pkey.key.rsa.elen))
 			{
@@ -62091,9 +61921,9 @@ br_x509_minimal_run(void *t0ctx)
 			break;
 
 		case BR_KEYTYPE_EC:
-			if (CTX_u244->pkey.key.ec.curve != ta->pkey.key.ec.curve
-				|| CTX_u244->pkey.key.ec.qlen != ta->pkey.key.ec.qlen
-				|| memcmp(CTX_u244->pkey.key.ec.q,
+			if (CTX_u243->pkey.key.ec.curve != ta->pkey.key.ec.curve
+				|| CTX_u243->pkey.key.ec.qlen != ta->pkey.key.ec.qlen
+				|| memcmp(CTX_u243->pkey.key.ec.q,
 					ta->pkey.key.ec.q,
 					ta->pkey.key.ec.qlen) != 0)
 			{
@@ -62108,8 +61938,8 @@ br_x509_minimal_run(void *t0ctx)
 		/*
 		 * Direct trust match!
 		 */
-		CTX_u244->err = BR_ERR_X509_OK;
-		T0_CO_u244();
+		CTX_u243->err = BR_ERR_X509_OK;
+		T0_CO_u243();
 	}
 
 				}
@@ -62119,21 +61949,21 @@ br_x509_minimal_run(void *t0ctx)
 
 	size_t u;
 
-	for (u = 0; u < CTX_u244->trust_anchors_num; u ++) {
+	for (u = 0; u < CTX_u243->trust_anchors_num; u ++) {
 		const br_x509_trust_anchor *ta;
 		unsigned char hashed_DN[64];
 
-		ta = &CTX_u244->trust_anchors[u];
+		ta = &CTX_u243->trust_anchors[u];
 		if (!(ta->flags & BR_X509_TA_CA)) {
 			continue;
 		}
-		hash_dn_u244(CTX_u244, ta->dn.data, ta->dn.len, hashed_DN);
-		if (memcmp(hashed_DN, CTX_u244->saved_dn_hash, DNHASH_LEN_u244)) {
+		hash_dn_u243(CTX_u243, ta->dn.data, ta->dn.len, hashed_DN);
+		if (memcmp(hashed_DN, CTX_u243->saved_dn_hash, DNHASH_LEN_u243)) {
 			continue;
 		}
-		if (verify_signature_u244(CTX_u244, &ta->pkey) == 0) {
-			CTX_u244->err = BR_ERR_X509_OK;
-			T0_CO_u244();
+		if (verify_signature_u243(CTX_u243, &ta->pkey) == 0) {
+			CTX_u243->err = BR_ERR_X509_OK;
+			T0_CO_u243();
 		}
 	}
 
@@ -62141,69 +61971,69 @@ br_x509_minimal_run(void *t0ctx)
 				break;
 			case 25: {
 				/* co */
- T0_CO_u244(); 
+ T0_CO_u243(); 
 				}
 				break;
 			case 26: {
 				/* compute-dn-hash */
 
-	CTX_u244->dn_hash_impl->out(&CTX_u244->dn_hash.vtable, CTX_u244->current_dn_hash);
-	CTX_u244->do_dn_hash = 0;
+	CTX_u243->dn_hash_impl->out(&CTX_u243->dn_hash.vtable, CTX_u243->current_dn_hash);
+	CTX_u243->do_dn_hash = 0;
 
 				}
 				break;
 			case 27: {
 				/* compute-tbs-hash */
 
-	int id = T0_POPi_u244();
+	int id = T0_POPi_u243();
 	size_t len;
-	len = br_multihash_out(&CTX_u244->mhash, id, CTX_u244->tbs_hash);
-	T0_PUSH_u244(len);
+	len = br_multihash_out(&CTX_u243->mhash, id, CTX_u243->tbs_hash);
+	T0_PUSH_u243(len);
 
 				}
 				break;
 			case 28: {
 				/* copy-ee-ec-pkey */
 
-	size_t qlen = T0_POP_u244();
-	uint32_t curve = T0_POP_u244();
-	memcpy(CTX_u244->ee_pkey_data, CTX_u244->pkey_data, qlen);
-	CTX_u244->pkey.key_type = BR_KEYTYPE_EC;
-	CTX_u244->pkey.key.ec.curve = curve;
-	CTX_u244->pkey.key.ec.q = CTX_u244->ee_pkey_data;
-	CTX_u244->pkey.key.ec.qlen = qlen;
+	size_t qlen = T0_POP_u243();
+	uint32_t curve = T0_POP_u243();
+	memcpy(CTX_u243->ee_pkey_data, CTX_u243->pkey_data, qlen);
+	CTX_u243->pkey.key_type = BR_KEYTYPE_EC;
+	CTX_u243->pkey.key.ec.curve = curve;
+	CTX_u243->pkey.key.ec.q = CTX_u243->ee_pkey_data;
+	CTX_u243->pkey.key.ec.qlen = qlen;
 
 				}
 				break;
 			case 29: {
 				/* copy-ee-rsa-pkey */
 
-	size_t elen = T0_POP_u244();
-	size_t nlen = T0_POP_u244();
-	memcpy(CTX_u244->ee_pkey_data, CTX_u244->pkey_data, nlen + elen);
-	CTX_u244->pkey.key_type = BR_KEYTYPE_RSA;
-	CTX_u244->pkey.key.rsa.n = CTX_u244->ee_pkey_data;
-	CTX_u244->pkey.key.rsa.nlen = nlen;
-	CTX_u244->pkey.key.rsa.e = CTX_u244->ee_pkey_data + nlen;
-	CTX_u244->pkey.key.rsa.elen = elen;
+	size_t elen = T0_POP_u243();
+	size_t nlen = T0_POP_u243();
+	memcpy(CTX_u243->ee_pkey_data, CTX_u243->pkey_data, nlen + elen);
+	CTX_u243->pkey.key_type = BR_KEYTYPE_RSA;
+	CTX_u243->pkey.key.rsa.n = CTX_u243->ee_pkey_data;
+	CTX_u243->pkey.key.rsa.nlen = nlen;
+	CTX_u243->pkey.key.rsa.e = CTX_u243->ee_pkey_data + nlen;
+	CTX_u243->pkey.key.rsa.elen = elen;
 
 				}
 				break;
 			case 30: {
 				/* copy-name-SAN */
 
-	unsigned tag = T0_POP_u244();
-	unsigned ok = T0_POP_u244();
+	unsigned tag = T0_POP_u243();
+	unsigned ok = T0_POP_u243();
 	size_t u, len;
 
-	len = CTX_u244->pad[0];
-	for (u = 0; u < CTX_u244->num_name_elts; u ++) {
+	len = CTX_u243->pad[0];
+	for (u = 0; u < CTX_u243->num_name_elts; u ++) {
 		br_name_element *ne;
 
-		ne = &CTX_u244->name_elts[u];
+		ne = &CTX_u243->name_elts[u];
 		if (ne->status == 0 && ne->oid[0] == 0 && ne->oid[1] == tag) {
 			if (ok && ne->len > len) {
-				memcpy(ne->buf, CTX_u244->pad + 1, len);
+				memcpy(ne->buf, CTX_u243->pad + 1, len);
 				ne->buf[len] = 0;
 				ne->status = 1;
 			} else {
@@ -62219,16 +62049,16 @@ br_x509_minimal_run(void *t0ctx)
 				/* copy-name-element */
 
 	size_t len;
-	int32_t off = T0_POPi_u244();
-	int ok = T0_POPi_u244();
+	int32_t off = T0_POPi_u243();
+	int ok = T0_POPi_u243();
 
 	if (off >= 0) {
-		br_name_element *ne = &CTX_u244->name_elts[off];
+		br_name_element *ne = &CTX_u243->name_elts[off];
 
 		if (ok) {
-			len = CTX_u244->pad[0];
+			len = CTX_u243->pad[0];
 			if (len < ne->len) {
-				memcpy(ne->buf, CTX_u244->pad + 1, len);
+				memcpy(ne->buf, CTX_u243->pad + 1, len);
 				ne->buf[len] = 0;
 				ne->status = 1;
 			} else {
@@ -62244,64 +62074,64 @@ br_x509_minimal_run(void *t0ctx)
 			case 32: {
 				/* data-get8 */
 
-	size_t addr = T0_POP_u244();
-	T0_PUSH_u244(t0_datablock_u244[addr]);
+	size_t addr = T0_POP_u243();
+	T0_PUSH_u243(t0_datablock_u243[addr]);
 
 				}
 				break;
 			case 33: {
 				/* dn-hash-length */
 
-	T0_PUSH_u244(DNHASH_LEN_u244);
+	T0_PUSH_u243(DNHASH_LEN_u243);
 
 				}
 				break;
 			case 34: {
 				/* do-ecdsa-vrfy */
 
-	size_t qlen = T0_POP_u244();
-	int curve = T0_POP_u244();
+	size_t qlen = T0_POP_u243();
+	int curve = T0_POP_u243();
 	br_x509_pkey pk;
 
 	pk.key_type = BR_KEYTYPE_EC;
 	pk.key.ec.curve = curve;
-	pk.key.ec.q = CTX_u244->pkey_data;
+	pk.key.ec.q = CTX_u243->pkey_data;
 	pk.key.ec.qlen = qlen;
-	T0_PUSH_u244(verify_signature_u244(CTX_u244, &pk));
+	T0_PUSH_u243(verify_signature_u243(CTX_u243, &pk));
 
 				}
 				break;
 			case 35: {
 				/* do-rsa-vrfy */
 
-	size_t elen = T0_POP_u244();
-	size_t nlen = T0_POP_u244();
+	size_t elen = T0_POP_u243();
+	size_t nlen = T0_POP_u243();
 	br_x509_pkey pk;
 
 	pk.key_type = BR_KEYTYPE_RSA;
-	pk.key.rsa.n = CTX_u244->pkey_data;
+	pk.key.rsa.n = CTX_u243->pkey_data;
 	pk.key.rsa.nlen = nlen;
-	pk.key.rsa.e = CTX_u244->pkey_data + nlen;
+	pk.key.rsa.e = CTX_u243->pkey_data + nlen;
 	pk.key.rsa.elen = elen;
-	T0_PUSH_u244(verify_signature_u244(CTX_u244, &pk));
+	T0_PUSH_u243(verify_signature_u243(CTX_u243, &pk));
 
 				}
 				break;
 			case 36: {
 				/* drop */
- (void)T0_POP_u244(); 
+ (void)T0_POP_u243(); 
 				}
 				break;
 			case 37: {
 				/* dup */
- T0_PUSH_u244(T0_PEEK_u244(0)); 
+ T0_PUSH_u243(T0_PEEK_u243(0)); 
 				}
 				break;
 			case 38: {
 				/* eqOID */
 
-	const unsigned char *a2 = &t0_datablock_u244[T0_POP_u244()];
-	const unsigned char *a1 = &CTX_u244->pad[0];
+	const unsigned char *a2 = &t0_datablock_u243[T0_POP_u243()];
+	const unsigned char *a1 = &CTX_u243->pad[0];
 	size_t len = a1[0];
 	int x;
 	if (len == a2[0]) {
@@ -62309,37 +62139,37 @@ br_x509_minimal_run(void *t0ctx)
 	} else {
 		x = 0;
 	}
-	T0_PUSH_u244((uint32_t)x);
+	T0_PUSH_u243((uint32_t)x);
 
 				}
 				break;
 			case 39: {
 				/* eqblob */
 
-	size_t len = T0_POP_u244();
-	const unsigned char *a2 = (const unsigned char *)CTX_u244 + T0_POP_u244();
-	const unsigned char *a1 = (const unsigned char *)CTX_u244 + T0_POP_u244();
-	T0_PUSHi_u244(-(memcmp(a1, a2, len) == 0));
+	size_t len = T0_POP_u243();
+	const unsigned char *a2 = (const unsigned char *)CTX_u243 + T0_POP_u243();
+	const unsigned char *a1 = (const unsigned char *)CTX_u243 + T0_POP_u243();
+	T0_PUSHi_u243(-(memcmp(a1, a2, len) == 0));
 
 				}
 				break;
 			case 40: {
 				/* fail */
 
-	CTX_u244->err = T0_POPi_u244();
-	T0_CO_u244();
+	CTX_u243->err = T0_POPi_u243();
+	T0_CO_u243();
 
 				}
 				break;
 			case 41: {
 				/* get-system-date */
 
-	if (CTX_u244->days == 0 && CTX_u244->seconds == 0) {
+	if (CTX_u243->days == 0 && CTX_u243->seconds == 0) {
 #if BR_USE_UNIX_TIME
 		time_t x = time(NULL);
 
-		T0_PUSH_u244((uint32_t)(x / 86400) + 719528);
-		T0_PUSH_u244((uint32_t)(x % 86400));
+		T0_PUSH_u243((uint32_t)(x / 86400) + 719528);
+		T0_PUSH_u243((uint32_t)(x % 86400));
 #elif BR_USE_WIN32_TIME
 		FILETIME ft;
 		uint64_t x;
@@ -62348,15 +62178,15 @@ br_x509_minimal_run(void *t0ctx)
 		x = ((uint64_t)ft.dwHighDateTime << 32)
 			+ (uint64_t)ft.dwLowDateTime;
 		x = (x / 10000000);
-		T0_PUSH_u244((uint32_t)(x / 86400) + 584754);
-		T0_PUSH_u244((uint32_t)(x % 86400));
+		T0_PUSH_u243((uint32_t)(x / 86400) + 584754);
+		T0_PUSH_u243((uint32_t)(x % 86400));
 #else
-		CTX_u244->err = BR_ERR_X509_TIME_UNKNOWN;
-		T0_CO_u244();
+		CTX_u243->err = BR_ERR_X509_TIME_UNKNOWN;
+		T0_CO_u243();
 #endif
 	} else {
-		T0_PUSH_u244(CTX_u244->days);
-		T0_PUSH_u244(CTX_u244->seconds);
+		T0_PUSH_u243(CTX_u243->days);
+		T0_PUSH_u243(CTX_u243->seconds);
 	}
 
 				}
@@ -62364,16 +62194,16 @@ br_x509_minimal_run(void *t0ctx)
 			case 42: {
 				/* get16 */
 
-	uint32_t addr = T0_POP_u244();
-	T0_PUSH_u244(*(uint16_t *)(void *)((unsigned char *)CTX_u244 + addr));
+	uint32_t addr = T0_POP_u243();
+	T0_PUSH_u243(*(uint16_t *)(void *)((unsigned char *)CTX_u243 + addr));
 
 				}
 				break;
 			case 43: {
 				/* get32 */
 
-	uint32_t addr = T0_POP_u244();
-	T0_PUSH_u244(*(uint32_t *)(void *)((unsigned char *)CTX_u244 + addr));
+	uint32_t addr = T0_POP_u243();
+	T0_PUSH_u243(*(uint32_t *)(void *)((unsigned char *)CTX_u243 + addr));
 
 				}
 				break;
@@ -62382,56 +62212,56 @@ br_x509_minimal_run(void *t0ctx)
 
 	size_t n1, n2;
 
-	if (CTX_u244->server_name == NULL) {
-		T0_PUSH_u244(0);
-		T0_RET_u244();
+	if (CTX_u243->server_name == NULL) {
+		T0_PUSH_u243(0);
+		T0_RET_u243();
 	}
-	n1 = strlen(CTX_u244->server_name);
-	n2 = CTX_u244->pad[0];
-	if (n1 == n2 && eqnocase_u244(&CTX_u244->pad[1], CTX_u244->server_name, n1)) {
-		T0_PUSHi_u244(-1);
-		T0_RET_u244();
+	n1 = strlen(CTX_u243->server_name);
+	n2 = CTX_u243->pad[0];
+	if (n1 == n2 && eqnocase_u243(&CTX_u243->pad[1], CTX_u243->server_name, n1)) {
+		T0_PUSHi_u243(-1);
+		T0_RET_u243();
 	}
-	if (n2 >= 2 && CTX_u244->pad[1] == '*' && CTX_u244->pad[2] == '.') {
+	if (n2 >= 2 && CTX_u243->pad[1] == '*' && CTX_u243->pad[2] == '.') {
 		size_t u;
 
 		u = 0;
-		while (u < n1 && CTX_u244->server_name[u] != '.') {
+		while (u < n1 && CTX_u243->server_name[u] != '.') {
 			u ++;
 		}
 		u ++;
 		n1 -= u;
 		if ((n2 - 2) == n1
-			&& eqnocase_u244(&CTX_u244->pad[3], CTX_u244->server_name + u, n1))
+			&& eqnocase_u243(&CTX_u243->pad[3], CTX_u243->server_name + u, n1))
 		{
-			T0_PUSHi_u244(-1);
-			T0_RET_u244();
+			T0_PUSHi_u243(-1);
+			T0_RET_u243();
 		}
 	}
-	T0_PUSH_u244(0);
+	T0_PUSH_u243(0);
 
 				}
 				break;
 			case 45: {
 				/* neg */
 
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(-a);
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(-a);
 
 				}
 				break;
 			case 46: {
 				/* offset-name-element */
 
-	unsigned san = T0_POP_u244();
+	unsigned san = T0_POP_u243();
 	size_t u;
 
-	for (u = 0; u < CTX_u244->num_name_elts; u ++) {
-		if (CTX_u244->name_elts[u].status == 0) {
+	for (u = 0; u < CTX_u243->num_name_elts; u ++) {
+		if (CTX_u243->name_elts[u].status == 0) {
 			const unsigned char *oid;
 			size_t len, off;
 
-			oid = CTX_u244->name_elts[u].oid;
+			oid = CTX_u243->name_elts[u].oid;
 			if (san) {
 				if (oid[0] != 0 || oid[1] != 0) {
 					continue;
@@ -62441,157 +62271,157 @@ br_x509_minimal_run(void *t0ctx)
 				off = 0;
 			}
 			len = oid[off];
-			if (len != 0 && len == CTX_u244->pad[0]
+			if (len != 0 && len == CTX_u243->pad[0]
 				&& memcmp(oid + off + 1,
-					CTX_u244->pad + 1, len) == 0)
+					CTX_u243->pad + 1, len) == 0)
 			{
-				T0_PUSH_u244(u);
-				T0_RET_u244();
+				T0_PUSH_u243(u);
+				T0_RET_u243();
 			}
 		}
 	}
-	T0_PUSHi_u244(-1);
+	T0_PUSHi_u243(-1);
 
 				}
 				break;
 			case 47: {
 				/* or */
 
-	uint32_t b = T0_POP_u244();
-	uint32_t a = T0_POP_u244();
-	T0_PUSH_u244(a | b);
+	uint32_t b = T0_POP_u243();
+	uint32_t a = T0_POP_u243();
+	T0_PUSH_u243(a | b);
 
 				}
 				break;
 			case 48: {
 				/* over */
- T0_PUSH_u244(T0_PEEK_u244(1)); 
+ T0_PUSH_u243(T0_PEEK_u243(1)); 
 				}
 				break;
 			case 49: {
 				/* read-blob-inner */
 
-	uint32_t len = T0_POP_u244();
-	uint32_t addr = T0_POP_u244();
-	size_t clen = CTX_u244->hlen;
+	uint32_t len = T0_POP_u243();
+	uint32_t addr = T0_POP_u243();
+	size_t clen = CTX_u243->hlen;
 	if (clen > len) {
 		clen = (size_t)len;
 	}
 	if (addr != 0) {
-		memcpy((unsigned char *)CTX_u244 + addr, CTX_u244->hbuf, clen);
+		memcpy((unsigned char *)CTX_u243 + addr, CTX_u243->hbuf, clen);
 	}
-	if (CTX_u244->do_mhash) {
-		br_multihash_update(&CTX_u244->mhash, CTX_u244->hbuf, clen);
+	if (CTX_u243->do_mhash) {
+		br_multihash_update(&CTX_u243->mhash, CTX_u243->hbuf, clen);
 	}
-	if (CTX_u244->do_dn_hash) {
-		CTX_u244->dn_hash_impl->update(
-			&CTX_u244->dn_hash.vtable, CTX_u244->hbuf, clen);
+	if (CTX_u243->do_dn_hash) {
+		CTX_u243->dn_hash_impl->update(
+			&CTX_u243->dn_hash.vtable, CTX_u243->hbuf, clen);
 	}
-	CTX_u244->hbuf += clen;
-	CTX_u244->hlen -= clen;
-	T0_PUSH_u244(addr + clen);
-	T0_PUSH_u244(len - clen);
+	CTX_u243->hbuf += clen;
+	CTX_u243->hlen -= clen;
+	T0_PUSH_u243(addr + clen);
+	T0_PUSH_u243(len - clen);
 
 				}
 				break;
 			case 50: {
 				/* read8-low */
 
-	if (CTX_u244->hlen == 0) {
-		T0_PUSHi_u244(-1);
+	if (CTX_u243->hlen == 0) {
+		T0_PUSHi_u243(-1);
 	} else {
-		unsigned char x = *CTX_u244->hbuf ++;
-		if (CTX_u244->do_mhash) {
-			br_multihash_update(&CTX_u244->mhash, &x, 1);
+		unsigned char x = *CTX_u243->hbuf ++;
+		if (CTX_u243->do_mhash) {
+			br_multihash_update(&CTX_u243->mhash, &x, 1);
 		}
-		if (CTX_u244->do_dn_hash) {
-			CTX_u244->dn_hash_impl->update(&CTX_u244->dn_hash.vtable, &x, 1);
+		if (CTX_u243->do_dn_hash) {
+			CTX_u243->dn_hash_impl->update(&CTX_u243->dn_hash.vtable, &x, 1);
 		}
-		CTX_u244->hlen --;
-		T0_PUSH_u244(x);
+		CTX_u243->hlen --;
+		T0_PUSH_u243(x);
 	}
 
 				}
 				break;
 			case 51: {
 				/* roll */
- T0_ROLL_u244(T0_POP_u244()); 
+ T0_ROLL_u243(T0_POP_u243()); 
 				}
 				break;
 			case 52: {
 				/* rot */
- T0_ROT_u244(); 
+ T0_ROT_u243(); 
 				}
 				break;
 			case 53: {
 				/* set16 */
 
-	uint32_t addr = T0_POP_u244();
-	*(uint16_t *)(void *)((unsigned char *)CTX_u244 + addr) = T0_POP_u244();
+	uint32_t addr = T0_POP_u243();
+	*(uint16_t *)(void *)((unsigned char *)CTX_u243 + addr) = T0_POP_u243();
 
 				}
 				break;
 			case 54: {
 				/* set32 */
 
-	uint32_t addr = T0_POP_u244();
-	*(uint32_t *)(void *)((unsigned char *)CTX_u244 + addr) = T0_POP_u244();
+	uint32_t addr = T0_POP_u243();
+	*(uint32_t *)(void *)((unsigned char *)CTX_u243 + addr) = T0_POP_u243();
 
 				}
 				break;
 			case 55: {
 				/* set8 */
 
-	uint32_t addr = T0_POP_u244();
-	*((unsigned char *)CTX_u244 + addr) = (unsigned char)T0_POP_u244();
+	uint32_t addr = T0_POP_u243();
+	*((unsigned char *)CTX_u243 + addr) = (unsigned char)T0_POP_u243();
 
 				}
 				break;
 			case 56: {
 				/* start-dn-hash */
 
-	CTX_u244->dn_hash_impl->init(&CTX_u244->dn_hash.vtable);
-	CTX_u244->do_dn_hash = 1;
+	CTX_u243->dn_hash_impl->init(&CTX_u243->dn_hash.vtable);
+	CTX_u243->do_dn_hash = 1;
 
 				}
 				break;
 			case 57: {
 				/* start-tbs-hash */
 
-	br_multihash_init(&CTX_u244->mhash);
-	CTX_u244->do_mhash = 1;
+	br_multihash_init(&CTX_u243->mhash);
+	CTX_u243->do_mhash = 1;
 
 				}
 				break;
 			case 58: {
 				/* stop-tbs-hash */
 
-	CTX_u244->do_mhash = 0;
+	CTX_u243->do_mhash = 0;
 
 				}
 				break;
 			case 59: {
 				/* swap */
- T0_SWAP_u244(); 
+ T0_SWAP_u243(); 
 				}
 				break;
 			case 60: {
 				/* zero-server-name */
 
-	T0_PUSHi_u244(-(CTX_u244->server_name == NULL));
+	T0_PUSHi_u243(-(CTX_u243->server_name == NULL));
 
 				}
 				break;
 			}
 
 		} else {
-			T0_ENTER_u244(ip, rp, t0x);
+			T0_ENTER_u243(ip, rp, t0x);
 		}
 	}
 t0_exit:
-	((t0_context_u244 *)t0ctx)->dp = dp;
-	((t0_context_u244 *)t0ctx)->rp = rp;
-	((t0_context_u244 *)t0ctx)->ip = ip;
+	((t0_context_u243 *)t0ctx)->dp = dp;
+	((t0_context_u243 *)t0ctx)->rp = rp;
+	((t0_context_u243 *)t0ctx)->ip = ip;
 }
 
 
@@ -62602,7 +62432,7 @@ t0_exit:
  * type. Returned value is either 0 on success, or a non-zero error code.
  */
 static int
-verify_signature_u244(br_x509_minimal_context *ctx, const br_x509_pkey *pk)
+verify_signature_u243(br_x509_minimal_context *ctx, const br_x509_pkey *pk)
 {
 	int kt;
 
@@ -62618,7 +62448,7 @@ verify_signature_u244(br_x509_minimal_context *ctx, const br_x509_pkey *pk)
 			return BR_ERR_X509_UNSUPPORTED;
 		}
 		if (!ctx->irsa(ctx->cert_sig, ctx->cert_sig_len,
-			&t0_datablock_u244[ctx->cert_sig_hash_oid],
+			&t0_datablock_u243[ctx->cert_sig_hash_oid],
 			ctx->cert_sig_hash_len, &pk->key.rsa, tmp))
 		{
 			return BR_ERR_X509_BAD_SIGNATURE;
@@ -62684,7 +62514,7 @@ br_x509_minimal_init_full(br_x509_minimal_context *xc,
 	 * Note: the X.509 validation engine will nonetheless refuse to
 	 * validate signatures that use MD5 as hash function.
 	 */
-	static const br_hash_class *hashes_u245[] = {
+	static const br_hash_class *hashes_u244[] = {
 		&br_md5_vtable,
 		&br_sha1_vtable,
 		&br_sha224_vtable,
@@ -62703,7 +62533,7 @@ br_x509_minimal_init_full(br_x509_minimal_context *xc,
 	for (id = br_md5_ID; id <= br_sha512_ID; id ++) {
 		const br_hash_class *hc;
 
-		hc = hashes_u245[id - 1];
+		hc = hashes_u244[id - 1];
 		br_x509_minimal_set_hash(xc, id, hc);
 	}
 }
@@ -62735,7 +62565,7 @@ br_x509_minimal_init_full(br_x509_minimal_context *xc,
  */
 
 
-static const br_config_option config_u246[] = {
+static const br_config_option config_u245[] = {
 	{ "BR_64",
 #if BR_64
 	 1
@@ -63013,5 +62843,5 @@ static const br_config_option config_u246[] = {
 const br_config_option *
 br_get_config(void)
 {
-	return config_u246;
+	return config_u245;
 }

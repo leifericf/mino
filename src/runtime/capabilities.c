@@ -80,6 +80,8 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_STORE,       mino_install_store           },
     { MINO_CAP_JSON,        mino_install_clojure_data_json },
     { MINO_CAP_NET,         mino_install_net             },
+    /* Same bit as net: TLS rides the net capability (ADR 20). */
+    { MINO_CAP_NET,         mino_install_tls             },
 };
 
 #define K_CAP_DISPATCH_COUNT \

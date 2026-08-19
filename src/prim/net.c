@@ -168,9 +168,9 @@ static mino_net_sock_t *net_sock_arg(mino_state *S, mino_val *v,
 
 /* Read an optional non-negative ms timeout out of opts under key.
  * Falls back to def when absent. Throws eval/contract on a negative
- * or non-integer value. Returns 0 on success. */
-static int net_opt_ms(mino_state *S, mino_val *opts, const char *key,
-                      long long def, long long *out)
+ * or non-integer value. Returns 0 on success. Shared with tls.c. */
+int net_opt_ms(mino_state *S, mino_val *opts, const char *key,
+               long long def, long long *out)
 {
     mino_val *v;
     long long    ms;
@@ -314,9 +314,10 @@ static int net_wait_connected(mino_state *S, mino_net_fd_t fd,
 }
 
 /* (net-connect host port [opts]) -> net-socket handle.
- * opts keys :connect-timeout / :read-timeout / :write-timeout (ms). */
-static mino_val *prim_net_connect(mino_state *S, mino_val *args,
-                                  mino_env *env)
+ * opts keys :connect-timeout / :read-timeout / :write-timeout (ms).
+ * Cross-TU: tls.c calls it for its host+port convenience arity. */
+mino_val *prim_net_connect(mino_state *S, mino_val *args,
+                           mino_env *env)
 {
     mino_val *host_val, *port_val, *opts = NULL;
     mino_val *hv;
@@ -513,34 +514,32 @@ static mino_val *prim_net_connect(mino_state *S, mino_val *args,
 
 /* ---- read ---- */
 
-/* Single recv of up to n bytes into a malloc'd buffer. Returns:
+/* Single recv of up to n bytes into buf. Returns:
  *   1  got 1..*got bytes
  *   0  clean EOF before any byte
  *  -1  error (kind/code/msg filled) */
-static int net_recv_once(mino_state *S, mino_net_sock_t *sock,
-                         unsigned char *buf, size_t n, size_t *got,
-                         const char **kind, const char **code, char *msg,
-                         size_t msg_cap)
+static int net_recv_fd(mino_state *S, mino_net_fd_t fd, long long read_ms,
+                       unsigned char *buf, size_t n, size_t *got,
+                       const char **kind, const char **code, char *msg,
+                       size_t msg_cap)
 {
     for (;;) {
         int rc;
         int depth = mino_yield_lock(S);
 #ifdef _WIN32
-        rc = recv(sock->fd, (char *)buf, (int)n, 0);
+        rc = recv(fd, (char *)buf, (int)n, 0);
         mino_resume_lock(S, depth);
         if (rc == SOCKET_ERROR) {
             int e = WSAGetLastError();
             if (e == WSAEINTR) continue;
             if (e == WSAETIMEDOUT) {
                 snprintf(msg, msg_cap,
-                         "net-read: timed out after %lld ms",
-                         sock->read_timeout_ms);
+                         "read timed out after %lld ms", read_ms);
                 *kind = "net/timeout";
                 *code = "MNE003";
                 return -1;
             }
-            snprintf(msg, msg_cap, "net-read: read failed: winsock error %d",
-                     e);
+            snprintf(msg, msg_cap, "read failed: winsock error %d", e);
             *kind = "net";
             *code = "MNE004";
             return -1;
@@ -548,21 +547,19 @@ static int net_recv_once(mino_state *S, mino_net_sock_t *sock,
 #else
         ssize_t r;
         rc = 0;
-        r = recv(sock->fd, buf, n, 0);
+        r = recv(fd, buf, n, 0);
         mino_resume_lock(S, depth);
         if (r < 0) {
             if (errno == EINTR) continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 /* Blocking fd + SO_RCVTIMEO: EAGAIN marks expiry. */
                 snprintf(msg, msg_cap,
-                         "net-read: timed out after %lld ms",
-                         sock->read_timeout_ms);
+                         "read timed out after %lld ms", read_ms);
                 *kind = "net/timeout";
                 *code = "MNE003";
                 return -1;
             }
-            snprintf(msg, msg_cap, "net-read: read failed: %s",
-                     strerror(errno));
+            snprintf(msg, msg_cap, "read failed: %s", strerror(errno));
             *kind = "net";
             *code = "MNE004";
             return -1;
@@ -576,6 +573,16 @@ static int net_recv_once(mino_state *S, mino_net_sock_t *sock,
         *got = (size_t)rc;
         return 1;
     }
+}
+
+/* Thin socket-record wrapper used by the net prims. */
+static int net_recv_once(mino_state *S, mino_net_sock_t *sock,
+                         unsigned char *buf, size_t n, size_t *got,
+                         const char **kind, const char **code, char *msg,
+                         size_t msg_cap)
+{
+    return net_recv_fd(S, sock->fd, sock->read_timeout_ms, buf, n, got,
+                       kind, code, msg, msg_cap);
 }
 
 /* (net-read sock n) -> up to n bytes as soon as any arrive; nil on
@@ -752,6 +759,61 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
 #  define NET_SEND_FLAGS 0
 #endif
 
+/* Send the whole buffer, looping over partial sends. Returns 0 on
+ * success, -1 on error (kind/code/msg filled). */
+static int net_send_all_fd(mino_state *S, mino_net_fd_t fd,
+                           const unsigned char *data, size_t len,
+                           long long write_ms, const char **kind,
+                           const char **code, char *msg, size_t msg_cap)
+{
+    size_t sent = 0;
+    while (sent < len) {
+        int rc;
+        int depth = mino_yield_lock(S);
+#ifdef _WIN32
+        rc = send(fd, (const char *)data + sent, (int)(len - sent), 0);
+        mino_resume_lock(S, depth);
+        if (rc == SOCKET_ERROR) {
+            int e = WSAGetLastError();
+            if (e == WSAEINTR) continue;
+            if (e == WSAETIMEDOUT) {
+                snprintf(msg, msg_cap, "write timed out after %lld ms",
+                         write_ms);
+                *kind = "net/timeout";
+                *code = "MNE003";
+                return -1;
+            }
+            snprintf(msg, msg_cap, "write failed: winsock error %d", e);
+            *kind = "net";
+            *code = "MNE004";
+            return -1;
+        }
+#else
+        ssize_t r;
+        rc = 0;
+        r = send(fd, data + sent, len - sent, NET_SEND_FLAGS);
+        mino_resume_lock(S, depth);
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                snprintf(msg, msg_cap, "write timed out after %lld ms",
+                         write_ms);
+                *kind = "net/timeout";
+                *code = "MNE003";
+                return -1;
+            }
+            snprintf(msg, msg_cap, "write failed: %s", strerror(errno));
+            *kind = "net";
+            *code = "MNE004";
+            return -1;
+        }
+        rc = (int)r;
+#endif
+        sent += (size_t)rc;
+    }
+    return 0;
+}
+
 /* (net-write sock data) -> byte count written. data is a string
  * (UTF-8 bytes) or bytes. Blocks until every byte is written, the
  * write timeout expires, or the connection fails. */
@@ -760,7 +822,9 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
     mino_val *sock_val, *data_val;
     mino_net_sock_t *sock;
     const unsigned char *data;
-    size_t len, sent = 0;
+    size_t len;
+    const char *kind = "net", *code = "MNE004";
+    char msg[200];
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -788,58 +852,17 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
                                      "bytes");
     }
 
-    while (sent < len) {
-        int rc;
-        int depth = mino_yield_lock(S);
-#ifdef _WIN32
-        rc = send(sock->fd, (const char *)data + sent, (int)(len - sent),
-                  0);
-        mino_resume_lock(S, depth);
-        if (rc == SOCKET_ERROR) {
-            int e = WSAGetLastError();
-            if (e == WSAEINTR) continue;
-            if (e == WSAETIMEDOUT) {
-                char msg[160];
-                snprintf(msg, sizeof(msg),
-                         "net-write: timed out after %lld ms",
-                         sock->write_timeout_ms);
-                return prim_throw_classified(S, "net/timeout", "MNE003",
-                                             msg);
-            }
-            {
-                char msg[200];
-                snprintf(msg, sizeof(msg),
-                         "net-write: write failed: winsock error %d", e);
-                return prim_throw_classified(S, "net", "MNE004", msg);
-            }
-        }
-#else
-        ssize_t r;
-        rc = 0;
-        r = send(sock->fd, data + sent, len - sent, NET_SEND_FLAGS);
-        mino_resume_lock(S, depth);
-        if (r < 0) {
-            if (errno == EINTR) continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                char msg[160];
-                snprintf(msg, sizeof(msg),
-                         "net-write: timed out after %lld ms",
-                         sock->write_timeout_ms);
-                return prim_throw_classified(S, "net/timeout", "MNE003",
-                                             msg);
-            }
-            {
-                char msg[200];
-                snprintf(msg, sizeof(msg), "net-write: write failed: %s",
-                         strerror(errno));
-                return prim_throw_classified(S, "net", "MNE004", msg);
-            }
-        }
-        rc = (int)r;
-#endif
-        sent += (size_t)rc;
+    /* data points into a GC string or bytes while the send loop
+     * yields the state lock; pin the value so a concurrent
+     * collection cannot sweep the payload mid-send. */
+    gc_pin(data_val);
+    if (net_send_all_fd(S, sock->fd, data, len, sock->write_timeout_ms,
+                        &kind, &code, msg, sizeof(msg)) != 0) {
+        gc_unpin(1);
+        return prim_throw_classified(S, kind, code, msg);
     }
-    return mino_int(S, (long long)sent);
+    gc_unpin(1);
+    return mino_int(S, (long long)len);
 }
 
 /* ---- close ---- */
@@ -864,6 +887,61 @@ static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
         sock->closed = 1;
     }
     return mino_nil(S);
+}
+
+/* ---- fd bridge for the TLS layer ---- */
+
+/* prim/tls.c drives a connected descriptor through these: the TLS
+ * engine pumps raw records against the socket with the same timeout
+ * and error classification as the net prims. Descriptors cross the
+ * boundary widened to uintptr_t (int on POSIX, SOCKET on Windows). */
+
+int mino_net_adopt(mino_state *S, mino_val *v, uintptr_t *fd_out,
+                   long long *read_ms_out, long long *write_ms_out)
+{
+    mino_net_sock_t *sock = net_sock_arg(S, v, "tls-connect");
+    if (sock == NULL) return -1;
+    if (sock->closed) {
+        prim_throw_classified(S, "tls", "MTL004",
+                              "tls-connect: underlying socket is "
+                              "closed");
+        return -1;
+    }
+    *fd_out         = (uintptr_t)sock->fd;
+    *read_ms_out    = sock->read_timeout_ms;
+    *write_ms_out   = sock->write_timeout_ms;
+    /* Ownership of the descriptor passes to the caller; the net
+     * handle is marked closed so its finalizer will not close it. */
+    sock->closed = 1;
+    return 0;
+}
+
+void mino_net_apply_timeouts_raw(uintptr_t fd, long long read_ms,
+                                 long long write_ms)
+{
+    net_apply_io_timeouts((mino_net_fd_t)fd, read_ms, write_ms);
+}
+
+void mino_net_close_raw(uintptr_t fd)
+{
+    net_close_fd((mino_net_fd_t)fd);
+}
+
+int mino_net_recv_raw(mino_state *S, uintptr_t fd, unsigned char *buf,
+                      size_t n, size_t *got, long long read_ms,
+                      const char **kind, const char **code, char *msg,
+                      size_t msg_cap)
+{
+    return net_recv_fd(S, (mino_net_fd_t)fd, read_ms, buf, n, got,
+                       kind, code, msg, msg_cap);
+}
+
+int mino_net_send_raw(mino_state *S, uintptr_t fd, const unsigned char *buf,
+                      size_t n, long long write_ms, const char **kind,
+                      const char **code, char *msg, size_t msg_cap)
+{
+    return net_send_all_fd(S, (mino_net_fd_t)fd, buf, n, write_ms,
+                           kind, code, msg, msg_cap);
 }
 
 /* ---- install ---- */

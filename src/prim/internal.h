@@ -374,6 +374,34 @@ mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env);
 void mino_install_proc(mino_state *S, mino_env *env);
 
+/* net.c -- prims are file-local static (registered by the table at TU
+ * bottom) except prim_net_connect, called by tls.c for the host+port
+ * convenience arity of tls-connect. net_opt_ms is the shared opts
+ * timeout reader (also used by tls.c). */
+mino_val *prim_net_connect(mino_state *S, mino_val *args, mino_env *env);
+int       net_opt_ms(mino_state *S, mino_val *opts, const char *key,
+                     long long def, long long *out);
+
+/* net.c fd bridge for prim/tls.c. The TLS engine pumps a connected
+ * descriptor through these with the net prims' timeout and error
+ * classification. Descriptors cross as uintptr_t (int on POSIX,
+ * SOCKET on Windows). mino_net_adopt hands ownership of a net
+ * socket's descriptor to the caller (the net handle is marked closed
+ * so its finalizer will not close it) and throws eval/type for
+ * non-socket values. */
+int  mino_net_adopt(mino_state *S, mino_val *sock_val, uintptr_t *fd_out,
+                    long long *read_ms_out, long long *write_ms_out);
+void mino_net_apply_timeouts_raw(uintptr_t fd, long long read_ms,
+                                 long long write_ms);
+void mino_net_close_raw(uintptr_t fd);
+int  mino_net_recv_raw(mino_state *S, uintptr_t fd, unsigned char *buf,
+                       size_t n, size_t *got, long long read_ms,
+                       const char **kind, const char **code, char *msg,
+                       size_t msg_cap);
+int  mino_net_send_raw(mino_state *S, uintptr_t fd, const unsigned char *buf,
+                       size_t n, long long write_ms, const char **kind,
+                       const char **code, char *msg, size_t msg_cap);
+
 /* fs.c -- all prims are file-local static; no extern declarations needed. */
 void mino_install_fs(mino_state *S, mino_env *env);
 

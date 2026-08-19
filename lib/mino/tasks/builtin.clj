@@ -10,7 +10,7 @@
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
-       " -Isrc/vendor/bearssl"))
+       " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"))
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        "-DMINO_CPJIT=1 "
@@ -19,13 +19,13 @@
                          (if (= v "") [] (str/split v " "))))
 (def ^:private windows? (some? (getenv "OS")))
 (def ^:private libs    (str/split (or (getenv "LIBS")
-                                       ;; advapi32: BearSSL's vendored OS
-                                       ;; entropy (CryptGenRandom in
-                                       ;; src/vendor/bearssl/src/rand/
-                                       ;; sysrng.c) links against it.
-                                       (if windows?
-                                         "-lm -lws2_32 -ladvapi32"
-                                         "-lm -lpthread")) " "))
+                                        ;; bcrypt: the TLS layer's
+                                        ;; BCryptGenRandom entropy seeder
+                                        ;; (src/prim/tls.c replaces
+                                        ;; BearSSL's vendored sysrng unit).
+                                        (if windows?
+                                          "-lm -lws2_32 -lbcrypt"
+                                          "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
 ;; Stencil-regeneration toolchain. Stencils are committed as byte
@@ -98,7 +98,8 @@
    "src/prim/stateful.c" "src/prim/stateful_bindings.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/store.c" "src/prim/module.c"
    "src/prim/image.c"
    "src/prim/ns.c"
-   "src/prim/fs.c" "src/prim/proc.c" "src/prim/net.c"
+    "src/prim/fs.c" "src/prim/proc.c" "src/prim/net.c"
+    "src/prim/tls.c"
    "src/prim/host.c" "src/prim/jvm_statics.c" "src/interop/syntax.c"
    "src/collections/clone.c" "src/regex/re_compile.c" "src/regex/re_match.c" "src/collections/transient.c"
    "src/async/scheduler.c" "src/async/timer.c" "src/async/chan.c"
@@ -351,9 +352,9 @@
     :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
    {:platform "linux-arm64"      :triple "aarch64-linux-gnu"
     :libs ["-lm" "-lpthread"]    :exe "" :static false :publish false}
-   {:platform "windows-amd64"    :triple "x86_64-windows-gnu"
-    ;; advapi32: BearSSL's vendored OS entropy (CryptGenRandom).
-    :libs ["-lm" "-lws2_32" "-ladvapi32"]  :exe ".exe" :static false :publish true}])
+    {:platform "windows-amd64"    :triple "x86_64-windows-gnu"
+     ;; bcrypt: the TLS layer's BCryptGenRandom entropy seeder.
+     :libs ["-lm" "-lws2_32" "-lbcrypt"]  :exe ".exe" :static false :publish true}])
 
 (defn- cross-build-one
   "Cross-compile one target in a single `zig cc` invocation (compile +
@@ -585,8 +586,8 @@
 (def ^:private amalgam-search-paths
   ["src" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
-   "src/vendor/imath" "src/vendor/bearssl" "src/eval/bc"
-   "src/eval/bc/jit" "src/eval/bc/stencils" "src/regex"])
+   "src/vendor/imath" "src/vendor/bearssl" "src/vendor/bearssl/inc"
+   "src/eval/bc" "src/eval/bc/jit" "src/eval/bc/stencils" "src/regex"])
 
 (defn- amalgam-find-header
   "Resolve a project-local #include \"X\" string to an on-disk path.

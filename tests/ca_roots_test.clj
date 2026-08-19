@@ -27,12 +27,16 @@
 (deftest ca-roots-files-exist
   (is (file-exists? pem-path) "mozilla-roots.pem is checked in")
   (is (file-exists? roots-path) "roots.c is checked in")
+  (is (file-exists? "src/vendor/bearssl/roots.h")
+      "the generated declarations header is checked in")
   (is (file-exists? "src/vendor/bearssl/tools/gen_ca_roots.clj")
       "the generator script is checked in"))
 
 (deftest ca-roots-pem-sha-matches-generated-data
   (is (= pem-sha (second (re-find #"PEM sha256: ([0-9a-f]{64})" roots-text)))
-      "roots.c was generated from the checked-in PEM"))
+      "roots.c was generated from the checked-in PEM")
+  (is (str/includes? roots-text "#include \"roots.h\"")
+      "roots.c takes its declarations from the generated header"))
 
 (deftest ca-roots-pem-sha-matches-readme
   (is (= pem-sha (recorded-sha readme-text))

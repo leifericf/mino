@@ -156,7 +156,9 @@ cfiles += ["src/codec/%s.c" % n for n in codec]
 cfiles += ["src/hash/%s.c" % n for n in hashdir()]
 cfiles += ["src/int/%s" % n for n in int_files]
 cfiles += ["src/mac/hmac.c", "src/mac/hmac_ct.c"]
-cfiles += ["src/rand/hmac_drbg.c", "src/rand/sysrng.c"]
+# sysrng.c is excluded: src/prim/tls.c provides br_prng_seeder_system
+# (getentropy / BCryptGenRandom) so no Windows advapi32 link is needed.
+cfiles += ["src/rand/hmac_drbg.c"]
 cfiles += ["src/rsa/%s.c" % n for n in rsa()]
 cfiles += ["src/ec/%s.c" % n for n in ec()]
 cfiles += ["src/symcipher/%s.c" % n for n in symcipher()]

@@ -9,7 +9,7 @@
  * checked-in PEM, rerun the generator, commit both, and update
  * the README (sha256 and Mozilla date line).
  */
-#include <stddef.h>
+#include "roots.h"
 
 /* Concatenated DER certificates; anchor i spans
  * mino_ca_der_data[offset_i, offset_i + len_i).
@@ -8088,11 +8088,6 @@ const unsigned char mino_ca_der_data[] = {
     0xa2,0xe7,0x42,0xea,0x15,0x0f,0x80,0xd7,0xf1,0xea,0xeb,0x11,0xc7,0x0c,0xdc,0x7b,
     0x08,0x8f,0x37,0x77,0x6d,0xc4,0xaf,
 };
-
-typedef struct mino_ca_anchor {
-    const unsigned char *der;
-    size_t len;
-} mino_ca_anchor;
 
 /* DER {pointer, length} pairs, one per root certificate,
  * in PEM order.

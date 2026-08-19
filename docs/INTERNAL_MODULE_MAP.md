@@ -97,6 +97,8 @@ src/
 | `src/prim/url.c` | URL text primitives: percent-encode / percent-decode, parse-url (RFC 3986) |
 | `src/prim/codec.c` | Binary codec primitives: base64-encode / base64-decode (RFC 4648), hex-encode / hex-decode |
 | `src/prim/proc.c` | Process / subprocess primitives |
+| `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through |
+| `src/prim/tls.c` | TLS client primitives (tls-connect, tls-read, tls-read-all, tls-write, tls-close) over vendored BearSSL: SNI always, chain+host verification against the vendored Mozilla roots, `:insecure?` skip path, and the getentropy/BCryptGenRandom entropy seeder |
 | `src/prim/host.c` | Host interop primitives (`host/new`, `host/call`, `host/static-call`, `host/get`), capability registry |
 | `src/interop/syntax.c` | Interop syntax desugaring (dot-method, field access, constructor, static calls) |
 
@@ -183,6 +185,8 @@ and a four-primitive bridge.
 |------|----------------|
 | `src/vendor/imath/imath.c` | MIT-licensed arbitrary-precision integer library |
 | `src/vendor/imath/imath.h` | imath public header |
+| `src/vendor/bearssl/bearssl_client.c` | generated single-TU BearSSL TLS client amalgam (see `src/vendor/bearssl/README.md`) |
+| `src/vendor/bearssl/roots.c` | generated Mozilla CA root DER snapshot feeding TLS verification |
 
 ## Headers
 
