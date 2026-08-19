@@ -1818,6 +1818,7 @@ void gc_release_stw(mino_state *S)
 /* ------------------------------------------------------------------------- */
 
 #if defined(_WIN32) && defined(_MSC_VER)
+#  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 void mino_state_lock_init(mino_state *S)
 {

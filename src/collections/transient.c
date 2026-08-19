@@ -33,6 +33,7 @@
 /* Portability shim for the owner-ID CAS loop. Mirrors the tc_load / tc_add
  * pattern in src/runtime/host_threads.h. */
 #if defined(_MSC_VER)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 static uint32_t transient_atomic_load_u32(uint32_t volatile *p)
 {

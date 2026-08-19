@@ -30,6 +30,7 @@
  * surface and a uniform `NULL` sentinel so the size-pass + commit-pass
  * logic doesn't fork on host. */
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 void *jit_region_alloc(size_t size)
 {

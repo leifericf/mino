@@ -1592,7 +1592,10 @@
   []
   (if windows?
     {:triple "x86_64-windows-gnu" :define "MINO_CPJIT_X86_64_WINDOWS"
-     :static? false :unwind? true :exe ".exe"}
+     :static? false :unwind? true :exe ".exe"
+     ;; ws2_32 + bcrypt: the net and TLS layers' Windows link set,
+     ;; same libs as the windows-amd64 cross target.
+     :libs ["-lws2_32" "-lbcrypt"]}
     (let [os   (str/trim (str (get (sh "uname" "-s") :out)))
           arch (str/trim (str (get (sh "uname" "-m") :out)))]
       (cond
@@ -1614,7 +1617,7 @@
   "Build one canary twin with the pinned zig cc. `defines` carries the
    -D list that distinguishes the JIT-enabled binary from its lean
    twin."
-  [{:keys [triple static? unwind?]} out-bin defines]
+  [{:keys [triple static? unwind? libs]} out-bin defines]
   (let [args (concat stencil-cc
                      jit-host-canary-cflags
                      (when unwind? ["-funwind-tables"])
@@ -1624,7 +1627,8 @@
                      (when static? ["-static"])
                      ["-o" out-bin]
                      all-srcs
-                     (when unwind? ["-lm" "-lunwind"]))]
+                     (when unwind? ["-lm" "-lunwind"])
+                     libs)]
     (println (str "  " (str/join " " args)))
     (apply sh! args)
     (println (str "  jit-host build -> " out-bin))))

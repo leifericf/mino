@@ -807,6 +807,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         __builtin___clear_cache((char *)ctx.region,
                                 (char *)ctx.region + flush_bytes);
 #elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
         FlushInstructionCache(GetCurrentProcess(), ctx.region, flush_bytes);
 #else

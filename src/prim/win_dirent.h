@@ -17,6 +17,7 @@
 #define PRIM_WIN_DIRENT_H
 
 #include <sys/stat.h>
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>

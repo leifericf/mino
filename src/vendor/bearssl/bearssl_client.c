@@ -12,10 +12,19 @@
  * define below replaces the per-unit ones (inert on other
  * arches).
  *
+ * WIN32_LEAN_AND_MEAN is defined up front: the _WIN32 branches of
+ * ssl_engine.c and x509_minimal.c include <windows.h>, and the
+ * lean flag keeps winsock.h out of it (it would redefine-clash
+ * with the winsock2.h the net layer includes, under MSVC).
+ *
  * MIN/MAX renamed to br_MIN/br_MAX: hosts commonly define MIN/MAX
  * macros (sys/param.h) which collide with inner.h's inlines.
  */
 #define BR_ENABLE_INTRINSICS 1
+/* WIN32_LEAN_AND_MEAN: see the file-top note. Inert on non-Windows
+ * hosts (windows.h is never included there).
+ */
+#define WIN32_LEAN_AND_MEAN
 /* Collapsing the headers into this TU makes their unused static
  * inline helpers visible as main-file functions; silence that for
  * the header block only, under compilers that understand the

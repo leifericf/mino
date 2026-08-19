@@ -35,8 +35,19 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+/* bearssl's public headers probe BR_DOXYGEN_IGNORE with #if; the macro
+ * exists only inside the library's own build, so -Wundef flags it.
+ * Scoped silence, the same pragma treatment the amalgam gives its
+ * header block. */
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundef"
+#endif
 #include "bearssl_x509.h"
 #include "bearssl_ssl.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #include "roots.h"
 
 #include <stdint.h>
@@ -1190,7 +1201,7 @@ static const mino_prim_def k_prims_tls[] = {
      "collector."},
 };
 
-const size_t k_prims_tls_count =
+static const size_t k_prims_tls_count =
     sizeof(k_prims_tls) / sizeof(k_prims_tls[0]);
 
 #ifndef _WIN32

@@ -37,6 +37,7 @@ static inline int mino_atomic_cas_acqrel_ptr(mino_val **p,
 
 #elif defined(_MSC_VER)
 
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 static inline mino_val *mino_atomic_load_acquire_ptr(mino_val **p)
 {

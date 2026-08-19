@@ -23,6 +23,7 @@
 #include <string.h>
 
 #if defined(_WIN32) && defined(_MSC_VER)
+#  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 #  include <process.h>
 #else

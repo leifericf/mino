@@ -6,6 +6,7 @@
 #include "runtime/internal.h"
 
 #if defined(_WIN32) && defined(_MSC_VER)
+#  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>  /* Sleep() for the lazy-realize spin yield */
 #else
 #  include <time.h>     /* nanosleep() for the lazy-realize spin yield */
@@ -621,6 +622,7 @@ static inline void lazy_realized_store(int *p, int val)
     __atomic_store_n(p, val, __ATOMIC_RELEASE);
 }
 #elif defined(_MSC_VER)
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 static inline int lazy_realized_load(int *p)
 {

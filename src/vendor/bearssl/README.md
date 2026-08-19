@@ -42,6 +42,13 @@ rechecks each:
   amalgam. Units with x86 or POWER8 intrinsics normally set it before
   including `inner.h`; with collapsed includes the global define
   replaces the per-unit ones and is inert elsewhere.
+- `#define WIN32_LEAN_AND_MEAN` is defined at the top of the amalgam.
+  The `_WIN32` branches of `ssl_engine.c` (BR_USE_WIN32_RAND) and
+  `x509_minimal.c` (BR_USE_WIN32_TIME, auto-detected by `inner.h`)
+  include `<windows.h>`, which by default pulls in winsock.h; inside
+  mino's single-file amalgamation that redefines the winsock2.h types
+  the net layer includes, a hard error under MSVC. The lean define
+  removes winsock.h from those includes; inert on non-Windows hosts.
 - The `#pragma comment` line-drop edit (MSVC linker directives, which
   are unknown-pragma noise under clang/gcc) is now inert: the only
   unit that carried one was `sysrng.c`, excluded from the file list.
