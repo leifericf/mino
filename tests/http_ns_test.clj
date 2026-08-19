@@ -1,4 +1,5 @@
 (require "tests/test")
+(require "tests/fixtures/http/server")
 (require '[clojure.string :as str])
 (require '[mino.http :as http])
 
@@ -6,12 +7,8 @@
 ;; Normalization is pinned by a mock executor (with-redefs on
 ;; execute-request*, the public seam); response shaping, throw policy,
 ;; and error translation are pinned against canned prim maps; the
-;; loopback tier runs the full stack against a python3 server
-;; (net_test / http_request_test fixture precedent: 127.0.0.1, chosen
-;; port, detached stdio, alarm, kill in finally). POSIX-only; Windows
-;; runs the mock tier.
-
-(def ^:private hnp-posix? (nil? (getenv "OS")))
+;; loopback tier runs the full stack against the in-process mino
+;; server (tests/fixtures/http/server.clj).
 
 (def ^:private captured (atom nil))
 
@@ -112,10 +109,10 @@
         [_ p2] (via-mock {:method :get :url "http://example.com/x"} canned-200)]
     (is (= p1 p2)))
   (is (str/includes? (ex-message (throw-via-mock
-                                  {:method :get
-                                   :uri "http://example.com/x"
-                                   :url "http://example.com/x"}
-                                  canned-200))
+                                   {:method :get
+                                    :uri "http://example.com/x"
+                                    :url "http://example.com/x"}
+                                   canned-200))
                      "either :uri or :url")))
 
 (deftest method-accepts-strings-and-uppercases
@@ -255,7 +252,7 @@
 
 (deftest accept-and-content-type-expand-media-keywords
   (let [[_ p1] (via-mock {:method :get :uri "http://h/x" :accept :json}
-                        canned-200)
+                         canned-200)
         [_ p2] (via-mock {:method :get :uri "http://h/x"
                           :accept "application/vnd.api+json"}
                          canned-200)
@@ -268,7 +265,7 @@
 
 (deftest content-type-is-sent-and-validated-without-a-body
   (let [[_ prim] (via-mock {:method :get :uri "http://h/x" :content-type :json}
-                          canned-200)]
+                           canned-200)]
     (is (= "application/json"
            (clojure.core/get (:headers prim) "content-type"))))
   (is (str/includes? (ex-message (throw-via-mock
@@ -335,8 +332,8 @@
 
 (deftest invalid-as-coercion-throws
   (is (str/includes? (ex-message (throw-via-mock
-                                  {:method :get :uri "http://h/x" :as :stream}
-                                  canned-200))
+                                   {:method :get :uri "http://h/x" :as :stream}
+                                   canned-200))
                      ":as")))
 
 (deftest error-statuses-throw-with-the-response-as-ex-data
@@ -432,277 +429,143 @@
     (is (= 200 (:status resp)))
     (is (= "hello" (:body resp)))))
 
-;; ---- loopback end to end (POSIX) ----
-
-(def ^:private hnp-srv-code
-  "import gzip, json, os, signal, sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-class Server(ThreadingHTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
-
-    def __init__(self, addr, countfile):
-        self.nconn = 0
-        self.countfile = countfile
-        super().__init__(addr, Handler)
-
-    def get_request(self):
-        conn, addr = self.socket.accept()
-        self.nconn += 1
-        with open(self.countfile, \"w\") as f:
-            f.write(str(self.nconn))
-        return conn, addr
-
-def read_body(h):
-    n = int(h.headers.get(\"Content-Length\", 0))
-    return h.rfile.read(n) if n > 0 else b\"\"
-
-def text(h, code, s, headers=()):
-    body = s.encode(\"latin-1\") if isinstance(s, str) else s
-    h.send_response(code)
-    for k, v in headers:
-        h.send_header(k, v)
-    h.send_header(\"Content-Type\", \"text/plain\")
-    h.send_header(\"Content-Length\", str(len(body)))
-    h.end_headers()
-    h.wfile.write(body)
-
-def json_route(h, code, obj):
-    body = json.dumps(obj).encode()
-    h.send_response(code)
-    h.send_header(\"Content-Type\", \"application/json\")
-    h.send_header(\"Content-Length\", str(len(body)))
-    h.end_headers()
-    h.wfile.write(body)
-
-def route(h):
-    p = h.path
-    if p == \"/hello\":
-        text(h, 200, \"hello world\")
-    elif p.startswith(\"/echo-path\"):
-        text(h, 200, p)
-    elif p == \"/echo-body\":
-        text(h, 200, read_body(h))
-    elif p == \"/echo-headers\":
-        json_route(h, 200, {\"user-agent\": h.headers.get(\"User-Agent\", \"\"),
-                            \"accept\": h.headers.get(\"Accept\", \"\")})
-    elif p.startswith(\"/items\"):
-        if \"page=1\" in p:
-            json_route(h, 200, {\"page\": 1, \"items\": [\"a\", \"b\"], \"more\": True})
-        elif \"page=2\" in p:
-            json_route(h, 200, {\"page\": 2, \"items\": [\"c\"], \"more\": False})
-        else:
-            json_route(h, 200, {\"page\": 0, \"items\": [], \"more\": True})
-    elif p == \"/gzip\":
-        blob = gzip.compress((\"gz-body-\" * 30).encode())
-        text(h, 200, blob, [(\"Content-Encoding\", \"gzip\")])
-    elif p == \"/r1\":
-        text(h, 301, \"moved\", [(\"Location\", \"/r2\")])
-    elif p == \"/r2\":
-        text(h, 301, \"moved\", [(\"Location\", \"/final\")])
-    elif p == \"/final\":
-        text(h, 200, \"final-landing\")
-    else:
-        text(h, 404, \"not here\")
-
-class Handler(BaseHTTPRequestHandler):
-    protocol_version = \"HTTP/1.1\"
-    def do_GET(self):
-        route(self)
-    def do_POST(self):
-        route(self)
-    def log_message(self, fmt, *args):
-        pass
-
-countfile = sys.argv[1]
-srv = Server((\"127.0.0.1\", 0), countfile)
-port = srv.server_address[1]
-pid = os.fork()
-if pid == 0:
-    devnull = os.open(os.devnull, os.O_RDWR)
-    os.dup2(devnull, 0); os.dup2(devnull, 1); os.dup2(devnull, 2)
-    os.setsid()
-    signal.alarm(300)
-    srv.serve_forever()
-    os._exit(0)
-else:
-    sys.stdout.write(\"%d %d\" % (port, pid))
-    sys.exit(0)")
-
-(def ^:private hnp-count-seq (atom 0))
-
-(defn- hnp-count-file []
-  (str (or (getenv "TMPDIR") "/tmp/")
-       "mino-http-ns-count-" (time-ms) "-"
-       (swap! hnp-count-seq inc) ".txt"))
-
-(defn- hnp-start-server []
-  (let [path (hnp-count-file)]
-    (sh! "touch" path)
-    (let [out (sh! "python3" "-c" hnp-srv-code path)
-          bits (str/split out #" ")]
-      (when (not= 2 (count bits))
-        (throw (str "http ns fixture printed no port line: " out)))
-      {:port (parse-long (nth bits 0))
-       :pid  (nth bits 1)
-       :path path})))
-
-(defn- hnp-stop-server [srv]
-  (when (and srv (:pid srv))
-    (sh "kill" (:pid srv))))
+;; ---- loopback end to end ----
 
 (defn- hnp-with-server [body]
-  (let [srv (hnp-start-server)]
-    (try
-      (body (str "http://127.0.0.1:" (:port srv)) srv)
-      (finally
-        (hnp-stop-server srv)))))
+  (fx-with-server
+    (fn [srv]
+      (body (str "http://127.0.0.1:" (:port srv)) srv))))
 
-(defn- hnp-conn-count [srv]
-  (try (or (parse-long (str/trim (slurp (:path srv)))) 0)
-       (catch e 0)))
+(deftest get-returns-the-response-map
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/hello"))]
+        (is (= 200 (:status r)))
+        (is (= "hello world" (:body r)))
+        (is (string? (clojure.core/get (:headers r) "content-type")))
+        (is (nat-int? (:request-time r)))
+        (is (= [] (:trace-redirects r)))
+        (is (= (str base "/hello") (get-in r [:request :uri])))))))
 
-(defn- hnp-wait-for-count
-  [srv want]
-  (let [t0 (time-ms)]
-    (loop []
-      (let [n (hnp-conn-count srv)]
-        (if (or (>= n want) (> (- (time-ms) t0) 5000))
-          n
-          (do (thread-sleep 25) (recur)))))))
+(deftest post-echoes-its-body
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/post (str base "/echo") {:body "upload 123"})]
+        (is (= 200 (:status r)))
+        (is (= "upload 123" (:body r)))))))
 
-(when hnp-posix?
-  (deftest get-returns-the-response-map
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/hello"))]
-          (is (= 200 (:status r)))
-          (is (= "hello world" (:body r)))
-          (is (string? (clojure.core/get (:headers r) "content-type")))
-          (is (nat-int? (:request-time r)))
-          (is (= [] (:trace-redirects r)))
-          (is (= (str base "/hello") (get-in r [:request :uri])))))))
+(deftest query-params-reach-the-server
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/echo-path")
+                        {:query-params {:type "backend"}})]
+        (is (= "/echo-path?type=backend" (:body r)))))))
 
-  (deftest post-echoes-its-body
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/post (str base "/echo-body") {:body "upload 123"})]
-          (is (= 200 (:status r)))
-          (is (= "upload 123" (:body r)))))))
+(deftest form-params-post-urlencoded
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/post (str base "/echo")
+                         {:form-params {:a "b c" :n 1}})]
+        (is (= "a=b%20c&n=1" (:body r)))))))
 
-  (deftest query-params-reach-the-server
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/echo-path")
-                          {:query-params {:type "backend"}})]
-          (is (= "/echo-path?type=backend" (:body r)))))))
+(deftest headers-reach-the-server
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/echo-headers")
+                        {:user-agent "probe-agent" :accept :json
+                         :as :json})]
+        (is (= 200 (:status r)))
+        (is (= "probe-agent" (:user-agent (:body r))))
+        (is (= "application/json" (:accept (:body r))))))))
 
-  (deftest form-params-post-urlencoded
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/post (str base "/echo-body")
-                           {:form-params {:a "b c" :n 1}})]
-          (is (= "a=b%20c&n=1" (:body r)))))))
+(deftest not-found-throws-with-the-response-map
+  (hnp-with-server
+    (fn [base _]
+      (let [e (try
+                (http/get (str base "/missing"))
+                (catch e e))
+            d (ex-data e)]
+        (is (= "HTTP 404" (ex-message e)))
+        (is (= 404 (:status d)))
+        (is (= "not here" (:body d)))))))
 
-  (deftest headers-reach-the-server
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/echo-headers")
-                          {:user-agent "probe-agent" :accept :json
-                           :as :json})]
-          (is (= 200 (:status r)))
-          (is (= "probe-agent" (:user-agent (:body r))))
-          (is (= "application/json" (:accept (:body r))))))))
+(deftest throw-false-returns-not-found-as-data
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/missing") {:throw false})]
+        (is (= 404 (:status r)))
+        (is (= "not here" (:body r)))))))
 
-  (deftest not-found-throws-with-the-response-map
-    (hnp-with-server
-      (fn [base _]
-        (let [e (try
-                  (http/get (str base "/missing"))
-                  (catch e e))
-              d (ex-data e)]
-          (is (= "HTTP 404" (ex-message e)))
-          (is (= 404 (:status d)))
-          (is (= "not here" (:body d)))))))
+(deftest redirect-chain-records-the-trace
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/r1"))]
+        (is (= 200 (:status r)))
+        (is (= "final-landing" (:body r)))
+        (is (= [(str base "/r2") (str base "/final")]
+               (:trace-redirects r)))))))
 
-  (deftest throw-false-returns-not-found-as-data
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/missing") {:throw false})]
-          (is (= 404 (:status r)))
-          (is (= "not here" (:body r)))))))
+(deftest keep-alive-serves-two-requests-over-one-connection
+  (hnp-with-server
+    (fn [base srv]
+      (let [r1 (http/get (str base "/hello"))
+            r2 (http/get (str base "/echo-path?x=1"))]
+        (is (= 200 (:status r1)))
+        (is (= 200 (:status r2)))
+        (is (= "/echo-path?x=1" (:body r2)))
+        (is (= 1 @(:accepts srv)))))))
 
-  (deftest redirect-chain-records-the-trace
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/r1"))]
-          (is (= 200 (:status r)))
-          (is (= "final-landing" (:body r)))
-          (is (= [(str base "/r2") (str base "/final")]
-                 (:trace-redirects r)))))))
+(deftest gzip-body-decompresses-by-default
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/gzip"))]
+        (is (= 200 (:status r)))
+        (is (= (apply str (repeat 40 "gz-integration-")) (:body r)))))))
 
-  (deftest keep-alive-serves-two-requests-over-one-connection
-    (hnp-with-server
-      (fn [base srv]
-        (let [r1 (http/get (str base "/hello"))
-              r2 (http/get (str base "/echo-path?x=1"))]
-          (is (= 200 (:status r1)))
-          (is (= 200 (:status r2)))
-          (is (= "/echo-path?x=1" (:body r2)))
-          (is (= 1 (hnp-wait-for-count srv 1)))))))
+(deftest json-bodies-read-as-keywordized-data
+  (hnp-with-server
+    (fn [base _]
+      (let [r (http/get (str base "/items?page=1") {:as :json})]
+        (is (= 200 (:status r)))
+        (is (= 1 (:page (:body r))))
+        (is (= ["alpha" "beta"] (:items (:body r))))
+        (is (= 2 (:next_page (:body r))))))))
 
-  (deftest gzip-body-decompresses-by-default
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/gzip"))]
-          (is (= 200 (:status r)))
-          (is (= (apply str (repeat 30 "gz-body-")) (:body r)))))))
+(deftest async-deref-matches-the-sync-result
+  (hnp-with-server
+    (fn [base _]
+      (let [sync  (http/get (str base "/hello"))
+            fut   (http/get (str base "/hello") {:async true})
+            async (deref fut)]
+        (is (= (:status sync) (:status async)))
+        (is (= (:body sync) (:body async)))))))
 
-  (deftest json-bodies-read-as-keywordized-data
-    (hnp-with-server
-      (fn [base _]
-        (let [r (http/get (str base "/items?page=1") {:as :json})]
-          (is (= 200 (:status r)))
-          (is (= 1 (:page (:body r))))
-          (is (= ["a" "b"] (:items (:body r))))
-          (is (true? (:more (:body r))))))))
+(deftest pmap-composes-over-plain-map-requests
+  (hnp-with-server
+    (fn [base _]
+      (let [results (pmap http/request
+                          [{:method :get :uri (str base "/hello")}
+                           {:method :get :uri (str base "/final")
+                            :throw false}])]
+        (is (= [200 200] (map :status results)))
+        (is (= ["hello world" "final-landing"] (map :body results)))))))
 
-  (deftest async-deref-matches-the-sync-result
-    (hnp-with-server
-      (fn [base _]
-        (let [sync  (http/get (str base "/hello"))
-              fut   (http/get (str base "/hello") {:async true})
-              async (deref fut)]
-          (is (= (:status sync) (:status async)))
-          (is (= (:body sync) (:body async)))))))
-
-  (deftest pmap-composes-over-plain-map-requests
-    (hnp-with-server
-      (fn [base _]
-        (let [results (pmap http/request
-                            [{:method :get :uri (str base "/hello")}
-                             {:method :get :uri (str base "/final")
-                              :throw false}])]
-          (is (= [200 200] (map :status results)))
-          (is (= ["hello world" "final-landing"] (map :body results)))))))
-
-  (deftest bb-gist-pagination-iterates-two-pages-as-plain-maps
-    (hnp-with-server
-      (fn [base _]
-        (let [pages (->> (range 1 3)
-                         (map (fn [page]
-                                (http/request
-                                  {:method :get
-                                   :uri (str base "/items")
-                                   :headers {:accept "application/json"}
-                                   :query-params {:page page}
-                                   :as :json
-                                   :throw false})))
-                         (map :body))
-              all   (mapcat :items pages)]
-          (is (= [1 2] (map :page pages)))
-          (is (= ["a" "b" "c"] (vec all)))
-          (is (false? (:more (nth pages 1)))))))))
+(deftest bb-gist-pagination-iterates-two-pages-as-plain-maps
+  (hnp-with-server
+    (fn [base _]
+      (let [pages (->> (range 1 3)
+                       (map (fn [page]
+                              (http/request
+                                {:method :get
+                                 :uri (str base "/items")
+                                 :headers {:accept "application/json"}
+                                 :query-params {:page page}
+                                 :as :json
+                                 :throw false})))
+                       (map :body))
+            all   (mapcat :items pages)]
+        (is (= [1 2] (map :page pages)))
+        (is (= ["alpha" "beta" "gamma"] (vec all)))
+        (is (nil? (:next_page (nth pages 1))))))))
 
 (run-tests-and-exit)

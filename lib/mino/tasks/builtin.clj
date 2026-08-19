@@ -2342,12 +2342,13 @@
 
 (defn test-http
   "Run the localhost HTTP integration lane
-  (tests/http_integration_test.clj): one python3 fixture process
-  (tests/fixtures/http/server.py) serves plain and TLS listeners
-  behind a shared route table (echo, JSON validation, pagination,
-  redirects, chunked, gzip, slow, connection counter), and the suite
-  drives it end to end through the mino.http surface. The fixture
-  forks; POSIX hosts run the full lane and Windows the skip tier."
+  (tests/http_integration_test.clj): an in-process fixture server
+  written in mino (tests/fixtures/http/server.clj, accept loop on a
+  worker future) serves the route table (echo, JSON validation,
+  pagination, redirects, chunked, gzip, hold, connection counter),
+  and the suite drives it end to end through the mino.http surface.
+  In process, so the lane runs on every platform the CLI builds on;
+  the TLS end-to-end legs live in the mino-tests satellite repo."
   []
   (println (sh! mino-bin "tests/http_integration_test.clj")))
 

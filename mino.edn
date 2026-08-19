@@ -101,7 +101,7 @@
    test-generative {:doc  "Run JSON property tests with the JIT off (CPJIT defect workaround)"
                     :deps [build]
                     :task mino.tasks.builtin/test-generative}
-   test-http      {:doc  "Run the localhost HTTP integration lane (mino.http end to end against the python fixture)"
+    test-http      {:doc  "Run the localhost HTTP integration lane (mino.http end to end against the in-process mino fixture server)"
                    :deps [build]
                    :task mino.tasks.builtin/test-http}
   test-summary    {:doc  "Run the suite and emit output/test-results.edn"

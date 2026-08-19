@@ -165,16 +165,15 @@ jobs:
         timeout-minutes: 5
 
       - name: HTTP integration lane
-        # End-to-end localhost lane: one python3 fixture process
-        # (tests/fixtures/http/server.py, plain + TLS listeners) driven
-        # through the mino.http surface (tests/http_integration_test.clj):
-        # query/header GETs, JSON POST echo, gist pagination, 404 ex-data,
-        # redirect chains with 307 body preservation, keep-alive
-        # connection counting, gzip, chunked, async deref, read timeouts,
-        # and TLS trust. The fixture forks (os.fork), so it runs on the
-        # POSIX legs; the suite itself would skip the server tier on
-        # Windows (same gate as the net/tls suites in `task test`).
-        if: matrix.os != 'windows-2022'
+        # End-to-end localhost lane: the in-process mino fixture
+        # server (tests/fixtures/http/server.clj, accept loop on a
+        # worker future) driven through the mino.http surface
+        # (tests/http_integration_test.clj): query/header GETs, JSON
+        # POST echo, gist pagination, 404 ex-data, redirect chains
+        # with 307 body preservation, keep-alive connection counting,
+        # gzip, chunked, async deref, and read timeouts. In process,
+        # so the lane runs on every matrix leg (TLS end-to-end legs
+        # live in the mino-tests satellite repo).
         run: ./mino task test-http
         timeout-minutes: 5
 
