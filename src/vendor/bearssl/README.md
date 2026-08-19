@@ -33,8 +33,8 @@ amalgamation produces hundreds of redefinition errors. The generator
 renames each unit's file-local identifiers (macros, static functions
 and objects, typedefs, struct/union/enum tags) with a per-unit `_u<idx>`
 suffix; per-TU semantics guarantee every reference is intra-unit. It
-also applies two targeted edits, recorded here so an upstream bump
-rechecks both:
+also applies these targeted edits, recorded here so an upstream bump
+rechecks each:
 
 - `MIN`/`MAX` static inlines in `inner.h` become `br_MIN`/`br_MAX`
   (host `sys/param.h` macros collide; BearSSL never calls them).
@@ -48,11 +48,16 @@ rechecks both:
 
 A scoped `#pragma GCC diagnostic ignored "-Wunused-function"` wraps the
 pasted public headers only: collapsing them into one TU exposes their
-static inline helpers without callers. Guarded by
-`#if defined(__GNUC__) || defined(__clang__)` so MSVC never sees it.
-No warning suppression is needed for any `.c` unit; under the project's
-strict flags the vendored code is clean on host cc, zig x86_64-linux
-and zig x86_64-windows.
+static inline helpers without callers. `src/int/i62_modpow2.c` and
+`src/symcipher/poly1305_ctmulq.c` are additionally wrapped in a scoped
+`#pragma GCC diagnostic ignored "-Wpedantic"`: both multiply through
+`unsigned __int128` behind `BR_64` gates, which gcc rejects as pedwarns
+under `-std=c99 -Wpedantic -Werror` while clang and MSVC accept it
+silently. Both suppressions are guarded by
+`#if defined(__GNUC__) || defined(__clang__)` so MSVC never sees them,
+and scoped so every other pasted unit stays under full strict-flag
+checking. No other warning suppression exists; the rest of the vendored
+code is clean on host cc, gcc, zig x86_64-linux and zig x86_64-windows.
 
 ## Trim list
 

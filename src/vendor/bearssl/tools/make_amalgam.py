@@ -100,6 +100,28 @@ def emit(path, out, strip_local=True, suffix=None):
     return nren
 
 
+def pedantic_relief(path, opening):
+    """Emit push/pop pragmas around units gcc rejects under the strict
+    bootstrap flags. i62_modpow2.c and poly1305_ctmulq.c multiply via
+    unsigned __int128 behind BR_64 gates; correct vendored code that
+    gcc diagnoses as 'ISO C does not support __int128' pedwarns under
+    -std=c99 -Wpedantic (clang and MSVC accept it silently). Scoped
+    per unit so every other pasted unit stays under full pedantic
+    checking. Guarded so MSVC never sees a GCC pragma."""
+    if path not in ("src/int/i62_modpow2.c",
+                    "src/symcipher/poly1305_ctmulq.c"):
+        return
+    if opening:
+        out.write("#if defined(__GNUC__) || defined(__clang__)\n")
+        out.write("#pragma GCC diagnostic push\n")
+        out.write('#pragma GCC diagnostic ignored "-Wpedantic"\n')
+        out.write("#endif\n")
+    else:
+        out.write("#if defined(__GNUC__) || defined(__clang__)\n")
+        out.write("#pragma GCC diagnostic pop\n")
+        out.write("#endif\n")
+
+
 headers = [
     "inc/bearssl.h",
     "inc/bearssl_hash.h", "inc/bearssl_hmac.h", "inc/bearssl_kdf.h",
@@ -211,7 +233,9 @@ out.write("#if defined(__GNUC__) || defined(__clang__)\n")
 out.write("#pragma GCC diagnostic pop\n")
 out.write("#endif\n")
 for idx, c in enumerate(cfiles):
+    pedantic_relief(c, True)
     emit(c, out, suffix="u%d" % idx)
+    pedantic_relief(c, False)
 
 text = "".join(sink)
 text = re.sub(r'\bMIN\b(?=\()', 'br_MIN', text)

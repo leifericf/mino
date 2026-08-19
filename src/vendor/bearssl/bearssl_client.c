@@ -25389,6 +25389,10 @@ br_i32_to_monty(uint32_t *x, const uint32_t *m)
 		br_i32_muladd_small(x, 0, m);
 	}
 }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
 
 /* === src/int/i62_modpow2.c === */
 #line 1 "src/int/i62_modpow2.c"
@@ -25884,6 +25888,9 @@ br_i62_modpow_opt_as_i31(uint32_t *x31, const unsigned char *e, size_t elen,
 	return br_i62_modpow_opt(x31, e, elen, m31, m0i31,
 		(uint64_t *)tmp, twlen >> 1);
 }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 /* === src/mac/hmac.c === */
 #line 1 "src/mac/hmac.c"
@@ -51774,6 +51781,10 @@ br_poly1305_ctmul32_run(const void *key, const void *iv,
 		ichacha(key, iv, 1, data, len);
 	}
 }
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
 
 /* === src/symcipher/poly1305_ctmulq.c === */
 #line 1 "src/symcipher/poly1305_ctmulq.c"
@@ -52250,6 +52261,9 @@ br_poly1305_ctmulq_get(void)
 	return 0;
 }
 
+#endif
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
 #endif
 
 /* === src/symcipher/poly1305_i15.c === */

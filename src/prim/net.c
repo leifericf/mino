@@ -409,11 +409,14 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
     if (gai_rc != 0) {
         char msg[300];
         gc_unpin(1);
+        /* Precision bounds keep each diagnostic inside msg[] by
+         * construction, which gcc's -Wformat-truncation can prove. */
 #ifdef _WIN32
-        snprintf(msg, sizeof(msg), "net-connect: cannot resolve host %s: "
+        snprintf(msg, sizeof(msg), "net-connect: cannot resolve host %.200s: "
                  "getaddrinfo error %d", host, gai_rc);
 #else
-        snprintf(msg, sizeof(msg), "net-connect: cannot resolve host %s: %s",
+        snprintf(msg, sizeof(msg),
+                 "net-connect: cannot resolve host %.200s: %.60s",
                  host, gai_strerror(gai_rc));
 #endif
         return prim_throw_classified(S, "net/dns", "MNE001", msg);
@@ -455,8 +458,8 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
                 freeaddrinfo(res);
                 gc_unpin(1);
                 snprintf(msg, sizeof(msg),
-                         "net-connect: connect to %s:%lld timed out after "
-                         "%lld ms", host, port, connect_ms);
+                         "net-connect: connect to %.200s:%lld timed out "
+                         "after %lld ms", host, port, connect_ms);
                 return prim_throw_classified(S, "net/connect", "MNE002",
                                              msg);
             }
@@ -478,8 +481,8 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
     if (fd == MINO_NET_INVALID_FD) {
         char msg[300];
         gc_unpin(1);
-        snprintf(msg, sizeof(msg), "net-connect: cannot connect to %s:%lld: "
-                 "%s", host, port,
+        snprintf(msg, sizeof(msg), "net-connect: cannot connect to %.180s:"
+                 "%lld: %.60s", host, port,
                  detail[0] ? detail : "no usable addresses");
         return prim_throw_classified(S, "net/connect", "MNE002", msg);
     }

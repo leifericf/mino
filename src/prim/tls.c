@@ -698,8 +698,10 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         free(iobuf);
         free(ts);
         gc_unpin(1);
+        /* Precision bounds keep the diagnostic inside msg[] by
+         * construction, which gcc's -Wformat-truncation can prove. */
         snprintf(msg, sizeof(msg), "tls-connect: cannot start handshake "
-                 "with %s: %s (code %d)", host,
+                 "with %.120s: %.50s (code %d)", host,
                  tls_engine_err_desc(err), err);
         return prim_throw_classified(S, "tls", "MTL001", msg);
     }
