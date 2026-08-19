@@ -175,21 +175,20 @@ jobs:
         # so the lane runs on every matrix leg (TLS end-to-end legs
         # live in the mino-tests satellite repo).
         #
-        # Windows pre-step guard: the preceding Test step is
-        # continue-on-error by design, and a mino.exe that dies
-        # abnormally there is held by Windows Error Reporting while
-        # the crash dump is collected -- during that window the exe
-        # image is write-locked and this lane's relink fails with
-        # "cannot open output file mino.exe: Permission denied"
-        # (observed on windows-2022 twice). Kill any lingering
-        # mino.exe before building so an informational Test-step
-        # death can never block this blocking lane. The Test step's
-        # own failures still surface in its log and step summary.
+        # Windows runs the integration file directly instead of
+        # `./mino task test-http`: the task's :deps [build] relinks
+        # mino.exe while ./mino itself is that running image, and
+        # Windows write-locks a running executable (ld: "cannot open
+        # output file mino.exe: Permission denied") where POSIX
+        # allows the replace. The binary under test is the one the
+        # Bootstrap step built and the Test step just ran, so the
+        # rebuild the dep would add is redundant on this leg anyway.
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            taskkill //F //IM mino.exe 2>/dev/null || true
+            ./mino tests/http_integration_test.clj
+          else
+            ./mino task test-http
           fi
-          ./mino task test-http
         timeout-minutes: 5
 
       - name: Release gate
