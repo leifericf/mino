@@ -2424,44 +2424,44 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
 
 /* One header row out of a name and value pair, with the layer-owned
  * names rejected here so the caller sees :http/headers, not the
- * encoder's contract text. */
-static int httpreq_header_row(mino_state *S, mino_val *k, mino_val *val,
-                              http_hdr_in_t *out)
+ * encoder's contract text. Pure classifier: fills err and returns -1
+ * rather than throwing, because a throw inside a try block longjmps
+ * past the caller's cleanup of the malloc'd header array. */
+static int httpreq_header_row(mino_val *k, mino_val *val,
+                              http_hdr_in_t *out, char *err, size_t err_cap)
 {
     if (!http_name_arg(k, &out->name, &out->name_len)
         || val == NULL || mino_type_of(val) != MINO_STRING) {
-        prim_throw_classified(S, "http/headers", "MHR002",
-                              "http-request: header names must be "
-                              "strings or keywords and values strings");
+        snprintf(err, err_cap, "http-request: header names must be "
+                 "strings or keywords and values strings");
         return -1;
     }
     out->value     = val->as.s.data;
     out->value_len = val->as.s.len;
     if (out->name_len == 0) {
-        prim_throw_classified(S, "http/headers", "MHR002",
-                              "http-request: header name is empty");
+        snprintf(err, err_cap, "http-request: header name is empty");
         return -1;
     }
     if (http_owned_name(out->name, out->name_len)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg),
-                 "http-request: header %.*s is computed by the request "
-                 "layer",
+        snprintf(err, err_cap, "http-request: header %.*s is computed "
+                 "by the request layer",
                  (int)(out->name_len < 48 ? out->name_len : 48),
                  out->name);
-        prim_throw_classified(S, "http/headers", "MHR002", msg);
         return -1;
     }
     return 0;
 }
 
 /* Headers value into a malloc'd encoder array (caller frees), with
- * room for one injected Connection header. */
+ * room for one injected Connection header. Row rejections free the
+ * array BEFORE throwing: prim_throw_classified longjmps to the
+ * nearest try frame, so any throw with the array live leaks it. */
 static int httpreq_headers_array(mino_state *S, mino_val *headers,
                                  size_t extra,
                                  http_hdr_in_t **out, size_t *n_out)
 {
     http_hdr_in_t *hdrs;
+    char msg[128];
     size_t n = 0, i;
 
     if (headers == NULL) {
@@ -2478,11 +2478,14 @@ static int httpreq_headers_array(mino_state *S, mino_val *headers,
         for (i = 0; i < n; i++) {
             mino_val *entry = vec_nth(headers, i);
             if (entry == NULL || mino_type_of(entry) != MINO_VECTOR
-                || entry->as.vec.len != 2
-                || httpreq_header_row(S, vec_nth(entry, 0),
-                                      vec_nth(entry, 1),
-                                      &hdrs[i]) != 0) {
+                || entry->as.vec.len != 2) {
                 free(hdrs);
+                return -1;
+            }
+            if (httpreq_header_row(vec_nth(entry, 0), vec_nth(entry, 1),
+                                   &hdrs[i], msg, sizeof(msg)) != 0) {
+                free(hdrs);
+                prim_throw_classified(S, "http/headers", "MHR002", msg);
                 return -1;
             }
         }
@@ -2492,9 +2495,10 @@ static int httpreq_headers_array(mino_state *S, mino_val *headers,
         if (hdrs == NULL) goto oom;
         for (i = 0; i < n; i++) {
             mino_val *k = vec_nth(headers->as.map.key_order, i);
-            if (httpreq_header_row(S, k, map_get_val(headers, k),
-                                   &hdrs[i]) != 0) {
+            if (httpreq_header_row(k, map_get_val(headers, k),
+                                   &hdrs[i], msg, sizeof(msg)) != 0) {
                 free(hdrs);
+                prim_throw_classified(S, "http/headers", "MHR002", msg);
                 return -1;
             }
         }
