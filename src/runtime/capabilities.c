@@ -84,6 +84,8 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_NET,         mino_install_tls             },
     /* Same bit as net: the keep-alive pool is the net layer's. */
     { MINO_CAP_NET,         mino_install_pool            },
+    /* Same bit as net: http-request composes the whole net stack. */
+    { MINO_CAP_NET,         mino_install_http_client     },
 };
 
 #define K_CAP_DISPATCH_COUNT \

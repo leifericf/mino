@@ -246,9 +246,10 @@ static mino_val *gz_throw(mino_state *S, gz_status st, size_t max_out,
 }
 
 /* (gzip-decompress data opts?) -- one gzip member, strictly: the CRC32
- * and ISIZE trailer is verified and trailing bytes are an error. */
-static mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
-                                      mino_env *env)
+ * and ISIZE trailer is verified and trailing bytes are an error.
+ * Cross-TU: http.c calls it to decode Content-Encoding gzip bodies. */
+mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
+                               mino_env *env)
 {
     const unsigned char *data;
     size_t               len, max_out, body_ofs, consumed, end;
@@ -287,9 +288,10 @@ static mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
 }
 
 /* (deflate-decompress data opts?) -- one raw deflate stream, strictly:
- * the stream must consume the whole input. */
-static mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
-                                         mino_env *env)
+ * the stream must consume the whole input.
+ * Cross-TU: http.c calls it to decode Content-Encoding deflate. */
+mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
+                                  mino_env *env)
 {
     const unsigned char *data;
     size_t               len, max_out, consumed;

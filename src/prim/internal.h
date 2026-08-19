@@ -413,17 +413,42 @@ void mino_net_handle_close(mino_val *v);
 
 /* tls.c -- same bridge shape as net.c above for TLS-socket handles.
  * The pool-side close releases the descriptor without the close_notify
- * pump (non-blocking, finalizer-equivalent). */
+ * pump (non-blocking, finalizer-equivalent). prim_tls_connect is
+ * cross-TU: http.c drives the https leg of http-request through it
+ * (the prim_net_connect precedent). The handle send/recv bridge pumps
+ * application data over a live TLS handle with an explicit per-call
+ * deadline; same classified-error contract as the net raw bridge. */
 const char *mino_tls_sock_tag(void);
 int  mino_tls_handle_fd(mino_val *v, uintptr_t *fd_out);
 void mino_tls_handle_close(mino_val *v);
+mino_val *prim_tls_connect(mino_state *S, mino_val *args, mino_env *env);
+int  mino_tls_handle_send(mino_state *S, mino_val *v,
+                          const unsigned char *buf, size_t n,
+                          long long write_ms, const char **kind,
+                          const char **code, char *msg, size_t msg_cap);
+int  mino_tls_handle_recv(mino_state *S, mino_val *v, unsigned char *buf,
+                          size_t n, size_t *got, long long read_ms,
+                          const char **kind, const char **code, char *msg,
+                          size_t msg_cap);
 
 /* pool.c -- keep-alive connection pool per endpoint, per state (the
  * registry hangs off S->net_pools; see runtime/internal.h). State
  * teardown calls the free hook so pooled sockets die with the state.
  * The prim table is file-local static (installed by mino_install_pool,
- * dispatched from the MINO_CAP_NET capability bit like tls.c). */
+ * dispatched from the MINO_CAP_NET capability bit like tls.c). The
+ * C checkout/return pair is the request loop's seam: endpoint spelled
+ * as parts plus the TLS verification mode (an insecure entry never
+ * serves a verifying checkout), no prim-map construction, no throws
+ * on the checkout (NULL is a miss); return closes the handle on every
+ * failure instead of throwing, is idempotent for a handle already in
+ * the pool, and answers -1 only for allocation failure. */
 void mino_net_pool_state_free(mino_state *S);
+mino_val *mino_net_pool_checkout(mino_state *S, const char *host,
+                                 size_t host_len, int port, int is_https,
+                                 int insecure, long long keepalive);
+int mino_net_pool_return(mino_state *S, const char *host, size_t host_len,
+                         int port, int is_https, int insecure,
+                         mino_val *handle, long long keepalive);
 
 /* fs.c -- all prims are file-local static; no extern declarations needed. */
 void mino_install_fs(mino_state *S, mino_env *env);
@@ -503,6 +528,13 @@ extern const size_t        k_prims_async_count;
 extern const mino_prim_def k_prims_fs[];
 extern const size_t        k_prims_fs_count;
 
+/* http.c -- codec prims are file-local static (the k_prims_http table
+ * above). mino_install_http_client installs the http-request
+ * orchestration prim under MINO_CAP_NET (net/tls/pool capability
+ * dispatch in runtime/capabilities.c). prim_parse_url stays cross-TU
+ * for redirect-target resolution. */
+void mino_install_http_client(mino_state *S, mino_env *env);
+
 /* url.c -- prims are file-local static except prim_parse_url, called
  * by http.c to resolve redirect targets against a request :uri. */
 extern const mino_prim_def k_prims_url[];
@@ -517,9 +549,14 @@ extern const size_t        k_prims_codec_count;
 extern const mino_prim_def k_prims_http[];
 extern const size_t        k_prims_http_count;
 
-/* gzip.c -- all prims are file-local static; no extern declarations needed. */
+/* gzip.c -- prim_gzip_decompress and prim_deflate_decompress are
+ * cross-TU: http.c decodes Content-Encoding bodies through them. */
 extern const mino_prim_def k_prims_gzip[];
 extern const size_t        k_prims_gzip_count;
+mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
+                               mino_env *env);
+mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
+                                  mino_env *env);
 
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;

@@ -5,12 +5,18 @@
  * One pool per endpoint (scheme, host, port), held per mino state in
  * S->net_pools. Entries are idle net or TLS socket handles rooted
  * through mino_ref (the host-retained root list), stamped with a
- * monotonic last-used time. The pool never opens connections: checkout
- * answers a live idle handle or nil, and the caller connects on nil.
- * Expiry (the :keepalive ms age) and liveness (a zero-timeout POLLIN
- * poll: a readable idle socket means the peer closed or desynced) are
- * checked as entries come out, so a dead or stale entry is closed and
- * dropped and the next one is tried.
+ * monotonic last-used time and the TLS verification mode they were
+ * opened under: an :insecure? session never serves a verifying
+ * request to the same endpoint (credentials would cross an unverified
+ * hop), so checkout treats a mode mismatch like a dead entry. The
+ * pool never opens connections: checkout answers a live idle handle
+ * or nil, and the caller connects on nil. Expiry (the :keepalive ms
+ * age) and liveness (a zero-timeout POLLIN poll: a readable idle
+ * socket means the peer closed or desynced) are checked as entries
+ * come out, so a dead or stale entry is closed and dropped and the
+ * next one is tried. Returning a handle that already sits in the pool
+ * is a no-op: one entry per handle, or two checkouts would hand the
+ * same descriptor to two callers.
  *
  * Locking follows the host_threads discipline: one mutex per endpoint
  * pool guarding queue operations only, never blocking IO. Prims on one
@@ -66,6 +72,7 @@ static void pool_mu_destroy(pool_mu_t *mu){ pthread_mutex_destroy(mu); }
 typedef struct pool_entry {
     mino_ref          *ref;   /* rooted handle value */
     long long         last_used_ms;
+    int               insecure;  /* TLS verification mode at open time */
     struct pool_entry *next;
 } pool_entry_t;
 
@@ -276,16 +283,32 @@ static int pool_name_text(const mino_val *v, const char **out,
     return 0;
 }
 
-/* Endpoint map {:scheme :host :port} into the pool key. host arrives
- * lowercased into host_out. Returns 0 on success, -1 with a
- * classified throw. */
+/* Lowercase a host into dst (cap POOL_HOST_CAP) for the endpoint key.
+ * Returns 0 when it fits, -1 when too long. */
+static int pool_lower_host(const char *src, size_t len, char *dst)
+{
+    size_t i;
+    if (len >= POOL_HOST_CAP) return -1;
+    for (i = 0; i < len; i++) {
+        char c = src[i];
+        dst[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+    }
+    dst[len] = '\0';
+    return 0;
+}
+
+/* Endpoint map {:scheme :host :port :insecure?} into the pool key.
+ * host arrives lowercased into host_out; :insecure? (optional
+ * boolean, default false) is the TLS verification mode the caller
+ * will accept. Returns 0 on success, -1 with a classified throw. */
 static int pool_endpoint_arg(mino_state *S, mino_val *m,
                              char *host_out, size_t *host_len_out,
-                             int *port_out, int *is_https_out)
+                             int *port_out, int *is_https_out,
+                             int *insecure_out)
 {
     mino_val *v;
     const char *scheme;
-    size_t scheme_len, i;
+    size_t scheme_len;
     long long port;
 
     if (m == NULL || mino_type_of(m) != MINO_MAP) {
@@ -305,18 +328,14 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     *is_https_out = scheme_len == 5;
     v = map_get_val(m, mino_keyword(S, "host"));
     if (v == NULL || mino_type_of(v) != MINO_STRING
-        || v->as.s.len == 0 || v->as.s.len >= POOL_HOST_CAP) {
+        || v->as.s.len == 0
+        || pool_lower_host(v->as.s.data, v->as.s.len, host_out) != 0) {
         prim_throw_classified(S, "eval/contract", "MCT001",
                               "pool: :host must be a non-empty string "
                               "under 256 bytes");
         return -1;
     }
-    memcpy(host_out, v->as.s.data, v->as.s.len);
     *host_len_out = v->as.s.len;
-    for (i = 0; i < *host_len_out; i++) {
-        char c = host_out[i];
-        host_out[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
-    }
     v = map_get_val(m, mino_keyword(S, "port"));
     if (!as_long(v, &port) || port < 1 || port > 65535) {
         prim_throw_classified(S, "eval/contract", "MCT001",
@@ -325,6 +344,16 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
         return -1;
     }
     *port_out = (int)port;
+    *insecure_out = 0;
+    v = map_get_val(m, mino_keyword(S, "insecure?"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (mino_type_of(v) != MINO_BOOL) {
+            prim_throw_classified(S, "eval/contract", "MCT001",
+                                  "pool: :insecure? must be a boolean");
+            return -1;
+        }
+        *insecure_out = mino_val_bool_get(v);
+    }
     return 0;
 }
 
@@ -366,15 +395,14 @@ static int pool_opt_keepalive(mino_state *S, mino_val *opts,
  * nothing live and unexpired is pooled. The caller connects on nil;
  * the pool never opens connections. */
 static mino_val *prim_pool_checkout(mino_state *S, mino_val *args,
-                                    mino_env *env)
+                                     mino_env *env)
 {
     mino_val *m, *opts = NULL;
     char host[POOL_HOST_CAP];
     size_t host_len;
-    int port, is_https;
+    int port, is_https, insecure;
     long long keepalive;
-    pool_endpoint_t *ep;
-    long long now;
+    mino_val *v;
     (void)env;
 
     if (!mino_is_cons(args)) {
@@ -393,58 +421,26 @@ static mino_val *prim_pool_checkout(mino_state *S, mino_val *args,
         }
     }
     if (pool_opts_arg(S, opts, "pool-checkout") != 0) return NULL;
-    if (pool_endpoint_arg(S, m, host, &host_len, &port, &is_https) != 0)
+    if (pool_endpoint_arg(S, m, host, &host_len, &port, &is_https,
+                          &insecure) != 0)
         return NULL;
     if (pool_opt_keepalive(S, opts, &keepalive) != 0) return NULL;
-    if (keepalive <= 0) return mino_nil(S);
-    ep = pool_endpoint(S, host, host_len, port, is_https, 0);
-    if (ep == NULL) return mino_nil(S);
-
-    now = pool_now_ms();
-    for (;;) {
-        pool_entry_t *e;
-        mino_val *v;
-        uintptr_t fd;
-        const pool_handle_ops_t *ops;
-
-        pool_mu_lock(&ep->mu);
-        e = ep->idle;
-        if (e != NULL) ep->idle = e->next;
-        pool_mu_unlock(&ep->mu);
-        if (e == NULL) return mino_nil(S);
-        v = mino_deref(e->ref);
-        ops = v != NULL ? pool_ops_for(v) : NULL;
-        if (v == NULL || ops == NULL
-            || now - e->last_used_ms >= keepalive
-            || ops->fd_of(v, &fd) == 0
-            || pool_socket_dead(fd)) {
-            /* Expired, closed, or peer-gone: close, drop, try next. */
-            if (v != NULL && ops != NULL) ops->close(v);
-            mino_unref(S, e->ref);
-            free(e);
-            continue;
-        }
-        mino_unref(S, e->ref);
-        free(e);
-        return v;
-    }
+    v = mino_net_pool_checkout(S, host, host_len, port, is_https,
+                               insecure, keepalive);
+    return v != NULL ? v : mino_nil(S);
 }
 
 /* (pool-return endpoint handle [opts]) -> nil. Gives an idle socket or
  * TLS handle back to its endpoint pool for reuse. :keepalive 0 or
  * negative closes the handle instead of pooling it. */
 static mino_val *prim_pool_return(mino_state *S, mino_val *args,
-                                  mino_env *env)
+                                   mino_env *env)
 {
     mino_val *m, *handle, *opts = NULL;
     char host[POOL_HOST_CAP];
     size_t host_len;
-    int port, is_https;
+    int port, is_https, insecure;
     long long keepalive;
-    const pool_handle_ops_t *ops;
-    uintptr_t fd;
-    pool_endpoint_t *ep;
-    pool_entry_t *e;
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -464,42 +460,137 @@ static mino_val *prim_pool_return(mino_state *S, mino_val *args,
         }
     }
     if (pool_opts_arg(S, opts, "pool-return") != 0) return NULL;
-    if (pool_endpoint_arg(S, m, host, &host_len, &port, &is_https) != 0)
+    if (pool_endpoint_arg(S, m, host, &host_len, &port, &is_https,
+                          &insecure) != 0)
         return NULL;
-    ops = pool_ops_for(handle);
-    if (ops == NULL) {
+    if (pool_ops_for(handle) == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "pool-return: handle must be a net "
                                      "or TLS socket");
     }
     if (pool_opt_keepalive(S, opts, &keepalive) != 0) return NULL;
+    if (mino_net_pool_return(S, host, host_len, port, is_https, insecure,
+                             handle, keepalive) != 0) {
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "pool-return: out of memory");
+    }
+    return mino_nil(S);
+}
+
+/* ---- C API for prim/http.c (the request loop) ---- */
+
+/* Checkout with the endpoint spelled as C parts instead of a map.
+ * host is lowercased into the pool key here. Entries opened under a
+ * different TLS verification mode are closed and skipped: a session
+ * the caller did not ask to trust must not carry its credentials.
+ * Returns a live handle or NULL when nothing is reusable (miss,
+ * expiry, mode mismatch, or keepalive <= 0). */
+mino_val *mino_net_pool_checkout(mino_state *S, const char *host,
+                                 size_t host_len, int port, int is_https,
+                                 int insecure, long long keepalive)
+{
+    char key[POOL_HOST_CAP];
+    pool_endpoint_t *ep;
+    long long now;
+
+    if (keepalive <= 0) return NULL;
+    if (pool_lower_host(host, host_len, key) != 0) return NULL;
+    ep = pool_endpoint(S, key, host_len, port, is_https, 0);
+    if (ep == NULL) return NULL;
+
+    now = pool_now_ms();
+    for (;;) {
+        pool_entry_t *e;
+        mino_val *v;
+        uintptr_t fd;
+        const pool_handle_ops_t *ops;
+
+        pool_mu_lock(&ep->mu);
+        e = ep->idle;
+        if (e != NULL) ep->idle = e->next;
+        pool_mu_unlock(&ep->mu);
+        if (e == NULL) return NULL;
+        v = mino_deref(e->ref);
+        ops = v != NULL ? pool_ops_for(v) : NULL;
+        if (v == NULL || ops == NULL
+            || e->insecure != insecure
+            || now - e->last_used_ms >= keepalive
+            || ops->fd_of(v, &fd) == 0
+            || pool_socket_dead(fd)) {
+            /* Expired, closed, peer-gone, or wrong verification mode:
+             * close, drop, try next. */
+            if (v != NULL && ops != NULL) ops->close(v);
+            mino_unref(S, e->ref);
+            free(e);
+            continue;
+        }
+        mino_unref(S, e->ref);
+        free(e);
+        return v;
+    }
+}
+
+/* Return-side twin of the checkout above. Closes instead of pooling
+ * for keepalive <= 0 and for already-closed handles, and is
+ * idempotent: a handle already sitting in this endpoint's idle list
+ * is never rooted a second time (two checkouts would hand the same
+ * descriptor to two callers). Returns 0, or -1 on allocation failure
+ * with the handle already closed (never leaves a failed entry in the
+ * pool). */
+int mino_net_pool_return(mino_state *S, const char *host, size_t host_len,
+                         int port, int is_https, int insecure,
+                         mino_val *handle, long long keepalive)
+{
+    char key[POOL_HOST_CAP];
+    const pool_handle_ops_t *ops;
+    pool_endpoint_t *ep;
+    pool_entry_t *e;
+    pool_entry_t *scan;
+    uintptr_t fd;
+
+    ops = pool_ops_for(handle);
+    if (ops == NULL) return 0;
     if (keepalive <= 0 || ops->fd_of(handle, &fd) == 0) {
         /* Reuse disabled, or the handle is already closed: keep the
          * pool free of entries that can never be handed out. */
         if (keepalive <= 0) ops->close(handle);
-        return mino_nil(S);
+        return 0;
     }
-    ep = pool_endpoint(S, host, host_len, port, is_https, 1);
-    e = (pool_entry_t *)malloc(sizeof(*e));
-    if (ep == NULL || e == NULL) {
-        free(e);
+    if (pool_lower_host(host, host_len, key) != 0) {
         ops->close(handle);
-        return prim_throw_classified(S, "internal", "MIN001",
-                                     "pool-return: out of memory");
+        return 0;
+    }
+    ep = pool_endpoint(S, key, host_len, port, is_https, 1);
+    if (ep == NULL) {
+        ops->close(handle);
+        return -1;
+    }
+    pool_mu_lock(&ep->mu);
+    for (scan = ep->idle; scan != NULL; scan = scan->next) {
+        if (mino_deref(scan->ref) == handle) {
+            pool_mu_unlock(&ep->mu);
+            return 0;
+        }
+    }
+    pool_mu_unlock(&ep->mu);
+    e = (pool_entry_t *)malloc(sizeof(*e));
+    if (e == NULL) {
+        ops->close(handle);
+        return -1;
     }
     e->ref = mino_ref_new(S, handle);
     if (e->ref == NULL) {
         free(e);
         ops->close(handle);
-        return prim_throw_classified(S, "internal", "MIN001",
-                                     "pool-return: out of memory");
+        return -1;
     }
     e->last_used_ms = pool_now_ms();
+    e->insecure     = insecure;
     pool_mu_lock(&ep->mu);
     e->next  = ep->idle;
     ep->idle = e;
     pool_mu_unlock(&ep->mu);
-    return mino_nil(S);
+    return 0;
 }
 
 /* (pool-close-all) -> nil. Closes every pooled socket in every
@@ -536,17 +627,21 @@ static mino_val *prim_pool_close_all(mino_state *S, mino_val *args,
 static const mino_prim_def k_prims_pool[] = {
     {"pool-checkout", prim_pool_checkout,
      "Returns a live idle keep-alive socket or TLS handle for the "
-     "endpoint map {:scheme :host :port}, or nil when nothing is "
-     "pooled (the caller connects on nil; the pool never connects). "
-     "Opts key :keepalive (ms, default 120000) bounds entry age at "
-     "checkout; 0 or negative disables reuse. Stale entries are closed "
-     "and dropped; liveness is a zero-timeout poll, so a peer-closed "
-     "socket is never handed out."},
+     "endpoint map {:scheme :host :port :insecure?}, or nil when "
+     "nothing is pooled (the caller connects on nil; the pool never "
+     "connects). Entries opened under a different TLS verification "
+     "mode than :insecure? are never handed out. Opts key :keepalive "
+     "(ms, default 120000) bounds entry age at checkout; 0 or negative "
+     "disables reuse. Stale entries are closed and dropped; liveness "
+     "is a zero-timeout poll, so a peer-closed socket is never handed "
+     "out."},
     {"pool-return", prim_pool_return,
      "Gives an idle socket or TLS handle back to its endpoint pool for "
-     "reuse. Returns nil. Opts key :keepalive (ms, default 120000) "
-     "stamps the entry; 0 or negative closes the handle instead of "
-     "pooling it. Returning an already-closed handle is a no-op."},
+     "reuse, stamped with the endpoint map's verification mode "
+     "(:insecure?). Returns nil. Opts key :keepalive (ms, default "
+     "120000) stamps the entry; 0 or negative closes the handle "
+     "instead of pooling it. Returning an already-closed or "
+     "already-pooled handle is a no-op."},
     {"pool-close-all", prim_pool_close_all,
      "Closes every pooled socket in every endpoint and empties the "
      "pools. Returns nil. Idempotent. State teardown runs it "

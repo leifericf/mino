@@ -193,6 +193,10 @@ else:
          (try (pool-return {:scheme :http :host "h" :port 80}
                            "string-not-a-socket")
               (catch e (:mino/kind e)))))
+  (is (= :eval/contract
+         (try (pool-checkout {:scheme :https :host "h" :port 443
+                              :insecure? "yes"})
+              (catch e (:mino/kind e)))))
   (is (thrown? (pool-close-all :unexpected))))
 
 (deftest pool-checkout-empty-pool-returns-nil
@@ -325,6 +329,47 @@ else:
           (net-close h)
           (is (nil? (pool-return e h nil)))
           (is (nil? (pool-checkout e nil)))
+          (is (nil? (pool-close-all)))))))
+
+  (deftest double-return-roots-the-handle-once
+    ;; Two returns without a checkout in between must not create two
+    ;; entries for one descriptor: the second checkout would hand the
+    ;; same socket to a second caller.
+    (pool-with-server "keep"
+      (fn [srv]
+        (let [e (pool-ep srv)
+              h (net-connect "127.0.0.1" (:port srv))]
+          (pool-wait-for-count srv 1)
+          (is (nil? (pool-return e h nil)))
+          (is (nil? (pool-return e h nil))
+              "returning an already-pooled handle is a no-op")
+          (let [h2 (pool-checkout e nil)
+                h3 (pool-checkout e nil)]
+            (is (identical? h h2))
+            (is (nil? h3) "the double return must not root a second entry")
+            (net-close h2)
+            (is (nil? (pool-close-all))))))))
+
+  (deftest tls-verification-mode-partitions-the-pool
+    ;; A session opened with :insecure? true must never serve a
+    ;; verifying request to the same endpoint: the Authorization
+    ;; headers of a default-verified call would cross an unverified
+    ;; hop. Insecure checkouts reuse insecure entries.
+    (pool-with-server "tls"
+      (fn [srv]
+        (let [secure   {:scheme :https :host "localhost" :port (:port srv)}
+              insecure (assoc secure :insecure? true)
+              t-opts   {:insecure? true :connect-timeout 3000
+                        :read-timeout 3000 :write-timeout 3000}
+              h1       (tls-connect (net-connect "127.0.0.1" (:port srv)
+                                                t-opts)
+                                    "localhost" t-opts)]
+          (is (nil? (pool-return insecure h1 nil)))
+          (is (identical? h1 (pool-checkout insecure nil))
+              "an insecure entry serves the next insecure checkout")
+          (is (nil? (pool-return insecure h1 nil)))
+          (is (nil? (pool-checkout secure nil))
+              "a verifying checkout must never reuse an insecure session")
           (is (nil? (pool-close-all)))))))
 
   (deftest tls-handles-pool-like-sockets

@@ -544,9 +544,10 @@ static int tls_opt_insecure(mino_state *S, mino_val *opts, int *out)
 
 /* ---- connect ---- */
 
-/* (tls-connect sock host opts?) / (tls-connect host port opts?) */
-static mino_val *prim_tls_connect(mino_state *S, mino_val *args,
-                                  mino_env *env)
+/* (tls-connect sock host opts?) / (tls-connect host port opts?).
+ * Cross-TU: http.c calls it for the https leg of http-request. */
+mino_val *prim_tls_connect(mino_state *S, mino_val *args,
+                           mino_env *env)
 {
     mino_val *a1, *a2, *opts = NULL;
     mino_val *hv;
@@ -880,15 +881,66 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
 }
 
 /* ---- write ---- */
+/* Pump the whole buffer through the engine. 0 ok, -1 failure
+ * (kind/code/msg filled). Shared by tls-write and the http bridge. */
+static int tls_send_all(mino_state *S, mino_tls_sock_t *ts,
+                        const unsigned char *data, size_t len,
+                        const char *who, const char **kind,
+                        const char **code, char *msg, size_t msg_cap)
+{
+    size_t sent = 0;
+    while (sent < len) {
+        unsigned st = br_ssl_engine_current_state(&ts->cc.eng);
+        if (st & BR_SSL_CLOSED) {
+            tls_engine_error_text(who, "write", &ts->cc.eng, msg,
+                                  msg_cap);
+            *kind = "tls";
+            *code = "MTL003";
+            return -1;
+        }
+        if (st & BR_SSL_SENDREC) {
+            if (tls_drain_sendrec(S, ts, kind, code, msg, msg_cap) != 0)
+                return -1;
+            continue;
+        }
+        if (st & BR_SSL_SENDAPP) {
+            size_t space;
+            unsigned char *app = br_ssl_engine_sendapp_buf(&ts->cc.eng,
+                                                           &space);
+            size_t take;
+            if (app == NULL || space == 0) {
+                *kind = "tls";
+                *code = "MTL003";
+                snprintf(msg, msg_cap,
+                         "%s: no application buffer space", who);
+                return -1;
+            }
+            take = len - sent < space ? len - sent : space;
+            memcpy(app, data + sent, take);
+            br_ssl_engine_sendapp_ack(&ts->cc.eng, take);
+            sent += take;
+            continue;
+        }
+        /* Only peer input pending: the engine cannot take more app
+         * data until the record machinery advances, so feed it. This
+         * blocks up to the read timeout rather than spinning; the
+         * usual content here is a peer close_notify or alert. */
+        if (tls_fill_recvrec(S, ts, kind, code, msg, msg_cap) != 0)
+            return -1;
+    }
+    br_ssl_engine_flush(&ts->cc.eng, 0);
+    return tls_drain_sendrec(S, ts, kind, code, msg, msg_cap);
+}
 
 /* (tls-write sock data) -> byte count written. data is a string
  * (UTF-8 bytes) or bytes. */
-static mino_val *prim_tls_write(mino_state *S, mino_val *args, mino_env *env)
+static mino_val *prim_tls_write(mino_state *S, mino_val *args,
+                                mino_env *env)
 {
     mino_val *sock_val, *data_val;
     mino_tls_sock_t *ts;
     const unsigned char *data;
-    size_t len, sent = 0;
+    size_t len;
     const char *kind = "tls", *code = "MTL003";
     char msg[240];
     (void)env;
@@ -925,55 +977,13 @@ static mino_val *prim_tls_write(mino_state *S, mino_val *args, mino_env *env)
      * either mid-write. */
     gc_pin(sock_val);
     gc_pin(data_val);
-    while (sent < len) {
-        unsigned st = br_ssl_engine_current_state(&ts->cc.eng);
-        if (st & BR_SSL_CLOSED) {
-            tls_engine_error_text("tls-write", "write", &ts->cc.eng, msg,
-                                  sizeof msg);
-            gc_unpin(2);
-            return prim_throw_classified(S, "tls", "MTL003", msg);
-        }
-        if (st & BR_SSL_SENDREC) {
-            if (tls_drain_sendrec(S, ts, &kind, &code, msg,
-                                  sizeof msg) != 0) {
-                gc_unpin(2);
-                return prim_throw_classified(S, kind, code, msg);
-            }
-            continue;
-        }
-        if (st & BR_SSL_SENDAPP) {
-            size_t space;
-            unsigned char *app = br_ssl_engine_sendapp_buf(&ts->cc.eng,
-                                                           &space);
-            size_t take;
-            if (app == NULL || space == 0) {
-                gc_unpin(2);
-                return prim_throw_classified(S, "tls", "MTL003",
-                                             "tls-write: no application "
-                                             "buffer space");
-            }
-            take = len - sent < space ? len - sent : space;
-            memcpy(app, data + sent, take);
-            br_ssl_engine_sendapp_ack(&ts->cc.eng, take);
-            sent += take;
-            continue;
-        }
-        /* Only peer input pending: the engine cannot take more app
-         * data until the record machinery advances, so feed it. This
-         * blocks up to the read timeout rather than spinning; the
-         * usual content here is a peer close_notify or alert. */
-        if (tls_fill_recvrec(S, ts, &kind, &code, msg, sizeof msg) != 0) {
-            gc_unpin(2);
-            return prim_throw_classified(S, kind, code, msg);
-        }
-    }
-    br_ssl_engine_flush(&ts->cc.eng, 0);
-    if (tls_drain_sendrec(S, ts, &kind, &code, msg, sizeof msg) != 0) {
+    if (tls_send_all(S, ts, data, len, "tls-write", &kind, &code, msg,
+                     sizeof msg) != 0) {
         gc_unpin(2);
         return prim_throw_classified(S, kind, code, msg);
     }
     gc_unpin(2);
-    return mino_int(S, (long long)sent);
+    return mino_int(S, (long long)len);
 }
 
 /* ---- close ---- */
@@ -1023,6 +1033,81 @@ static mino_val *prim_tls_close(mino_state *S, mino_val *args, mino_env *env)
     mino_net_close_raw(ts->fd);
     ts->closed = 1;
     return mino_nil(S);
+}
+
+/* ---- request pump bridge for prim/http.c ---- */
+
+/* Resolve a live TLS-socket record from a handle value without
+ * throwing. NULL for wrong tag, NULL ptr, or closed. */
+static mino_tls_sock_t *tls_handle_record(mino_val *v)
+{
+    mino_tls_sock_t *ts;
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE
+        || v->as.handle.tag == NULL
+        || strcmp(v->as.handle.tag, TLS_SOCK_TAG) != 0
+        || v->as.handle.ptr == NULL) {
+        return NULL;
+    }
+    ts = (mino_tls_sock_t *)v->as.handle.ptr;
+    return ts->closed ? NULL : ts;
+}
+
+/* Send a whole buffer over a TLS-socket handle with this call's write
+ * deadline. Same contract as mino_net_send_raw: 0 ok, -1 with
+ * kind/code/msg filled. Pins the handle across the pump's yield
+ * windows. The deadline must also move to the descriptor: the engine
+ * enforces SO_SNDTIMEO, and a pooled session still carries the first
+ * request's socket options. */
+int mino_tls_handle_send(mino_state *S, mino_val *v,
+                         const unsigned char *buf, size_t n,
+                         long long write_ms, const char **kind,
+                         const char **code, char *msg, size_t msg_cap)
+{
+    mino_tls_sock_t *ts = tls_handle_record(v);
+    int rc;
+    if (ts == NULL) {
+        *kind = "tls";
+        *code = "MTL004";
+        snprintf(msg, msg_cap, "http-request: TLS socket is closed");
+        return -1;
+    }
+    if (ts->write_timeout_ms != write_ms) {
+        ts->write_timeout_ms = write_ms;
+        mino_net_apply_timeouts_raw(ts->fd, ts->read_timeout_ms, write_ms);
+    }
+    gc_pin(v);
+    rc = tls_send_all(S, ts, buf, n, "http-request", kind, code, msg,
+                      msg_cap);
+    gc_unpin(1);
+    return rc;
+}
+
+/* One decrypt read into buf (up to n bytes). Same contract as
+ * mino_net_recv_raw: 1 with *got set, 0 clean close before any byte,
+ * -1 with kind/code/msg filled. Re-applies SO_RCVTIMEO when this
+ * call's deadline differs, so pooled reuse cannot enforce the first
+ * request's read timeout. */
+int mino_tls_handle_recv(mino_state *S, mino_val *v, unsigned char *buf,
+                         size_t n, size_t *got, long long read_ms,
+                         const char **kind, const char **code, char *msg,
+                         size_t msg_cap)
+{
+    mino_tls_sock_t *ts = tls_handle_record(v);
+    int rc;
+    if (ts == NULL) {
+        *kind = "tls";
+        *code = "MTL004";
+        snprintf(msg, msg_cap, "http-request: TLS socket is closed");
+        return -1;
+    }
+    if (ts->read_timeout_ms != read_ms) {
+        ts->read_timeout_ms = read_ms;
+        mino_net_apply_timeouts_raw(ts->fd, read_ms, ts->write_timeout_ms);
+    }
+    gc_pin(v);
+    rc = tls_read_engine(S, ts, buf, n, got, kind, code, msg, msg_cap);
+    gc_unpin(1);
+    return rc;
 }
 
 /* ---- handle bridge for the keep-alive pool (prim/pool.c) ---- */
