@@ -220,6 +220,30 @@ zig pin and file/​link the upstream issue; then swap the
 `darwin-*` matrix entries in `release-build.yml` to a pinned-zig build
 and invert the canary so Apple clang becomes the informational lens.
 
+## Vendored security updates
+
+Three vendored inputs carry security exposure: BearSSL (TLS), miniz
+(inflate), and the Mozilla CA root snapshot. Each has its own re-pin
+ritual; this is the index plus the shared duties:
+
+- **BearSSL re-pin**: `src/vendor/bearssl/README.md` (re-pin the
+  release, regenerate `bearssl_client.c`, re-run the gates).
+- **miniz re-pin**: `src/vendor/miniz/README.md` (re-pin the release,
+  re-extract `mz_crc32`).
+- **Mozilla roots refresh**: fetch the current bundle from
+  <https://curl.se/ca/cacert.pem> over
+  `src/vendor/bearssl/mozilla-roots.pem`, rerun
+  `./mino src/vendor/bearssl/tools/gen_ca_roots.clj`, and update the
+  snapshot facts in the BearSSL README (Mozilla date line, PEM sha256,
+  anchor count). `tests/ca_roots_test.clj` fails if the PEM, the
+  generated `roots.c`, and the README drift apart.
+
+Any change to vendored code re-checks `THIRD_PARTY_LICENSES.md`: the
+notices must match the current pins and license texts. Each re-pin's
+changelog line rides the release that first ships it; the changelog
+lands through the proposal merge (ADR 05), never by editing it from a
+work branch.
+
 ## Guardrails
 
 - **Zig is a toolchain, never a source language.** No `.zig` files in the

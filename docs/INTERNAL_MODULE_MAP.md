@@ -25,7 +25,9 @@ src/
 ├── interop/                       # host interop syntax (+ internal.h)
 ├── regex/                         # self-contained regex engine
 ├── diag/                          # diagnostic kinds + reporting (+ diag_contract.h severity classes)
-└── vendor/imath/                  # MIT-licensed bignum (vendored)
+├── vendor/bearssl/                # vendored BearSSL TLS client + Mozilla root snapshot (see its README)
+├── vendor/imath/                  # MIT-licensed bignum (vendored)
+└── vendor/miniz/                  # vendored miniz inflate side (see its README)
 ```
 
 ## Runtime Core
@@ -96,7 +98,7 @@ src/
 | `src/prim/fs.c` | Filesystem primitives |
 | `src/prim/url.c` | URL text primitives: percent-encode / percent-decode, parse-url (RFC 3986) |
 | `src/prim/codec.c` | Binary codec primitives: base64-encode / base64-decode (RFC 4648), hex-encode / hex-decode |
-| `src/prim/http.c` | HTTP/1.1 message codec primitives: http-encode-request / http-encode-chunk, response parsing (http-parse-response, http-parse-response-chunks) over a capped incremental parser, and the pure redirect policy (redirect-next) driving parse-url for Location resolution |
+| `src/prim/http.c` | HTTP/1.1 message codec primitives: http-encode-request / http-encode-chunk, response parsing (http-parse-response, http-parse-response-chunks) over a capped incremental parser, and the pure redirect policy (redirect-next) driving parse-url for Location resolution; plus the http-request orchestration prim (net capability) composing net, TLS, pool, gzip decode, and the redirect loop |
 | `src/prim/gzip.c` | Decompression primitives: gzip-decompress (RFC 1952 container, CRC32 + ISIZE verified), deflate-decompress (raw RFC 1951), both capped by :max-bytes |
 | `src/prim/proc.c` | Process / subprocess primitives |
 | `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through and the handle bridge the pool borrows descriptors through |
@@ -190,6 +192,9 @@ and a four-primitive bridge.
 | `src/vendor/imath/imath.h` | imath public header |
 | `src/vendor/bearssl/bearssl_client.c` | generated single-TU BearSSL TLS client amalgam (see `src/vendor/bearssl/README.md`) |
 | `src/vendor/bearssl/roots.c` | generated Mozilla CA root DER snapshot feeding TLS verification |
+| `src/vendor/bearssl/tools/make_amalgam.py` | regenerates `bearssl_client.c` from the vendored upstream `inc/` + `src/` tree |
+| `src/vendor/bearssl/tools/gen_ca_roots.clj` | regenerates `roots.c` / `roots.h` from `mozilla-roots.pem` (run with `./mino`) |
+| `src/vendor/miniz/miniz_inflate.c` | hand-maintained single-TU miniz inflate: `upstream/miniz_tinfl.c` plus `mz_crc32` (see `src/vendor/miniz/README.md`) |
 
 ## Headers
 
@@ -260,6 +265,14 @@ Rules:
 2. Write the function as `static mino_val *prim_name(...)`. Declare it `extern` (and add a line to `src/prim/internal.h`) only when another TU calls it directly or it appears in a registration table owned by a different TU (ADR 09).
 3. Append a `{"name", prim_name, "docstring..."}` entry to the file's `k_prims_<domain>[]` table at TU bottom. The domain is already wired into `k_core_domains[]` in `src/prim/install.c`; new entries pick up the install loop automatically.
 4. Add tests in `tests/` and run `./mino task test`.
+
+Capability-gated domains (`fs`, `io`, `proc`, `host`, `async`, and the
+net stack) do not ride `k_core_domains[]`: each exports a
+`mino_install_<domain>` hook dispatched from its `MINO_CAP_*` bit in
+`src/runtime/capabilities.c`. `MINO_CAP_NET` (bit 34) carries the four
+net installs (`net.c`, `tls.c`, `pool.c`, and the `http-request` table
+in `http.c`). The CLI binary installs it; the sandbox preset
+(`MINO_CAP_DEFAULT`) excludes it.
 
 ## How to Add a Special Form
 
