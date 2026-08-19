@@ -17,9 +17,9 @@ TLS client library vendored for the HTTPS support in mino's net layer.
   (Makefile wildcard `src/vendor/bearssl/*.c` and the explicit source
   list in `lib/mino/tasks/builtin.clj`). It is generated and committed;
   see the ritual below.
-- `tools/make_amalgam.py` generates `bearssl_client.c` from `inc/` and
-  `src/`. Deterministic: sorted walks, stable paste order, no
-  timestamps.
+- `tools/make_amalgam.clj` generates `bearssl_client.c` from `inc/` and
+  `src/` (mino task `bearssl-amalgam`). Deterministic: sorted walks,
+  stable paste order, no timestamps.
 
 The TLS code that uses this library lives in the runtime; until it
 lands, nothing calls into BearSSL at runtime.
@@ -124,9 +124,11 @@ fails if the PEM, the generated data, and this README drift apart.
 1. Re-pin: clone the canonical repo, check out the new release tag,
    copy `LICENSE.txt` over `LICENSE`, refresh `inc/` and `src/` per the
    trim list, and update tag and commit sha above.
-2. Regenerate: `python3 src/vendor/bearssl/tools/make_amalgam.py`, then
-   diff `bearssl_client.c`. Rename-suffix counts changing is expected;
+2. Regenerate: `./mino task bearssl-amalgam`, then diff
+   `bearssl_client.c`. Rename-suffix counts changing is expected;
    anything else in the diff deserves a read.
+   `tests/bearssl_amalgam_test.clj` fails if the vendored tree and
+   the committed amalgam drift apart.
 3. Re-run the gates: `make`, `./mino task build-asan`,
    `./mino task build-ubsan`, `./mino task test`,
    `./mino task amalgamate`, plus the zig x86_64-windows cross

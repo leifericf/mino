@@ -91,7 +91,7 @@ SOFTWARE.
 The upstream sources under `src/vendor/bearssl/inc/` and
 `src/vendor/bearssl/src/` are unmodified. The committed
 `bearssl_client.c` is generated from them by
-`src/vendor/bearssl/tools/make_amalgam.py`, which applies mechanical,
+`src/vendor/bearssl/tools/make_amalgam.clj`, which applies mechanical,
 recorded transforms (per-unit file-local identifier renames, a
 `MIN`/`MAX` to `br_MIN`/`br_MAX` rename, hoisting one macro define, and
 dropping one MSVC `#pragma comment` line); see

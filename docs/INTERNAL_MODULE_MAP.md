@@ -192,7 +192,7 @@ and a four-primitive bridge.
 | `src/vendor/imath/imath.h` | imath public header |
 | `src/vendor/bearssl/bearssl_client.c` | generated single-TU BearSSL TLS client amalgam (see `src/vendor/bearssl/README.md`) |
 | `src/vendor/bearssl/roots.c` | generated Mozilla CA root DER snapshot feeding TLS verification |
-| `src/vendor/bearssl/tools/make_amalgam.py` | upstream BearSSL's amalgam generator, vendored with the trimmed tree; regenerates `bearssl_client.c` from `inc/` + `src/` (see the vendored README's update ritual) |
+| `src/vendor/bearssl/tools/make_amalgam.clj` | mino-task amalgam generator (`bearssl-amalgam`) for the vendored tree; regenerates `bearssl_client.c` from `inc/` + `src/` (see the vendored README's update ritual) |
 | `src/vendor/bearssl/tools/gen_ca_roots.clj` | regenerates `roots.c` / `roots.h` from `mozilla-roots.pem` (run with `./mino`) |
 | `src/vendor/miniz/miniz_inflate.c` | hand-maintained single-TU miniz inflate: `upstream/miniz_tinfl.c` plus `mz_crc32` (see `src/vendor/miniz/README.md`) |
 

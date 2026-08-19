@@ -1,7 +1,7 @@
 /* BearSSL v0.6 (commit 8ef7680) TLS-client amalgam, generated
- * by tools/make_amalgam.py from the vendored tree in this
- * directory. Not an upstream file. MIT (c) 2016 Thomas Pornin
- * <pornin@bolet.org>; see LICENSE.
+ * by tools/make_amalgam.clj (mino task bearssl-amalgam) from
+ * the vendored tree in this directory. Not an upstream file.
+ * MIT (c) 2016 Thomas Pornin <pornin@bolet.org>; see LICENSE.
  *
  * Per-unit local identifiers (statics, macros, typedefs) carry
  * an _u<idx> suffix so the independent TUs coexist in one
