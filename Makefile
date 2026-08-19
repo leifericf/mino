@@ -24,7 +24,7 @@ INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
            -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc \
-           -Isrc/vendor/miniz
+           -Isrc/vendor/miniz -Isrc/vendor/miniz/upstream
 
 ifeq ($(OS),Windows_NT)
 EXE  = .exe

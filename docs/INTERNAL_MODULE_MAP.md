@@ -96,6 +96,7 @@ src/
 | `src/prim/fs.c` | Filesystem primitives |
 | `src/prim/url.c` | URL text primitives: percent-encode / percent-decode, parse-url (RFC 3986) |
 | `src/prim/codec.c` | Binary codec primitives: base64-encode / base64-decode (RFC 4648), hex-encode / hex-decode |
+| `src/prim/gzip.c` | Decompression primitives: gzip-decompress (RFC 1952 container, CRC32 + ISIZE verified), deflate-decompress (raw RFC 1951), both capped by :max-bytes |
 | `src/prim/proc.c` | Process / subprocess primitives |
 | `src/prim/net.c` | TCP socket primitives (net-connect, net-read, net-read-all, net-write, net-close) plus the fd bridge the TLS layer pumps records through |
 | `src/prim/tls.c` | TLS client primitives (tls-connect, tls-read, tls-read-all, tls-write, tls-close) over vendored BearSSL: SNI always, chain+host verification against the vendored Mozilla roots, `:insecure?` skip path, and the getentropy/BCryptGenRandom entropy seeder |
