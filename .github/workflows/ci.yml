@@ -174,7 +174,22 @@ jobs:
         # gzip, chunked, async deref, and read timeouts. In process,
         # so the lane runs on every matrix leg (TLS end-to-end legs
         # live in the mino-tests satellite repo).
-        run: ./mino task test-http
+        #
+        # Windows pre-step guard: the preceding Test step is
+        # continue-on-error by design, and a mino.exe that dies
+        # abnormally there is held by Windows Error Reporting while
+        # the crash dump is collected -- during that window the exe
+        # image is write-locked and this lane's relink fails with
+        # "cannot open output file mino.exe: Permission denied"
+        # (observed on windows-2022 twice). Kill any lingering
+        # mino.exe before building so an informational Test-step
+        # death can never block this blocking lane. The Test step's
+        # own failures still surface in its log and step summary.
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            taskkill //F //IM mino.exe 2>/dev/null || true
+          fi
+          ./mino task test-http
         timeout-minutes: 5
 
       - name: Release gate

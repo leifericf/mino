@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# Vendored file kept byte-exact as upstream ships it (CRLF
+# inside); the LF normalization above must not rewrite it.
+src/vendor/miniz/LICENSE -text
