@@ -97,8 +97,10 @@ Current snapshot:
 - 121 anchors, 129143 bytes of DER
 
 The root certificates are distributed by Mozilla under the Mozilla
-Public License 2.0 (<https://mozilla.org/MPL/2.0/>); see
-THIRD_PARTY_LICENSES.md.
+Public License 2.0 (<https://mozilla.org/MPL/2.0/>). The full license
+text is vendored as `MPL-2.0.txt` in this directory and reproduced in
+THIRD_PARTY_LICENSES.md; the generated `roots.c`/`roots.h` headers
+carry the attribution.
 
 Update ritual: fetch the URL over `mozilla-roots.pem`, rerun the
 generator (it prints the sha256 and the Mozilla date line), update

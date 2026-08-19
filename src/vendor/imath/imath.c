@@ -1404,7 +1404,7 @@ mp_result mp_int_to_int(mp_int z, mp_small *out) {
 
   mp_usmall uz = MP_USED(z);
   mp_digit *dz = MP_DIGITS(z) + uz - 1;
-  /* Use unsigned accumulation to assemble the magnitude. Signed
+  /* mino: use unsigned accumulation to assemble the magnitude. Signed
    * left-shift past the high bit is UB in C; doing the assembly in
    * mp_usmall (unsigned long) lets the shifts wrap cleanly and the
    * final cast carries the bit pattern back into mp_small. The range

@@ -1,11 +1,14 @@
 /*
  * miniz_inflate.c -- the single miniz translation unit mino builds.
  *
+ * Upstream miniz 3.1.2 (commit 77d0dce); full sha in README.md in
+ * this directory.
+ *
  * mino vendors only the inflate side of miniz: the tinfl
  * decompressor plus the CRC-32 the gzip container framing needs.
  * This wrapper sets the trim defines and pulls the upstream sources
- * in unmodified; see README.md in this directory for the pin, the
- * trim list, and the update ritual.
+ * in unmodified; see README.md in this directory for the trim list
+ * and the update ritual.
  */
 
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES 1
