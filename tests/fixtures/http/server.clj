@@ -271,7 +271,9 @@
 
 (defn- fx-send
   "Write one response spec. Framed bodies carry Content-Length; :raw
-  specs are written exactly as given."
+  specs are written exactly as given. Every framed response carries
+  a Date header (RFC 1123 via format-time, dogfooding the time
+  layer) so tests can exercise Date-header parsing end to end."
   [c spec]
   (if-let [raw (:raw spec)]
     (net-write c raw)
@@ -280,6 +282,7 @@
       (net-write
         c
         (str "HTTP/1.1 " (:code spec) " " (fx-reason (:code spec)) "\r\n"
+             "Date: " (format-time (now) :rfc1123) "\r\n"
              "Content-Type: " (or (:ctype spec) "text/plain") "\r\n"
              (apply str (map (fn [h] (str (first h) ": " (second h) "\r\n"))
                              (or (:headers spec) [])))

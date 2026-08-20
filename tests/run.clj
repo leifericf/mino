@@ -147,6 +147,7 @@
 (require "tests/time_parse_test")
 (require "tests/time_format_test")
 (require "tests/time_arith_test")
+(require "tests/time_ns_test")
 (require "tests/http_codec_test")
 (require "tests/redirect_test")
 (require "tests/gzip_test")

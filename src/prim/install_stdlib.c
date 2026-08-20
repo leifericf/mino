@@ -64,6 +64,7 @@
 #include "lib_mino_tasks_builtin.h"
 #include "lib_mino_store.h"
 #include "lib_mino_http.h"
+#include "lib_mino_time.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -271,6 +272,12 @@ void mino_install_mino_http(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.http", lib_mino_http_src);
+}
+
+void mino_install_mino_time(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.time", lib_mino_time_src);
 }
 
 void mino_install_all(mino_state *S, mino_env *env)

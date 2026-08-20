@@ -554,6 +554,10 @@ static mino_env *floor_install_prim_tables(mino_state *S)
                                k_prims_clojure_repl_count);
         }
     }
+    /* mino.time bundled lib: ungated like its prims (reading a clock
+     * is info-only; ADR 21), so it registers in the floor and every
+     * embedder can (require '[mino.time]). */
+    mino_install_mino_time(S, NULL);
     return core_env;
 }
 
