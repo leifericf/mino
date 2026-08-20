@@ -145,6 +145,7 @@
 (require "tests/codec_test")
 (require "tests/time_civil_test")
 (require "tests/time_parse_test")
+(require "tests/time_format_test")
 (require "tests/http_codec_test")
 (require "tests/redirect_test")
 (require "tests/gzip_test")

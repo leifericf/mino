@@ -373,6 +373,212 @@ static int parse_rfc2822(const char *s, int64_t *ms, int *offset_min,
     return 0;
 }
 
+/* ---- date formatting (spike-proven) --------------------------------- */
+
+static char *put_nn(char *o, unsigned v, int n)
+{
+    for (int i = n - 1; i >= 0; i--) {
+        o[i] = (char)('0' + v % 10u);
+        v /= 10u;
+    }
+    return o + n;
+}
+
+/* ISO 8601 datetime; .SSS only when the millisecond part is nonzero */
+static int format_iso8601(int64_t ms, int offset_min, char *buf,
+                          size_t cap)
+{
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) return -1;
+    if (cap < 35) return -1;
+    long long local = ms + (long long)offset_min * 60000;
+    long long secs = local / 1000;
+    int msec = (int)(local % 1000);
+    if (msec < 0) { msec += 1000; secs -= 1; }
+    civil_tm tm;
+    broken_from_secs(secs, &tm);
+    char *o = buf;
+    o = put_nn(o, (unsigned)tm.year, 4);
+    *o++ = '-';
+    o = put_nn(o, tm.month, 2);
+    *o++ = '-';
+    o = put_nn(o, tm.day, 2);
+    *o++ = 'T';
+    o = put_nn(o, tm.hour, 2);
+    *o++ = ':';
+    o = put_nn(o, tm.min, 2);
+    *o++ = ':';
+    o = put_nn(o, tm.sec, 2);
+    if (msec != 0) {
+        *o++ = '.';
+        o = put_nn(o, (unsigned)msec, 3);
+    }
+    if (offset_min == 0) {
+        *o++ = 'Z';
+    } else {
+        int a = offset_min < 0 ? -offset_min : offset_min;
+        *o++ = offset_min < 0 ? '-' : '+';
+        o = put_nn(o, (unsigned)(a / 60), 2);
+        *o++ = ':';
+        o = put_nn(o, (unsigned)(a % 60), 2);
+    }
+    *o = '\0';
+    return 0;
+}
+
+/* ISO 8601 date-only (UTC unless an offset shifts the local date) */
+static int format_iso8601_date(int64_t ms, int offset_min, char *buf,
+                               size_t cap)
+{
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) return -1;
+    if (cap < 11) return -1;
+    civil_tm tm;
+    long long local = ms + (long long)offset_min * 60000;
+    long long secs = local / 1000;
+    if (local < 0 && local % 1000 != 0) secs -= 1; /* floor div */
+    broken_from_secs(secs, &tm);
+    char *o = buf;
+    o = put_nn(o, (unsigned)tm.year, 4);
+    *o++ = '-';
+    o = put_nn(o, tm.month, 2);
+    *o++ = '-';
+    o = put_nn(o, tm.day, 2);
+    *o = '\0';
+    return 0;
+}
+
+/* RFC 1123 (HTTP Date): always GMT */
+static int format_rfc1123(int64_t ms, char *buf, size_t cap)
+{
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) return -1;
+    if (cap < 30) return -1;
+    civil_tm tm;
+    broken_from_secs(ms / 1000
+                     - (ms < 0 && ms % 1000 != 0 ? 1 : 0), &tm);
+    const char *wd = k_wd[tm.wday % 7u];
+    const char *mo = k_mo[tm.month - 1u];
+    char *o = buf;
+    memcpy(o, wd, 3); o += 3;
+    *o++ = ','; *o++ = ' ';
+    o = put_nn(o, tm.day, 2);
+    *o++ = ' ';
+    memcpy(o, mo, 3); o += 3;
+    *o++ = ' ';
+    o = put_nn(o, (unsigned)tm.year, 4);
+    *o++ = ' ';
+    o = put_nn(o, tm.hour, 2); *o++ = ':';
+    o = put_nn(o, tm.min, 2);  *o++ = ':';
+    o = put_nn(o, tm.sec, 2);
+    *o++ = ' '; *o++ = 'G'; *o++ = 'M'; *o++ = 'T';
+    *o = '\0';
+    return 0;
+}
+
+/* RFC 2822: numeric offset zone */
+static int format_rfc2822(int64_t ms, int offset_min, char *buf,
+                          size_t cap)
+{
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) return -1;
+    if (cap < 32) return -1;
+    long long local = ms + (long long)offset_min * 60000;
+    long long secs = local / 1000;
+    if (local < 0 && local % 1000 != 0) secs -= 1; /* floor div */
+    civil_tm tm;
+    broken_from_secs(secs, &tm);
+    if (tm.year < 0 || tm.year > 9999) return -1;
+    const char *wd = k_wd[tm.wday % 7u];
+    const char *mo = k_mo[tm.month - 1u];
+    char *o = buf;
+    memcpy(o, wd, 3); o += 3;
+    *o++ = ','; *o++ = ' ';
+    o = put_nn(o, tm.day, 2);
+    *o++ = ' ';
+    memcpy(o, mo, 3); o += 3;
+    *o++ = ' ';
+    o = put_nn(o, (unsigned)tm.year, 4);
+    *o++ = ' ';
+    o = put_nn(o, tm.hour, 2); *o++ = ':';
+    o = put_nn(o, tm.min, 2);  *o++ = ':';
+    o = put_nn(o, tm.sec, 2);
+    *o++ = ' ';
+    if (offset_min == 0) {
+        *o++ = '+';
+        o = put_nn(o, 0, 4);
+    } else {
+        int a = offset_min < 0 ? -offset_min : offset_min;
+        *o++ = offset_min < 0 ? '-' : '+';
+        o = put_nn(o, (unsigned)(a / 60), 2);
+        o = put_nn(o, (unsigned)(a % 60), 2);
+    }
+    *o = '\0';
+    return 0;
+}
+
+/* ---- format-time prim ------------------------------------------------ */
+
+/* (format-time ms fmt? offset-min?) -> string. fmt: :iso8601 (default),
+ * :iso8601-date, :rfc1123, :rfc2822. */
+static mino_val *prim_format_time(mino_state *S, mino_val *args,
+                                  mino_env *env)
+{
+    mino_val *av[3];
+    size_t n;
+    long long ms, off = 0;
+    mino_val *fmt;
+    char buf[40];
+    int rc;
+    char msg[80];
+    (void)env;
+
+    if (!arg_count(S, args, &n) || n < 1 || n > 3) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "format-time takes one to three "
+                                     "arguments");
+    }
+    av[0] = args->as.cons.car;
+    if (n >= 2) av[1] = args->as.cons.cdr->as.cons.car;
+    if (n == 3) av[2] = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "format-time", "epoch-ms", &ms))
+        return NULL;
+    fmt = (n >= 2) ? av[1] : NULL;
+    if (n == 3 && !time_arg_ll(S, av[2], "format-time", "offset-min",
+                               &off))
+        return NULL;
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
+        snprintf(msg, sizeof(msg),
+                 "format-time: %lld is outside years 1..9999", ms);
+        return time_throw(S, "time/range", "MTR001", msg);
+    }
+    if (off < TIME_OFF_MIN || off > TIME_OFF_MAX) {
+        snprintf(msg, sizeof(msg),
+                 "format-time: offset %lld exceeds 23:59", off);
+        return time_throw(S, "time/field", "MTF001", msg);
+    }
+
+    if (fmt == NULL || fmt == mino_keyword(S, "iso8601")) {
+        rc = format_iso8601(ms, (int)off, buf, sizeof(buf));
+    } else if (fmt == mino_keyword(S, "iso8601-date")) {
+        rc = format_iso8601_date(ms, (int)off, buf, sizeof(buf));
+    } else if (fmt == mino_keyword(S, "rfc1123")) {
+        if (n == 3) {
+            return time_throw(S, "time/field", "MTF001",
+                              "format-time: :rfc1123 is always GMT; an "
+                              "offset argument is not accepted");
+        }
+        rc = format_rfc1123(ms, buf, sizeof(buf));
+    } else if (fmt == mino_keyword(S, "rfc2822")) {
+        rc = format_rfc2822(ms, (int)off, buf, sizeof(buf));
+    } else {
+        return time_throw(S, "time/field", "MTF001",
+                          "format-time: fmt must be :iso8601, "
+                          ":iso8601-date, :rfc1123, or :rfc2822");
+    }
+    if (rc != 0) {
+        return time_throw(S, "internal", "MIN001",
+                          "format-time: internal format failure");
+    }
+    return mino_string_n(S, buf, strlen(buf));
+}
+
 /* ---- parse-time prim ------------------------------------------------- */
 
 /* (parse-time s) -> {:epoch-ms :offset-min :format :date-only?} */
@@ -780,6 +986,16 @@ const mino_prim_def k_prims_time[] = {
       "input over 64 characters throw :time/parse with the byte "
       "position. :format reports :iso8601, :rfc1123 (alphabetic "
       "zone), or :rfc2822 (numeric zone)."},
+    {"format-time", prim_format_time,
+     "Formats epoch milliseconds as a string. (format-time ms) is "
+      "ISO 8601 UTC with a Z suffix and a .SSS fraction only when "
+      "the milliseconds are nonzero. Optional fmt keyword: "
+      ":iso8601 (default), :iso8601-date (YYYY-MM-DD), :rfc1123 "
+      "(HTTP Date, always GMT, no offset argument), :rfc2822 "
+      "(numeric-offset zone). An optional final offset-min argument "
+      "renders the offset-capable forms at a fixed offset. No "
+      "pattern strings: compose custom formats from the time map "
+      "and str. Throws :time/range outside years 1..9999."},
 };
 
 const size_t k_prims_time_count =
