@@ -236,7 +236,10 @@
         r (try (net-connect "127.0.0.1" port {:connect-timeout 2000})
                (catch e e))]
     (is (= :net/connect (:mino/kind r)))
-    (is (str/includes? (:mino/message r) "cannot connect"))))
+    ;; Refusal says "cannot connect"; a firewall that DROPs to the
+    ;; unbound port surfaces the connect deadline instead. The kind
+    ;; plus the addressed port are the invariants either way.
+    (is (str/includes? (:mino/message r) "127.0.0.1"))))
 
 (deftest net-connect-timeout-classifies-as-net-connect
   ;; A non-routable address: the SYN gets no answer, so the connect

@@ -196,11 +196,13 @@
 
 (deftest tls-connect-refused-passthrough-classifies-as-net-connect
   ;; Nothing is listening: the underlying connect refusal passes
-  ;; through the TLS layer unrewritten.
+  ;; through the TLS layer unrewritten. Refusal says "cannot
+  ;; connect"; a firewall DROP surfaces the connect deadline; the
+  ;; kind and the addressed host are the invariants either way.
   (let [port (tls-free-dead-port)
         r (try (tls-connect "127.0.0.1" port t-opts)
                (catch e e))]
     (is (= :net/connect (:mino/kind r)))
-    (is (str/includes? (:mino/message r) "cannot connect"))))
+    (is (str/includes? (:mino/message r) "127.0.0.1"))))
 
 (run-tests-and-exit)
