@@ -959,6 +959,398 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
     return mino_int(S, total);
 }
 
+/* ---- calendar arithmetic and human diff ------------------------------- */
+
+static int64_t floor_div(int64_t a, int64_t b)
+{
+    int64_t q = a / b;
+    if ((a % b != 0) && ((a < 0) != (b < 0))) q -= 1;
+    return q;
+}
+
+/* add months with day clamping (Jan 31 + 1mo -> Feb 28/29) */
+static void add_months_civil(civil_tm *tm, long long delta)
+{
+    long long total = tm->year * 12 + (long long)(tm->month - 1) + delta;
+    long long y = total / 12;
+    long long mo = total % 12;
+    if (mo < 0) { mo += 12; y -= 1; }
+    tm->year = y;
+    tm->month = (unsigned)mo + 1u;
+    unsigned dim = days_in_month(y, tm->month);
+    if (tm->day > dim) tm->day = dim;
+}
+
+/* shift an epoch-ms by n calendar months on the UTC civil date,
+ * keeping the intra-day milliseconds; 0 ok, -1 out of range */
+static int add_months_ms(int64_t ms, long long n, int64_t *out)
+{
+    civil_tm tm;
+    int64_t base = floor_div(ms, 1000);
+    int msec = (int)(ms - base * 1000);
+    broken_from_secs(base, &tm);
+    add_months_civil(&tm, n);
+    if (tm.year < 1 || tm.year > 9999) return -1;
+    {
+        int64_t r = secs_from_broken(&tm) * 1000 + msec;
+        if (r < TIME_MS_MIN || r > TIME_MS_MAX) return -1;
+        *out = r;
+    }
+    return 0;
+}
+
+/* months_between as the exact definition: the largest n with
+ * add_months(a, n) <= b (requires a <= b). The field estimate is
+ * within one, so the correction loops run at most once each. */
+static long long months_between_calc(int64_t a, int64_t b)
+{
+    civil_tm ta, tb;
+    int64_t probe;
+    broken_from_secs(floor_div(a, 1000), &ta);
+    broken_from_secs(floor_div(b, 1000), &tb);
+    long long n = (tb.year - ta.year) * 12 + (long long)tb.month
+                - (long long)ta.month;
+    while (n > 0 && (add_months_ms(a, n, &probe) != 0 || probe > b)) n--;
+    while (add_months_ms(a, n + 1, &probe) == 0 && probe <= b) n++;
+    return n;
+}
+
+/* (leap-year? y) */
+static mino_val *prim_leap_year_p(mino_state *S, mino_val *args,
+                                  mino_env *env)
+{
+    long long y;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)
+        || !time_arg_ll(S, args->as.cons.car, "leap-year?", "year", &y))
+        return NULL;
+    return is_leap(y) ? mino_true(S) : mino_false(S);
+}
+
+/* (days-in-month y m) */
+static mino_val *prim_days_in_month(mino_state *S, mino_val *args,
+                                    mino_env *env)
+{
+    mino_val *av[2];
+    long long y, m;
+    char msg[72];
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "days-in-month takes two arguments");
+    }
+    av[0] = args->as.cons.car;
+    av[1] = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "days-in-month", "year", &y)) return NULL;
+    if (!time_arg_ll(S, av[1], "days-in-month", "month", &m)) return NULL;
+    if (m < 1 || m > 12) {
+        snprintf(msg, sizeof(msg),
+                 "days-in-month: month %lld outside 1..12", m);
+        return time_throw(S, "time/field", "MTF001", msg);
+    }
+    return mino_int(S, days_in_month(y, (unsigned)m));
+}
+
+/* (weekday ms-or-map) -> 0..6 (0 = Sunday) */
+static mino_val *prim_weekday(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *v;
+    long long ms;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "weekday takes one argument");
+    }
+    v = args->as.cons.car;
+    if (v != NULL && mino_type_of(v) == MINO_MAP) {
+        mino_val *r = prim_time_map_to_epoch(S, args, env);
+        if (r == NULL) return NULL;
+        if (!as_long(r, &ms)) return NULL;
+    } else if (!time_arg_ll(S, v, "weekday", "epoch-ms", &ms)) {
+        return NULL;
+    }
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
+        return time_throw(S, "time/range", "MTR001",
+                          "weekday: epoch-ms outside years 1..9999");
+    }
+    return mino_int(S, weekday_from_days(floor_div(ms, 86400000)));
+}
+
+/* (add-days ms n) -> ms; exact 86400000-ms days (the model has no
+ * DST, so a day is always exact) */
+static mino_val *prim_add_days(mino_state *S, mino_val *args,
+                               mino_env *env)
+{
+    mino_val *av[2];
+    long long ms, n;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "add-days takes two arguments");
+    }
+    av[0] = args->as.cons.car;
+    av[1] = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "add-days", "epoch-ms", &ms)) return NULL;
+    if (!time_arg_ll(S, av[1], "add-days", "n", &n)) return NULL;
+    /* years 1..9999 span under 3.7M days; anything beyond can only
+     * leave the range, and 4M days cannot overflow int64 in ms */
+    if (n > 4000000 || n < -4000000) {
+        return time_throw(S, "time/range", "MTR001",
+                          "add-days: result outside years 1..9999");
+    }
+    {
+        int64_t r = (int64_t)ms + (int64_t)n * 86400000;
+        if (r < TIME_MS_MIN || r > TIME_MS_MAX) {
+            return time_throw(S, "time/range", "MTR001",
+                              "add-days: result outside years 1..9999");
+        }
+        return mino_int(S, r);
+    }
+}
+
+/* (add-months ms-or-map n) -> same kind as the input. An ms input
+ * shifts the UTC civil date; a map input shifts its own fields and
+ * keeps hour/min/sec/ms/offset untouched. Day clamps to the target
+ * month (Jan 31 + 1mo -> Feb 28/29). */
+static mino_val *prim_add_months(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val *v, *nv;
+    long long n;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "add-months takes two arguments");
+    }
+    v = args->as.cons.car;
+    nv = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, nv, "add-months", "n", &n)) return NULL;
+
+    if (v != NULL && mino_type_of(v) == MINO_MAP) {
+        /* validate through the strict converter (one-arg list), then
+         * rebuild the map with shifted local fields */
+        mino_val *one, *ep, *mv;
+        int pinned = 0;
+        long long ms;
+        one = mino_cons(S, v, mino_nil(S));
+        gc_pin(one); pinned++;
+        ep = prim_time_map_to_epoch(S, one, env);
+        if (ep == NULL) { gc_unpin(pinned); return NULL; }
+        gc_pin(ep); pinned++;
+        if (!as_long(ep, &ms)) { gc_unpin(pinned); return NULL; }
+        {
+            mino_val *offv = map_get_val(v, mino_keyword(S, "offset-min"));
+            long long off = 0;
+            mino_val *msv, *two, *mm;
+            if (offv != NULL && !mino_is_nil(offv)
+                && !as_long(offv, &off)) {
+                gc_unpin(pinned);
+                return NULL;
+            }
+            msv = mino_int(S, ms);
+            gc_pin(msv); pinned++;
+            two = mino_cons(S, msv, mino_nil(S));
+            gc_pin(two); pinned++;
+            mm = mino_int(S, off);
+            gc_pin(mm); pinned++;
+            two = mino_cons(S, msv, mino_cons(S, mm, mino_nil(S)));
+            gc_pin(two); pinned++;
+            mv = prim_epoch_to_time_map(S, two, env);
+            if (mv == NULL) { gc_unpin(pinned); return NULL; }
+            gc_pin(mv); pinned++;
+            {
+                long long y, mo, d, h, mi, sec, msec, off2, wd;
+                mino_val *keys[9], *vals[9], *m;
+                int p2 = 0;
+                civil_tm tm;
+                if (!tm_field(S, mv, "year", 1, &y)
+                    || !tm_field(S, mv, "month", 1, &mo)
+                    || !tm_field(S, mv, "day", 1, &d)
+                    || !tm_field(S, mv, "hour", 0, &h)
+                    || !tm_field(S, mv, "min", 0, &mi)
+                    || !tm_field(S, mv, "sec", 0, &sec)
+                    || !tm_field(S, mv, "ms", 0, &msec)
+                    || !tm_field(S, mv, "offset-min", 0, &off2)) {
+                    gc_unpin(pinned);
+                    return NULL;
+                }
+                tm.year = y;
+                tm.month = (unsigned)mo;
+                tm.day = (unsigned)d;
+                add_months_civil(&tm, n);
+                if (tm.year < 1 || tm.year > 9999) {
+                    gc_unpin(pinned);
+                    return time_throw(S, "time/range", "MTR001",
+                                      "add-months: result outside years "
+                                      "1..9999");
+                }
+                wd = weekday_from_days(days_from_civil(tm.year, tm.month,
+                                                       tm.day));
+                keys[0] = mino_keyword(S, "year");     gc_pin(keys[0]); p2++;
+                vals[0] = mino_int(S, tm.year);        gc_pin(vals[0]); p2++;
+                keys[1] = mino_keyword(S, "month");    gc_pin(keys[1]); p2++;
+                vals[1] = mino_int(S, tm.month);       gc_pin(vals[1]); p2++;
+                keys[2] = mino_keyword(S, "day");      gc_pin(keys[2]); p2++;
+                vals[2] = mino_int(S, tm.day);         gc_pin(vals[2]); p2++;
+                keys[3] = mino_keyword(S, "hour");     gc_pin(keys[3]); p2++;
+                vals[3] = mino_int(S, h);              gc_pin(vals[3]); p2++;
+                keys[4] = mino_keyword(S, "min");      gc_pin(keys[4]); p2++;
+                vals[4] = mino_int(S, mi);             gc_pin(vals[4]); p2++;
+                keys[5] = mino_keyword(S, "sec");      gc_pin(keys[5]); p2++;
+                vals[5] = mino_int(S, sec);            gc_pin(vals[5]); p2++;
+                keys[6] = mino_keyword(S, "ms");       gc_pin(keys[6]); p2++;
+                vals[6] = mino_int(S, msec);           gc_pin(vals[6]); p2++;
+                keys[7] = mino_keyword(S, "wday");     gc_pin(keys[7]); p2++;
+                vals[7] = mino_int(S, wd);             gc_pin(vals[7]); p2++;
+                keys[8] = mino_keyword(S, "offset-min");
+                gc_pin(keys[8]); p2++;
+                vals[8] = mino_int(S, off2);           gc_pin(vals[8]); p2++;
+                m = mino_map(S, keys, vals, 9);
+                gc_unpin(p2);
+                gc_unpin(pinned);
+                return m;
+            }
+        }
+    }
+    {
+        long long ms, r;
+        if (!time_arg_ll(S, v, "add-months", "epoch-ms", &ms)) return NULL;
+        if (add_months_ms(ms, n, &r) != 0) {
+            return time_throw(S, "time/range", "MTR001",
+                              "add-months: result outside years 1..9999");
+        }
+        return mino_int(S, r);
+    }
+}
+
+/* (days-between a b) -> whole civil days from a to b, floor; the
+ * sign follows b - a */
+static mino_val *prim_days_between(mino_state *S, mino_val *args,
+                                   mino_env *env)
+{
+    mino_val *av[2];
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "days-between takes two arguments");
+    }
+    av[0] = args->as.cons.car;
+    av[1] = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "days-between", "a", &a)) return NULL;
+    if (!time_arg_ll(S, av[1], "days-between", "b", &b)) return NULL;
+    if (a < TIME_MS_MIN || a > TIME_MS_MAX || b < TIME_MS_MIN
+        || b > TIME_MS_MAX) {
+        return time_throw(S, "time/range", "MTR001",
+                          "days-between: epoch-ms outside years 1..9999");
+    }
+    return mino_int(S, floor_div((int64_t)b - (int64_t)a, 86400000));
+}
+
+/* (months-between a b) -> whole calendar months from a to b: the
+ * largest n with (add-months a n) <= b; the sign follows b - a */
+static mino_val *prim_months_between(mino_state *S, mino_val *args,
+                                     mino_env *env)
+{
+    mino_val *av[2];
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "months-between takes two arguments");
+    }
+    av[0] = args->as.cons.car;
+    av[1] = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "months-between", "a", &a)) return NULL;
+    if (!time_arg_ll(S, av[1], "months-between", "b", &b)) return NULL;
+    if (a < TIME_MS_MIN || a > TIME_MS_MAX || b < TIME_MS_MIN
+        || b > TIME_MS_MAX) {
+        return time_throw(S, "time/range", "MTR001",
+                          "months-between: epoch-ms outside years "
+                          "1..9999");
+    }
+    if (a <= b) return mino_int(S, months_between_calc(a, b));
+    return mino_int(S, -months_between_calc(b, a));
+}
+
+/* (human-diff a b?) -> the largest-unit phrase for b - a.
+ * Pinned vocabulary (ADR 21): |d| < 1s "just now" / "in a moment";
+ * then N seconds < 60s, minutes < 60m, hours < 24h; calendar months
+ * (add-months based, so a Feb-clamped month still counts) before
+ * 12, then years; full singular/plural words. */
+static mino_val *prim_human_diff(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val *av[2];
+    size_t n;
+    long long a, b;
+    int64_t diff, ad, earlier;
+    long long count, mb;
+    const char *unit;
+    char buf[64];
+    (void)env;
+
+    if (!arg_count(S, args, &n) || n < 1 || n > 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "human-diff takes one or two "
+                                     "arguments");
+    }
+    av[0] = args->as.cons.car;
+    if (n == 2) av[1] = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, av[0], "human-diff", "a", &a)) return NULL;
+    if (n == 2) {
+        if (!time_arg_ll(S, av[1], "human-diff", "b", &b)) return NULL;
+    } else {
+        b = time_wall_ms();
+    }
+    if (a < TIME_MS_MIN || a > TIME_MS_MAX || b < TIME_MS_MIN
+        || b > TIME_MS_MAX) {
+        return time_throw(S, "time/range", "MTR001",
+                          "human-diff: epoch-ms outside years 1..9999");
+    }
+    diff = (int64_t)b - (int64_t)a;
+    ad = diff < 0 ? -diff : diff;
+    earlier = diff >= 0 ? (int64_t)a : (int64_t)b;
+
+    if (ad < 1000) {
+        return mino_string_n(S, diff >= 0 ? "just now" : "in a moment",
+                             diff >= 0 ? 8 : 11);
+    }
+    if (ad < 60LL * 1000) {
+        count = ad / 1000;
+        unit = count == 1 ? "second" : "seconds";
+    } else if (ad < 60LL * 60 * 1000) {
+        count = ad / 60000;
+        unit = count == 1 ? "minute" : "minutes";
+    } else if (ad < 24LL * 60 * 60 * 1000) {
+        count = ad / 3600000;
+        unit = count == 1 ? "hour" : "hours";
+    } else {
+        mb = months_between_calc(earlier, earlier + ad);
+        if (mb >= 12) {
+            count = mb / 12;
+            unit = count == 1 ? "year" : "years";
+        } else if (mb >= 1) {
+            count = mb;
+            unit = count == 1 ? "month" : "months";
+        } else {
+            count = ad / 86400000;
+            unit = count == 1 ? "day" : "days";
+        }
+    }
+    if (diff >= 0) {
+        snprintf(buf, sizeof(buf), "%lld %s ago", count, unit);
+    } else {
+        snprintf(buf, sizeof(buf), "in %lld %s", count, unit);
+    }
+    return mino_string_n(S, buf, strlen(buf));
+}
+
 /* ---- prim table ------------------------------------------------------ */
 
 const mino_prim_def k_prims_time[] = {
@@ -1010,6 +1402,39 @@ const mino_prim_def k_prims_time[] = {
       "renders the offset-capable forms at a fixed offset. No "
       "pattern strings: compose custom formats from the time map "
       "and str. Throws :time/range outside years 1..9999."},
+    {"leap-year?", prim_leap_year_p,
+     "True when the year is a Gregorian leap year (divisible by 4, "
+      "except centuries not divisible by 400)."},
+    {"days-in-month", prim_days_in_month,
+     "Returns the number of days in the month (1..12) of the year; "
+      "February answers 29 in leap years."},
+    {"weekday", prim_weekday,
+     "Returns the day of the week of an epoch-ms or a time map as an "
+      "integer 0..6, 0 = Sunday."},
+    {"add-days", prim_add_days,
+     "Adds n exact 86400000-ms days to an epoch-ms (the model has no "
+      "DST, so a day is always exact). Result stays inside years "
+      "1..9999 or throws :time/range."},
+    {"add-months", prim_add_months,
+     "Adds n calendar months to an epoch-ms or a time map, returning "
+      "the same kind. The day clamps to the target month (January 31 "
+      "plus one month is February 28 or 29). A map input shifts its "
+      "own fields and keeps hour/min/sec/ms/offset; an ms input "
+      "shifts the UTC civil date."},
+    {"days-between", prim_days_between,
+     "Whole civil days from a to b, floored; the sign follows "
+      "b - a. Both arguments are epoch-ms."},
+    {"months-between", prim_months_between,
+     "Whole calendar months from a to b: the largest n with "
+      "(add-months a n) <= b, so a January 31 to February 28 gap "
+      "counts as one month. The sign follows b - a."},
+    {"human-diff", prim_human_diff,
+     "Renders the difference b - a between two epoch-ms as the "
+      "largest unit phrase: under a second \"just now\" / \"in a "
+      "moment\", then seconds under 60, minutes under 60, hours "
+      "under 24, calendar months under 12, then years, with full "
+      "singular and plural words (\"3 days ago\", \"in 5 minutes\"). "
+      "b defaults to (now)."},
 };
 
 const size_t k_prims_time_count =
