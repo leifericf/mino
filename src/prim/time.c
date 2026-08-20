@@ -523,7 +523,7 @@ static int format_rfc2822(int64_t ms, int offset_min, char *buf,
 static mino_val *prim_format_time(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
-    mino_val *av[3];
+    mino_val *av[3] = {NULL};
     size_t n;
     long long ms, off = 0;
     mino_val *fmt;
@@ -744,7 +744,7 @@ static mino_val *prim_cpu_ms(mino_state *S, mino_val *args, mino_env *env)
 static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
                                         mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     size_t n;
     long long ms, off = 0;
     civil_tm tm;
@@ -983,7 +983,7 @@ static void add_months_civil(civil_tm *tm, long long delta)
 
 /* shift an epoch-ms by n calendar months on the UTC civil date,
  * keeping the intra-day milliseconds; 0 ok, -1 out of range */
-static int add_months_ms(int64_t ms, long long n, int64_t *out)
+static int add_months_ms(int64_t ms, long long n, long long *out)
 {
     civil_tm tm;
     int64_t base = floor_div(ms, 1000);
@@ -992,7 +992,7 @@ static int add_months_ms(int64_t ms, long long n, int64_t *out)
     add_months_civil(&tm, n);
     if (tm.year < 1 || tm.year > 9999) return -1;
     {
-        int64_t r = secs_from_broken(&tm) * 1000 + msec;
+        long long r = secs_from_broken(&tm) * 1000 + msec;
         if (r < TIME_MS_MIN || r > TIME_MS_MAX) return -1;
         *out = r;
     }
@@ -1005,7 +1005,7 @@ static int add_months_ms(int64_t ms, long long n, int64_t *out)
 static long long months_between_calc(int64_t a, int64_t b)
 {
     civil_tm ta, tb;
-    int64_t probe;
+    long long probe;
     broken_from_secs(floor_div(a, 1000), &ta);
     broken_from_secs(floor_div(b, 1000), &tb);
     long long n = (tb.year - ta.year) * 12 + (long long)tb.month
@@ -1031,7 +1031,7 @@ static mino_val *prim_leap_year_p(mino_state *S, mino_val *args,
 static mino_val *prim_days_in_month(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     long long y, m;
     char msg[72];
     (void)env;
@@ -1098,7 +1098,7 @@ static mino_val *prim_weekday(mino_state *S, mino_val *args,
 static mino_val *prim_add_days(mino_state *S, mino_val *args,
                                mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     long long ms, n;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -1247,7 +1247,7 @@ static mino_val *prim_add_months(mino_state *S, mino_val *args,
 static mino_val *prim_days_between(mino_state *S, mino_val *args,
                                    mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     long long a, b;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -1272,7 +1272,7 @@ static mino_val *prim_days_between(mino_state *S, mino_val *args,
 static mino_val *prim_months_between(mino_state *S, mino_val *args,
                                      mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     long long a, b;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -1302,7 +1302,7 @@ static mino_val *prim_months_between(mino_state *S, mino_val *args,
 static mino_val *prim_human_diff(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
-    mino_val *av[2];
+    mino_val *av[2] = {NULL};
     size_t n;
     long long a, b;
     int64_t diff, ad, earlier;
