@@ -2517,6 +2517,7 @@
    "src/prim/ns.c"              "ns primitives -- intern / refer / alias / publics in one module"
    "src/prim/numeric.c"         "numeric tower -- arith + compare + math fns sharing coercion helpers"
    "src/prim/http.c"            "HTTP layer home: parser machine + serializer + prims, one TU per layer (net.c precedent)"
+   "src/prim/time.c"            "time/date layer home: civil core + parsers + formatters + arithmetic + prims, one TU per layer (http.c precedent)"
    "src/prim/reflection.c"      "reflection / type / meta surface kept together"
    "src/prim/sequences.c"       "sequence primitives -- map / filter / take / etc share lazy-seq glue"
    "src/prim/stm.c"             "STM commit + retry + ref/alter/commute/dosync kept together"
