@@ -42,6 +42,13 @@
 #else
 #  include "win_dirent.h"
 #endif
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -108,15 +115,15 @@ typedef struct {
  * bad caps (cannot happen with the +2 contract). */
 static int path_clean(const char *src, size_t n, char *out, size_t cap)
 {
-    size_t stackbuf[64];
+    seg_span_t stackbuf[64];
     size_t nsegs = 0, maxsegs, i = 0, o = 0, k;
     seg_span_t *segs;
     int absolute = (n > 0 && src[0] == '/');
 
     if (cap < n + 2) return -1;
     maxsegs = n / 2 + 1;
-    segs = (maxsegs <= 64)
-        ? (seg_span_t *)(void *)stackbuf
+    segs = (maxsegs <= (sizeof(stackbuf) / sizeof(stackbuf[0])))
+        ? stackbuf
         : (seg_span_t *)malloc(maxsegs * sizeof(*segs));
     if (segs == NULL) return -1;
 
@@ -140,7 +147,7 @@ static int path_clean(const char *src, size_t n, char *out, size_t cap)
             if (absolute) continue;          /* .. after root drops */
         }
         if (nsegs == maxsegs) {              /* unreachable; bounds guard */
-            if ((void *)segs != (void *)stackbuf) free(segs);
+            if (segs != stackbuf) free(segs);
             return -1;
         }
         segs[nsegs].off = start;
@@ -156,7 +163,7 @@ static int path_clean(const char *src, size_t n, char *out, size_t cap)
     }
     if (o == 0) out[o++] = absolute ? '/' : '.';
     out[o] = '\0';
-    if ((void *)segs != (void *)stackbuf) free(segs);
+    if (segs != stackbuf) free(segs);
     return 0;
 }
 
@@ -580,12 +587,23 @@ static mino_val *prim_path_expand_home(mino_state *S, mino_val *args,
 #define GLOB_MAX_PATTERN 256
 #define GLOB_MAX_DEPTH   128
 
+/* Shared work budget for one match operation: bounds total
+ * backtracking work so adversarial star-heavy patterns against
+ * long subjects throw :eval/bounds instead of hanging (the fuzz
+ * contract is match-or-classified-throw, temporally as well). */
+typedef struct {
+    long long steps;
+    long long budget;
+    int over;
+} glob_budget_t;
+
 typedef struct {
     const char *p;      /* pattern cursor */
     const char *pend;
     const char *s;      /* string cursor */
     const char *send;
     const char *p0;     /* pattern start (for whole-segment checks) */
+    glob_budget_t *bud;
     int depth;
 } glob_ctx;
 
@@ -595,7 +613,7 @@ static int glob_match_here(glob_ctx *g);
  * for brace alternatives whose end position is ambiguous. */
 static int glob_match_exact(const char *sp, const char *spend,
                             const char *s, size_t k, const char *p0,
-                            int depth)
+                            glob_budget_t *bud, int depth)
 {
     glob_ctx sub;
     sub.p = sp;
@@ -603,6 +621,7 @@ static int glob_match_exact(const char *sp, const char *spend,
     sub.s = s;
     sub.send = s + k;
     sub.p0 = p0;
+    sub.bud = bud;
     sub.depth = depth;
     return glob_match_here(&sub) && sub.p == sub.pend && sub.s == sub.send;
 }
@@ -628,7 +647,7 @@ static int glob_brace_try(glob_ctx *g, const char *body, const char *close)
             if (*p == ',' && depth == 1) {
                 for (k = 0; k <= maxlen; k++) {
                     if (glob_match_exact(alt_start, p, g->s, k, g->p0,
-                                         g->depth + 1)) {
+                                         g->bud, g->depth + 1)) {
                         const char *savep = g->p;
                         const char *saves = g->s;
                         g->p = rest;
@@ -637,13 +656,14 @@ static int glob_brace_try(glob_ctx *g, const char *body, const char *close)
                         g->p = savep;
                         g->s = saves;
                     }
+                    if (g->bud != NULL && g->bud->over) return 0;
                 }
                 alt_start = p + 1;
             }
         } else {
             for (k = 0; k <= maxlen; k++) {
                 if (glob_match_exact(alt_start, close, g->s, k, g->p0,
-                                     g->depth + 1)) {
+                                     g->bud, g->depth + 1)) {
                     const char *savep = g->p;
                     const char *saves = g->s;
                     g->p = rest;
@@ -652,6 +672,7 @@ static int glob_brace_try(glob_ctx *g, const char *body, const char *close)
                     g->p = savep;
                     g->s = saves;
                 }
+                if (g->bud != NULL && g->bud->over) return 0;
             }
             return 0;
         }
@@ -707,6 +728,10 @@ static int glob_class_match(glob_ctx *g)
 static int glob_match_here(glob_ctx *g)
 {
     if (g->depth > GLOB_MAX_DEPTH) return 0;
+    if (g->bud != NULL && ++g->bud->steps > g->bud->budget) {
+        g->bud->over = 1;
+        return 0;
+    }
     while (g->p < g->pend) {
         char pc = *g->p;
         if (pc == '*') {
@@ -727,12 +752,13 @@ static int glob_match_here(glob_ctx *g)
                     const char *k;
                     g->p = rest;
                     if (glob_match_here(g)) return 1;
-                    for (k = g->s; k < g->send; k++) {
+                    for (k = saves; k < g->send; k++) {
                         if (*k == '/') {
                             g->p = rest;          /* reset per retry */
                             g->s = k + 1;
                             if (glob_match_here(g)) return 1;
                         }
+                        if (g->bud != NULL && g->bud->over) break;
                     }
                     g->p = savep;
                     g->s = saves;
@@ -752,6 +778,7 @@ static int glob_match_here(glob_ctx *g)
                     g->s = q;
                     if (glob_match_here(g)) return 1;
                     if (q >= g->send || *q == '/') break;
+                    if (g->bud != NULL && g->bud->over) break;
                 }
                 g->p = savep;
                 g->s = saves;
@@ -801,18 +828,50 @@ static int glob_match_here(glob_ctx *g)
 }
 
 /* Shared entry: does pattern (already length-checked by the
- * caller) match s byte-for-byte under the glob syntax? */
+ * caller) match s byte-for-byte under the glob syntax? The work
+ * budget bounds backtracking so adversarial star-heavy patterns
+ * answer false rather than hang; the prim layer turns *over into
+ * a classified throw. */
 static int glob_pattern_matches(const char *pat, size_t pat_len,
                                 const char *s, size_t s_len)
 {
     glob_ctx g;
+    glob_budget_t bud;
+    bud.steps = 0;
+    bud.budget = 100000 + 1000 * ((long long)pat_len + (long long)s_len);
+    bud.over = 0;
     g.p = pat;
     g.pend = pat + pat_len;
     g.s = s;
     g.send = s + s_len;
     g.p0 = pat;
+    g.bud = &bud;
     g.depth = 0;
     return glob_match_here(&g);
+}
+
+/* Like glob_pattern_matches but reports budget exhaustion through
+ * *over_out so callers can throw instead of answering false. */
+static int glob_pattern_matches_checked(const char *pat, size_t pat_len,
+                                        const char *s, size_t s_len,
+                                        int *over_out)
+{
+    glob_ctx g;
+    glob_budget_t bud;
+    int r;
+    bud.steps = 0;
+    bud.budget = 100000 + 1000 * ((long long)pat_len + (long long)s_len);
+    bud.over = 0;
+    g.p = pat;
+    g.pend = pat + pat_len;
+    g.s = s;
+    g.send = s + s_len;
+    g.p0 = pat;
+    g.bud = &bud;
+    g.depth = 0;
+    r = glob_match_here(&g);
+    if (!r && bud.over && over_out != NULL) *over_out = 1;
+    return r;
 }
 
 /* (path-glob-match pattern s) -- pure matcher, walker policy
@@ -849,8 +908,19 @@ static mino_val *prim_path_glob_match(mino_state *S, mino_val *args,
                               "bytes");
         return NULL;
     }
-    r = glob_pattern_matches(pat_val->as.s.data, pat_val->as.s.len,
-                             s_val->as.s.data, s_val->as.s.len);
+    {
+        int over = 0;
+        r = glob_pattern_matches_checked(pat_val->as.s.data,
+                                         pat_val->as.s.len,
+                                         s_val->as.s.data,
+                                         s_val->as.s.len, &over);
+        if (over) {
+            prim_throw_classified(S, "eval/bounds", "MBD001",
+                                  "path-glob-match: pattern requires too "
+                                  "much backtracking against this path");
+            return NULL;
+        }
+    }
     return r ? mino_true(S) : mino_false(S);
 }
 
@@ -898,8 +968,20 @@ static int glob_is_dir(const char *child, const glob_opts_t *opts)
 {
     struct stat st;
 #ifdef _WIN32
-    (void)opts;
-    return stat(child, &st) == 0 && S_ISDIR(st.st_mode);
+    /* Windows: no lstat, but attributes distinguish directories
+     * from reparse points (symlinks and junctions), so the
+     * documented no-follow default stays honest. */
+    (void)st;
+    {
+        DWORD a = GetFileAttributesA(child);
+        if (a == INVALID_FILE_ATTRIBUTES) return 0;
+        if (!(a & FILE_ATTRIBUTE_DIRECTORY)) return 0;
+        if (!opts->follow_links
+            && (a & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            return 0;
+        }
+        return 1;
+    }
 #else
     return (opts->follow_links ? stat(child, &st)
                                : lstat(child, &st)) == 0
@@ -1090,6 +1172,10 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
     opts.follow_links = 0;
     opts.recursive = 1;
     opts.max_depth = 128;
+    /* zeroed up front: every fail: path must be able to free these */
+    w.results.items = NULL;
+    w.results.len = 0;
+    w.results.cap = 0;
 
     for (a = args; a != NULL && mino_is_cons(a); a = a->as.cons.cdr) nargs++;
     if (nargs < 1 || nargs > 3) {
@@ -1154,10 +1240,12 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
                                                              "max-depth"));
             long long md;
             if (v != NULL && mino_type_of(v) != MINO_NIL) {
-                if (mino_type_of(v) != MINO_INT || !as_long(v, &md) || md < 1) {
+                if (mino_type_of(v) != MINO_INT || !as_long(v, &md)
+                    || md < 1 || md > 4096) {
                     prim_throw_classified(S, "eval/contract", "MCT001",
-                                          "glob: :max-depth must be a "
-                                          "positive integer");
+                                          "glob: :max-depth must be an "
+                                          "integer in 1..4096 (the walk "
+                                          "recurses one C frame per level)");
                     goto fail;
                 }
                 opts.max_depth = md;
@@ -1240,9 +1328,6 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
     }
 
     w.opts = opts;
-    w.results.items = NULL;
-    w.results.len = 0;
-    w.results.cap = 0;
 
     glob_walk_dir(&w, walk_root, segs, seg_lens, nsegs, 0, "", 0, 0);
 
@@ -1269,6 +1354,10 @@ done:
     return result;
 
 fail:
+    /* the walk may already have accumulated results; mirror the
+     * success path's cleanup so nothing leaks on a late failure */
+    for (i = 0; i < w.results.len; i++) free(w.results.items[i]);
+    free(w.results.items);
     free(top_dir_heap);
     free(root_folded);
     free(segs);

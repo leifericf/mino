@@ -136,6 +136,16 @@
     false "**a"        "x/ya"       ; leading ** not whole segment
     true  "**a"        "xxa"))
 
+(deftest doublestar-retry-cursor-regression
+  ;; review round: the ** retry scan once started from a cursor the
+  ;; failed zero-directory attempt had already advanced, skipping
+  ;; earlier / boundaries
+  (are [expected pat s] (= expected (m pat s))
+    true  "**/a/a"     "a/a/a"
+    true  "**/ab/ab"   "ab/ab/ab"
+    true  "**/x/y"     "x/x/y"
+    false "**/a/b"     "a/a/c"))
+
 ;;; literals and edges
 
 (deftest literal-goldens
@@ -160,6 +170,22 @@
          (try (path-glob-match (apply str (repeat 257 "a")) "a")
               (catch e (:mino/kind e))))
       "patterns over 256 bytes throw :eval/bounds"))
+
+(deftest matcher-backtracking-budget
+  ;; review round: adversarial star-heavy patterns against a long
+  ;; subject once hung the matcher; the work budget turns that into
+  ;; a classified :eval/bounds throw (the fuzz contract is
+  ;; match-or-classified-throw, temporally as well). Proving a
+  ;; non-match through 120 stars is exponential, so it throws;
+  ;; honest patterns on the same subject stay boolean.
+  (let [subject (apply str (repeat 20000 "a"))
+        stars (str (apply str (interpose "a" (repeat 120 "*"))) "b")]
+    (is (= :eval/bounds
+           (try (path-glob-match stars subject)
+                (catch e (:mino/kind e))))))
+  (let [subject (apply str (repeat 20000 "a"))]
+    (is (true? (path-glob-match "*a*" subject)))
+    (is (false? (path-glob-match "*z*" subject)))))
 
 ;;; fuzz: untrusted patterns and strings never crash
 

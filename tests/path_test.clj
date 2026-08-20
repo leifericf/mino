@@ -169,6 +169,14 @@
     "/a"     "\\a"
     "a"      "a\\."))
 
+(deftest normalize-many-segments
+  ;; review round: 33 one-char segments (65 bytes) once overflowed
+  ;; path_clean's stack scratch; pinned so it can never regress
+  (let [deep (apply str (interpose "/" (repeat 33 "a")))]
+    (is (= deep (path-normalize deep))))
+  (let [deep (apply str (interpose "/" (repeat 100 "ab")))]
+    (is (= deep (path-normalize deep)))))
+
 (deftest normalize-is-idempotent-prop
   (is (pq (prop/for-all [s garbage-gen]
                          (= (path-normalize (path-normalize s))

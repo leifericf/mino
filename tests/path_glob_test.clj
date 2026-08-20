@@ -183,7 +183,10 @@
 
 (deftest missing-root-answers-empty
   (is (= [] (glob "*" "/nonexistent-xyz-mino-123")))
-  (is (= [] (glob "**/*.clj" "/nonexistent-xyz-mino-123"))))
+  (is (= [] (glob "**/*.clj" "/nonexistent-xyz-mino-123")))
+  ;; only-separator pattern: nothing to match, pinned deliberately
+  ;; (Python and Elixir answer ["/"] here; mino answers [])
+  (is (= [] (glob "/"))))
 
 ;;; errors
 
@@ -195,6 +198,8 @@
   (is (thrown? (glob "*" "." :kw)))
   (is (thrown? (glob "*" "." {:match-dot "yes"})))
   (is (thrown? (glob "*" "." {:max-depth 0})))
+  (is (thrown? (glob "*" "." {:max-depth 4097}))
+      "the walk recurses one C frame per level: capped at 4096")
   (is (= :eval/bounds
          (try (glob (apply str (repeat 257 "a")))
               (catch e (:mino/kind e))))
