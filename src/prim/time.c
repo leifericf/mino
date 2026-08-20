@@ -396,6 +396,8 @@ static int format_iso8601(int64_t ms, int offset_min, char *buf,
     if (msec < 0) { msec += 1000; secs -= 1; }
     civil_tm tm;
     broken_from_secs(secs, &tm);
+    /* the offset shift can push the local date outside years 1..9999 */
+    if (tm.year < 1 || tm.year > 9999) return -1;
     char *o = buf;
     o = put_nn(o, (unsigned)tm.year, 4);
     *o++ = '-';
@@ -436,6 +438,7 @@ static int format_iso8601_date(int64_t ms, int offset_min, char *buf,
     long long secs = local / 1000;
     if (local < 0 && local % 1000 != 0) secs -= 1; /* floor div */
     broken_from_secs(secs, &tm);
+    if (tm.year < 1 || tm.year > 9999) return -1;
     char *o = buf;
     o = put_nn(o, (unsigned)tm.year, 4);
     *o++ = '-';
@@ -484,7 +487,7 @@ static int format_rfc2822(int64_t ms, int offset_min, char *buf,
     if (local < 0 && local % 1000 != 0) secs -= 1; /* floor div */
     civil_tm tm;
     broken_from_secs(secs, &tm);
-    if (tm.year < 0 || tm.year > 9999) return -1;
+    if (tm.year < 1 || tm.year > 9999) return -1;
     const char *wd = k_wd[tm.wday % 7u];
     const char *mo = k_mo[tm.month - 1u];
     char *o = buf;
@@ -573,8 +576,12 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
                           ":iso8601-date, :rfc1123, or :rfc2822");
     }
     if (rc != 0) {
-        return time_throw(S, "internal", "MIN001",
-                          "format-time: internal format failure");
+        /* the formatters fail only when the offset shift pushes the
+         * local date outside years 1..9999 (buffers are sized above
+         * the format maxima), so this is a range error, not internal */
+        return time_throw(S, "time/range", "MTR001",
+                          "format-time: offset shifts the date outside "
+                          "years 1..9999");
     }
     return mino_string_n(S, buf, strlen(buf));
 }
@@ -775,6 +782,13 @@ static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
     int msec = (int)(local % 1000);
     if (msec < 0) { msec += 1000; secs -= 1; }
     broken_from_secs(secs, &tm);
+    /* the offset shift can push the local date outside years 1..9999 */
+    if (tm.year < 1 || tm.year > 9999) {
+        snprintf(msg, sizeof(msg),
+                 "epoch->time-map: offset %lld shifts the date outside "
+                 "years 1..9999", off);
+        return time_throw(S, "time/range", "MTR001", msg);
+    }
 
     keys[0] = mino_keyword(S, "year");        gc_pin(keys[0]); pinned++;
     vals[0] = mino_int(S, tm.year);           gc_pin(vals[0]); pinned++;

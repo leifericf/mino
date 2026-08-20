@@ -100,6 +100,20 @@
   (is (thrown? (format-time)))
   (is (thrown? (format-time 0 :iso8601 0 0))))
 
+(deftest offset-shift-past-range-boundary-throws
+  ;; review round finding: a valid epoch plus a valid offset can
+  ;; push the local date outside years 1..9999; that rejects with
+  ;; :time/range instead of rendering year 0000 or 10000
+  (are [f] (thrown-with-msg? #"years 1..9999" (f))
+    #(format-time ms-max :iso8601 1439)
+    #(format-time ms-min :iso8601 -1)
+    #(format-time ms-max :rfc2822 1439)
+    #(format-time ms-min :rfc2822 -1439)
+    #(format-time ms-min :iso8601-date -1))
+  (are [f] (thrown-with-msg? #"years 1..9999" (f))
+    #(epoch->time-map ms-max 1439)
+    #(epoch->time-map ms-min -1)))
+
 ;;; round-trip properties: every output parses back to the same
 ;;; instant (and offset for the offset-carrying forms)
 
