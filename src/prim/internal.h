@@ -562,6 +562,11 @@ mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
 extern const mino_prim_def k_prims_time[];
 extern const size_t        k_prims_time_count;
 
+/* path.c -- the pure algebra table installs in the floor (install.c
+ * k_core_domains). */
+extern const mino_prim_def k_prims_path[];
+extern const size_t        k_prims_path_count;
+
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;
 
