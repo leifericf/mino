@@ -152,6 +152,310 @@ static int time_arg_ll(mino_state *S, const mino_val *v, const char *who,
     return 1;
 }
 
+/* ---- date parsing (spike-proven) ------------------------------------ */
+
+static int is_digit(char c) { return c >= '0' && c <= '9'; }
+
+static int nn(const char **p, int n, unsigned *out)
+{
+    unsigned v = 0;
+    for (int i = 0; i < n; i++) {
+        if (!is_digit(**p)) return -1;
+        v = v * 10u + (unsigned)(**p - '0');
+        (*p)++;
+    }
+    *out = v;
+    return 0;
+}
+
+/* every reject site reports the byte it stopped at */
+static int perr(const char *s, const char *p, int *errpos)
+{
+    if (errpos != NULL) *errpos = (int)(p - s);
+    return -1;
+}
+
+/* case-insensitive fixed-word match; advances p past the word */
+static int match_ci(const char **p, const char *word)
+{
+    size_t n = strlen(word);
+    for (size_t i = 0; i < n; i++) {
+        char c = (*p)[i];
+        char w = word[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (w >= 'A' && w <= 'Z') w = (char)(w - 'A' + 'a');
+        if (c != w) return 0;
+    }
+    *p += n;
+    return 1;
+}
+
+static const char *const k_wd[] =
+    {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+static const char *const k_mo[] =
+    {"Jan","Feb","Mar","Apr","May","Jun",
+     "Jul","Aug","Sep","Oct","Nov","Dec"};
+
+/* ISO 8601 / RFC 3339:
+   YYYY-MM-DD
+   YYYY-MM-DD[Tt ]HH:MM[:SS[.frac]][Zz|+HH:MM|+-HHMM]
+   Fractional seconds preserved to milliseconds (truncated past 3
+   digits). sec 60 (leap second) folds to 59; 61 rejects. Years
+   1..9999 only. date_only flags a bare date. */
+static int parse_iso8601(const char *s, int64_t *ms, int *offset_min,
+                         int *date_only, int *errpos)
+{
+    const char *p = s;
+    unsigned y, mo, d, h = 0, mi = 0, sec = 0, msec = 0;
+    int off = 0;
+    *date_only = 0;
+    if (nn(&p, 4, &y)) return perr(s, p, errpos);
+    if (y < 1) return perr(s, p, errpos);
+    if (*p != '-') return perr(s, p, errpos);
+    p++;
+    if (nn(&p, 2, &mo)) return perr(s, p, errpos);
+    if (*p != '-') return perr(s, p, errpos);
+    p++;
+    if (nn(&p, 2, &d)) return perr(s, p, errpos);
+    if (*p == 'T' || *p == 't' || *p == ' ') {
+        p++;
+        if (nn(&p, 2, &h)) return perr(s, p, errpos);
+        if (*p != ':') return perr(s, p, errpos);
+        p++;
+        if (nn(&p, 2, &mi)) return perr(s, p, errpos);
+        if (*p == ':') {
+            p++;
+            if (nn(&p, 2, &sec)) return perr(s, p, errpos);
+            if (sec == 60) sec = 59;      /* leap second folds */
+            else if (sec > 59) return perr(s, p, errpos);
+            if (*p == '.') {              /* fraction: keep 3 digits */
+                p++;
+                if (!is_digit(*p)) return perr(s, p, errpos);
+                int digits = 0;
+                unsigned frac = 0;
+                while (is_digit(*p)) {
+                    if (digits < 3) frac = frac * 10u + (unsigned)(*p - '0');
+                    digits++;
+                    p++;
+                }
+                if (digits == 1) msec = frac * 100u;
+                else if (digits == 2) msec = frac * 10u;
+                else msec = frac;
+            }
+        }
+        if (*p == 'Z' || *p == 'z') {
+            p++;
+            off = 0;
+        } else if (*p == '+' || *p == '-') {
+            int sign = *p == '-' ? -1 : 1;
+            p++;
+            unsigned oh, om = 0;
+            if (nn(&p, 2, &oh)) return perr(s, p, errpos);
+            if (*p == ':') {
+                p++;
+                if (nn(&p, 2, &om)) return perr(s, p, errpos);
+            } else if (is_digit(*p)) {
+                if (nn(&p, 2, &om)) return perr(s, p, errpos);
+            }
+            if (oh > 23 || om > 59) return perr(s, p, errpos);
+            off = sign * (int)(oh * 60u + om);
+        }
+        /* no offset: naive local read as UTC; offset 0 reported */
+    } else {
+        *date_only = 1;
+    }
+    if (*p != '\0') return perr(s, p, errpos);
+    if (mo < 1 || mo > 12) return perr(s, p, errpos);
+    if (d < 1 || d > days_in_month((int64_t)y, mo)) {
+        return perr(s, p, errpos);
+    }
+    if (h > 23 || mi > 59) return perr(s, p, errpos);
+    {
+        civil_tm tm = {(int64_t)y, mo, d, h, mi, sec, 0};
+        int64_t secs = secs_from_broken(&tm) - (int64_t)off * 60;
+        int64_t total = secs * 1000 + (int64_t)msec;
+        if (total < TIME_MS_MIN || total > TIME_MS_MAX) {
+            return perr(s, p, errpos);
+        }
+        *ms = total;
+    }
+    *offset_min = off;
+    return 0;
+}
+
+/* RFC 1123 / RFC 2822 comma form:
+   [Dow, ]D[D] Mon YYYY HH:MM[:SS] (GMT|UT|UTC|+-HHMM)
+   Month, day, and zone names case-insensitive (RFC 2822 4.3). Day
+   1-2 digits; year exactly 4 digits. The day name, when present,
+   must match the LOCAL (offset-shifted) date. alphabetic_zone flags
+   GMT/UT/UTC so the caller can report :rfc1123 vs :rfc2822. */
+static int parse_rfc2822(const char *s, int64_t *ms, int *offset_min,
+                         int *alphabetic_zone, int *errpos)
+{
+    const char *p = s;
+    unsigned d, y, h, mi, sec = 0;
+    int mo = -1, off = 0, dow = -1;
+    *alphabetic_zone = 0;
+    for (int i = 0; i < 7; i++) {
+        if (match_ci(&p, k_wd[i])) {
+            if (p[0] != ',') return perr(s, p, errpos);
+            p++;
+            while (*p == ' ') p++;
+            dow = i;
+            break;
+        }
+    }
+    if (!is_digit(*p)) return perr(s, p, errpos);
+    d = (unsigned)(*p++ - '0');
+    if (is_digit(*p)) d = d * 10u + (unsigned)(*p++ - '0');
+    if (*p != ' ') return perr(s, p, errpos);
+    p++;
+    for (int i = 0; i < 12; i++) {
+        if (match_ci(&p, k_mo[i])) { mo = i + 1; break; }
+    }
+    if (mo < 0) return perr(s, p, errpos);
+    if (*p != ' ') return perr(s, p, errpos);
+    p++;
+    if (nn(&p, 4, &y)) return perr(s, p, errpos);
+    if (y < 1) return perr(s, p, errpos);
+    if (*p != ' ') return perr(s, p, errpos);
+    p++;
+    if (nn(&p, 2, &h)) return perr(s, p, errpos);
+    if (*p != ':') return perr(s, p, errpos);
+    p++;
+    if (nn(&p, 2, &mi)) return perr(s, p, errpos);
+    if (*p == ':') {
+        p++;
+        if (nn(&p, 2, &sec)) return perr(s, p, errpos);
+        if (sec == 60) sec = 59;
+        else if (sec > 59) return perr(s, p, errpos);
+    }
+    if (*p != ' ') return perr(s, p, errpos);
+    p++;
+    if (match_ci(&p, "gmt") || match_ci(&p, "utc")
+        || match_ci(&p, "ut")) {
+        off = 0;
+        *alphabetic_zone = 1;
+    } else if (*p == '+' || *p == '-') {
+        int sign = *p == '-' ? -1 : 1;
+        p++;
+        unsigned oh, om;
+        if (nn(&p, 2, &oh)) return perr(s, p, errpos);
+        if (nn(&p, 2, &om)) return perr(s, p, errpos);
+        if (oh > 23 || om > 59) return perr(s, p, errpos);
+        off = sign * (int)(oh * 60u + om);
+    } else {
+        return perr(s, p, errpos);
+    }
+    if (*p != '\0') return perr(s, p, errpos);
+    if (h > 23 || mi > 59) return perr(s, p, errpos);
+    if (d < 1 || d > days_in_month((int64_t)y, (unsigned)mo)) {
+        return perr(s, p, errpos);
+    }
+    {
+        civil_tm tm = {(int64_t)y, (unsigned)mo, d, h, mi, sec, 0};
+        int64_t secs = secs_from_broken(&tm) - (int64_t)off * 60;
+        if (secs < TIME_MS_MIN / 1000 || secs > TIME_MS_MAX / 1000) {
+            return perr(s, p, errpos);
+        }
+        if (dow >= 0) {
+            /* day name describes the LOCAL date, not UTC */
+            int64_t local = secs + (int64_t)off * 60;
+            int64_t days = local / 86400;
+            if (local % 86400 < 0) days -= 1;
+            if ((int)weekday_from_days(days) != dow) {
+                return perr(s, p, errpos);
+            }
+        }
+        *ms = secs * 1000;
+    }
+    *offset_min = off;
+    return 0;
+}
+
+/* ---- parse-time prim ------------------------------------------------- */
+
+/* (parse-time s) -> {:epoch-ms :offset-min :format :date-only?} */
+static mino_val *prim_parse_time(mino_state *S, mino_val *args,
+                                 mino_env *env)
+{
+    mino_val *v, *keys[4], *vals[4], *m;
+    int pinned = 0;
+    const char *s;
+    size_t len;
+    int64_t ms;
+    int off, date_only = 0, az = 0, errpos = 0;
+    const char *family;
+    char msg[96];
+    (void)env;
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "parse-time requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || mino_type_of(v) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "parse-time: argument must be a "
+                                     "string");
+    }
+    s = v->as.s.data;
+    len = v->as.s.len;
+    if (len > 64) {
+        return time_throw(S, "time/parse", "MTP001",
+                          "parse-time: input longer than 64 characters");
+    }
+    if (strlen(s) != len) {
+        /* embedded NUL would truncate the parse at the wrong place;
+         * the string's bytes after the NUL must not be ignored */
+        return time_throw(S, "time/parse", "MTP001",
+                          "parse-time: input contains a NUL byte");
+    }
+
+    /* dispatch: 4 digits then '-' is ISO; a leading alphabetic run is
+     * the RFC comma form; anything else tries ISO first for the
+     * better error position. */
+    if (len >= 5 && is_digit(s[0]) && is_digit(s[1]) && is_digit(s[2])
+        && is_digit(s[3]) && s[4] == '-') {
+        family = "ISO 8601";
+        if (parse_iso8601(s, &ms, &off, &date_only, &errpos)) {
+            snprintf(msg, sizeof(msg),
+                     "parse-time: invalid ISO 8601 date at byte %d",
+                     errpos);
+            return time_throw(S, "time/parse", "MTP001", msg);
+        }
+    } else {
+        family = "RFC 1123/2822";
+        if (parse_rfc2822(s, &ms, &off, &az, &errpos)) {
+            int errpos2 = 0;
+            if (parse_iso8601(s, &ms, &off, &date_only, &errpos2) == 0) {
+                family = "ISO 8601";
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "parse-time: invalid RFC 1123/2822 date at "
+                         "byte %d", errpos);
+                return time_throw(S, "time/parse", "MTP001", msg);
+            }
+        }
+    }
+
+    keys[0] = mino_keyword(S, "epoch-ms");   gc_pin(keys[0]); pinned++;
+    vals[0] = mino_int(S, ms);               gc_pin(vals[0]); pinned++;
+    keys[1] = mino_keyword(S, "offset-min"); gc_pin(keys[1]); pinned++;
+    vals[1] = mino_int(S, off);              gc_pin(vals[1]); pinned++;
+    keys[2] = mino_keyword(S, "format");     gc_pin(keys[2]); pinned++;
+    vals[2] = mino_keyword(S, (family[0] == 'I')
+                                  ? "iso8601"
+                                  : (az ? "rfc1123" : "rfc2822"));
+    gc_pin(vals[2]); pinned++;
+    keys[3] = mino_keyword(S, "date-only?"); gc_pin(keys[3]); pinned++;
+    vals[3] = date_only ? mino_true(S) : mino_false(S);
+
+    m = mino_map(S, keys, vals, 4);
+    gc_unpin(pinned);
+    return m;
+}
+
 /* ---- clocks ---------------------------------------------------------- */
 
 static long long time_wall_ms(void)
@@ -464,6 +768,18 @@ const mino_prim_def k_prims_time[] = {
       "Strict: unknown keys, out-of-range fields, and impossible "
       "dates (February 30th) throw :time/field rather than "
       "normalizing silently."},
+    {"parse-time", prim_parse_time,
+     "Parses a date or datetime string into {:epoch-ms :offset-min "
+      ":format :date-only?}. Accepts ISO 8601 / RFC 3339 (date-only or "
+      "datetime, T/t/space separator, optional seconds, fractional "
+      "seconds kept to milliseconds, Z/z and +HH:MM / +-HHMM offsets; "
+      "leap second 60 folds to 59) and the RFC 1123 / 2822 comma form "
+      "(optional day name, case-insensitive month and zone names, "
+      "zones GMT/UT/UTC or +-HHMM). Strict: impossible dates, "
+      "mismatched day names, named non-UTC zones, trailing junk, and "
+      "input over 64 characters throw :time/parse with the byte "
+      "position. :format reports :iso8601, :rfc1123 (alphabetic "
+      "zone), or :rfc2822 (numeric zone)."},
 };
 
 const size_t k_prims_time_count =
