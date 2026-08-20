@@ -560,6 +560,11 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * is info-only; ADR 21), so it registers in the floor and every
      * embedder can (require '[mino.time]). */
     mino_install_mino_time(S, NULL);
+    /* mino.path bundled lib: the algebra prims are ungated floor
+     * prims and the ns source only layers names over them, so it
+     * registers in the floor too (ADR 22). The glob fn inside
+     * resolves only when the fs capability is installed. */
+    mino_install_mino_path(S, NULL);
     return core_env;
 }
 

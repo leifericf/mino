@@ -106,7 +106,8 @@ BUNDLED = \
     lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj \
     lib_mino_store:lib/mino/store.clj \
     lib_mino_http:lib/mino/http.clj \
-    lib_mino_time:lib/mino/time.clj
+    lib_mino_time:lib/mino/time.clj \
+    lib_mino_path:lib/mino/path.clj
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 
