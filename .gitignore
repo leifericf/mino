@@ -68,6 +68,7 @@ docs/**/*.md
 !docs/ARCHITECTURE_CONTRACT.md
 !docs/HTTP_CLIENT.md
 !docs/TIME_DATE.md
+!docs/PATH.md
 !docs/INTERNAL_MODULE_MAP.md
 !docs/MAINTAINER_TOOLCHAIN.md
 !README.md

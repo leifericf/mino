@@ -87,19 +87,28 @@ names.
   given. Results are a sorted (byte order, not locale collation)
   vector of strings rendered as-given: a relative pattern rooted
   at a relative root answers relative paths. Symlinked directories
-  are not followed by default (`{:follow-links true}` opts in),
-  and the walk is depth-bounded (128 default, `{:max-depth n}`
-  opt) so a followed symlink loop terminates. `{:recursive false}`
-  caps `**` to a single directory level. Unmatched or unreadable
-  directories answer `[]`, mirroring filelib and Python glob.
+  found by wildcards are not followed by default
+  (`{:follow-links true}` opts in); segments the pattern names
+  literally are the user's explicit path and resolve through
+  symlinks (find -P semantics: the policy governs discovered
+  entries, not named operands, so `/tmp/x` works where `/tmp` is
+  a symlink). The walk is depth-bounded (128 default,
+  `{:max-depth n}` opt, clamped to 4096 because each level is a C
+  frame) so a followed symlink loop terminates. `{:recursive
+  false}` caps `**` to a single directory level. Unmatched or
+  unreadable directories answer `[]`, mirroring filelib and
+  Python glob.
 - **The matcher is pure and separate.** `path-glob-match` answers
   whether one string matches one pattern with the same syntax
   minus walker policy: `*` does not cross `/`, and dotfile
   visibility is not its business (the walker filters; the matcher
   matches). Patterns are user-written, so the pattern side never
   gets backslash acceptance; `\` in a pattern is always an escape.
-  Pattern length is capped at 256 with a classified
-  `:eval/bounds` throw.
+  Pattern length is capped at 256 and the matcher carries a work
+  budget: a star-heavy pattern whose non-match proof would take
+  exponential backtracking against a long subject throws
+  `:eval/bounds` instead of hanging, keeping the untrusted-input
+  contract match-or-classified-throw temporally as well.
 - **`expand-home` is the one impure algebra resident:** a lone `~`
   or `~/` prefix expands through `HOME` (POSIX) or `USERPROFILE`,
   then `HOMEDRIVE` + `HOMEPATH` (Windows). `~otheruser` is not
