@@ -558,6 +558,10 @@ mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
 mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
                                   mino_env *env);
 
+/* time.c -- all prims are file-local static; no extern declarations needed. */
+extern const mino_prim_def k_prims_time[];
+extern const size_t        k_prims_time_count;
+
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;
 

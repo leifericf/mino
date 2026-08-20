@@ -107,6 +107,7 @@
    "src/prim/sequences.c" "src/prim/sequences_seq.c"
    "src/prim/lazy.c"
      "src/prim/string.c" "src/prim/io.c" "src/prim/url.c" "src/prim/codec.c"
+     "src/prim/time.c"
      "src/prim/gzip.c" "src/prim/http.c"
    "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
    "src/prim/stateful.c" "src/prim/stateful_bindings.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/store.c" "src/prim/module.c"
