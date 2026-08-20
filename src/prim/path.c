@@ -1,17 +1,18 @@
 /*
- * path.c -- path string algebra and the pure glob matcher (ADR 22).
+ * path.c -- path string algebra, the pure glob matcher, and the
+ * glob walker (ADR 22).
  *
- * Vocabulary: paths are STRINGS, never a path type. The prims are
- * total byte-level functions: no filesystem contact, no locale,
+ * Vocabulary: paths are STRINGS, never a path type. The pure prims
+ * are total byte-level functions: no filesystem contact, no locale,
  * no encoding assumptions (filenames are bytes). The one impure
- * resident is expand-home (a ~ lookup through the environment);
- * the glob walker joins this file in a later commit.
+ * algebra resident is expand-home (a ~ lookup through the
+ * environment); the one filesystem reader is the glob walker.
  *
  * Separators: '/' is canonical in every output. '\' is accepted in
  * every path input and folded at each prim's edge (the Windows v1
  * stance; no drive letters, no UNC). The pattern side of
- * path-glob-match never folds: patterns are user-written and '\'
- * in a pattern is an escape.
+ * path-glob-match and glob never folds: patterns are user-written
+ * and '\' in a pattern is an escape.
  *
  * Edge rules are the cross-language majority pinned by the
  * path-lib PoCs and ADR 22: extension carries the dot and dotfiles
@@ -21,9 +22,12 @@
  * the raw last segment (no .. resolution, node parity), dirname is
  * the cleaned prefix.
  *
- * Capabilities (ADR 22): k_prims_path (the algebra and the pure
+ * Capabilities (ADR 22): k_prims_path (the algebra + the pure
  * matcher) installs in the floor like time -- string math reads
- * nothing and mutates nothing.
+ * nothing. The glob walker reads directory contents, so it lives
+ * in k_prims_path_fs and installs with the fs capability through
+ * mino_install_fs (fs.c), the file-seq precedent: a directory
+ * walker rides a capability gate.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -851,7 +855,430 @@ static mino_val *prim_path_glob_match(mino_state *S, mino_val *args,
 }
 
 
-/* ---- prim table ------------------------------------------------------- */
+/* ---- glob walker ------------------------------------------------------- */
+
+typedef struct {
+    int match_dot;
+    int follow_links;
+    int recursive;
+    long long max_depth;
+} glob_opts_t;
+
+/* Result accumulator: C strings, sorted and deduped at the end. */
+typedef struct {
+    char **items;
+    size_t len, cap;
+} strvec_t;
+
+static int strvec_cmp(const void *a, const void *b)
+{
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+typedef struct {
+    glob_opts_t opts;
+    strvec_t results;
+    const char *prefix;    /* rendered root ("" means no prefix) */
+    size_t prefix_len;
+} glob_walk_t;
+
+/* Entry visibility under the dotfile policy: hidden names need
+ * match-dot or a pattern segment that itself starts with a dot. */
+static int glob_visible(const char *name, const char *seg, size_t seg_len,
+                        const glob_opts_t *opts)
+{
+    if (name[0] != '.') return 1;
+    if (opts->match_dot) return 1;
+    return seg_len > 0 && seg[0] == '.';
+}
+
+/* Is child (dir + "/" + name) a directory? lstat unless
+ * follow-links; stat on Windows (no lstat there). */
+static int glob_is_dir(const char *child, const glob_opts_t *opts)
+{
+    struct stat st;
+#ifdef _WIN32
+    (void)opts;
+    return stat(child, &st) == 0 && S_ISDIR(st.st_mode);
+#else
+    return (opts->follow_links ? stat(child, &st)
+                               : lstat(child, &st)) == 0
+           && S_ISDIR(st.st_mode);
+#endif
+}
+
+/* Directory test through symlinks (stat). Used for segments the
+ * pattern names literally: the pattern's own structure is the
+ * user's explicit path (find -P semantics: -P governs discovered
+ * entries, not explicitly named operands), so /tmp/x works on
+ * macOS where /tmp is a symlink while ** keeps its no-follow
+ * default for wildcard-discovered directories. */
+static int glob_is_dir_follow(const char *child)
+{
+    struct stat st;
+    return stat(child, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* A segment with no wildcard metacharacters matches exactly one
+ * name the user spelled out. */
+static int seg_is_literal(const char *seg, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        char c = seg[i];
+        if (c == '*' || c == '?' || c == '[' || c == '{'
+            || c == '\\') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Push one result: prefix + "/" + rel, or bare rel when the
+ * prefix is empty (the default "." root renders unprefixed). A
+ * prefix ending in "/" (the absolute-pattern "/") does not get a
+ * second separator. */
+static void glob_push(glob_walk_t *w, const char *rel, size_t rel_len)
+{
+    size_t sep = (w->prefix_len > 0
+                  && w->prefix[w->prefix_len - 1] != '/') ? 1 : 0;
+    size_t need = w->prefix_len + sep + rel_len + 1;
+    char *out = (char *)malloc(need);
+    if (out == NULL) return;
+    if (w->prefix_len == 0) {
+        memcpy(out, rel, rel_len);
+        out[rel_len] = '\0';
+    } else {
+        memcpy(out, w->prefix, w->prefix_len);
+        if (sep) out[w->prefix_len] = '/';
+        memcpy(out + w->prefix_len + sep, rel, rel_len);
+        out[w->prefix_len + sep + rel_len] = '\0';
+    }
+    if (w->results.len == w->results.cap) {
+        size_t nc = w->results.cap ? w->results.cap * 2 : 64;
+        char **nb = (char **)realloc(w->results.items,
+                                     nc * sizeof(*nb));
+        if (nb == NULL) { free(out); return; }
+        w->results.items = nb;
+        w->results.cap = nc;
+    }
+    w->results.items[w->results.len++] = out;
+}
+
+/* Expand pattern segments segs[i..) against directory dir; rel is
+ * the malloc'd path of dir relative to the walk root ("" at the
+ * top). Every directory level descended increments depth; the
+ * ** recursion never exceeds opts->max_depth. */
+static void glob_walk_dir(glob_walk_t *w, const char *dir,
+                          const char **segs, const size_t *seg_lens,
+                          size_t nsegs, size_t i, const char *rel,
+                          size_t rel_len, long long depth)
+{
+    DIR *d;
+    struct dirent *ent;
+    const glob_opts_t *opts = &w->opts;
+
+    if (i >= nsegs) return;
+    if (depth > opts->max_depth) return;
+
+    /* ** zero-level case first, once per directory: the segment
+     * after ** matches entries of this very directory. */
+    if (seg_lens[i] == 2 && segs[i][0] == '*' && segs[i][1] == '*'
+        && opts->recursive && i + 1 < nsegs) {
+        glob_walk_dir(w, dir, segs, seg_lens, nsegs, i + 1, rel,
+                      rel_len, depth);
+    }
+
+    d = opendir(dir);
+    if (d == NULL) return;
+    while ((ent = readdir(d)) != NULL) {
+        const char *name = ent->d_name;
+        size_t name_len = strlen(name);
+        const char *seg = segs[i];
+        size_t seg_len = seg_lens[i];
+        size_t dir_len = strlen(dir);
+        char *child, *rel2;
+        size_t child_len, rel2_len;
+
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+        if (name[0] == '\0') continue;
+
+        child_len = dir_len + 1 + name_len + 1;
+        child = (char *)malloc(child_len);
+        if (child == NULL) continue;
+        memcpy(child, dir, dir_len);
+        child[dir_len] = '/';
+        memcpy(child + dir_len + 1, name, name_len);
+        child[child_len - 1] = '\0';
+
+        rel2_len = rel_len + (rel_len ? 1 : 0) + name_len + 1;
+        rel2 = (char *)malloc(rel2_len);
+        if (rel2 == NULL) { free(child); continue; }
+        {
+            size_t o = rel_len;
+            memcpy(rel2, rel, rel_len);
+            if (o > 0) rel2[o++] = '/';
+            memcpy(rel2 + o, name, name_len);
+            o += name_len;
+            rel2[o] = '\0';
+            rel2_len = o;
+        }
+
+        if (seg_len == 2 && seg[0] == '*' && seg[1] == '*'
+            && opts->recursive) {
+            /* ** descend: every visible directory continues with **
+             * in effect; as the final segment it also emits every
+             * visible descendant. */
+            if (glob_visible(name, seg, seg_len, opts)) {
+                if (i + 1 == nsegs) {
+                    glob_push(w, rel2, rel2_len);
+                }
+                if (glob_is_dir(child, opts)) {
+                    glob_walk_dir(w, child, segs, seg_lens, nsegs, i, rel2,
+                                  rel2_len, depth + 1);
+                }
+            }
+        } else {
+            const char *match_seg = seg;
+            size_t match_len = seg_len;
+            if (seg_len == 2 && seg[0] == '*' && seg[1] == '*') {
+                /* non-recursive **: behaves as a single * */
+                match_seg = "*";
+                match_len = 1;
+            }
+            if (glob_visible(name, match_seg, match_len, opts)
+                && glob_pattern_matches(match_seg, match_len, name,
+                                        name_len)) {
+                if (i + 1 == nsegs) {
+                    glob_push(w, rel2, rel2_len);
+                } else if (glob_is_dir(child, opts)
+                           || (seg_is_literal(seg, seg_len)
+                               && glob_is_dir_follow(child))) {
+                    glob_walk_dir(w, child, segs, seg_lens, nsegs, i + 1,
+                                  rel2, rel2_len, depth + 1);
+                }
+            }
+        }
+        free(child);
+        free(rel2);
+    }
+    closedir(d);
+}
+
+/* (glob pattern root? opts?) -- the one walker (ADR 22). Sorted
+ * (byte order) vector of strings rendered as-given; dotfiles
+ * hidden unless {:match-dot true}; symlinks not followed unless
+ * {:follow-links true}; {:recursive false} caps ** to one level;
+ * {:max-depth n} bounds the walk (default 128). Unreadable or
+ * missing directories answer []. */
+static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *pat_val, *root_val = NULL, *opts_val = NULL;
+    size_t nargs = 0, pat_len, nsegs = 0, i, k;
+    mino_val *a, *result;
+    char *pat = NULL, *root_folded = NULL;
+    const char **segs = NULL;
+    size_t *seg_lens = NULL;
+    glob_opts_t opts;
+    glob_walk_t w;
+    mino_vec_builder *b;
+    int pattern_absolute;
+    char *top_dir_heap = NULL;
+    const char *walk_root;
+
+    opts.match_dot = 0;
+    opts.follow_links = 0;
+    opts.recursive = 1;
+    opts.max_depth = 128;
+
+    for (a = args; a != NULL && mino_is_cons(a); a = a->as.cons.cdr) nargs++;
+    if (nargs < 1 || nargs > 3) {
+        prim_throw_classified(S, "eval/arity", "MAR001",
+                              "glob requires one to three arguments");
+        return NULL;
+    }
+    pat_val = args->as.cons.car;
+    if (nargs >= 2) root_val = args->as.cons.cdr->as.cons.car;
+    if (nargs >= 3) opts_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+
+    if (pat_val == NULL || mino_type_of(pat_val) != MINO_STRING
+        || pat_val->as.s.len == 0) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "glob: pattern must be a non-empty string");
+        return NULL;
+    }
+    if (pat_val->as.s.len > GLOB_MAX_PATTERN) {
+        prim_throw_classified(S, "eval/bounds", "MBD001",
+                              "glob: pattern longer than 256 bytes");
+        return NULL;
+    }
+    if (nargs >= 2 && root_val != NULL
+        && mino_type_of(root_val) != MINO_STRING
+        && mino_type_of(root_val) != MINO_NIL) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "glob: root must be a string");
+        return NULL;
+    }
+    if (nargs >= 3 && opts_val != NULL
+        && mino_type_of(opts_val) != MINO_MAP
+        && mino_type_of(opts_val) != MINO_NIL) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "glob: opts must be a map");
+        return NULL;
+    }
+    if (opts_val != NULL && mino_type_of(opts_val) == MINO_MAP) {
+        static const struct { const char *key; int is_bool; } kbools[] = {
+            { "match-dot", 1 }, { "follow-links", 1 }, { "recursive", 1 },
+        };
+        size_t bi;
+        for (bi = 0; bi < sizeof(kbools) / sizeof(kbools[0]); bi++) {
+            mino_val *v = map_get_val(opts_val, mino_keyword(S,
+                                                             kbools[bi].key));
+            if (v == NULL || mino_type_of(v) == MINO_NIL) continue;
+            if (mino_type_of(v) != MINO_BOOL) {
+                char msg[96];
+                snprintf(msg, sizeof(msg),
+                         "glob: :%s must be a boolean", kbools[bi].key);
+                prim_throw_classified(S, "eval/contract", "MCT001", msg);
+                goto fail;
+            }
+            {
+                int on = mino_val_bool_get(v);
+                if (bi == 0) opts.match_dot = on;
+                else if (bi == 1) opts.follow_links = on;
+                else opts.recursive = on;
+            }
+        }
+        {
+            mino_val *v = map_get_val(opts_val, mino_keyword(S,
+                                                             "max-depth"));
+            long long md;
+            if (v != NULL && mino_type_of(v) != MINO_NIL) {
+                if (mino_type_of(v) != MINO_INT || !as_long(v, &md) || md < 1) {
+                    prim_throw_classified(S, "eval/contract", "MCT001",
+                                          "glob: :max-depth must be a "
+                                          "positive integer");
+                    goto fail;
+                }
+                opts.max_depth = md;
+            }
+        }
+    }
+
+    /* Pattern: split on '/' (pattern never folds; '\' escapes). */
+    pat_len = pat_val->as.s.len;
+    pat = (char *)malloc(pat_len + 1);
+    if (pat == NULL) goto fail;
+    memcpy(pat, pat_val->as.s.data, pat_len);
+    pat[pat_len] = '\0';
+    pattern_absolute = (pat[0] == '/');
+    segs = (const char **)malloc((pat_len / 2 + 2) * sizeof(*segs));
+    seg_lens = (size_t *)malloc((pat_len / 2 + 2) * sizeof(*seg_lens));
+    if (segs == NULL || seg_lens == NULL) goto fail;
+    {
+        size_t j = 0;
+        while (j < pat_len) {
+            size_t start;
+            while (j < pat_len && pat[j] == '/') j++;
+            start = j;
+            while (j < pat_len && pat[j] != '/') j++;
+            if (j > start) {
+                segs[nsegs] = pat + start;
+                seg_lens[nsegs] = j - start;
+                nsegs++;
+            }
+        }
+    }
+    if (nsegs == 0) {
+        /* pattern was only separators: nothing to match */
+        result = mino_vector(S, NULL, 0);
+        goto done;
+    }
+
+    /* Root: as-given prefix; the default (and an explicit "." or
+     * "") renders unprefixed, so relative patterns answer relative
+     * results. An absolute pattern walks from / and ignores root. */
+    if (pattern_absolute) {
+        w.prefix = "/";
+        w.prefix_len = 1;
+        walk_root = "/";
+    } else {
+        const char *root_str = ".";
+        size_t root_len = 1;
+        if (nargs >= 2 && root_val != NULL
+            && mino_type_of(root_val) == MINO_STRING
+            && root_val->as.s.len > 0) {
+            root_str = root_val->as.s.data;
+            root_len = root_val->as.s.len;
+        }
+        root_folded = (char *)malloc(root_len + 1);
+        if (root_folded == NULL) goto fail;
+        memcpy(root_folded, root_str, root_len);
+        root_folded[root_len] = '\0';
+        fold_backslashes(root_folded);
+        while (root_len > 1 && root_folded[root_len - 1] == '/') root_len--;
+        root_folded[root_len] = '\0';
+        if (root_folded[0] == '/') {
+            w.prefix = root_folded;
+            w.prefix_len = root_len;
+        } else if (root_len == 1 && root_folded[0] == '.') {
+            w.prefix = "";
+            w.prefix_len = 0;
+        } else {
+            w.prefix = root_folded;
+            w.prefix_len = root_len;
+        }
+        walk_root = root_folded;
+        if (w.prefix_len == 0) {
+            /* unprefixed walk still needs a real directory to open */
+            if (top_dir_heap != NULL) free(top_dir_heap);
+            top_dir_heap = (char *)malloc(2);
+            if (top_dir_heap == NULL) goto fail;
+            top_dir_heap[0] = '.'; top_dir_heap[1] = '\0';
+            walk_root = top_dir_heap;
+        }
+    }
+
+    w.opts = opts;
+    w.results.items = NULL;
+    w.results.len = 0;
+    w.results.cap = 0;
+
+    glob_walk_dir(&w, walk_root, segs, seg_lens, nsegs, 0, "", 0, 0);
+
+    if (w.results.len > 1) {
+        qsort(w.results.items, w.results.len, sizeof(char *), strvec_cmp);
+    }
+    b = mino_vector_builder_new(S);
+    if (b == NULL) goto fail;
+    for (k = 0; k < w.results.len; k++) {
+        if (k > 0 && strcmp(w.results.items[k], w.results.items[k - 1]) == 0)
+            continue;                         /* dedupe ambiguous ** */
+        mino_vector_builder_push(b, mino_string(S, w.results.items[k]));
+    }
+    result = mino_vector_builder_finish(b);
+    for (i = 0; i < w.results.len; i++) free(w.results.items[i]);
+    free(w.results.items);
+
+done:
+    free(top_dir_heap);
+    free(root_folded);
+    free(segs);
+    free(seg_lens);
+    free(pat);
+    return result;
+
+fail:
+    free(top_dir_heap);
+    free(root_folded);
+    free(segs);
+    free(seg_lens);
+    free(pat);
+    return NULL;
+}
+
+
+/* ---- prim tables ------------------------------------------------------ */
 
 const mino_prim_def k_prims_path[] = {
     {"path-join", prim_path_join,
@@ -907,3 +1334,28 @@ const mino_prim_def k_prims_path[] = {
 
 const size_t k_prims_path_count =
     sizeof(k_prims_path) / sizeof(k_prims_path[0]);
+
+/* The glob walker rides the fs capability (ADR 22): it reads
+ * directory contents, exactly the surface file-seq gates under
+ * io. Installed by mino_install_fs in fs.c. */
+const mino_prim_def k_prims_path_fs[] = {
+    {"glob", prim_glob,
+     "Walks directories matching a glob pattern and answers a "
+      "sorted (byte order) vector of path strings rendered "
+      "as-given: a relative pattern with no root (or root \".\") "
+      "answers relative paths. Syntax as path-glob-match. "
+      "Dotfiles are hidden unless the segment itself starts with "
+      "a dot or {:match-dot true}. Symlinked directories found by "
+      "wildcards are not followed unless {:follow-links true}; "
+      "segments the pattern names literally are the user's "
+      "explicit path and resolve through symlinks (so /tmp/x "
+      "works where /tmp is one). {:recursive false} caps ** to "
+      "one level; {:max-depth n} bounds the walk (default 128). "
+      "Missing or unreadable directories answer []. An absolute "
+      "pattern walks from / and ignores root. Requires the fs "
+      "capability."},
+};
+
+const size_t k_prims_path_fs_count =
+    sizeof(k_prims_path_fs) / sizeof(k_prims_path_fs[0]);
+

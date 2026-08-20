@@ -563,9 +563,12 @@ extern const mino_prim_def k_prims_time[];
 extern const size_t        k_prims_time_count;
 
 /* path.c -- the pure algebra table installs in the floor (install.c
- * k_core_domains). */
+ * k_core_domains). k_prims_path_fs holds the glob walker and rides
+ * the fs capability through mino_install_fs (fs.c). */
 extern const mino_prim_def k_prims_path[];
 extern const size_t        k_prims_path_count;
+extern const mino_prim_def k_prims_path_fs[];
+extern const size_t        k_prims_path_fs_count;
 
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;

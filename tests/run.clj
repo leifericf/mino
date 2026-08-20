@@ -134,6 +134,7 @@
 (require "tests/fs_test")
 (require "tests/path_test")
 (require "tests/path_match_test")
+(require "tests/path_glob_test")
 (require "tests/json_test")
 (require "tests/proc_test")
 (require "tests/deps_test")
