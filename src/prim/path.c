@@ -1167,6 +1167,7 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
     int pattern_absolute;
     char *top_dir_heap = NULL;
     const char *walk_root;
+    (void)env;
 
     opts.match_dot = 0;
     opts.follow_links = 0;
