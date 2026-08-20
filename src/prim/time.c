@@ -1052,8 +1052,11 @@ static mino_val *prim_days_in_month(mino_state *S, mino_val *args,
     return mino_int(S, days_in_month(y, (unsigned)m));
 }
 
-/* (weekday ms-or-map) -> 0..6 (0 = Sunday) */
-static mino_val *prim_weekday(mino_state *S, mino_val *args, mino_env *env)
+/* (weekday ms-or-map) -> 0..6 (0 = Sunday). For an epoch-ms, the
+ * UTC weekday; for a time map, the weekday of the map's own
+ * (offset-local) date, agreeing with the map's :wday field. */
+static mino_val *prim_weekday(mino_state *S, mino_val *args,
+                              mino_env *env)
 {
     mino_val *v;
     long long ms;
@@ -1064,10 +1067,23 @@ static mino_val *prim_weekday(mino_state *S, mino_val *args, mino_env *env)
     }
     v = args->as.cons.car;
     if (v != NULL && mino_type_of(v) == MINO_MAP) {
-        mino_val *r = prim_time_map_to_epoch(S, args, env);
-        if (r == NULL) return NULL;
-        if (!as_long(r, &ms)) return NULL;
-    } else if (!time_arg_ll(S, v, "weekday", "epoch-ms", &ms)) {
+        long long y, mo, d;
+        if (!tm_field(S, v, "year", 1, &y)
+            || !tm_field(S, v, "month", 1, &mo)
+            || !tm_field(S, v, "day", 1, &d)) {
+            return NULL;
+        }
+        if (mo < 1 || mo > 12
+            || d < 1 || d > (long long)days_in_month(y, (unsigned)mo)
+            || y < 1 || y > 9999) {
+            return time_throw(S, "time/field", "MTF001",
+                              "weekday: invalid date fields");
+        }
+        return mino_int(S,
+                        weekday_from_days(days_from_civil(
+                            y, (unsigned)mo, (unsigned)d)));
+    }
+    if (!time_arg_ll(S, v, "weekday", "epoch-ms", &ms)) {
         return NULL;
     }
     if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
@@ -1409,8 +1425,10 @@ const mino_prim_def k_prims_time[] = {
      "Returns the number of days in the month (1..12) of the year; "
       "February answers 29 in leap years."},
     {"weekday", prim_weekday,
-     "Returns the day of the week of an epoch-ms or a time map as an "
-      "integer 0..6, 0 = Sunday."},
+     "Returns the day of the week as an integer 0..6, 0 = Sunday. "
+      "For an epoch-ms, the UTC weekday; for a time map, the "
+      "weekday of the map's own (offset-local) date, agreeing with "
+      "the map's :wday field."},
     {"add-days", prim_add_days,
      "Adds n exact 86400000-ms days to an epoch-ms (the model has no "
       "DST, so a day is always exact). Result stays inside years "

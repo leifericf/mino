@@ -8,7 +8,7 @@
   (t/parse \"2026-08-20T10:00:00Z\")  ; {:epoch-ms ... :format :iso8601}
   (t/format (t/now) :rfc1123)        ; \"Thu, 20 Aug 2026 03:12:00 GMT\"
   (t/add (t/parse \"2026-01-31\") {:months 1}) ; clamps to Feb 28
-  (t/human (t/parse \"2024-08-20\"))  ; \"1 year ago\" style
+  (t/human (t/parse \"2026-08-20\") (t/parse \"2026-08-23\")) ; \"3 days ago\"
 
   The instant is an integer: epoch milliseconds since
   1970-01-01T00:00:00Z, the same value inst-ms produces. Broken-down
@@ -57,16 +57,17 @@
 
 (defn instant
   "Coerces to epoch-ms: an integer passes through, a parse result
-  yields its :epoch-ms, a time map converts strictly. Most mino.time
-  verbs accept anything this accepts."
+  yields its :epoch-ms, a time map converts strictly. Every verb
+  that takes an instant accepts anything this accepts."
   [t]
   (cond
     (int? t) t
     (and (map? t) (contains? t :epoch-ms)) (:epoch-ms t)
     (map? t) (time-map->epoch t)
-    :else (throw (ex-info "t/instant: expected epoch-ms, a parse "
-                          "result, or a time map"
-                          {:got t}))))
+    :else (throw (ex-info
+                  (str "mino.time/instant: expected epoch-ms, a parse "
+                       "result, or a time map")
+                  {:got t}))))
 
 ;;;; Parsing and formatting
 
@@ -75,7 +76,7 @@
   :format :date-only?}. ISO 8601 / RFC 3339 and the RFC 1123 / 2822
   comma form are accepted; see the parse-time prim docstring for the
   exact strictness. Throws :time/parse on malformed input. Every
-  other mino.time verb accepts this map as an instant."
+  verb that takes an instant accepts this map."
   [s]
   (clojure.core/parse-time s))
 
@@ -119,28 +120,33 @@
 (defn add
   "Adds a units map to an instant (epoch-ms, parse result, or time
   map), returning the same kind: integer inputs answer integers,
-  parse results and time maps answer time maps (a parse result
-  becomes its UTC time map). Units: :ms (raw milliseconds), :days
-  (exact 86400000-ms days), :months (calendar months with day
-  clamping; January 31 plus one month is February 28 or 29). Units
-  apply in the order ms, days, months; months operate on the UTC
-  civil date; a time map's :offset-min is preserved. Unknown units
-  are an error naming them."
+  parse results and time maps answer time maps rendered at the
+  input's own :offset-min (UTC when absent). Units: :ms (raw
+  milliseconds), :days (exact 86400000-ms days), :months (calendar
+  months with day clamping; January 31 plus one month is February
+  28 or 29). Units apply in the order ms, days, months. For map
+  inputs the months shift the map's own (offset-local) fields, so
+  the clamp holds on the wall clock; for integer inputs they
+  operate on the UTC civil date. Unknown units are an error naming
+  them."
   [t units]
   (let [extra (filter #(not (contains? add-units %)) (keys units))]
     (when (seq extra)
-      (throw (ex-info (str "t/add: unknown units " (pr-str (vec extra)))
+      (throw (ex-info (str "mino.time/add: unknown units "
+                           (pr-str (vec extra)))
                       {:units (vec extra)}))))
   (let [map-out (map? t)
-        off (when (and map-out (contains? t :offset-min))
-              (:offset-min t))
         e0 (instant t)
-        e1 (+ e0 (or (:ms units) 0) (* (or (:days units) 0) 86400000))
-        e2 (if (nil? (:months units)) e1
-               (clojure.core/add-months e1 (:months units)))]
+        e1 (+ e0 (or (:ms units) 0) (* (or (:days units) 0) 86400000))]
     (if map-out
-      (epoch->time-map e2 (or off 0))
-      e2)))
+      (let [off (or (clojure.core/get t :offset-min) 0)
+            m1 (epoch->time-map e1 off)]
+        (if (nil? (:months units))
+          m1
+          (clojure.core/add-months m1 (:months units))))
+      (if (nil? (:months units))
+        e1
+        (clojure.core/add-months e1 (:months units))))))
 
 (defn diff
   "Calendar difference between two instants (each an epoch-ms, parse
@@ -182,13 +188,17 @@
   (clojure.core/days-in-month y m))
 
 (defn weekday
-  "Day of the week of an instant (epoch-ms, parse result, or time
-  map), 0..6, 0 = Sunday."
+  "Day of the week, 0..6, 0 = Sunday. For an epoch-ms integer, the
+  UTC weekday; for a time map or parse result, the weekday of the
+  value's own (offset-local) date, agreeing with the map's :wday
+  field."
   [t]
   (if (map? t)
-    (clojure.core/weekday (if (contains? t :epoch-ms)
-                            (epoch->time-map (:epoch-ms t))
-                            t))
+    (let [m (if (contains? t :epoch-ms)
+              (epoch->time-map (:epoch-ms t)
+                               (or (:offset-min t) 0))
+              t)]
+      (clojure.core/weekday m))
     (clojure.core/weekday t)))
 
 ;;;; clojure.instant interop
@@ -196,11 +206,11 @@
 (defn from-inst
   "Converts an inst value (a #inst literal or read-instant-date map)
   to epoch-ms. Strict: the date must be possible (February 30th
-  rejects) and the offset fields are honored; nanoseconds truncate
-  to milliseconds."
+  rejects) and the offset fields are honored; seconds 60 (leap
+  second) folds to 59 and nanoseconds truncate to milliseconds."
   [v]
   (when-not (inst? v)
-    (throw (ex-info "t/from-inst: not an inst" {:got v})))
+    (throw (ex-info "mino.time/from-inst: not an inst" {:got v})))
   (let [{:keys [years months days hours minutes seconds nanoseconds
                 offset-sign offset-hours offset-minutes]} v
         off-min (* (or offset-sign 1)

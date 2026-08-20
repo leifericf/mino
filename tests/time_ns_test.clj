@@ -1,5 +1,6 @@
 (require "tests/test")
 (require "tests/fixtures/http/server")
+(require '[clojure.data.json :as json])
 (require '[mino.http])
 (require '[mino.time :as t])
 
@@ -17,6 +18,9 @@
   (is (= {:year 2026 :month 2 :day 28}
          (select-keys (t/add (t/parse "2026-01-31") {:months 1})
                       [:year :month :day])))
+  (is (= "3 days ago"
+         (t/human (t/parse "2026-08-20") (t/parse "2026-08-23")))
+      "the ns docstring example, pinned")
   (is (= "3 days ago"
          (t/human (- (t/now) (* 3 86400000)) (t/now)))))
 
@@ -72,7 +76,8 @@
 
 (deftest today-and-clocks
   (let [td (t/today)]
-    (is (= 2026 (:year td)))                 ; test runs in 2026
+    (is (= (:year (t/epoch->time-map (t/now))) (:year td))
+        "today is this calendar year, derived not hard-coded")
     (is (= 0 (:hour td)))
     (is (= 0 (:ms td))))
   (is (int? (t/now-s)))
@@ -97,13 +102,13 @@
   ;; nanoseconds truncate
   (is (= 250 (rem (t/from-inst #inst "2026-01-15T10:30:00.2505Z")
                   1000)))
-  ;; strict: impossible date rejects (the reader-level instant
-  ;; validation allows Feb 30 by range check only)
-  (is (thrown? (t/from-inst {:years 2023 :months 2 :days 30
-                             :hours 0 :minutes 0 :seconds 0
-                             :nanoseconds 0
-                             :offset-sign 1 :offset-hours 0
-                             :offset-minutes 0})))
+  ;; strict: the reader accepts Feb 30 (range check only); from-inst
+  ;; rejects it through the strict converter
+  (is (thrown-with-msg? #"day 30 invalid"
+                        (t/from-inst #inst "2023-02-30T00:00:00Z")))
+  ;; a plain map without the instant marker is not an inst
+  (is (thrown-with-msg? #"not an inst"
+                        (t/from-inst {:years 2026 :months 1 :days 1})))
   (is (thrown? (t/from-inst "not an inst"))))
 
 (deftest to-inst-prints-and-reads-back
@@ -132,9 +137,38 @@
               "Date header is fresh"))))))
 
 (deftest json-iso-strings-stay-strings
-  ;; no auto-coercion: documented contract pinned
-  (is (string? (t/format (t/now))))
-  (is (map? (t/parse "2026-08-20T10:00:00Z"))
-      "the parse result is data; strings stay strings in JSON"))
+  ;; documented no-auto-coercion contract, pinned through a real
+  ;; JSON decode: ISO date fields arrive as strings, never instants
+  (let [m (json/read-str "{\"at\":\"2026-08-20T10:00:00Z\",\"n\":3}")]
+    (is (string? (clojure.core/get m "at")))
+    (is (= "2026-08-20T10:00:00Z" (clojure.core/get m "at")))
+    (is (not (inst? (clojure.core/get m "at"))))))
+
+(deftest instant-error-renders
+  ;; review round finding: the seam's error path must render its
+  ;; message and data, not fail inside ex-info
+  (is (thrown-with-msg? #"expected epoch-ms"
+                        (t/instant "2026-08-20")))
+  (let [e (try (t/instant "2026-08-20") (catch e e))]
+    (is (map? (ex-data e)))))
+
+(deftest add-months-clamp-holds-on-offset-maps
+  ;; review round finding: ADR clamp must hold on the wall clock,
+  ;; not the UTC civil date, for offset-carrying inputs
+  (is (= [2026 2 28]
+         ((juxt :year :month :day)
+          (t/add {:year 2026 :month 1 :day 31 :offset-min 120}
+                 {:months 1}))))
+  (is (= [2026 2 28]
+         ((juxt :year :month :day)
+          (t/add (t/parse "2026-01-31T00:00:00+02:00") {:months 1})))))
+
+(deftest weekday-map-agrees-with-wday-field
+  ;; review round finding: the map reading and the field must agree
+  (let [e (:epoch-ms (t/parse "2026-08-20T00:30:00+02:00"))
+        m (t/epoch->time-map e 120)]
+    (is (= (:wday m) (t/weekday m)))
+    (is (= (:wday m) (t/weekday (t/parse
+                                 "2026-08-20T00:30:00+02:00"))))))
 
 (run-tests-and-exit)
