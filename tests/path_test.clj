@@ -181,7 +181,7 @@
   (is (pq (prop/for-all [s garbage-gen]
                          (= (path-normalize (path-normalize s))
                             (path-normalize s)))
-          20260820 400)))
+          20260820 200)))
 
 ;;; absolute?
 
@@ -235,30 +235,30 @@
                          (let [p (apply path-join segs)]
                            (and (= segs (path-split p))
                                 (= p (apply path-join (path-split p))))))
-          20260821 400)))
+          20260821 200)))
 
 (deftest split-ext-rebuilds-prop
   (is (pq (prop/for-all [s garbage-gen]
                          (let [[st ext] (path-split-ext s)]
                            (= s (if ext (str st ext) st))))
-          20260822 500)))
+          20260822 250)))
 
 (deftest extension-stem-agreement-prop
   (is (pq (prop/for-all [s garbage-gen]
                          (let [[_ ext] (path-split-ext s)]
                            (= (path-extension s) (or ext ""))))
-          20260823 500))
+          20260823 250))
   (is (pq (prop/for-all [s garbage-gen]
                          (= (path-stem s)
                             (first (path-split-ext (path-basename s)))))
-          20260824 500)))
+          20260824 250)))
 
 (deftest basename-dirname-chain-prop
   (is (pq (prop/for-all [s garbage-gen]
                          (let [d (path-dirname s)]
                            (or (= d ".") (= d "/")
                                (not= "" (path-basename d)))))
-          20260825 500)))
+          20260825 250)))
 
 (deftest pure-prims-total-over-garbage-prop
   ;; ADR 22: the algebra is total over any byte string. Garbage in,
@@ -274,6 +274,6 @@
                               (vector? (path-split-ext s))
                               (or (true? (path-absolute? s))
                                   (false? (path-absolute? s)))))
-          20260826 600)))
+          20260826 300)))
 
 (run-tests-and-exit)

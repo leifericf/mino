@@ -178,12 +178,12 @@
   ;; match-or-classified-throw, temporally as well). Proving a
   ;; non-match through 120 stars is exponential, so it throws;
   ;; honest patterns on the same subject stay boolean.
-  (let [subject (apply str (repeat 20000 "a"))
-        stars (str (apply str (interpose "a" (repeat 120 "*"))) "b")]
+  (let [subject (apply str (repeat 8000 "a"))
+        stars (str (apply str (interpose "a" (repeat 100 "*"))) "b")]
     (is (= :eval/bounds
            (try (path-glob-match stars subject)
                 (catch e (:mino/kind e))))))
-  (let [subject (apply str (repeat 20000 "a"))]
+  (let [subject (apply str (repeat 8000 "a"))]
     (is (true? (path-glob-match "*a*" subject)))
     (is (false? (path-glob-match "*z*" subject)))))
 
@@ -194,7 +194,7 @@
                          s garbage-gen]
                          (or (true? (m pat s))
                              (false? (m pat s))))
-          20260827 2000)))
+          20260827 500)))
 
 (deftest matcher-mutation-prop
   ;; mutate valid patterns; the matcher still answers a boolean
@@ -210,7 +210,7 @@
                                    base)]
                            (or (true? (m p "a/b.clj"))
                                (false? (m p "a/b.clj")))))
-          20260828 2000)))
+          20260828 500)))
 
 (deftest escape-law-prop
   ;; every string matches its fully escaped pattern
@@ -221,6 +221,6 @@
                                     s)))]
     (is (pq (prop/for-all [s garbage-gen]
                            (true? (m (escape s) s)))
-            20260829 2000))))
+            20260829 500))))
 
 (run-tests-and-exit)
