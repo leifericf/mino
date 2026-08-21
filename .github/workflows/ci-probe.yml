@@ -1,8 +1,9 @@
 name: ci-probe
 
-# TEMPORARY diagnostic (2026-08-21): a bare ubuntu job that only
-# sleeps, to discriminate hosted-runner degradation from suite
-# content during the ubuntu kill wave. Delete after diagnosis.
+# TEMPORARY diagnostic (2026-08-21): discriminate hosted-runner
+# degradation from suite content during the ubuntu kill wave, and
+# measure the suite's true peak RSS on a real 16GB runner.
+# Delete after diagnosis.
 on:
   workflow_dispatch:
   push:
@@ -22,10 +23,34 @@ jobs:
             sleep 30
           done
       - name: Churn probe
-        # A modest heap churn to see whether allocation draws the
-        # kill the suite jobs see: 4 python processes each building
-        # a 1.5GB list, staggered, well under the runner ceiling.
         run: |
           for i in 1 2 3 4; do
             python3 -c "xs=bytearray(1_500_000_000); xs[::4096]=b'x'*len(xs[::4096]); print('churn', $i, 'alive', __import__('time').strftime('%H:%M:%S'))"
           done
+
+  suite-probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build mino
+        run: make
+      - name: Full suite with RSS monitor
+        env:
+          MINO_TEST_TRACE: "1"
+        run: |
+          set +e
+          ( while true; do
+              ps -o rss= -C mino 2>/dev/null | head -1
+              sleep 1
+            done ) > /tmp/rss.log &
+          MON=$!
+          ./mino tests/run.clj > /tmp/suite.log 2>&1
+          RC=$?
+          kill $MON 2>/dev/null
+          echo "suite exit=$RC"
+          tail -2 /tmp/suite.log
+          echo "--- peak RSS (KB):"; sort -n /tmp/rss.log | tail -1
+          echo "--- final traces:"; tail -3 /tmp/suite.log.mino_trace 2>/dev/null || true
+          exit 0
