@@ -2653,6 +2653,12 @@ static int httpreq_translate(mino_state *S, mino_val *next,
     size_t mlen, tlen, n, kept = 0, i;
     int r = -1;
 
+    if (next == NULL) {
+        prim_throw_classified(S, "http/request", "MHR003",
+                              "http-request: redirect follow decision "
+                              "has no :request");
+        return -1;
+    }
     uri_val = map_get_val(next, mino_keyword(S, "uri"));
     if (uri_val == NULL || mino_type_of(uri_val) != MINO_STRING) {
         prim_throw_classified(S, "http/request", "MHR003",
