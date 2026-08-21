@@ -497,4 +497,83 @@
       (is (= :net/timeout kind))
       (is (< dt 2400) (str "accepted-socket read timeout fired at " dt " ms")))))
 
+;; Regression (ki-20): a thread parked inside a blocking net prim
+;; holds live references only in its C stack frames (interpreter
+;; args, prim locals, raw payload pointers). Before the parked-stack
+;; root scan, a gc! forced from a peer thread while the worker was
+;; parked in send/recv/accept could sweep those references: the
+;; payload mid-send (use-after-free read inside net_send_all_fd) or
+;; the socket handle record itself (freed by net_sock_finalize, read
+;; again by a later net-close on the test thread). These fixtures
+;; interleave blocking socket traffic with forced collections from
+;; the other thread and assert payload integrity end to end. The
+;; sanitizer lanes are the crash oracle; every lane is the data
+;; oracle.
+
+(def ^:private gc-net-payload-bytes (* 128 1024))
+
+(defn- gc-net-payload
+  "A distinctive byte pattern per round so a cross-round reuse of a
+  swept payload cannot pass the equality check."
+  [round]
+  (byte-array (map (fn [i] (mod (+ i round) 256))
+                   (range gc-net-payload-bytes))))
+
+(defn- gc-net-chunk
+  "Expected bytes [k*c, (k+1)*c) of round r's payload pattern."
+  [round k c]
+  (byte-array (map (fn [i] (mod (+ i round) 256))
+                   (range (* k c) (* (inc k) c)))))
+
+(deftest net-parked-worker-survives-forced-gc
+  ;; Face 1: the ECHO worker parks in net-read and then in net-write
+  ;; of the 128 KiB payload (several send syscalls) while the test
+  ;; thread forces collections and allocates churn garbage between
+  ;; reads, so the worker is parked under pressure for the whole
+  ;; round trip.
+  (with-server :echo
+    (fn [srv]
+      (dotimes [round 6]
+        (let [s (net-connect "127.0.0.1" (:port srv))
+              payload (gc-net-payload round)]
+          (is (= gc-net-payload-bytes (net-write s payload)))
+          (dotimes [k 8]
+            (is (= (gc-net-chunk round k 16384)
+                   (read-n s 16384))
+                (str "round " round " chunk " k
+                     ": echoed payload corrupted while echo worker "
+                     "was parked under forced gc"))
+            (dotimes [_ 12]
+              (vec (range 64))
+              (gc!)))
+          (net-close s))))))
+
+(deftest net-parked-main-survives-worker-gc
+  ;; Face 2: the TEST thread parks in net-read waiting for the echo
+  ;; while a worker future forces collections. Before main_ctx was
+  ;; included in the conservative parked scan and the BC-snapshot
+  ;; walk, main's parked C stack (and its BC register snapshot while
+  ;; a worker mutates S->bc) were invisible to the worker's
+  ;; collector.
+  (with-server :echo
+    (fn [srv]
+      (dotimes [round 6]
+        (let [s (net-connect "127.0.0.1" (:port srv))
+              payload (gc-net-payload round)
+              churn (future
+                      (dotimes [_ 150]
+                        (vec (range 64))
+                        (gc!))
+                      :done)]
+          (is (= gc-net-payload-bytes (net-write s payload)))
+          (dotimes [k 8]
+            (is (= (gc-net-chunk round k 16384)
+                   (read-n s 16384))
+                (str "round " round " chunk " k
+                     ": payload corrupted while test thread was "
+                     "parked under worker-forced gc")))
+          (is (= :done (deref churn 20000 ::timeout)))
+          (net-close s))))))
+
+
 (run-tests-and-exit)

@@ -537,4 +537,8 @@ void gc_minor_collect(mino_state *S)
     gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);
     gc_charge_pause(S, start_ns);
     mino_current_ctx(S)->gc_depth--;
+    /* Deferred finalizers run after the atomic window closes: a
+     * finalizer can yield state_lock (future joins), which must never
+     * happen between this cycle's mark and sweep. */
+    gc_finalize_drain(S);
 }

@@ -52,33 +52,92 @@ int gc_freelist_class(size_t size)
     }
 }
 
-/* Call the per-tag finalizer for h (if any), then route h back to the
- * freelist (when there is a matching size class), leave it stranded in
- * its bump slab (no size class, bump-origin -- the slab is released on
- * state teardown), or free() it (no size class, calloc-origin).
- * Called from both gc_minor_sweep (minor.c) and gc_sweep (major.c). */
-void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
+/* Route h back to the freelist (when there is a matching size class),
+ * leave it stranded in its bump slab (no size class, bump-origin --
+ * the slab is released on state teardown), or free() it (no size
+ * class, calloc-origin). The header's finalizer, if any, must already
+ * have run. Called from gc_hdr_recycle (after the deferred finalizer
+ * drains) and from the drain itself. */
+static void gc_hdr_reclaim(mino_state *S, gc_hdr_t *h)
 {
-    {
+    int fc = gc_freelist_class(h->size);
+    if (fc >= 0) {
+        /* Bump and calloc-origin headers both round-trip through
+         * the freelist; gc_alloc_raw preserves h->bump across
+         * the memset that resets pulled headers. */
+        h->next             = S->gc.freelists[fc];
+        S->gc.freelists[fc] = h;
+    } else if (h->bump) {
+        /* No size class: bump-origin leaks in its slab until
+         * state destruction frees the whole slab. */
+    } else {
+        free(h);
+    }
+}
+
+/* Queue h for post-collection finalization. The caller (a sweep) holds
+ * state_lock and has already unlinked h from its generation list, so
+ * the header memory stays valid until the drain runs its finalizer
+ * and reclaims it. Must be called with the state lock held. */
+void gc_finalize_push(mino_state *S, gc_hdr_t *h)
+{
+    if (S->gc.finalize_q_len == S->gc.finalize_q_cap) {
+        size_t          ncap = S->gc.finalize_q_cap * 2u;
+        gc_hdr_t      **nq;
+        if (ncap == 0) ncap = 64;
+        nq = (gc_hdr_t **)realloc(S->gc.finalize_q,
+                                  ncap * sizeof(*nq));
+        if (nq == NULL) {
+            /* OOM growing the queue: run the finalizer inline rather
+             * than leaking the external resource. This can reopen the
+             * mid-collection yield window, but only under allocation
+             * failure, where the process is about to throw OOM
+             * anyway. */
+            gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
+                                  ? S->gc_finalizers[h->type_tag] : NULL;
+            if (fin != NULL) fin(S, h);
+            gc_hdr_reclaim(S, h);
+            return;
+        }
+        S->gc.finalize_q     = nq;
+        S->gc.finalize_q_cap = ncap;
+    }
+    S->gc.finalize_q[S->gc.finalize_q_len++] = h;
+}
+
+/* Run every queued finalizer and reclaim the headers. Called after the
+ * collector's atomic mark/sweep window has closed (phase restored,
+ * gc_depth back at baseline) and at state teardown. The caller holds
+ * state_lock between iterations; an individual finalizer may yield it
+ * (future joins), during which the drain touches no shared state, so
+ * a concurrent collector may interleave pushes that this loop then
+ * picks up. Each pop happens under the caller's state_lock hold. */
+void gc_finalize_drain(mino_state *S)
+{
+    while (S->gc.finalize_q_len > 0) {
+        gc_hdr_t       *h = S->gc.finalize_q[--S->gc.finalize_q_len];
         gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
                               ? S->gc_finalizers[h->type_tag] : NULL;
         if (fin != NULL) fin(S, h);
+        gc_hdr_reclaim(S, h);
     }
-    {
-        int fc = gc_freelist_class(h->size);
-        if (fc >= 0) {
-            /* Bump and calloc-origin headers both round-trip through
-             * the freelist; gc_alloc_raw preserves h->bump across
-             * the memset that resets pulled headers. */
-            h->next             = S->gc.freelists[fc];
-            S->gc.freelists[fc] = h;
-        } else if (h->bump) {
-            /* No size class: bump-origin leaks in its slab until
-             * state destruction frees the whole slab. */
-        } else {
-            free(h);
-        }
+}
+
+/* Call the per-tag finalizer for h (if any), then route h back to the
+ * freelist, its bump slab, or free(). Called from both gc_minor_sweep
+ * (minor.c) and gc_sweep (major.c). The finalizer is deferred through
+ * the finalize queue when one is registered: see gc_state_t's comment
+ * for why an inline finalizer (which can yield state_lock from inside
+ * the collector's mark-to-sweep window) is unsound. */
+void gc_hdr_recycle(mino_state *S, gc_hdr_t *h)
+{
+    gc_finalizer_fn fin = (h->type_tag < GC_T__COUNT)
+                          ? S->gc_finalizers[h->type_tag] : NULL;
+    if (fin != NULL) {
+        gc_finalize_push(S, h);
+        return;
     }
+    gc_hdr_reclaim(S, h);
 }
 
 /* Record one STW pause sample. Saturates the ring slot at UINT32_MAX

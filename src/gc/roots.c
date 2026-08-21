@@ -355,6 +355,56 @@ static void gc_mark_ctx_bc_cursor(mino_state *S, mino_thread_ctx_t *ctx)
     }
 }
 
+/* gc_mark_ctx_parked_stack -- conservatively scan the C stack of a
+ * thread parked inside a yielding primitive (state_lock released,
+ * blocked in send/recv/accept/cv_wait). mino_yield_lock published
+ * parked_sp as an anchor deeper than every frame that survives the
+ * park, so [parked_sp, gc_stack_bottom) is exactly the region holding
+ * the parked thread's live references: prim arguments, AST interpreter
+ * let-locals, raw payload pointers. No other root category can see
+ * those frames -- the owner cannot scan its own stack (it is blocked
+ * in a syscall) and pins/snapshots only cover what they name. Without
+ * this scan a collection forced from a peer can sweep the payload a
+ * parked worker is mid-send on, or the socket record itself.
+ *
+ * Safe by construction: the region is frozen while the owner is parked
+ * (it holds no state_lock and executes no code), the anchor is stored
+ * under state_lock on both edges, and a conservative scan can only
+ * retain more, never less. Word loop mirrors gc_scan_stack; the ASan
+ * suppression rationale is identical (the scan deliberately reads
+ * across frame red zones). */
+#if defined(__has_feature) && !defined(_MSC_VER)
+#  if __has_feature(address_sanitizer)
+__attribute__((no_sanitize_address))
+#  endif
+#elif defined(_MSC_VER) && defined(__SANITIZE_ADDRESS__)
+__declspec(no_sanitize_address)
+#elif defined(__SANITIZE_ADDRESS__)
+__attribute__((no_sanitize_address))
+#endif
+static void gc_mark_ctx_parked_stack(mino_state *S, mino_thread_ctx_t *ctx)
+{
+    char *lo;
+    char *hi;
+    char *cur;
+    if (ctx->parked_sp == NULL || ctx->gc_stack_bottom == NULL) {
+        return;
+    }
+    lo = (char *)ctx->parked_sp;
+    hi = (char *)ctx->gc_stack_bottom;
+    if (lo >= hi) {
+        return;
+    }
+    while (((uintptr_t)lo % sizeof(void *)) != 0 && lo < hi) {
+        lo++;
+    }
+    for (cur = lo; cur + sizeof(void *) <= hi; cur += sizeof(void *)) {
+        void *word;
+        memcpy(&word, cur, sizeof(word));
+        gc_mark_interior(S, word);
+    }
+}
+
 /* gc_mark_ctx_try_stack -- mark exception values held in a context's
  * try_stack.  The main_ctx walk is done in gc_mark_module_and_meta;
  * worker ctxs need the same treatment so that a caught exception held
@@ -518,6 +568,10 @@ static void gc_mark_thread_state(mino_state *S)
     gc_mark_each_ctx(S, gc_mark_ctx_gc_save);
     gc_mark_each_ctx(S, gc_mark_ctx_tx);
     gc_mark_each_ctx(S, gc_mark_ctx_lazy_inflight);
+    /* Conservative scan of every parked thread's frozen C stack. Must
+     * run for main_ctx and workers alike: either can be the one parked
+     * in a yielding prim while a peer collects. */
+    gc_mark_each_ctx(S, gc_mark_ctx_parked_stack);
     /* Pin in-flight try/catch exception values for each worker context.
      * The main_ctx try_stack is already walked in gc_mark_module_and_meta;
      * worker ctxs are parallel execution contexts that can hold their own
@@ -598,10 +652,11 @@ static void gc_mark_runtime_globals(mino_state *S)
      * walk, a yielded worker's slot could be collected during a
      * peer's allocation pressure.
      *
-     * main_ctx's snapshot is reachable here only when the embedder
-     * is itself yielded (a nested mino_call from a primitive that
-     * yields), which currently doesn't happen but is included for
-     * symmetry. */
+     * main_ctx is walked here unconditionally (it holds state_lock's
+     * BC stack whenever it runs; its snapshot fields mirror the live
+     * S->bc fields at yield time), so the mirror case -- main parked
+     * in a yielding prim while a worker collects -- keeps main's
+     * register slots alive too. */
     {
         mino_thread_ctx_t *w;
         mino_worker_list_lock_acquire(S);
@@ -619,6 +674,27 @@ static void gc_mark_runtime_globals(mino_state *S)
             }
         }
         mino_worker_list_lock_release(S);
+        /* main_ctx's snapshot needs no list lock -- the GC already runs
+         * under state_lock, which main cannot be holding concurrently.
+         * Walk it exactly while main is parked (parked_sp published at
+         * its yield): when main itself collects, its snapshot may be
+         * stale from an earlier era and its live registers are covered
+         * by the S->bc walk above. */
+        if (S->main_ctx.parked_sp != NULL
+                && S->main_ctx.bc_snapshot_valid
+                && S->main_ctx.bc_regs_storage != NULL) {
+            size_t bi;
+            gc_mark_interior(S, S->main_ctx.bc_regs_storage);
+            if (S->main_ctx.bc_top_snapshot
+                    <= S->main_ctx.bc_regs_storage_cap) {
+                for (bi = 0; bi < S->main_ctx.bc_top_snapshot; bi++) {
+                    if (S->main_ctx.bc_regs_storage[bi] != NULL) {
+                        gc_mark_interior(S,
+                            S->main_ctx.bc_regs_storage[bi]);
+                    }
+                }
+            }
+        }
     }
 }
 

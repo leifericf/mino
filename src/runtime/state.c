@@ -500,10 +500,18 @@ static void state_free_string_interns(mino_state *S)
 static void state_free_gc_aux(mino_state *S)
 {
     int i;
+    /* Drain before freeing the array: queued headers are unlinked from
+     * the generation lists, so state_free_heap's walk cannot reach
+     * them. */
+    gc_finalize_drain(S);
     free(S->gc.ranges);
     free(S->gc.ranges_pending);
     free(S->gc.mark_stack);
     free(S->gc.remset);
+    free(S->gc.finalize_q);
+    S->gc.finalize_q     = NULL;
+    S->gc.finalize_q_len = 0;
+    S->gc.finalize_q_cap = 0;
     gc_evt_free(S);
     for (i = 0; i < 4; i++) {
         gc_hdr_t *h = S->gc.freelists[i];
@@ -549,6 +557,10 @@ static void state_free_heap(mino_state *S)
 {
     gc_hdr_t *h, *hnext;
     gc_bump_slab_t *slab, *snext;
+    /* Any finalizer still queued from a collection whose drain never
+     * completed (or that queued during teardown's own walk below)
+     * runs here, before the generation lists go away. */
+    gc_finalize_drain(S);
     /* Release the external payloads of every header still live at
      * teardown: chunk/record/host-array slot arrays, bigint payloads,
      * byte buffers, embedder HANDLE finalizers, chan impls, and future
@@ -1939,12 +1951,20 @@ void mino_worker_list_lock_release(mino_state *S)
 int mino_yield_lock(mino_state *S)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    char    sp_anchor; /* address = deepest live frame while parked */
     int depth = ctx->lock_depth;
     /* Snapshot the BC stack into this ctx before releasing the lock. */
     ctx->bc_regs_storage      = S->bc.bc_regs;
     ctx->bc_regs_storage_cap  = S->bc.bc_regs_cap;
     ctx->bc_top_snapshot      = S->bc.bc_top;
     ctx->bc_snapshot_valid    = 1;
+    /* Publish the parked-stack scan anchor while still under the lock:
+     * every frame that survives the yield (the caller that is about to
+     * block, its callers, up to the anchored bottom) sits at or above
+     * &sp_anchor. Cleared in mino_resume_lock after re-acquiring, so a
+     * peer's collector scans this range exactly while the owner cannot
+     * be mutating it. */
+    ctx->parked_sp            = (void *)&sp_anchor;
     /* Save this thread's live namespace pair and hand back the pair
      * it found at its last acquire, so the next mutator never sees a
      * parked call's mid-switch namespace. */
@@ -1968,6 +1988,11 @@ void mino_resume_lock(mino_state *S, int saved_depth)
         mino_state_lock_acquire(S);
         ctx->lock_depth++;
     }
+    /* The thread is the mutator again: its live stack is scanned by
+     * gc_scan_stack on this thread, so retire the parked anchor (the
+     * store is under the re-acquired state_lock; a concurrent peer
+     * collector cannot observe the window). */
+    ctx->parked_sp = NULL;
     /* Restore the BC stack snapshot. The state's bc_regs/cap/top
      * now reflect THIS worker's frame again, isolated from any peer
      * worker's frames that ran during the yield window (those peers

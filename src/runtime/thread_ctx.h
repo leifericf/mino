@@ -252,6 +252,22 @@ typedef struct mino_thread_ctx {
     void           *gc_stack_bottom;
     int             gc_depth;
 
+    /* Stack anchor recorded at mino_yield_lock: the address of a local
+     * in the yielding frame, deeper than every frame of the caller that
+     * is about to park in a blocking syscall. While the thread is
+     * parked (state_lock released) every live reference it holds lives
+     * at or above this address up to gc_stack_bottom -- prim args,
+     * interpreter let-locals, raw payload pointers. The collector scans
+     * [parked_sp, gc_stack_bottom) for every parked ctx as a root
+     * category (gc_mark_ctx_parked_stack), because no other walk sees
+     * those frames: the owner cannot scan its own stack (it is blocked),
+     * and pins/snapshots only cover what they name explicitly. NULL
+     * whenever the thread holds state_lock (the running mutator's stack
+     * is scanned by gc_scan_stack on its own thread). Stored under
+     * state_lock on both edges (set before release, cleared after
+     * re-acquire), so the collector never sees a torn value. */
+    void           *parked_sp;
+
     /* Active JIT invoke env. Set by mino_jit_invoke from the
      * mino_bc_run frame's `env` parameter so slow helpers (e.g.,
      * mino_jit_getglobal_cached_slow) can resolve captured-local

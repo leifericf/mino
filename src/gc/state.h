@@ -94,8 +94,26 @@ typedef struct gc_state {
     uintptr_t       heap_min;
     uintptr_t       heap_max;
 
+    /* Deferred finalizer queue. Sweeps never run a dead header's
+     * finalizer inline: a finalizer can yield state_lock (the MINO_FUTURE
+     * sweep joins its worker thread, which parks on the lock), and a
+     * mutator running in that window between the collector's mark and
+     * its sweep invalidates the mark snapshot -- allocations and pins
+     * land unmarked and the sweep frees live data. Instead the sweep
+     * queues the header here (memory intact, already unlinked) and the
+     * collector drains the queue after its atomic window closes: one
+     * entry popped per iteration under state_lock, the finalizer run
+     * outside the mark/sweep invariant. Pushes and pops only happen
+     * under state_lock; a finalizer that parks releases the lock and
+     * the parked drain touches no shared state until it resumes, so no
+     * second mutex is needed. Drained empty by every collector before
+     * it returns and by state teardown. */
+    gc_hdr_t      **finalize_q;
+    size_t          finalize_q_len;
+    size_t          finalize_q_cap;
+
     /* GC event ring buffer (diagnostic only; opt-in via MINO_GC_EVT=1
-     * at state init). Allocated lazily; NULL otherwise and every
+     * at state init. Allocated lazily; NULL otherwise and every
      * recording site is a no-op. */
     gc_evt_t       *evt_ring;
     uint64_t        evt_seq;

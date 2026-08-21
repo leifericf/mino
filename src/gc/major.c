@@ -185,6 +185,10 @@ void gc_major_sweep_phase(mino_state *S)
     S->gc.collections_major++;
     S->gc.phase = GC_PHASE_IDLE;
     mino_current_ctx(S)->gc_depth--;
+    /* Deferred finalizers run after the atomic window closes; see
+     * gc_state_t's finalize_q comment for why they must not run
+     * inline inside the sweep. */
+    gc_finalize_drain(S);
 }
 
 /* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD

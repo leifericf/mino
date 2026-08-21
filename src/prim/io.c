@@ -812,7 +812,12 @@ mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env)
     /* Join outstanding host worker threads before libc teardown so
      * leaked threads don't trip TSan (or, on Windows, DllMain
      * teardown ordering). State teardown via mino_state_free also
-     * calls quiesce, but `(exit ...)` bypasses that path.
+     * calls quiesce, but `(exit ...)` used to bypass that path
+     * entirely -- every finalizer-bearing value alive at exit
+     * (sockets, chans, futures, bigint payloads) leaked to the OS
+     * and LeakSanitizer reported the abandoned handles. Now the
+     * drained path runs the full state teardown so finalizers fire
+     * exactly as on a normal return from main.
      *
      * Use a *bounded* drain: a future whose body is an uninterruptible
      * tight C loop (e.g. a C-side reduce over a huge range) never
@@ -827,6 +832,14 @@ mino_val *prim_exit(mino_state *S, mino_val *args, mino_env *env)
      * since _Exit does not. */
     if (mino_quiesce_threads_timed(S, 3000)) {
         mino_quiesce_threads(S); /* all drained; reap joinable threads */
+        /* Drop this thread's recursive holds so state teardown can
+         * destroy the state lock; the abandoned eval frames above
+         * never resume, so the depth is not restored. */
+        while (mino_current_ctx(S)->lock_depth > 0) {
+            mino_state_lock_release(S);
+            mino_current_ctx(S)->lock_depth--;
+        }
+        mino_state_free(S);
         exit(code);
     }
     fflush(stdout);

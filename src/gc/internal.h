@@ -213,6 +213,12 @@ int    gc_freelist_class(size_t size);
  * bump-origin), or release it via free() (no size class, calloc-origin).
  * Shared between minor sweep (minor.c) and major sweep (major.c). */
 void   gc_hdr_recycle(mino_state *S, gc_hdr_t *h);
+/* Deferred finalization: sweeps queue finalizable headers instead of
+ * running them inside the collector's atomic window; every collector
+ * drains the queue before returning, and state teardown drains it
+ * before walking the generation lists. driver.c. */
+void   gc_finalize_push(mino_state *S, gc_hdr_t *h);
+void   gc_finalize_drain(mino_state *S);
 
 /* True iff p lies inside the mino_state struct -- i.e. p is a singleton
  * or small-int cache entry rather than a GC allocation.  Shared between
