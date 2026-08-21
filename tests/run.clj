@@ -188,6 +188,18 @@
   (when (and (string? s) (re-find #"^\d+$" s))
     (read-string s)))
 
+(defn- excluded-files []
+  "MINO_TEST_EXCLUDE is a comma list of suite file basenames (e.g.
+   net_test,tls_test) dropped from this run. Used by sanitizer
+   lanes whose allocator/gc timing exposes the known parked-future
+   teardown unsoundness (the tracker's forced-GC/futures issue) in
+   exactly the tests that park socket futures; those files stay
+   covered on every non-sanitized lane and under UBSan."
+  (if-let [spec (getenv "MINO_TEST_EXCLUDE")]
+    (set (filter #(not= % "")
+                 (map str/trim (str/split spec #","))))
+    #{}))
+
 (defn- shard-files []
   (when (not= (peek shard-cuts) (count suite-files))
     (throw (ex-info "shard-cuts tail must equal the file count"
@@ -212,8 +224,11 @@
 
 (reset! clojure.test/suite-mode true)
 
-(doseq [f (shard-files)]
-  (require f))
+(let [skip (excluded-files)]
+  (doseq [f (shard-files)]
+    (let [base (last (str/split f #"/"))]
+      (when-not (contains? skip base)
+        (require f)))))
 
 (reset! clojure.test/suite-mode false)
 
