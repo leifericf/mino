@@ -219,6 +219,11 @@ void   gc_hdr_recycle(mino_state *S, gc_hdr_t *h);
  * before walking the generation lists. driver.c. */
 void   gc_finalize_push(mino_state *S, gc_hdr_t *h);
 void   gc_finalize_drain(mino_state *S);
+/* Free every bump-slab region at state teardown (driver.c). */
+void   gc_bump_slab_free_all(mino_state *S);
+/* Batched release of emptied (cold) slab regions; called at the end
+ * of every collection and from state teardown (driver.c). */
+void   gc_bump_slab_release(mino_state *S);
 
 /* True iff p lies inside the mino_state struct -- i.e. p is a singleton
  * or small-int cache entry rather than a GC allocation.  Shared between

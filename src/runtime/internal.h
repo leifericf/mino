@@ -496,6 +496,11 @@ struct mino_state {
     char           *gc_bump_cur;
     char           *gc_bump_end;
     struct gc_bump_slab *gc_bump_slabs;
+    /* Recently-emptied slab regions kept for reuse by the next refill
+     * instead of returning them to the OS and re-allocating. Bounded
+     * (GC_BUMP_WARM_POOL); gc_bump_slab_release refills it from the
+     * cold list and frees the excess. */
+    struct gc_bump_slab *gc_bump_warm;
     size_t          gc_bump_alloc_hits;
     size_t          gc_bump_slab_refills;
 

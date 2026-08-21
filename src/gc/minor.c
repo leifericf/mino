@@ -539,6 +539,8 @@ void gc_minor_collect(mino_state *S)
     mino_current_ctx(S)->gc_depth--;
     /* Deferred finalizers run after the atomic window closes: a
      * finalizer can yield state_lock (future joins), which must never
-     * happen between this cycle's mark and sweep. */
+     * happen between this cycle's mark and sweep. Cold slab regions
+     * released in the same batched pass. */
     gc_finalize_drain(S);
+    gc_bump_slab_release(S);
 }

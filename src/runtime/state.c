@@ -556,7 +556,6 @@ static void state_free_async(mino_state *S)
 static void state_free_heap(mino_state *S)
 {
     gc_hdr_t *h, *hnext;
-    gc_bump_slab_t *slab, *snext;
     /* Any finalizer still queued from a collection whose drain never
      * completed (or that queued during teardown's own walk below)
      * runs here, before the generation lists go away. */
@@ -590,14 +589,9 @@ static void state_free_heap(mino_state *S)
         if (!h->bump) free(h);
     }
     /* Bump slabs own the bump-allocated headers; free the whole slab
-     * here after finalizers have run on every header it contained. */
-    for (slab = S->gc_bump_slabs; slab != NULL; slab = snext) {
-        snext = slab->next;
-        free(slab);
-    }
-    S->gc_bump_slabs = NULL;
-    S->gc_bump_cur = NULL;
-    S->gc_bump_end = NULL;
+     * region here after finalizers have run on every header it
+     * contained. */
+    gc_bump_slab_free_all(S);
 }
 
 mino_jit_capability mino_state_jit_capability(const mino_state *S)

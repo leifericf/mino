@@ -187,8 +187,10 @@ void gc_major_sweep_phase(mino_state *S)
     mino_current_ctx(S)->gc_depth--;
     /* Deferred finalizers run after the atomic window closes; see
      * gc_state_t's finalize_q comment for why they must not run
-     * inline inside the sweep. */
+     * inline inside the sweep. Cold slab regions released in the
+     * same batched pass. */
     gc_finalize_drain(S);
+    gc_bump_slab_release(S);
 }
 
 /* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD

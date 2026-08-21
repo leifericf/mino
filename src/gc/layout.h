@@ -68,10 +68,12 @@ enum {
  * of padding, then 8-byte size and 8-byte next. Four single-byte fields
  * fit into the padding slot that existed for type_tag/mark alone; the
  * struct size is unchanged. The `bump` field tags headers carved from
- * a bump-allocator slab: those headers cannot be free()d on sweep
- * (their memory belongs to the slab, freed only at state destruction)
- * and never enter the per-size-class freelist (the freelist's pop arm
- * would memset the bump flag away). */
+ * a bump-allocator slab: those headers are never free()d on sweep --
+ * the memory belongs to the aligned slab region, which is returned to
+ * the OS once every header carved from it has been recycled (see
+ * gc_bump_slab_t). Bump-origin headers DO round-trip through the
+ * per-size-class freelist; gc_alloc_raw preserves the flag across the
+ * pull-time memset. */
 typedef struct gc_hdr {
     unsigned char  type_tag;
     unsigned char  mark;
@@ -91,10 +93,19 @@ typedef struct {
 } gc_range_t;
 
 /* Slab for the bump allocator. payload[] starts at the byte after the
- * header and runs to MINO_BUMP_SLAB_BYTES total. Slabs are malloc'd
- * page-aligned and never freed during the state's lifetime; bump
- * cursor / end on mino_state advance through the head slab and
- * a refill links a fresh slab onto the list.
+ * header and runs to MINO_BUMP_SLAB_BYTES total. Each slab occupies
+ * exactly one MINO_BUMP_SLAB_BYTES-aligned region (VirtualAlloc's
+ * allocation granularity on Windows, posix_memalign elsewhere), so a
+ * header's owning slab is derivable by masking its address -- no
+ * back-pointer in gc_hdr_t. `live` counts headers carved from this
+ * slab that are still reachable-or-freelisted... precisely: headers
+ * carved and not yet recycled (a recycled-with-size-class header
+ * decremented at push; pulling it back off the freelist increments
+ * again). When live reaches zero and the slab is not the one the
+ * cursor is carving from, the slab is purged from the per-size-class
+ * freelists and its region is returned to the OS. Aligned-allocation
+ * failure at refill falls back to the calloc path (headers with
+ * bump=0), so the mask lookup only ever sees aligned slabs.
  *
  * The bump path bypasses the per-size-class freelist arm of
  * gc_alloc_raw; freed headers from bump-allocated slabs route to
@@ -103,10 +114,23 @@ typedef struct {
  * hold the requested size on refill become permanent waste, which
  * is bounded by the slab size. */
 #define MINO_BUMP_SLAB_BYTES (64u * 1024u)
+#define MINO_BUMP_SLAB_MASK  (~((uintptr_t)MINO_BUMP_SLAB_BYTES - 1u))
 
 typedef struct gc_bump_slab {
     struct gc_bump_slab *next;
+    size_t               live;  /* carved-and-not-yet-recycled headers */
+    unsigned char        cold;  /* 1 once retired to the cold list; a
+                                 * freelist pull of one of its headers
+                                 * revives it before the batched release
+                                 * can free the region */
 } gc_bump_slab_t;
+
+/* Owning slab of a bump-carved header. Only valid for headers with
+ * h->bump == 1; see the slab comment for the alignment contract. */
+static inline gc_bump_slab_t *gc_bump_slab_of(const gc_hdr_t *h)
+{
+    return (gc_bump_slab_t *)((uintptr_t)h & MINO_BUMP_SLAB_MASK);
+}
 
 /* ------------------------------------------------------------------------- */
 /* Per-tag tracer registration                                               */

@@ -13,6 +13,13 @@
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"  /* tc_load: MSVC-portable thread_count read */
 
+/* Bump-slab regions use VirtualAlloc's 64 KiB allocation granularity
+ * on Windows; declared inline at the single use site below. */
+#if defined(_WIN32)
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
  * maximum address (shallowest frame on a downward-growing stack). */
@@ -41,6 +48,15 @@ void gc_note_host_frame(mino_state *S, void *addr)
 
 /* Free list size classes: indices into gc_freelists[]. Returns -1 for
  * variable-size allocations that cannot be recycled. */
+static void gc_bump_slab_maybe_free(mino_state *S, gc_bump_slab_t *slab);
+
+/* Per-class freelist cache cap. The lists are pure allocation caches:
+ * beyond this depth a recycled header is worth less than the memory it
+ * pins (bump-origin headers keep their slab alive, calloc-origin
+ * headers stay malloc'd). The cap also bounds the cold-slab release
+ * pass, which walks the freelists once per collection. */
+#define GC_FREELIST_CAP 1024
+
 int gc_freelist_class(size_t size)
 {
     switch (size) {
@@ -52,24 +68,35 @@ int gc_freelist_class(size_t size)
     }
 }
 
-/* Route h back to the freelist (when there is a matching size class),
- * leave it stranded in its bump slab (no size class, bump-origin --
- * the slab is released on state teardown), or free() it (no size
- * class, calloc-origin). The header's finalizer, if any, must already
- * have run. Called from gc_hdr_recycle (after the deferred finalizer
- * drains) and from the drain itself. */
+/* Route h back to the freelist (when there is a matching size class
+ * and the cache has room), strand it in its bump slab, or free() it.
+ * The header's finalizer, if any, must already have run. Called from
+ * gc_hdr_recycle (after the deferred finalizer drains) and from the
+ * drain itself. */
 static void gc_hdr_reclaim(mino_state *S, gc_hdr_t *h)
 {
     int fc = gc_freelist_class(h->size);
-    if (fc >= 0) {
-        /* Bump and calloc-origin headers both round-trip through
-         * the freelist; gc_alloc_raw preserves h->bump across
-         * the memset that resets pulled headers. */
+    if (h->bump) {
+        gc_bump_slab_t *slab = gc_bump_slab_of(h);
+        /* Size-classed bump headers round-trip through the freelist
+         * (gc_alloc_raw preserves h->bump across the memset); push
+         * BEFORE the live decrement so an immediate slab retirement
+         * accounts for this very entry. A full cache strands the
+         * header instead -- its slab then frees once nothing carved
+         * from it remains. */
+        if (fc >= 0 && S->gc.freelist_len[fc] < GC_FREELIST_CAP) {
+            h->next             = S->gc.freelists[fc];
+            S->gc.freelists[fc] = h;
+            S->gc.freelist_len[fc]++;
+        }
+        slab->live--;
+        gc_bump_slab_maybe_free(S, slab);
+        return;
+    }
+    if (fc >= 0 && S->gc.freelist_len[fc] < GC_FREELIST_CAP) {
         h->next             = S->gc.freelists[fc];
         S->gc.freelists[fc] = h;
-    } else if (h->bump) {
-        /* No size class: bump-origin leaks in its slab until
-         * state destruction frees the whole slab. */
+        S->gc.freelist_len[fc]++;
     } else {
         free(h);
     }
@@ -374,18 +401,230 @@ static void gc_driver_tick(mino_state *S, size_t alloc_size)
     gc_tick_idle(S);
 }
 
-/* Slab-backed bump allocator. Allocates a fresh 64 KiB slab via calloc
- * and zeroes it (the bump fast path relies on slab memory being zero
- * so headers are returned in calloc-equivalent state without a per-alloc
- * memset). Links the slab onto S->gc_bump_slabs and parks the cursor
- * pair at the start of the usable payload region. Returns 0 on calloc
- * failure (caller falls back to plain calloc per allocation). */
+/* Allocated region for one bump slab: exactly MINO_BUMP_SLAB_BYTES,
+ * aligned to MINO_BUMP_SLAB_BYTES so gc_bump_slab_of's mask resolves
+ * any carved header back to its slab. Windows VirtualAlloc already
+ * honors 64 KiB allocation granularity; POSIX uses posix_memalign.
+ * The region arrives zeroed (fresh pages), which the bump fast path
+ * relies on. Returns NULL on failure (the caller falls back to plain
+ * calloc per allocation, headers with bump=0). */
+static void *gc_bump_slab_region_alloc(void)
+{
+#if defined(_WIN32)
+    return VirtualAlloc(NULL, MINO_BUMP_SLAB_BYTES,
+                        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+    void *p = NULL;
+    if (posix_memalign(&p, (size_t)MINO_BUMP_SLAB_BYTES,
+                       (size_t)MINO_BUMP_SLAB_BYTES) != 0) {
+        return NULL;
+    }
+    return p;
+#endif
+}
+
+static void gc_bump_slab_region_free(void *p)
+{
+#if defined(_WIN32)
+    VirtualFree(p, 0, MEM_RELEASE);
+#else
+    free(p);
+#endif
+}
+
+/* Free every slab region at state teardown. state_free_heap calls this
+ * after the per-header finalizers have run; cold-listed slabs are
+ * released first (no purge needed -- the freelists die with the
+ * state). */
+void gc_bump_slab_free_all(mino_state *S)
+{
+    gc_bump_slab_t *slab, *snext;
+    for (slab = S->gc_bump_warm; slab != NULL; slab = snext) {
+        snext = slab->next;
+        gc_bump_slab_region_free(slab);
+    }
+    S->gc_bump_warm = NULL;
+    for (slab = S->gc_bump_slabs; slab != NULL; slab = snext) {
+        snext = slab->next;
+        gc_bump_slab_region_free(slab);
+    }
+    S->gc_bump_slabs = NULL;
+    S->gc_bump_cur   = NULL;
+    S->gc_bump_end   = NULL;
+}
+
+/* An emptied slab is retired in place: the cold flag is set and the
+ * slab stays on the main list -- unless the bump cursor is still
+ * carving from it. Called from the recycle paths whenever a bump
+ * header's slab drops its live count to zero; O(1). The batched
+ * gc_bump_slab_release (once per collection) unlinks cold slabs from
+ * the main list, purges their freelist entries, and returns the
+ * regions to the OS (keeping up to GC_BUMP_WARM_POOL for reuse). A
+ * freelist pull of a cold slab's header revives it in place. Must run
+ * with the state lock held. */
+static void gc_bump_slab_maybe_free(mino_state *S, gc_bump_slab_t *slab)
+{
+    if (slab->live != 0) return;
+    if ((char *)S->gc_bump_cur >= (char *)slab
+            && (char *)S->gc_bump_cur < (char *)slab + MINO_BUMP_SLAB_BYTES) {
+        return; /* active carving slab */
+    }
+    slab->cold = 1;
+    S->gc.cold_pending++;
+}
+
+/* Release every cold slab: one pass over the four freelists drops
+ * entries whose header memory lies inside any cold slab (a dangling
+ * entry would hand out freed memory on the next pull), then the
+ * regions go back to the OS. Called at the end of every collection
+ * (next to the finalizer drain) and from state teardown. */
+/* Warm-pool depth: emptied slab regions retained for the next refills.
+ * Bounds the retention (this many 64 KiB regions) while absorbing the
+ * alloc/free churn of alternating collection cycles. */
+#define GC_BUMP_WARM_POOL 8u
+
+/* Release threshold: the main-list walk + freelist purge only pay off
+ * once this many slabs retired; below it the slabs stay cold-flagged
+ * on the list (bounded extra retention: threshold x 64 KiB). */
+#define GC_SLAB_RELEASE_MIN 24u
+
+void gc_bump_slab_release(mino_state *S)
+{
+    gc_bump_slab_t **mp;
+    gc_bump_slab_t *freeme = NULL, *kept = NULL;
+    size_t          kept_n = 0;
+    size_t          retired = 0;
+    if (S->gc.cold_pending < GC_SLAB_RELEASE_MIN) return;
+    S->gc.cold_pending = 0;
+    /* One pass over the main slab list: unlink every cold slab,
+     * splitting them into the keep-for-warm prefix and the free list.
+     * Cold entries' freelist references were purged below before any
+     * region is reused or freed. */
+    mp = &S->gc_bump_slabs;
+    while (*mp != NULL) {
+        gc_bump_slab_t *slab = *mp;
+        if (slab->cold) {
+            *mp = slab->next; /* unlink from main list */
+            if (kept_n < GC_BUMP_WARM_POOL) {
+                slab->next = kept;
+                kept       = slab;
+                kept_n++;
+            } else {
+                slab->next = freeme;
+                freeme     = slab;
+            }
+        } else {
+            mp = &slab->next;
+        }
+    }
+    /* Purge freelist entries pointing into ANY retired slab (kept or
+     * freed): a kept region is zeroed by its next refill and a freed
+     * region is gone; either way a surviving entry would alias. */
+    {
+        size_t     n = 0, cap, i;
+        uintptr_t *set, m;
+        gc_bump_slab_t *slab;
+        for (slab = freeme; slab != NULL; slab = slab->next) n++;
+        for (slab = kept; slab != NULL; slab = slab->next) n++;
+        if (n > 0) {
+            cap = 8;
+            while (cap < n * 2u) cap <<= 1u;
+            set = (uintptr_t *)malloc(cap * sizeof(*set));
+            if (set == NULL) {
+                /* OOM: re-queue everything onto the main list and
+                 * retry at the next release. */
+                for (slab = freeme; slab != NULL; ) {
+                    gc_bump_slab_t *nx = slab->next;
+                    slab->next = S->gc_bump_slabs;
+                    S->gc_bump_slabs = slab;
+                    slab = nx;
+                }
+                for (slab = kept; slab != NULL; ) {
+                    gc_bump_slab_t *nx = slab->next;
+                    slab->next = S->gc_bump_slabs;
+                    S->gc_bump_slabs = slab;
+                    slab = nx;
+                }
+                S->gc.cold_pending = GC_SLAB_RELEASE_MIN;
+                return;
+            }
+            m = cap - 1u;
+            memset(set, 0xFF, cap * sizeof(*set)); /* all-ones = empty */
+            for (slab = freeme; slab != NULL; slab = slab->next) {
+                uintptr_t b = (uintptr_t)slab;
+                size_t    k = (size_t)((b >> 16u) & m);
+                while (set[k] != (uintptr_t)-1) k = (k + 1u) & m;
+                set[k] = b;
+            }
+            for (slab = kept; slab != NULL; slab = slab->next) {
+                uintptr_t b = (uintptr_t)slab;
+                size_t    k = (size_t)((b >> 16u) & m);
+                while (set[k] != (uintptr_t)-1) k = (k + 1u) & m;
+                set[k] = b;
+            }
+            for (i = 0; i < 4u; i++) {
+                gc_hdr_t **pp = &S->gc.freelists[i];
+                while (*pp != NULL) {
+                    gc_hdr_t *h = *pp;
+                    uintptr_t b = (uintptr_t)h & MINO_BUMP_SLAB_MASK;
+                    size_t    k = (size_t)((b >> 16u) & m);
+                    int       retired = 0;
+                    while (set[k] != (uintptr_t)-1) {
+                        if (set[k] == b) { retired = 1; break; }
+                        k = (k + 1u) & m;
+                    }
+                    if (retired && h->bump) {
+                        *pp = h->next;
+                        S->gc.freelist_len[i]--;
+                    } else {
+                        pp = &h->next;
+                    }
+                }
+            }
+            free(set);
+        }
+    }
+    /* Keep the warm prefix reachable by refill; free the rest. */
+    {
+        gc_bump_slab_t **wp = &S->gc_bump_warm;
+        while (*wp != NULL) wp = &(*wp)->next;
+        *wp = kept;
+    }
+    while (freeme != NULL) {
+        gc_bump_slab_t *nx = freeme->next;
+        gc_bump_slab_region_free(freeme);
+        freeme = nx;
+    }
+}
+
+/* Slab-backed bump allocator. Allocates a fresh aligned 64 KiB slab
+ * region (zeroed; the bump fast path relies on slab memory being zero
+ * so headers are returned in calloc-equivalent state without a
+ * per-alloc memset). Links the slab onto S->gc_bump_slabs and parks
+ * the cursor pair at the start of the usable payload region. Returns
+ * 0 on allocation failure (caller falls back to plain calloc per
+ * allocation). */
 static int gc_bump_slab_refill(mino_state *S)
 {
     gc_bump_slab_t *slab;
-    slab = (gc_bump_slab_t *)calloc(1, MINO_BUMP_SLAB_BYTES);
-    if (slab == NULL) return 0;
+    /* Prefer a warm-pool region over a fresh allocation: alternating
+     * collection cycles otherwise churn alloc/free of 64 KiB regions. */
+    if (S->gc_bump_warm != NULL) {
+        slab             = S->gc_bump_warm;
+        S->gc_bump_warm  = slab->next;
+    } else {
+        slab = (gc_bump_slab_t *)gc_bump_slab_region_alloc();
+        if (slab == NULL) return 0;
+    }
+    /* The bump fast path relies on calloc-equivalent zeroed memory
+     * (headers' dirty bit, unpicked payload bytes). VirtualAlloc
+     * commits zeroed pages; recycled and posix_memalign regions do
+     * not, so zero unconditionally. One memset per 64 KiB slab is
+     * noise next to the carving. */
+    memset(slab, 0, MINO_BUMP_SLAB_BYTES);
     slab->next = S->gc_bump_slabs;
+    slab->live = 0;
+    slab->cold = 0;
     S->gc_bump_slabs = slab;
     S->gc_bump_cur = (char *)slab + sizeof(*slab);
     S->gc_bump_end = (char *)slab + MINO_BUMP_SLAB_BYTES;
@@ -411,15 +650,29 @@ static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
         unsigned char was_bump;
         h = S->gc.freelists[fc];
         S->gc.freelists[fc] = h->next;
+        S->gc.freelist_len[fc]--;
         was_bump = h->bump;
         memset(h, 0, sizeof(*h) + size);
         h->bump = was_bump;
+        if (was_bump) {
+            /* The pulled header's memory sits in a bump slab; it is
+             * live again from its slab's perspective. A retired (cold)
+             * slab revives in place: it never left the main list, and
+             * the batched release must not free a region a pull just
+             * reoccupied. */
+            gc_bump_slab_t *slab = gc_bump_slab_of(h);
+            slab->live++;
+            if (slab->cold) {
+                slab->cold = 0;
+                if (S->gc.cold_pending > 0) S->gc.cold_pending--;
+            }
+        }
         S->gc_alloc_freelist_hits++;
     } else if (S->gc_bump_enabled) {
-        /* Bump path: zero-fill comes for free from the slab's calloc.
-         * Total = header + payload, rounded up to 8 bytes for alignment.
-         * Oversized requests (won't fit in a slab) bypass bump and fall
-         * through to the calloc arm. */
+        /* Bump path: zero-fill comes for free from the slab's zeroed
+         * region. Total = header + payload, rounded up to 8 bytes for
+         * alignment. Oversized requests (won't fit in a slab) bypass
+         * bump and fall through to the calloc arm. */
         if (size > SIZE_MAX - sizeof(*h)) goto calloc_path;
         size_t total = sizeof(*h) + size;
         total = (total + 7u) & ~(size_t)7u;
@@ -433,6 +686,7 @@ static gc_hdr_t *gc_alloc_raw(mino_state *S, unsigned char tag,
             h = (gc_hdr_t *)S->gc_bump_cur;
             S->gc_bump_cur += total;
             h->bump = 1;
+            gc_bump_slab_of(h)->live++;
             S->gc_bump_alloc_hits++;
         } else {
             goto calloc_path;

@@ -89,6 +89,10 @@ typedef struct gc_state {
     size_t          mark_stack_high_water;
 
     gc_hdr_t       *freelists[4];   /* per-size-class recycling */
+    size_t          freelist_len[4]; /* current depth per class, capped
+                                      * at GC_FREELIST_CAP so the cache
+                                      * never pins unbounded memory and
+                                      * the release pass stays bounded */
 
     /* Cached [min, max) bounds of all managed allocations. */
     uintptr_t       heap_min;
@@ -111,6 +115,15 @@ typedef struct gc_state {
     gc_hdr_t      **finalize_q;
     size_t          finalize_q_len;
     size_t          finalize_q_cap;
+
+    /* Bump slabs whose live count reached zero are flagged cold in
+     * place (they stay on the main slab list until the batched
+     * gc_bump_slab_release unlinks them); cold_pending counts retired
+     * slabs so release can skip its list walk entirely until enough
+     * retirement accumulated to amortize it (GC_SLAB_RELEASE_MIN). A
+     * freelist pull of a cold slab's header revives it in place (see
+     * gc_alloc_raw). */
+    size_t cold_pending;
 
     /* GC event ring buffer (diagnostic only; opt-in via MINO_GC_EVT=1
      * at state init. Allocated lazily; NULL otherwise and every
