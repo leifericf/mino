@@ -1,0 +1,31 @@
+name: ci-probe
+
+# TEMPORARY diagnostic (2026-08-21): a bare ubuntu job that only
+# sleeps, to discriminate hosted-runner degradation from suite
+# content during the ubuntu kill wave. Delete after diagnosis.
+on:
+  workflow_dispatch:
+  push:
+    branches: [probe-ubuntu]
+
+jobs:
+  sleep-probe:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Six-minute sleep
+        run: |
+          for i in $(seq 1 12); do
+            echo "probe minute $i ($(date -u +%H:%M:%S))"
+            sleep 30
+          done
+      - name: Churn probe
+        # A modest heap churn to see whether allocation draws the
+        # kill the suite jobs see: 4 python processes each building
+        # a 1.5GB list, staggered, well under the runner ceiling.
+        run: |
+          for i in 1 2 3 4; do
+            python3 -c "xs=bytearray(1_500_000_000); xs[::4096]=b'x'*len(xs[::4096]); print('churn', $i, 'alive', __import__('time').strftime('%H:%M:%S'))"
+          done
