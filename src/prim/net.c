@@ -1048,7 +1048,6 @@ static int net_recv_fd(mino_state *S, mino_net_fd_t fd, long long read_ms,
         }
 #else
         ssize_t r;
-        rc = 0;
         r = recv(fd, buf, n, 0);
         mino_resume_lock(S, depth);
         if (r < 0) {
@@ -1215,6 +1214,10 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
             return prim_throw_classified(S, kind, code, msg);
         }
         if (rc == 0) break;
+        /* A zero-byte chunk needs no copy; also keeps memcpy's first
+         * argument provably non-null (buf is allocated above whenever
+         * got > 0). */
+        if (got == 0) continue;
         /* Strict-after-read (mirrors tls-read-all): only data past
          * the cap throws, so a stream exactly max-bytes long returns
          * rather than overflowing at EOF. */
@@ -1292,7 +1295,6 @@ static int net_send_all_fd(mino_state *S, mino_net_fd_t fd,
         }
 #else
         ssize_t r;
-        rc = 0;
         r = send(fd, data + sent, len - sent, NET_SEND_FLAGS);
         mino_resume_lock(S, depth);
         if (r < 0) {

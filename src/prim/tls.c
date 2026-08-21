@@ -872,6 +872,10 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
             return prim_throw_classified(S, kind, code, msg);
         }
         if (rc == 0) break;
+        /* A zero-byte chunk needs no copy; also keeps memcpy's first
+         * argument provably non-null (buf is allocated above whenever
+         * got > 0). */
+        if (got == 0) continue;
         if ((long long)(len + got) > max_bytes) {
             char m[160];
             free(buf);

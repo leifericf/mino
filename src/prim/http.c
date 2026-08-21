@@ -3152,7 +3152,6 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 if (!ok) goto close_and_done;
                 next_ref = mino_ref_new(S, new_cur);
                 if (next_ref == NULL) {
-                    cur = new_cur;
                     res = prim_throw_classified(S, "internal", "MIN001",
                                                 "http-request: out of "
                                                 "memory");
@@ -3259,7 +3258,6 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                     if (out == NULL) goto close_and_done;
                     out_ref = mino_ref_new(S, out);
                     if (out_ref == NULL) {
-                        body_val = out;
                         res = prim_throw_classified(S, "internal",
                                                     "MIN001",
                                                     "http-request: out "
