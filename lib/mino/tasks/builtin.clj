@@ -948,20 +948,13 @@
   3)
 
 (def ^:private asan-excluded-tests
-  "Suite files the ASan lanes skip (MINO_TEST_EXCLUDE). These are
-   exactly the fixtures that park socket futures (accept loops, held
-   connections): under ASan's allocation/gc timing they expose the
-   known parked-future teardown unsoundness (the tracker's
-   forced-GC/futures issue: a worker blocked in a C send while a peer
-   collects can have its socket handle swept mid-send) as a flaky
-   heap-use-after-free, and the abandoned accepted-socket handle as a
-   leak report at exit. The same rationale as the TSan subset: the
-   unsoundness is documented with a prescribed runtime fix; until it
-   lands these files stay covered on every non-ASan lane (full suite
-   under UBSan, plain runs on all platforms) and their TLS end-to-end
-   battery lives in the mino-tests satellite."
-  ["net_test" "tls_test" "pool_test"
-   "http_request_test" "http_ns_test"])
+  "Suite files the ASan lanes skip (MINO_TEST_EXCLUDE). Empty since the
+   parked-thread root scan and deferred finalization landed: the
+   forced-GC/futures unsoundness the list papered over is fixed and
+   every file runs under ASan plus LeakSanitizer. Kept as a documented
+   empty seam so a future isolation need has the plumbing; do not add
+   entries to mask runtime bugs."
+  [])
 
 (defn- run-suite-with-test-bin
   "Run the full suite under `bin`, exporting MINO_TEST_BIN so
@@ -2094,19 +2087,21 @@
    Exits 0 on a clean tree. Negative controls live in the cycle's
    .local/ status file -- this task is the positive control."
   []
-  (check-reloc-mirror)
-  (check-stencil-registry)
-  (test-suite)
-  (build-asan)
-  ;; ASan suite in both JIT modes: the JIT's C side (emit / patcher /
-  ;; helpers / invoke) is enabled in the sanitizer build via
-  ;; jit-enable-flags, so eager mode pushes every test through the
-  ;; native tier under ASan. Emitted machine code itself stays
-  ;; uninstrumented (see sanitize-zig's boundary note).
-  (run-suite-with-test-bin "./mino_asan" []
-                            {:exclude asan-excluded-tests})
-  (run-suite-with-test-bin "./mino_asan" ["--jit=on"]
-                            {:exclude asan-excluded-tests})
+   (check-reloc-mirror)
+   (check-stencil-registry)
+   (test-suite)
+   (build-asan)
+   ;; ASan suite in both JIT modes: the JIT's C side (emit / patcher /
+   ;; helpers / invoke) is enabled in the sanitizer build via
+   ;; jit-enable-flags, so eager mode pushes every test through the
+   ;; native tier under ASan. Emitted machine code itself stays
+   ;; uninstrumented (see sanitize-zig's boundary note). The full suite
+   ;; runs with no exclusions: the parked-thread scan + deferred
+   ;; finalization fixes closed the socket-fixture unsoundness the
+   ;; exclusion list used to hide (leak-sanitizer also verifies the
+   ;; exit-time teardown path).
+   (run-suite-with-test-bin "./mino_asan" [])
+   (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
   (test-jit-parity)
   (examples)
   (examples-amalgam)
