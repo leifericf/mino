@@ -1079,18 +1079,24 @@ static void glob_walk_dir(glob_walk_t *w, const char *dir,
         const char *seg = segs[i];
         size_t seg_len = seg_lens[i];
         size_t dir_len = strlen(dir);
+        size_t dir_sep;
         char *child, *rel2;
         size_t child_len, rel2_len;
 
         if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
         if (name[0] == '\0') continue;
 
-        child_len = dir_len + 1 + name_len + 1;
+        /* dir may itself end in '/' (the absolute walk root is "/"):
+         * appending another separator yields "//name", benign on
+         * POSIX but UNC network-path syntax to FindFirstFileA on
+         * Windows, killing the whole walk. */
+        dir_sep = (dir_len > 0 && dir[dir_len - 1] == '/') ? 0 : 1;
+        child_len = dir_len + dir_sep + name_len + 1;
         child = (char *)malloc(child_len);
         if (child == NULL) continue;
         memcpy(child, dir, dir_len);
-        child[dir_len] = '/';
-        memcpy(child + dir_len + 1, name, name_len);
+        if (dir_sep) child[dir_len] = '/';
+        memcpy(child + dir_len + dir_sep, name, name_len);
         child[child_len - 1] = '\0';
 
         rel2_len = rel_len + (rel_len ? 1 : 0) + name_len + 1;
