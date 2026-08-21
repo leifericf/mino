@@ -937,11 +937,26 @@
 
               :else [])))))
 
+(def ^:private suite-shard-count
+  "Process partitions the suite runs in on POSIX CI lanes. The
+   suite's RSS on glibc Linux grows with every file loaded in the
+   process (churn-driven old-gen growth; tracked as the suite-RSS
+   issue), and a single-process full run can exhaust a 16GB hosted
+   runner. tests/run.clj owns the cut points; this count must match
+   its shard-cuts vector. Windows and macOS stay single-process:
+   their allocators keep the whole suite well under the ceiling."
+  3)
+
 (defn- run-suite-with-test-bin
   "Run the full suite under `bin`, exporting MINO_TEST_BIN so
    subprocess-spawning tests target the binary under test rather than
    ./mino. POSIX-only env prefix; on Windows the suite runs without
    the export and those tests self-skip.
+
+   On POSIX the suite runs as `suite-shard-count` sequential
+   processes (MINO_TEST_SHARD=k/n) so each partition's memory peak
+   stays low on hosted runners; the partitions reconstruct the full
+   suite exactly.
 
    Uses `sh` (not `sh!`) and prints the binary's full combined output
    before checking the exit code, so a failing test's FAIL / ERROR
@@ -949,21 +964,26 @@
    captured output to 512 chars in its throw message, which hid which
    test actually failed."
   [bin extra-args]
-  (let [res (if windows?
-              (apply sh bin (concat extra-args ["tests/run.clj"]))
-              (sh "sh" "-c"
-                  (str "MINO_TEST_BIN=" bin " " bin " "
-                       (str/join " " extra-args)
-                       (if (seq extra-args) " " "")
-                       "tests/run.clj 2>&1")))]
-    (print (:out res))
-    (flush)
-    (when (not= 0 (:exit res))
-      (throw (ex-info (str "run-suite-with-test-bin: " bin
-                           (when (seq extra-args)
-                             (str " " (str/join " " extra-args)))
-                           " exited " (:exit res))
-                      {:bin bin :exit (:exit res)})))))
+  (let [arg-str (str/join " " extra-args)
+        runs (if windows?
+               [(apply sh bin (concat extra-args ["tests/run.clj"]))]
+               (for [k (range 1 (inc suite-shard-count))]
+                 (sh "sh" "-c"
+                     (str "MINO_TEST_BIN=" bin
+                          " MINO_TEST_SHARD=" k "/" suite-shard-count
+                          " " bin " "
+                          arg-str
+                          (if (seq arg-str) " " "")
+                          "tests/run.clj 2>&1"))))]
+    (doseq [res runs]
+      (print (:out res))
+      (flush)
+      (when (not= 0 (:exit res))
+        (throw (ex-info (str "run-suite-with-test-bin: " bin
+                             (when (seq arg-str)
+                               (str " " arg-str))
+                             " exited " (:exit res))
+                        {:bin bin :exit (:exit res)}))))))
 
 (def ^:private tsan-concurrency-tests
   "Test files that exercise real OS threads, atomics, or memory
@@ -1418,10 +1438,15 @@
    (build-zig) and run the full test suite against it. Proves the
    version-locked toolchain produces a correct mino independent of the
    runner's system compiler -- the additive reproducibility backstop
-   behind the gcc/Apple-clang/mingw CI canaries."
+   behind the gcc/Apple-clang/mingw CI canaries. Sharded on this
+   POSIX-only lane so each partition's memory peak stays low on
+   hosted runners (see run-suite-with-test-bin)."
   []
   (build-zig)
-  (println (sh! "./mino_zig" "tests/run.clj")))
+  (doseq [k (range 1 (inc suite-shard-count))]
+    (println (sh! "sh" "-c"
+                  (str "MINO_TEST_SHARD=" k "/" suite-shard-count
+                       " ./mino_zig tests/run.clj")))))
 
 (defn build-debug-zig
   "Developer debug binary: compile mino with the pinned `zig cc` at
@@ -2341,7 +2366,10 @@
 (defn test-suite
   "Run the test suite."
   []
-  (println (sh! mino-bin "tests/run.clj")))
+  (doseq [k (range 1 (inc suite-shard-count))]
+    (println (sh! "sh" "-c"
+                  (str "MINO_TEST_SHARD=" k "/" suite-shard-count
+                       " " mino-bin " tests/run.clj")))))
 
 (defn test-generative
   "Run the generative property tests (tests/json_property_test.clj)
@@ -2370,15 +2398,39 @@
 
 (defn test-summary
   "Run the test suite and emit a stable EDN summary artifact at
-  output/test-results.edn. The shape is:
-    {:tests N :passes N :failures N :errors N
-     :assertions N :pass-rate 0.0..1.0}
-  Exits non-zero if the suite fails."
+   output/test-results.edn. The shape is:
+     {:tests N :passes N :failures N :errors N
+      :assertions N :pass-rate 0.0..1.0}
+   Exits non-zero if the suite fails. POSIX-only lane (env-prefixed
+   invocations), so it runs sharded like the other suite lanes and
+   merges the per-shard summaries into the artifact."
   []
   (sh! "mkdir" "-p" "output")
-  (println (sh! "sh" "-c"
-                (str "MINO_TEST_SUMMARY=output/test-results.edn "
-                     mino-bin " tests/run.clj")))
+  (doseq [k (range 1 (inc suite-shard-count))]
+    (println (sh! "sh" "-c"
+                  (str "MINO_TEST_SUMMARY=output/test-results." k ".edn"
+                       " MINO_TEST_SHARD=" k "/" suite-shard-count
+                       " " mino-bin " tests/run.clj"))))
+  (let [ks (range 1 (inc suite-shard-count))
+        shard-path #(str "output/test-results." % ".edn")
+        sums (map (fn [p] (read-string (slurp p)))
+                  (filter file-exists? (map shard-path ks)))
+        {t :tests p :passes f :failures e :errors a :assertions}
+        (reduce (fn [acc s]
+                  (merge-with + acc (select-keys s
+                                                 [:tests :passes
+                                                  :failures :errors
+                                                  :assertions])))
+                {:tests 0 :passes 0 :failures 0 :errors 0
+                 :assertions 0}
+                sums)
+        total (+ p f e)]
+    (spit "output/test-results.edn"
+          (pr-str {:tests t :passes p :failures f :errors e
+                   :assertions a
+                   :pass-rate (if (zero? total)
+                                1.0
+                                (/ (double p) (double total)))})))
   (println "---")
   (when (file-exists? "output/test-results.edn")
     (println (slurp "output/test-results.edn"))))

@@ -108,34 +108,49 @@ jobs:
           : > /tmp/test_trace.log
           (tail -F /tmp/test_trace.log 2>/dev/null) &
           TAIL_PID=$!
-          # exec replaces the subshell with mino so $! is mino's
-          # pid directly -- the watchdog's kill -ABRT then lands
-          # on mino, not on an outer shell wrapper.
-          (exec ./mino tests/run.clj) 2> /tmp/test_trace.log &
-          MINO_PID=$!
-          # Wake at 7m30s (the cap is 8m) so SIGABRT has time to
-          # run mino's handler before GHA's own SIGKILL lands.
-          # mino's crash_handler (main.c:711) prints a backtrace +
-          # GC stats on SIGABRT, so a hang now leaves a readable
-          # stack in the log + trace artifact instead of a silent
-          # kill. mino exits 134 (128 + SIGABRT) after the dump.
-          (sleep 450; if kill -0 $MINO_PID 2>/dev/null; then
-             echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
-             kill -ABRT $MINO_PID
-           fi) &
-          WD_PID=$!
-          wait $MINO_PID
-          RC=$?
+          # Linux runners execute the suite as 3 sequential shard
+          # processes (MINO_TEST_SHARD=k/3): the suite's RSS on
+          # glibc grows with every file loaded in-process and a
+          # single full run can exhaust the 16GB hosted VM (which
+          # takes the runner agent down with it). Each partition
+          # peaks around 4-5GB; macOS and Windows stay single-run.
+          # The watchdog wraps the whole sequence; per-shard hangs
+          # still pinpoint via the trace tail below.
+          run_one () {
+            (exec ./mino tests/run.clj) 2>> /tmp/test_trace.log &
+            MINO_PID=$!
+            (sleep 240; if kill -0 $MINO_PID 2>/dev/null; then
+               echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
+               kill -ABRT $MINO_PID
+             fi) &
+            WD_PID=$!
+            wait $MINO_PID
+            RC=$?
+            kill $WD_PID 2>/dev/null || true
+            return $RC
+          }
+          OVERALL=0
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            for K in 1 2 3; do
+              export MINO_TEST_SHARD=$K/3
+              echo "=== suite shard $K/3 ==="
+              run_one || { OVERALL=1; break; }
+            done
+            unset MINO_TEST_SHARD
+          else
+            run_one || OVERALL=1
+          fi
+          RC=$OVERALL
           # Give the trace tail a moment to flush mino's last lines.
           sleep 1
-          kill $WD_PID 2>/dev/null || true
           kill $TAIL_PID 2>/dev/null || true
           exit $RC
         # Tests usually finish in seconds; a hang means a deadlock, not
         # a slow runner. Cap so we get diagnostic output instead of
-        # waiting on the 6h job-default timeout. The watchdog above
-        # fires 30s before this cap so we keep the stack trace.
-        timeout-minutes: 8
+        # waiting on the 6h job-default timeout. The per-shard
+        # watchdog above fires well before this cap so we keep the
+        # stack trace.
+        timeout-minutes: 14
         # The Windows test suite has documented divergence: cmd.exe's
         # echo emits a trailing space before \n, which the proc-test
         # assertions do not strip. Build still must pass; tests are
