@@ -804,6 +804,7 @@ static void try_frame_fill(mino_state *S, mino_thread_ctx_t *ctx, int depth)
     ctx->try_stack[depth].saved_lazy_len    = ctx->lazy_inflight_len;
     ctx->try_stack[depth].saved_bc_cursor   = ctx->bc_current_bc;
     ctx->try_stack[depth].saved_bc_cursor_pc = ctx->bc_current_pc;
+    ctx->try_stack[depth].saved_gc_depth    = ctx->gc_depth;
 }
 
 static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
@@ -841,6 +842,7 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
             mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
             mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth = saved_try;
+            mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
             if (mino_last_error(S) == NULL) {
                 /* Normalize first so an ex-info map ({:message :data})
                  * gets reshaped to the diagnostic form ({:mino/kind
@@ -904,6 +906,12 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
 
     v = eval(S, form, env);
     mino_current_ctx(S)->try_depth = saved_try;
+    /* Tripwire: a top-level form must not exit with gc_depth above its
+     * entry value. The landing pads rewind longjmp-unwound regions;
+     * this assert catches balanced-pair code that leaks on a normal
+     * return path, which would silently disable collection. */
+    assert(mino_current_ctx(S)->gc_depth
+           == mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth);
     if (v == NULL) {
         append_trace(S);
         mino_current_ctx(S)->call_depth = 0;
@@ -980,6 +988,7 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
             mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
             mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth   = saved_try;
+            mino_current_ctx(S)->gc_depth    = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
             S->reader.reader_file = saved_file;
             S->reader.reader_line = saved_line;
             S->reader.reader_col  = saved_col;
@@ -1298,6 +1307,7 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
         mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
         mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
+        mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
         }
@@ -1423,6 +1433,7 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor;
         mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
+        mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
         }

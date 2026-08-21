@@ -56,6 +56,16 @@ typedef struct {
      * landing pad rewinds the counter to its frame-entry value so the
      * leak cannot accumulate. */
     int         saved_jit_invoke_depth;
+    /* gc_depth at frame entry. C code raises gc_depth around regions
+     * that hold unrooted vals (rb_assoc running a user comparator,
+     * seq->array accumulation, incremental GC phases); a throw out of
+     * such a region longjmps past the matching decrement. Left
+     * unrewound, one caught throw disables every future collection on
+     * this thread -- mino_gc_collect and the auto-tick both treat
+     * gc_depth > 0 as "nested, suppressed". Each landing pad rewinds
+     * the counter to its frame-entry value so an abandoned region can
+     * never leave it elevated. */
+    int         saved_gc_depth;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live

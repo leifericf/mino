@@ -162,3 +162,30 @@
         "OOM exception carries :mino/kind :internal")
     (is (= "MIN001" (:mino/code result))
         "OOM exception carries :mino/code MIN001")))
+
+;; Regression (ki-21): mino_sorted_set_by / mino_sorted_map_by raise
+;; gc_depth around rb_assoc, which invokes the user comparator; a
+;; comparator that throws longjmps past the matching decrement. Before
+;; the try-frame fix nothing restored ctx->gc_depth on the catch
+;; landing, so one caught cross-type compare left gc_depth elevated
+;; forever: every later collection (including explicit gc!) became a
+;; no-op and young bytes grew monotonically for the rest of the run.
+;; The catch landing pads now rewind gc_depth to the frame-entry value.
+(deftest gc-depth-restored-after-thrown-comparator
+  (gc!)
+  (let [baseline (long (:bytes-young (gc-stats)))]
+    ;; Trigger both leak shapes: comparator throw inside sorted-set-by
+    ;; and inside sorted-map-by construction.
+    (is (thrown? (sorted-set-by compare 1 "a" :k)))
+    (is (thrown? (sorted-map-by compare 1 "a" :k)))
+    ;; Dead young garbage. With gc_depth stuck at 1 the final gc! is a
+    ;; no-op and bytes-young stays far above baseline; with the fix the
+    ;; minor reclaims it.
+    (dotimes [_ 64] (vec (range 20000)))
+    (gc!)
+    (let [after (long (:bytes-young (gc-stats)))]
+      (is (< after (+ baseline (* 2 1024 1024)))
+          (str "gc! failed to reclaim young bytes after a caught "
+               "comparator throw: baseline " baseline ", after " after
+               " -- gc_depth left elevated?")))))
+
