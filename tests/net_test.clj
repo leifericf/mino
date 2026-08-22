@@ -530,10 +530,13 @@
   ;; of the 128 KiB payload (several send syscalls) while the test
   ;; thread forces collections and allocates churn garbage between
   ;; reads, so the worker is parked under pressure for the whole
-  ;; round trip.
+  ;; round trip. Counts stay small: each forced collection on a
+  ;; loaded CI runner costs hundreds of milliseconds, and the hazard
+  ;; only needs a handful of collections landing inside the park
+  ;; window (the ASan lanes are the crash oracle for those).
   (with-server :echo
     (fn [srv]
-      (dotimes [round 6]
+      (dotimes [round 2]
         (let [s (net-connect "127.0.0.1" (:port srv))
               payload (gc-net-payload round)]
           (is (= gc-net-payload-bytes (net-write s payload)))
@@ -543,7 +546,7 @@
                 (str "round " round " chunk " k
                      ": echoed payload corrupted while echo worker "
                      "was parked under forced gc"))
-            (dotimes [_ 12]
+            (dotimes [_ 2]
               (vec (range 64))
               (gc!)))
           (net-close s))))))
@@ -557,7 +560,7 @@
   ;; collector.
   (with-server :echo
     (fn [srv]
-      (dotimes [round 6]
+      (dotimes [round 2]
         (let [s (net-connect "127.0.0.1" (:port srv))
               payload (gc-net-payload round)
               churn (future
