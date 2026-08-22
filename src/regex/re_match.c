@@ -138,8 +138,55 @@ static int next_top_alt(re_t pattern, int start)
 
 /* Single-branch match. Same shape as the prior re_matchp (no
  * top-level alternation awareness). re_matchp dispatches to this
- * once per alternative. */
+ * when the pattern has no top-level alternation. */
 static int re_matchp_one(re_t pattern, const char* text, int* matchlength);
+
+/* Try one top-level branch anchored at `text` (the current scan
+ * position). Absorbs the branch's leading SET_FLAGS slots, honors a
+ * leading BEGIN anchor against the scan base, and runs matchpattern
+ * without any position advance of its own. Returns 1 with the match
+ * length in *matchlength on success. `entry_flags` is restored into
+ * re_flags before the attempt so branch-local flags cannot leak. */
+static int try_branch_anchored(regex_t *branch, const char* text,
+                               const char* scan_base,
+                               unsigned char entry_flags,
+                               int* matchlength)
+{
+  unsigned char saved_flags = re_flags;
+  int p0 = 0;
+  int r;
+  *matchlength = 0;
+  re_flags = entry_flags;
+  while (branch[p0].type == SET_FLAGS)
+  {
+    if (branch[p0].u.flg.set) re_flags |=  branch[p0].u.flg.mask;
+    else                      re_flags &= ~branch[p0].u.flg.mask;
+    p0++;
+  }
+  if (branch[p0].type == BEGIN)
+  {
+    if (re_flags & RE_FLAG_MULTILINE)
+    {
+      if (text != scan_base && !(text > scan_base && text[-1] == '\n'))
+      {
+        re_flags = saved_flags;
+        return 0;
+      }
+    }
+    else if (text != scan_base)
+    {
+      re_flags = saved_flags;
+      return 0;
+    }
+    r = matchpattern(&branch[p0 + 1], text, matchlength);
+  }
+  else
+  {
+    r = matchpattern(&branch[p0], text, matchlength);
+  }
+  re_flags = saved_flags;
+  return r;
+}
 
 int re_matchp(re_t pattern, const char* text, int* matchlength)
 {
@@ -152,42 +199,56 @@ int re_matchp(re_t pattern, const char* text, int* matchlength)
     {
       return re_matchp_one(pattern, text, matchlength);
     }
-    /* Top-level alternation: try each branch in left-to-right order
-     * at the earliest matching position. JVM's regex picks the first
-     * alternative that matches at the leftmost position, so we
-     * iterate position outermost, branches innermost. */
+    /* Top-level alternation: one forward scan over the text, trying
+     * every branch anchored at each position. The selection is
+     * identical to the historical per-branch strategy (leftmost
+     * position wins; among branches matching at that position the
+     * longest match wins), but the cost is one pass: running each
+     * branch as its own unanchored search made every token pay the
+     * distance to the next match of EVERY branch that matches later
+     * or never, which is quadratic in text length. */
     {
-      int             alt_start = 0;
-      int             best_idx  = -1;
-      int             best_len  = 0;
-      regex_t        *mp        = (regex_t *)pattern;
+      regex_t        *mp   = (regex_t *)pattern;
+      const char     *base = text;
+      unsigned char   entry_flags;
+      /* Group spans are recorded relative to re_g_state.base; make
+       * sure the base is this scan, matching re_matchp_one. */
+      if (re_g_state.base != text)
+      {
+        re_g_state_reset(text, 0);
+      }
+      re_flags = 0;
+      entry_flags = 0;
       while (1)
       {
-        int    end       = next_top_alt(pattern, alt_start);
-        int    saved     = mp[end].type;
-        int    branch_ml = 0;
-        int    branch_idx;
-        /* Temporarily terminate the branch with UNUSED so the inner
-         * matchpattern stops there. Restored after the call. */
-        mp[end].type = UNUSED;
-        branch_idx = re_matchp_one(&mp[alt_start], text, &branch_ml);
-        mp[end].type = (unsigned char)saved;
-        if (branch_idx >= 0)
+        int alt_start = 0;
+        int best_len  = -1;
+        while (1)
         {
-          if (best_idx < 0
-              || branch_idx < best_idx
-              || (branch_idx == best_idx && branch_ml > best_len))
+          int end       = next_top_alt(pattern, alt_start);
+          int saved     = mp[end].type;
+          int branch_ml = 0;
+          /* Temporarily terminate the branch with UNUSED so the inner
+           * matchpattern stops there. Restored after the call. */
+          mp[end].type = UNUSED;
+          if (try_branch_anchored(&mp[alt_start], text, base,
+                                  entry_flags, &branch_ml))
           {
-            best_idx = branch_idx;
-            best_len = branch_ml;
+            if (branch_ml > best_len) best_len = branch_ml;
           }
+          mp[end].type = (unsigned char)saved;
+          if (mp[end].type != ALT) break;
+          alt_start = end + 1;
         }
-        if (mp[end].type != ALT) break;
-        alt_start = end + 1;
+        if (best_len >= 0)
+        {
+          *matchlength = best_len;
+          return (int)(text - base);
+        }
+        if (*text == '\0') break;
+        text++;
       }
-      if (best_idx < 0) return -1;
-      *matchlength = best_len;
-      return best_idx;
+      return -1;
     }
   }
 }

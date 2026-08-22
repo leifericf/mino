@@ -194,14 +194,16 @@ static mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
     return text_val;
 }
 
-/* (re-find-from pattern text cp-start) -- like re-find, but starts
- * the scan at codepoint index cp-start and reports where the match
- * landed: nil or [match cp-start cp-end] with codepoint indices into
+/* (re-find-from pattern text byte-start) -- like re-find, but starts
+ * the scan at byte index byte-start and reports where the match
+ * landed: nil or [match byte-start byte-end] with byte indices into
  * the full text. Backs re-seq and the stateful matcher so they
  * advance by the real match position instead of re-locating the
  * matched text by substring search (which picks the wrong site when
  * the same text occurs earlier, and cannot represent a zero-width
- * match). */
+ * match). Indices are byte offsets: a sequential scan thread passes
+ * the previous end back in, so each call costs only the bytes it
+ * advances rather than a codepoint walk from the text start. */
 static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *pat_val, *text_val, *pos_val;
@@ -211,9 +213,7 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
     int         match_idx;
     const char *pat_data;
     size_t      pat_len;
-    long long   cp_start;
-    size_t      byte_start;
-    long long   total_cps;
+    long long   byte_start;
     (void)env;
     (void)pat_len;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
@@ -238,12 +238,9 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "re-find-from: start must be an integer");
     }
-    cp_start = mino_val_int_get(pos_val);
-    if (cp_start < 0) return mino_nil(S);
-    total_cps = utf8_codepoint_count(text_val->as.s.data, text_val->as.s.len);
-    if (cp_start > total_cps) return mino_nil(S);
-    byte_start = utf8_skip_codepoints(text_val->as.s.data,
-                                      text_val->as.s.len, 0, cp_start);
+    byte_start = mino_val_int_get(pos_val);
+    if (byte_start < 0) return mino_nil(S);
+    if ((size_t)byte_start > text_val->as.s.len) return mino_nil(S);
     MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
@@ -258,10 +255,8 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
     }
     {
         const char *base = text_val->as.s.data + byte_start;
-        long long   cp_m_start = cp_start
-            + utf8_codepoint_count(base, (size_t)match_idx);
-        long long   cp_m_end = cp_m_start
-            + utf8_codepoint_count(base + match_idx, (size_t)match_len);
+        size_t      abs_start = (size_t)byte_start + (size_t)match_idx;
+        size_t      abs_end   = abs_start + (size_t)match_len;
         mino_val *match;
         mino_val *result;
         /* Guard: suppress GC across all allocating calls in the
@@ -297,8 +292,8 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
         {
             mino_val *items[3];
             items[0] = match;
-            items[1] = mino_int(S, cp_m_start);
-            items[2] = mino_int(S, cp_m_end);
+            items[1] = mino_int(S, (long long)abs_start);
+            items[2] = mino_int(S, (long long)abs_end);
             result = mino_vector(S, items, 3);
         }
         mino_current_ctx(S)->gc_depth--;
@@ -314,7 +309,7 @@ const mino_prim_def k_prims_regex[] = {
     {"re-matches", prim_re_matches,
      "Returns the match if the entire string matches the regex, or nil."},
     {"re-find-from", prim_re_find_from,
-     "Internal: finds the first match at or after a codepoint index; returns [match start end] or nil."},
+     "Internal: finds the first match at or after a byte index; returns [match start end] or nil."},
 };
 
 const size_t k_prims_regex_count =

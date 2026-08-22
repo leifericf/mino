@@ -1878,8 +1878,8 @@
   (letfn [(step [pos]
             (lazy-seq
               (when-let [[m start end] (re-find-from pattern s pos)]
-                ;; A zero-width match advances the scan one codepoint
-                ;; so the walk terminates.
+                ;; A zero-width match advances the scan one byte so
+                ;; the walk terminates.
                 (cons m (step (if (= start end) (inc end) end))))))]
     (step 0)))
 
@@ -1904,7 +1904,7 @@
         text    (:text state)
         pos     (:pos state)]
     (when-let [[result start end] (re-find-from pattern text pos)]
-      ;; A zero-width match advances :pos one codepoint so repeated
+      ;; A zero-width match advances :pos one byte so repeated
       ;; finds terminate.
       (swap! m assoc :pos (if (= start end) (inc end) end) :last result)
       result)))
