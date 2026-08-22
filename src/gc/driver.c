@@ -493,7 +493,6 @@ void gc_bump_slab_release(mino_state *S)
     gc_bump_slab_t **mp;
     gc_bump_slab_t *freeme = NULL, *kept = NULL;
     size_t          kept_n = 0;
-    size_t          retired = 0;
     if (S->gc.cold_pending < GC_SLAB_RELEASE_MIN) return;
     S->gc.cold_pending = 0;
     /* One pass over the main slab list: unlink every cold slab,
