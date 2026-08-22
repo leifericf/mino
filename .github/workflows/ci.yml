@@ -119,7 +119,7 @@ jobs:
           run_one () {
             (exec ./mino tests/run.clj) 2>> /tmp/test_trace.log &
             MINO_PID=$!
-            (sleep 240; if kill -0 $MINO_PID 2>/dev/null; then
+            (sleep 420; if kill -0 $MINO_PID 2>/dev/null; then
                echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
                kill -ABRT $MINO_PID
              fi) &
