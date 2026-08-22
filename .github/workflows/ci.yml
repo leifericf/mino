@@ -558,9 +558,11 @@ jobs:
         # Step-level cap: a job-level timeout CANCELS the job (no logs
         # uploaded, run aborted), while a step-level timeout FAILS the
         # step and preserves the log -- which is the only way to see
-        # where a hung suite actually sat. Baseline is ~8 min on the
-        # slowest host (windows); 15 min is 2x that.
-        timeout-minutes: 15
+        # where a hung suite actually sat. Baseline was ~8 min on the
+        # slowest host (windows) before the perf-shape test files
+        # landed; they push the windows leg past 15, so the cap is
+        # now 3x the original baseline.
+        timeout-minutes: 24
         run: ./mino task test-jit-host
 
   # Portability canary: compile the amalgamated single-file source with
