@@ -91,3 +91,21 @@ src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_
 src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_types' [unix.Malloc]
 src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_vals' [unix.Malloc]
 src/runtime/var.c: warning: Null pointer passed to 1st parameter expecting 'nonnull' [core.NonNullParamChecker]
+
+# Triage (2026-08-22, known-issues campaign):
+#   core.StackAddressEscape (state.c, x2) -- parked_sp = &sp_anchor in
+#     mino_yield_lock. The address is a conservative-scan BOUND, never
+#     dereferenced by the collector; it is stored while the owner thread
+#     is parked inside the very frame that owns sp_anchor (the frame is
+#     alive for the whole park) and mino_resume_lock clears it before
+#     the owner proceeds past the yield point. Safe by construction;
+#     the analyzer cannot see the resume-side clear (cross-function
+#     invariant).
+#   unix.StdCLibraryFunctions (proc.c) -- execvp(argv[0], argv): the
+#     analyzer models a path with argv[0] == NULL, but build_argv
+#     returns NULL for an empty list and always writes a NUL-terminated
+#     heap string into argv[0] otherwise (cross-TU invariant the
+#     analyzer cannot see).
+src/prim/proc.c: warning: The 1st argument to 'execvp' is NULL but should not be NULL [unix.StdCLibraryFunctions]
+src/runtime/state.c: warning: Address of stack memory associated with local variable 'sp_anchor' is still referred to by the caller variable 'S' upon returning to the caller.  This will be a dangling reference [core.StackAddressEscape]
+src/runtime/state.c: warning: Address of stack memory associated with local variable 'sp_anchor' is still referred to by the global variable 'mino_tls_ctx' upon returning to the caller.  This will be a dangling reference [core.StackAddressEscape]
