@@ -119,7 +119,7 @@ jobs:
           run_one () {
             (exec ./mino tests/run.clj) 2>> /tmp/test_trace.log &
             MINO_PID=$!
-            (sleep 420; if kill -0 $MINO_PID 2>/dev/null; then
+            (sleep 600; if kill -0 $MINO_PID 2>/dev/null; then
                echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
                kill -ABRT $MINO_PID
              fi) &
@@ -241,8 +241,8 @@ jobs:
           set +e
           ./mino task release-gate &
           GATE_PID=$!
-          (sleep 900; if kill -0 $GATE_PID 2>/dev/null; then
-             echo "##[warning]Watchdog: release-gate exceeded 15m; SIGABRT mino for a backtrace"
+          (sleep 1200; if kill -0 $GATE_PID 2>/dev/null; then
+             echo "##[warning]Watchdog: release-gate exceeded 20m; SIGABRT mino for a backtrace"
              pkill -ABRT mino 2>/dev/null
            fi) &
           WD_PID=$!

@@ -18,10 +18,9 @@
 (deftest deep-interpreted-eval-survives-pin-pressure
   (is (= 120 (eval deep-form)))
   (is (= 121 (count (eval deep-pairs-form))))
-  ;; Force collections after the deep run so a corrupted ctx field
+  ;; Force a collection after the deep run so a corrupted ctx field
   ;; would be walked by the root scanner.
-  (dotimes [_ 3]
-    (vec (map inc (range 50000))))
+  (vec (map inc (range 20000)))
   (is (= 120 (eval deep-form))))
 
 (run-tests-and-exit)

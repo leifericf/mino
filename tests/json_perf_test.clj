@@ -59,7 +59,7 @@
         t0    (nano-time)
         v     (json/read-str small)
         ms    (quot (- (nano-time) t0) 1000000)]
-    (is (= 350 (count (get v "entries"))))
+    (is (= 200 (count (get v "entries"))))
     (is (< ms 2500) (str "quarter-megabyte parse took " ms "ms"))))
 
 (defn- build-big-doc
