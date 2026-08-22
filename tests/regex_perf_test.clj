@@ -15,21 +15,31 @@
 (def ^:private mixed-text
   (apply str (repeat 8000 "abc é 123 中 de 7 fghi ")))
 
-(defn- scan-ms [text expected-tokens]
-  (let [t0   (nano-time)
-        toks (doall (re-seq scan-re text))]
-    (is (= expected-tokens (count toks)))
-    (quot (- (nano-time) t0) 1000000)))
+(defn- scan-ms-best
+  "Best of n timed scans over text. Collection pauses land in some
+  runs only; the fastest run approximates the scan's own cost."
+  [text expected-tokens n]
+  (loop [i 0 best Long/MAX_VALUE]
+    (if (>= i n)
+      best
+      (let [t0   (nano-time)
+            toks (doall (re-seq scan-re text))]
+        (when (= i 0)
+          (is (= expected-tokens (count toks))))
+        (recur (inc i)
+               (min best (quot (- (nano-time) t0) 1000000)))))))
 
 (defn- scan-ratio
-  "Time re-seq over one text and its double; return the time ratio.
-  A linear scan doubles, a quadratic one quadruples, so the ratio is
-  machine- and sanitizer-independent evidence of the scan shape."
+  "Time re-seq over one text and its double; return the time ratio of
+  the best runs. A linear scan doubles, a quadratic one quadruples,
+  so the ratio is machine- and sanitizer-independent evidence of the
+  scan shape, and best-of-three keeps collection pauses (which scale
+  with the suite's live heap, not with the scan) out of the number."
   [make-text tokens-per-unit]
   (let [small (make-text 4000)
         big   (make-text 8000)]
-    (let [t-small (scan-ms small (* 4000 tokens-per-unit))
-          t-big   (scan-ms big (* 8000 tokens-per-unit))]
+    (let [t-small (scan-ms-best small (* 4000 tokens-per-unit) 3)
+          t-big   (scan-ms-best big (* 8000 tokens-per-unit) 3)]
       {:ratio (max 1.0 (if (zero? t-big) 1.0 (/ (inc t-big) (inc t-small))))
        :small-ms t-small :big-ms t-big})))
 
