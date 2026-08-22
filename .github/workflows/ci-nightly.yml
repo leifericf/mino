@@ -67,9 +67,11 @@ jobs:
       - name: Release gate
         # First gate -- if release-gate fails, the rest of the
         # nightly battery is noise. Same gate as push CI; included
-        # here so nightly is self-contained.
+        # here so nightly is self-contained. Cap mirrors ci.yml's
+        # widened watchdog: the perf-shape test files pushed the
+        # slowest runners past the old 12-minute budget.
         run: ./mino task release-gate
-        timeout-minutes: 12
+        timeout-minutes: 22
 
       - name: Embed stress
         run: ./mino task test-embed
