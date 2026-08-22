@@ -15,29 +15,46 @@
 (def ^:private mixed-text
   (apply str (repeat 8000 "abc é 123 中 de 7 fghi ")))
 
-(deftest re-seq-ascii-scan-within-budget
-  (let [t0    (nano-time)
-        toks  (doall (re-seq scan-re ascii-text))
-        ms    (quot (- (nano-time) t0) 1000000)]
-    (is (= 80000 (count toks)))
-    ;; Contiguity: the matches tile the text with no gaps, so the
-    ;; lengths sum to the text length.
-    (is (= (count ascii-text)
-           (reduce + 0 (map count toks))))
-    (is (< ms 8000) (str "ascii re-seq took " ms "ms"))))
+(defn- scan-ms [text expected-tokens]
+  (let [t0   (nano-time)
+        toks (doall (re-seq scan-re text))]
+    (is (= expected-tokens (count toks)))
+    (quot (- (nano-time) t0) 1000000)))
 
-(deftest re-seq-mixed-scan-within-budget
-  (let [t0    (nano-time)
-        toks  (doall (re-seq scan-re mixed-text))
-        ms    (quot (- (nano-time) t0) 1000000)]
-    (is (= 96000 (count toks))
-        "mixed text still tokenizes to a fixed count")
-    ;; Non-ASCII codepoints fall to the single-character catch-all
-    ;; only if the pattern has one; scan-re does not, so é and 中
-    ;; split nothing here: every match is ASCII, and the multibyte
-    ;; codepoints are simply absent from the matches. The counts
-    ;; above pin the shape.
-    (is (< ms 8000) (str "mixed re-seq took " ms "ms"))))
+(defn- scan-ratio
+  "Time re-seq over one text and its double; return the time ratio.
+  A linear scan doubles, a quadratic one quadruples, so the ratio is
+  machine- and sanitizer-independent evidence of the scan shape."
+  [make-text tokens-per-unit]
+  (let [small (make-text 4000)
+        big   (make-text 8000)]
+    (let [t-small (scan-ms small (* 4000 tokens-per-unit))
+          t-big   (scan-ms big (* 8000 tokens-per-unit))]
+      {:ratio (max 1.0 (if (zero? t-big) 1.0 (/ (inc t-big) (inc t-small))))
+       :small-ms t-small :big-ms t-big})))
+
+(deftest re-seq-ascii-scan-stays-linear
+  (let [{:keys [ratio small-ms big-ms]} (scan-ratio
+                                          #(apply str (repeat % "abc 123 de 7 fghi "))
+                                          10)]
+    (is (< ratio 3.2)
+        (str "ascii re-seq scaling ratio " ratio
+             " (" small-ms "ms -> " big-ms "ms)"))))
+
+(deftest re-seq-mixed-scan-stays-linear
+  (let [{:keys [ratio small-ms big-ms]} (scan-ratio
+                                          #(apply str (repeat % "abc é 123 中 de 7 fghi "))
+                                          12)]
+    (is (< ratio 3.2)
+        (str "mixed re-seq scaling ratio " ratio
+             " (" small-ms "ms -> " big-ms "ms)"))))
+
+(deftest re-seq-tiles-the-text
+  ;; Contiguity: the matches tile the text with no gaps, so the
+  ;; lengths sum to the text length.
+  (let [toks (doall (re-seq scan-re ascii-text))]
+    (is (= (count ascii-text)
+           (reduce + 0 (map count toks))))))
 
 (deftest re-seq-matches-in-order
   (is (= ["abc" " " "123"] (take 3 (re-seq scan-re "abc 123 de")))
