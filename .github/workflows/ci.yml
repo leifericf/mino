@@ -526,9 +526,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     # A local run is ~25s on arm64 darwin; CI runners are slower and
-    # windows slower still, but a hang (the failure mode JIT bugs
-    # produce) should trip this cap, not the 6-hour default.
-    timeout-minutes: 25
+    # windows slower still (two zig builds plus two full suite passes
+    # past the perf-shape test files run ~25 min there), but a hang
+    # (the failure mode JIT bugs produce) should trip this cap, not
+    # the 6-hour default.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -562,7 +564,7 @@ jobs:
         # slowest host (windows) before the perf-shape test files
         # landed; they push the windows leg past 15, so the cap is
         # now 3x the original baseline.
-        timeout-minutes: 24
+        timeout-minutes: 40
         run: ./mino task test-jit-host
 
   # Portability canary: compile the amalgamated single-file source with
