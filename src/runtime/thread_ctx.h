@@ -244,8 +244,13 @@ typedef struct mino_thread_ctx {
     int                      throw_loc_line;
     int                      throw_loc_col;
 
-    /* GC save stack: transient roots pinned across allocations. */
-    mino_val     *gc_save[64];
+    /* GC save stack: transient roots pinned across allocations. The
+     * array size and GC_SAVE_MAX (gc/internal.h mirrors this value)
+     * must agree; the pin macros bound every store by the macro, so a
+     * hardcoded array smaller than the macro writes out of bounds
+     * into the fields that follow. */
+#define MINO_GC_SAVE_MAX 512
+    mino_val     *gc_save[MINO_GC_SAVE_MAX];
     int             gc_save_len;
 
     /* Conservative stack scan anchor + GC re-entrancy depth. */

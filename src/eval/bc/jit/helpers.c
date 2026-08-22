@@ -805,7 +805,8 @@ mino_val *mino_jit_tailcall_slow(mino_state *S, mino_val **regs,
                                      args);
         if (cell == NULL) { gc_unpin(2); return NULL; }
         args = cell;
-        mino_current_ctx(S)->gc_save[args_slot] = args;
+        if (args_slot < GC_SAVE_MAX)
+            mino_current_ctx(S)->gc_save[args_slot] = args;
     }
     gc_unpin(2);
     S->tail_call_sentinel.as.tail_call.fn   = callee;

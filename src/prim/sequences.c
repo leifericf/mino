@@ -1701,7 +1701,8 @@ static mino_val **ptrarr_grow(mino_state *S, mino_val **old,
     for (i = 0; i < old_len; i++) {
         nb[i] = old[i];
     }
-    mino_current_ctx(S)->gc_save[pin_slot] = (mino_val *)nb;
+    if (pin_slot < GC_SAVE_MAX)
+        mino_current_ctx(S)->gc_save[pin_slot] = (mino_val *)nb;
     return nb;
 }
 

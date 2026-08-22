@@ -2395,17 +2395,14 @@
                        " " mino-bin " tests/run.clj")))))
 
 (defn test-generative
-  "Run the generative property tests (tests/json_property_test.clj)
-  with the JIT disabled. The property loops push clojure.data.json's
-  writer and reader through enough iterations that fns cross the
-  hot threshold, and a CPJIT defect around the hot format-double
-  path crashes the process there (known issue, tracked with a
-  compact repro). The interpreter path is sound at the same seeds,
-  so the lane pins the properties while the JIT defect is open."
+  "Run the generative property tests (tests/json_property_test.clj).
+  Historically pinned with the JIT disabled: the property loops
+  pushed clojure.data.json hot enough to trip a CPJIT crash (the
+  pin-stack overflow corruption, ki-10). That root cause is fixed
+  and pinned by tests/pin_pressure_test.clj plus the quick-check
+  repro, so the lane runs under the default jit=auto again."
   []
-  (println (sh! "sh" "-c"
-                (str "MINO_JIT=off " mino-bin
-                     " tests/json_property_test.clj"))))
+  (println (sh! mino-bin "tests/json_property_test.clj")))
 
 (defn test-http
   "Run the localhost HTTP integration lane

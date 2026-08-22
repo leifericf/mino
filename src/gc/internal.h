@@ -85,7 +85,9 @@ typedef struct {
  * level pins fn through eval_apply_regular_call, and the standard
  * -O2 build (no -DNDEBUG) used to abort the embedder there.
  * Require a local variable named `S` of type mino_state *. */
-#define GC_SAVE_MAX 64
+/* Must equal MINO_GC_SAVE_MAX in runtime/thread_ctx.h, which sizes
+ * the per-ctx gc_save array this macro bounds. */
+#define GC_SAVE_MAX MINO_GC_SAVE_MAX
 /* Gate the overflow assert on whether we're in a sanitizer build.
  * Sanitizer builds want loud failure to flag liveness regressions;
  * release builds keep the documented soft-loss path so the

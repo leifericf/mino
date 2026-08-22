@@ -294,7 +294,8 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                             vec_nth(spliced, j), mino_nil(S));
                         if (tail == NULL) {
                             out = cell;
-                            mino_current_ctx(S)->gc_save[out_slot] = out;
+                            if (out_slot < GC_SAVE_MAX)
+                                mino_current_ctx(S)->gc_save[out_slot] = out;
                         } else { mino_cons_cdr_set(S, tail, cell); }
                         tail = cell;
                         count++;
@@ -312,7 +313,8 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                                 sp->as.cons.car, mino_nil(S));
                             if (tail == NULL) {
                                 out = cell;
-                                mino_current_ctx(S)->gc_save[out_slot] = out;
+                                if (out_slot < GC_SAVE_MAX)
+                                    mino_current_ctx(S)->gc_save[out_slot] = out;
                             } else { mino_cons_cdr_set(S, tail, cell); }
                             tail = cell;
                             count++;
@@ -326,7 +328,8 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                                     ch->as.chunk.vals[k], mino_nil(S));
                                 if (tail == NULL) {
                                     out = cell;
-                                    mino_current_ctx(S)->gc_save[out_slot] = out;
+                                    if (out_slot < GC_SAVE_MAX)
+                                        mino_current_ctx(S)->gc_save[out_slot] = out;
                                 } else { mino_cons_cdr_set(S, tail, cell); }
                                 tail = cell;
                                 count++;
@@ -348,7 +351,8 @@ static mino_val *qq_expand_vector(mino_state *S, mino_val *form,
                 cell = mino_cons(S, expanded, mino_nil(S));
                 if (tail == NULL) {
                     out = cell;
-                    mino_current_ctx(S)->gc_save[out_slot] = out;
+                    if (out_slot < GC_SAVE_MAX)
+                        mino_current_ctx(S)->gc_save[out_slot] = out;
                 } else { mino_cons_cdr_set(S, tail, cell); }
                 tail = cell;
                 count++;
