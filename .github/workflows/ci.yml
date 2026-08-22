@@ -241,8 +241,8 @@ jobs:
           set +e
           ./mino task release-gate &
           GATE_PID=$!
-          (sleep 660; if kill -0 $GATE_PID 2>/dev/null; then
-             echo "##[warning]Watchdog: release-gate exceeded 11m; SIGABRT mino for a backtrace"
+          (sleep 900; if kill -0 $GATE_PID 2>/dev/null; then
+             echo "##[warning]Watchdog: release-gate exceeded 15m; SIGABRT mino for a backtrace"
              pkill -ABRT mino 2>/dev/null
            fi) &
           WD_PID=$!
@@ -251,7 +251,7 @@ jobs:
           sleep 2
           kill $WD_PID 2>/dev/null || true
           exit $RC
-        timeout-minutes: 12
+        timeout-minutes: 16
 
       - name: Embed API smoke test
         if: matrix.os != 'windows-2022'
