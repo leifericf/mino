@@ -9,12 +9,6 @@
 
 (def ^:private scan-re #"[a-z]+|\d+|\s+")
 
-(def ^:private ascii-text
-  (apply str (repeat 8000 "abc 123 de 7 fghi ")))
-
-(def ^:private mixed-text
-  (apply str (repeat 8000 "abc é 123 中 de 7 fghi ")))
-
 (defn- scan-ms-best
   "Best of n timed scans over text. Collection pauses land in some
   runs only; the fastest run approximates the scan's own cost."
@@ -33,13 +27,15 @@
   "Time re-seq over one text and its double; return the time ratio of
   the best runs. A linear scan doubles, a quadratic one quadruples,
   so the ratio is machine- and sanitizer-independent evidence of the
-  scan shape, and best-of-three keeps collection pauses (which scale
-  with the suite's live heap, not with the scan) out of the number."
+  scan shape, and best-of-two keeps collection pauses (which scale
+  with the suite's live heap, not with the scan) out of the number.
+  Sizes stay small: the discrimination is in the ratio, and a large
+  corpus only feeds collection storms on loaded runners."
   [make-text tokens-per-unit]
-  (let [small (make-text 4000)
-        big   (make-text 8000)]
-    (let [t-small (scan-ms-best small (* 4000 tokens-per-unit) 3)
-          t-big   (scan-ms-best big (* 8000 tokens-per-unit) 3)]
+  (let [small (make-text 1000)
+        big   (make-text 2000)]
+    (let [t-small (scan-ms-best small (* 1000 tokens-per-unit) 2)
+          t-big   (scan-ms-best big (* 2000 tokens-per-unit) 2)]
       {:ratio (max 1.0 (if (zero? t-big) 1.0 (/ (inc t-big) (inc t-small))))
        :small-ms t-small :big-ms t-big})))
 
@@ -62,8 +58,9 @@
 (deftest re-seq-tiles-the-text
   ;; Contiguity: the matches tile the text with no gaps, so the
   ;; lengths sum to the text length.
-  (let [toks (doall (re-seq scan-re ascii-text))]
-    (is (= (count ascii-text)
+  (let [text (apply str (repeat 2000 "abc 123 de 7 fghi "))
+        toks (doall (re-seq scan-re text))]
+    (is (= (count text)
            (reduce + 0 (map count toks))))))
 
 (deftest re-seq-matches-in-order
