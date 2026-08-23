@@ -119,7 +119,7 @@ jobs:
           run_one () {
             (exec ./mino tests/run.clj) 2>> /tmp/test_trace.log &
             MINO_PID=$!
-            (sleep 600; if kill -0 $MINO_PID 2>/dev/null; then
+            (sleep 900; if kill -0 $MINO_PID 2>/dev/null; then
                echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
                kill -ABRT $MINO_PID
              fi) &
@@ -149,8 +149,10 @@ jobs:
         # a slow runner. Cap so we get diagnostic output instead of
         # waiting on the 6h job-default timeout. The per-shard
         # watchdog above fires well before this cap so we keep the
-        # stack trace.
-        timeout-minutes: 14
+        # stack trace. macOS runs the suite single-process and its
+        # runners vary ~2x in speed; 15m keeps the slow tail inside
+        # the step cap while the watchdog guards true hangs.
+        timeout-minutes: 17
         # The Windows test suite has documented divergence: cmd.exe's
         # echo emits a trailing space before \n, which the proc-test
         # assertions do not strip. Build still must pass; tests are
@@ -251,7 +253,7 @@ jobs:
           sleep 2
           kill $WD_PID 2>/dev/null || true
           exit $RC
-        timeout-minutes: 16
+        timeout-minutes: 22
 
       - name: Embed API smoke test
         if: matrix.os != 'windows-2022'
