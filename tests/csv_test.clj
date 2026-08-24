@@ -23,7 +23,7 @@
   (is (= [["x"]] (csv/read-csv "x\n"))))
 
 (deftest read-empty-input-yields-no-rows
-  (is (= () (csv/read-csv ""))))
+  (is (= [] (csv/read-csv ""))))
 
 (deftest read-empty-line-yields-empty-row
   (is (= [[]] (csv/read-csv "\n"))))
@@ -104,13 +104,14 @@
 
 (deftest read-from-cursor-atom
   (with-in-str "a,b\nc,d\n"
-    (is (= [["a" "b"] ["c" "d"]] (doall (csv/read-csv *in*))))))
+    (is (= [["a" "b"] ["c" "d"]] (csv/read-csv *in*)))))
 
-(deftest read-from-cursor-atom-consumes-incrementally
+(deftest read-from-cursor-atom-consumes-cursor
+  ;; the cursor is parsed whole and emptied (the reader is eager)
   (with-in-str "a,b\nc,d\n"
     (let [rows (csv/read-csv *in*)]
-      (is (= ["a" "b"] (first rows)))
-      (is (= "c,d\n" @*in*)))))
+      (is (= [["a" "b"] ["c" "d"]] rows))
+      (is (= "" @*in*)))))
 
 ;;;; Writer
 
