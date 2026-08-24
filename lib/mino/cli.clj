@@ -24,7 +24,11 @@
   :mino.cli/args, and a -- inside the args moves the rest there.
 
   A coercion that cannot succeed throws ex-info with :kind
-  :cli/parse, :option, and :value in the data map."
+  :cli/parse, :option, and :value in the data map.
+
+  (cli/format-opts {:spec {:port {:alias :p :default 80
+                                  :desc \"The port.\"}}})
+  ;; => \"  -p, --port  The port. (default: 80)\""
   (:require [clojure.string :as str]))
 
 ;;;; Spec shape
@@ -167,6 +171,63 @@
                      [(or (get aliases (keyword one)) (keyword one))
                       [true 0]]))
                  body)))))
+
+;;;; format-opts
+
+(defn- flag-column
+  "The left column of one usage row: alias, long name, and ref."
+  [k {:keys [alias ref negatable]}]
+  (str (if alias (str "-" (name alias) ", ") "    ")
+       "--" (if negatable "[no-]" "")
+       (name k)
+       (if ref (str " " ref) "")))
+
+(defn- opt-desc
+  "The right column: desc with the default appended in parentheses."
+  [m]
+  (let [dv (when (contains? m :default)
+             (str "(default: "
+                  (or (:default-desc m) (str (:default m))) ")"))]
+    (cond
+      (and (:desc m) dv) (str (:desc m) " " dv)
+      (:desc m)          (:desc m)
+      dv                 dv
+      :else              "")))
+
+(defn format-opts
+  "Renders a spec into the babashka.cli usage block, one row per
+  option: the alias and long-name column (with ref), two spaces,
+  then the description with any default in parentheses. Takes
+  {:spec spec} with optional {:order [names]} (selects and orders;
+  names a missing option and throws) and {:indent n} (default 2).
+  A vector-of-pairs spec keeps its declared order. No terminal
+  wrapping.
+
+  (cli/format-opts {:spec {:port {:alias :p :default 80
+                                  :desc \"The port.\"}}})
+  ;; => \"  -p, --port  The port. (default: 80)\""
+  [{:keys [spec order indent] :or {indent 2}}]
+  (let [entries   (or (spec-entries spec) [])
+        by-name   (into {} entries)
+        chosen    (if order
+                    (map (fn [k]
+                           (if (contains? by-name k)
+                             [k (get by-name k)]
+                             (throw-parse (str "mino.cli: :order names "
+                                               (name k)
+                                               " which is not in :spec")
+                                          k nil)))
+                         order)
+                    entries)
+        columns   (map (fn [[k m]] (flag-column k m)) chosen)
+        width     (apply max 0 (map count columns))
+        pad       (apply str (repeat indent " "))]
+    (str/join "\n"
+              (map (fn [[col m]]
+                     (str pad col
+                          (apply str (repeat (- width (count col)) " "))
+                          "  " (opt-desc m)))
+                   (map vector columns (map second chosen))))))
 
 ;;;; parse-opts
 
