@@ -15,7 +15,7 @@
 (def ^:private roots-text (slurp roots-path))
 (def ^:private readme-text (slurp readme-path))
 
-(def ^:private pem-sha (sha256 pem-text))
+(def ^:private pem-sha (hex-encode (sha256 pem-text)))
 
 (defn- recorded-sha [text]
   (let [m (re-find #"PEM sha256:?\s*\n?\s*`?([0-9a-f]{64})`?" text)]

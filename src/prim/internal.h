@@ -549,6 +549,10 @@ extern const size_t        k_prims_json_count;
 extern const mino_prim_def k_prims_csv[];
 extern const size_t        k_prims_csv_count;
 
+/* digest.c -- all prims are file-local static; no extern declarations needed. */
+extern const mino_prim_def k_prims_digest[];
+extern const size_t        k_prims_digest_count;
+
 /* http.c -- all prims are file-local static; no extern declarations needed. */
 extern const mino_prim_def k_prims_http[];
 extern const size_t        k_prims_http_count;
