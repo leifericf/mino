@@ -566,6 +566,9 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * registers in the floor too (ADR 22). The glob fn inside
      * resolves only when the fs capability is installed. */
     mino_install_mino_path(S, NULL);
+    /* mino.cli bundled lib: pure option parsing over core string
+     * and reader fns, so it registers in the floor like mino.path. */
+    mino_install_mino_cli(S, NULL);
     return core_env;
 }
 
