@@ -360,9 +360,9 @@ static void print_usage(FILE *out)
         "mino - tiny embeddable Lisp\n"
         "\n"
         "USAGE:\n"
-        "    mino [OPTIONS] [FILE]\n"
+        "    mino [OPTIONS] [FILE] [ARGS...]\n"
         "    mino [OPTIONS] EXPR             # EXPR starts with ( [ { # @ '\n"
-        "    mino [OPTIONS] -e EXPR\n"
+        "    mino [OPTIONS] -e EXPR [-- ARGS...]\n"
         "    mino <SUBCOMMAND> [ARGS...]\n"
         "\n"
         "OPTIONS:\n"
@@ -376,7 +376,8 @@ static void print_usage(FILE *out)
         "    --jit=auto|off|on   Accepted for parity; this build has the JIT compiled out\n"
         "    --jit-threshold=N   Accepted for parity; this build has the JIT compiled out\n"
 #endif
-        "    --                  End of options; treat the rest as FILE\n"
+        "    --                  End of options; after FILE, task NAME, or\n"
+        "                        -e EXPR the rest is *command-line-args*\n"
         "\n"
         "    A FILE of '-' reads the script from standard input.\n"
         "\n"
@@ -597,8 +598,31 @@ static mino_val *build_cmd_args(mino_state *S, int argc, char **argv,
     return head;
 }
 
+/* Index of the first user argument for *command-line-args*. One
+ * dispatch slot (the script path, or `task NAME`) is skipped when one
+ * is consumed, and a `--` right after it is dropped so the separator
+ * never reaches the script. With `-e EXPR --` the whole post-separator
+ * tail is user args: no file slot follows the separator. */
+static int cli_args_start(int argc, char **argv, int first,
+                          int dash_dash, const char *eval_expr)
+{
+    int start;
+    if (first >= argc) return argc;
+    if (eval_expr != NULL && dash_dash) return first;
+    if (!dash_dash && eval_expr == NULL
+        && strcmp(argv[first], "task") == 0
+        && first + 1 < argc) {
+        start = first + 2;
+    } else {
+        start = first + 1;
+    }
+    if (start >= argc) return argc;
+    if (strcmp(argv[start], "--") == 0) start++;
+    return start;
+}
+
 static void repl_specials_init(mino_state *S, repl_specials_t *r,
-                               int argc, char **argv, int first)
+                               int argc, char **argv, int args_start)
 {
     mino_env *core_env = ns_env_ensure(S, "clojure.core");
     r->core_env = core_env;
@@ -609,14 +633,12 @@ static void repl_specials_init(mino_state *S, repl_specials_t *r,
     r->cmdargs = repl_intern_special(S, core_env, "*command-line-args*");
     r->file    = repl_intern_special(S, core_env, "*file*");
 
-    /* *command-line-args*: skip past the script path / -e expression so the
-     * first entry the script sees is the first argument *after* itself. In
-     * REPL mode (no file, no -e) this is the empty list. */
-    {
-        int args_start = (first < argc) ? first + 1 : argc;
-        repl_set_special(S, core_env, r->cmdargs, "*command-line-args*",
-                         build_cmd_args(S, argc, argv, args_start));
-    }
+    /* *command-line-args* is exactly the user tail: everything after
+     * the dispatch slot (script path or task NAME) with a following
+     * `--` dropped, or the whole post-separator tail after
+     * `-e EXPR --`. In REPL mode it is the empty list. */
+    repl_set_special(S, core_env, r->cmdargs, "*command-line-args*",
+                     build_cmd_args(S, argc, argv, args_start));
     /* *file*: filled in later when entering file mode; stays
      * "NO_SOURCE_PATH" for the REPL and -e modes, matching the canon
      * convention. */
@@ -1336,7 +1358,9 @@ int main(int argc, char **argv)
     }
 
     repl_specials_t specials;
-    repl_specials_init(S, &specials, argc, argv, first);
+    repl_specials_init(S, &specials, argc, argv,
+                       cli_args_start(argc, argv, first, dash_dash,
+                                      eval_expr));
 
     /* Subcommand: mino deps */
     if (!dash_dash && first < argc && strcmp(argv[first], "deps") == 0) {
@@ -1352,11 +1376,13 @@ int main(int argc, char **argv)
     /* -e / --eval EXPR mode: evaluate the expression, then continue
      * into the positional dispatch when a FILE follows (the canonical
      * CLI composition: eval the form, run the script with the
-     * remaining arguments). Without a positional, exit with the
-     * eval's status. */
+     * remaining arguments). With the -- separator the post-separator
+     * tail is exactly *command-line-args*: no FILE composition, no
+     * subcommand dispatch, exit with the eval's status. Without a
+     * positional, exit with the eval's status. */
     if (eval_expr != NULL) {
         exit_code = run_eval_expr(S, env, eval_expr);
-        if (exit_code != 0 || first >= argc) {
+        if (exit_code != 0 || dash_dash || first >= argc) {
             mino_env_free(S, env);
             mino_state_free(S);
             return exit_code;
