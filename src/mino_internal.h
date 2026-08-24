@@ -118,6 +118,7 @@ void mino_install_clojure_pprint    (mino_state *S, mino_env *env);
 void mino_install_clojure_zip       (mino_state *S, mino_env *env);
 void mino_install_clojure_data      (mino_state *S, mino_env *env);
 void mino_install_clojure_data_json (mino_state *S, mino_env *env);
+void mino_install_clojure_data_csv  (mino_state *S, mino_env *env);
 void mino_install_clojure_test      (mino_state *S, mino_env *env);
 void mino_install_clojure_test_check(mino_state *S, mino_env *env);
 void mino_install_clojure_repl      (mino_state *S, mino_env *env);

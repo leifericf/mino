@@ -35,6 +35,7 @@
 #include "lib_clojure_zip.h"
 #include "lib_clojure_data.h"
 #include "lib_clojure_data_json.h"
+#include "lib_clojure_data_csv.h"
 #include "lib_clojure_test.h"
 #include "lib_clojure_template.h"
 #include "lib_clojure_repl.h"
@@ -126,6 +127,13 @@ void mino_install_clojure_data_json(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "clojure.data.json",
                               lib_clojure_data_json_src);
+}
+
+void mino_install_clojure_data_csv(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.data.csv",
+                              lib_clojure_data_csv_src);
 }
 
 /* clojure.test + clojure.template install together. clojure.template

@@ -212,6 +212,7 @@
    ["lib/clojure/zip.clj"             "clojure.zip"             "lib_clojure_zip"]
    ["lib/clojure/data.clj"            "clojure.data"            "lib_clojure_data"]
    ["lib/clojure/data/json.clj"       "clojure.data.json"       "lib_clojure_data_json"]
+   ["lib/clojure/data/csv.clj"        "clojure.data.csv"        "lib_clojure_data_csv"]
    ["lib/clojure/test.clj"            "clojure.test"            "lib_clojure_test"]
    ["lib/clojure/template.clj"        "clojure.template"        "lib_clojure_template"]
    ["lib/clojure/repl.clj"            "clojure.repl"            "lib_clojure_repl"]

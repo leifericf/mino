@@ -258,6 +258,8 @@ static const mino_capability_info k_capability_info[] = {
       "mino.store: EAVT fact store (open / transact / query / merge)." },
     { "json",         MINO_CAP_JSON,
       "clojure.data.json (read-str / write-str)." },
+    { "csv",          MINO_CAP_CSV,
+      "clojure.data.csv (read-csv / write-csv)." },
     { "net",          MINO_CAP_NET,
       "TCP sockets (net-connect / net-read / net-read-all / net-write / net-close)." },
     { NULL,           0u,                                                NULL },

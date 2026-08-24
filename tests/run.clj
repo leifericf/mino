@@ -151,8 +151,9 @@
    "tests/path_match_test"
    "tests/path_glob_test"
    "tests/path_ns_test"
-   "tests/json_test"
-   "tests/json_perf_test"
+    "tests/json_test"
+    "tests/json_perf_test"
+    "tests/csv_test"
    "tests/proc_test"
    "tests/deps_test"
    "tests/introspection_test"
@@ -188,7 +189,7 @@
    shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
    glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
    tail grows past ~5GB. The final entry must equal the file count."
-  [0 103 129 160])
+  [0 103 129 161])
 
 (defn- parse-shard-int [s]
   (when (and (string? s) (re-find #"^\d+$" s))
