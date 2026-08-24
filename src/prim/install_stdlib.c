@@ -68,6 +68,7 @@
 #include "lib_mino_time.h"
 #include "lib_mino_path.h"
 #include "lib_mino_cli.h"
+#include "lib_mino_digest.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -300,6 +301,12 @@ void mino_install_mino_cli(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.cli", lib_mino_cli_src);
+}
+
+void mino_install_mino_digest(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.digest", lib_mino_digest_src);
 }
 
 void mino_install_all(mino_state *S, mino_env *env)

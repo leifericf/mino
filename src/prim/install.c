@@ -573,6 +573,9 @@ static mino_env *floor_install_prim_tables(mino_state *S)
     /* mino.cli bundled lib: pure option parsing over core string
      * and reader fns, so it registers in the floor like mino.path. */
     mino_install_mino_cli(S, NULL);
+    /* mino.digest bundled lib: pure hex sugar over floor digest
+     * prims, so it registers in the floor like mino.cli. */
+    mino_install_mino_digest(S, NULL);
     return core_env;
 }
 

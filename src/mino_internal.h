@@ -136,6 +136,7 @@ void mino_install_mino_http         (mino_state *S, mino_env *env);
 void mino_install_mino_time         (mino_state *S, mino_env *env);
 void mino_install_mino_path         (mino_state *S, mino_env *env);
 void mino_install_mino_cli          (mino_state *S, mino_env *env);
+void mino_install_mino_digest       (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install
  * after capability bits are set; idempotent. */
