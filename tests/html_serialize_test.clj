@@ -18,7 +18,9 @@
 ;;    content verbatim; PLAINTEXT verbatim with no end tag; RCDATA
 ;;    title/textarea re-encoded like text (D6 decoded them at parse);
 ;;    comments and the DOCTYPE text verbatim; adjacent text runs
-;;    merge into one serialized run.
+;;    merge into one serialized run; empty text runs (parse output
+;;    for dropped-codepoint references) vanish, being
+;;    unrepresentable in HTML.
 ;;
 ;; 2. Round-trip property (A-3): (parse (to-html (parse s))) equals
 ;;    (parse s) modulo the D10 adjacent-run merge, over the full p1
@@ -53,9 +55,9 @@
   ;; always double-quoted; amp and quot escaped; minimal spelling
   ;; keeps lt gt raw (round-trip-safe inside quoted values)
   (is (= "<p title=\"a&quot;b&amp;c\"></p>"
-         (html/to-html (html-ser-el :p {:title "a\"b&c"}))))
+         (html/to-html (html-ser-el :p {:title "a\"b&c"} []))))
   (is (= "<p alt=\"a<b>c\"></p>"
-         (html/to-html (html-ser-el :p {:alt "a<b>c"}))))
+         (html/to-html (html-ser-el :p {:alt "a<b>c"} []))))
   ;; valueless attributes re-emit as name=""
   (is (= "<input disabled=\"\">"
          (html/to-html (first (html/parse-fragment "<input disabled>")))))
@@ -129,8 +131,9 @@
          (html/to-html (first (html/parse-fragment "<?php echo 1?>")))))
   (is (= "<!DOCTYPE html>"
          (html/to-html (first (html/parse-fragment "<!DOCTYPE html>")))))
-  ;; doctype text verbatim, first > ended it at parse so it re-emits
-  (is (= "<!DOCTYPE html SYSTEM \"x>>"
+  ;; doctype text verbatim; the first > ended it at parse, so the
+  ;; re-emitted > is the same one
+  (is (= "<!DOCTYPE html SYSTEM \"x>"
          (html/to-html
            (first
              (html/parse-fragment "<!DOCTYPE html SYSTEM \"x>a\">"))))))
@@ -206,25 +209,33 @@
 ;;; ---- round-trip property (A-3): equal trees, modulo D10 merges ----
 
 (defn- html-ser-merge
-  "Merges adjacent string siblings (D10 normalization; the serializer
-  emits one run, so split runs compare after merging)."
+  "Merges adjacent string siblings and drops empty string runs (D10
+  normalization; the serializer emits one run, and an empty text
+  node is unrepresentable in HTML, so it vanishes on reparse)."
   [nodes]
   (loop [nodes nodes acc []]
     (if (seq nodes)
       (let [n (first nodes)]
-        (if (and (string? n) (string? (peek acc)))
+        (cond
+          (and (string? n) (= "" n)) (recur (rest nodes) acc)
+          (and (string? n) (string? (peek acc)))
           (recur (rest nodes)
                  (assoc acc (dec (count acc)) (str (peek acc) n)))
-          (recur (rest nodes) (conj acc n))))
+          :else (recur (rest nodes) (conj acc n))))
       acc)))
 
 (defn- html-ser-norm
-  "Any tree normalized per D10: adjacent text runs merged at every
-  level. Idempotent."
+  "Any tree normalized per D10: adjacent text runs merged and empty
+  text runs dropped at every container level. Comment and
+  document-type payloads are verbatim data, not text runs; they pass
+  through untouched. Idempotent."
   [node]
   (if (map? node)
-    (assoc node
-      :content (html-ser-merge (mapv html-ser-norm (:content node))))
+    (if (or (= :comment (:type node))
+            (= :document-type (:type node)))
+      node
+      (assoc node
+        :content (html-ser-merge (mapv html-ser-norm (:content node)))))
     (if (vector? node)
       (html-ser-merge (mapv html-ser-norm node))
       node)))
@@ -256,7 +267,10 @@
              "<p>1<table><p>2"
              "<table>stray<tr><td>cell"
              "<textarea><b>x"
-             "<plaintext><b>x&amp;"
+             ;; PLAINTEXT is excluded from document mode: its content
+             ;; is verbatim to EOF, so the wrappers' materialized end
+             ;; tags would join the run on reparse. In fragment mode,
+             ;; as the tail node, it round trips (pinned above).
              "x<!--tail-->"
              "<html><head></head><body><p>x</p></body><!--tail--></html>"
              "<!--lead--><!DOCTYPE h><p>x"]]
