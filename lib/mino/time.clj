@@ -14,9 +14,12 @@
   1970-01-01T00:00:00Z, the same value inst-ms produces. Broken-down
   time is a plain map {:year :month :day :hour :min :sec :ms :wday
   :offset-min} with 1-based months and :wday 0 = Sunday. Offsets are
-  fixed minutes east of UTC carried in the map; there is no named
-  zone database (that layer can be added later without breaking any
-  map). The representable range is years 1..9999; anything outside
+  fixed minutes east of UTC carried in the map. Named IANA zones
+  (ADR 27) are an additive layer over the same epoch-ms: {:zone z}
+  options on parse/format and the converters, plus in-zone and
+  zone-offset-mins, resolve a zone to its offset at an instant; the
+  wall clock changes, the instant never does. The representable
+  range is years 1..9999; anything outside
   throws :time/range. Parsing is strict: impossible dates, wrong day
   names, ambiguous named zones (EST), and trailing junk throw
   :time/parse.
@@ -76,17 +79,24 @@
   :format :date-only?}. ISO 8601 / RFC 3339 and the RFC 1123 / 2822
   comma form are accepted; see the parse-time prim docstring for the
   exact strictness. Throws :time/parse on malformed input. Every
-  verb that takes an instant accepts this map."
-  [s]
-  (clojure.core/parse-time s))
+  verb that takes an instant accepts this map. opts: {:zone z}
+  interprets an offset-less input as local wall time in the zone
+  (fold-0: overlaps take the first occurrence, gaps shift forward)."
+  ([s] (clojure.core/parse-time s))
+  ([s opts]
+   (when-not (map? opts)
+     (throw (ex-info "mino.time/parse: opts must be a map" {:arg opts})))
+   (clojure.core/parse-time s opts)))
 
 (defn format
   "Formats an instant (epoch-ms, parse result, or time map) as a
   string. fmt is :iso8601 (default, Z form, .SSS only when the
   milliseconds are nonzero), :iso8601-date, :rfc1123 (HTTP Date,
   always GMT), or :rfc2822. An optional offset-min renders the
-  offset-capable forms at a fixed offset. No pattern strings:
-  compose custom formats from the time map and str."
+  offset-capable forms at a fixed offset; an options map
+  {:zone z} (in the fmt or offset position) renders them at the
+  zone's offset at the instant. No pattern strings: compose custom
+  formats from the time map and str."
   ([t] (clojure.core/format-time (instant t)))
   ([t fmt] (clojure.core/format-time (instant t) fmt))
   ([t fmt offset-min]
@@ -200,6 +210,45 @@
               t)]
       (clojure.core/weekday m))
     (clojure.core/weekday t)))
+
+;;;; Named zones (ADR 27)
+
+(defn- tz-zone-checked
+  "Runs (zone-fn) and rethrows :time/zone errors with the zone in
+  the ex-info data, so facade callers see which name missed."
+  [zone zone-fn]
+  (try
+    (zone-fn)
+    (catch e
+      (if (= :time/zone (:mino/kind e))
+        (throw (ex-info (str "mino.time: unknown time zone "
+                             (pr-str zone))
+                        {:kind :time/zone :zone zone}))
+        (throw e)))))
+
+(defn in-zone
+  "Renders an instant (epoch-ms, parse result, or time map) as the
+  plain time map on the zone's wall clock: the offset the zone holds
+  at that instant lands in :offset-min and the civil fields shift to
+  match. The instant itself is unchanged: it stays the same epoch-ms
+  inst-ms produces, and (time-map->epoch (in-zone zone t)) returns
+  it exactly, because the map carries the resolved offset. The
+  result never stores the zone name; a zone is a way to read an
+  instant, not data in one. DST follows the embedded tzdata
+  transitions with fold-0 semantics."
+  [zone t]
+  (tz-zone-checked zone
+                   #(epoch->time-map (instant t) {:zone zone})))
+
+(defn zone-offset-mins
+  "The zone's UTC offset in minutes at an instant: positive east.
+  The zone is an IANA name (string or keyword, e.g. \"Europe/Oslo\")
+  or a fixed offset in minutes. Same relation to inst-ms as every
+  verb here: the offset describes the wall clock, the instant stays
+  epoch-ms."
+  [zone t]
+  (tz-zone-checked zone
+                   #(clojure.core/zone-offset-mins zone (instant t))))
 
 ;;;; clojure.instant interop
 

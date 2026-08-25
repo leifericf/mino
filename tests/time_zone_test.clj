@@ -1,4 +1,5 @@
 (require "tests/test")
+(require '[mino.time :as t])
 
 ;; Timezones over the ADR 21 civil core (ADR 27). Every vector below
 ;; was derived by running python3 zoneinfo on this machine (the
@@ -258,3 +259,48 @@
     #(epoch->time-map 0 {:zone -1500})
     #(epoch->time-map 0 {:zone "x" :hour 3})   ; unknown option key
     #(parse-time "2026-08-20" {:offset 0})))   ; only :zone is an option
+
+;;; mino.time zone sugar (ADR 27 facade)
+
+(deftest tz-in-zone-sugar
+  (is (= {:year 2026 :month 1 :day 15 :hour 7 :min 0 :sec 0 :ms 0
+          :wday 4 :offset-min -300}
+         (t/in-zone "America/New_York" 1768478400000)))
+  ;; parse results and time maps flow through the instant coercion
+  (is (= 1772953200000
+         (t/time-map->epoch
+          (t/in-zone "America/New_York"
+                     (t/parse "2026-03-08T07:00:00Z")))))
+  ;; the map carries the resolved offset, so the plain converter
+  ;; round-trips (the documented relation to inst-ms: the instant is
+  ;; the same epoch-ms everywhere, a zone only picks the wall clock)
+  (are [ms zone] (= ms (t/time-map->epoch (t/in-zone zone ms)))
+    1775314800000 "Australia/Lord_Howe"
+    2225966400000 "America/New_York"
+    16742116800000 "Australia/Lord_Howe"))
+
+(deftest tz-zone-offset-mins-sugar
+  (are [zone t off] (= off (t/zone-offset-mins zone t))
+    "Australia/Lord_Howe" 1768478400000 660
+    "Australia/Lord_Howe" 1784116800000 630
+    :Asia/Kathmandu      1787659200000 345
+    -480                 0              -480
+    "Europe/Oslo"        (t/parse "2026-07-15T12:00:00Z") 120))
+
+(deftest tz-sugar-opts-passthrough
+  ;; parse accepts {:zone ...} for offset-less input
+  (is (= 1772955000000
+         (:epoch-ms (t/parse "2026-03-08T02:30:00"
+                             {:zone "America/New_York"}))))
+  ;; format renders in the zone (2- and 3-arity shapes)
+  (is (= "2026-01-15T07:00:00-05:00"
+         (t/format 1768478400000 :iso8601 {:zone "America/New_York"})))
+  (is (= "2026-08-25T17:45:00+05:45"
+         (t/format (t/parse "2026-08-25T12:00:00Z")
+                   :iso8601 {:zone "Asia/Kathmandu"}))))
+
+(deftest tz-sugar-unknown-zone-carries-data
+  (let [r (try (t/in-zone "America/Nowhere" 0)
+               (catch e (ex-data e)))]
+    (is (= :time/zone (:kind r)))
+    (is (= "America/Nowhere" (:zone r)))))

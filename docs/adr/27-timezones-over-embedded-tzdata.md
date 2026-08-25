@@ -92,7 +92,7 @@ tables, transition arrays as sign-extended 40-bit absolute seconds
 u8 type indices, and NUL-terminated POSIX footer strings. Zones
 with identical (transitions, types, footer, initial type) share one
 stream: 599 zones collapse to 339 streams, and the compiled data
-lands around 150 KB. Per zone the type before the first transition
+lands at 171 KB (598 zones, 341 streams). Per zone the type before the first transition
 is the first non-DST type (the RFC 8536 rule python follows);
 macOS files carry no sentinel transitions.
 
@@ -133,7 +133,7 @@ determinism check pins.
 
 - ADR 21's surface is untouched: every existing test, map, and prim
   behaves identically; `:zone` is one more way to state an offset.
-- The binary grows by the blob (~150 KB) and the footer evaluator;
+- The binary grows by the blob (171 KB) and the footer evaluator;
   no tzdata update ritual is forced (the snapshot ages gracefully;
   footers keep future instants right regardless).
 - mino.time gains `in-zone` and `zone-offset-mins` sugar over the
