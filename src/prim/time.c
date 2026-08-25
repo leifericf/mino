@@ -38,6 +38,7 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+#include "tzdata_blob.h"
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -152,6 +153,539 @@ static int time_arg_ll(mino_state *S, const mino_val *v, const char *who,
     return 1;
 }
 
+/* ---- timezone database (ADR 27) -------------------------------------- */
+
+static int64_t floor_div(int64_t a, int64_t b)
+{
+    int64_t q = a / b;
+    if ((a % b != 0) && ((a < 0) != (b < 0))) q -= 1;
+    return q;
+}
+
+/* The blob layout is fixed by src/vendor/tzdata/tools/gen_tzdata.clj:
+ * u32le magic, u32le n_zones, u32le n_streams; zone table (name-sorted)
+ * of {u32 name_off, u32 stream_idx}; stream table of {u32 types_off,
+ * u32 trans_off, u32 footer_off, u16 n_types, u16 n_trans, u8
+ * init_type, u8 pad} (18 bytes per entry); then NUL-terminated names, NUL-terminated POSIX footer
+ * strings, then per stream i32le offset tables and sign-extended
+ * 40-bit little-endian absolute transition seconds with a parallel
+ * u8 type-index array. All lookups are length-bounded; names are
+ * NUL-terminated inside the blob, so bounded memcmp never reads
+ * past mino_tzdata_blob_size. */
+
+static uint32_t tz_u32le(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8)
+         | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint16_t tz_u16le(const unsigned char *p)
+{
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static int32_t tz_i32le(const unsigned char *p)
+{
+    return (int32_t)tz_u32le(p);
+}
+
+static int64_t tz_i40le(const unsigned char *p)
+{
+    uint64_t v = (uint64_t)p[0] | ((uint64_t)p[1] << 8)
+               | ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 24)
+               | ((uint64_t)p[4] << 32);
+    if (v & 0x8000000000ULL) v |= 0xFFFFFF0000000000ULL;
+    return (int64_t)v;
+}
+
+typedef struct {
+    const unsigned char *types;   /* i32le gmtoff seconds */
+    const unsigned char *trans;   /* i40le UTC seconds */
+    const unsigned char *tidx;    /* u8 type indices */
+    const char *footer;           /* POSIX TZ string, "" when none */
+    uint32_t n_types, n_trans;
+    uint8_t init_type;
+} tz_zone;
+
+static uint32_t tz_zone_count(void)
+{
+    return tz_u32le(mino_tzdata_blob + 4);
+}
+
+static const char *tz_name_at(uint32_t off, size_t *len)
+{
+    const unsigned char *end = mino_tzdata_blob + mino_tzdata_blob_size;
+    const unsigned char *p = mino_tzdata_blob + off;
+    const unsigned char *q = p;
+    while (q < end && *q != 0) q++;
+    *len = (size_t)(q - p);
+    return (const char *)p;
+}
+
+static int tz_name_cmp(const char *q, size_t qlen, uint32_t off)
+{
+    size_t nlen;
+    const char *nm = tz_name_at(off, &nlen);
+    size_t m = qlen < nlen ? qlen : nlen;
+    int c = memcmp(q, nm, m);
+    if (c != 0) return c;
+    if (qlen < nlen) return -1;
+    if (qlen > nlen) return 1;
+    return 0;
+}
+
+/* bounded name lookup: binary search over the sorted zone table.
+ * Returns 0 and fills z, or -1 when the name is unknown. */
+static int tz_find(const char *q, size_t qlen, tz_zone *z)
+{
+    uint32_t lo = 0, hi = tz_zone_count();
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        const unsigned char *ze = mino_tzdata_blob + 12 + (size_t)mid * 8;
+        int c = tz_name_cmp(q, qlen, tz_u32le(ze));
+        if (c == 0) {
+            uint32_t sid = tz_u32le(ze + 4);
+            const unsigned char *se = mino_tzdata_blob + 12
+                + (size_t)tz_zone_count() * 8 + (size_t)sid * 18;
+            size_t flen;
+            z->types = mino_tzdata_blob + tz_u32le(se);
+            z->trans = mino_tzdata_blob + tz_u32le(se + 4);
+            z->n_types = tz_u16le(se + 12);
+            z->n_trans = tz_u16le(se + 14);
+            z->init_type = se[16];
+            z->tidx = z->trans + (size_t)z->n_trans * 5;
+            z->footer = tz_name_at(tz_u32le(se + 8), &flen);
+            return 0;
+        }
+        if (c < 0) hi = mid; else lo = mid + 1;
+    }
+    return -1;
+}
+
+static int32_t tz_type_off(const tz_zone *z, unsigned i)
+{
+    return tz_i32le(z->types + (size_t)i * 4);
+}
+
+static int64_t tz_trans_at(const tz_zone *z, unsigned i)
+{
+    return tz_i40le(z->trans + (size_t)i * 5);
+}
+
+static uint8_t tz_trans_type(const tz_zone *z, unsigned i)
+{
+    return z->tidx[i];
+}
+
+/* ---- POSIX TZ footer evaluation -------------------------------------- */
+
+typedef struct {
+    int32_t std_off, dst_off;    /* UTC seconds (sign corrected) */
+    int has_dst;
+    char kind[2];                /* 'M', 'J', or 'D' (day count) */
+    int m[2], w[2], d[2], n[2];  /* M rules: m w d; J/D rules: n */
+    int32_t time[2];             /* seconds within the frame day */
+    char frame[2];               /* 'w' all, 's' std, 'u' utc */
+} tz_footer;
+
+/* [+-]hh[:mm[:ss]]; POSIX sign is inverted (EST5 is UTC-5). */
+static int tz_parse_tz_off(const char **p, int32_t *out)
+{
+    const char *s = *p;
+    int neg = 0, any = 0;
+    int32_t v = 0;
+    if (*s == '+' || *s == '-') { neg = *s == '-'; s++; }
+    for (int part = 0; part < 3; part++) {
+        int32_t n = 0, digits = 0;
+        while (*s >= '0' && *s <= '9') {
+            n = n * 10 + (*s - '0');
+            s++;
+            digits++;
+            if (digits > 3) return -1;
+        }
+        if (digits == 0) return part == 0 ? -1 : 0;
+        any = 1;
+        v += part == 0 ? n * 3600 : (part == 1 ? n * 60 : n);
+        if (*s != ':') break;
+        s++;
+    }
+    if (!any) return -1;
+    *out = neg ? v : -v;
+    *p = s;
+    return 0;
+}
+
+/* rule time: [+-]hh[:mm[:ss]] with an optional w/s/u/g/z frame
+ * suffix; default 02:00:00 wall. Sign is literal (not the POSIX
+ * inverted offset convention); hours may exceed 24 (up to 167). */
+static int tz_parse_rule_time(const char **p, int32_t *out, char *frame)
+{
+    const char *s = *p;
+    int neg = 0, any = 0;
+    int32_t v = 0;
+    *frame = 'w';
+    if (*s != '/') {
+        *out = 2 * 3600;
+        return 0;
+    }
+    s++;
+    if (*s == '+' || *s == '-') {
+        neg = *s == '-';
+        s++;
+    }
+    for (int part = 0; part < 3; part++) {
+        int32_t n = 0, digits = 0;
+        while (*s >= '0' && *s <= '9') {
+            n = n * 10 + (*s - '0');
+            s++;
+            if (++digits > 3) return -1;
+        }
+        if (digits == 0) return part == 0 ? -1 : 0;
+        any = 1;
+        v += part == 0 ? n * 3600 : (part == 1 ? n * 60 : n);
+        if (*s != ':') break;
+        s++;
+    }
+    if (!any) return -1;
+    if (*s == 'w' || *s == 's' || *s == 'u' || *s == 'g' || *s == 'z') {
+        *frame = (*s == 'g' || *s == 'z') ? 'u' : *s;
+        s++;
+    }
+    *out = neg ? -v : v;
+    *p = s;
+    return 0;
+}
+
+static int tz_skip_name(const char **p)
+{
+    const char *s = *p;
+    if (*s == '<') {
+        s++;
+        while (*s != '\0' && *s != '>') s++;
+        if (*s != '>') return -1;
+        s++;
+    } else {
+        while ((*s >= 'A' && *s <= 'Z') || (*s >= 'a' && *s <= 'z')) s++;
+        if (s == *p) return -1;
+    }
+    *p = s;
+    return 0;
+}
+
+/* Parse a POSIX TZ footer (RFC 8536 3.3.1). Returns 0 or -1. */
+static int tz_parse_footer(const char *s, tz_footer *f)
+{
+    f->has_dst = 0;
+    f->std_off = 0;
+    f->dst_off = 0;
+    if (tz_skip_name(&s) != 0) return -1;
+    if (tz_parse_tz_off(&s, &f->std_off) != 0) return -1;
+    if (*s == '\0' || *s == ',') {
+        /* std-only footer (a trailing comma with nothing else is
+         * malformed, but tolerate it as std-only) */
+        return 0;
+    }
+    if (tz_skip_name(&s) != 0) return -1;
+    f->has_dst = 1;
+    f->dst_off = f->std_off + 3600;
+    if (*s != ',' && *s != '\0') {
+        if (tz_parse_tz_off(&s, &f->dst_off) != 0) return -1;
+    }
+    for (int r = 0; r < 2; r++) {
+        if (*s != ',') return -1;
+        s++;
+        if (*s == 'M') {
+            s++;
+            f->kind[r] = 'M';
+            /* Mm.w.d: the month may be one or two digits, the week
+             * and day are single digits */
+            int mo = 0, mdig = 0;
+            while (*s >= '0' && *s <= '9') {
+                mo = mo * 10 + (*s - '0');
+                s++;
+                if (++mdig > 2) return -1;
+            }
+            if (mdig == 0 || *s != '.') return -1;
+            s++;
+            if (!(*s >= '0' && *s <= '9')) return -1;
+            f->w[r] = *s++ - '0';
+            if (*s != '.') return -1;
+            s++;
+            if (!(*s >= '0' && *s <= '9')) return -1;
+            f->d[r] = *s++ - '0';
+            f->m[r] = mo;
+            if (f->m[r] < 1 || f->m[r] > 12 || f->w[r] < 1 || f->w[r] > 5
+                || f->d[r] > 6) return -1;
+        } else if (*s == 'J') {
+            s++;
+            f->kind[r] = 'J';
+            int n = 0, digits = 0;
+            while (*s >= '0' && *s <= '9') {
+                n = n * 10 + (*s - '0');
+                s++;
+                if (++digits > 3) return -1;
+            }
+            if (digits == 0 || n < 1 || n > 365) return -1;
+            f->n[r] = n;
+        } else {
+            f->kind[r] = 'D';
+            int n = 0, digits = 0;
+            while (*s >= '0' && *s <= '9') {
+                n = n * 10 + (*s - '0');
+                s++;
+                if (++digits > 3) return -1;
+            }
+            if (digits == 0 || n > 365) return -1;
+            f->n[r] = n;
+        }
+        if (tz_parse_rule_time(&s, &f->time[r], &f->frame[r]) != 0)
+            return -1;
+    }
+    if (*s != '\0') return -1;
+    return 0;
+}
+
+/* rule r's instant in year y, as UTC seconds */
+static int64_t tz_rule_utc(const tz_footer *f, int r, int64_t y)
+{
+    int64_t days;
+    if (f->kind[r] == 'M') {
+        unsigned dim = days_in_month(y, (unsigned)f->m[r]);
+        int64_t first = days_from_civil(y, (unsigned)f->m[r], 1);
+        unsigned wd1 = weekday_from_days(first);
+        unsigned day = 1u + (((unsigned)f->d[r] + 7u - wd1) % 7u);
+        if (f->w[r] < 5) {
+            day += 7u * (unsigned)(f->w[r] - 1);
+        } else {
+            while (day + 7u <= dim) day += 7u;
+        }
+        days = days_from_civil(y, (unsigned)f->m[r], (int)day);
+    } else if (f->kind[r] == 'J') {
+        int64_t n = f->n[r];
+        if (is_leap(y) && n >= 60) n += 1;
+        days = days_from_civil(y, 1, 1) + n - 1;
+    } else {
+        days = days_from_civil(y, 1, 1) + f->n[r];
+    }
+    int64_t local = days * 86400 + f->time[r];
+    int32_t fr;
+    if (f->frame[r] == 'u') fr = 0;
+    else if (f->frame[r] == 's') fr = f->std_off;
+    else fr = (r == 0) ? f->std_off : f->dst_off;
+    return local - fr;
+}
+
+static int tz_footer_dst_at(const tz_footer *f, int64_t t)
+{
+    if (!f->has_dst) return 0;
+    int64_t y;
+    unsigned mm, dd;
+    civil_from_days(floor_div(t + f->std_off, 86400), &y, &mm, &dd);
+    for (int64_t yy = y - 1; yy <= y + 1; yy++) {
+        int64_t s = tz_rule_utc(f, 0, yy);
+        int64_t e = tz_rule_utc(f, 1, yy);
+        int64_t end = (s < e) ? e : tz_rule_utc(f, 1, yy + 1);
+        if (s <= t && t < end) return 1;
+    }
+    return 0;
+}
+
+/* UTC offset (seconds) at UTC instant t */
+static int32_t tz_off_at(const tz_zone *z, int64_t t)
+{
+    if (z->n_trans > 0) {
+        if (t < tz_trans_at(z, 0))
+            return tz_type_off(z, z->init_type);
+        if (t < tz_trans_at(z, z->n_trans - 1)) {
+            uint32_t lo = 0, hi = z->n_trans - 1;
+            while (lo < hi) {
+                uint32_t mid = lo + (hi - lo + 1) / 2;
+                if (tz_trans_at(z, mid) <= t) lo = mid; else hi = mid - 1;
+            }
+            return tz_type_off(z, tz_trans_type(z, lo));
+        }
+    }
+    if (z->footer[0] != '\0') {
+        tz_footer f;
+        if (tz_parse_footer(z->footer, &f) == 0)
+            return tz_footer_dst_at(&f, t) ? f.dst_off : f.std_off;
+    }
+    if (z->n_trans > 0)
+        return tz_type_off(z, tz_trans_type(z, z->n_trans - 1));
+    return tz_type_off(z, z->init_type);
+}
+
+/* offset seconds -> minutes, rounded to nearest (ADR 27's documented
+ * granularity: sub-minute historical LMT offsets approximate) */
+static int tz_round_min(int32_t secs)
+{
+    return secs < 0 ? (int)-(((-secs) + 30) / 60) : (int)((secs + 30) / 60);
+}
+
+/* Local wall seconds -> UTC seconds and the offset minutes used,
+ * python-zoneinfo fold-0 semantics: a fall-back overlap resolves to
+ * the first occurrence (the pre-transition offset), a spring-forward
+ * gap maps forward using the pre-transition offset. */
+static void tz_local_to_utc(const tz_zone *z, int64_t l, int64_t *e,
+                            int *off_min)
+{
+    int64_t use; /* offset seconds */
+    if (z->n_trans == 0) {
+        /* no transitions: the footer's fixed std offset */
+        use = 0;
+        if (z->footer[0] != '\0') {
+            tz_footer f;
+            if (tz_parse_footer(z->footer, &f) == 0) use = f.std_off;
+        }
+    } else if (l < tz_trans_at(z, 0) + tz_type_off(z, z->init_type)) {
+        use = tz_type_off(z, z->init_type);
+    } else if (l >= tz_trans_at(z, z->n_trans - 1)
+                     + tz_type_off(z, tz_trans_type(z, z->n_trans - 1))) {
+        /* footer era: try the larger offset first so overlaps pick
+         * the earlier instant; gaps fall back to std */
+        int have = 0;
+        use = 0;
+        if (z->footer[0] != '\0') {
+            tz_footer f;
+            if (tz_parse_footer(z->footer, &f) == 0) {
+                have = 1;
+                use = f.std_off;
+                if (f.has_dst) {
+                    int32_t c0 = f.dst_off, c1 = f.std_off;
+                    if (c0 < c1) {
+                        int32_t sw = c0;
+                        c0 = c1;
+                        c1 = sw;
+                    }
+                    for (int i = 0; i < 2; i++) {
+                        int32_t ci = (i == 0) ? c0 : c1;
+                        if (tz_off_at(z, l - ci) == ci) {
+                            use = ci;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!have)
+            use = tz_type_off(z, tz_trans_type(z, z->n_trans - 1));
+    } else {
+        /* largest k with local_start_k <= l */
+        uint32_t lo = 0, hi = z->n_trans - 1;
+        while (lo < hi) {
+            uint32_t mid = lo + (hi - lo + 1) / 2;
+            if (tz_trans_at(z, mid)
+                + tz_type_off(z, tz_trans_type(z, mid)) <= l)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        uint32_t k = lo;
+        if (k >= 1 && l < tz_trans_at(z, k)
+                          + tz_type_off(z, tz_trans_type(z, k - 1))) {
+            use = tz_type_off(z, tz_trans_type(z, k - 1)); /* overlap */
+        } else {
+            use = tz_type_off(z, tz_trans_type(z, k)); /* normal/gap */
+        }
+    }
+    *off_min = tz_round_min((int32_t)use);
+    *e = l - (int64_t)*off_min * 60;
+}
+
+/* ---- zone arguments and the :zone option ---------------------------- */
+
+/* A zone argument: an integer is a fixed offset in minutes (the ADR
+ * 21 arithmetic path); a string or keyword is an IANA name looked up
+ * in the blob. Returns 1 (fixed, minutes in *fixed), 0 (named, *z),
+ * or throws. */
+static int time_zone_arg(mino_state *S, mino_val *v, const char *who,
+                         tz_zone *z, long long *fixed)
+{
+    if (v != NULL && mino_type_of(v) == MINO_INT) {
+        long long m;
+        if (!as_long(v, &m)) return -1;
+        if (m < TIME_OFF_MIN || m > TIME_OFF_MAX) {
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     "%s: :zone offset %lld exceeds 23:59", who, m);
+            time_throw(S, "time/field", "MTF001", msg);
+            return -1;
+        }
+        *fixed = m;
+        return 1;
+    }
+    if (v != NULL && (mino_type_of(v) == MINO_STRING
+                      || mino_type_of(v) == MINO_KEYWORD)) {
+        const char *nm;
+        size_t len;
+        if (mino_type_of(v) == MINO_STRING) {
+            nm = v->as.s.data;
+            len = v->as.s.len;
+        } else if (!mino_to_keyword(v, &nm, &len)) {
+            return -1;
+        }
+        if (tz_find(nm, len, z) != 0) {
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     "%s: unknown time zone \"%.32s\"", who, nm);
+            time_throw(S, "time/zone", "MTZ001", msg);
+            return -1;
+        }
+        return 0;
+    }
+    time_throw(S, "eval/type", "MTY001",
+               ":zone must be an offset in minutes or a zone name");
+    return -1;
+}
+
+/* Offset in minutes at instant ms for a resolved zone argument. */
+static long long time_zone_offset(const tz_zone *z, long long fixed,
+                                  int is_fixed, long long ms)
+{
+    if (is_fixed) return fixed;
+    return tz_round_min(tz_off_at(z, floor_div(ms, 1000)));
+}
+
+/* Parse an option map for {:zone ...}; only :zone is an option.
+ * Returns 1 (zone present), 0 (no zone), or throws (-1). */
+static int time_zone_opt(mino_state *S, mino_val *opts, const char *who,
+                         tz_zone *z, long long *fixed, int *is_fixed)
+{
+    size_t n, i;
+    if (opts == NULL || mino_type_of(opts) != MINO_MAP) {
+        time_throw(S, "eval/type", "MTY001",
+                   "options must be a {:zone ...} map");
+        return -1;
+    }
+    n = opts->as.map.len;
+    for (i = 0; i < n; i++) {
+        mino_val *k = vec_nth(opts->as.map.key_order, i);
+        if (k != mino_keyword(S, "zone")) {
+            const char *kd;
+            size_t klen;
+            char msg[96];
+            if (k != NULL && mino_to_keyword(k, &kd, &klen)) {
+                snprintf(msg, sizeof(msg),
+                         "%s: unknown option :%.*s (only :zone)",
+                         who, (int)klen, kd);
+            } else {
+                snprintf(msg, sizeof(msg),
+                         "%s: option keys must be keywords", who);
+            }
+            time_throw(S, "time/field", "MTF001", msg);
+            return -1;
+        }
+    }
+    {
+        mino_val *v = map_get_val(opts, mino_keyword(S, "zone"));
+        if (v == NULL || mino_is_nil(v)) return 0;
+        int r = time_zone_arg(S, v, who, z, fixed);
+        if (r < 0) return -1;
+        *is_fixed = r;
+        return 1;
+    }
+}
+
 /* ---- date parsing (spike-proven) ------------------------------------ */
 
 static int is_digit(char c) { return c >= '0' && c <= '9'; }
@@ -201,14 +735,16 @@ static const char *const k_mo[] =
    YYYY-MM-DD[Tt ]HH:MM[:SS[.frac]][Zz|+HH:MM|+-HHMM]
    Fractional seconds preserved to milliseconds (truncated past 3
    digits). sec 60 (leap second) folds to 59; 61 rejects. Years
-   1..9999 only. date_only flags a bare date. */
+   1..9999 only. date_only flags a bare date. has_off flags an
+   explicit Z or numeric offset in the input. */
 static int parse_iso8601(const char *s, int64_t *ms, int *offset_min,
-                         int *date_only, int *errpos)
+                          int *date_only, int *has_off, int *errpos)
 {
     const char *p = s;
     unsigned y, mo, d, h = 0, mi = 0, sec = 0, msec = 0;
     int off = 0;
     *date_only = 0;
+    *has_off = 0;
     if (nn(&p, 4, &y)) return perr(s, p, errpos);
     if (y < 1) return perr(s, p, errpos);
     if (*p != '-') return perr(s, p, errpos);
@@ -246,6 +782,7 @@ static int parse_iso8601(const char *s, int64_t *ms, int *offset_min,
         if (*p == 'Z' || *p == 'z') {
             p++;
             off = 0;
+            *has_off = 1;
         } else if (*p == '+' || *p == '-') {
             int sign = *p == '-' ? -1 : 1;
             p++;
@@ -259,6 +796,7 @@ static int parse_iso8601(const char *s, int64_t *ms, int *offset_min,
             }
             if (oh > 23 || om > 59) return perr(s, p, errpos);
             off = sign * (int)(oh * 60u + om);
+            *has_off = 1;
         }
         /* no offset: naive local read as UTC; offset 0 reported */
     } else {
@@ -518,8 +1056,11 @@ static int format_rfc2822(int64_t ms, int offset_min, char *buf,
 
 /* ---- format-time prim ------------------------------------------------ */
 
-/* (format-time ms fmt? offset-min?) -> string. fmt: :iso8601 (default),
- * :iso8601-date, :rfc1123, :rfc2822. */
+/* (format-time ms fmt? offset-min? | opts?) -> string. fmt: :iso8601
+ * (default), :iso8601-date, :rfc1123, :rfc2822. An argument position
+ * that would hold the fmt keyword or the offset integer instead
+ * accepts an options map {:zone z}: the zone's offset at ms renders
+ * the offset-capable forms. */
 static mino_val *prim_format_time(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
@@ -530,6 +1071,9 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
     char buf[40];
     int rc;
     char msg[80];
+    tz_zone z;
+    long long fixed = 0;
+    int is_fixed = 0, have_zone = 0;
     (void)env;
 
     if (!arg_count(S, args, &n) || n < 1 || n > 3) {
@@ -543,9 +1087,35 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
     if (!time_arg_ll(S, av[0], "format-time", "epoch-ms", &ms))
         return NULL;
     fmt = (n >= 2) ? av[1] : NULL;
-    if (n == 3 && !time_arg_ll(S, av[2], "format-time", "offset-min",
-                               &off))
-        return NULL;
+    if (fmt != NULL && mino_type_of(fmt) == MINO_MAP) {
+        int r = time_zone_opt(S, fmt, "format-time", &z, &fixed,
+                              &is_fixed);
+        if (r < 0) return NULL;
+        if (r == 1) {
+            have_zone = 1;
+            off = time_zone_offset(&z, fixed, is_fixed, ms);
+        }
+        fmt = NULL;
+    }
+    if (n == 3) {
+        if (av[2] != NULL && mino_type_of(av[2]) == MINO_MAP) {
+            int r;
+            if (have_zone) {
+                return time_throw(S, "time/field", "MTF001",
+                                  "format-time: one :zone option only");
+            }
+            r = time_zone_opt(S, av[2], "format-time", &z, &fixed,
+                              &is_fixed);
+            if (r < 0) return NULL;
+            if (r == 1) {
+                have_zone = 1;
+                off = time_zone_offset(&z, fixed, is_fixed, ms);
+            }
+        } else if (!time_arg_ll(S, av[2], "format-time", "offset-min",
+                                &off)) {
+            return NULL;
+        }
+    }
     if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
         snprintf(msg, sizeof(msg),
                  "format-time: %lld is outside years 1..9999", ms);
@@ -562,10 +1132,10 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
     } else if (fmt == mino_keyword(S, "iso8601-date")) {
         rc = format_iso8601_date(ms, (int)off, buf, sizeof(buf));
     } else if (fmt == mino_keyword(S, "rfc1123")) {
-        if (n == 3) {
+        if (n == 3 || have_zone) {
             return time_throw(S, "time/field", "MTF001",
                               "format-time: :rfc1123 is always GMT; an "
-                              "offset argument is not accepted");
+                              "offset or zone argument is not accepted");
         }
         rc = format_rfc1123(ms, buf, sizeof(buf));
     } else if (fmt == mino_keyword(S, "rfc2822")) {
@@ -586,27 +1156,76 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
     return mino_string_n(S, buf, strlen(buf));
 }
 
+/* ---- zone-offset-mins prim ------------------------------------------- */
+
+/* (zone-offset-mins zone ms) -> the zone's UTC offset in minutes at
+ * the instant. zone is an IANA name (string or keyword) or a fixed
+ * offset in minutes, which passes through unchanged. Unknown names
+ * throw :time/zone carrying the name. */
+static mino_val *prim_zone_offset_mins(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    mino_val *zv, *mv;
+    tz_zone z;
+    long long fixed = 0, ms;
+    int r;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "zone-offset-mins takes two "
+                                     "arguments");
+    }
+    zv = args->as.cons.car;
+    mv = args->as.cons.cdr->as.cons.car;
+    if (!time_arg_ll(S, mv, "zone-offset-mins", "epoch-ms", &ms))
+        return NULL;
+    if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
+        return time_throw(S, "time/range", "MTR001",
+                          "zone-offset-mins: epoch-ms outside years "
+                          "1..9999");
+    }
+    r = time_zone_arg(S, zv, "zone-offset-mins", &z, &fixed);
+    if (r < 0) return NULL;
+    return mino_int(S, time_zone_offset(&z, fixed, r, ms));
+}
+
 /* ---- parse-time prim ------------------------------------------------- */
 
-/* (parse-time s) -> {:epoch-ms :offset-min :format :date-only?} */
+/* (parse-time s opts?) -> {:epoch-ms :offset-min :format :date-only?}
+ * opts: {:zone z} interprets an offset-less input (naive datetime
+ * or date-only) as local wall time in z; an input carrying its own
+ * offset together with :zone is a :time/field conflict. */
 static mino_val *prim_parse_time(mino_state *S, mino_val *args,
                                  mino_env *env)
 {
-    mino_val *v, *keys[4], *vals[4], *m;
+    mino_val *v, *opts = NULL, *keys[4], *vals[4], *m;
     int pinned = 0;
     const char *s;
     size_t len;
     int64_t ms;
-    int off, date_only = 0, az = 0, errpos = 0;
+    int off, date_only = 0, az = 0, errpos = 0, has_off = 0;
     const char *family;
     char msg[96];
+    tz_zone z;
+    long long fixed = 0;
+    int is_fixed = 0, have_zone = 0;
     (void)env;
 
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args)
+        || (mino_is_cons(args->as.cons.cdr)
+            && mino_is_cons(args->as.cons.cdr->as.cons.cdr))) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-                                     "parse-time requires one argument");
+                                     "parse-time requires one or two "
+                                     "arguments");
     }
     v = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        opts = args->as.cons.cdr->as.cons.car;
+        have_zone = time_zone_opt(S, opts, "parse-time", &z, &fixed,
+                                  &is_fixed);
+        if (have_zone < 0) return NULL;
+    }
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "parse-time: argument must be a "
@@ -631,7 +1250,7 @@ static mino_val *prim_parse_time(mino_state *S, mino_val *args,
     if (len >= 5 && is_digit(s[0]) && is_digit(s[1]) && is_digit(s[2])
         && is_digit(s[3]) && s[4] == '-') {
         family = "ISO 8601";
-        if (parse_iso8601(s, &ms, &off, &date_only, &errpos)) {
+        if (parse_iso8601(s, &ms, &off, &date_only, &has_off, &errpos)) {
             snprintf(msg, sizeof(msg),
                      "parse-time: invalid ISO 8601 date at byte %d",
                      errpos);
@@ -641,7 +1260,8 @@ static mino_val *prim_parse_time(mino_state *S, mino_val *args,
         family = "RFC 1123/2822";
         if (parse_rfc2822(s, &ms, &off, &az, &errpos)) {
             int errpos2 = 0;
-            if (parse_iso8601(s, &ms, &off, &date_only, &errpos2) == 0) {
+            if (parse_iso8601(s, &ms, &off, &date_only, &has_off,
+                              &errpos2) == 0) {
                 family = "ISO 8601";
             } else {
                 snprintf(msg, sizeof(msg),
@@ -649,6 +1269,32 @@ static mino_val *prim_parse_time(mino_state *S, mino_val *args,
                          "byte %d", errpos);
                 return time_throw(S, "time/parse", "MTP001", msg);
             }
+        }
+    }
+
+    if (have_zone) {
+        if (has_off || family[0] == 'R') {
+            return time_throw(S, "time/field", "MTF001",
+                              "parse-time: input carries its own "
+                              "offset; :zone applies to offset-less "
+                              "inputs");
+        }
+        if (!is_fixed) {
+            int64_t local_secs = floor_div(ms, 1000);
+            int64_t msec = ms - local_secs * 1000;
+            int64_t e;
+            int offm;
+            tz_local_to_utc(&z, local_secs, &e, &offm);
+            ms = e * 1000 + msec;
+            off = offm;
+        } else {
+            off = (int)fixed;
+            ms -= (int64_t)fixed * 60000;
+        }
+        if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
+            return time_throw(S, "time/range", "MTR001",
+                              "parse-time: result outside years "
+                              "1..9999");
         }
     }
 
@@ -739,8 +1385,10 @@ static mino_val *prim_cpu_ms(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- epoch-ms <-> time map ------------------------------------------ */
 
-/* (epoch->time-map ms offset-min?) -> plain map. The map always
- * carries :offset-min so the conversion round-trips as data. */
+/* (epoch->time-map ms offset-min? | opts?) -> plain map. The map
+ * always carries :offset-min so the conversion round-trips as data.
+ * opts: {:zone z} renders at the zone's offset at that instant
+ * (z may be a fixed offset in minutes or an IANA name). */
 static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
                                         mino_env *env)
 {
@@ -751,6 +1399,9 @@ static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
     mino_val *keys[9], *vals[9], *m;
     int pinned = 0;
     char msg[80];
+    tz_zone z;
+    long long fixed = 0;
+    int is_fixed = 0;
     (void)env;
 
     if (!arg_count(S, args, &n) || n < 1 || n > 2) {
@@ -762,9 +1413,18 @@ static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
     if (n == 2) av[1] = args->as.cons.cdr->as.cons.car;
     if (!time_arg_ll(S, av[0], "epoch->time-map", "epoch-ms", &ms))
         return NULL;
-    if (n == 2 && !time_arg_ll(S, av[1], "epoch->time-map", "offset-min",
-                               &off))
-        return NULL;
+    if (n == 2) {
+        if (av[1] != NULL && mino_type_of(av[1]) == MINO_MAP) {
+            int r = time_zone_opt(S, av[1], "epoch->time-map", &z,
+                                  &fixed, &is_fixed);
+            if (r < 0) return NULL;
+            if (r == 1)
+                off = time_zone_offset(&z, fixed, is_fixed, ms);
+        } else if (!time_arg_ll(S, av[1], "epoch->time-map", "offset-min",
+                                &off)) {
+            return NULL;
+        }
+    }
     if (ms < TIME_MS_MIN || ms > TIME_MS_MAX) {
         snprintf(msg, sizeof(msg),
                  "epoch->time-map: %lld is outside years 1..9999",
@@ -847,16 +1507,30 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
     civil_tm tm;
     long long total;
     char msg[112];
+    tz_zone z;
+    long long fixed = 0;
+    int is_fixed = 0, have_zone = 0;
     (void)env;
 
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)
-        || args->as.cons.car == NULL
+    if (!mino_is_cons(args) || args->as.cons.car == NULL
         || mino_type_of(args->as.cons.car) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "time-map->epoch requires one map "
                                      "argument");
     }
     m = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val *opts;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "time-map->epoch takes one or "
+                                         "two arguments");
+        }
+        opts = args->as.cons.cdr->as.cons.car;
+        have_zone = time_zone_opt(S, opts, "time-map->epoch", &z, &fixed,
+                                  &is_fixed);
+        if (have_zone < 0) return NULL;
+    }
 
     /* unknown keys reject: every key must be one of the nine known.
      * Keywords are interned, so identity is the equality. */
@@ -950,7 +1624,23 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
         return time_throw(S, "time/field", "MTF001", msg);
     }
 
-    total = (secs_from_broken(&tm) - off * 60) * 1000 + msec;
+    if (have_zone) {
+        /* the map's fields are local wall time in the zone; :zone
+         * overrides the map's own :offset-min (the composition
+         * (time-map->epoch (epoch->time-map ms {:zone z}) {:zone z})
+         * round-trips). */
+        int64_t local_secs = secs_from_broken(&tm);
+        int64_t e;
+        int offm;
+        if (is_fixed) {
+            total = (local_secs - fixed * 60) * 1000 + msec;
+        } else {
+            tz_local_to_utc(&z, local_secs, &e, &offm);
+            total = e * 1000 + msec;
+        }
+    } else {
+        total = (secs_from_broken(&tm) - off * 60) * 1000 + msec;
+    }
     if (total < TIME_MS_MIN || total > TIME_MS_MAX) {
         snprintf(msg, sizeof(msg),
                  "time-map->epoch: result outside years 1..9999");
@@ -960,13 +1650,6 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
 }
 
 /* ---- calendar arithmetic and human diff ------------------------------- */
-
-static int64_t floor_div(int64_t a, int64_t b)
-{
-    int64_t q = a / b;
-    if ((a % b != 0) && ((a < 0) != (b < 0))) q -= 1;
-    return q;
-}
 
 /* add months with day clamping (Jan 31 + 1mo -> Feb 28/29) */
 static void add_months_civil(civil_tm *tm, long long delta)
@@ -1384,40 +2067,61 @@ const mino_prim_def k_prims_time[] = {
       "busy threads consume it twice as fast."},
     {"epoch->time-map", prim_epoch_to_time_map,
      "Converts epoch milliseconds to a plain time map {:year :month "
-      ":day :hour :min :sec :ms :wday :offset-min} with 1-based "
-      "months and :wday 0=Sunday. Optional second argument renders "
-      "the fields shifted by a fixed offset in minutes east of UTC "
-      "(the map carries :offset-min so the value round-trips). "
-      "Throws :time/range outside years 1..9999."},
+     ":day :hour :min :sec :ms :wday :offset-min} with 1-based "
+     "months and :wday 0=Sunday. Optional second argument renders "
+     "the fields shifted by a fixed offset in minutes east of UTC "
+     "(the map carries :offset-min so the value round-trips), or an "
+     "options map {:zone z} with z a fixed offset in minutes or an "
+     "IANA zone name rendered at the zone's offset at that instant "
+     "(ADR 27; the offset is minute-granular). Throws :time/range "
+     "outside years 1..9999."},
     {"time-map->epoch", prim_time_map_to_epoch,
      "Converts a time map back to epoch milliseconds. :year :month "
-      ":day are required; :hour :min :sec :ms :offset-min default to "
-      "0; :wday is optional but must match the date when present. "
-      "Strict: unknown keys, out-of-range fields, and impossible "
-      "dates (February 30th) throw :time/field rather than "
-      "normalizing silently."},
+     ":day are required; :hour :min :sec :ms :offset-min default to "
+     "0; :wday is optional but must match the date when present. "
+     "Strict: unknown keys, out-of-range fields, and impossible "
+     "dates (February 30th) throw :time/field rather than "
+     "normalizing silently. Optional second argument {:zone z} "
+     "reads the fields as local wall time in the zone (fold-0: "
+     "overlaps take the first occurrence, gaps shift forward); "
+     ":zone overrides the map's own :offset-min."},
     {"parse-time", prim_parse_time,
      "Parses a date or datetime string into {:epoch-ms :offset-min "
-      ":format :date-only?}. Accepts ISO 8601 / RFC 3339 (date-only or "
-      "datetime, T/t/space separator, optional seconds, fractional "
-      "seconds kept to milliseconds, Z/z and +HH:MM / +-HHMM offsets; "
-      "leap second 60 folds to 59) and the RFC 1123 / 2822 comma form "
-      "(optional day name, case-insensitive month and zone names, "
-      "zones GMT/UT/UTC or +-HHMM). Strict: impossible dates, "
-      "mismatched day names, named non-UTC zones, trailing junk, and "
-      "input over 64 characters throw :time/parse with the byte "
-      "position. :format reports :iso8601, :rfc1123 (alphabetic "
-      "zone), or :rfc2822 (numeric zone)."},
+     ":format :date-only?}. Accepts ISO 8601 / RFC 3339 (date-only or "
+     "datetime, T/t/space separator, optional seconds, fractional "
+     "seconds kept to milliseconds, Z/z and +HH:MM / +-HHMM offsets; "
+     "leap second 60 folds to 59) and the RFC 1123 / 2822 comma form "
+     "(optional day name, case-insensitive month and zone names, "
+     "zones GMT/UT/UTC or +-HHMM). Strict: impossible dates, "
+     "mismatched day names, named non-UTC zones, trailing junk, and "
+     "input over 64 characters throw :time/parse with the byte "
+     "position. :format reports :iso8601, :rfc1123 (alphabetic "
+     "zone), or :rfc2822 (numeric zone). Optional second argument "
+     "{:zone z} interprets an offset-less input as local wall time "
+     "in the zone (fold-0: overlaps take the first occurrence, "
+     "gaps shift forward); an input carrying its own offset plus "
+     ":zone throws :time/field."},
     {"format-time", prim_format_time,
      "Formats epoch milliseconds as a string. (format-time ms) is "
-      "ISO 8601 UTC with a Z suffix and a .SSS fraction only when "
-      "the milliseconds are nonzero. Optional fmt keyword: "
-      ":iso8601 (default), :iso8601-date (YYYY-MM-DD), :rfc1123 "
-      "(HTTP Date, always GMT, no offset argument), :rfc2822 "
-      "(numeric-offset zone). An optional final offset-min argument "
-      "renders the offset-capable forms at a fixed offset. No "
-      "pattern strings: compose custom formats from the time map "
-      "and str. Throws :time/range outside years 1..9999."},
+     "ISO 8601 UTC with a Z suffix and a .SSS fraction only when "
+     "the milliseconds are nonzero. Optional fmt keyword: "
+     ":iso8601 (default), :iso8601-date (YYYY-MM-DD), :rfc1123 "
+     "(HTTP Date, always GMT, no offset argument), :rfc2822 "
+     "(numeric-offset zone). An optional final offset-min argument "
+     "renders the offset-capable forms at a fixed offset; an "
+     "options map {:zone z} in the fmt or offset position renders "
+     "them at the zone's offset at ms (ADR 27). No "
+     "pattern strings: compose custom formats from the time map "
+     "and str. Throws :time/range outside years 1..9999."},
+    {"zone-offset-mins", prim_zone_offset_mins,
+     "Returns a zone's UTC offset in minutes at an epoch-ms "
+     "instant. The zone is an IANA name (string or keyword) or a "
+     "fixed offset in minutes, which passes through unchanged. "
+     "Named zones come from the embedded tzdata snapshot (ADR 27): "
+     "598 canonical zones, DST via transition table with the POSIX "
+     "footer governing past the last stored transition, offsets "
+     "minute-granular (sub-minute historical LMT offsets round to "
+     "the nearest minute). Unknown names throw :time/zone."},
     {"leap-year?", prim_leap_year_p,
      "True when the year is a Gregorian leap year (divisible by 4, "
       "except centuries not divisible by 400)."},

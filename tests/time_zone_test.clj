@@ -31,7 +31,8 @@
     "Australia/Lord_Howe" 1759591800000 660
     "Australia/Lord_Howe" 1775314799000 660   ; second before DST ends
     "Australia/Lord_Howe" 1775314800000 630
-    "Asia/Kathmandu"      0                345
+    "Asia/Kathmandu"      0                330   ; +05:30 until 1986
+    "Asia/Kathmandu"      1787659200000    345
     "UTC"                 0                0
     ;; fixed-offset integers pass through (the ADR 21 arithmetic path)
     -480                   0                -480
@@ -105,7 +106,11 @@
   ;; divergence from second-exact tzdata).
   (is (= {:year 1850 :month 6 :day 1 :hour 12 :min 53 :sec 0 :ms 0
           :wday 6 :offset-min 53}
-         (epoch->time-map -3773736000000 {:zone "Europe/Oslo"}))))
+         (epoch->time-map -3773736000000 {:zone "Europe/Oslo"})))
+  ;; Monrovia 1970 is LMT -00:44:30, an exact half minute: mino
+  ;; rounds half away from zero (-45) where python zoneinfo
+  ;; banker-rounds to -44; the divergence is documented and pinned.
+  (is (= -45 (zone-offset-mins "Africa/Monrovia" 0))))
 
 ;;; parse-time with :zone: naive input reads as local wall time
 
@@ -217,10 +222,11 @@
     0 345))
 
 (deftest tz-format-parse-round-trip-in-zone
+  ;; the zone-formatted string carries its own numeric offset, so the
+  ;; plain parse reads it back without needing the zone again
   (are [ms zone] (= ms (:epoch-ms
                         (parse-time (format-time ms :iso8601
-                                                 {:zone zone})
-                                    {:zone zone})))
+                                                 {:zone zone}))))
     1768478400000 "America/New_York"
     1784116800000 "Australia/Lord_Howe"
     2225966400000 "America/New_York"

@@ -122,6 +122,8 @@
                     :task mino.tasks.builtin/amalgamate}
    bearssl-amalgam {:doc "Regenerate src/vendor/bearssl/bearssl_client.c from the vendored BearSSL tree"
                     :task vendor.bearssl.tools.make-amalgam/run}
+   gen-tzdata      {:doc "Regenerate src/prim/tzdata_blob.c from the vendored zoneinfo bundle"
+                    :task vendor.tzdata.tools.gen-tzdata/run}
   examples-amalgam {:doc  "Build every examples/embed_*.c against the dist/ amalgamation"
                     :deps [build]
                     :task mino.tasks.builtin/examples-amalgam}
