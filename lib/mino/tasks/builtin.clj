@@ -110,6 +110,8 @@
         "src/prim/csv.c"
         "src/prim/toml.c"
         "src/prim/yaml.c"
+        "src/prim/html_entities.c"
+        "src/prim/html.c"
         "src/prim/digest.c"
         "src/prim/time.c"
         "src/prim/tzdata_blob.c"
