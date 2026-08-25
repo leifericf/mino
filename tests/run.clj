@@ -218,9 +218,10 @@
           "tests/yaml_perf_test"
           "tests/time_zone_test"
           "tests/template_test"
-           "tests/html_fixture_test"
-           "tests/html_test"
-           "tests/html_perf_test"
+            "tests/html_fixture_test"
+            "tests/html_test"
+            "tests/html_serialize_test"
+            "tests/html_perf_test"
            "tests/xml_fixture_test"])
 
 (def ^:private shard-cuts
@@ -228,7 +229,7 @@
    shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
    glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
    tail grows past ~5GB. The final entry must equal the file count."
-   [0 103 129 179])
+   [0 103 129 180])
 
 (let [wired (set (map #(last (str/split % #"/")) suite-files))
       unwired (sort (set/difference disk-basenames wired other-lane-files))]
