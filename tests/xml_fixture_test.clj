@@ -1,16 +1,15 @@
 (require "tests/test")
 (require '[clojure.string :as str])
+(require '[tests.xml-fixture :as xfix])
 
-;; XML fixture generator (html-xml campaign, design D9/A-6).
+;; XML fixture realism record (html-xml campaign, design D9/A-6).
 ;;
-;; Builds the megabyte-scale strict-XML mix the p5 reader gate
-;; parses: seeded arithmetic blocks (the yaml_perf_test.clj style; no
-;; runtime randomness, no committed blob). One well-formed document
-;; cycling three realistic feed shapes: maven pom modules, rss
-;; channels with entity-dense item text, and svg packs with
-;; self-closing geometry. Attributes use both quote styles, elements
-;; carry comments, and text exercises the five predefined entities
-;; plus numeric character references.
+;; The generator lives in tests/xml_fixture.clj (ns tests.xml-fixture,
+;; the tests.html-fixture precedent) so reader gates can require it
+;; standalone; this suite file owns the parser-independent realism
+;; bands and the determinism checks. The p1 generator emitted
+;; unquoted svg/catalog attribute values, which strict XML rejects;
+;; they are quoted now (the p5 discovery, pinned by the reader gate).
 ;;
 ;; Realism record (stats measured with the regex scanner in this
 ;; file over the committed generator; bands assert the same
@@ -18,112 +17,15 @@
 ;;
 ;;   metric                measured        asserted band
 ;;   -------------------   -------------   ----------------
-;;   size (chars=bytes)    1015023         950000..1050000
+;;   size (chars=bytes)    1019865         950000..1050000
 ;;   start-tag elements    20813           18500..23000
 ;;   max open depth        5               4..7
 ;;   attributes            15975           14000..18000
 ;;   entity references     10164           9000..11500
 ;;
 ;; The scanner is parser-independent (tag-shaped regex walk honoring
-;; the trailing solidus) so the bands bind at p1, before xml-parse
-;; exists; p5's perf test re-asserts reader-side shape.
-
-(defn- xml-fx-pom-block
-  [i]
-  (let [r (rem i 9)]
-    (str
-      "  <maven-project xmlns=\"http://maven.apache.org/POM/4.0.0\">\n"
-      "    <modelVersion>4.0.0</modelVersion>\n"
-      "    <groupId>io.mino.demo</groupId>\n"
-      "    <artifactId>resizer-" i "</artifactId>\n"
-      "    <version>2." r "." (rem i 20) "</version>\n"
-      "    <packaging>jar</packaging>\n"
-      "    <!-- runtime deps for module " i " -->\n"
-      "    <dependencies>\n"
-      "      <dependency>\n"
-      "        <groupId>org.webjars</groupId>\n"
-      "        <artifactId>chart-" r "</artifactId>\n"
-      "        <version>1." (rem i 30) "</version>\n"
-      "        <scope>runtime</scope>\n"
-      "      </dependency>\n"
-      "      <dependency>\n"
-      "        <groupId>io.mino</groupId>\n"
-      "        <artifactId>codec</artifactId>\n"
-      "        <version>0." (+ 10 r) "</version>\n"
-      "      </dependency>\n"
-      "    </dependencies>\n"
-      "    <properties>\n"
-      "      <max.pixels>" (+ 4096 r) "</max.pixels>\n"
-      "      <trace.enabled>" (if (even? i) "true" "false") "</trace.enabled>\n"
-      "    </properties>\n"
-      "  </maven-project>\n")))
-
-(defn- xml-fx-rss-block
-  [i]
-  (let [r (rem i 7)]
-    (str
-      "  <rss version=\"2.0\" xml:lang='en'>\n"
-      "    <channel>\n"
-      "      <title>Deps &amp; feeds, channel " i "</title>\n"
-      "      <link>https://example.invalid/feeds/" i "</link>\n"
-      "      <description>Notes &lt;b&gt;rich&lt;/b&gt; text &amp; more for feed " i "</description>\n"
-      "      <item>\n"
-      "        <title>Item &quot;" (+ 1000 i) "&quot; &#8212; update</title>\n"
-      "        <guid isPermaLink='false'>urn:item:" i ":a</guid>\n"
-      "        <pubDate>Tue, 25 Aug 2026 0" (+ 1 r) ":00:00 +0200</pubDate>\n"
-      "        <description>Price &amp; availability for &lt;code&gt;res-" i "&lt;/code&gt;: &#8364;" (+ 9 r) ",&#160;in stock</description>\n"
-      "      </item>\n"
-      "      <item>\n"
-      "        <title>Follow-up &amp; errata " r "</title>\n"
-      "        <guid isPermaLink='false'>urn:item:" i ":b</guid>\n"
-      "        <description>Terms apply&#46; See &amp; accept before use&#8230;</description>\n"
-      "      </item>\n"
-      "    </channel>\n"
-      "  </rss>\n")))
-
-(defn- xml-fx-svg-block
-  [i]
-  (let [r (rem i 8)]
-    (str
-      "  <svg-pack id=pack-" i " viewBox='0 0 100 100' xmlns=\"http://www.w3.org/2000/svg\">\n"
-      "    <g fill=\"none\" stroke='#333' stroke-width=" (+ 1 r) ">\n"
-      "      <rect x=\"5\" y=\"5\" width=\"" (+ 80 r) "\" height=\"" (+ 70 r) "\" rx=\"8\"/>\n"
-      "      <path d=\"M10 50 Q 30 " (+ 10 r) " 50 50 T 90 50\"/>\n"
-      "      <circle cx=" (+ 40 r) " cy=50 r=" (+ 20 r) "/>\n"
-      "      <use href=\"#glyph-" i "\"/>\n"
-      "      <text x=\"50\" y=\"90\" text-anchor='middle'>pack " i " &amp; glyph</text>\n"
-      "    </g>\n"
-      "    <g transform='translate(" (* 2 r) " " (* 3 r) ")'>\n"
-      "      <path d='M0 0 L10 10 Z'/>\n"
-      "      <path d='M20 0 L30 10 Z'/>\n"
-      "    </g>\n"
-      "  </svg-pack>\n")))
-
-(defn- xml-fx-block
-  [i]
-  (let [r (rem i 3)]
-    (case r
-      0 (xml-fx-pom-block i)
-      1 (xml-fx-rss-block i)
-      2 (xml-fx-svg-block i))))
-
-(defn xml-fixture-doc
-  "The megabyte-scale strict-XML pom/rss/svg mix (design D9): one
-  well-formed document, 1452 seeded-arithmetic blocks (484 cycles of
-  the three kinds) under a catalog root. Deterministic; identical on
-  every call. Reader gates (p5t4) parse exactly this string."
-  []
-  (str
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-    "<catalog kind='mix' generated-by='xml-fixture-doc' count=1452>\n"
-    (let [acc (transient [])]
-      (loop [i 0]
-        (if (= i 1452)
-          (str/join (persistent! acc))
-          (do
-            (conj! acc (xml-fx-block i))
-            (recur (inc i))))))
-    "</catalog>\n"))
+;; the trailing solidus) so the bands bind before and after the p5
+;; reader; tests/xml_perf_test.clj re-asserts reader-side shape.
 
 (def ^:private xml-fx-tag-re #"<(/?)([a-zA-Z][a-zA-Z0-9:_.-]*)[^>]*>")
 
@@ -160,7 +62,7 @@
                      (inc elems)
                      attrs'))))))))
 
-(def ^:private xml-fx-doc (xml-fixture-doc))
+(def ^:private xml-fx-doc (xfix/xml-fixture-doc))
 (def ^:private xml-fx-doc-size (count xml-fx-doc))
 
 (deftest xml-fixture-size-in-band
@@ -175,7 +77,7 @@
     (is (<= 9000 entities 11500) (str "entity density out of band: " entities))))
 
 (deftest xml-fixture-deterministic-regeneration
-  (let [b (xml-fixture-doc)]
+  (let [b (xfix/xml-fixture-doc)]
     (is (= xml-fx-doc b) "regenerating the fixture must yield the identical string")
     (is (= xml-fx-doc-size (count b)))))
 
