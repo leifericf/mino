@@ -22,7 +22,24 @@
   --color=auto default; {:force true} in the trailing opts map
   overrides it for redirects that still want the bytes. Bad style
   data throws ex-info with :kind :term/style and the offending :key;
-  bad argument shapes throw :kind :term/opts."
+  bad argument shapes throw :kind :term/opts.
+
+  Progress bars:
+
+  (term/progress {:label \"downloading\" :ratio 0.42})
+  ;; => \"downloading  42%|████████▏        |\" on a terminal
+  ;; => \"downloading  42%\" when stdout is not a terminal
+  (term/render-progress {:label \"downloading\" :ratio 0.42} 40)
+  ;; the pure render at an explicit width, gate-free
+
+  progress renders one tqdm-shaped line: label, percentage, then the
+  bar between rails, sized so the whole line fills the width (from
+  {:width n} or terminal-width). The bar fills in eighth blocks
+  (U+2588 and the U+258F..U+2589 partials). render-progress is the
+  pure data-in fn; progress is the gated shell that answers the
+  plain label-and-percentage line when stdout is not a terminal and
+  {:force true} is absent. :ratio must be a number within 0..1;
+  anything else throws :kind :term/opts."
   (:require [clojure.string :as str]))
 
 (def ^:private esc "\033")
@@ -138,3 +155,91 @@
      (if (or (= [] codes) (not (color-on? opts)))
        text
        (str (escape codes) text esc "[0m")))))
+
+;;;; progress bars
+
+(def ^:private full-block (char 0x2588))
+
+;; Index 0 is the one-eighth block; frac n takes (nth blocks (dec n)).
+(def ^:private eighth-blocks
+  [(char 0x258F) (char 0x258E) (char 0x258D) (char 0x258C)
+   (char 0x258B) (char 0x258A) (char 0x2589)])
+
+(defn- bar->parts
+  "Validated bar map -> [label ratio]."
+  [bar]
+  (when-not (map? bar)
+    (throw-opts "progress bar must be a map" bar))
+  (let [label (get bar :label)
+        ratio (get bar :ratio)]
+    (when-not (string? label)
+      (throw-opts "progress :label must be a string" bar))
+    (when-not (number? ratio)
+      (throw-opts "progress :ratio must be a number" bar))
+    (when-not (<= 0 ratio 1)
+      (throw-opts "progress :ratio must be within 0..1" bar))
+    [label ratio]))
+
+(defn- pad3
+  "n (0..100) right-aligned in three columns."
+  [n]
+  (let [s (str n)]
+    (cond
+      (= 3 (count s)) s
+      (= 2 (count s)) (str " " s)
+      :else           (str "  " s))))
+
+(defn- pct-of
+  "Percentage for a ratio; the epsilon keeps 0.42 a 42 rather than a
+  41 (0.42 is not exact in binary floating point)."
+  [ratio]
+  (int (Math/floor (+ (* 100.0 ratio) 0.000001))))
+
+(defn- label-prefix
+  [label]
+  (if (= "" label) "" (str label " ")))
+
+(defn- bar-chars
+  "n cells of bar at ratio: full blocks, one eighth-partial, spaces."
+  [n ratio]
+  (let [eighths (Math/round (* 8 n ratio))
+        full    (quot eighths 8)
+        frac    (rem eighths 8)
+        partial (if (pos? frac) (nth eighth-blocks (dec frac)) "")
+        empties (- n full (if (pos? frac) 1 0))]
+    (str (str/join (repeat full full-block))
+         partial
+         (str/join (repeat empties " ")))))
+
+(defn render-progress
+  "The pure bar renderer: bar map {:label string :ratio 0..1} and an
+  explicit total width -> the one-line string. label, percentage,
+  then the bar between rails; when the width leaves no room for even
+  one rail-to-rail cell the rails drop and the label and percentage
+  survive alone. The result fills the width exactly whenever the
+  rails are present."
+  [bar width]
+  (let [[label ratio] (bar->parts bar)]
+    (when-not (and (int? width) (<= 0 width))
+      (throw-opts "progress width must be a non-negative integer" width))
+    (let [head (str (label-prefix label) (pad3 (pct-of ratio)) "%")
+          room (- width (count head) 2)]
+      (if (< room 1)
+        head
+        (str head "|" (bar-chars room ratio) "|")))))
+
+(defn progress
+  "One tqdm-shaped progress line for bar {:label string :ratio
+  0..1}. Width comes from {:width n} in opts or terminal-width. On a
+  terminal (or with {:force true}) the answer is the shaped bar from
+  render-progress; when stdout is not a terminal the answer is the
+  plain label-and-percentage line, so piped and logged output stays
+  clean. Returns the string; printing is the caller's business."
+  ([bar] (progress bar nil))
+  ([bar opts]
+   (check-opts opts)
+   (let [[label ratio] (bar->parts bar)
+         width (or (get opts :width) (terminal-width))]
+     (if (color-on? opts)
+       (render-progress bar width)
+       (str (label-prefix label) (pad3 (pct-of ratio)) "%")))))
