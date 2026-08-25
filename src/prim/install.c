@@ -609,6 +609,11 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * clojure.zip locs, pure Clojure over the bundled zip, so it
      * registers in the floor like mino.html. */
     mino_install_mino_html_select(S, NULL);
+    /* clojure.xml bundled lib: the JVM clojure.xml mirror (ADR 28)
+     * over the floor xml-parse prim, registering in the floor like
+     * mino.html (the prim is the reader; this is sugar plus the
+     * error contract). */
+    mino_install_clojure_xml(S, NULL);
     /* mino.template bundled lib: the pure Selmer-shaped renderer,
      * so it registers in the floor like mino.yaml; render-file
      * resolves its slurp at call time. */

@@ -33,6 +33,7 @@
 #include "lib_clojure_edn.h"
 #include "lib_clojure_pprint.h"
 #include "lib_clojure_zip.h"
+#include "lib_clojure_xml.h"
 #include "lib_clojure_data.h"
 #include "lib_clojure_data_json.h"
 #include "lib_clojure_data_csv.h"
@@ -123,6 +124,15 @@ void mino_install_clojure_zip(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.zip", lib_clojure_zip_src);
+}
+
+/* clojure.xml: the JVM mirror over the floor xml-parse prim, so it
+ * registers in the floor like mino.html (pure sugar; the prim is
+ * the reader). */
+void mino_install_clojure_xml(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.xml", lib_clojure_xml_src);
 }
 
 void mino_install_clojure_data(mino_state *S, mino_env *env)

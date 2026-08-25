@@ -1,6 +1,8 @@
 (require "tests/test")
 (require '[clojure.string :as str])
 (require '[clojure.edn :as edn])
+(require '[clojure.xml :as xml])
+(require '[clojure.test.junit :as junit])
 
 ;; Strict XML reader tests (html-xml campaign p5, ADR 28).
 ;;
@@ -326,5 +328,113 @@
     (is (= 2 (nth r 2)))
     (is (= 4 (nth r 3)))
     (is (= "<b></c>" (nth r 4)))))
+
+;;; ---- the clojure.xml mirror (p5t3) ----
+
+(defn- xml-facade-err-data
+  [thunk]
+  (try (thunk) :no-throw (catch e (ex-data e))))
+
+;; The facade converts the descriptor to positioned ex-info in the
+;; yaml reader contract (:kind/:code/:location/:text).
+(deftest xml-facade-positioned-ex-info
+  (let [d (xml-facade-err-data #(xml/parse "<a>&nbsp;</a>"))]
+    (is (map? d))
+    (is (= :xml/parse (:kind d)))
+    (is (= :undefined-entity (:code d)))
+    (is (= {:line 1 :col 4} (:location d)))
+    (is (string? (:text d))))
+  (let [d (xml-facade-err-data #(xml/parse "<a/>\n<b/>"))]
+    (is (= :multiple-roots (:code d)))
+    (is (= {:line 2 :col 1} (:location d))))
+  (let [d (xml-facade-err-data
+            #(xml/parse "<!DOCTYPE a [<!ENTITY e \"x\">]><a/>"))]
+    (is (= :unsupported-doctype (:code d)))))
+
+;; Divergence (AC-5): parse takes a STRING first (the JVM surface is
+;; File/InputStream/URI); opts are keyword maps, reserved in v1.
+(deftest xml-facade-string-first-surface
+  (is (map? (xml/parse "<a/>")))
+  (is (map? (xml/parse "<a/>" nil)))
+  (is (map? (xml/parse "<a/>" {})))
+  (is (= :xml/opts (:kind (xml-facade-err-data #(xml/parse 5))))
+      "input must be a string")
+  (is (= :xml/opts (:kind (xml-facade-err-data #(xml/parse "<a/>" :nope))))
+      "opts must be a map"))
+
+;; Divergence (AC-5): parse returns the root element map directly,
+;; the JVM node shape without :type; attrs values are strings.
+(deftest xml-facade-jvm-node-shape
+  (let [t (xml/parse "<catalog kind=\"mix\" count=\"1452\"/>")]
+    (is (map? t))
+    (is (false? (contains? t :type)))
+    (is (= :catalog (:tag t)))
+    (is (= {:kind "mix" :count "1452"} (:attrs t)))
+    (is (= [] (:content t)))
+    (is (string? (:kind (:attrs t))))))
+
+;;; ---- A-7: the junit parse-back proof (the in-repo customer) ----
+
+(defn- xml-junit-probe-ns!
+  "A scratch namespace with one passing and one failing test var
+  (the test_tap_junit_test pattern; the probes never register with
+  this file's suite)."
+  []
+  (when (find-ns 'xj.probe) (remove-ns 'xj.probe))
+  (create-ns 'xj.probe)
+  (let [pv (intern 'xj.probe 'probe-pass (fn [] (is (= 1 1))))
+        fv (intern 'xj.probe 'probe-fail (fn [] (is (= 1 2))))]
+    (alter-meta! pv assoc :test (var-get pv))
+    (alter-meta! fv assoc :test (var-get fv))
+    [pv fv]))
+
+(defn- xml-junit-run
+  "The captured clojure.test.junit emitter output for both probes
+  inside one testsuite bracket."
+  []
+  (let [[pv fv] (xml-junit-probe-ns!)]
+    (with-out-str
+      (binding [*test-out*        *out*
+                *report-counters* (atom *initial-report-counters*)]
+        (junit/with-junit-output
+          (do (do-report {:type :begin-test-ns :ns 'xj.probe})
+              (test-var pv)
+              (test-var fv)
+              (do-report {:type :end-test-ns :ns 'xj.probe})))))))
+
+;; A-7: clojure.xml/parse round-trips clojure.test.junit's emitter
+;; output: the declaration parses, the testsuites tree comes back in
+;; the JVM shape, counts are string attribute values, the passing
+;; case is self-closed, and the failing case carries a nested
+;; failure element whose escaped message and detail text decode.
+(deftest xml-junit-emit-round-trips-through-parse
+  (let [doc (xml-junit-run)
+        tree (xml/parse doc)
+        els (fn [content] (filterv map? content))
+        suite (first (els (:content tree)))
+        cases (els (:content suite))
+        fail-case (second cases)
+        failure (first (els (:content fail-case)))]
+    (is (str/starts-with? doc "<?xml version=\"1.0\""))
+    (is (= :testsuites (:tag tree)))
+    ;; the emitter's newlines are character data inside the root and
+    ;; stay verbatim string children (only whitespace OUTSIDE the
+    ;; root drops)
+    (is (= ["\n" "\n"] (filterv string? (:content tree))))
+    (is (= :testsuite (:tag suite)))
+    (is (= {:name     "xj.probe"
+            :tests    "2"
+            :failures "1"
+            :errors   "0"}
+           (:attrs suite)))
+    (is (= 2 (count cases)))
+    (is (= :testcase (:tag (first cases))))
+    (is (= "probe-pass" (:name (:attrs (first cases)))))
+    (is (= [] (:content (first cases))))
+    (is (= "probe-fail" (:name (:attrs fail-case))))
+    (is (= :failure (:tag failure)))
+    (is (= "assertion failed" (:message (:attrs failure))))
+    (is (str/includes? (first (filterv string? (:content failure)))
+                       "expected:"))))
 
 (run-tests-and-exit)

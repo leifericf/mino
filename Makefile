@@ -75,6 +75,7 @@ BUNDLED = \
     lib_clojure_edn:lib/clojure/edn.clj \
     lib_clojure_pprint:lib/clojure/pprint.clj \
     lib_clojure_zip:lib/clojure/zip.clj \
+    lib_clojure_xml:lib/clojure/xml.clj \
     lib_clojure_data:lib/clojure/data.clj \
     lib_clojure_data_json:lib/clojure/data/json.clj \
     lib_clojure_data_csv:lib/clojure/data/csv.clj \
