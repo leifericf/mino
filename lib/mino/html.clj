@@ -5,6 +5,7 @@
   (html/parse \"<p>hello\")                ; => the document node map
   (html/parse-fragment \"<p>a<p>b\")       ; => [node node]
   (html/to-html (html/parse \"<p>x\"))     ; => \"<html>...</html>\"
+  (html/as-hiccup (html/parse \"<p>x\"))   ; => hiccup vectors
 
   Nodes are plain maps: elements {:type :element :tag keyword
   :attrs {keyword string} :content [node|string]} with lowercase tag
@@ -283,3 +284,118 @@
    (when-not (or (nil? opts) (map? opts))
      (throw-opts "to-html opts must be a map" opts))
    (html-serialize node)))
+
+;;; ---- as-hiccup (p6t1; hickory.convert/hickory-to-hiccup shape) ----
+
+(def ^:private hiccup-text-re #"[&<>\"]")
+(def ^:private hiccup-text-esc
+  {"&" "&amp;" "<" "&lt;" ">" "&gt;" "\"" "&quot;"})
+
+(def ^:private hiccup-unescapable
+  "Tags whose content stays verbatim in the hiccup output (hickory's
+  unescapable-content set: RAWTEXT elements; parse kept their
+  interiors raw, so no escaping may touch them)."
+  #{:script :style})
+
+(defn- hiccup-escape
+  "hickory's html-escape spelling for text: amp lt gt quot."
+  [s]
+  (if (re-find hiccup-text-re s)
+    (str/replace s hiccup-text-re hiccup-text-esc)
+    s))
+
+(defn- as-hiccup-node
+  "One node to hiccup. Strings (text) escape; elements become
+  [tag attrs children...] with the attrs map always present (hickory
+  emits {} for attribute-less elements); documents become a vector
+  of converted children; comments and document-types become their
+  literal source strings."
+  [x]
+  (cond
+    (string? x)
+    (hiccup-escape x)
+
+    (map? x)
+    (let [typ (:type x)]
+      (cond
+        (= :element typ)
+        (let [tag (:tag x)
+              attrs (into {} (:attrs x))]
+          (if (contains? hiccup-unescapable tag)
+            (do
+              (doseq [c (:content x)]
+                (when-not (string? c)
+                  (throw-opts
+                    (str "as-hiccup raw-text children must be strings: "
+                         tag)
+                    c)))
+              (apply vector tag attrs (:content x)))
+            (apply vector tag attrs (mapv as-hiccup-node (:content x)))))
+
+        (= :document typ)
+        (mapv as-hiccup-node (:content x))
+
+        (= :comment typ)
+        (str "<!--" (or (first (:content x)) "") "-->")
+
+        (= :document-type typ)
+        (str "<!DOCTYPE " (or (first (:content x)) "") ">")
+
+        (nil? typ)
+        ;; the shared JVM clojure.xml element shape, the to-html
+        ;; input-domain symmetry
+        (if (contains? x :tag)
+          (let [tag (:tag x)
+                attrs (into {} (:attrs x))]
+            (if (contains? hiccup-unescapable tag)
+              (do
+                (doseq [c (or (:content x) [])]
+                  (when-not (string? c)
+                    (throw-opts
+                      (str "as-hiccup raw-text children must be strings: "
+                           tag)
+                      c)))
+                (apply vector tag attrs (or (:content x) [])))
+              (apply vector tag attrs
+                     (mapv as-hiccup-node (or (:content x) [])))))
+          (throw-opts "as-hiccup requires a node with :type or :tag" x))
+
+        :else (throw-opts "as-hiccup got an unknown node :type" typ)))
+
+    (sequential? x)
+    (mapv as-hiccup-node x)
+
+    :else (throw-opts "as-hiccup requires a node" x)))
+
+(defn as-hiccup
+  "Converts node to hiccup vectors, directly, with no reparse (the
+  hickory.convert/hickory-to-hiccup contract, FR-10).
+
+  (html/as-hiccup (html/parse \"<p>x\"))
+  => [[:html {} [:head {}] [:body {} [:p {} \"x\"]]]]
+
+  An element becomes [tag attrs children...]: tag a keyword, attrs
+  the {keyword string} map ALWAYS present ({} when the element has
+  no attributes, as hickory emits), children converted in order. A
+  document node becomes a vector of its converted children. Text
+  strings escape amp, lt, gt, and quot (hickory's html-escape), so
+  a raw hiccup renderer reproduces the text. A comment becomes the
+  literal string \"<!--content-->\"; a document-type becomes the
+  literal string \"<!DOCTYPE ...>\" -- the same bytes to-html emits
+  (the one divergence from hickory, which renders doctypes from
+  structured :name/:publicid/:systemid attrs; mino nodes carry the
+  raw doctype text per ADR 28). script and style content is verbatim
+  (parse kept their interiors raw) and a non-string child under them
+  throws ex-info :kind :html/opts, as hickory errors on the same
+  shape.
+
+  node may be any to-html input: a node map, a bare string (escaped
+  text), or a sequential collection (each element converted; a
+  parse-fragment vector becomes a vector of hiccup forms). The
+  reverse direction (hiccup -> node) stays out until asked for.
+  opts is a keyword map, reserved and accepted but ignored in v1."
+  ([node] (as-hiccup node nil))
+  ([node opts]
+   (when-not (or (nil? opts) (map? opts))
+     (throw-opts "as-hiccup opts must be a map" opts))
+   (as-hiccup-node node)))
