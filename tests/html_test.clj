@@ -111,9 +111,10 @@
   "The ledgered divergence classes the p2 comparison must not apply
   python expectations for: raw-text scope wider than the tier
   (ledger 8), NUL in text (ledger 9), semicolonless attribute
-  entities (ledger 4), non-CDATA marked sections (ledger 6
-  reconstruction), and the rule 15/16 tier triggers (ledger 12).
-  Oracle-skipped vectors carry no :events at all."
+  entities (ledger 4), marked sections whose oracle reconstruction
+  differs from the bogus-comment span (ledger 6), and the rule 15/16
+  tier triggers (ledger 12). Oracle-skipped vectors carry no :events
+  at all."
   [v]
   (let [input (:input v)]
     (or (not (contains? v :events))
@@ -124,8 +125,7 @@
         (boolean (re-find
                    #"<[a-zA-Z/][^>]*&[a-zA-Z][a-zA-Z0-9]*[^;a-zA-Z0-9]"
                    input))
-        (and (re-find #"<!\[" input)
-             (not (re-find #"(?i)<!\[CDATA\[" input)))
+        (boolean (re-find #"<!\[" input))
         (html-golden-tier-trigger? input))))
 
 (defn- html-golden-kw-node
@@ -203,7 +203,7 @@
   (is (= [(html-el :circle {:cx "5"} [])]
          (html/parse-fragment "<circle cx=\"5\"/>")))
   ;; solidus inside an unquoted value is value bytes, not a close
-  (is (= [(html-el :a {:href "x/"} []) "y"]
+  (is (= [(html-el :a {:href "x/"} ["y"])]
          (html/parse-fragment "<a href=x/>y"))))
 
 ;; Rule 6: attribute forms, duplicates keep the first, valueless
@@ -249,10 +249,14 @@
   (is (= ["\uFFFD"] (html/parse-fragment "&#xD800;")))
   (is (= ["\uFFFD"] (html/parse-fragment "&#x110000;")))
   (is (= ["\u20AC"] (html/parse-fragment "&#0128;")))
-  ;; attribute context: semicolon required for names
-  (is (= [(html-el :p {:title "¬x"} [])]
-         (html/parse-fragment "<p title=&not;x>")))
-  (is (= [(html-el :p {:title "&not;"} [])]
+  ;; attribute context: names decode only when semicolon-terminated
+  ;; (the ledger-4 divergence; python decodes some semicolonless
+  ;; legacy forms there)
+  (is (= [(html-el :p {:title "&not x"} [])]
+         (html/parse-fragment "<p title=\"&not x\">")))
+  (is (= [(html-el :p {:title "&notx"} [])]
+         (html/parse-fragment "<p title=&notx>")))
+  (is (= [(html-el :p {:title "\u00AC"} [])]
          (html/parse-fragment "<p title=\"&not;\">")))
   (is (= [(html-el :p {:a "A&B"} [])]
          (html/parse-fragment "<p a=\"&#65;&amp;B\">"))))
@@ -308,12 +312,14 @@
 ;; Rule 15: like-tag implied closes bounded by scope barriers
 ;; (table td th caption template html).
 (deftest html-tier-like-tag-implied-close
+  ;; like-tag closes are literal: dt closes dt, dd closes dd (the
+  ;; tier's simplified rule, not WHATWG's dt/dd cross-close)
+  (is (= [(html-el :dl
+                   [(html-el :dt ["a" (html-el :dd ["x"])])
+                    (html-el :dt ["b" (html-el :dd ["y"])])])]
+         (html/parse-fragment "<dl><dt>a<dd>x<dt>b<dd>y")))
   (is (= [(html-el :ul [(html-el :li ["a"]) (html-el :li ["b"])])]
          (html/parse-fragment "<ul><li>a<li>b</ul>")))
-  (is (= [(html-el :dl
-                   [(html-el :dt ["a"]) (html-el :dd ["x"])
-                    (html-el :dt ["b"]) (html-el :dd ["y"])])]
-         (html/parse-fragment "<dl><dt>a<dd>x<dt>b<dd>y")))
   ;; table is a barrier: the second p nests, it does not close the
   ;; outer p (and the first p was closed by table per rule 16)
   (is (= [(html-el :p ["1"])
@@ -424,12 +430,13 @@
                             [(html-el :head)
                              (html-el :body [(html-el :p ["x"])])]))
          (html/parse "<!--c--><p>x")))
-  ;; a title in the head phase is RCDATA and stays in head
+  ;; a title in the head phase is RCDATA; a heading after it starts
+  ;; the body
   (is (= (html-doc
            (html-el :html
                     [(html-el :head [(html-el :title ["t"])])
                      (html-el :body [(html-el :h1 ["x"])])]))
-         (html/parse "<title>t<h1>x"))))
+         (html/parse "<title>t</title><h1>x"))))
 
 (deftest html-fragment-never-synthesizes
   (is (= [(html-el :p ["x"])] (html/parse-fragment "<p>x")))
@@ -443,17 +450,19 @@
 (defn- html-deep-open [n] (str/join (repeat n "<div>")))
 
 (defn- html-err-data
-  [f s]
-  (try (f s) :no-throw (catch e (ex-data e))))
+  [thunk]
+  (try (thunk) :no-throw (catch e (ex-data e))))
 
 ;; Rule 14: open-element depth beyond 256 throws :max-depth with a
 ;; position. 255 open parses; 257 throws (A-2 boundary pins).
 (deftest html-error-max-depth-boundary
   (let [ok255 (html/parse-fragment (html-deep-open 255))]
     (is (vector? ok255))
-    (is (= 255 (loop [n (nth ok255 0) d 0]
-                 (if (map? n) (recur (nth (:content n) 0) (inc d)) d)))))
-  (let [d (html-err-data html/parse-fragment (html-deep-open 257))]
+    (is (= 255 (loop [n (nth ok255 0) d 1]
+                 (if (and (map? n) (seq (:content n)))
+                   (recur (nth (:content n) 0) (inc d))
+                   d)))))
+  (let [d (html-err-data #(html/parse-fragment (html-deep-open 257)))]
     (is (map? d))
     (is (= :html/parse (:kind d)))
     (is (= :max-depth (:code d)))
@@ -482,7 +491,7 @@
 
 ;; Divergence: positioned ex-info where hickory never throws.
 (deftest html-surface-positioned-ex-info
-  (let [d (html-err-data html/parse (html-deep-open 300))]
+  (let [d (html-err-data #(html/parse (html-deep-open 300)))]
     (is (map? d))
     (is (= :html/parse (:kind d)))
     (is (contains? d :location))))
