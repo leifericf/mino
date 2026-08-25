@@ -1,11 +1,16 @@
 /*
- * html.c -- native HTML reader, tolerant mode (ADR 28).
+ * html.c -- native HTML/XML reader, two modes over one core (ADR 28).
  *
  * Single-pass byte-cursor tokenizer and tree assembler backing the
  * html-parse prim (the mino.html facade rides it): hickory-shaped
  * node maps {:type :element|:comment|:document-type :tag :attrs
  * :content} constructed directly in C in the json.c/toml.c lineage;
- * no event objects cross the boundary.
+ * no event objects cross the boundary. The xml-parse prim (the
+ * clojure.xml mirror rides it) runs the strict mode over the same
+ * machinery: JVM clojure.xml nodes without :type, the strict
+ * entity rule (five predefined plus numeric only, D3), CDATA
+ * capture, mandatory attribute quoting, single-root and prolog
+ * checks, and its own positioned error classes.
  *
  * The tolerance tier is the enumerated set pinned in the campaign's
  * technical design: unclosed tags auto-balance at EOF, stray end
@@ -80,6 +85,15 @@ typedef struct {
     unsigned char       *pend_buf; /* NULL until a </> splits a run */
     size_t               pend_cap;
     size_t               pend_w;
+    /* XML mode state (ADR 28: one core, two modes). pend_buf is
+     * reused as the XML character-data carry (pend_w its length);
+     * the html pending fields above are untouched in XML mode.
+     * seen_doctype is shared: the html rule-10 flag and the xml
+     * one-doctype rule never run in the same parse. */
+    int                  xml;
+    int                  seen_root;
+    const unsigned char *xml_start; /* doc start after BOM strip */
+    mino_val            *xml_root;  /* the root element node */
 } hp_t;
 
 static int hp_run(hp_t *h);
@@ -1527,6 +1541,881 @@ static int hp_run(hp_t *h)
     return 0;
 }
 
+/* ---- XML mode (ADR 28: one core, two modes; the strict delta) ----
+ *
+ * xml-parse over the shared machinery: case-sensitive names, the
+ * five predefined entities plus numeric references only (D3), CDATA
+ * capture with comments/PIs/doctype dropped at the tree, mandatory
+ * attribute quoting with 3.3.3 whitespace normalization, single
+ * root and prolog checks, no implied closes, the shared 256-deep
+ * cap. Errors carry byte positions at the failing token (design
+ * D11: the failing byte, never python's event boundaries).
+ */
+
+static int hp_xml_run(hp_t *h);
+
+/* XML whitespace: exactly space, tab, CR, LF (no \f). */
+static int hp_x_ws(unsigned char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+/* Simplified XML NameStartChar: letters, '_', ':', and any
+ * non-ASCII byte (the full production's exotic exclusions are not
+ * policed; the JVM qname behavior this mirrors does not care). */
+static int hp_x_name_start(unsigned char c)
+{
+    if (hp_is_alpha(c) || c == '_' || c == ':') return 1;
+    return c >= 0x80;
+}
+
+static int hp_x_name_char(unsigned char c)
+{
+    if (hp_x_name_start(c)) return 1;
+    if (hp_is_digit(c)) return 1;
+    return c == '-' || c == '.';
+}
+
+/* Case-preserving keyword from a raw span; a QName's first colon
+ * splits into namespace and name (the JVM (keyword "ns:name")
+ * behavior, so :dc/creator from "dc:creator"). A colon at either
+ * end stays flat. */
+static mino_val *xp_name_keyword(hp_t *h, const unsigned char *s,
+                                 size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        if (s[i] == ':') break;
+    }
+    if (i == 0 || i >= len) {
+        return mino_keyword_n(h->S, (const char *)s, len);
+    }
+    return mino_keyword_ns_n(h->S, (const char *)s, i,
+                             (const char *)s + i + 1, len - i - 1);
+}
+
+/* Fail with the error position at tok: line counters advance only
+ * up to tok so multi-line constructs report the failing byte's own
+ * line and column. */
+static void xp_fail(hp_t *h, const char *code,
+                    const unsigned char *tok)
+{
+    if (!h->failed) {
+        const unsigned char *q = h->synced;
+        while (q < tok) {
+            if (*q == '\n') {
+                h->line++;
+                h->line_start = q + 1;
+            }
+            q++;
+        }
+        h->synced = q;
+        h->failed = 1;
+        h->err_code = code;
+        h->err_line = h->line;
+        h->err_col = (size_t)(tok - h->line_start) + 1;
+        h->err_tok = tok;
+    }
+}
+
+/* The five predefined entities (design D3), ';' included in the
+ * pattern so the semicolon stays mandatory. */
+static const struct { const char *name; const char *value; }
+    k_xp_ents[5] = {
+        {"amp;", "&"}, {"lt;", "<"}, {"gt;", ">"},
+        {"quot;", "\""}, {"apos;", "'"},
+};
+
+/* Decode the reference at *pp (the '&') under the strict rule.
+ * Returns the UTF-8 byte count written to out (max 4) and advances
+ * *pp past the ';', or -1 with the error set at the '&'. */
+static long xp_ref(hp_t *h, const unsigned char **pp,
+                   const unsigned char *to, unsigned char *out)
+{
+    const unsigned char *r = *pp + 1;
+    size_t i;
+    if (r >= to || to - r < 2) {
+        xp_fail(h, "undefined-entity", *pp);
+        return -1;
+    }
+    if (*r == '#') {
+        const unsigned char *d = r + 1;
+        int hex = 0;
+        unsigned long cp = 0;
+        int ndig = 0;
+        if (*d == 'x') {
+            hex = 1;
+            d++;
+        }
+        while (d < to) {
+            int dv = hex ? hp_hex_val(*d)
+                         : (hp_is_digit(*d) ? *d - '0' : -1);
+            if (dv < 0) break;
+            if (cp <= 0x10FFFF) {
+                cp = cp * (unsigned long)(hex ? 16 : 10)
+                     + (unsigned long)dv;
+            }
+            ndig++;
+            d++;
+        }
+        /* Semicolon mandatory; 'X' is not a hex marker (XML 1.0). */
+        if (ndig == 0 || d >= to || *d != ';') {
+            xp_fail(h, "undefined-entity", *pp);
+            return -1;
+        }
+        /* XML Char policing: #x9 #xA #xD, #x20-#xD7FF,
+         * #xE000-#xFFFD, #x10000-#x10FFFF. */
+        if (!((cp == 0x9 || cp == 0xA || cp == 0xD)
+              || (cp >= 0x20 && cp <= 0xD7FF)
+              || (cp >= 0xE000 && cp <= 0xFFFD)
+              || (cp >= 0x10000 && cp <= 0x10FFFF))) {
+            xp_fail(h, "undefined-entity", *pp);
+            return -1;
+        }
+        *pp = d + 1;
+        return (long)hp_utf8(cp, out);
+    }
+    for (i = 0; i < 5; i++) {
+        size_t n = strlen(k_xp_ents[i].name);
+        const char *v = k_xp_ents[i].value;
+        size_t vl = strlen(v);
+        if ((size_t)(to - r) >= n
+            && memcmp(r, k_xp_ents[i].name, n) == 0) {
+            memcpy(out, v, vl);
+            *pp = r + n;
+            return (long)vl;
+        }
+    }
+    xp_fail(h, "undefined-entity", *pp);
+    return -1;
+}
+
+/* Append bytes to the pending character-data carry. */
+static int xp_put(hp_t *h, const unsigned char *from, size_t n)
+{
+    if (n == 0) return 0;
+    if (hp_pend_grow(h, h->pend_w + n) != 0) return -1;
+    memcpy(h->pend_buf + h->pend_w, from, n);
+    h->pend_w += n;
+    return 0;
+}
+
+/* Append a verbatim span with line-ending normalization (CR LF and
+ * lone CR to LF; XML 2.11, CDATA included). */
+static int xp_put_raw_cr(hp_t *h, const unsigned char *from,
+                         const unsigned char *to)
+{
+    while (from < to) {
+        const unsigned char *q = from;
+        while (q < to && *q != '\r') q++;
+        if (xp_put(h, from, (size_t)(q - from)) != 0) return -1;
+        if (q >= to) break;
+        if (xp_put(h, (const unsigned char *)"\n", 1) != 0) return -1;
+        from = q + 1;
+        if (from < to && *from == '\n') from++;
+    }
+    return 0;
+}
+
+/* Decode one text span into the pending carry: strict references,
+ * line-ending normalization, NUL and the literal ]]> rejected. */
+static int xp_decode_span(hp_t *h, const unsigned char *from,
+                          const unsigned char *to)
+{
+    const unsigned char *r = from;
+    while (r < to) {
+        unsigned char c = *r;
+        if (c == '&') {
+            unsigned char ent[4];
+            long n = xp_ref(h, &r, to, ent);
+            if (n < 0) return -1;
+            if (xp_put(h, ent, (size_t)n) != 0) return -1;
+        } else if (c == '\r') {
+            if (xp_put(h, (const unsigned char *)"\n", 1) != 0) {
+                return -1;
+            }
+            r++;
+            if (r < to && *r == '\n') r++;
+        } else if (c == 0) {
+            xp_fail(h, "unexpected-token", r);
+            return -1;
+        } else {
+            const unsigned char *q = r;
+            while (q < to && *q != '&' && *q != '\r' && *q != 0
+                   && *q != ']') {
+                q++;
+            }
+            if (q < to && *q == ']') {
+                /* ']' is data unless it starts ]]>; the span ends
+                 * at '<' so a ]]> can never straddle the boundary */
+                if (to - q >= 3 && q[1] == ']' && q[2] == '>') {
+                    xp_fail(h, "unexpected-token", q);
+                    return -1;
+                }
+                q++; /* this one ']' is data */
+            }
+            if (xp_put(h, r, (size_t)(q - r)) != 0) return -1;
+            r = q;
+        }
+    }
+    return 0;
+}
+
+/* Materialize the pending character-data carry as one string child
+ * (the oracle merges text, CDATA, comments, and PIs into one run). */
+static int xp_flush(hp_t *h)
+{
+    mino_state *S = h->S;
+    mino_val *s;
+    int saved;
+    if (h->pend_w == 0) return 0;
+    saved = mino_current_ctx(S)->gc_depth;
+    mino_current_ctx(S)->gc_depth = saved + 1;
+    s = mino_string_n(S, (const char *)h->pend_buf, h->pend_w);
+    mino_current_ctx(S)->gc_depth = saved;
+    h->pend_w = 0;
+    if (s == NULL) return -1;
+    return hp_add_child(h, s);
+}
+
+/* Close the top element as a JVM clojure.xml node (no :type). */
+static int hp_xml_pop(hp_t *h)
+{
+    mino_state *S = h->S;
+    hp_open_t *o;
+    mino_val *content;
+    mino_val *keys[3];
+    mino_val *vals[3];
+    mino_val *node;
+    if (xp_flush(h) != 0) return -1;
+    h->depth--;
+    o = &h->stack[h->depth];
+    content = mino_persistent(S, o->acc);
+    if (content == NULL) return -1;
+    keys[0] = hp_kw_tag(h);
+    keys[1] = hp_kw_attrs(h);
+    keys[2] = hp_kw_content(h);
+    vals[0] = o->tag;
+    vals[1] = o->attrs;
+    vals[2] = content;
+    node = mino_map(S, keys, vals, 3);
+    if (node == NULL) return -1;
+    if (hp_add_child(h, node) != 0) return -1;
+    if (h->depth == 0) {
+        h->xml_root = node;
+    }
+    return 0;
+}
+
+/* assoc with duplicate detection (strict XML has no keep-first). */
+static int xp_assoc_attr(hp_t *h, mino_val **attrs, mino_val *k,
+                         mino_val *v, const unsigned char *name_pos)
+{
+    mino_state *S = h->S;
+    mino_val *tr;
+    mino_val *tr2;
+    mino_val *p;
+    if (map_get_val(*attrs, k) != NULL) {
+        xp_fail(h, "duplicate-attribute", name_pos);
+        return -1;
+    }
+    tr = mino_transient(S, *attrs);
+    if (tr == NULL) return -1;
+    tr2 = mino_assoc_bang(S, tr, k, v);
+    if (tr2 == NULL) return -1;
+    p = mino_persistent(S, tr2);
+    if (p == NULL) return -1;
+    *attrs = p;
+    return 0;
+}
+
+/* Decode a quoted attribute-value span: strict references; literal
+ * tab, LF, and CR (CR LF together) become one space each (XML 1.0
+ * 3.3.3 CDATA-type normalization); character references pass
+ * through verbatim. */
+static mino_val *xp_attr_value(hp_t *h, const unsigned char *from,
+                               const unsigned char *to)
+{
+    mino_state *S = h->S;
+    size_t cap = (size_t)(to - from) + 16;
+    unsigned char *buf;
+    size_t w = 0;
+    int saved = mino_current_ctx(S)->gc_depth;
+    mino_val *out;
+    const unsigned char *r = from;
+    mino_current_ctx(S)->gc_depth = saved + 1;
+    buf = (unsigned char *)gc_alloc_typed_inner(S, GC_T_RAW, cap);
+    if (buf == NULL) {
+        mino_current_ctx(S)->gc_depth = saved;
+        return NULL;
+    }
+    while (r < to) {
+        unsigned char c = *r;
+        if (c == '&') {
+            unsigned char ent[4];
+            long n = xp_ref(h, &r, to, ent);
+            if (n < 0) {
+                mino_current_ctx(S)->gc_depth = saved;
+                return NULL;
+            }
+            memcpy(buf + w, ent, (size_t)n);
+            w += (size_t)n;
+        } else if (c == ' ' || c == '\t' || c == '\n') {
+            buf[w++] = ' ';
+            r++;
+        } else if (c == '\r') {
+            buf[w++] = ' ';
+            r++;
+            if (r < to && *r == '\n') r++;
+        } else {
+            const unsigned char *q = r;
+            while (q < to && *q != '&' && *q != ' ' && *q != '\t'
+                   && *q != '\n' && *q != '\r') {
+                q++;
+            }
+            memcpy(buf + w, r, (size_t)(q - r));
+            w += (size_t)(q - r);
+            r = q;
+        }
+    }
+    out = mino_string_n(S, (const char *)buf, w);
+    mino_current_ctx(S)->gc_depth = saved;
+    return out;
+}
+
+/* A strict start tag at '<'. */
+static int hp_xml_start_tag(hp_t *h)
+{
+    const unsigned char *ts = h->p;
+    const unsigned char *ns;
+    size_t nlen;
+    mino_val *tag;
+    mino_val *attrs;
+    int self_close = 0;
+    h->p++;
+    ns = h->p;
+    while (h->p < h->end && hp_x_name_char(*h->p)) {
+        h->p++;
+    }
+    nlen = (size_t)(h->p - ns);
+    tag = xp_name_keyword(h, ns, nlen);
+    if (tag == NULL) return -1;
+    attrs = hp_empty_map(h);
+    if (attrs == NULL) return -1;
+    for (;;) {
+        const unsigned char *ans;
+        const unsigned char *name_end;
+        mino_val *akw;
+        if (h->p >= h->end) {
+            xp_fail(h, "unexpected-eof", h->end);
+            return -1;
+        }
+        if (hp_x_ws(*h->p)) {
+            h->p++;
+            continue;
+        }
+        if (*h->p == '>') {
+            h->p++;
+            break;
+        }
+        if (*h->p == '/') {
+            if (h->p + 1 < h->end && h->p[1] == '>') {
+                self_close = 1;
+                h->p += 2;
+                break;
+            }
+            xp_fail(h, "unexpected-token", h->p);
+            return -1;
+        }
+        ans = h->p;
+        if (!hp_x_name_start(*h->p)) {
+            xp_fail(h, "invalid-name", h->p);
+            return -1;
+        }
+        h->p++;
+        while (h->p < h->end && hp_x_name_char(*h->p)) {
+            h->p++;
+        }
+        name_end = h->p;
+        akw = xp_name_keyword(h, ans, (size_t)(name_end - ans));
+        if (akw == NULL) return -1;
+        {
+            const unsigned char *q = h->p;
+            while (q < h->end && hp_x_ws(*q)) q++;
+            if (q >= h->end) {
+                xp_fail(h, "unexpected-eof", h->end);
+                return -1;
+            }
+            if (*q != '=') {
+                xp_fail(h, "unexpected-token", q);
+                return -1;
+            }
+            q++;
+            while (q < h->end && hp_x_ws(*q)) q++;
+            if (q >= h->end) {
+                xp_fail(h, "unexpected-eof", h->end);
+                return -1;
+            }
+            if (*q != '"' && *q != '\'') {
+                xp_fail(h, "unexpected-token", q);
+                return -1;
+            }
+            {
+                unsigned char quote = *q;
+                const unsigned char *vs = q + 1;
+                const unsigned char *ve = vs;
+                while (ve < h->end && *ve != quote && *ve != '<'
+                       && *ve != 0) {
+                    ve++;
+                }
+                if (ve >= h->end) {
+                    xp_fail(h, "unexpected-eof", h->end);
+                    return -1;
+                }
+                if (*ve != quote) {
+                    xp_fail(h, "unexpected-token", ve);
+                    return -1;
+                }
+                h->p = ve + 1;
+                {
+                    mino_val *v = xp_attr_value(h, vs, ve);
+                    if (v == NULL) return -1;
+                    if (xp_assoc_attr(h, &attrs, akw, v, ans) != 0) {
+                        return -1;
+                    }
+                }
+                /* whitespace (or the tag end) must follow a value */
+                if (h->p < h->end && !hp_x_ws(*h->p)
+                    && *h->p != '>' && *h->p != '/') {
+                    xp_fail(h, "unexpected-token", h->p);
+                    return -1;
+                }
+            }
+        }
+    }
+    if (h->depth == 0) {
+        if (h->seen_root) {
+            xp_fail(h, "multiple-roots", ts);
+            return -1;
+        }
+        h->seen_root = 1;
+    } else if (xp_flush(h) != 0) {
+        return -1;
+    }
+    if (h->depth >= HP_MAX_DEPTH) {
+        xp_fail(h, "max-depth", ts);
+        return -1;
+    }
+    if (hp_push(h, tag, attrs, 0) != 0) {
+        if (!h->failed) xp_fail(h, "max-depth", ts);
+        return -1;
+    }
+    if (self_close) {
+        return hp_xml_pop(h);
+    }
+    return 0;
+}
+
+/* A strict end tag at '</': must match the open element exactly. */
+static int hp_xml_end_tag(hp_t *h)
+{
+    const unsigned char *ts = h->p;
+    const unsigned char *ns;
+    size_t nlen;
+    mino_val *tag;
+    h->p += 2;
+    ns = h->p;
+    while (h->p < h->end && hp_x_name_char(*h->p)) {
+        h->p++;
+    }
+    nlen = (size_t)(h->p - ns);
+    while (h->p < h->end && hp_x_ws(*h->p)) {
+        h->p++;
+    }
+    if (h->p >= h->end) {
+        xp_fail(h, "unexpected-eof", h->end);
+        return -1;
+    }
+    if (*h->p != '>') {
+        xp_fail(h, "unexpected-token", h->p);
+        return -1;
+    }
+    h->p++;
+    tag = xp_name_keyword(h, ns, nlen);
+    if (tag == NULL) return -1;
+    if (h->depth == 0 || !hp_kw_eq(h->stack[h->depth - 1].tag, tag)) {
+        xp_fail(h, "mismatched-end-tag", ts);
+        return -1;
+    }
+    return hp_xml_pop(h);
+}
+
+/* A comment at '<!--' consumed: close at the first -->; any other
+ * '--' inside the content is not well-formed. Comments drop. */
+static int hp_xml_comment(hp_t *h)
+{
+    const unsigned char *q = h->p;
+    for (;;) {
+        while (q < h->end && *q != '-') q++;
+        if (h->end - q < 2) {
+            xp_fail(h, "unexpected-eof", h->end);
+            return -1;
+        }
+        if (q[1] != '-') {
+            q += 2; /* a lone hyphen is data */
+            continue;
+        }
+        if (h->end - q >= 3 && q[2] == '>') {
+            h->p = q + 3;
+            return 0;
+        }
+        if (h->end - q < 3) {
+            xp_fail(h, "unexpected-eof", h->end);
+            return -1;
+        }
+        xp_fail(h, "unexpected-token", q);
+        return -1;
+    }
+}
+
+/* CDATA at '<![CDATA[': content verbatim (line endings normalized)
+ * into the pending carry; ends at the first ]]>; never parsed. */
+static int hp_xml_cdata(hp_t *h)
+{
+    const unsigned char *start = h->p;
+    const unsigned char *q = h->p;
+    for (;;) {
+        while (q < h->end && *q != ']' && *q != 0) q++;
+        if (q >= h->end) {
+            xp_fail(h, "unexpected-eof", h->end);
+            return -1;
+        }
+        if (*q == 0) {
+            xp_fail(h, "unexpected-token", q);
+            return -1;
+        }
+        if (h->end - q >= 3 && q[1] == ']' && q[2] == '>') {
+            if (xp_put_raw_cr(h, start, q) != 0) return -1;
+            h->p = q + 3;
+            return 0;
+        }
+        q++;
+    }
+}
+
+/* A PI at '<?' with the cursor past it: target name, then either
+ * the reserved-xml handling or a skip to '?>'. PIs drop. */
+static int hp_xml_pi(hp_t *h)
+{
+    const unsigned char *ts = h->p - 2;
+    const unsigned char *tstart = h->p;
+    size_t tlen;
+    if (h->p >= h->end || !hp_x_name_start(*h->p)) {
+        xp_fail(h, "invalid-name",
+                h->p < h->end ? h->p : h->end);
+        return -1;
+    }
+    while (h->p < h->end && hp_x_name_char(*h->p)) {
+        h->p++;
+    }
+    tlen = (size_t)(h->p - tstart);
+    if (tlen == 3 && hp_lower(tstart[0]) == 'x'
+        && hp_lower(tstart[1]) == 'm' && hp_lower(tstart[2]) == 'l') {
+        /* reserved target: the declaration only, only at the very
+         * start, only exactly lowercase */
+        if (ts != h->xml_start
+            || !(tstart[0] == 'x' && tstart[1] == 'm'
+                 && tstart[2] == 'l')) {
+            xp_fail(h, "invalid-prolog", ts);
+            return -1;
+        }
+        /* the XML declaration: quoted pseudo-attributes, version
+         * required (value not policed; python accepts "2.0") */
+        {
+            int seen_version = 0;
+            for (;;) {
+                const unsigned char *ans;
+                const unsigned char *name_end;
+                if (h->p >= h->end) {
+                    xp_fail(h, "unexpected-eof", h->end);
+                    return -1;
+                }
+                if (hp_x_ws(*h->p)) {
+                    h->p++;
+                    continue;
+                }
+                if (*h->p == '?') {
+                    if (h->p + 1 < h->end && h->p[1] == '>') {
+                        if (!seen_version) {
+                            xp_fail(h, "invalid-prolog", ts);
+                            return -1;
+                        }
+                        h->p += 2;
+                        return 0;
+                    }
+                    xp_fail(h, "invalid-prolog", h->p);
+                    return -1;
+                }
+                ans = h->p;
+                if (!hp_x_name_start(*h->p)) {
+                    xp_fail(h, "invalid-prolog", h->p);
+                    return -1;
+                }
+                h->p++;
+                while (h->p < h->end && hp_x_name_char(*h->p)) {
+                    h->p++;
+                }
+                name_end = h->p;
+                if (name_end - ans == 7
+                    && memcmp(ans, "version", 7) == 0) {
+                    seen_version = 1;
+                }
+                {
+                    const unsigned char *q = h->p;
+                    while (q < h->end && hp_x_ws(*q)) q++;
+                    if (q >= h->end) {
+                        xp_fail(h, "unexpected-eof", h->end);
+                        return -1;
+                    }
+                    if (*q != '=') {
+                        xp_fail(h, "invalid-prolog", q);
+                        return -1;
+                    }
+                    q++;
+                    while (q < h->end && hp_x_ws(*q)) q++;
+                    if (q >= h->end) {
+                        xp_fail(h, "unexpected-eof", h->end);
+                        return -1;
+                    }
+                    if (*q != '"' && *q != '\'') {
+                        xp_fail(h, "invalid-prolog", q);
+                        return -1;
+                    }
+                    {
+                        unsigned char quote = *q;
+                        q++;
+                        while (q < h->end && *q != quote) q++;
+                        if (q >= h->end) {
+                            xp_fail(h, "unexpected-eof", h->end);
+                            return -1;
+                        }
+                        h->p = q + 1;
+                    }
+                }
+            }
+        }
+    }
+    /* a normal PI: anything to '?>' */
+    {
+        const unsigned char *q = h->p;
+        for (;;) {
+            while (q < h->end && *q != '?') q++;
+            if (q >= h->end) {
+                xp_fail(h, "unexpected-eof", h->end);
+                return -1;
+            }
+            if (q + 1 < h->end && q[1] == '>') {
+                h->p = q + 2;
+                return 0;
+            }
+            q++;
+        }
+    }
+}
+
+/* A DOCTYPE at '<!DOCTYPE' (the keyword is case-sensitive): scanned
+ * and dropped. Brackets, quoted strings, comments, and PIs inside
+ * are skipped correctly; any <!ENTITY declaration inside the
+ * internal subset throws :unsupported-doctype (design D3: nothing
+ * is ever honored or fetched). */
+static int hp_xml_doctype(hp_t *h)
+{
+    const unsigned char *ts = h->p;
+    const unsigned char *q = h->p + 9;
+    int brackets = 0;
+    if (h->seen_root || h->seen_doctype) {
+        xp_fail(h, "invalid-prolog", ts);
+        return -1;
+    }
+    h->seen_doctype = 1;
+    if (q >= h->end || !hp_x_ws(*q)) {
+        xp_fail(h, "unexpected-token", q < h->end ? q : h->end);
+        return -1;
+    }
+    while (q < h->end) {
+        unsigned char c = *q;
+        if (c == '"' || c == '\'') {
+            unsigned char qc = c;
+            q++;
+            while (q < h->end && *q != qc) q++;
+            if (q >= h->end) break;
+            q++;
+            continue;
+        }
+        if (c == '[') {
+            brackets = 1;
+            q++;
+            continue;
+        }
+        if (c == ']') {
+            brackets = 0;
+            q++;
+            continue;
+        }
+        if (c == '>') {
+            if (brackets) {
+                q++;
+                continue;
+            }
+            h->p = q + 1;
+            return 0;
+        }
+        if (c == '<') {
+            if (h->end - q >= 4 && q[1] == '!' && q[2] == '-'
+                && q[3] == '-') {
+                q += 4;
+                while (q < h->end
+                       && !(h->end - q >= 3 && q[0] == '-'
+                            && q[1] == '-' && q[2] == '>')) {
+                    q++;
+                }
+                if (q >= h->end) break;
+                q += 3;
+                continue;
+            }
+            if (h->end - q >= 8 && q[1] == '!'
+                && hp_span_ci_eq(q + 2, 6, "entity")
+                && (q + 8 >= h->end || hp_x_ws(q[8])
+                    || q[8] == '%')) {
+                xp_fail(h, "unsupported-doctype", q);
+                return -1;
+            }
+            if (h->end - q >= 2 && q[1] == '?') {
+                q += 2;
+                while (q < h->end
+                       && !(q + 1 < h->end && q[0] == '?'
+                            && q[1] == '>')) {
+                    q++;
+                }
+                if (q >= h->end) break;
+                q += 2;
+                continue;
+            }
+            if (h->end - q >= 2 && q[1] == '!') {
+                /* ELEMENT/ATTLIST/NOTATION: to the decl's '>' */
+                q += 2;
+                while (q < h->end && *q != '>') {
+                    if (*q == '"' || *q == '\'') {
+                        unsigned char qc = *q;
+                        q++;
+                        while (q < h->end && *q != qc) q++;
+                    }
+                    q++;
+                }
+                if (q >= h->end) break;
+                q++;
+                continue;
+            }
+            q++;
+            continue;
+        }
+        q++;
+    }
+    xp_fail(h, "unexpected-eof", h->end);
+    return -1;
+}
+
+/* The strict main loop: prolog, single root, epilogue. Character
+ * data merges across comments, PIs, and CDATA into one string per
+ * position (the oracle shape); whitespace outside the root drops. */
+static int hp_xml_run(hp_t *h)
+{
+    if (h->end - h->p >= 3 && h->p[0] == 0xEF && h->p[1] == 0xBB
+        && h->p[2] == 0xBF) {
+        h->p += 3; /* the UTF-8 BOM drops (the oracle behavior) */
+        h->line_start = h->p;
+        h->synced = h->p;
+    }
+    h->xml_start = h->p;
+    while (h->p < h->end) {
+        unsigned char c1;
+        if (*h->p != '<') {
+            if (h->depth > 0) {
+                const unsigned char *lt =
+                    (const unsigned char *)memchr(
+                        h->p, '<', (size_t)(h->end - h->p));
+                const unsigned char *to = (lt != NULL) ? lt : h->end;
+                if (xp_decode_span(h, h->p, to) != 0) return -1;
+                h->p = to;
+            } else {
+                if (hp_x_ws(*h->p)) {
+                    h->p++;
+                    continue;
+                }
+                xp_fail(h, "content-before-root", h->p);
+                return -1;
+            }
+            continue;
+        }
+        c1 = (h->p + 1 < h->end) ? h->p[1] : 0;
+        if (c1 == '?') {
+            h->p += 2;
+            if (hp_xml_pi(h) != 0) return -1;
+            continue;
+        }
+        if (c1 == '!') {
+            if (h->end - h->p >= 4 && h->p[2] == '-'
+                && h->p[3] == '-') {
+                h->p += 4;
+                if (hp_xml_comment(h) != 0) return -1;
+                continue;
+            }
+            if (h->end - h->p >= 9
+                && memcmp(h->p + 2, "DOCTYPE", 7) == 0) {
+                if (hp_xml_doctype(h) != 0) return -1;
+                continue;
+            }
+            if (h->end - h->p >= 9
+                && memcmp(h->p + 2, "[CDATA[", 7) == 0) {
+                if (h->depth == 0) {
+                    /* character data outside the root */
+                    xp_fail(h, "content-before-root", h->p);
+                    return -1;
+                }
+                h->p += 9;
+                if (hp_xml_cdata(h) != 0) return -1;
+                continue;
+            }
+            xp_fail(h, "unexpected-token", h->p);
+            return -1;
+        }
+        if (c1 == '/') {
+            if (h->p + 2 < h->end
+                && hp_x_name_start(h->p[2])) {
+                if (hp_xml_end_tag(h) != 0) return -1;
+                continue;
+            }
+            if (h->p + 2 >= h->end) {
+                xp_fail(h, "unexpected-eof", h->end);
+            } else {
+                xp_fail(h, "invalid-name", h->p + 2);
+            }
+            return -1;
+        }
+        if (hp_x_name_start(c1)) {
+            if (hp_xml_start_tag(h) != 0) return -1;
+            continue;
+        }
+        xp_fail(h, "unexpected-token", h->p);
+        return -1;
+    }
+    if (h->depth > 0 || !h->seen_root) {
+        xp_fail(h, "unexpected-eof", h->end);
+        return -1;
+    }
+    return 0;
+}
+
 /* ---- prim ---- */
 
 static mino_val *prim_html_parse(mino_state *S, mino_val *args,
@@ -1611,6 +2500,64 @@ static mino_val *prim_html_parse(mino_state *S, mino_val *args,
     }
 }
 
+static mino_val *prim_xml_parse(mino_state *S, mino_val *args,
+                                mino_env *env)
+{
+    mino_val *s_val;
+    mino_val *opts;
+    hp_t h;
+    (void)env;
+    if (!mino_is_cons(args)
+        || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "xml-parse requires two arguments");
+    }
+    s_val = args->as.cons.car;
+    opts = args->as.cons.cdr->as.cons.car;
+    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "xml-parse: first argument must be a string");
+    }
+    if (opts != NULL && mino_type_of(opts) != MINO_MAP
+        && mino_type_of(opts) != MINO_NIL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "xml-parse: second argument must be a map or nil");
+    }
+    memset(&h, 0, sizeof(h));
+    h.S = S;
+    h.env = env;
+    h.p = (const unsigned char *)s_val->as.s.data;
+    h.end = h.p + s_val->as.s.len;
+    h.line_start = h.p;
+    h.synced = h.p;
+    h.line = 1;
+    h.xml = 1;
+    h.doc = hp_empty_transient(&h);
+    if (h.doc == NULL) return NULL;
+    if (hp_xml_run(&h) != 0) {
+        if (h.failed) {
+            mino_val *items[5];
+            const unsigned char *line_span_end;
+            line_span_end = h.line_start;
+            while (line_span_end < h.end && *line_span_end != '\n') {
+                line_span_end++;
+            }
+            items[0] = mino_keyword(S, "xml/error");
+            items[1] = mino_string(S, h.err_code);
+            items[2] = mino_int(S, (long long)h.err_line);
+            items[3] = mino_int(S, (long long)h.err_col);
+            items[4] = mino_string_n(S,
+                                     (const char *)h.line_start,
+                                     (size_t)(line_span_end
+                                              - h.line_start));
+            return mino_vector(S, items, 5);
+        }
+        return NULL;
+    }
+    return h.xml_root;
+}
+
 const mino_prim_def k_prims_html[] = {
     {"html-parse", prim_html_parse,
      "Parses HTML text into a hickory-shaped node tree (ADR 28): "
@@ -1626,6 +2573,29 @@ const mino_prim_def k_prims_html[] = {
      "Returns the tree, or an error descriptor vector "
      "[:html/error code line col text] the facade converts to "
      "ex-info."},
+    {"xml-parse", prim_xml_parse,
+     "Parses a well-formed XML 1.0 document into the JVM "
+     "clojure.xml element shape (ADR 28, strict mode): elements "
+     "are {:tag keyword :attrs {keyword string} :content "
+     "[string|node]} with case-sensitive names (a QName prefix "
+     "keywordizes at its first colon), :attrs {} and :content [] "
+     "always present, the root element only (comments, processing "
+     "instructions, and the DOCTYPE drop; character data merges "
+     "across them into one string per position). Strictness per "
+     "the campaign design: only the five predefined entities plus "
+     "numeric references resolve (any other named reference, a "
+     "bare ampersand, or an out-of-range code point is "
+     ":undefined-entity); a DOCTYPE is accepted and dropped but "
+     "any internal-subset ENTITY declaration throws "
+     ":unsupported-doctype (XXE is impossible by construction); "
+     "attribute values must be quoted and get XML 1.0 3.3.3 "
+     "whitespace normalization; exactly one root element; the XML "
+     "declaration only as the first bytes; the 256-deep nesting "
+     "cap. Line endings normalize (CR LF and lone CR to LF) and a "
+     "leading UTF-8 BOM drops. Second argument is an opts map, "
+     "reserved. Returns the root element map, or an error "
+     "descriptor vector [:xml/error code line col text] the "
+     "facade converts to positioned ex-info."},
 };
 
 const size_t k_prims_html_count =

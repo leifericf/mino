@@ -45,16 +45,9 @@
 
 (defn- xml-err
   "Runs (xml-parse s nil) and returns the error descriptor vector,
-  or :no-throw."
+  the tree, or the thrown value."
   [s]
-  (try (xml-parse s nil) :no-throw (catch e e)))
-
-(defn- xml-err-data
-  "The [:xml/error code line col text] descriptor, or the thrown
-  value when xml-parse throws instead of returning one."
-  [s]
-  (let [r (xml-err s)]
-    (if (vector? r) r [:threw r])))
+  (try (xml-parse s nil) (catch e e)))
 
 ;;; ---- golden corpus ----
 
@@ -104,29 +97,29 @@
 ;; D3: five predefined entities plus numeric character references
 ;; only, in text and attribute values.
 (deftest xml-strict-entity-rules
-  (is (= (xml-el :a ["\"' <>&"])
+  (is (= (xml-el :a ["\"'<>&"])
          (xml-parse "<a>&quot;&apos;&lt;&gt;&amp;</a>" nil)))
   (is (= (xml-el :a {:t "&<>\"'"} [])
          (xml-parse "<a t=\"&amp;&lt;&gt;&quot;&apos;\"/>" nil)))
-  (is (= (xml-el :a ["&#38;&#x26;"])
+  (is (= (xml-el :a ["&#38;&#38;"])
          (xml-parse "<a>&#38;#38;&#x26;#38;</a>" nil)))
   ;; ANY other named entity is :undefined-entity (D3)
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&nbsp;</a>"))))
+         (take 4 (xml-err "<a>&nbsp;</a>"))))
   (is (= [:xml/error "undefined-entity" 1 6]
-         (take 4 (xml-err-data "<a>x & y</a>"))))
+         (take 4 (xml-err "<a>x &amp y</a>"))))
   ;; missing semicolon is not a reference
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&amp</a>"))))
+         (take 4 (xml-err "<a>&amp</a>"))))
   ;; numeric range policing: 0, surrogates, > 0x10FFFF reject
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&#0;</a>"))))
+         (take 4 (xml-err "<a>&#0;</a>"))))
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&#xD800;</a>"))))
+         (take 4 (xml-err "<a>&#xD800;</a>"))))
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&#x110000;</a>"))))
+         (take 4 (xml-err "<a>&#x110000;</a>"))))
   (is (= [:xml/error "undefined-entity" 1 4]
-         (take 4 (xml-err-data "<a>&#x;</a>")))))
+         (take 4 (xml-err "<a>&#x;</a>")))))
 
 ;; D3: DOCTYPE accepted and dropped; an internal-subset ENTITY
 ;; declaration throws :unsupported-doctype (nothing is ever honored
@@ -140,58 +133,58 @@
          (xml-parse
            "<!DOCTYPE r [<!-- c --><!ELEMENT r (#PCDATA)>]><r>t</r>" nil)))
   (is (= [:xml/error "unsupported-doctype" 1 14]
-         (take 4 (xml-err-data "<!DOCTYPE a [<!ENTITY e \"x\">]><a/>"))))
-  (is (= [:xml/error "unsupported-doctype" 1 16]
-         (take 4 (xml-err-data
+         (take 4 (xml-err "<!DOCTYPE a [<!ENTITY e \"x\">]><a/>"))))
+  (is (= [:xml/error "unsupported-doctype" 1 14]
+         (take 4 (xml-err
                    "<!DOCTYPE a [<!ENTITY % p \"x\">]><a/>"))))
   ;; a second DOCTYPE and a post-root DOCTYPE are prolog errors
   (is (= [:xml/error "invalid-prolog" 1 13]
-         (take 4 (xml-err-data "<!DOCTYPE a><!DOCTYPE b><a/>"))))
+         (take 4 (xml-err "<!DOCTYPE a><!DOCTYPE b><a/>"))))
   (is (= [:xml/error "invalid-prolog" 1 5]
-         (take 4 (xml-err-data "<a/><!DOCTYPE b>")))))
+         (take 4 (xml-err "<a/><!DOCTYPE b>")))))
 
 ;; XML delta: CDATA captured as text (merging with adjacent runs,
 ;; markup and ampersands literal); PIs dropped everywhere.
 (deftest xml-strict-cdata-and-pis
-  (is (= (xml-el :a ["x<b>&amp;z"])
+  (is (= (xml-el :a ["x<b>&amp;"])
          (xml-parse "<a>x<![CDATA[<b>&amp;]]></a>" nil)))
   (is (= (xml-el :a ["raw & <text>"])
          (xml-parse "<a><![CDATA[raw & <text>]]></a>" nil)))
   (is (= (xml-el :a [])
          (xml-parse "<a><![CDATA[]]></a>" nil)))
-  (is (= (xml-el :r ["onetwothree"])
+  (is (= (xml-el :a ["onetwothree"])
          (xml-parse "<a>one<!--c-->two<?pi x?>three</a>" nil)))
-  (is (= (xml-el :r ["x"])
+  (is (= (xml-el :r ["xy"])
          (xml-parse "<?pi data?><r>x<?pi2?>y</r>" nil))))
 
 ;; XML delta: attribute values must be quoted (XML 1.0 3.3); no
 ;; valueless attributes; whitespace must separate attributes.
 (deftest xml-strict-mandatory-attribute-quoting
   (is (= [:xml/error "unexpected-token" 1 6]
-         (take 4 (xml-err-data "<a b=c/>"))))
+         (take 4 (xml-err "<a b=c/>"))))
   (is (= [:xml/error "unexpected-token" 1 6]
-         (take 4 (xml-err-data "<a b=c=\"d\"/>"))))
+         (take 4 (xml-err "<a b=c=\"d\"/>"))))
   (is (= [:xml/error "unexpected-token" 1 5]
-         (take 4 (xml-err-data "<a b>"))))
+         (take 4 (xml-err "<a b>"))))
   (is (= [:xml/error "unexpected-token" 1 9]
-         (take 4 (xml-err-data "<a b=\"1\"c=\"2\"/>"))))
+         (take 4 (xml-err "<a b=\"1\"c=\"2\"/>"))))
   ;; a literal < inside a quoted value is not well-formed
   (is (= [:xml/error "unexpected-token" 1 7]
-         (take 4 (xml-err-data "<a b=\"<\"/>")))))
+         (take 4 (xml-err "<a b=\"<\"/>")))))
 
 ;; XML delta: exactly one root element; character data outside the
 ;; root is an error; whitespace outside is allowed.
 (deftest xml-strict-single-root
   (is (= [:xml/error "multiple-roots" 1 5]
-         (take 4 (xml-err-data "<a/><b/>"))))
+         (take 4 (xml-err "<a/><b/>"))))
   (is (= [:xml/error "multiple-roots" 2 1]
-         (take 4 (xml-err-data "<a/>\n<b/>"))))
+         (take 4 (xml-err "<a/>\n<b/>"))))
   (is (= [:xml/error "content-before-root" 1 1]
-         (take 4 (xml-err-data "x<a/>"))))
+         (take 4 (xml-err "x<a/>"))))
   (is (= [:xml/error "content-before-root" 1 5]
-         (take 4 (xml-err-data "<a/>x"))))
+         (take 4 (xml-err "<a/>x"))))
   (is (= [:xml/error "content-before-root" 1 6]
-         (take 4 (xml-err-data "<a/> <![CDATA[x]]>"))))
+         (take 4 (xml-err "<a/> <![CDATA[x]]>"))))
   ;; whitespace around the root is fine
   (is (= (xml-el :r ["t"])
          (xml-parse "\n  <r>t</r>\n\n" nil))))
@@ -207,17 +200,17 @@
            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><r/>"
            nil)))
   (is (= [:xml/error "invalid-prolog" 1 1]
-         (take 4 (xml-err-data "<?XML version=\"1.0\"?><a/>"))))
-  (is (= [:xml/error "invalid-prolog" 1 2]
-         (take 4 (xml-err-data "x<?xml version=\"1.0\"?><a/>"))))
+         (take 4 (xml-err "<?XML version=\"1.0\"?><a/>"))))
+  (is (= [:xml/error "invalid-prolog" 1 9]
+         (take 4 (xml-err "<!--c--><?xml version=\"1.0\"?><a/>"))))
   (is (= [:xml/error "invalid-prolog" 1 22]
-         (take 4 (xml-err-data
+         (take 4 (xml-err
                    "<?xml version=\"1.0\"?><?xml version=\"1.0\"?><a/>"))))
   (is (= [:xml/error "invalid-prolog" 1 4]
-         (take 4 (xml-err-data "<a><?xml version=\"1.0\"?></a>"))))
+         (take 4 (xml-err "<a><?xml version=\"1.0\"?></a>"))))
   ;; a declaration without version is malformed
   (is (= [:xml/error "invalid-prolog" 1 1]
-         (take 4 (xml-err-data "<?xml encoding=\"UTF-8\"?><a/>")))))
+         (take 4 (xml-err "<?xml encoding=\"UTF-8\"?><a/>")))))
 
 ;; XML 1.0 3.3.3 attribute-value normalization: literal tab, CR,
 ;; and LF become one space each (CR LF together one space);
@@ -250,62 +243,62 @@
 ;; no stray-drop: those are HTML-tier recoveries).
 (deftest xml-error-mismatched-end-tags
   (is (= [:xml/error "mismatched-end-tag" 1 4]
-         (take 4 (xml-err-data "<a></b>"))))
+         (take 4 (xml-err "<a></b>"))))
   (is (= [:xml/error "mismatched-end-tag" 1 1]
-         (take 4 (xml-err-data "</a>"))))
+         (take 4 (xml-err "</a>"))))
   (is (= [:xml/error "mismatched-end-tag" 1 8]
-         (take 4 (xml-err-data "<a></a></a>"))))
-  (is (= [:xml/error "mismatched-end-tag" 1 8]
-         (take 4 (xml-err-data "<a><b></a></b>"))))
+         (take 4 (xml-err "<a></a></a>"))))
+  (is (= [:xml/error "mismatched-end-tag" 1 7]
+         (take 4 (xml-err "<a><b></a></b>"))))
   ;; junk inside an end tag
   (is (= [:xml/error "unexpected-token" 1 8]
-         (take 4 (xml-err-data "<a></a b>")))))
+         (take 4 (xml-err "<a></a b>")))))
 
 ;; Strictness: EOF inside any construct is :unexpected-eof at the
 ;; EOF byte; unclosed elements never auto-balance.
 (deftest xml-error-unexpected-eof
   (is (= [:xml/error "unexpected-eof" 1 4]
-         (take 4 (xml-err-data "<a>"))))
+         (take 4 (xml-err "<a>"))))
   (is (= [:xml/error "unexpected-eof" 1 3]
-         (take 4 (xml-err-data "<a"))))
+         (take 4 (xml-err "<a"))))
   (is (= [:xml/error "unexpected-eof" 1 8]
-         (take 4 (xml-err-data "<a b=\"x"))))
-  (is (= [:xml/error "unexpected-eof" 1 12]
-         (take 4 (xml-err-data "<a><!--x"))))
+         (take 4 (xml-err "<a b=\"x"))))
+  (is (= [:xml/error "unexpected-eof" 1 9]
+         (take 4 (xml-err "<a><!--x"))))
   (is (= [:xml/error "unexpected-eof" 1 18]
-         (take 4 (xml-err-data "<a><![CDATA[x</a>"))))
+         (take 4 (xml-err "<a><![CDATA[x</a>"))))
   (is (= [:xml/error "unexpected-eof" 1 1]
-         (take 4 (xml-err-data ""))))
+         (take 4 (xml-err ""))))
   (is (= [:xml/error "unexpected-eof" 1 22]
-         (take 4 (xml-err-data "<?xml version=\"1.0\"?>")))))
+         (take 4 (xml-err "<?xml version=\"1.0\"?>")))))
 
 ;; Strictness: markup-open characters that start no construct.
 (deftest xml-error-unexpected-tokens
-  (is (= [:xml/error "unexpected-token" 1 3]
-         (take 4 (xml-err-data "a < b"))))
+  (is (= [:xml/error "unexpected-token" 1 5]
+         (take 4 (xml-err "<a> < b</a>"))))
   (is (= [:xml/error "unexpected-token" 1 1]
-         (take 4 (xml-err-data "<3a/>"))))
+         (take 4 (xml-err "<3a/>"))))
   (is (= [:xml/error "unexpected-token" 1 1]
-         (take 4 (xml-err-data "<!doctype a><a/>"))))
+         (take 4 (xml-err "<!doctype a><a/>"))))
   ;; ]] must not appear literally in text
   (is (= [:xml/error "unexpected-token" 1 4]
-         (take 4 (xml-err-data "<a>]]></a>"))))
+         (take 4 (xml-err "<a>]]></a>"))))
   ;; NUL is not a legal XML character anywhere
   (is (= [:xml/error "unexpected-token" 1 5]
-         (take 4 (xml-err-data (str "<a>x" (char 0) "y</a>"))))))
+         (take 4 (xml-err (str "<a>x" (char 0) "y</a>"))))))
 
 ;; Comments: '--' inside comment content is not well-formed.
 (deftest xml-error-comment-double-hyphen
   (is (= [:xml/error "unexpected-token" 1 9]
-         (take 4 (xml-err-data "<a><!--a--b--></a>"))))
+         (take 4 (xml-err "<a><!--a--b--></a>"))))
   (is (= [:xml/error "unexpected-token" 1 9]
-         (take 4 (xml-err-data "<a><!--a---></a>")))))
+         (take 4 (xml-err "<a><!--a---></a>")))))
 
 ;; Duplicate attributes reject (duplicates keeping the first is the
 ;; HTML rule; strict XML has no such tolerance).
 (deftest xml-error-duplicate-attribute
   (is (= [:xml/error "duplicate-attribute" 1 10]
-         (take 4 (xml-err-data "<a b=\"1\" b=\"2\"/>")))))
+         (take 4 (xml-err "<a b=\"1\" b=\"2\"/>")))))
 
 ;; A-2 boundary pins: 256 open elements parse, 257 throw :max-depth
 ;; (the shared 256 cap; no synthesized wrappers in XML mode).
@@ -321,17 +314,17 @@
                    (recur (nth (:content n) 0) (inc d))
                    d)))))
   (is (= [:xml/error "max-depth" 1 769]
-         (take 4 (xml-err-data (xml-deep-open 257))))))
+         (take 4 (xml-err (xml-deep-open 257))))))
 
 ;; The prim returns the error descriptor vector; the facade owns
 ;; the ex-info throw (the toml.c split). :text is the source line.
 (deftest xml-error-prim-descriptor-shape
-  (let [r (xml-err-data "<a>\n<b></c>\n</a>")]
+  (let [r (xml-err "<a>\n<b></c>\n</a>")]
     (is (vector? r))
     (is (= :xml/error (nth r 0)))
     (is (= "mismatched-end-tag" (nth r 1)))
     (is (= 2 (nth r 2)))
-    (is (= 1 (nth r 3)))
+    (is (= 4 (nth r 3)))
     (is (= "<b></c>" (nth r 4)))))
 
 (run-tests-and-exit)
