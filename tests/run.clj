@@ -165,8 +165,10 @@
    "tests/require_env_test"
    "tests/url_encode_test"
    "tests/url_parse_test"
-   "tests/codec_test"
-   "tests/time_civil_test"
+    "tests/codec_test"
+    "tests/digest_test"
+    "tests/digest_hex_test"
+    "tests/time_civil_test"
    "tests/time_parse_test"
    "tests/time_format_test"
    "tests/time_arith_test"
@@ -197,7 +199,7 @@
    shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
    glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
    tail grows past ~5GB. The final entry must equal the file count."
-  [0 103 129 169])
+  [0 103 129 171])
 
 (defn- parse-shard-int [s]
   (when (and (string? s) (re-find #"^\d+$" s))
