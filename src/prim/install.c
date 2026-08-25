@@ -174,6 +174,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"csv",         k_prims_csv,         &k_prims_csv_count},
     {"digest",      k_prims_digest,      &k_prims_digest_count},
     {"time",        k_prims_time,        &k_prims_time_count},
+    {"term",        k_prims_term,        &k_prims_term_count},
     {"path",        k_prims_path,        &k_prims_path_count},
     {"http",        k_prims_http,        &k_prims_http_count},
     {"gzip",        k_prims_gzip,        &k_prims_gzip_count},
