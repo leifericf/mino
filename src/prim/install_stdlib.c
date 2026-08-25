@@ -74,6 +74,7 @@
 #include "lib_mino_log.h"
 #include "lib_mino_toml.h"
 #include "lib_mino_yaml.h"
+#include "lib_mino_html.h"
 #include "lib_mino_template.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
@@ -343,6 +344,12 @@ void mino_install_mino_yaml(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.yaml", lib_mino_yaml_src);
+}
+
+void mino_install_mino_html(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.html", lib_mino_html_src);
 }
 
 void mino_install_mino_template(mino_state *S, mino_env *env)
