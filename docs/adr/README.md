@@ -28,3 +28,12 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [17](17-slad-forward-compatibility.md) | SLAD forward compatibility via skip-and-warn, plus an offline migration tool |
 | [18](18-analyze-zig-baseline-is-ci-specific.md) | The analyze-zig baseline is CI-specific (platform-conditional analyzer output) |
 | [19](19-census-as-source-of-truth.md) | clojure-census is the source of truth for the Clojure surface and mino divergences |
+| [20](20-one-http-client-plain-data-vendored-tls.md) | One HTTP client, plain data in/out, vendored TLS |
+| [21](21-time-date-own-core-epoch-ms.md) | Time and date: own C99 core, epoch-ms instants, plain maps |
+| [22](22-path-lib-strings-and-glob.md) | Path library: paths are strings, unix-shell names, one glob walker |
+| [23](23-json-reader-in-c-writer-stays-clojure.md) | The JSON reader is native C; the writer stays Clojure |
+| [24](24-csv-reader-in-c-writer-stays-clojure.md) | The CSV reader is native C; the writer stays Clojure |
+| [25](25-toml-reader-in-c.md) | The TOML reader is a native prim over byte indices |
+| [26](26-yaml-subset-reader-first.md) | The YAML reader is a native subset prim (block/flow core, no anchors) |
+| [27](27-timezones-over-embedded-tzdata.md) | Timezones over embedded compact tzdata generated at build time |
+| [28](28-html-xml-native-tokenizer-two-modes.md) | HTML and XML readers: one native tokenizer, two modes, hickory/JVM shapes |
