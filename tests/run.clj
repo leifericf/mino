@@ -20,6 +20,27 @@
 
 (require "tests/test")
 (require '[clojure.string :as str])
+(require '[clojure.set :as set])
+(require '[mino.path :as path])
+
+;; Files matching tests/*_test.clj that other lanes own (coverage,
+;; mutation, ns isolation, checkpoints, interop) and that must NOT be
+;; loaded by this runner. Anything else on disk that is missing from
+;; suite-files is a wiring bug: a suite file nobody executes (the
+;; digest suites sat dead this way through four landed phases before
+;; the guard existed). New suite files join suite-files (bumping the
+;; shard-cuts tail) in the same commit, or join this set with a
+;; comment naming the owning lane.
+(def ^:private other-lane-files
+  #{"bc_tail_multiarity_test" "clojure_coverage_test" "interop_test"
+    "json_property_test" "mutation_test" "ns_cljs_checkpoint_test"
+    "ns_clojure_strict_test" "ns_isolation_test" "ns_libs_test"
+    "ns_reader_test" "ns_sci_checkpoint_test" "ns_vars_test"})
+
+(def ^:private disk-basenames
+  (set (map #(let [base (last (str/split % #"/"))]
+               (subs base 0 (- (count base) (count ".clj"))))
+            (path/glob "tests/*_test.clj"))))
 
 (def ^:private suite-files
   [   "tests/test"
@@ -203,7 +224,15 @@
    shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
    glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
    tail grows past ~5GB. The final entry must equal the file count."
-  [0 103 129 175])
+   [0 103 129 175])
+
+(let [wired (set (map #(last (str/split % #"/")) suite-files))
+      unwired (sort (set/difference disk-basenames wired other-lane-files))]
+  (when (seq unwired)
+    (throw (ex-info (str "test files on disk that no lane runs; wire "
+                         "them into suite-files or list them in "
+                         "other-lane-files")
+                    {:unwired unwired}))))
 
 (defn- parse-shard-int [s]
   (when (and (string? s) (re-find #"^\d+$" s))
