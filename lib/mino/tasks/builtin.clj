@@ -255,7 +255,8 @@
      ["lib/mino/term.clj"               "mino.term"               "lib_mino_term"]
      ["lib/mino/log.clj"                "mino.log"                "lib_mino_log"]
      ["lib/mino/toml.clj"               "mino.toml"               "lib_mino_toml"]
-     ["lib/mino/yaml.clj"              "mino.yaml"              "lib_mino_yaml"]])
+     ["lib/mino/yaml.clj"              "mino.yaml"              "lib_mino_yaml"]
+     ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

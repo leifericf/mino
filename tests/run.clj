@@ -192,17 +192,18 @@
       "tests/term_test"
       "tests/term_progress_test"
        "tests/log_test"
-        "tests/toml_test"
-        "tests/yaml_test"
-        "tests/yaml_perf_test"
-        "tests/time_zone_test"])
+         "tests/toml_test"
+         "tests/yaml_test"
+         "tests/yaml_perf_test"
+         "tests/time_zone_test"
+         "tests/template_test"])
 
 (def ^:private shard-cuts
   "File-count prefix boundaries for MINO_TEST_SHARD partitions:
    shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
    glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
    tail grows past ~5GB. The final entry must equal the file count."
-  [0 103 129 174])
+  [0 103 129 175])
 
 (defn- parse-shard-int [s]
   (when (and (string? s) (re-find #"^\d+$" s))

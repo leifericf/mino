@@ -600,6 +600,10 @@ static mino_env *floor_install_prim_tables(mino_state *S)
     /* mino.yaml bundled lib: the YAML subset reader facade (ADR 26),
      * registering in the floor like mino.toml. */
     mino_install_mino_yaml(S, NULL);
+    /* mino.template bundled lib: the pure Selmer-shaped renderer,
+     * so it registers in the floor like mino.yaml; render-file
+     * resolves its slurp at call time. */
+    mino_install_mino_template(S, NULL);
     return core_env;
 }
 
