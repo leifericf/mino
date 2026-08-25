@@ -121,7 +121,7 @@
   (is (= 3 (count (sel/select (sel/class "ITEM") html-sel-page))))
   ;; whitespace-split membership, not substring
   (is (= [] (html-sel-tags (sel/select (sel/class "fir") html-sel-page))))
-  (is (= [:li]
+  (is (= [:p]
          (html-sel-tags
            (sel/select (sel/class :first)
                        (first (html/parse-fragment
@@ -200,17 +200,18 @@
   ;; not is hickory's raw not, not el-not: non-elements match too
   (let [sel-out (sel/select (sel/not (sel/tag :div)) html-sel-page)]
     (is (some string? sel-out) "text nodes match (not (tag ...))")
-    (is (some #(= :comment (:type %)) sel-out) "comments match")
+    (is (some #(= :document-type (:type %)) sel-out)
+        "the doctype matches (not (tag ...))")
     (is (= [] (filter #(= :div (:tag %)) sel-out)))
     (is (= [(html-sel-el :div)]
            (sel/select (sel/not (sel/tag :span))
-                       (html-sel-el :div))))))
-  (is (= [:p :p :b]
+                       (html-sel-el :div)))))
+  (is (= [:p :b]
          (html-sel-tags
-           (filter map?)
-           (sel/select (sel/not (sel/class :note))
-                       (first (html/parse-fragment
-                                "<p>a</p><p class=\"note\">n</p><b>c</b>")))))))
+           (filter map?
+                   (sel/select (sel/not (sel/class :note))
+                               (html/parse-fragment
+                                 "<p>a</p><p class=\"note\">n</p><b>c</b>")))))))
 
 (deftest html-select-child
   ;; the hickory docstring example, verbatim shape: direct chain
@@ -222,7 +223,7 @@
            (html-sel-tags (sel/select (sel/child (sel/tag :div)
                                                  (sel/class :foo)
                                                  (sel/attr :disabled))
-                                      direct)))
+                                      direct))))
     (is (= [] (html-sel-tags (sel/select (sel/child (sel/tag :div)
                                                     (sel/class :foo)
                                                     (sel/attr :disabled))
@@ -386,10 +387,19 @@
         "no elements among bare strings")))
   ;; each fragment root is its own zipper: first-child applies per root
   (let [frag (html/parse-fragment "<p>a</p><p>b</p>")]
-    (is (= [:p :p]
+    ;; position selectors never match fragment roots: a parse
+    ;; fragment has no parent (the same answer hickory gives when
+    ;; selecting per fragment node)
+    (is (= []
            (html-sel-tags (sel/select (sel/and (sel/tag :p)
                                                sel/first-child)
-                                      frag)))))
+                                      frag))))
+    ;; nested element children of a fragment root position normally
+    (is (= [:b]
+           (html-sel-tags (sel/select (sel/and (sel/tag :b)
+                                               sel/first-child)
+                                      (html/parse-fragment
+                                        "<p>lead<b>x</b></p>"))))))
   (is (= [] (sel/select (sel/tag :p) (html/parse-fragment "no tags")))))
 
 (deftest html-select-jvm-shared-shape
@@ -398,7 +408,7 @@
   ;; position selectors are HTML-shaped and stay inert on it
   (let [root {:tag :root :attrs {}
               :content [{:tag :a :attrs {:x "1"} :content ["va"]}
-                        " tail"]}]}
+                         " tail"]}]
     (is (= [:a] (html-sel-tags (sel/select (sel/tag :a) root))))
     (is (= ["1"] (html-sel-attr-of :x (sel/select (sel/attr :x) root))))
     (is (= [] (sel/select sel/any root)))))

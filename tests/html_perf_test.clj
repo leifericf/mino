@@ -80,19 +80,14 @@
     (is (<= 13 maxd 20)
         (str "max depth out of band: " maxd))))
 
+(require '[mino.html.select :as sel])
+
 (defn- html-perf-count-tag
-  "Explicit-stack tag traversal: every element with the tag. The
-  select pass until mino.html.select lands (p4t2 swaps it in); no
-  seq materialization over big vectors (the O(n) seq lesson)."
+  "One select pass via mino.html.select: every element with the tag
+  (p4t2 swapped the interim explicit-stack traversal for the real
+  selector; the budget pins the zipper-walk select cost)."
   [node tag]
-  (loop [stack [node] acc 0]
-    (if (pos? (count stack))
-      (let [n (peek stack)]
-        (if (map? n)
-          (recur (into (pop stack) (:content n))
-                 (if (= tag (:tag n)) (inc acc) acc))
-          (recur (pop stack) acc)))
-      acc)))
+  (count (sel/select (sel/tag tag) node)))
 
 (deftest html-perf-pipeline-within-budget
   ;; parse + one select pass + to-html under 6000ms in-suite (design

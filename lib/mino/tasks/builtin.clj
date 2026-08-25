@@ -259,6 +259,7 @@
      ["lib/mino/toml.clj"               "mino.toml"               "lib_mino_toml"]
      ["lib/mino/yaml.clj"              "mino.yaml"              "lib_mino_yaml"]
      ["lib/mino/html.clj"              "mino.html"              "lib_mino_html"]
+     ["lib/mino/html/select.clj"       "mino.html.select"       "lib_mino_html_select"]
      ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]])
 
 (defn- regen-stdlib-header

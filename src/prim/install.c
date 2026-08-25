@@ -605,6 +605,10 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * 28) over the floor html-parse prim, registering like
      * mino.yaml. */
     mino_install_mino_html(S, NULL);
+    /* mino.html.select bundled lib: the hickory.select subset over
+     * clojure.zip locs, pure Clojure over the bundled zip, so it
+     * registers in the floor like mino.html. */
+    mino_install_mino_html_select(S, NULL);
     /* mino.template bundled lib: the pure Selmer-shaped renderer,
      * so it registers in the floor like mino.yaml; render-file
      * resolves its slurp at call time. */
