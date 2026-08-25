@@ -157,7 +157,12 @@ def read_input_fixture(path):
         data = _read_edn(f.read())
     out = []
     for i, m in enumerate(data):
-        if not isinstance(m, dict) or not isinstance(m.get(":input"), str):
+        if not isinstance(m, dict):
+            raise EdnError("%s[%d]: not an input map" % (path, i))
+        if not isinstance(m.get(":input"), str):
+            if m.get(":transcribe") == "skipped":
+                out.append(m)
+                continue
             raise EdnError("%s[%d]: not an input map" % (path, i))
         out.append(m)
     return out
@@ -407,13 +412,18 @@ def main():
             entry = [
                 ":id %s" % edn_string(m[":id"]),
                 ":description %s" % edn_string(m.get(":description", "")),
-                ":input %s" % edn_string(m[":input"]),
             ]
+            if ":input" in m:
+                entry.append(":input %s" % edn_string(m[":input"]))
             if ":initial-state" in m and m[":initial-state"] != "Data state":
                 entry.append(":initial-state %s" % edn_string(m[":initial-state"]))
             if ":last-start-tag" in m:
                 entry.append(":last-start-tag %s" % edn_string(m[":last-start-tag"]))
-            if (":initial-state" in m and m[":initial-state"] != "Data state") or (
+            if m.get(":transcribe") == "skipped":
+                entry.append(':oracle "skipped"')
+                entry.append(":reason %s" % edn_string(m.get(":reason", "")))
+                counts["skipped"] += 1
+            elif (":initial-state" in m and m[":initial-state"] != "Data state") or (
                 ":last-start-tag" in m
             ):
                 entry.append(':oracle "skipped"')
