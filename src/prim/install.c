@@ -587,6 +587,11 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * mino.env; the color gate consults (tty? :stdout) at call
      * time. */
     mino_install_mino_term(S, NULL);
+    /* mino.log bundled lib: pure Clojure over the floor time prims
+     * and the *err* routing, so it registers in the floor like
+     * mino.term; the timestamp and stderr write resolve at call
+     * time. */
+    mino_install_mino_log(S, NULL);
     return core_env;
 }
 
