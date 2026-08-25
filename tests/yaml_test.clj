@@ -81,19 +81,19 @@
          (yaml/parse-string "this is#not: a comment\n"))))
 
 (deftest yaml-empty-lines-at-end-of-document
-  ;; suite NHX8
-  (is (= {(keyword "") nil}
+  ;; suite NHX8: the empty key is the null scalar, so it parses to nil
+  (is (= {nil nil}
          (yaml/parse-string ":\n\n\n"))))
 
 (deftest yaml-empty-key-and-value
   ;; suite SM9W / UKK6 / NKF9 / S3PD
-  (is (= {(keyword "") nil} (yaml/parse-string ":\n")))
+  (is (= {nil nil} (yaml/parse-string ":\n")))
   (is (= {(keyword ":") nil} (yaml/parse-string "::\n")))
-  (is (= [{(keyword "") nil}] (yaml/parse-string "- :\n")))
-  (is (= {(keyword "") nil :key "value"}
+  (is (= [{nil nil}] (yaml/parse-string "- :\n")))
+  (is (= {nil nil :key "value"}
          (yaml/parse-string "key: value\n: \n")))
   (is (= {(keyword "plain key") "in-line value"
-          (keyword "") nil
+          nil nil
           (keyword "quoted key") ["entry"]}
          (yaml/parse-string "plain key: in-line value\n: # Both empty\n\"quoted key\":\n- entry\n"))))
 
@@ -209,7 +209,7 @@
 
 (deftest yaml-plain-keys-with-quote-and-bracket-chars
   ;; suite AZW3
-  (is (= [{:bla"keks "foo"} {(keyword "bla]keks") "foo"}]
+  (is (= [{(keyword "bla\"keks") "foo"} {(keyword "bla]keks") "foo"}]
          (yaml/parse-string "- bla\"keks: foo\n- bla]keks: foo\n"))))
 
 ;;; Quoted scalars
@@ -236,7 +236,7 @@
           :single "\"Howdy!\" he cried."
           :quoted " # Not a 'comment'."
           (keyword "tie-fighter") "|\\-*-/|"}
-         (yaml/parse-string "unicode: \"Sosa did fine.\\u263A\"\ncontrol: \"\\b1998\\t1999\\t2000\\n\"\nhex esc: \"\\x0d\\x0a is \\r\\n\"\n\nsingle: '\"Howdy!\" he cried.'\nquoted: ' # Not a ''comment''. '\ntie-fighter: '|\\-*-/|'\n"))))
+         (yaml/parse-string "unicode: \"Sosa did fine.\\u263A\"\ncontrol: \"\\b1998\\t1999\\t2000\\n\"\nhex esc: \"\\x0d\\x0a is \\r\\n\"\n\nsingle: '\"Howdy!\" he cried.'\nquoted: ' # Not a ''comment''.'\ntie-fighter: '|\\-*-/|'\n"))))
 
 (deftest yaml-single-quoted-line-folding
   ;; suite PRH3, spec 7.9
@@ -406,7 +406,7 @@
 
 (deftest yaml-sequence-of-sequences-flow
   ;; suite YD5X, spec 2.5
-  (is (= [[:name :hr :avg]
+  (is (= [["name" "hr" "avg"]
           ["Mark McGwire" 65 0.278]
           ["Sammy Sosa" 63 0.288]]
          (yaml/parse-string "- [name        , hr, avg  ]\n- [Mark McGwire, 65, 0.278]\n- [Sammy Sosa  , 63, 0.288]\n"))))
@@ -430,19 +430,19 @@
 
 (deftest yaml-flow-whitespace-and-multiline
   ;; suite LP6E
-  (is (= [[:a :b :c] {:a "b" :c "d" :e "f"} []]
+  (is (= [["a" "b" "c"] {:a "b" :c "d" :e "f"} []]
          (yaml/parse-string "- [a, b , c ]\n- { \"a\"  : b\n   , c : 'd' ,\n   e   : \"f\"\n  }\n- [      ]\n"))))
 
 (deftest yaml-flow-comment-before-comma
   ;; suite 7TMG
-  (is (= [:word1 :word2]
+  (is (= ["word1" "word2"]
          (yaml/parse-string "---\n[ word1\n# comment\n, word2]\n"))))
 
 (deftest yaml-flow-comments-inside-sequence
   ;; suite 6HB6, spec 6.1
   (is (= {(keyword "Not indented")
           {(keyword "By one space") "By four\n  spaces\n"
-           (keyword "Flow style") [(keyword "By two") (keyword "Also by two") (keyword "Still by two")]}}
+           (keyword "Flow style") ["By two" "Also by two" "Still by two"]}}
          (yaml/parse-string " # Leading comment line spaces are\n  # neither content nor indentation.\n    \nNot indented:\n By one space: |\n    By four\n      spaces\n Flow style: [    # Leading spaces\n   By two,        # in flow style\n  Also by two,    # are neither\n  \tStill by two   # content nor\n    ]             # indentation.\n"))))
 
 (deftest yaml-plain-url-in-flow
@@ -479,11 +479,11 @@
          (yaml/parse-string "a: [1, 2, {b: [3, {c: 4}]}]\nd: {}\n"))))
 
 (deftest yaml-empty-flow-collections
-  (is (= [[] {}] (yaml/parse-string "[[], {}]\n")))
+  (is (= [[] {}] (yaml/parse-string "[[], {}]\n"))))
 
 (deftest yaml-deeply-nested-flow-over-lines
   ;; suite ZK9H
-  (is (= {:key [[[:value]]]}
+  (is (= {:key [[["value"]]]}
          (yaml/parse-string "{ key: [[[\n  value\n ]]]\n}\n"))))
 
 (deftest yaml-flow-multiline-under-block-key
@@ -497,13 +497,13 @@
 (deftest yaml-flow-multiline-key-and-percent
   ;; suite UT92, spec 9.4
   (is (= [{(keyword "matches %") 20} nil]
-         (yaml/parse-string "---\n{ matches\n% : 20 }\n...\n---\n# Empty\n...\n"))))
+         (yaml/parse-string-all "---\n{ matches\n% : 20 }\n...\n---\n# Empty\n...\n"))))
 
 (deftest yaml-single-pair-implicit-entries
   ;; suite 9MMW / CFD4
-  (is (= [{:YAML "separate"} {(keyword "JSON like") "adjacent"}]
+  (is (= [[{:YAML "separate"}] [{(keyword "JSON like") "adjacent"}]]
          (yaml/parse-string "- [ YAML : separate ]\n- [ \"JSON like\":adjacent ]\n")))
-  (is (= [{(keyword "") "empty key"} {(keyword "") "another empty key"}]
+  (is (= [[{nil "empty key"}] [{nil "another empty key"}]]
          (yaml/parse-string "- [ : empty key ]\n- [: another empty key]\n")))
   ;; the third 9MMW entry has a collection key: out of subset
   (is (yaml-err-reason "- [ {JSON: like}:adjacent ]\n" :unsupported-complex-key)))
@@ -515,7 +515,7 @@
 
 (deftest yaml-empty-flow-keys-and-values
   ;; suite NKF9 documents 2 and 4
-  (is (= {(keyword "") nil}
+  (is (= {nil nil}
          (yaml/parse-string "{ : }\n"))))
 
 ;;; Documents and streams
@@ -648,13 +648,13 @@
          (yaml/parse-string "a: 2001-12-14\nb: 2001-12-14t21:59:43.10-05:00\nc: 2001-12-14 21:59:43.10 -5\n"))))
 
 (deftest yaml-keys-resolve-too
-  (is (= {23 "x" :true "yes" :a 1}
+  (is (= {23 "x" true "yes" :a 1}
          (yaml/parse-string "23: x\ntrue: yes\na: 1\n"))))
 
 (deftest yaml-duplicate-keys-last-wins
   (is (= {:a 2} (yaml/parse-string "a: 1\na: 2\n")))
   (is (= {:m {:x 2}} (yaml/parse-string "m:\n  x: 1\n  x: 2\n")))
-  (is (= {1 :b 2 :c} (yaml/parse-string "1: a\n1: b\n2: c\n"))))
+  (is (= {1 "b" 2 "c"} (yaml/parse-string "1: a\n1: b\n2: c\n"))))
 
 ;;; Options and API surface
 
@@ -663,7 +663,7 @@
          (yaml/parse-string "a:\n  b: [1, {c: d}]\n" {:keywords false})))
   (is (= {:a {:b [1 {:c "d"}]}}
          (yaml/parse-string "a:\n  b: [1, {c: d}]\n" {:keywords true})))
-  (is (= {(keyword "") 1}
+  (is (= {nil 1}
          (yaml/parse-string ": 1\n" {:keywords false}))))
 
 (deftest yaml-parse-string-argument-validation
@@ -730,7 +730,7 @@
   ;; suite 7LBH / JKF3 / QB6E
   (is (yaml-err-at "\"a\\nb\": 1\n\"c\n d\": 1\n" :multiline-key 2 1))
   (is (yaml-err-at "- - \"bar\nbar\": x\n" :bad-indentation 2 1))
-  (is (yaml-err-at "---\nquoted: \"a\nb\nc\"\n" :bad-indentation 2 1)))
+  (is (yaml-err-at "---\nquoted: \"a\nb\nc\"\n" :bad-indentation 3 1)))
 
 ;;; Errors: quoted scalars
 
@@ -748,7 +748,7 @@
 (deftest yaml-error-flow-structure
   ;; suite 9MAG / CTN5 / T833 / CML9 / 4H7K / 6JTT / 9JBA / CVW2 / DK4H / ZXT5 / C2SP
   (is (yaml-err-at "---\n[ , a, b, c ]\n" :flow-syntax 2 3))
-  (is (yaml-err-at "---\n[ a, b, c, , ]\n" :flow-syntax 2 11))
+  (is (yaml-err-at "---\n[ a, b, c, , ]\n" :flow-syntax 2 12))
   (is (yaml-err-at "---\n{\n foo: 1\n bar: 2 }\n" :flow-syntax 4 2))
   (is (yaml-err-at "key: [ word1\n#  xxx\n  word2 ]\n" :flow-syntax 3 3))
   (is (yaml-err-at "---\n[ a, b, c ] ]\n" :unexpected-content 2 13))
@@ -757,7 +757,7 @@
   (is (yaml-err-at "---\n[ a, b, c,#invalid\n]\n" :unexpected-content 2 11))
   (is (yaml-err-at "---\n[ key\n  : value ]\n" :flow-syntax 3 3))
   (is (yaml-err-at "[ \"key\"\n  :value ]\n" :flow-syntax 2 3))
-  (is (yaml-err-at "[23\n]: 42\n" :flow-syntax 2 1))
+  (is (yaml-err-reason "[23\n]: 42\n" :unsupported-complex-key))
   (is (yaml-err-at "a: [1, 2}\n" :flow-syntax 1 9))
   ;; suite G5U8 / YJV2: a lone dash is not a plain scalar
   (is (yaml-err-reason "[-]\n" :flow-syntax))

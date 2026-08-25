@@ -173,6 +173,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"json",        k_prims_json,        &k_prims_json_count},
     {"csv",         k_prims_csv,         &k_prims_csv_count},
     {"toml",        k_prims_toml,        &k_prims_toml_count},
+    {"yaml",        k_prims_yaml,        &k_prims_yaml_count},
     {"digest",      k_prims_digest,      &k_prims_digest_count},
     {"time",        k_prims_time,        &k_prims_time_count},
     {"term",        k_prims_term,        &k_prims_term_count},
@@ -596,6 +597,9 @@ static mino_env *floor_install_prim_tables(mino_state *S)
     /* mino.toml bundled lib: pure regex-driven reader over the floor
      * regex prims, so it registers in the floor like mino.log. */
     mino_install_mino_toml(S, NULL);
+    /* mino.yaml bundled lib: the YAML subset reader facade (ADR 26),
+     * registering in the floor like mino.toml. */
+    mino_install_mino_yaml(S, NULL);
     return core_env;
 }
 

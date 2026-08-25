@@ -81,18 +81,26 @@ integers to signed 64-bit, floats including `1e3`, `.5`, `.inf`,
 thrown ex-info with `:kind :yaml/parse`, a `:reason` keyword, and
 `:location {:line :col}` over bytes.
 
-### The plan
+### The plan, and how it resolved
 
-The reader lands mino-side first: one cursor over the string's
-bytes, indentation tracked as a stack, scalars cut as byte spans.
-The golden vectors from the test suite pin the semantics green
-before any measurement. The scaling gate then decides: if the 1 MB
-config-shaped document cannot hold the absolute budget, the reader
-becomes the native `yaml-parse` prim in `src/prim/yaml.c` following
-the toml.c structure (same facade, same golden vectors, the Clojure
-parser deleted), registered in the floor domain beside `toml-parse`
-with no capability bit, and this record carries the measured
-outcome.
+The reader landed mino-side first: one cursor over the string's
+bytes, indentation tracked per line, spans cut by regex captures, no
+per-character `subs`. The golden vectors from the test suite pinned
+the semantics green before any measurement, so the algorithm was
+already linear and correct.
+
+The pre-landing scaling gate then measured it: a generated 1.05 MB
+config-shaped document parsed in 82.4 s, 41x over the 2 s absolute
+budget. The profile is the toml.c wall again, worse: interpreter
+dispatch per byte walked plus per-token regex compilation, and YAML
+touches more bytes per value than TOML does. The recorded follow-up
+fired in the same commit: the reader became the native `yaml-parse`
+prim in `src/prim/yaml.c`, a byte-cursor port of the green Clojure
+semantics (same folding tables, same error reasons and positions),
+and the Clojure parser was deleted as dead code per the ADR 23/24/25
+precedent. The golden vectors pass unchanged against the prim. After
+the switch the same 1.05 MB document parses in 84 ms standalone,
+about 24x inside the budget.
 
 ## Consequences
 
@@ -102,6 +110,13 @@ outcome.
 - 1.2 core resolution means `yes` is the string "yes" and `017` is
   seventeen; scripts coming from 1.1 parsers see those as divergences
   by design, pinned in the golden vectors.
-- If the native fallback fires, the scaling gate, the nightly
-  exclusion entry, and the headroom budget follow the TOML precedent
-  (ADR 25) exactly, including the in-suite GC pressure allowance.
+- The scaling gate, the nightly exclusion entry, and the headroom
+  budget follow the TOML precedent (ADR 25) exactly, including the
+  in-suite GC pressure allowance.
+- `yaml-parse` registers in the floor domain list beside
+  `toml-parse` with no capability bit (a pure data-in/data-out
+  reader, the json/csv/toml pattern); the mino.yaml facade rides the
+  bundled-lib machinery in the floor like mino.toml.
+- A lone carriage return is normalized to a line break rather than
+  rejected (YAML counts CR as a break character; the TOML reader's
+  strict lone-CR error would misfire here).

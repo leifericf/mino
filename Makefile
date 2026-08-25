@@ -114,7 +114,8 @@ BUNDLED = \
                     lib_mino_env:lib/mino/env.clj \
                     lib_mino_term:lib/mino/term.clj \
                     lib_mino_log:lib/mino/log.clj \
-                    lib_mino_toml:lib/mino/toml.clj
+                    lib_mino_toml:lib/mino/toml.clj \
+                    lib_mino_yaml:lib/mino/yaml.clj
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 
