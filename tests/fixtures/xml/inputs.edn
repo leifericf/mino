@@ -1,0 +1,58 @@
+;; Strict-XML golden input corpus (html-xml campaign, design D11).
+;; INPUTS ONLY, authored for coverage of the well-formed surface the
+;; p5 reader pins: element/text/mixed shapes, the five predefined
+;; entities plus numeric references, CDATA, comments and PIs (dropped
+;; at the tree), DOCTYPE forms without internal ENTITY declarations,
+;; XML declaration forms, both attribute quote styles, whitespace
+;; normalization, case-sensitive names, unicode, line-ending
+;; normalization, BOM. Namespaced inputs are excluded (divergence
+;; ledger line 2). Every expected value is generated through the
+;; python3 oracle:
+;;   python3 tools/gen_xml_oracle.py -o tests/fixtures/xml/golden.edn \
+;;       tests/fixtures/xml/inputs.edn
+[
+ {:id "xml-minimal-selfclose" :description "Smallest document: one self-closed root" :input "<a/>"}
+ {:id "xml-minimal-pair" :description "One empty root, explicit close" :input "<a></a>"}
+ {:id "xml-text-root" :description "Root with text only" :input "<a>hello</a>"}
+ {:id "xml-nested-empty" :description "Nested empty elements" :input "<r><x><y/></x></r>"}
+ {:id "xml-pretty-whitespace" :description "Pretty-printed: whitespace-only text and tails are kept verbatim" :input "<r>\n  <a x=\"1\">\n    <b/>\n  </a>\n</r>"}
+ {:id "xml-five-entities" :description "The five predefined entities in text" :input "<a>&quot;&apos;&lt;&gt;&amp;</a>"}
+ {:id "xml-numeric-refs" :description "Decimal and hex character references, leading zeros allowed" :input "<a>&#38;&#x26;&#65;&#x41;&#8212;&#8364;&#00066;&#x4a;</a>"}
+ {:id "xml-cdata-merge" :description "CDATA merges with surrounding text, markup inside stays literal" :input "<a>x<![CDATA[<b>&amp;]]></a>"}
+ {:id "xml-cdata-only" :description "Root whose only content is one CDATA section" :input "<a><![CDATA[raw & <text>]]></a>"}
+ {:id "xml-cdata-empty" :description "Empty CDATA contributes no text child" :input "<a><![CDATA[]]></a>"}
+ {:id "xml-comment-merge" :description "Character data merges across comments and PIs" :input "<a>one<!--c-->two<?pi x?>three</a>"}
+ {:id "xml-pi-dropped" :description "PIs in prolog and content are dropped" :input "<?pi data?><r>x<?pi2?>y</r>"}
+ {:id "xml-comment-shapes" :description "Comments in prolog, content, epilogue; empty comment form" :input "<!-- pro -->\n<r><!-- mid --><!-- -->t</r>\n<!-- epi -->"}
+ {:id "xml-doctype-bare" :description "Bare DOCTYPE accepted and dropped" :input "<!DOCTYPE a><r/>"}
+ {:id "xml-doctype-system" :description "External-id DOCTYPE accepted and dropped" :input "<!DOCTYPE r SYSTEM \"x.dtd\"><r/>"}
+ {:id "xml-doctype-subset-no-entity" :description "Internal subset without ENTITY declarations accepted and dropped" :input "<!DOCTYPE r [<!-- note --><!ELEMENT r (#PCDATA)><!ATTLIST r k CDATA #IMPLIED>]><r>t</r>"}
+ {:id "xml-decl-minimal" :description "XML declaration, version only" :input "<?xml version=\"1.0\"?><r/>"}
+ {:id "xml-decl-full" :description "XML declaration with encoding and standalone" :input "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><r/>"}
+ {:id "xml-attr-forms" :description "Both quote styles, escapes of all five entities in values, whitespace around =" :input "<a x=\"1\" y='two' z=\"&quot;q&quot;\" w='&apos;s' esc=\"&amp;&lt;&gt;\" p = \"3\" q ='4'/>"}
+ {:id "xml-attr-ws-normalization" :description "Literal tab/newline/CR in values normalize to one space each" :input "<a t=\"x\ty\" u=\"x\ny\" v=\"x\r\ny\"/>"}
+ {:id "xml-attr-charrefs-passthrough" :description "Character references in values pass through unnormalized" :input "<a t=\"&#9;x&#10;y&#13;z\" cr=\"&#xD;\"/>"}
+ {:id "xml-attr-empty-values" :description "Empty attribute values" :input "<a b=\"\" c=''/>"}
+ {:id "xml-case-sensitive" :description "Case-sensitive names: Case and case are distinct tags" :input "<r><Case>c</Case><case>d</case><MIXED>M</MIXED><mixed>m</mixed></r>"}
+ {:id "xml-name-chars" :description "Names carrying dots, dashes, underscores" :input "<my-tag.my_tag><a-b_c x-y.z_w=\"1\"/></my-tag.my_tag>"}
+ {:id "xml-unicode-text" :description "Non-ASCII text passes through as UTF-8" :input "<a>café — € 日本語</a>"}
+ {:id "xml-pom-shaped" :description "Small maven-pom shaped document" :input "<project><modelVersion>4.0.0</modelVersion><dependencies><dependency><groupId>org.webjars</groupId><artifactId>chart</artifactId><version>1.2</version><scope>runtime</scope></dependency></dependencies></project>"}
+ {:id "xml-rss-shaped" :description "Small rss document with attributes and entity-dense titles" :input "<rss version=\"2.0\"><channel><title>T &amp; t</title><item><guid isPermaLink=\"false\">urn:1</guid><description>&lt;b&gt;rich&lt;/b&gt; &amp; more</description></item></channel></rss>"}
+ {:id "xml-mixed-content" :description "Mixed content: text, elements, tails in order" :input "<p>Some <b>bold</b> and <i>italic</i> text.</p>"}
+ {:id "xml-empty-vs-selfclose" :description "Explicit-close empty and self-closed empty are the same shape" :input "<r><a></a><b/></r>"}
+ {:id "xml-tail-text" :description "Text after a child element is a trailing string child" :input "<r><a/>tail</r>"}
+ {:id "xml-whitespace-text-child" :description "Whitespace-only text child is kept" :input "<r> </r>"}
+ {:id "xml-gt-in-text" :description "A bare > in text is legal" :input "<a>a > b</a>"}
+ {:id "xml-quotes-in-text" :description "Quote characters need no escaping in text" :input "<a>\"quoted\" and 'single'</a>"}
+ {:id "xml-crlf-normalization" :description "CR LF in text normalizes to LF" :input "<a>line1\r\nline2</a>"}
+ {:id "xml-lone-cr-normalization" :description "A lone CR in text normalizes to LF" :input "<a>a\rb</a>"}
+ {:id "xml-bom" :description "Leading UTF-8 BOM is accepted and stripped" :input "﻿<a/>"}
+ {:id "xml-bom-decl" :description "BOM before the XML declaration" :input "﻿<?xml version=\"1.0\"?><a/>"}
+ {:id "xml-entity-dense" :description "Long entity-dense text run" :input "<a>&amp;&amp;&amp;&lt;&lt;&lt;x&amp;&gt;&gt;</a>"}
+ {:id "xml-double-numeric" :description "A numeric amp does not re-parse its output" :input "<a>&#38;#38;</a>"}
+ {:id "xml-attr-with-gt" :description "A > inside a quoted attribute value" :input "<a cmd=\"a > b &amp;&amp; c\"/>"}
+ {:id "xml-deep-nesting" :description "Nested same-named elements to a modest depth" :input "<a><a><a><a><a>x</a></a></a></a></a>"}
+ {:id "xml-selfclose-with-attrs" :description "Self-closing element with attributes" :input "<img src=\"x.png\" alt=\"an &quot;img&quot;\" width=\"10\"/>"}
+ {:id "xml-leading-trailing-ws" :description "Whitespace before and after the root is allowed and dropped" :input "\n  <r>t</r>\n\n"}
+ {:id "xml-ws-ref-text" :description "Character references to whitespace stay literal in text" :input "<a>&#9;&#10;&#13;</a>"}
+]
