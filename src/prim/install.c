@@ -576,6 +576,11 @@ static mino_env *floor_install_prim_tables(mino_state *S)
     /* mino.digest bundled lib: pure hex sugar over floor digest
      * prims, so it registers in the floor like mino.cli. */
     mino_install_mino_digest(S, NULL);
+    /* mino.env bundled lib: pure dotenv parsing plus a Clojure-side
+     * getenv overlay, so it registers in the floor like mino.cli;
+     * the process-env fallback and slurp resolve at call time and
+     * need the io capability like any other caller. */
+    mino_install_mino_env(S, NULL);
     return core_env;
 }
 

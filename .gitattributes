@@ -3,3 +3,7 @@
 # Vendored file kept byte-exact as upstream ships it (CRLF
 # inside); the LF normalization above must not rewrite it.
 src/vendor/miniz/LICENSE -text
+
+# dotenv golden fixture kept byte-exact (UTF-8 BOM + CRLF inside);
+# the LF normalization above must not rewrite it.
+tests/fixtures/env/edge.env -text
