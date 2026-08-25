@@ -1,0 +1,93 @@
+# sample workload manifests for the scaling fixture
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-resizer
+  namespace: media
+  labels:
+    app.kubernetes.io/name: resizer
+    app.kubernetes.io/part-of: media-pipeline
+  annotations:
+    deployment.kubernetes.io/revision: "12"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: resizer
+  template:
+    metadata:
+      labels:
+        app: resizer
+    spec:
+      serviceAccountName: resizer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: resizer
+          image: registry.internal/resizer:2.3.1
+          args: ["--workers", "4", "--queue", "resize"]
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            - name: RESIZE_BACKEND
+              value: gpu
+            - name: MAX_PIXELS
+              value: "4096"
+            - name: TRACE_ENDPOINT
+              value: ~
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: resizer
+  namespace: media
+spec:
+  selector:
+    app: resizer
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: resizer-pruner
+  namespace: media
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pruner
+              image: registry.internal/pruner:1.0
+              env:
+                - name: RETENTION_DAYS
+                  value: "14"
