@@ -247,7 +247,9 @@
     ["lib/mino/time.clj"               "mino.time"               "lib_mino_time"]
     ["lib/mino/path.clj"               "mino.path"               "lib_mino_path"]
     ["lib/mino/cli.clj"                "mino.cli"                "lib_mino_cli"]
-    ["lib/mino/digest.clj"             "mino.digest"             "lib_mino_digest"]])
+    ["lib/mino/digest.clj"             "mino.digest"             "lib_mino_digest"]
+    ["lib/mino/env.clj"                "mino.env"                "lib_mino_env"]
+    ["lib/mino/term.clj"               "mino.term"               "lib_mino_term"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

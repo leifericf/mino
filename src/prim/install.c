@@ -582,6 +582,11 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * the process-env fallback and slurp resolve at call time and
      * need the io capability like any other caller. */
     mino_install_mino_env(S, NULL);
+    /* mino.term bundled lib: ANSI styling as data over the floor
+     * tty? / terminal-width prims, so it registers in the floor like
+     * mino.env; the color gate consults (tty? :stdout) at call
+     * time. */
+    mino_install_mino_term(S, NULL);
     return core_env;
 }
 
