@@ -108,6 +108,7 @@
    "src/prim/lazy.c"
        "src/prim/string.c" "src/prim/io.c" "src/prim/url.c" "src/prim/codec.c" "src/prim/json.c"
         "src/prim/csv.c"
+        "src/prim/toml.c"
         "src/prim/digest.c"
        "src/prim/time.c"
        "src/prim/term.c"
@@ -250,7 +251,8 @@
     ["lib/mino/digest.clj"             "mino.digest"             "lib_mino_digest"]
      ["lib/mino/env.clj"                "mino.env"                "lib_mino_env"]
      ["lib/mino/term.clj"               "mino.term"               "lib_mino_term"]
-     ["lib/mino/log.clj"                "mino.log"                "lib_mino_log"]])
+     ["lib/mino/log.clj"                "mino.log"                "lib_mino_log"]
+     ["lib/mino/toml.clj"               "mino.toml"               "lib_mino_toml"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

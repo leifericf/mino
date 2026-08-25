@@ -172,6 +172,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"codec",       k_prims_codec,       &k_prims_codec_count},
     {"json",        k_prims_json,        &k_prims_json_count},
     {"csv",         k_prims_csv,         &k_prims_csv_count},
+    {"toml",        k_prims_toml,        &k_prims_toml_count},
     {"digest",      k_prims_digest,      &k_prims_digest_count},
     {"time",        k_prims_time,        &k_prims_time_count},
     {"term",        k_prims_term,        &k_prims_term_count},
@@ -592,6 +593,9 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * mino.term; the timestamp and stderr write resolve at call
      * time. */
     mino_install_mino_log(S, NULL);
+    /* mino.toml bundled lib: pure regex-driven reader over the floor
+     * regex prims, so it registers in the floor like mino.log. */
+    mino_install_mino_toml(S, NULL);
     return core_env;
 }
 

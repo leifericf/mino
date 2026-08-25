@@ -140,6 +140,7 @@ void mino_install_mino_digest       (mino_state *S, mino_env *env);
 void mino_install_mino_env          (mino_state *S, mino_env *env);
 void mino_install_mino_term         (mino_state *S, mino_env *env);
 void mino_install_mino_log          (mino_state *S, mino_env *env);
+void mino_install_mino_toml         (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install
  * after capability bits are set; idempotent. */

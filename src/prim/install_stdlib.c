@@ -72,6 +72,7 @@
 #include "lib_mino_env.h"
 #include "lib_mino_term.h"
 #include "lib_mino_log.h"
+#include "lib_mino_toml.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -328,6 +329,12 @@ void mino_install_mino_log(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.log", lib_mino_log_src);
+}
+
+void mino_install_mino_toml(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.toml", lib_mino_toml_src);
 }
 
 void mino_install_all(mino_state *S, mino_env *env)

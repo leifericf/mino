@@ -65,7 +65,7 @@
          (toml/parse-string "a.\"b.c\".d = 1\n"))))
 
 (deftest quoted-and-numeric-and-dashed-keys
-  (is (= {:"127.0.0.1" "v" :key2 2}
+  (is (= {(keyword "127.0.0.1") "v" :key2 2}
          (toml/parse-string "\"127.0.0.1\" = \"v\"\n'key2' = 2\n")))
   (is (= 3 (get (toml/parse-string "\"naïve key\" = 3\n")
                 (keyword "naïve key"))))
@@ -100,7 +100,7 @@
          (toml/parse-string "[[a]]\nb.c = 1\n[[a]]\nb.c = 2\n"))))
 
 (deftest array-header-with-quoted-dotted-path
-  (is (= {:"a b" {:"c d" [{:x 1}]}}
+  (is (= {(keyword "a b") {(keyword "c d") [{:x 1}]}}
          (toml/parse-string "[[\"a b\".\"c d\"]]\nx=1\n"))))
 
 ;;; Inline tables
@@ -148,7 +148,7 @@
   (is (= {:a "Here are two quotation marks: \"\". Simple enough."}
          (toml/parse-string "a = \"\"\"Here are two quotation marks: \"\". Simple enough.\"\"\"\n")))
   (is (= {:a "three: \"\"\" ok"}
-         (toml/parse-string "a = \"\"\"three: \"\\\"\\\"\\\" ok\"\"\"\n")))
+         (toml/parse-string "a = \"\"\"three: \\\"\\\"\\\" ok\"\"\"\n")))
   ;; escaped quote then two bare quotes then y then the terminator
   (is (= {:a "x\"\"\"y"}
          (toml/parse-string "a = \"\"\"x\\\"\"\"y\"\"\"\n")))
@@ -314,7 +314,7 @@
   (is (err-at "a = 1 2\n"                          :unexpected-text 1 7))
   (is (err-at "a = 01\n"                           :unexpected-text 1 6))
   (is (err-at "a =\n"                              :invalid-value   1 4))
-  (is (err-at "a =\t \n"                           :invalid-value   1 7))
+  (is (err-at "a =\t \n"                           :invalid-value   1 6))
   (is (err-at "a = .7\n"                           :invalid-value   1 5))
   (is (err-at "a = 7.\n"                           :unexpected-text 1 6))
   (is (err-at "a = True\n"                         :invalid-value   1 5))
@@ -327,7 +327,7 @@
   (is (err-at "a = 1._0\n"                         :unexpected-text 1 6))
   (is (err-at "a = 00.1\n"                         :unexpected-text 1 6))
   (is (err-at "a = 0x_1\n"                         :unexpected-text 1 6))
-  (is (err-at "a = -0x1\n"                         :unexpected-text 1 6))
+  (is (err-at "a = -0x1\n"                           :unexpected-text 1 7))
   ;; tomllib also accepts past-int64 literals; the TOML 1.0 spec
   ;; requires lossless 64-bit, so mino errors (recorded divergence)
   (is (err-at "a = 9223372036854775808\n"          :int-overflow    1 5)))
