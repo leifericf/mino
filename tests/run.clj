@@ -35,7 +35,11 @@
   #{"bc_tail_multiarity_test" "clojure_coverage_test" "interop_test"
     "json_property_test" "mutation_test" "ns_cljs_checkpoint_test"
     "ns_clojure_strict_test" "ns_isolation_test" "ns_libs_test"
-    "ns_reader_test" "ns_sci_checkpoint_test" "ns_vars_test"})
+    "ns_reader_test" "ns_sci_checkpoint_test" "ns_vars_test"
+    ;; Owned by the nightly test-zip64 task: the 4 GiB + 1 member's
+    ;; ~4.5 GB whole-buffer working set (compression-zip campaign
+    ;; p6t3, ADR 29).
+    "zip64_big_test"})
 
 (def ^:private disk-basenames
   (set (map #(let [base (last (str/split % #"/"))]

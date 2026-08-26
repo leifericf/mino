@@ -2462,15 +2462,29 @@
 
 (defn test-http
   "Run the localhost HTTP integration lane
-  (tests/http_integration_test.clj): an in-process fixture server
-  written in mino (tests/fixtures/http/server.clj, accept loop on a
-  worker future) serves the route table (echo, JSON validation,
-  pagination, redirects, chunked, gzip, hold, connection counter),
-  and the suite drives it end to end through the mino.http surface.
-  In process, so the lane runs on every platform the CLI builds on;
-  the TLS end-to-end legs live in the mino-tests satellite repo."
+   (tests/http_integration_test.clj): an in-process fixture server
+   written in mino (tests/fixtures/http/server.clj, accept loop on a
+   worker future) serves the route table (echo, JSON validation,
+   pagination, redirects, chunked, gzip, hold, connection counter),
+   and the suite drives it end to end through the mino.http surface.
+   In process, so the lane runs on every platform the CLI builds on;
+   the TLS end-to-end legs live in the mino-tests satellite repo."
   []
   (println (sh! mino-bin "tests/http_integration_test.clj")))
+
+(defn test-zip64
+  "Nightly zip64 size-path lane (compression-zip campaign p6t3,
+   ADR 29): run tests/zip64_big_test.clj, the 4 GiB + 1 member that
+   forces the writer's automatic zip64 switch. Whole-buffer scope
+   means a ~4.5 GB working set, so this file never joins the
+   ordinary suite (tests/run.clj lists it under other-lane-files
+   with nightly as the owning lane) and the test itself memory-
+   guards: a host that cannot allocate the set degrades to a
+   printed recorded-acceptance fallback, never a silent skip.
+   Nightly host budget should stay generous (land-time: ~35 s of
+   prim work on arm64 darwin, plus unzip -t streaming)."
+  []
+  (println (sh! mino-bin "tests/zip64_big_test.clj")))
 
 (defn test-summary
   "Run the test suite and emit a stable EDN summary artifact at

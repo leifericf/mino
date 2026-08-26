@@ -77,6 +77,17 @@ jobs:
         run: ./mino task test-embed
         timeout-minutes: 10
 
+      - name: Zip64 size-path (4 GiB member)
+        # The nightly zip64 lane (compression-zip campaign p6t3,
+        # ADR 29): one 4 GiB + 1 member written and read whole-buffer
+        # through the zip prims, forcing the automatic zip64 switch;
+        # unzip -t streams the archive clean. Needs a host that can
+        # allocate the ~4.5 GB working set; smaller hosts print a
+        # recorded-acceptance note and degrade to the 256 MiB
+        # sub-threshold check (never a silent skip).
+        run: ./mino task test-zip64
+        timeout-minutes: 15
+
   # Clang static-analyzer gate on one pinned-zig runner. Off the push
   # path on purpose: the analyzer is slow (~90s) and its raw output is
   # noisy (clang cross-TU false positives), so it runs nightly rather
