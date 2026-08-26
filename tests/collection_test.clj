@@ -573,3 +573,27 @@
   (is (= nil (disj nil)))
   (is (thrown? (disj [1] 1))))
 
+(deftest array-ctors-size-and-init
+  ;; (kind-array size init) fills size slots with init. JVM Clojure
+  ;; grants this arity to int/long/float/double/char/boolean arrays
+  ;; and denies it to short/object/to-array.
+  (is (= 3 (count (char-array 3 \a))))
+  (is (= [\a \a \a] (vec (char-array 3 \a))))
+  (is (= 3 (count (double-array 3 1.5))))
+  (is (= [1.5 1.5 1.5] (vec (double-array 3 1.5))))
+  (is (= [5 5 5] (vec (int-array 3 5))))
+  (is (= [7 7 7] (vec (long-array 3 7))))
+  (is (= [true true] (vec (boolean-array 2 true))))
+  (is (= [1.5 1.5] (vec (float-array 2 1.5))))
+  (is (= 0 (count (char-array 0 \a))))
+  (testing "existing arities unchanged"
+    (is (= 2 (count (char-array 2))))
+    (is (= 0 (aget (int-array 2) 1)))
+    (is (= 3 (count (double-array 3)))))
+  (testing "kinds without the fill arity keep erroring, per JVM"
+    (is (thrown? (short-array 3 7)))
+    (is (thrown? (object-array 3 :x)))
+    (is (thrown? (to-array 3 :x))))
+  (testing "guard rails"
+    (is (thrown? (char-array -1 \a)))
+    (is (thrown? (char-array "ab" \a)))))

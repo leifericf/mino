@@ -136,17 +136,52 @@ mino_val *val_to_seq(mino_state *S, mino_val *v)
     }
 }
 
-/* host-array constructor primitive: ((<kind>) size-or-coll). When
+/* host-array constructor primitive: ((<kind>) size-or-coll) or, for
+ * kinds whose JVM counterpart has it, ((<kind>) size init). When
  * given a non-negative integer, allocates a fresh host array of that
  * length filled with the kind's zero value (nil for Object, 0 for
  * int / long, etc.). When given a collection, copies its elements
  * into a host array of the corresponding length. */
 static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
                                           host_array_kind_t kind,
+                                          int allow_init,
                                           const char *opname)
 {
     mino_val *arg;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    size_t      n;
+    arg_count(S, args, &n);
+    if (n == 2 && allow_init) {
+        mino_val *size_val = args->as.cons.car;
+        mino_val *init     = args->as.cons.cdr->as.cons.car;
+        mino_val *arr;
+        long long  size;
+        size_t      i;
+        if (size_val == NULL || !mino_val_int_p(size_val)) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "%s: size must be an integer", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
+        size = mino_val_int_get(size_val);
+        if (size < 0) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "%s: negative array size", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
+        if (init == NULL) init = mino_nil(S);
+        /* init is register-live across the constructor's allocations
+         * while vals[] is malloc-owned; pin across the window. After
+         * the return the array is a young GC value whose slots are
+         * traced, and the fill loop allocates nothing. */
+        gc_pin(init);
+        arr = mino_host_array_new(S, (size_t)size, kind);
+        gc_unpin(1);
+        if (arr == NULL) return NULL;
+        for (i = 0; i < (size_t)size; i++) {
+            arr->as.host_array.vals[i] = init;
+        }
+        return arr;
+    }
+    if (n != 1) {
         char buf[80];
         snprintf(buf, sizeof(buf), "%s requires one argument", opname);
         return prim_throw_classified(S, "eval/arity", "MAR001", buf);
@@ -172,25 +207,25 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
 static mino_val *prim_object_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "object-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, 0, "object-array");
 }
 
 static mino_val *prim_int_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_INT, "int-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_INT, 1, "int-array");
 }
 
 static mino_val *prim_long_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_LONG, "long-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_LONG, 1, "long-array");
 }
 
 static mino_val *prim_short_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, "short-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, 0, "short-array");
 }
 
 /* byte-array constructs an immutable MINO_BYTES value. JVM Clojure's
@@ -319,31 +354,31 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
 static mino_val *prim_float_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_FLOAT, "float-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_FLOAT, 1, "float-array");
 }
 
 static mino_val *prim_double_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_DOUBLE, "double-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_DOUBLE, 1, "double-array");
 }
 
 static mino_val *prim_char_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_CHAR, "char-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_CHAR, 1, "char-array");
 }
 
 static mino_val *prim_boolean_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_BOOLEAN, "boolean-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_BOOLEAN, 1, "boolean-array");
 }
 
 static mino_val *prim_to_array(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
-    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
+    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, 0, "to-array");
 }
 
 /* aset: in-place mutation of a host array slot. JVM Clojure's aset
