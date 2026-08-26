@@ -66,6 +66,7 @@ Thumbs.db
 docs/**/*.md
 !docs/adr/*.md
 !docs/ARCHITECTURE_CONTRACT.md
+!docs/COMPRESSION_ZIP.md
 !docs/HTTP_CLIENT.md
 !docs/HTML_XML.md
 !docs/TIME_DATE.md
