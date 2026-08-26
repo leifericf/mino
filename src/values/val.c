@@ -367,6 +367,78 @@ mino_val *mino_symbol_n(mino_state *S, const char *s, size_t len)
     return intern_lookup_or_create(S, &S->sym_intern, MINO_SYMBOL, s, len);
 }
 
+/* Lookup-only probe over an intern table: returns the entry matching
+ * (s, len, ns_len) or NULL when absent. ns_len resolution mirrors
+ * intern_lookup_or_create_ns so a keyword interned by any spelling is
+ * found under the same shape. Never inserts. */
+static mino_val *intern_lookup_only(intern_table_t *tbl,
+                                    const char *s, size_t len,
+                                    size_t ns_len_hint)
+{
+    size_t mask;
+    size_t idx;
+    size_t ns_len;
+    if (tbl->ht_buckets == NULL) return NULL;
+    if (ns_len_hint != (size_t)-1) {
+        ns_len = ns_len_hint;
+    } else {
+        size_t i;
+        ns_len = 0;
+        if (len > 1) {
+            for (i = 0; i < len; i++) {
+                if (s[i] == '/') ns_len = i;
+            }
+        }
+    }
+    mask = tbl->ht_cap - 1;
+    idx = intern_hash(s, len) & mask;
+    while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
+        if (tbl->ht_buckets[idx] != INTERN_HT_TOMBSTONE) {
+            mino_val *e = tbl->entries[tbl->ht_buckets[idx]];
+            if (e != NULL
+                && e->as.s.len == len
+                && e->as.s.ns_len == ns_len
+                && memcmp(e->as.s.data, s, len) == 0) {
+                return e;
+            }
+        }
+        idx = (idx + 1) & mask;
+    }
+    return NULL;
+}
+
+mino_val *mino_find_keyword_n(mino_state *S, const char *s, size_t len)
+{
+    (void)S;
+    return intern_lookup_only(&S->kw_intern, s, len, (size_t)-1);
+}
+
+mino_val *mino_find_keyword_ns_n(mino_state *S,
+                                 const char *ns, size_t ns_len,
+                                 const char *name, size_t name_len)
+{
+    char stack_buf[256];
+    char *buf;
+    size_t total;
+    mino_val *found;
+    if (ns == NULL) {
+        found = intern_lookup_only(&S->kw_intern, name, name_len, 0);
+        return found;
+    }
+    if (ns_len > SIZE_MAX - 1 - name_len) return NULL;
+    total = ns_len + 1 + name_len;
+    buf = (total < sizeof(stack_buf)) ? stack_buf
+                                      : (char *)malloc(total);
+    if (buf == NULL) return NULL;
+    memcpy(buf, ns, ns_len);
+    buf[ns_len] = '/';
+    memcpy(buf + ns_len + 1, name, name_len);
+    found = intern_lookup_only(&S->kw_intern, buf, total, ns_len);
+    if (buf != stack_buf) free(buf);
+    return found;
+}
+
+
 mino_val *mino_symbol(mino_state *S, const char *s)
 {
     return mino_symbol_n(S, s, strlen(s));

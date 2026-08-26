@@ -283,6 +283,43 @@ static mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
 }
 
+/* find-keyword is lookup-only over the keyword intern table: nil for
+ * a name that was never interned, the interned keyword otherwise.
+ * Never interns. Non-string arguments answer nil (strings-only
+ * contract, matching keyword's accepted inputs). */
+static mino_val *prim_find_keyword(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *v;
+    mino_val *found;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "find-keyword requires one or two arguments");
+    }
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val *ns_val = args->as.cons.car;
+        mino_val *nm_val = args->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "find-keyword requires one or two arguments");
+        }
+        if (ns_val == NULL || mino_type_of(ns_val) != MINO_STRING
+            || nm_val == NULL || mino_type_of(nm_val) != MINO_STRING) {
+            return mino_nil(S);
+        }
+        found = mino_find_keyword_ns_n(S,
+                                       ns_val->as.s.data, ns_val->as.s.len,
+                                       nm_val->as.s.data, nm_val->as.s.len);
+        return (found != NULL) ? found : mino_nil(S);
+    }
+    v = args->as.cons.car;
+    if (v == NULL || mino_type_of(v) != MINO_STRING) {
+        return mino_nil(S);
+    }
+    found = mino_find_keyword_n(S, v->as.s.data, v->as.s.len);
+    return (found != NULL) ? found : mino_nil(S);
+}
+
 static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
@@ -1648,6 +1685,9 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns a symbol with the given name."},
     {"keyword",   prim_keyword,
      "Returns a keyword with the given name."},
+    {"find-keyword", prim_find_keyword,
+     "Returns the already-interned keyword with the given name, or nil "
+     "when it was never interned. Never interns."},
     {"hash",      prim_hash,
      "Returns the hash code of the value. Note: mino uses FNV-1a internally; hash values are NOT compatible with JVM Clojure's Murmur3-based hasheq."},
     {"macroexpand-1", prim_macroexpand_1,

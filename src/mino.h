@@ -407,6 +407,15 @@ mino_val *mino_keyword_ns_n(mino_state *S,
                               const char *ns, size_t ns_len,
                               const char *name, size_t name_len);
 
+/* Lookup-only keyword probes: return the already-interned keyword for
+ * the given name (or ns/name), or NULL when it was never interned.
+ * They never intern, so a caller can observe the intern table without
+ * mutating it. */
+mino_val *mino_find_keyword_n(mino_state *S, const char *s, size_t len);
+mino_val *mino_find_keyword_ns_n(mino_state *S,
+                                 const char *ns, size_t ns_len,
+                                 const char *name, size_t name_len);
+
 /* Same shape for symbols. */
 mino_val *mino_symbol_ns_n(mino_state *S,
                              const char *ns, size_t ns_len,

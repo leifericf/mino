@@ -116,6 +116,14 @@
   (is (keyword? (keyword "foo")))
   (is (= "bar" (name (keyword "bar")))))
 
+(deftest find-keyword-is-lookup-only
+  ;; find-keyword never interns: a not-yet-interned name answers nil
+  ;; (whether plain or namespaced), while a previously interned
+  ;; keyword is still found.
+  (is (nil? (find-keyword "fkw-never")))
+  (is (nil? (find-keyword "fkw-ns" "fkw-name")))
+  (is (= :fkw-have (do (keyword "fkw-have") (find-keyword "fkw-have")))))
+
 (deftest empty-string-namespace-is-preserved
   ;; Two-arg (keyword "" name) and (symbol "" name) construct a value
   ;; whose namespace is the empty string, not nil. This matches

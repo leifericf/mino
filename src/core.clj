@@ -3507,14 +3507,8 @@
    reader-conditional."
   [x] (boolean (some-> x meta :mino/reader-conditional)))
 
-;; Keyword interning probe. mino interns every keyword on construction,
-;; so any keyword we can construct already exists.
-(defn find-keyword
-  "Returns the keyword for the given string. In mino keywords are
-   always interned, so this is equivalent to keyword for string input
-   and nil for other input."
-  ([s]      (when (string? s) (keyword s)))
-  ([ns nm]  (when (and (string? ns) (string? nm)) (keyword ns nm))))
+;; find-keyword is a C primitive: a lookup-only probe over the
+;; keyword intern table (nil when absent, never interns).
 
 ;; Parsing helpers (Clojure 1.11+).
 (defn parse-boolean
