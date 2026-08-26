@@ -1286,12 +1286,14 @@
 
 (defn replace
   "Returns a collection with items in coll replaced by entries in
-   smap."
-  [smap coll]
-  (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
-    (if (vector? coll)
-      (with-meta (mapv f coll) (meta coll))
-      (map f coll))))
+   smap. When called with no collection, returns a transducer."
+  ([smap]
+   (map (fn [x] (if-let [e (find smap x)] (val e) x))))
+  ([smap coll]
+   (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
+     (if (vector? coll)
+       (with-meta (mapv f coll) (meta coll))
+       (map f coll)))))
 
 ;; str-replace is now a C primitive in prim/string.c
 

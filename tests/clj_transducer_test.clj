@@ -154,3 +154,14 @@
   ;; Short coll terminates the walk, matching Clojure.
   (is (= '(11 22) (sequence (map +) [1 2] [10 20 30 40])))
   (is (= '(2 4 6) (sequence (map +) [1 2 3] [1 2 3]))))
+
+;; --- replace ---
+
+(deftest clj-replace-xf
+  (testing "transducer arity"
+    (is (= [1 :b] (into [] (replace {:a 1}) [:a :b])))
+    (is (= [1 :b] (transduce (replace {:a 1}) conj [:a :b])))
+    (is (= [] (into [] (replace {:a 1}) []))))
+  (testing "collection arity"
+    (is (= [1 :b] (replace {:a 1} [:a :b])))
+    (is (= [1 :b] (replace {:a 1} '(:a :b))))))
