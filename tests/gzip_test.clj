@@ -1,12 +1,16 @@
 (require "tests/test")
+(require '[mino.path :as path])
 (require '[clojure.test.check :as tc])
 (require '[clojure.test.check.properties :as prop])
 (require '[clojure.test.check.generators :as gen])
 
 ;; gzip-decompress / deflate-decompress decode response-body-shaped
-;; bytes through the vendored miniz inflate core. mino has no
-;; compressor, so every round trip starts from a fixture generated
-;; with gzip(1) (see tests/fixtures/gzip/README.md).
+;; bytes through the vendored miniz inflate core; gzip-compress and
+;; friends write them back out. The suite is self-serve:
+;; round-trip payloads are generated and compressed in-process both
+;; directions, and the checked-in fixtures are oracle goldens only
+;; (gzip(1)-made decode pins, provenance in the fixtures README).
+;; zeros200m.gz keeps its decompression-bomb role.
 ;;
 ;; Error kinds live in one family: :codec/truncated (input ends
 ;; mid-structure), :codec/magic (not a gzip container), :codec/crc
@@ -15,6 +19,10 @@
 ;; :codec/limit (output passed the :max-bytes cap). deflate-decompress
 ;; is raw-deflate only: a zlib-wrapped stream is rejected as data, not
 ;; decoded.
+;;
+;; No test depends on gzip(1) at test time except compress_test's
+;; self-skipping decode cross-check; pinned by the grep-clean
+;; assertion at the bottom.
 
 (def ^:private fx-dir "tests/fixtures/gzip/")
 
@@ -41,9 +49,22 @@
 (def ^:private hello-plaintext
   (byte-array (map int "hello, gzip\n")))
 
+(def ^:private gz-random10k
+  "Deterministic incompressible payload, generated in-process:
+  a seeded LCG over 10240 bytes, the old checked-in random10k role."
+  (loop [i 0 seed 20260826 acc (transient [])]
+    (if (= i 10240)
+      (byte-array (persistent! acc))
+      (let [s (long (mod (+ (* seed 1103515245) 12345) 2147483648))]
+        (recur (inc i) s (conj! acc (mod (quot s 65536) 256)))))))
+
+(def ^:private gz-zeros1m
+  "1 MiB of zeros, generated in-process (the old zeros1m.gz role)."
+  (byte-array 1048576))
+
 (defn- hello-parts
   "Split hello.gz into [header body trailer] at its structural
-  boundaries (gzip -n writes a 10-byte no-flag header)."
+  boundaries (the no-name 10-byte header shape)."
   []
   (let [b (fixture "hello.gz")
         s (seq b)
@@ -80,11 +101,16 @@
     (is (= hello-plaintext (gzip-decompress container)))))
 
 (deftest gzip-incompressible-10k-round-trips
-  (is (= (fixture "random10k.bin")
-         (gzip-decompress (fixture "random10k.gz")))))
+  ;; In-process both directions: mino's own member over
+  ;; incompressible data. Cross-tool incompressible decode stays
+  ;; pinned in compress_test against the python oracle streams.
+  (is (= gz-random10k
+         (gzip-decompress (gzip-compress gz-random10k {:level 9}))))
+  (is (= gz-random10k
+         (gzip-decompress (gzip-compress gz-random10k {:level 0})))))
 
 (deftest gzip-1mb-of-zeros-round-trips
-  (let [out (gzip-decompress (fixture "zeros1m.gz"))]
+  (let [out (gzip-decompress (gzip-compress gz-zeros1m))]
     (is (= 1048576 (count out)))
     (is (= (byte-array 1048576) out))))
 
@@ -100,7 +126,7 @@
                                  {:max-bytes 300000000})))))
 
 (deftest cap-is-inclusive-at-the-boundary
-  (let [gz (fixture "zeros1m.gz")]
+  (let [gz (gzip-compress gz-zeros1m)]
     (is (= 1048576 (count (gzip-decompress gz {:max-bytes 1048576}))))
     (is (= :codec/limit
            (decode-kind #(gzip-decompress gz {:max-bytes 1048575}))))))
@@ -244,5 +270,22 @@
                   (and (= :err tag) (contains? family val)))
               (str "iteration " iter " op " op))
           (recur seed' (inc iter)))))))
+
+;;; the suite shells nothing at test time
+
+(deftest no-test-time-gzip-one-dependencies
+  ;; grep-clean over the suite: the only sanctioned gzip(1) call is
+  ;; compress_test's self-skipping cross-check. Command-line shapes
+  ;; only (a flag or a pipe into the binary); prim names like
+  ;; gzip-compress and prose mentions of gzip(1) never match.
+  (let [invocation #"(?m)(gzip\s+-|\|\s*gzip(\s|$))"
+        offenders
+        (->> (path/glob "tests/*_test.clj")
+             (filter #(not= % "tests/compress_test.clj"))
+             (filter #(re-find invocation (slurp %)))
+             (vec))]
+    (is (= [] offenders)
+        (str "test-time gzip(1) dependency outside the cross-check: "
+             offenders))))
 
 (run-tests-and-exit)
