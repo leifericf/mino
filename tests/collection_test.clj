@@ -553,3 +553,13 @@
   ;; incompatible types -- the total-order deviation is specific to the
   ;; implicit default comparator, not to `compare`.
   (is (thrown? (sorted-set-by compare 1 "a" :k))))
+(deftest char-array-from-string
+  ;; A string argument sequences as its chars, one array slot per
+  ;; codepoint, matching JVM Clojure.
+  (is (= 2 (count (char-array "ab"))))
+  (is (= [\a \b] (vec (char-array "ab"))))
+  (is (= 0 (count (char-array ""))))
+  (is (= [] (vec (char-array ""))))
+  (is (= 2 (count (char-array "aé"))))
+  (is (= [\a \é] (vec (char-array "aé")))))
+

@@ -160,6 +160,11 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
         }
         return mino_host_array_new(S, (size_t)mino_val_int_get(arg), kind);
     }
+    /* Strings are seqable as chars per Clojure; seqify so the copy
+     * below sees one cons cell per codepoint. */
+    if (arg != NULL && mino_type_of(arg) == MINO_STRING) {
+        arg = val_to_seq(S, arg);
+    }
     /* Treat as a collection (vector / seq / list / set / map). */
     return mino_host_array_from_coll(S, arg, kind);
 }
