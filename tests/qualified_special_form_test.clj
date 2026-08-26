@@ -152,4 +152,31 @@
   (is (= '(clojure.core/when true 1)
          (macroexpand-1 '(clojure.core/when true 1)))))
 
+;; ---------------------------------------------------------------------------
+;; (7) Unresolvable bare symbols qualify with the current ns, matching the
+;;     JVM reader: `(sqx b) reads as (user/sqx user/b) in user. Locals are
+;;     included -- the JVM qualifies let/fn bindings too, which is why
+;;     auto-gensyms exist -- while read-time gensyms and pre-qualified
+;;     symbols pass through as read.
+;; ---------------------------------------------------------------------------
+
+(deftest qsf-syntax-quote-qualifies-unresolvable-symbols
+  (is (= (list (symbol (str *ns*) "sqx") (symbol (str *ns*) "b"))
+         `(sqx b)))
+  (is (= '(clojure.core/map clojure.core/inc) `(map inc))))
+
+(deftest qsf-syntax-quote-qualifies-locals
+  (let [x 1]
+    (is (= (symbol (str *ns*) "x") `x))))
+
+(deftest qsf-syntax-quote-leaves-gensyms-and-qualified-symbols
+  (is (nil? (namespace `x#)))
+  (is (= 'other/sym `other/sym)))
+
+(deftest qsf-syntax-quote-unresolvable-in-macro-template-uses-defining-ns
+  (defmacro qsf-template [] `(sqx b))
+  (let [home (str *ns*)]
+    (is (= (list (symbol home "sqx") (symbol home "b"))
+           (macroexpand-1 '(qsf-template))))))
+
 (run-tests-and-exit)

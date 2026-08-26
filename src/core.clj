@@ -2989,6 +2989,9 @@
    \return    "return"
    \delete    "delete"})
 
+;; with-open's close call is emitted unqualified (~'close) so it
+;; resolves in the consumer's namespace at runtime; the JVM macro
+;; avoids auto-qualification the same way with (.close ~name).
 (defmacro with-open
   "Binds resources, evaluates body, then closes each resource."
   [bindings & body]
@@ -3000,7 +3003,7 @@
       `(let [~name ~init]
          (try
            (with-open ~(into [] rest-bindings) ~@body)
-           (finally (close ~name)))))))
+           (finally (~'close ~name)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Transducers: composable algorithmic transformations. Gated on

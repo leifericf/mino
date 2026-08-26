@@ -90,24 +90,6 @@ mino_val *macroexpand_all(mino_state *S, mino_val *form, mino_env *env)
 }
 
 /*
- * Walk lexical-frame chain stopping at the first ns env, returning 1
- * if `name` is bound there. Used by syntax-quote auto-qualification to
- * leave macro-local symbols (let/fn args) bare.
- */
-static int qq_locally_bound(mino_state *S, mino_env *env, const char *name)
-{
-    mino_env *e;
-    for (e = env; e != NULL; e = e->parent) {
-        size_t i;
-        for (i = 0; i < S->ns_vars.ns_env_len; i++) {
-            if (S->ns_vars.ns_env_table[i].env == e) return 0; /* hit ns boundary */
-        }
-        if (env_find_here(e, name) != NULL) return 1;
-    }
-    return 0;
-}
-
-/*
  * Pick the namespace context that syntax-quote should consult when
  * qualifying a bare symbol. Inside a macro expansion, that is the
  * macro's defining ns (carried in fn_ambient_ns by apply_callable),
@@ -133,14 +115,36 @@ static void qq_qualifying_ns(mino_state *S, const char **ns_name_out,
     *ns_env_out  = current_ns_env(S);
 }
 
+/* Read-time auto-gensyms land as name__N__auto__; the reader interns
+ * them bare, so qualification must leave them alone. */
+static int qq_ends_with_auto(const char *name, size_t nlen)
+{
+    static const char suffix[] = "__auto__";
+    size_t slen = sizeof(suffix) - 1;
+    return nlen >= slen
+           && memcmp(name + nlen - slen, suffix, slen) == 0;
+}
+
+static int qq_is_bare_special(const char *name, size_t nlen)
+{
+    static const char *const names[] = { "catch", "finally", "new" };
+    size_t i;
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strlen(names[i]) == nlen
+            && memcmp(name, names[i], nlen) == 0) return 1;
+    }
+    return 0;
+}
+
 /*
  * Auto-qualify a bare symbol against the current namespace's chain:
  * find the namespace whose env owns the binding (env_find_here), and
- * return ns/name. Symbols not found in any ns env stay bare so special
- * forms (try, catch, &) and gensym names pass through unchanged.
+ * return ns/name. Read-time gensyms (name__N__auto__) and true special
+ * forms pass through unchanged; symbols with no binding anywhere
+ * qualify with the current ns, so locals (let/fn bindings) qualify
+ * exactly like the JVM reader, which never consults the local frame.
  */
-static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
-                                     mino_env *env)
+static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym)
 {
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
@@ -180,7 +184,9 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
         }
         return sym;
     }
-    if (qq_locally_bound(S, env, name)) return sym;
+    if (qq_ends_with_auto(name, nlen)) return sym;
+    /* Host method forms (.foo) stay bare, matching the JVM reader. */
+    if (name[0] == '.') return sym;
     /* True special forms (if, do, def, quote, var, recur, try, let*, ...)
      * stay bare, matching canonical syntax-quote. The eleven macro-family
      * members (fn, let, loop, when, and, or, ...) are excluded here so the
@@ -189,6 +195,10 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
      * accepts the clojure.core/ prefix for exactly this set). */
     if (eval_is_special_form_name(name, nlen)
         && !eval_is_public_form_name(name, nlen)) return sym;
+    /* catch, finally, and new sit in the JVM's Compiler.specials table
+     * but have no standalone handler entries here (they are try clauses
+     * and the ctor form); the reader keeps them bare. */
+    if (qq_is_bare_special(name, nlen)) return sym;
     if (qns_name == NULL) return sym;
     for (e = qns_env; e != NULL; e = e->parent) {
         env_binding_t *b = env_find_here(e, name);
@@ -227,7 +237,18 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym,
             return sym; /* env without ns name (shouldn't happen) */
         }
     }
-    return sym;
+    /* No binding anywhere: qualify with the current ns. The JVM reader
+     * does this for every unresolvable bare symbol, locals included. */
+    {
+        size_t cnlen = strlen(qns_name);
+        char   buf[512];
+        if (cnlen + 1 + nlen + 1 > sizeof(buf)) return sym;
+        memcpy(buf, qns_name, cnlen);
+        buf[cnlen] = '/';
+        memcpy(buf + cnlen + 1, name, nlen);
+        buf[cnlen + 1 + nlen] = '\0';
+        return mino_symbol_n(S, buf, cnlen + 1 + nlen);
+    }
 }
 
 /* qq_expand_vector -- expand a vector template. The fast path (no ~@
@@ -513,7 +534,7 @@ mino_val *quasiquote_expand(mino_state *S, mino_val *form,
                               mino_env *env)
 {
     if (form == NULL) { return form; }
-    if (mino_type_of(form) == MINO_SYMBOL) return qq_qualify_symbol(S, form, env);
+    if (mino_type_of(form) == MINO_SYMBOL) return qq_qualify_symbol(S, form);
     if (mino_type_of(form) == MINO_VECTOR) return qq_expand_vector(S, form, env);
     if (mino_type_of(form) == MINO_MAP)    return qq_expand_map(S, form, env);
     if (!mino_is_cons(form))       return form;
