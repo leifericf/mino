@@ -127,6 +127,8 @@
                     :task vendor.bearssl.tools.make-amalgam/run}
    gen-tzdata      {:doc "Regenerate src/prim/tzdata_blob.c from the vendored zoneinfo bundle"
                     :task vendor.tzdata.tools.gen-tzdata/run}
+   gen-unicode-case {:doc "Regenerate src/prim/unicode_case.h from the vendored Unicode UCD"
+                     :task mino.tasks.builtin/gen-unicode-case}
   examples-amalgam {:doc  "Build every examples/embed_*.c against the dist/ amalgamation"
                     :deps [build]
                     :task mino.tasks.builtin/examples-amalgam}

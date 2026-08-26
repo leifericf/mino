@@ -24,8 +24,8 @@ casing prims' non-ASCII path through them. The generator
 (`tools/gen_unicode_case.py`) reads only the vendored files, so
 regeneration (`./mino task gen-unicode-case`) needs no network. The
 tables cover 1:1 simple mappings plus the unconditional 1:1 entries
-of SpecialCasing; every mapping keeps the codepoint's UTF-8 byte
-length, which the generator asserts.
+of SpecialCasing; mappings may change a codepoint's UTF-8 byte
+length, so the casing prims size output buffers for the worst case.
 
 Excluded, deliberately: multi-character mappings (sharp s to SS) and
 locale-sensitive mappings (Turkish dotted i), which JVM

@@ -2843,3 +2843,10 @@
       (println "qa-arch: PASS")
       (do (println (str "qa-arch: FAIL (" failures " issue(s))"))
           (throw (str "qa-arch failed with " failures " issue(s)"))))))
+
+(defn gen-unicode-case
+  "Regenerate src/prim/unicode_case.h from the vendored Unicode
+   character database (vendor/unicode/). Run after bumping the
+   vendored UCD copy, then commit the generated diff. See ADR 31."
+  []
+  (println (sh! "python3" "tools/gen_unicode_case.py")))
