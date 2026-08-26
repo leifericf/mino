@@ -33,3 +33,15 @@ python3 tools/gen_zip_oracle.py
 Compressed bodies are never compared between mino and
 python (the R4 golden split): the archives pin the read
 side, decode interop only.
+
+Self-frozen write goldens (p4, NOT generator output):
+
+- `write_golden.zip` / `write_golden64.zip` -- mino's own zip-write
+  bytes over tests/zip_write_test.clj's zw-golden-entries (default
+  and forced-zip64), frozen once at the p4t2 impl commit.
+- `write_golden.edn` -- the frozen SHA-256s plus provenance.
+
+These are determinism pins (R4): regeneration must reproduce the
+same shas in any timezone; a diff means the writer broke, not that
+the goldens need refreshing. Never regenerate or compare them
+against python output.

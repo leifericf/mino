@@ -591,11 +591,11 @@ extern const mino_prim_def k_prims_compress[];
 extern const size_t        k_prims_compress_count;
 
 /* zip.c -- k_prims_archive registers the zip container prims
- * (zip-entries, zip-read; zip-write joins in p4) under the "archive"
+ * (zip-entries, zip-read, zip-write) under the "archive"
  * domain key (the "zip" string already belongs to the clojure.zip
  * capability registry). All prims are file-local static; the CDH
- * walk, CP437 decode, and DOS timestamp decode are file-local too
- * (no cross-TU consumers). */
+ * walk, CP437 decode, DOS timestamp decode, and the write-side
+ * UTC compensation are file-local too (no cross-TU consumers). */
 extern const mino_prim_def k_prims_archive[];
 extern const size_t        k_prims_archive_count;
 extern const mino_prim_def k_prims_gzip[];

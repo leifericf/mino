@@ -1,13 +1,17 @@
 /*
- * zip.c -- zip container primitives (reader half, ADR 29).
+ * zip.c -- zip container primitives (ADR 29).
  *
  * zip-entries lists an archive's central directory in archive order
  * (MZ_ZIP_FLAG_DO_NOT_SORT_CENTRAL_DIRECTORY, D8); zip-read returns
  * one entry's bytes by decoded name, the FIRST central-directory
  * match. Both run over the vendored miniz memory reader
  * (mz_zip_reader_init_mem / mz_zip_reader_file_stat /
- * mz_zip_reader_extract_to_heap); the writer half joins this TU in
- * p4.
+ * mz_zip_reader_extract_to_heap). zip-write builds an archive over
+ * the vendor heap writer: every entry goes through
+ * mz_zip_writer_add_mem_ex_v2 with an explicit last_modified, the
+ * whole entry vector is validated and captured BEFORE any writer
+ * allocation, and the result is mino_bytes of the finalized heap
+ * archive.
  *
  * Two decodings are mino-owned, never vendor localtime paths (D5,
  * D6): the CDH time/date words are read straight from the archive
@@ -41,7 +45,8 @@
  * (LOC/CDH disagreement, malformed streams), :codec/limit MGC005
  * (:max-bytes, zip64 ceilings), :codec/missing MGC006 (name not
  * found), :codec/unsupported MGC007 (encrypted entries, methods
- * other than 0 and 8). Nothing escapes :internal except OOM.
+ * other than 0 and 8, unknown write :method). Nothing escapes
+ * :internal except OOM.
  */
 
 #include "prim/internal.h"
@@ -56,6 +61,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define ZIP_DEFAULT_MAX (64u * 1024u * 1024u)
 #define ZIP_EOCD_SIG_LEN 4u
@@ -95,13 +101,14 @@ static mz_uint64 zip_le32(const unsigned char *p)
  * bytes-strict, the gzip.c symmetry). Returns 0 with data/len
  * filled, or a thrown error via -1. */
 static int zip_data_arg(mino_state *S, mino_val *v, const char *who,
+                        const char *what,
                         const unsigned char **data, size_t *len)
 {
     char msg[96];
 
     if (v == NULL || (!mino_is_bytes(v) && !mino_is_string(v))) {
-        snprintf(msg, sizeof(msg), "%s: archive must be bytes or a string",
-                 who);
+        snprintf(msg, sizeof(msg), "%s: %s must be bytes or a string",
+                 who, what);
         prim_throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
@@ -286,7 +293,8 @@ static int zip_cdh_walk_init(const mz_zip_archive *zip, zip_cdh_walk *w,
 
 static int zip_cdh_next(zip_cdh_walk *w, unsigned *dos_time,
                         unsigned *dos_date, unsigned *bit_flag,
-                        const unsigned char **name, size_t *name_len)
+                        const unsigned char **name, size_t *name_len,
+                        const unsigned char **comment, size_t *comment_len)
 {
     size_t nl, xl, cl;
     const unsigned char *p;
@@ -304,6 +312,13 @@ static int zip_cdh_next(zip_cdh_walk *w, unsigned *dos_time,
     *bit_flag = zip_le16(p + 8);
     *name = p + ZIP_CDH_FIXED_LEN;
     *name_len = nl;
+    /* The raw comment bytes, not the vendor stat copy (char[512],
+     * silently capped at 511): a writer may emit a comment up to the
+     * 16-bit field width and the reader must return all of it.
+     * Callers uninterested in the comment pass NULL (the name-only
+     * lookup). */
+    if (comment != NULL) *comment = p + ZIP_CDH_FIXED_LEN + nl + xl;
+    if (comment_len != NULL) *comment_len = cl;
     w->ofs += ZIP_CDH_FIXED_LEN + nl + xl + cl;
     return 0;
 }
@@ -378,8 +393,9 @@ static mino_val *zip_mtime(mino_state *S, unsigned dos_time,
 static mino_val *zip_entry_map(mino_state *S,
                                const mz_zip_archive_file_stat *st,
                                const unsigned char *name, size_t name_len,
-                               unsigned bit_flag, unsigned dos_time,
-                               unsigned dos_date)
+                               const unsigned char *comment,
+                               size_t comment_len, unsigned bit_flag,
+                               unsigned dos_time, unsigned dos_date)
 {
     mino_val *ks[8], *vs[8];
     unsigned char *scratch;
@@ -414,15 +430,15 @@ static mino_val *zip_entry_map(mino_state *S,
     vs[6] = st->m_is_directory ? mino_true(S) : mino_false(S);
     ks[7] = mino_keyword(S, "comment");
     {
-        /* The vendor stat copies the comment zero-terminated (capped
-         * at 511 bytes); decode through the same rule as the name. */
-        clen = strlen(st->m_comment);
+        /* The raw CDH comment bytes decode through the same rule as
+         * the name (bit 11: claimed UTF-8 pass-through, else CP437);
+         * capacity >= 3 * comment_len covers the expansion. */
+        clen = comment_len;
         scratch = (unsigned char *)malloc(clen * 3 + 1);
         if (scratch == NULL)
             return prim_throw_classified(S, "internal", "MIN001",
                                          "zip-entries: out of memory");
-        dn = zip_decode_name(scratch, (const unsigned char *)st->m_comment,
-                             clen, bit_flag);
+        dn = zip_decode_name(scratch, comment, clen, bit_flag);
         vs[7] = mino_string_n(S, (const char *)scratch, dn);
         free(scratch);
     }
@@ -458,7 +474,322 @@ static mino_val *zip_extract_error(mino_state *S, mz_zip_error err,
     }
 }
 
+/* ---- the writer half (p4, ADR 29) ---- */
+
+/* DOS date range in epoch seconds: 1980-01-01 (the python ZipInfo
+ * default clamp) through 2107-12-31 23:59:58, the last second the
+ * 16-bit date word encodes. 315532800 is zip_days_from_civil(1980,
+ * 1, 1) * 86400. */
+#define ZIP_DOS_MIN_EPOCH 315532800LL
+
+/* Civil date from days since 1970-01-01 (the Hinnant era inverse),
+ * pure integer arithmetic, no localtime. */
+static void zip_civil_from_days(long long z, long long *y, unsigned *m,
+                                unsigned *d)
+{
+    long long era;
+    unsigned doe, yoe, doy, mp;
+
+    z += 719468;
+    era = (z >= 0 ? z : z - 146096) / 146097;
+    doe = (unsigned)(z - era * 146097);
+    yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    *y = (long long)yoe + era * 400;
+    doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    mp = (5 * doy + 2) / 153;
+    *d = doy - (153 * mp + 2) / 5 + 1;
+    *m = mp + (mp < 10 ? 3u : (unsigned)-9);
+    *y += (*m <= 2);
+}
+
+/* One captured, fully validated write entry. name is malloc'd and
+ * rewritten; data and comment borrow the caller's mino values
+ * (safe through the vendor add loop: no mino allocation happens
+ * between capture and result, and the allocator is non-moving, the
+ * reader's borrowed-archive precedent). */
+typedef struct {
+    char                *name;
+    size_t               name_len;
+    const unsigned char *data;
+    size_t               data_len;
+    const unsigned char *comment;
+    size_t               comment_len;
+    mz_uint              add_flags; /* ASCII filename flag or 0 */
+    int                  level;     /* 0-9, 0 when stored */
+    time_t               mtime;     /* compensated DOS input */
+} zip_wentry;
+
+static void zip_wentries_free(zip_wentry *es, size_t n)
+{
+    size_t i;
+
+    if (es == NULL) return;
+    for (i = 0; i < n; i++) free(es[i].name);
+    free(es);
+}
+
+/* epoch seconds to the vendor's DOS conversion input: clamp into
+ * the DOS date range (0 and nil arrive as 0 and clamp up, post-2107
+ * clamps down), take the UTC civil fields, then feed them to
+ * mktime(isdst=-1) so the vendor's localtime lands on exactly those
+ * fields (D5). The vendor then never calls time(): every entry
+ * carries an explicit last_modified (A2). The DST-window edge (a
+ * :mtime whose UTC fields fall inside the runner's local transition
+ * window) is accepted and pinned away in tests. */
+static time_t zip_epoch_compensate(long long epoch)
+{
+    long long max_epoch = zip_days_from_civil(2107, 12, 31) * 86400
+                        + 23 * 3600 + 59 * 60 + 58;
+    struct tm tm;
+    long long days, rem, y;
+    unsigned m, d;
+
+    if (epoch < ZIP_DOS_MIN_EPOCH) epoch = ZIP_DOS_MIN_EPOCH;
+    if (epoch > max_epoch) epoch = max_epoch;
+    days = epoch / 86400;
+    rem = epoch % 86400;
+    zip_civil_from_days(days, &y, &m, &d);
+    memset(&tm, 0, sizeof(tm));
+    tm.tm_year = (int)(y - 1900);
+    tm.tm_mon = (int)m - 1;
+    tm.tm_mday = (int)d;
+    tm.tm_hour = (int)(rem / 3600);
+    tm.tm_min = (int)((rem % 3600) / 60);
+    tm.tm_sec = (int)(rem % 60);
+    tm.tm_isdst = -1;
+    return mktime(&tm);
+}
+
+/* Read zip-write's opts: {:level 6 :zip64 false}. Returns 0 or a
+ * thrown error via -1. */
+static int zip_write_opts(mino_state *S, mino_val *opts, int *level,
+                          int *zip64)
+{
+    mino_val *v;
+    long long n;
+    char msg[112];
+
+    *level = 6;
+    *zip64 = 0;
+    if (opts == NULL || mino_type_of(opts) != MINO_MAP) return 0;
+    v = map_get_val(opts, mino_keyword(S, "level"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (!as_long(v, &n) || n < 0 || n > 9) {
+            snprintf(msg, sizeof(msg),
+                     "zip-write: :level must be an integer 0-9");
+            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            return -1;
+        }
+        *level = (int)n;
+    }
+    v = map_get_val(opts, mino_keyword(S, "zip64"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (mino_type_of(v) != MINO_BOOL) {
+            snprintf(msg, sizeof(msg),
+                     "zip-write: :zip64 must be a boolean");
+            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            return -1;
+        }
+        *zip64 = mino_val_bool_get(v);
+    }
+    return 0;
+}
+
+/* Validate and capture one entry. Every throw happens here, before
+ * any writer allocation (the bomb-cap discipline inverted: caller
+ * input is fully checked first). On failure the entry's own name
+ * buffer is freed and -1 returned after the throw. */
+static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
+                              int def_level, zip_wentry *out)
+{
+    mino_val *v;
+    const unsigned char *bytes;
+    size_t len, i;
+    long long mtime = 0, n;
+    int store = 0, level = def_level;
+    char msg[144];
+
+#define ZIP_WCONTRACT(...)                                              \
+    do {                                                                \
+        snprintf(msg, sizeof(msg), __VA_ARGS__);                        \
+        free(out->name);                                                \
+        out->name = NULL;                                               \
+        prim_throw_classified(S, "eval/contract", "MCT001", msg);       \
+        return -1;                                                      \
+    } while (0)
+
+    if (entry == NULL || mino_type_of(entry) != MINO_MAP) {
+        snprintf(msg, sizeof(msg),
+                 "zip-write: entry %lu must be a map", (unsigned long)idx);
+        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return -1;
+    }
+
+    /* :name -- required string, backslashes rewritten to forward
+     * slashes, leading slash rejected (APPNOTE 4.4.17.1), embedded
+     * NUL rejected (the vendor takes a C string and would silently
+     * truncate). */
+    out->name = NULL;
+    v = map_get_val(entry, mino_keyword(S, "name"));
+    if (v == NULL || mino_type_of(v) != MINO_STRING)
+        ZIP_WCONTRACT("zip-write: entry %lu :name must be a string",
+                      (unsigned long)idx);
+    len = v->as.s.len;
+    bytes = (const unsigned char *)v->as.s.data;
+    if (bytes == NULL) bytes = (const unsigned char *)"";
+    if (len == 0)
+        ZIP_WCONTRACT("zip-write: entry %lu :name must not be empty",
+                      (unsigned long)idx);
+    if (len > 0xFFFF)
+        ZIP_WCONTRACT("zip-write: entry %lu :name exceeds the 16-bit "
+                      "name field", (unsigned long)idx);
+    if (memchr(bytes, 0, len) != NULL)
+        ZIP_WCONTRACT("zip-write: entry %lu :name must not contain a "
+                      "NUL byte", (unsigned long)idx);
+    out->name = (char *)malloc(len + 1);
+    if (out->name == NULL) {
+        snprintf(msg, sizeof(msg), "zip-write: out of memory");
+        prim_throw_classified(S, "internal", "MIN001", msg);
+        return -1;
+    }
+    out->name_len = len;
+    out->add_flags = 0;
+    for (i = 0; i < len; i++) {
+        out->name[i] = (bytes[i] == '\\') ? '/' : (char)bytes[i];
+        if ((unsigned char)out->name[i] >= 0x80) out->add_flags = 1;
+    }
+    out->name[len] = '\0';
+    if (out->name[0] == '/')
+        ZIP_WCONTRACT("zip-write: entry %lu :name must not start with a "
+                      "slash", (unsigned long)idx);
+    /* Bit 11 carries the vendor's UTF-8 handling (D6): non-ASCII
+     * names set it, ASCII names leave it clear. */
+    if (out->add_flags == 0) out->add_flags = MZ_ZIP_FLAG_ASCII_FILENAME;
+
+    /* :data -- required, bytes or a string (its UTF-8 bytes). */
+    v = map_get_val(entry, mino_keyword(S, "data"));
+    if (v == NULL || mino_type_of(v) == MINO_NIL)
+        ZIP_WCONTRACT("zip-write: entry %lu is missing :data",
+                      (unsigned long)idx);
+    if (!mino_is_bytes(v) && !mino_is_string(v))
+        ZIP_WCONTRACT("zip-write: entry %lu :data must be bytes or a "
+                      "string", (unsigned long)idx);
+    if (mino_is_bytes(v)) {
+        out->data = mino_bytes_data(v);
+        out->data_len = mino_bytes_len(v);
+    } else {
+        out->data = (const unsigned char *)v->as.s.data;
+        out->data_len = v->as.s.len;
+    }
+    if (out->data == NULL) out->data = (const unsigned char *)"";
+
+    /* :method -- :deflate (default) or :store; other keywords are
+     * known-but-unsupported, non-keyword values are type
+     * violations. */
+    v = map_get_val(entry, mino_keyword(S, "method"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (v == mino_keyword(S, "deflate")) {
+            ; /* default */
+        } else if (v == mino_keyword(S, "store")) {
+            store = 1;
+        } else if (mino_type_of(v) == MINO_KEYWORD) {
+            snprintf(msg, sizeof(msg),
+                     "zip-write: entry %lu :method is not supported "
+                     "(only :deflate and :store)", (unsigned long)idx);
+            free(out->name);
+            out->name = NULL;
+            prim_throw_classified(S, "codec/unsupported",
+                                  ZIP_MGC_UNSUPPORTED, msg);
+            return -1;
+        } else {
+            ZIP_WCONTRACT("zip-write: entry %lu :method must be :deflate "
+                          "or :store", (unsigned long)idx);
+        }
+    }
+
+    /* :level -- per-entry override of the archive default. */
+    v = map_get_val(entry, mino_keyword(S, "level"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (!as_long(v, &n) || n < 0 || n > 9)
+            ZIP_WCONTRACT("zip-write: entry %lu :level must be an "
+                          "integer 0-9", (unsigned long)idx);
+        level = (int)n;
+    }
+    out->level = store ? 0 : level;
+
+    /* A trailing-slash name is a directory entry and cannot carry
+     * data (the vendor rejects it mid-write; catching it here keeps
+     * validation ahead of allocation). */
+    if (out->name[out->name_len - 1] == '/' && out->data_len != 0)
+        ZIP_WCONTRACT("zip-write: entry %lu directory names cannot carry "
+                      ":data", (unsigned long)idx);
+
+    /* :mtime -- epoch seconds; 0, nil, and anything pre-1980 clamp
+     * to the DOS minimum, post-2107 clamps down (D5). */
+    v = map_get_val(entry, mino_keyword(S, "mtime"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL
+        && !as_long(v, &mtime))
+        ZIP_WCONTRACT("zip-write: entry %lu :mtime must be an integer",
+                      (unsigned long)idx);
+    out->mtime = zip_epoch_compensate(mtime);
+
+    /* :comment -- central-directory comment; embedded NUL rejected
+     * (the read side decodes a length-delimited field and NUL would
+     * survive write but confuse nothing; rejected for symmetry with
+     * :name). */
+    out->comment = NULL;
+    out->comment_len = 0;
+    v = map_get_val(entry, mino_keyword(S, "comment"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (mino_type_of(v) != MINO_STRING)
+            ZIP_WCONTRACT("zip-write: entry %lu :comment must be a "
+                          "string", (unsigned long)idx);
+        len = v->as.s.len;
+        bytes = (const unsigned char *)v->as.s.data;
+        if (bytes == NULL) bytes = (const unsigned char *)"";
+        if (len > 0xFFFF)
+            ZIP_WCONTRACT("zip-write: entry %lu :comment exceeds the "
+                          "16-bit comment field", (unsigned long)idx);
+        if (memchr(bytes, 0, len) != NULL)
+            ZIP_WCONTRACT("zip-write: entry %lu :comment must not contain "
+                          "a NUL byte", (unsigned long)idx);
+        out->comment = bytes;
+        out->comment_len = len;
+    }
+    return 0;
+#undef ZIP_WCONTRACT
+}
+
+/* Map a vendor writer failure onto the family. After full up-front
+ * validation only allocation and the format ceilings can fail: the
+ * entry-count and central-directory-size ceilings throw limit,
+ * never truncate (D7); everything else is an invariant break. */
+static mino_val *zip_writer_error(mino_state *S, mz_zip_error err,
+                                  const char *who)
+{
+    char msg[128];
+
+    switch (err) {
+    case MZ_ZIP_ALLOC_FAILED:
+        snprintf(msg, sizeof(msg), "%s: out of memory", who);
+        return prim_throw_classified(S, "internal", "MIN001", msg);
+    case MZ_ZIP_TOO_MANY_FILES:
+    case MZ_ZIP_FILE_TOO_LARGE:
+    case MZ_ZIP_UNSUPPORTED_CDIR_SIZE:
+        snprintf(msg, sizeof(msg),
+                 "%s: archive exceeds the entry or directory-size "
+                 "ceiling", who);
+        return prim_throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
+    default:
+        snprintf(msg, sizeof(msg),
+                 "%s: writer failed after validation (invariant break)",
+                 who);
+        return prim_throw_classified(S, "internal", "MIN001", msg);
+    }
+}
+
 /* ---- the prims ---- */
+
 
 /* (zip-entries data) -- vector of read-side entry maps in archive
  * order, from the central directory. data is bytes or a string (its
@@ -475,8 +806,9 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
     mz_zip_archive_file_stat *stats = NULL;
     unsigned *words = NULL;       /* 4 slots per entry: time date flag _ */
     size_t *name_ofs = NULL, *name_len = NULL;
-    const unsigned char *name;
-    size_t nlen, dn, scratch_cap = 0;
+    size_t *com_ofs = NULL, *com_len = NULL;
+    const unsigned char *name, *comment;
+    size_t nlen, clen, dn, scratch_cap = 0;
     unsigned dos_time, dos_date, bit_flag;
     unsigned char *scratch = NULL;
     zip_cdh_walk walk;
@@ -490,7 +822,8 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
                               "zip-entries takes one argument");
         return NULL;
     }
-    if (zip_data_arg(S, args->as.cons.car, "zip-entries", &data, &len) != 0)
+    if (zip_data_arg(S, args->as.cons.car, "zip-entries", "archive",
+                     &data, &len) != 0)
         return NULL;
     if (zip_reader_open(S, &zip, data, len, "zip-entries") != 0) return NULL;
 
@@ -501,10 +834,13 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
         words = (unsigned *)malloc((size_t)total * 4 * sizeof(unsigned));
         name_ofs = (size_t *)malloc((size_t)total * sizeof(size_t));
         name_len = (size_t *)malloc((size_t)total * sizeof(size_t));
+        com_ofs = (size_t *)malloc((size_t)total * sizeof(size_t));
+        com_len = (size_t *)malloc((size_t)total * sizeof(size_t));
         if (stats == NULL || words == NULL || name_ofs == NULL
-            || name_len == NULL) {
+            || name_len == NULL || com_ofs == NULL || com_len == NULL) {
             mz_zip_reader_end(&zip);
             free(stats); free(words); free(name_ofs); free(name_len);
+            free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: out of memory");
             return prim_throw_classified(S, "internal", "MIN001", msg);
         }
@@ -512,6 +848,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
     if (zip_cdh_walk_init(&zip, &walk, data, len) != 0) {
         mz_zip_reader_end(&zip);
         free(stats); free(words); free(name_ofs); free(name_len);
+        free(com_ofs); free(com_len);
         snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
         return prim_throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
                                      msg);
@@ -521,14 +858,16 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
         if (!mz_zip_reader_file_stat(&zip, i, &stats[i])) {
             mz_zip_reader_end(&zip);
             free(stats); free(words); free(name_ofs); free(name_len);
+            free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
             return prim_throw_classified(S, "codec/corrupt",
                                          ZIP_MGC_CORRUPT, msg);
         }
         if (zip_cdh_next(&walk, &dos_time, &dos_date, &bit_flag,
-                         &name, &nlen) != 0) {
+                         &name, &nlen, &comment, &clen) != 0) {
             mz_zip_reader_end(&zip);
             free(stats); free(words); free(name_ofs); free(name_len);
+            free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
             return prim_throw_classified(S, "codec/corrupt",
                                          ZIP_MGC_CORRUPT, msg);
@@ -538,6 +877,8 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
         words[i * 4 + 2] = bit_flag;
         name_ofs[i] = (size_t)(name - data);
         name_len[i] = nlen;
+        com_ofs[i] = (size_t)(comment - data);
+        com_len[i] = clen;
     }
     mz_zip_reader_end(&zip);
 
@@ -549,38 +890,45 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
     scratch = (unsigned char *)malloc(1);
     if (scratch == NULL) {
         free(stats); free(words); free(name_ofs); free(name_len);
+        free(com_ofs); free(com_len);
         snprintf(msg, sizeof(msg), "zip-entries: out of memory");
         return prim_throw_classified(S, "internal", "MIN001", msg);
     }
     for (i = 0; i < total; i++) {
         mino_val *entry;
+        size_t want = (name_len[i] > com_len[i] ? name_len[i] : com_len[i]);
 
-        if (name_len[i] * 3 + 1 > scratch_cap) {
+        if (want * 3 + 1 > scratch_cap) {
             unsigned char *grown =
-                (unsigned char *)malloc(name_len[i] * 3 + 1);
+                (unsigned char *)malloc(want * 3 + 1);
             if (grown == NULL) {
                 free(scratch);
                 free(stats); free(words); free(name_ofs); free(name_len);
+                free(com_ofs); free(com_len);
                 snprintf(msg, sizeof(msg), "zip-entries: out of memory");
                 return prim_throw_classified(S, "internal", "MIN001", msg);
             }
             free(scratch);
             scratch = grown;
-            scratch_cap = name_len[i] * 3 + 1;
+            scratch_cap = want * 3 + 1;
         }
         dn = zip_decode_name(scratch, data + name_ofs[i], name_len[i],
                              words[i * 4 + 2]);
-        entry = zip_entry_map(S, &stats[i], scratch, dn, words[i * 4 + 2],
+        entry = zip_entry_map(S, &stats[i], scratch, dn,
+                              data + com_ofs[i], com_len[i],
+                              words[i * 4 + 2],
                               words[i * 4], words[i * 4 + 1]);
         if (entry == NULL) {
             free(scratch);
             free(stats); free(words); free(name_ofs); free(name_len);
+            free(com_ofs); free(com_len);
             return NULL;
         }
         mino_vector_builder_push(out, entry);
     }
     free(scratch);
     free(stats); free(words); free(name_ofs); free(name_len);
+    free(com_ofs); free(com_len);
     result = mino_vector_builder_finish(out);
     return result;
 }
@@ -614,7 +962,8 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
                               "zip-read takes two or three arguments");
         return NULL;
     }
-    if (zip_data_arg(S, args->as.cons.car, "zip-read", &data, &len) != 0)
+    if (zip_data_arg(S, args->as.cons.car, "zip-read", "archive",
+                     &data, &len) != 0)
         return NULL;
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
@@ -668,7 +1017,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     }
     for (i = 0; i < total; i++) {
         if (zip_cdh_next(&walk, &dos_time, &dos_date, &bit_flag,
-                         &name, &nlen) != 0) {
+                         &name, &nlen, NULL, NULL) != 0) {
             mz_zip_reader_end(&zip);
             free(scratch);
             snprintf(msg, sizeof(msg), "zip-read: archive is corrupt");
@@ -752,6 +1101,114 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     return result;
 }
 
+/* (zip-write entries opts?) -- the archive bytes. The entry vector
+ * is validated and captured whole BEFORE the vendor writer opens
+ * (every arity, type, contract, and name throw happens with nothing
+ * allocated); the add loop then runs with no mino allocation until
+ * the heap archive is finalized, detached, and wrapped as
+ * mino_bytes. Opts: {:zip64 false :level 6}; {:zip64 true} ORs
+ * MZ_ZIP_FLAG_WRITE_ZIP64 in for always-zip64 output, the default
+ * rides miniz's automatic switch at the 4 GiB and 65535-entry
+ * thresholds. */
+static mino_val *prim_zip_write(mino_state *S, mino_val *args,
+                                mino_env *env)
+{
+    mino_val *entries_val, *opts = NULL, *result;
+    zip_wentry *wentries = NULL;
+    size_t n, i;
+    int level, zip64;
+    mz_zip_archive zip;
+    mz_zip_error err;
+    void *buf = NULL;
+    size_t buf_len = 0;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        prim_throw_classified(S, "eval/arity", "MAR001",
+                              "zip-write takes one or two arguments");
+        return NULL;
+    }
+    entries_val = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            prim_throw_classified(S, "eval/arity", "MAR001",
+                                  "zip-write takes one or two arguments");
+            return NULL;
+        }
+    }
+    if (entries_val == NULL || mino_type_of(entries_val) != MINO_VECTOR) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "zip-write: entries must be a vector of "
+                              "entry maps");
+        return NULL;
+    }
+    if (opts != NULL && mino_type_of(opts) != MINO_MAP
+        && mino_type_of(opts) != MINO_NIL) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "zip-write: opts must be a map");
+        return NULL;
+    }
+    if (zip_write_opts(S, opts, &level, &zip64) != 0) return NULL;
+
+    n = entries_val->as.vec.len;
+    if (n != 0) {
+        wentries = (zip_wentry *)calloc(n, sizeof(*wentries));
+        if (wentries == NULL) {
+            prim_throw_classified(S, "internal", "MIN001",
+                                  "zip-write: out of memory");
+            return NULL;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        if (zip_wentry_capture(S, vec_nth(entries_val, i), i, level,
+                               &wentries[i]) != 0) {
+            zip_wentries_free(wentries, i);
+            return NULL;
+        }
+    }
+
+    /* Pass two: no mino allocation from here until the heap archive
+     * is detached, so the borrowed data and comment pointers above
+     * stay valid through every vendor call. */
+    memset(&zip, 0, sizeof(zip));
+    if (!mz_zip_writer_init_heap_v2(&zip, 0, 0,
+                                    zip64 ? MZ_ZIP_FLAG_WRITE_ZIP64 : 0u)) {
+        err = mz_zip_get_last_error(&zip);
+        mz_zip_writer_end(&zip);
+        zip_wentries_free(wentries, n);
+        return zip_writer_error(S, err, "zip-write");
+    }
+    for (i = 0; i < n; i++) {
+        zip_wentry *e = &wentries[i];
+        if (!mz_zip_writer_add_mem_ex_v2(&zip, e->name, e->data,
+                                         e->data_len, e->comment,
+                                         (mz_uint16)e->comment_len,
+                                         (mz_uint)e->level | e->add_flags,
+                                         0, 0, &e->mtime,
+                                         NULL, 0, NULL, 0)) {
+            err = mz_zip_get_last_error(&zip);
+            mz_zip_writer_end(&zip);
+            zip_wentries_free(wentries, n);
+            return zip_writer_error(S, err, "zip-write");
+        }
+    }
+    if (!mz_zip_writer_finalize_heap_archive(&zip, &buf, &buf_len)) {
+        err = mz_zip_get_last_error(&zip);
+        mz_zip_writer_end(&zip);
+        zip_wentries_free(wentries, n);
+        return zip_writer_error(S, err, "zip-write");
+    }
+    /* Finalize detached the buffer; end frees only the vendor
+     * state. The single mino allocation is the result itself. */
+    mz_zip_writer_end(&zip);
+    zip_wentries_free(wentries, n);
+    result = mino_bytes(S, (const unsigned char *)buf, buf_len);
+    free(buf);
+    return result;
+}
+
 const mino_prim_def k_prims_archive[] = {
     {"zip-entries", prim_zip_entries,
      "Lists a zip archive's entries as a vector of maps with the keys "
@@ -763,14 +1220,27 @@ const mino_prim_def k_prims_archive[] = {
      "code. The archive is bytes or a string (its UTF-8 bytes). Zip "
      "read is untrusted input: nothing is written to any filesystem."},
     {"zip-read", prim_zip_read,
-     "Returns one zip entry's bytes: the FIRST central-directory entry "
-     "whose decoded name equals name (the same decoding zip-entries "
-     "listed). Throws :codec/missing when no entry matches, "
-     ":codec/unsupported for encrypted entries and compression methods "
-     "other than store and deflate. Opts: {:max-bytes 67108864}; the "
-     "declared entry size is checked against :max-bytes BEFORE any "
-     "inflation (:codec/limit), and the CRC-32 is verified "
-     "(:codec/crc). The archive is bytes or a string."},
+      "Returns one zip entry's bytes: the FIRST central-directory entry "
+      "whose decoded name equals name (the same decoding zip-entries "
+      "listed). Throws :codec/missing when no entry matches, "
+      ":codec/unsupported for encrypted entries and compression methods "
+      "other than store and deflate. Opts: {:max-bytes 67108864}; the "
+      "declared entry size is checked against :max-bytes BEFORE any "
+      "inflation (:codec/limit), and the CRC-32 is verified "
+      "(:codec/crc). The archive is bytes or a string."},
+    {"zip-write", prim_zip_write,
+      "Builds a zip archive in memory from a vector of entry maps and "
+      "returns the bytes. Entries: {:name string (required), :data "
+      "bytes-or-string (required; empty with a trailing-slash name "
+      "writes a directory entry), :method :deflate (default) or :store, "
+      ":level archive-default (integers 0-9), :mtime epoch-seconds-or-nil "
+      "(0 and nil clamp to the DOS minimum 1980-01-01), :comment string}. "
+      "Backslashes in names rewrite to forward slashes; a leading slash "
+      "throws. Non-ASCII names set the UTF-8 flag. Opts: {:zip64 false "
+      ":level 6}; {:zip64 true} forces zip64 structures, the default "
+      "switches automatically at the format thresholds. Output is "
+      "deterministic: same entries and opts give byte-identical "
+      "archives, timestamps in mino-owned UTC."},
 };
 
 const size_t k_prims_archive_count =

@@ -1,0 +1,18 @@
+;; Self-frozen write-determinism goldens (compression-zip campaign
+;; p4, ADR 29 R4 split). NOT oracle output: these bytes are mino's
+;; own writer, frozen ONCE at the p4t2 impl commit (2026-08-26) and
+;; diffed thereafter. Regeneration must reproduce the same shas
+;; (verified across TZ=UTC/Asia/Tokyo/America/New_York/Europe/Berlin
+;; at freeze time); a differing sha means the writer lost
+;; determinism, never that the golden should be refreshed.
+;;
+;; The entries vector lives in tests/zip_write_test.clj
+;; (zw-golden-entries); the archives carry every write-side shape:
+;; deflate and store methods, per-entry :level, string-borne UTF-8
+;; data, a bit-11 non-ASCII name with comment, a directory entry,
+;; the clamped default :mtime, and the :mtime 1 canary (a plain
+;; add_mem anywhere stamps NOW and flips both shas).
+{
+ :sha256 "af723406d7ca1c19d2072e5c9d9d95936be59a3f41f87d19f7b50a950f81d01b"
+ :zip64-sha256 "37733ed90607b9831447d66b0e32c557372b358712cafcdcb67d9f6a084683a5"
+ }

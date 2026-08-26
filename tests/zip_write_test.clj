@@ -149,8 +149,11 @@
           (str (:name e) " bytes survive the round trip")))))
 
 (deftest zip-write-string-data-is-utf-8
+  ;; A string :data contributes its UTF-8 bytes (the digest.c rule).
+  ;; map over a string walks codepoints, so the expected bytes are
+  ;; spelled as a literal vector: h 195 169(é) l l o space z i p.
   (let [ar (zip-write [{:name "s.txt" :data "h\u00e9llo zip"}])]
-    (is (= (byte-array (map int "h\u00e9llo zip"))
+    (is (= (byte-array [104 195 169 108 108 111 32 122 105 112])
            (zip-read ar "s.txt")))))
 
 (deftest zip-write-empty-archive-lists-nothing
@@ -261,11 +264,33 @@
     (is (= (zip-write [entry]) (zip-write [entry] {:level 6}))
         "the archive default is level 6")))
 
+(def ^:private zw-order-vocab
+  ["time" "person" "year" "way" "day" "thing" "world" "life" "hand"
+   "part" "child" "eye" "woman" "place" "work" "week" "case" "point"
+   "government" "company" "number" "group" "problem" "fact" "water"
+   "money" "month" "book" "school" "word" "business" "issue"])
+
+(defn- zw-level-corpus
+  "Deterministic word-stream corpus (~6 KB). Natural-text match
+  structure at distance is what separates the levels; on repetitive
+  templates tdefl's levels 1 and 9 tie exactly (the p2 lesson)."
+  []
+  (let [n (count zw-order-vocab)]
+    (loop [i 0, seed 7, first? true, acc (transient [])]
+      (if (= i 900)
+        (byte-array (persistent! acc))
+        (let [seed1 (long (mod (+ (* seed 1103515245) 12345) 2147483648))
+              seed2 (long (mod (+ (* seed1 1103515245) 12345) 2147483648))
+              w (nth zw-order-vocab (long (mod (quot seed1 6553) n)))
+              word (if (zero? (mod i 11)) (str/capitalize w) w)]
+          (when-not first? (conj! acc 32))
+          (doseq [b (map int word)] (conj! acc b))
+          (recur (inc i) seed2 false acc))))))
+
 (deftest zip-write-per-entry-level-overrides-the-archive
-  ;; Level changes the deflate stream on a compressible corpus, and
-  ;; the override wins over the archive default.
-  (let [corpus (byte-array (map int (apply str (repeat 200 "abcdeFGHIJ "))))
-        e {:name "e.txt" :data corpus}]
+  ;; Level changes the deflate stream on a natural-text corpus, and
+  ;; the per-entry override wins over the archive default.
+  (let [e {:name "e.txt" :data (zw-level-corpus)}]
     (is (not= (count (zip-write [(assoc e :level 1)] {:level 9}))
               (count (zip-write [(assoc e :level 9)] {:level 1}))))
     (is (= (zip-write [(assoc e :level 1)] {:level 9})
