@@ -305,33 +305,36 @@
   (sh "sh" "-c" (str "printf '%s' '" (base64-encode ar) "' | base64 -d > " path)))
 
 (deftest python3-zipfile-reads-mino-written-archives
-  ;; The oracle opens a fresh mino-written archive, lists names and
-  ;; dates, reads members; both sides must agree on bytes, and the
-  ;; caf\u00e9 entry's date_time must be the exact UTC civil fields
-  ;; D5 pinned (2024-06-15 12:34:56), the real proof the timestamp
-  ;; compensation lands regardless of the runner's timezone.
+  ;; The oracle opens fresh mino-written archives -- default AND
+  ;; forced-zip64 -- lists names and dates, reads members; both
+  ;; sides must agree on bytes, and the caf\u00e9 entry's date_time
+  ;; must be the exact UTC civil fields D5 pinned (2024-06-15
+  ;; 12:34:56), the real proof the timestamp compensation lands
+  ;; regardless of the runner's timezone.
   (if (zero? (:exit (sh "sh" "-c" "command -v python3")))
-    (let [ar (zip-write zw-golden-entries)
-          path "/tmp/mino_zip_write_py.zip"
-          _ (zw-spill ar path)
-          {:keys [exit out]}
-          (sh "sh" "-c"
-              (str "python3 -c '"
-                   "import hashlib,zipfile;"
-                   "zf=zipfile.ZipFile(\"" path "\");"
-                   "[print(z.filename, hashlib.sha256(zf.read(z)).hexdigest(), z.date_time)"
-                   " for z in zf.infolist()]"
-                   "' 2>&1"))]
-      (is (zero? exit) (str "python3 read failed: " out))
-      (doseq [line (str/split-lines out)]
-        (when-not (or (nil? line) (= "" line))
-          (let [[name sha date] (str/split line #" " 3)]
-            (is (= (zw-sha-hex (zip-read ar name)) sha)
-                (str name " agrees with python3"))
-            (when (= name "caf\u00e9.txt")
-              (is (= "(2024, 6, 15, 12, 34, 56)" (str/trim date))
-                  (str "D5 date_time, got " date))))))
-      (sh "sh" "-c" (str "rm -f " path)))
+    (doseq [[ar label] [[(zip-write zw-golden-entries) "default"]
+                        [(zip-write zw-golden-entries {:zip64 true})
+                         "forced-zip64"]] ]
+      (let [path "/tmp/mino_zip_write_py.zip"
+            _ (zw-spill ar path)
+            {:keys [exit out]}
+            (sh "sh" "-c"
+                (str "python3 -c '"
+                     "import hashlib,zipfile;"
+                     "zf=zipfile.ZipFile(\"" path "\");"
+                     "[print(z.filename, hashlib.sha256(zf.read(z)).hexdigest(), z.date_time)"
+                     " for z in zf.infolist()]"
+                     "' 2>&1"))]
+        (is (zero? exit) (str "python3 read of " label " failed: " out))
+        (doseq [line (str/split-lines out)]
+          (when-not (or (nil? line) (= "" line))
+            (let [[name sha date] (str/split line #" " 3)]
+              (is (= (zw-sha-hex (zip-read ar name)) sha)
+                  (str label " " name " agrees with python3"))
+              (when (= name "caf\u00e9.txt")
+                (is (= "(2024, 6, 15, 12, 34, 56)" (str/trim date))
+                    (str label " D5 date_time, got " date))))))
+        (sh "sh" "-c" (str "rm -f " path))))
     (println "zip-write: python3 absent -- cross-check skipped")))
 
 (deftest unzip-t-accepts-mino-written-archives

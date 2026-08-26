@@ -1,25 +1,37 @@
 (require "tests/test")
 (require '[clojure.string :as str])
 
-;; Zip read perf budgets (compression-zip campaign p3, ADR 29).
+;; Zip read and write perf budgets (compression-zip campaign p3/p4,
+;; ADR 29).
 ;;
-;; Both archives are built in-test from stored members (byte-known
-;; LOC/CDH/EOCD framing, transient accumulation, no committed blobs,
-;; no python at test time); the timing sections measure only the
-;; prims, never the build. Budgets are absolute wall-clock asserts
-;; with the ADR 25/28 multiplier band: native zip read of a stored
-;; member is memcpy plus CRC-32 (hundreds of MB/s), and a 10k-entry
-;; central directory walk is bounded linear work, so 500 ms holds
-;; order-of-magnitude headroom over the 2-8 ms land-time numbers.
+;; All archives are built in-test from stored or word-stream members
+;; (byte-known LOC/CDH/EOCD framing or zip-write itself, transient
+;; accumulation, no committed blobs, no python at test time); the
+;; timing sections measure only the prims, never the build. Budgets
+;; are absolute wall-clock asserts with the ADR 25/28 multiplier
+;; band: native zip read of a stored member is memcpy plus CRC-32
+;; (hundreds of MB/s), a 10k-entry central directory walk is bounded
+;; linear work, and a native write of ~1 MB across 100 entries is
+;; one tdefl pass per entry, so every budget holds order-of-
+;; magnitude headroom over the land-time numbers.
 ;;
 ;; Land-time numbers (this host, arm64 darwin, cc -O2):
-;;   zip-read   1,033,645 byte stored member:   3 ms
-;;   zip-entries 10,000-entry central dir:     73 ms
+;;   zip-read   1,033,645 byte stored member:      3 ms
+;;   zip-entries 10,000-entry central dir:        73 ms
+;;   zip-write  100 entries, ~1.0 MB total:       18 ms   (p4)
+;;   zip-write  65,536 sparse entries, 5.7 MB:   167 ms   (p4)
+;;   zip-entries 65,536-entry zip64 central dir: 713 ms   (p4)
 ;;
 ;; Every timing test also verifies the round trip, so a fast-but-
-;; wrong reader cannot pass. This file joins the nightly
+;; wrong prim cannot pass. This file joins the nightly
 ;; MINO_TEST_EXCLUDE seam (the gc-fuzz lane) in the same change it
-;; lands.
+;; lands. The 65,536-entry archive also carries the zip64
+;; auto-switch evidence (p4t3): one entry past the classic 16-bit
+;; count forces zip64 structures, asserted by locator scan, and the
+;; full listing plus sampled reads verify every entry (per-name
+;; reads of all 65,536 entries would be quadratic through the
+;; first-match lookup API; the sampled reads plus the O(n) listing
+;; are the same evidence in linear time).
 
 (def ^:private zperf-vocab
   ["alpha" "bravo" "charlie" "delta" "echo" "foxtrot" "golf" "hotel"
@@ -159,5 +171,88 @@
     (is (= "f00000.txt" (:name (first entries))))
     (is (= "f09999.txt" (:name (last entries))))
     (is (< ms 500) (str "zip-entries 10k-entry directory took " ms "ms"))))
+
+;;; ---- zip-write budgets and the zip64 auto-switch (p4t3) ----
+
+(def ^:private zperf-write-entries
+  ;; 100 word-stream members of ~10 KB each: ~1.0 MB across 100
+  ;; entries, built eagerly per the no-lazy-chains rule.
+  (let [acc (transient [])]
+    (dotimes [i 100]
+      (conj! acc {:name (format "w%03d.txt" i)
+                  :data (zperf-text 1600 (+ i 7))}))
+    (persistent! acc)))
+
+(defn- zperf-scan
+  "True when the 4-byte signature occurs anywhere in b (the same
+  scan discipline as the write goldens: presence and absence are
+  asserted by scan, never trusted from offsets)."
+  [b sig]
+  (let [bs (vec (seq b))]
+    (loop [i 0]
+      (if (> i (- (count bs) 4))
+        false
+        (if (= sig (subvec bs i (+ i 4)))
+          true
+          (recur (inc i)))))))
+
+(def ^:private zperf-locator-sig [0x50 0x4b 0x06 0x07])
+
+(deftest zperf-zip-write-within-budget
+  (let [total (loop [i 0, o 0]
+                (if (= i (count zperf-write-entries))
+                  o
+                  (recur (inc i)
+                         (+ o (count (:data (nth zperf-write-entries i)))))))
+        [ms ar] (zperf-ms #(zip-write zperf-write-entries))]
+    (is (> total 1000000) (str "corpus is " total " bytes"))
+    (is (< ms 2000) (str "zip-write ~1 MB across 100 entries took "
+                         ms "ms"))
+    (doseq [i [0 37 99]]
+      (let [e (nth zperf-write-entries i)]
+        (is (= (:data e) (zip-read ar (:name e)))
+            (str (:name e) " round trips"))))
+    (is (not (zperf-scan ar zperf-locator-sig))
+        "sub-threshold output carries no zip64 locator (A4)")))
+
+(deftest zperf-zip64-auto-switch-at-65535-entries
+  ;; One entry PAST the classic 16-bit entry-count ceiling: the
+  ;; writer must auto-switch to zip64 structures (the 64-bit EOCD
+  ;; locator appears, by scan) and the archive must round-trip.
+  ;; Reads are sampled (every 8192nd plus the last): per-name reads
+  ;; of all 65,536 entries would be quadratic through the
+  ;; first-match lookup API, while the full listing plus samples is
+  ;; the same evidence in linear time.
+  (let [n 65536
+        entries (loop [i 0, acc (transient [])]
+                  (if (= i n)
+                    (persistent! acc)
+                    (recur (inc i)
+                           (conj! acc {:name (format "f%05d" i)
+                                       :data (byte-array 0)}))))
+        [ms ar] (zperf-ms #(zip-write entries))
+        [lms ents] (zperf-ms #(zip-entries ar))]
+    (is (< ms 5000) (str "zip-write 65,536 sparse entries took "
+                         ms "ms"))
+    (is (= n (count ents)) "every entry listed")
+    (is (= "f00000" (:name (first ents))))
+    (is (= "f65535" (:name (last ents))))
+    (is (zperf-scan ar zperf-locator-sig)
+        "the auto-switch emitted zip64 structures")
+    (is (= 65536 (loop [i 0, o 0]
+                    (if (= i n)
+                      o
+                      (recur (inc i)
+                             (if (and (zero? (:size (nth ents i)))
+                                      (= :store (:method (nth ents i))))
+                               (inc o)
+                               o)))))
+        "every entry stored empty")
+    (doseq [i (range 0 n 8192)]
+      (is (= (byte-array 0) (zip-read ar (format "f%05d" i)))
+          (str "sampled read f" (format "%05d" i))))
+    (is (= (byte-array 0) (zip-read ar "f65535")))
+    (is (< lms 5000) (str "zip-entries 65,536-entry zip64 directory "
+                          "took " lms "ms"))))
 
 (run-tests-and-exit)
