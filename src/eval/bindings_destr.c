@@ -246,6 +246,53 @@ static int destructure_pair(mino_state *S, mino_val *lhs, mino_val *rhs,
     return 0;
 }
 
+/* JVM destructure returns the input unchanged unless some complete
+ * binding pair leads with a non-symbol pattern, so lists of plain
+ * pairs pass through untouched. */
+static int pairs_lead_with_symbols(mino_val *bindings)
+{
+    mino_val *cur = bindings;
+    while (mino_is_cons(cur)) {
+        mino_val *fst  = cur->as.cons.car;
+        mino_val *rest = cur->as.cons.cdr;
+        if (!mino_is_cons(rest)) return 1;
+        if (fst == NULL || mino_type_of(fst) != MINO_SYMBOL) return 0;
+        cur = rest->as.cons.cdr;
+    }
+    return 1;
+}
+
+static mino_val *destructure_non_vector(mino_state *S, mino_val *bindings)
+{
+    mino_val *acc;
+    mino_val *cur;
+    if (mino_type_of(bindings) == MINO_STRING) {
+        /* Strings pair chars, never symbols, so only inputs shorter
+         * than one complete pair pass through. */
+        long long chars = utf8_codepoint_count(bindings->as.s.data,
+                                               bindings->as.s.len);
+        if (chars < 2) return bindings;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY003",
+                      "destructure: pattern must be a symbol, vector, or map");
+        return NULL;
+    }
+    if (!mino_is_cons(bindings)) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001",
+                      "destructure: argument must be a vector");
+        return NULL;
+    }
+    if (pairs_lead_with_symbols(bindings)) return bindings;
+    acc = mino_vector(S, NULL, 0);
+    cur = bindings;
+    while (mino_is_cons(cur) && mino_is_cons(cur->as.cons.cdr)) {
+        mino_val *lhs = cur->as.cons.car;
+        mino_val *rhs = cur->as.cons.cdr->as.cons.car;
+        if (!destructure_pair(S, lhs, rhs, &acc)) return NULL;
+        cur = cur->as.cons.cdr->as.cons.cdr;
+    }
+    return acc;
+}
+
 mino_val *prim_destructure(mino_state *S, mino_val *args,
                              mino_env *env)
 {
@@ -259,11 +306,9 @@ mino_val *prim_destructure(mino_state *S, mino_val *args,
         return NULL;
     }
     bindings = args->as.cons.car;
-    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001",
-                      "destructure: argument must be a vector");
-        return NULL;
-    }
+    if (mino_is_nil(bindings)) return mino_nil(S);
+    if (mino_type_of(bindings) != MINO_VECTOR)
+        return destructure_non_vector(S, bindings);
     if ((bindings->as.vec.len % 2) != 0) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001",
                       "destructure: binding vector requires an even number of forms");

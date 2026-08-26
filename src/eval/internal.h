@@ -148,6 +148,10 @@ void print_dynvars_restore(mino_state *S, const print_dynvars_saved_t *saved);
  * table; eval/bc/compile.c also calls it at compile time. */
 mino_val *prim_destructure(mino_state *S, mino_val *args, mino_env *env);
 
+/* Forward declaration for the cross-module UTF-8 helper (implementation
+ * in prim/string.c); eval TUs must not include prim/internal.h. */
+long long utf8_codepoint_count(const char *data, size_t bytes);
+
 /* ------------------------------------------------------------------------- */
 /* read.c                                                                    */
 /* ------------------------------------------------------------------------- */

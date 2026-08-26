@@ -681,3 +681,16 @@
   (is (= [1 99]
          (destructure-eval_ '[{:keys [x y] :or {y 99}} {:x 1}]
                             '[x y]))))
+
+(deftest destructure-non-vector-passthrough
+  (testing "non-vector forms without a destructure pattern pass through"
+    (is (= "s" (destructure "s")))
+    (is (= '(a 1) (destructure '(a 1))))
+    (is (= '(a) (destructure '(a))))
+    (is (nil? (destructure nil))))
+  (testing "non-seqable and non-symbol-pair inputs still reject"
+    (is (thrown? (destructure :k)))
+    (is (thrown? (destructure 'sym)))
+    (is (thrown? (destructure "ab"))))
+  (testing "list binding pairs expand like vector pairs"
+    (is (= [1 2] (destructure-eval_ '([a b] [1 2]) '[a b])))))
