@@ -152,6 +152,12 @@
   (is (= ["l1" "l2" "l3"]
          (into [] (line-seq (atom (slurp core-misc-scratch-file)))))))
 
+(deftest line-seq-rejects-non-stream-readers
+  ;; A rdr that is not a string-cursor atom cannot be consumed; it
+  ;; must throw rather than fall through to reading stdin.
+  (is (thrown? (line-seq 1)))
+  (is (thrown? (line-seq nil))))
+
 ;; --- seque ---
 
 (deftest seque-preserves-elements-and-order

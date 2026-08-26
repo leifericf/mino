@@ -3769,8 +3769,13 @@
   "Returns the lines of text from rdr as a lazy sequence of strings.
    rdr is a string-cursor atom (the *in* model that read-line
    consumes from): each realized element takes one line off the
-   cursor. Returns nil when the cursor is exhausted."
+   cursor. Returns nil when the cursor is exhausted. Throws for a
+   rdr that is not an atom; per JVM line-seq, a value that is not a
+   reader cannot be consumed."
   [rdr]
+  (when-not (atom? rdr)
+    (throw (ex-info "line-seq: argument must be a string-cursor atom"
+                    {:value rdr})))
   (when-let [line (binding [*in* rdr] (read-line))]
     (cons line (lazy-seq (line-seq rdr)))))
 
