@@ -272,16 +272,19 @@ void gc_register_default_tracers(mino_state *S);
  * runs nested inside MAJOR_MARK. */
 void gc_major_enqueue_promoted(mino_state *S, gc_hdr_t *h);
 
-/* roots.c: range index over live headers plus root enumeration.
- * The range index backs gc_find_header_for_ptr, which resolves a raw
- * machine word to its owning header during conservative stack scans and
- * interior-pointer mark. gc_range_insert buffers new allocations in a
- * growable pending array; gc_range_merge_pending folds them into the
- * sorted main array at the top of each collection;
+/* ranges.c: the generation-split range index over live headers (ADR
+ * 30). The index backs gc_find_header_for_ptr, which resolves a raw
+ * machine word to its owning header during conservative stack scans
+ * and interior-pointer mark; a young pair and an old pair each hold a
+ * sorted main array plus a pending buffer. gc_range_insert appends new
+ * (young) allocations to the young pending array;
+ * gc_range_merge_pending folds it into the sorted young array at the
+ * top of each collection, walking young data only;
  * gc_range_compact_after_minor_mark drops freed YOUNG entries before
- * minor sweep so the index stays valid across cycles without a
- * rebuild-from-gc_all. gc_build_range_index is the fallback used when
- * the mutator hits OOM on pending growth. */
+ * minor sweep and routes entries whose header promoted at a previous
+ * sweep into the sorted old pending array, which folds into the old
+ * array at gc_build_range_index (the fallback when the mutator hit
+ * OOM on pending growth, and the post-major-sweep rebuild point). */
 void      gc_build_range_index(mino_state *S);
 void      gc_range_insert(mino_state *S, gc_hdr_t *h);
 void      gc_range_merge_pending(mino_state *S);

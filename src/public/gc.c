@@ -175,7 +175,14 @@ void mino_gc_stats(mino_state *S, mino_gc_stats_out *out)
     out->remset_cap        = S->gc.remset_cap;
     out->remset_high_water = S->gc.remset_high_water;
     out->range_walk_entries = S->gc_range_walk_entries;
-    out->ranges_len         = S->gc.ranges_len + S->gc.ranges_pending_len;
+    out->ranges_len         = S->gc.ranges_y_len
+                              + S->gc.ranges_y_pending_len
+                              + S->gc.ranges_o_len
+                              + S->gc.ranges_o_pending_len;
+    out->ranges_young_len       = S->gc.ranges_y_len
+                                  + S->gc.ranges_y_pending_len;
+    out->ranges_old_len        = S->gc.ranges_o_len;
+    out->ranges_old_pending_len = S->gc.ranges_o_pending_len;
     out->mark_stack_cap        = S->gc.mark_stack_cap;
     out->mark_stack_high_water = S->gc.mark_stack_high_water;
     out->phase             = phase_to_public(S->gc.phase);

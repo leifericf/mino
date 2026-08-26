@@ -36,18 +36,39 @@ typedef struct gc_state {
     /* Root environments registered via mino_register_root_env. */
     root_env_t     *root_envs;
 
-    /* Range index over live headers: addresses span -> owning header,
-     * used by the conservative stack scan and interior-pointer mark. */
-    gc_range_t     *ranges;
-    size_t          ranges_len;
-    size_t          ranges_cap;
+    /* Range index over live headers, split by generation (ADR 30):
+     * addresses span -> owning header, used by the conservative stack
+     * scan and interior-pointer mark. Each generation owns a sorted
+     * main array plus a pending buffer; lookup never reads generation
+     * from an entry, so a header resolves from whichever buffer holds
+     * its entry at every instant.
+     *
+     * Young pair: minors merge ranges_y_pending into ranges_y at the
+     * top of each collection and compact ranges_y after the minor
+     * mark, so minor-side maintenance walks young data only. A header
+     * promoted at a minor sweep keeps its entry in ranges_y for one
+     * cycle; the next compact routes it into the sorted old pending
+     * buffer. */
+    gc_range_t     *ranges_y;
+    size_t          ranges_y_len;
+    size_t          ranges_y_cap;
+    gc_range_t     *ranges_y_pending;
+    size_t          ranges_y_pending_len;
+    size_t          ranges_y_pending_cap;
+    /* Old pair: ranges_o holds the folded majority; ranges_o_pending
+     * accumulates entries routed out of the young array at compact,
+     * stays sorted, and folds into ranges_o at the next index
+     * rebuild, or early once it rivals a fraction of the old array
+     * (or its hard cap; see ranges.c). */
+    gc_range_t     *ranges_o;
+    size_t          ranges_o_len;
+    size_t          ranges_o_cap;
+    gc_range_t     *ranges_o_pending;
+    size_t          ranges_o_pending_len;
+    size_t          ranges_o_pending_cap;
+    /* Global validity flag: 0 means every buffer's contents are
+     * stale and the next collection rebuilds from gc_all. */
     size_t          ranges_valid;
-    /* Allocations between collections land here instead of memmove-ing
-     * into the sorted main array on every alloc. Merged at the next
-     * collection via sort-then-merge. */
-    gc_range_t     *ranges_pending;
-    size_t          ranges_pending_len;
-    size_t          ranges_pending_cap;
 
     size_t          collections_minor;
     size_t          collections_major;
@@ -94,7 +115,10 @@ typedef struct gc_state {
                                       * never pins unbounded memory and
                                       * the release pass stays bounded */
 
-    /* Cached [min, max) bounds of all managed allocations. */
+    /* Cached [min, max) bounds over the extents of the three sorted
+     * range buffers (young, old, old pending). The young pending
+     * buffer is unsorted and uncovered; the fast reject in
+     * gc_find_header_for_ptr is skipped while it is nonempty. */
     uintptr_t       heap_min;
     uintptr_t       heap_max;
 

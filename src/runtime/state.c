@@ -504,8 +504,10 @@ static void state_free_gc_aux(mino_state *S)
      * the generation lists, so state_free_heap's walk cannot reach
      * them. */
     gc_finalize_drain(S);
-    free(S->gc.ranges);
-    free(S->gc.ranges_pending);
+    free(S->gc.ranges_y);
+    free(S->gc.ranges_y_pending);
+    free(S->gc.ranges_o);
+    free(S->gc.ranges_o_pending);
     free(S->gc.mark_stack);
     free(S->gc.remset);
     free(S->gc.finalize_q);

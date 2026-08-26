@@ -1299,8 +1299,8 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_gc_stats_out st;
     const char *phase_name;
-    mino_val *ks[41];
-    mino_val *vs[41];
+    mino_val *ks[44];
+    mino_val *vs[44];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1483,13 +1483,21 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
         vs[38] = mino_map(S, ck, cv, n);
     }
     /* Range-index maintenance: cumulative entries examined by the
-     * per-collection merge and post-minor compaction passes, and the
-     * entry count currently in the index across all buffers. */
+     * per-collection merge and post-minor compaction passes, the entry
+     * count currently in the index across all buffers, and the same
+     * count split by generation (young pair, folded old array, old
+     * pending buffer). */
     ks[39] = mino_keyword(S, "range-walk-entries");
     vs[39] = mino_int(S, (long long)st.range_walk_entries);
     ks[40] = mino_keyword(S, "ranges-len");
     vs[40] = mino_int(S, (long long)st.ranges_len);
-    return mino_map(S, ks, vs, 41);
+    ks[41] = mino_keyword(S, "ranges-young-len");
+    vs[41] = mino_int(S, (long long)st.ranges_young_len);
+    ks[42] = mino_keyword(S, "ranges-old-len");
+    vs[42] = mino_int(S, (long long)st.ranges_old_len);
+    ks[43] = mino_keyword(S, "ranges-old-pending-len");
+    vs[43] = mino_int(S, (long long)st.ranges_old_pending_len);
+    return mino_map(S, ks, vs, 44);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

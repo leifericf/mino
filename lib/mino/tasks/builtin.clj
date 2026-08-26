@@ -85,7 +85,7 @@
    "src/runtime/capabilities.c"
    "src/runtime/image.c"
    "src/runtime/image_load.c"
-   "src/gc/driver.c" "src/gc/roots.c" "src/gc/major.c"
+    "src/gc/driver.c" "src/gc/roots.c" "src/gc/ranges.c" "src/gc/major.c"
    "src/gc/barrier.c" "src/gc/minor.c"
    "src/gc/trace.c" "src/gc/profile.c" "src/runtime/module.c"
    "src/public/gc.c" "src/public/embed.c"

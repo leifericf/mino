@@ -2019,9 +2019,15 @@ typedef struct {
      * count of index entries examined by the per-collection merge and
      * the post-minor compaction passes. ranges_len is the number of
      * entries currently in the index across all buffers (not
-     * cumulative). */
+     * cumulative); the three following fields split it by generation: the
+     * young pair (young array plus its pending buffer), the folded old
+     * array, and the old pending buffer promoted entries ride between
+     * folds. */
     size_t range_walk_entries;
     size_t ranges_len;
+    size_t ranges_young_len;
+    size_t ranges_old_len;
+    size_t ranges_old_pending_len;
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */
