@@ -620,6 +620,10 @@ static mino_env *floor_install_prim_tables(mino_state *S)
      * so it registers in the floor like mino.yaml; render-file
      * resolves its slurp at call time. */
     mino_install_mino_template(S, NULL);
+    /* mino.zip bundled lib: the thin archive facade (ADR 29) over
+     * the floor zip prims, registering in the floor like
+     * mino.html; it never touches clojure.zip. */
+    mino_install_mino_zip(S, NULL);
     return core_env;
 }
 

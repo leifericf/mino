@@ -78,6 +78,7 @@
 #include "lib_mino_html.h"
 #include "lib_mino_html_select.h"
 #include "lib_mino_template.h"
+#include "lib_mino_zip.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -374,6 +375,12 @@ void mino_install_mino_template(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.template", lib_mino_template_src);
+}
+
+void mino_install_mino_zip(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.zip", lib_mino_zip_src);
 }
 
 void mino_install_all(mino_state *S, mino_env *env)

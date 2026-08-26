@@ -296,7 +296,8 @@
      ["lib/mino/html.clj"              "mino.html"              "lib_mino_html"]
      ["lib/mino/html/select.clj"       "mino.html.select"       "lib_mino_html_select"]
      ["lib/clojure/xml.clj"            "clojure.xml"            "lib_clojure_xml"]
-     ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]])
+     ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]
+     ["lib/mino/zip.clj"               "mino.zip"               "lib_mino_zip"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.
