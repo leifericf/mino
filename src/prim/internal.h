@@ -366,6 +366,11 @@ mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env);
 /* module.c -- prim_use/doc/source/apropos are file-local static.
  * prim_require is cross-TU: called from src/eval/defs.c and src/prim/ns.c. */
 mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env);
+/* Eager bundled-ns load through the require loader (install-time
+ * clojure.string preload; a later require of the same name is a
+ * module-cache no-op). */
+mino_val *mino_module_load_bundled(mino_state *S, mino_env *env,
+                                   const char *name);
 
 /* ns.c -- all prims are file-local static; no extern declarations needed. */
 

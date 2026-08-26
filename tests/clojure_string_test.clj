@@ -171,3 +171,14 @@
   (is (= "<a>-<bb>"  (str/replace "a-bb" #"\w+" (fn [m] (str "<" m ">")))))
   (is (= "1a-2b"     (str/replace "a1-b2" #"(\w)(\d)"
                                   (fn [[_ g1 g2]] (str g2 g1))))))
+
+(deftest str-resolves-without-require
+  ;; A fresh JVM 1.12 process resolves the full clojure.string surface
+  ;; with no require; mino must too. Spawned as a fresh process because
+  ;; this suite itself requires the namespace: in-process the module
+  ;; cache would mask a preload regression.
+  (let [script "/tmp/mino-str-no-require.clj"]
+    (spit script "(println (clojure.string/capitalize \"abc\"))\n")
+    (let [{:keys [exit out]} (sh "timeout" "10" "./mino" script)]
+      (is (zero? exit))
+      (is (= "Abc" (str/trim out))))))

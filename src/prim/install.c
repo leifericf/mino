@@ -696,6 +696,22 @@ void mino_install_clojure_core(mino_state *S, mino_env *env)
     S->ns_vars.current_ns = "clojure.core";
     install_core_mino(S, core_env);
     S->ns_vars.current_ns = saved_ns;
+
+    /* JVM 1.12 resolves the full clojure.string surface in a fresh
+     * process with no require. Load the bundled lib here so the
+     * namespace is complete from startup (capitalize, reverse, and
+     * the nil-handling wrappers layered over the floor prims); a
+     * later (require '[clojure.string]) hits the module cache. Gated
+     * on the string-lib capability so minimal embedders keep the
+     * register-only behavior. */
+    if ((S->caps_installed & MINO_CAP_STRING_LIB) != 0) {
+        if (mino_module_load_bundled(S, env, "clojure.string") == NULL) {
+            /* Class I: bundled-stdlib failure at init, unrecoverable */
+            fprintf(stderr, "clojure.string preload error: %s\n",
+                    mino_last_error(S));
+            abort();
+        }
+    }
     (void)env;
 }
 

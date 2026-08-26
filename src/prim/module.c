@@ -1052,6 +1052,20 @@ void mino_set_resolver(mino_state *S, mino_resolve_fn fn, void *ctx)
     S->module.module_resolver_ctx = ctx;
 }
 
+mino_val *mino_module_load_bundled(mino_state *S, mino_env *env,
+                                   const char *name)
+{
+    /* require normalizes dotted names to path form before caching, so
+     * the eager load must key the cache the same way or a later
+     * (require ...) re-evaluates the lib over its own wrappers. */
+    char pathbuf[256];
+    if (runtime_module_dotted_to_path(name, strlen(name),
+                                      pathbuf, sizeof(pathbuf)) != 0) {
+        return NULL;
+    }
+    return require_load_path(S, mino_string(S, pathbuf), env);
+}
+
 void mino_register_bundled_lib(mino_state *S, const char *name,
                                 const char *source)
 {
