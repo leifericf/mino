@@ -563,3 +563,13 @@
   (is (= 2 (count (char-array "aé"))))
   (is (= [\a \é] (vec (char-array "aé")))))
 
+(deftest disj-no-keys-returns-coll
+  ;; (disj coll) with no keys returns the coll unchanged, per JVM
+  ;; Clojure; only key-bearing calls require a set.
+  (is (= [1 2 3] (disj [1 2 3])))
+  (is (= #{1 2 3} (disj #{1 2 3})))
+  (let [s #{:a :b}]
+    (is (identical? s (disj s))))
+  (is (= nil (disj nil)))
+  (is (thrown? (disj [1] 1))))
+

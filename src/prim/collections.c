@@ -2180,12 +2180,17 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "disj requires a set and at least one key");
+    if (n < 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "disj requires a set");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_nil(S);
+    }
+    /* No keys: return the collection unchanged, per Clojure. Key
+     * removal below still requires a set. */
+    if (n == 1) {
+        return coll;
     }
     if (mino_type_of(coll) == MINO_SORTED_SET) {
         p = args->as.cons.cdr;
