@@ -123,12 +123,13 @@
         (str "level " l " CMF/FLG"))))
 
 (deftest zlib-compress-fcheck-divides-and-flevel-buckets
-  (let [flevel-at (fn [l]
-                    (let [flg (second (seq (zlib-compress "bucket probe" {:level l})))]
+  (let [probe (byte-array (map int "bucket probe"))
+        flevel-at (fn [l]
+                    (let [flg (second (seq (zlib-compress probe {:level l})))]
                       (bit-shift-right (bit-and flg 0xc0) 6)))
         expected {0 0 1 0 2 1 3 1 4 1 5 1 6 2 7 3 8 3 9 3}]
     (doseq [l (range 10)]
-      (let [[cmf flg] (seq (zlib-compress "bucket probe" {:level l}))]
+      (let [[cmf flg] (seq (zlib-compress probe {:level l}))]
         (is (zero? (rem (+ (* cmf 256) flg) 31))
             (str "level " l " FCHECK divisibility"))
         (is (= (expected l) (flevel-at l))
@@ -136,11 +137,49 @@
 
 ;;; size ordering
 
+(def ^:private cmp-order-vocab
+  ["time" "person" "year" "way" "day" "thing" "man" "world" "life" "hand"
+   "part" "child" "eye" "woman" "place" "work" "week" "case" "point"
+   "government" "company" "number" "group" "problem" "fact" "water"
+   "money" "month" "lot" "book" "school" "word" "business" "issue"
+   "side" "kind" "head" "house" "service" "friend" "father" "power"
+   "hour" "game" "line" "end" "member" "law" "car" "city" "community"
+   "name" "president" "team" "minute" "idea" "kid" "body" "back"
+   "parent" "face" "level" "office" "door" "health" "art" "war"
+   "history" "party" "result" "change" "morning" "reason" "research"
+   "moment" "teacher" "guide" "music" "market" "sense" "nation" "plan"
+   "college" "interest" "death" "experience" "effect" "class"
+   "control" "care" "field" "development" "role" "rate" "heart" "drug"])
+
+(defn- cmp-order-corpus
+  "Deterministic word-stream corpus (~75 KB). Natural-text match
+  structure at distance is what separates the levels; on perfectly
+  repetitive templates tdefl's levels 6 and 9 tie and greedy level 1
+  can even win, so the ordering assertion needs this shape. Built by
+  transient int accumulation (no lazy chains at this size)."
+  []
+  (let [n (count cmp-order-vocab)]
+    (loop [i 0, seed 42, first? true, acc (transient [])]
+      (if (= i 12000)
+        (byte-array (persistent! acc))
+        (let [;; long coercion keeps the LCG in fixnums (the bigint
+              ;; multiply would make byte-array reject the index).
+              seed1 (long (mod (+ (* seed 1103515245) 12345) 2147483648))
+              seed2 (long (mod (+ (* seed1 1103515245) 12345) 2147483648))
+              w (nth cmp-order-vocab
+                     (long (mod (quot seed1 6553) n)))
+              word (if (zero? (mod i 13)) (str/capitalize w) w)]
+          (when-not first? (conj! acc 32)) ; inter-word space
+          (doseq [b (map int word)] (conj! acc b))
+          (recur (inc i) seed2 false acc))))))
+
+(def ^:private cmp-ordering-corpus (cmp-order-corpus))
+
 (deftest compression-size-orders-by-level
   (doseq [[f who] [[gzip-compress "gzip-compress"]
                    [zlib-compress "zlib-compress"]
                    [deflate-compress "deflate-compress"]]]
-    (let [size (fn [l] (count (f cmp-corpus {:level l})))]
+    (let [size (fn [l] (count (f cmp-ordering-corpus {:level l})))]
       (is (> (size 1) (size 6)) (str who " size(1) > size(6)"))
       (is (> (size 6) (size 9)) (str who " size(6) > size(9)")))))
 

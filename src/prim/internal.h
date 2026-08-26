@@ -564,7 +564,31 @@ extern const mino_prim_def k_prims_http[];
 extern const size_t        k_prims_http_count;
 
 /* gzip.c -- prim_gzip_decompress and prim_deflate_decompress are
- * cross-TU: http.c decodes Content-Encoding bodies through them. */
+ * cross-TU: http.c decodes Content-Encoding bodies through them.
+ * The bounded growing-buffer raw-inflate core is also shared C-side:
+ * compress.c's zlib-decompress inflates through the exact loop the
+ * gzip path was fuzz-hardened with (one inflate core; the http.c
+ * cross-TU precedent). The status codes and output shape are part
+ * of the seam; the implementation lives in gzip.c. */
+typedef enum {
+    GZ_OK = 0,
+    GZ_TRUNCATED,
+    GZ_MAGIC,
+    GZ_CRC,
+    GZ_CORRUPT,
+    GZ_LIMIT,
+    GZ_OOM
+} gz_status;
+
+typedef struct {
+    unsigned char *data;
+    size_t         len;
+} gz_out;
+
+gz_status mino_inflate_raw(const unsigned char *in, size_t in_len,
+                           size_t max_out, gz_out *out, size_t *consumed);
+extern const mino_prim_def k_prims_compress[];
+extern const size_t        k_prims_compress_count;
 extern const mino_prim_def k_prims_gzip[];
 extern const size_t        k_prims_gzip_count;
 mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,

@@ -118,7 +118,7 @@
         "src/prim/tzdata_blob.c"
        "src/prim/term.c"
        "src/prim/path.c"
-      "src/prim/gzip.c" "src/prim/http.c"
+       "src/prim/gzip.c" "src/prim/compress.c" "src/prim/http.c"
    "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
    "src/prim/stateful.c" "src/prim/stateful_bindings.c" "src/prim/stm.c" "src/prim/agent.c" "src/prim/store.c" "src/prim/module.c"
    "src/prim/image.c"

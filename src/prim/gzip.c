@@ -32,27 +32,17 @@
 
 #define GZ_DEFAULT_MAX (64u * 1024u * 1024u)
 
-typedef enum {
-    GZ_OK = 0,
-    GZ_TRUNCATED,
-    GZ_MAGIC,
-    GZ_CRC,
-    GZ_CORRUPT,
-    GZ_LIMIT,
-    GZ_OOM
-} gz_status;
-
-typedef struct {
-    unsigned char *data;
-    size_t         len;
-} gz_out;
+/* gz_status and gz_out are declared in prim/internal.h: the raw
+ * inflate core below is shared with compress.c (zlib-decompress),
+ * so its signature's types are part of that seam. */
 
 /* Inflate one raw deflate stream from in into a growing heap buffer
  * bounded by max_out. On GZ_OK, *consumed holds the input bytes the
  * stream occupied (the coroutine pushes back lookahead bytes at end
- * of stream, so this lands on the first byte past the stream). */
-static gz_status gz_inflate_raw(const unsigned char *in, size_t in_len,
-                                size_t max_out, gz_out *out, size_t *consumed)
+ * of stream, so this lands on the first byte past the stream).
+ * Shared cross-TU as mino_inflate_raw; see prim/internal.h. */
+gz_status mino_inflate_raw(const unsigned char *in, size_t in_len,
+                           size_t max_out, gz_out *out, size_t *consumed)
 {
     tinfl_decompressor decomp;
     unsigned char     *buf = NULL;
@@ -263,8 +253,8 @@ mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
         return NULL;
     st = gz_parse_header(data, len, &body_ofs);
     if (st == GZ_OK)
-        st = gz_inflate_raw(data + body_ofs, len - body_ofs, max_out,
-                            &out, &consumed);
+        st = mino_inflate_raw(data + body_ofs, len - body_ofs, max_out,
+                              &out, &consumed);
     if (st != GZ_OK) return gz_throw(S, st, max_out, "gzip-decompress");
     end = body_ofs + consumed;
     if (len - end < 8) {
@@ -302,7 +292,7 @@ mino_val *prim_deflate_decompress(mino_state *S, mino_val *args,
 
     if (gz_args(S, args, "deflate-decompress", &data, &len, &max_out) != 0)
         return NULL;
-    st = gz_inflate_raw(data, len, max_out, &out, &consumed);
+    st = mino_inflate_raw(data, len, max_out, &out, &consumed);
     if (st != GZ_OK) return gz_throw(S, st, max_out, "deflate-decompress");
     if (consumed != len) {
         free(out.data);

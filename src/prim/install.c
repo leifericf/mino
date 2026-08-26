@@ -181,6 +181,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"path",        k_prims_path,        &k_prims_path_count},
     {"http",        k_prims_http,        &k_prims_http_count},
     {"gzip",        k_prims_gzip,        &k_prims_gzip_count},
+    {"compress",    k_prims_compress,    &k_prims_compress_count},
     {"reflection",  k_prims_reflection,  &k_prims_reflection_count},
     {"stateful",    k_prims_stateful,    &k_prims_stateful_count},
     {"module",      k_prims_module,      &k_prims_module_count},
