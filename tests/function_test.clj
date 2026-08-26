@@ -73,6 +73,15 @@
   (is (= [:a :b 0] (apply (fn [[a b & rest]] [a b (count rest)])
                           [[:a :b]]))))
 
+(deftest apply-rejects-non-seqable-tail
+  ;; apply spreads the final argument as an argument seq; a tail that
+  ;; is neither nil nor a seqable collection is an error, not an
+  ;; silently-empty arg list. Strings are seqable (chars).
+  (is (thrown? (apply inc 1 1)))
+  (is (= "abc" (apply str "a" "bc")))
+  (is (= 6 (apply + 1 [2 3])))
+  (is (= [1] (apply conj [1] nil))))
+
 (deftest higher-order-utils
   (is (= false ((comp not nil?) nil)))
   (is (= 15 ((partial + 10) 5)))

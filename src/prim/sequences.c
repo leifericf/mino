@@ -2109,6 +2109,36 @@ static mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
+/* apply's final argument is spread as an argument seq, so a tail that
+ * is neither nil nor a seqable collection is an argument error, not a
+ * silently-empty arg list (JVM apply rejects such tails). Strings are
+ * excluded: apply's spread contract requires a collection tail. */
+static int apply_tail_seqable(const mino_val *v)
+{
+    if (v == NULL) return 1;
+    switch (mino_type_of(v)) {
+    case MINO_NIL:
+    case MINO_EMPTY_LIST:
+    case MINO_CONS:
+    case MINO_CHUNKED_CONS:
+    case MINO_LAZY:
+    case MINO_VECTOR:
+    case MINO_MAP_ENTRY:
+    case MINO_MAP:
+    case MINO_SET:
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
+    case MINO_QUEUE:
+    case MINO_BYTES:
+    case MINO_RECORD:
+    case MINO_HOST_ARRAY:
+    case MINO_STRING:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn;
@@ -2171,6 +2201,13 @@ static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
         /* Append elements from `last` collection. */
         if (last != NULL && mino_type_of(last) != MINO_NIL) {
             seq_iter_t it;
+            if (!apply_tail_seqable(last)) {
+                char msg[96];
+                snprintf(msg, sizeof(msg),
+                         "apply: last argument must be seqable, got %s",
+                         type_tag_str(last));
+                return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            }
             seq_iter_init(S, &it, last);
             while (!seq_iter_done(&it)) {
                 mino_val *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
@@ -2201,6 +2238,13 @@ static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
         mino_val *head = mino_nil(S);
         mino_val *tail2 = NULL;
         seq_iter_t it;
+        if (!apply_tail_seqable(last)) {
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     "apply: last argument must be seqable, got %s",
+                     type_tag_str(last));
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        }
         seq_iter_init(S, &it, last);
         while (!seq_iter_done(&it)) {
             mino_val *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
