@@ -27,7 +27,7 @@ src/
 ├── diag/                          # diagnostic kinds + reporting (+ diag_contract.h severity classes)
 ├── vendor/bearssl/                # vendored BearSSL TLS client + Mozilla root snapshot (see its README)
 ├── vendor/imath/                  # MIT-licensed bignum (vendored)
-└── vendor/miniz/                  # vendored miniz inflate side (see its README)
+└── vendor/miniz/                  # vendored miniz deflate and zip core (see its README)
 ```
 
 ## Runtime Core
@@ -196,7 +196,7 @@ and a four-primitive bridge.
 | `src/vendor/bearssl/roots.c` | generated Mozilla CA root DER snapshot feeding TLS verification |
 | `src/vendor/bearssl/tools/make_amalgam.clj` | mino-task amalgam generator (`bearssl-amalgam`) for the vendored tree; regenerates `bearssl_client.c` from `inc/` + `src/` (see the vendored README's update ritual) |
 | `src/vendor/bearssl/tools/gen_ca_roots.clj` | regenerates `roots.c` / `roots.h` from `mozilla-roots.pem` (run with `./mino`) |
-| `src/vendor/miniz/miniz_inflate.c` | hand-maintained single-TU miniz inflate: `upstream/miniz_tinfl.c` plus `mz_crc32` (see `src/vendor/miniz/README.md`) |
+| `src/vendor/miniz/miniz_core.c` | hand-maintained single-TU miniz core: `upstream/miniz_tinfl.c` + `miniz_tdef.c` + `miniz_zip.c` plus `mz_crc32` and `mz_adler32` (see `src/vendor/miniz/README.md`) |
 
 ## Headers
 

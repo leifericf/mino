@@ -25,7 +25,7 @@
 #pragma GCC diagnostic pop
 #endif
 /* Trim define: without it miniz.h declares static zlib-name wrappers
- * that trip -Wunused-function in every TU but miniz_inflate.c. */
+ * that trip -Wunused-function in every TU but miniz_core.c. */
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES 1
 #include "miniz.h"
 

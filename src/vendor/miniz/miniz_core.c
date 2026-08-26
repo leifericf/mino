@@ -1,23 +1,82 @@
 /*
- * miniz_inflate.c -- the single miniz translation unit mino builds.
+ * miniz_core.c -- the single miniz translation unit mino builds.
  *
  * Upstream miniz 3.1.2 (commit 77d0dce); full sha in README.md in
  * this directory.
  *
- * mino vendors only the inflate side of miniz: the tinfl
- * decompressor plus the CRC-32 the gzip container framing needs.
- * This wrapper sets the trim defines and pulls the upstream sources
- * in unmodified; see README.md in this directory for the trim list
- * and the update ritual.
+ * mino vendors the deflate and zip core of miniz: the tinfl
+ * decompressor, the tdefl compressor, and the zip reader and
+ * writer, plus the CRC-32, Adler-32, and default allocator hooks
+ * the container framings need. This wrapper sets the trim defines
+ * and pulls the upstream sources in unmodified; see README.md in
+ * this directory for the trim list and the update ritual.
  */
 
+#define MINIZ_NO_STDIO 1
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES 1
 
 #include "upstream/miniz_tinfl.c"
+#include "upstream/miniz_tdef.c"
+#include "upstream/miniz_zip.c"
+
+/* The default allocator hooks, copied verbatim from upstream
+ * miniz.c: the zip heap paths take them as function pointers, so
+ * the link requires the definitions (the rest of miniz.c stays
+ * out). MINIZ_EXPORT expands to nothing through the
+ * miniz_export.h stub. Re-extract from upstream on a version
+ * bump. */
+MINIZ_EXPORT void *miniz_def_alloc_func(void *opaque, size_t items, size_t size)
+{
+    (void)opaque, (void)items, (void)size;
+    return MZ_MALLOC(items * size);
+}
+MINIZ_EXPORT void miniz_def_free_func(void *opaque, void *address)
+{
+    (void)opaque, (void)address;
+    MZ_FREE(address);
+}
+MINIZ_EXPORT void *miniz_def_realloc_func(void *opaque, void *address, size_t items, size_t size)
+{
+    (void)opaque, (void)address, (void)items, (void)size;
+    return MZ_REALLOC(address, items * size);
+}
+
+/* mz_adler32, copied verbatim from upstream miniz.c. tdefl computes
+ * the zlib wrapper's Adler-32 through it (an external reference from
+ * miniz_tdef.c), so the copy is a link requirement, not a
+ * convenience. Re-extract from upstream on a version bump: the
+ * function sits at the top of miniz.c. */
+mz_ulong mz_adler32(mz_ulong adler, const unsigned char *ptr, size_t buf_len)
+{
+    mz_uint32 i, s1 = (mz_uint32)(adler & 0xffff), s2 = (mz_uint32)(adler >> 16);
+    size_t block_len = buf_len % 5552;
+    if (!ptr)
+        return MZ_ADLER32_INIT;
+    while (buf_len)
+    {
+        for (i = 0; i + 7 < block_len; i += 8, ptr += 8)
+        {
+            s1 += ptr[0], s2 += s1;
+            s1 += ptr[1], s2 += s1;
+            s1 += ptr[2], s2 += s1;
+            s1 += ptr[3], s2 += s1;
+            s1 += ptr[4], s2 += s1;
+            s1 += ptr[5], s2 += s1;
+            s1 += ptr[6], s2 += s1;
+            s1 += ptr[7], s2 += s1;
+        }
+        for (; i < block_len; ++i)
+            s1 += *ptr++, s2 += s1;
+        s1 %= 65521U, s2 %= 65521U;
+        buf_len -= block_len;
+        block_len = 5552;
+    }
+    return (s2 << 16) + s1;
+}
 
 /* mz_crc32, copied verbatim from upstream miniz.c (the table-driven
  * variant). Re-extract from upstream on a version bump: the function
- * lives next to mz_adler32 at the top of miniz.c. */
+ * sits below mz_adler32 near the top of miniz.c. */
 /* Faster, but larger CPU cache footprint.
  */
 mz_ulong mz_crc32(mz_ulong crc, const mz_uint8 *ptr, size_t buf_len)

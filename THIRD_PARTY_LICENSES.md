@@ -99,7 +99,8 @@ dropping one MSVC `#pragma comment` line); see
 
 ## miniz
 
-Vendored inflate (decompression) side of miniz, pinned at release
+Vendored deflate and zip core of miniz (tinfl, tdefl, zip
+container), pinned at release
 3.1.2, upstream commit `77d0dce8627735138c51770d1799a1ef48f2117d`.
 Source under `src/vendor/miniz/`, fetched from
 <https://github.com/richgel999/miniz>. The upstream license notice is
@@ -130,8 +131,9 @@ THE SOFTWARE.
 ```
 
 The upstream sources under `src/vendor/miniz/` are unmodified. The
-committed `miniz_inflate.c` selects the inflate-only trim with one
-upstream-provided define and carries `mz_crc32` copied verbatim from
+committed `miniz_core.c` selects the in-memory trim with two
+upstream-provided defines and carries `mz_crc32`, `mz_adler32`, and
+the three default allocator hooks copied verbatim from
 upstream `miniz.c`; see `src/vendor/miniz/README.md` for the trim
 list and the update ritual.
 

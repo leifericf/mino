@@ -133,7 +133,7 @@
      "src/vendor/imath/imath.c"
      "src/vendor/bearssl/bearssl_client.c"
      "src/vendor/bearssl/roots.c"
-     "src/vendor/miniz/miniz_inflate.c"])
+      "src/vendor/miniz/miniz_core.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
@@ -149,7 +149,7 @@
     ;; and re_match, both in lib-srcs.
     "src/regex/re.c"
     ;; Vendored upstream trees; compiled through the amalgam wrappers
-    ;; already in lib-srcs (bearssl_client, roots, imath, miniz_inflate).
+    ;; already in lib-srcs (bearssl_client, roots, imath, miniz_core).
     "src/vendor"})
 
 (def ^:private lane-excluded?
@@ -828,8 +828,8 @@
                       (slurp "src/vendor/imath/LICENSE"))
                (block "BearSSL (MIT), Copyright Thomas Pornin"
                       (slurp "src/vendor/bearssl/LICENSE"))
-               (block "miniz inflate side (MIT)"
-                      (slurp "src/vendor/miniz/LICENSE"))
+                (block "miniz core (MIT)"
+                       (slurp "src/vendor/miniz/LICENSE"))
                "## Mozilla CA root certificates (MPL-2.0)\n\n"
                "The embedded CA root data is copyright Mozilla Foundation\n"
                "and individual contributors, distributed under the Mozilla\n"
@@ -911,7 +911,7 @@
              "- mino: MIT (Leif Eric Fredheim).\n"
              "- imath (Michael J. Fromberger): MIT.\n"
              "- BearSSL v0.6 (Thomas Pornin): MIT.\n"
-             "- miniz inflate side v3.1.2 (RAD Game Tools, Valve Software,\n"
+              "- miniz core v3.1.2 (RAD Game Tools, Valve Software,\n"
              "  Rich Geldreich et al.): MIT.\n"
              "- Mozilla CA root certificate data (Mozilla Foundation):\n"
              "  MPL-2.0.\n\n"
