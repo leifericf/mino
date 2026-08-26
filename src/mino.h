@@ -2015,6 +2015,13 @@ typedef struct {
      * once per gc_alloc_typed call. The named indices are exposed via
      * `(gc-stats)`'s `:alloc-by-tag` map for the script-side view. */
     uint64_t alloc_by_tag[16];
+    /* Range-index maintenance. range_walk_entries is the cumulative
+     * count of index entries examined by the per-collection merge and
+     * the post-minor compaction passes. ranges_len is the number of
+     * entries currently in the index across all buffers (not
+     * cumulative). */
+    size_t range_walk_entries;
+    size_t ranges_len;
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */

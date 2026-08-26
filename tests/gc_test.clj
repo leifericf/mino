@@ -189,3 +189,39 @@
                "comparator throw: baseline " baseline ", after " after
                " -- gc_depth left elevated?")))))
 
+;; Range-index instrumentation. :range-walk-entries counts index
+;; entries the per-collection merge and the post-minor compaction
+;; have examined, cumulatively; :ranges-len is the entry count
+;; currently in the index across all buffers. A nil or stale read
+;; here means the gc-stats wiring is broken.
+(deftest gc-stats-range-walk-entries-ticks
+  (gc!)
+  (let [before (long (:range-walk-entries (gc-stats)))]
+    (dotimes [_ 64] (vec (range 20000)))
+    (gc!)
+    (let [after (long (:range-walk-entries (gc-stats)))]
+      (is (pos? after) "range-walk-entries is exposed and nonzero")
+      (is (> after before)
+          (str "churn plus gc! must advance the walk counter: before "
+               before ", after " after)))))
+
+(deftest gc-stats-ranges-len-exposed-and-stable
+  (gc!)
+  (dotimes [_ 8] (vec (range 1000)))
+  ;; Consecutive full collections keep sweeping deferred dead entries;
+  ;; repeat to the fixed point, discard one read cycle of settle
+  ;; drift, then compare.
+  (dotimes [_ 6] (gc!))
+  (long (:ranges-len (gc-stats)))
+  (gc!)
+  (let [len1 (long (:ranges-len (gc-stats)))]
+    (is (pos? len1) "ranges-len is exposed and nonzero after a collection")
+    (gc!)
+    (let [len2 (long (:ranges-len (gc-stats)))]
+      ;; A repeat collection at a fixed live set leaves the index
+      ;; unchanged within the reads' own allocation noise; drift past
+      ;; it means entries leak or drop incorrectly.
+      (is (<= (- len1 128) len2 (+ len1 128))
+          (str "ranges-len drifted across a repeat gc!: "
+               len1 " then " len2)))))
+

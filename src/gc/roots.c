@@ -192,6 +192,7 @@ void gc_range_merge_pending(mino_state *S)
             j--;
         }
         k--;
+        S->gc_range_walk_entries++;
     }
     S->gc.ranges_len = need;
     S->gc.ranges_pending_len = 0;
@@ -219,6 +220,7 @@ void gc_range_compact_after_minor_mark(mino_state *S)
         if (h->gen == GC_GEN_OLD || h->mark) {
             S->gc.ranges[dst++] = S->gc.ranges[src];
         }
+        S->gc_range_walk_entries++;
     }
     S->gc.ranges_len = dst;
     gc_heap_bounds_update(S);

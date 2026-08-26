@@ -283,6 +283,12 @@ struct mino_state {
     size_t          gc_barrier_dijkstra_pushes;
     size_t          gc_mark_stack_overflows;
 
+    /* Range-index maintenance counter: one tick per index entry
+     * examined by gc_range_merge_pending and the post-minor
+     * compaction in roots.c. The per-minor delta is the index-walk
+     * cost signal; see ADR 30. */
+    size_t          gc_range_walk_entries;
+
     /* Generational promotion bookkeeping. bytes_promoted_minor is a
      * running total of bytes that flipped YOUNG -> OLD during minor
      * sweep; the rate (delta over a window) feeds nursery / promotion-
