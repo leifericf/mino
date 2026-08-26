@@ -1,7 +1,36 @@
 (require "tests/test")
+(require '[clojure.string :as str])
+(require '[clojure.data.json :as json])
 
 ;; GC stability: heavy allocation tests.
 ;; Also run under `make test-gc-stress` which collects on every allocation.
+
+(defn- corpus-desc-cell
+  "One 512-char description cell with a non-ASCII codepoint every 64
+  characters, the json-corpus document shape."
+  [seed]
+  (apply str
+         (map (fn [i]
+                (if (zero? (rem i 64))
+                  (if (odd? (+ seed i)) "\u00e9" "\u4e2d")
+                  "x"))
+              (range 512))))
+
+(defn- corpus-entry
+  "One corpus entry: nested map, array, escapes, unicode, numbers."
+  [i]
+  (str "{\"name\": \"item " i "\", \"desc\": \"" (corpus-desc-cell i) "\","
+       " \"tags\": [\"alpha\", \"beta\\\"q\"],"
+       " \"score\": " i ".25,"
+       " \"active\": "
+       (if (odd? i) "true" "false")
+       "}"))
+
+(defn- corpus-doc
+  "A json document of n entries whose parse tree holds a large multiple
+  of n headers (10k entries parse to roughly 290k)."
+  [n]
+  (str "{\"entries\": [" (str/join "," (map corpus-entry (range n))) "]}"))
 
 (deftest gc-long-tail
   (is (= 50000 (loop [i 0] (if (< i 50000) (recur (+ i 1)) i)))))
@@ -257,4 +286,101 @@
       (is (<= (- len1 128) len2 (+ len1 128))
           (str "ranges-len drifted across a repeat gc!: "
                len1 " then " len2)))))
+
+;; Minor collections must examine a young-bounded slice of the range
+;; index, never a slice proportional to the whole heap. Under a big
+;; live OLD tree (the corpus parse, hundreds of thousands of entries)
+;; with only a young window between collections, the per-collection
+;; :range-walk-entries delta tracks the young census. A regression to
+;; walking every entry, young and old alike, shows up as the delta
+;; tracking :ranges-len instead (measured at 2.36x ranges-len per
+;; minor on the unified index).
+(deftest gc-range-walk-stays-young-bounded-under-big-old-tree
+  (let [doc  (corpus-doc 10000)
+        tree (json/read-str doc)]
+    (is (= 10000 (count (get tree "entries"))))
+    ;; Age the parse tree to OLD and settle the index before sampling;
+    ;; the tree stays live via this binding for the whole test.
+    (gc!)
+    (dotimes [_ 3] (gc!))
+    (let [len   (long (:ranges-len (gc-stats)))
+          walk1 (long (:range-walk-entries (gc-stats)))
+          coll1 (long (:collections-minor (gc-stats)))]
+      ;; Eight windows of big young allocations (64 KiB string slices
+      ;; of the document, a few hundred headers per window), each
+      ;; closed by an explicit gc! so every window's cost lands in one
+      ;; measured cycle.
+      (dotimes [_ 8]
+        (dotimes [_ 100] (subs doc 0 65536))
+        (gc!))
+      (let [walk2  (long (:range-walk-entries (gc-stats)))
+            coll2  (long (:collections-minor (gc-stats)))
+            minors (- coll2 coll1)
+            walked (- walk2 walk1)]
+        (is (>= minors 2)
+            (str "windows must collect: only " minors " minors"))
+        (let [per-minor (quot walked (max minors 1))]
+          (is (< per-minor (quot len 2))
+              (str "per-minor walk tracks ranges-len (" per-minor
+                   " vs len " len "), not the young census"))
+          ;; Census budget: each window holds a few hundred young
+          ;; headers (100 string slices plus survivors), so a
+          ;; young-bounded walk stays far under 8192 entries per
+          ;; collection; an old-proportional walk clears it by an
+          ;; order of magnitude.
+          (is (< per-minor 8192)
+              (str "per-minor walk " per-minor
+                   " exceeds the young-window budget 8192")))))))
+
+;; The per-generation lens of the range index: young entries (the
+;; nursery-sized slice minors maintain), old entries (the folded
+;; majority), and the old-pending buffer that collects entries of
+;; headers promoted since the last fold. Under a big live OLD tree the
+;; young slice stays far below the old slice, and the phase-one
+;; :ranges-len key keeps its meaning: the sum across all buffers.
+(deftest gc-stats-exposes-per-generation-range-lens
+  (let [doc (corpus-doc 2500)
+        tree (json/read-str doc)]
+    (is (= 2500 (count (get tree "entries"))))
+    (gc!)
+    (let [st   (gc-stats)
+          len  (long (:ranges-len st))
+          young (long (:ranges-young-len st))
+          old   (long (:ranges-old-len st))
+          pend  (long (:ranges-old-pending-len st))]
+      (is (pos? young) "ranges-young-len is exposed and nonzero")
+      (is (> old (* 4 young))
+          (str "old slice must dominate under a big old tree: old "
+               old ", young " young))
+      (is (>= pend 0) "ranges-old-pending-len is exposed")
+      (is (= len (+ young old pend))
+          (str "ranges-len must sum the generation slices: len " len
+               " vs young+old+pending " (+ young old pend))))))
+
+;; Promotion must not drop index coverage: a header promoted at a
+;; minor sweep keeps resolvable through every buffer transition, so a
+;; collection aged to OLD and then churned past further minors (each
+;; one re-routing promoted entries) still answers exact membership and
+;; equality reads. Freed-then-recycled nodes are what make a coverage
+;; gap observable, so the churn precedes every read sweep.
+(deftest aged-set-and-vector-keep-exact-membership
+  (let [n 4000
+        s (set (map #(str "pk" %) (range n)))
+        v (vec (map #(str "pv" %) (range 2048)))]
+    (dotimes [_ 64] (vec (range 20000)))
+    (let [fresh-s (set (map #(str "pk" %) (range n)))
+          fresh-v (vec (map #(str "pv" %) (range 2048)))]
+      (is (= s fresh-s) "aged set equals a fresh copy")
+      (is (= v fresh-v) "aged vector equals a fresh copy")
+      (let [out (disj s "pk7")]
+        (is (= (dec n) (count out)))
+        (dotimes [_ 64] (vec (range 20000)))
+        (dotimes [i n]
+          (is (if (= i 7)
+                (not (contains? out "pk7"))
+                (contains? out (str "pk" i)))
+              (str "membership broke at pk" i)))
+        (is (= n (count s)) "disj leaves the source untouched")
+        (dotimes [i 2048]
+          (is (= (str "pv" i) (nth v i)) (str "vector slot broke at " i)))))))
 
