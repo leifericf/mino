@@ -37,3 +37,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [26](26-yaml-subset-reader-first.md) | The YAML reader is a native subset prim (block/flow core, no anchors) |
 | [27](27-timezones-over-embedded-tzdata.md) | Timezones over embedded compact tzdata generated at build time |
 | [28](28-html-xml-native-tokenizer-two-modes.md) | HTML and XML readers: one native tokenizer, two modes, hickory/JVM shapes |
+| [29](29-compression-zip-native-core.md) | Compression write side and zip container: native end to end over vendored miniz |
