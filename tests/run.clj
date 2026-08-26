@@ -199,10 +199,11 @@
      "tests/gzip_test"
      "tests/compress_test"
      "tests/compress_perf_test"
-       "tests/zip_test"
-       "tests/zip_write_test"
-       "tests/zip_perf_test"
-       "tests/zip_facade_test"
+        "tests/zip_test"
+        "tests/zip_write_test"
+        "tests/zip_perf_test"
+        "tests/zip_facade_test"
+        "tests/zip_fuzz_test"
      "tests/net_test"
    "tests/tls_test"
    "tests/pool_test"
@@ -242,7 +243,7 @@
     shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
     glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
     tail grows past ~5GB. The final entry must equal the file count."
-   [0 103 129 193])
+   [0 103 129 194])
 
 (let [wired (set (map #(last (str/split % #"/")) suite-files))
       unwired (sort (set/difference disk-basenames wired other-lane-files))]
