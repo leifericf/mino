@@ -38,3 +38,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [27](27-timezones-over-embedded-tzdata.md) | Timezones over embedded compact tzdata generated at build time |
 | [28](28-html-xml-native-tokenizer-two-modes.md) | HTML and XML readers: one native tokenizer, two modes, hickory/JVM shapes |
 | [29](29-compression-zip-native-core.md) | Compression write side and zip container: native end to end over vendored miniz |
+| [30](30-young-only-range-index-for-minors.md) | Minor collections touch a young-only range index |
