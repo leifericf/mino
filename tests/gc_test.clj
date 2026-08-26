@@ -189,6 +189,39 @@
                "comparator throw: baseline " baseline ", after " after
                " -- gc_depth left elevated?")))))
 
+;; prim_disj rebuilds the result set by allocating the new MINO_SET
+;; first and filling root/key_order only after a rebuild loop that can
+;; allocate more than a nursery's worth of headers. A minor firing
+;; mid-loop promotes the still-unfilled container to OLD (gc_pin roots
+;; it but does not defer aging); the one-cycle promote-then-add remset
+;; entry is dropped at the next walk while the slots are still empty,
+;; and the late fills then install YOUNG trie nodes into an OLD
+;; container with no write barrier. The next minor frees those nodes
+;; as unreachable and membership reads walk recycled memory (observed
+;; as the dev-host 64 KiB-nursery SIGSEGV in eq_step via
+;; set/difference). The rebuild now raises gc_depth from allocation to
+;; first fill, the mino_set/mino_map construction precedent, so no
+;; minor can promote the container in between. Sizes are chosen so
+;; each rebuild crosses several minors at the default nursery.
+(deftest disj-rebuild-keeps-membership-across-minors
+  (let [n 12000
+        keep (set (map #(str "keep-" %) (range n)))
+        drop (set (map #(str "keep-" %) (range 96)))]
+    (gc!)
+    (let [out (reduce disj keep drop)]
+      (gc!)
+      ;; Recycle the freed young nodes before reading: an uncovered
+      ;; OLD->YOUNG edge only shows once the freed child's memory is
+      ;; reused, which is why the dev-host crash needed the suite's
+      ;; allocation storm around the reads.
+      (dotimes [_ 64] (vec (range 20000)))
+      (is (= (- n 96) (count out)))
+      (dotimes [i 96]
+        (is (not (contains? out (str "keep-" i)))
+            (str "kept dropped keep-" i)))
+      (dotimes [i (- n 96)]
+        (is (contains? out (str "keep-" (+ i 96))) (str "lost keep-" i))))))
+
 ;; Range-index instrumentation. :range-walk-entries counts index
 ;; entries the per-collection merge and the post-minor compaction
 ;; have examined, cumulatively; :ranges-len is the entry count

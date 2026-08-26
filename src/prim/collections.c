@@ -2200,7 +2200,19 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
         mino_val *key = p->as.cons.car;
         uint32_t    h   = hash_val(key);
         if (hamt_get(coll->as.set.root, key, h, 0u) != NULL) {
-            /* Element exists; rebuild without it. */
+            /* Element exists; rebuild without it. Raise gc_depth from
+             * allocation to first fill: the rebuild loop below can
+             * allocate more than a nursery's worth of headers, and a
+             * mid-loop minor would promote the still-unfilled
+             * container to OLD (gc_pin roots it but does not defer
+             * aging). The one-cycle promote-then-add remset entry is
+             * dropped at the next walk while the slots are still
+             * empty, and the late fills would then install YOUNG
+             * tries into an OLD container with no write barrier --
+             * the remset never hears, the next minor frees the tries,
+             * and readers walk recycled memory. Same construction
+             * discipline as mino_set / mino_map. */
+            mino_current_ctx(S)->gc_depth++;
             mino_val *new_set = alloc_val(S, MINO_SET);
             gc_pin(new_set);
             mino_val *order   = mino_vector(S, NULL, 0);
@@ -2223,6 +2235,7 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
             new_set->as.set.key_order = order;
             new_set->as.set.len       = new_len;
             new_set->meta             = coll->meta;
+            mino_current_ctx(S)->gc_depth--;
             coll = new_set;
         }
         p = p->as.cons.cdr;
