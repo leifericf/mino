@@ -63,6 +63,18 @@
   (is (= 16 (bit-shift-left 1 4)))
   (is (= 4 (bit-shift-right 16 2))))
 
+(deftest bitwise-variadic-folds-left-to-right
+  (is (= 0  (bit-and 12 10 6)))
+  (is (= 7  (bit-or 1 2 4)))
+  (is (= 5  (bit-xor 1 3 7)))
+  ;; ((15 & ~3) & ~1)
+  (is (= 12 (bit-and-not 15 3 1)))
+  ;; a single argument folds to itself
+  (is (= 7 (bit-and 7)))
+  (is (= 7 (bit-or 7)))
+  (is (= 7 (bit-xor 7)))
+  (is (= 7 (bit-and-not 7))))
+
 (deftest bit-shift-boundary
   ;; In-range shifts at both ends of [0, 63] are defined and produce the
   ;; usual two's-complement results.

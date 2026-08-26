@@ -16,49 +16,54 @@
 /* Bitwise operations                                                        */
 /* ------------------------------------------------------------------------- */
 
+/* Shared variadic fold for the two-operand bitwise prims: folds op
+ * left-to-right across every argument. Per JVM bit-and/bit-or/bit-xor,
+ * a single argument folds to itself; zero arguments is an arity error. */
+static mino_val *bit_fold(mino_state *S, mino_val *args, const char *name,
+                          long long (*op)(long long, long long))
+{
+    long long acc;
+    mino_val  *p;
+    char       msg[64];
+    if (!mino_is_cons(args)) {
+        snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
+    if (!as_long(args->as.cons.car, &acc)) {
+        snprintf(msg, sizeof(msg), "%s expects integers", name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    for (p = args->as.cons.cdr; mino_is_cons(p); p = p->as.cons.cdr) {
+        long long b;
+        if (!as_long(p->as.cons.car, &b)) {
+            snprintf(msg, sizeof(msg), "%s expects integers", name);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        }
+        acc = op(acc, b);
+    }
+    return mino_int_wrap(S, acc);
+}
+
+static long long bit_op_and(long long a, long long b) { return a & b; }
+static long long bit_op_or (long long a, long long b) { return a | b; }
+static long long bit_op_xor(long long a, long long b) { return a ^ b; }
+
 mino_val *prim_bit_and(mino_state *S, mino_val *args, mino_env *env)
 {
-    long long a, b;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-and requires two arguments");
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-and expects integers");
-    }
-    return mino_int_wrap(S, a & b);
+    return bit_fold(S, args, "bit-and", bit_op_and);
 }
 
 mino_val *prim_bit_or(mino_state *S, mino_val *args, mino_env *env)
 {
-    long long a, b;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-or requires two arguments");
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-or expects integers");
-    }
-    return mino_int_wrap(S, a | b);
+    return bit_fold(S, args, "bit-or", bit_op_or);
 }
 
 mino_val *prim_bit_xor(mino_state *S, mino_val *args, mino_env *env)
 {
-    long long a, b;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-xor requires two arguments");
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-xor expects integers");
-    }
-    return mino_int_wrap(S, a ^ b);
+    return bit_fold(S, args, "bit-xor", bit_op_xor);
 }
 
 mino_val *prim_bit_not(mino_state *S, mino_val *args, mino_env *env)

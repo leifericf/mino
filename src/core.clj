@@ -1298,8 +1298,11 @@
 ;; --- Bitwise compositions ---
 
 (defn bit-and-not
-  "Returns the bitwise AND of x and the complement of y."
-  [x y] (bit-and x (bit-not y)))
+  "Returns the bitwise AND of x and the complement of each remaining
+   argument, folded left to right."
+  ([x] x)
+  ([x y] (bit-and x (bit-not y)))
+  ([x y & more] (reduce bit-and-not (bit-and-not x y) more)))
 (defn bit-test
   "Returns true if bit n of x is set."
   [x n] (not= 0 (bit-and x (bit-shift-left 1 n))))
