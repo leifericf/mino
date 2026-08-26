@@ -119,14 +119,17 @@ static void print_rb_inorder_ns_stripped(mino_state *S, FILE *out,
  * Float.toString), double prints the shortest re-parsable `double`
  * (Double.toString). The two paths share the bracket-and-snprintf loop;
  * only the comparator and significand cap differ. */
-static void print_float_typed(FILE *out, double x, int is_float32)
+static int format_float_typed(char *buf, size_t bufsz, double x,
+                              int is_float32)
 {
-    char buf[64];
-    int n, needs_dot, i, p, maxp, sci_cleaned;
-    if (isnan(x)) { fputs("##NaN", out); return; }
+    int n, needs_dot, i, p, maxp;
+    if (isnan(x)) {
+        return snprintf(buf, bufsz, "%s", "##NaN") < 0 ? -1
+                                                       : (int)strlen(buf);
+    }
     if (isinf(x)) {
-        fputs(x > 0 ? "##Inf" : "##-Inf", out);
-        return;
+        return snprintf(buf, bufsz, "%s", x > 0 ? "##Inf" : "##-Inf") < 0
+                   ? -1 : (int)strlen(buf);
     }
     /* float32 carries ~9 significant digits; double carries ~17. The
      * loop tries widening precision until the round-trip matches, so
@@ -139,8 +142,8 @@ static void print_float_typed(FILE *out, double x, int is_float32)
         if (use_sci) {
             for (p = 0; p <= maxp; p++) {
                 /* %E -> uppercase exponent, matching JVM. */
-                n = snprintf(buf, sizeof(buf), "%.*E", p, x);
-                if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
+                n = snprintf(buf, bufsz, "%.*E", p, x);
+                if (n < 0 || n >= (int)bufsz) { n = -1; break; }
                 if (is_float32) {
                     float back = (float)strtod(buf, NULL);
                     if (back == (float)x) break;
@@ -152,8 +155,8 @@ static void print_float_typed(FILE *out, double x, int is_float32)
         } else {
             /* Fixed: %f precision is fractional-digit count. */
             for (p = 0; p <= maxp; p++) {
-                n = snprintf(buf, sizeof(buf), "%.*f", p, x);
-                if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
+                n = snprintf(buf, bufsz, "%.*f", p, x);
+                if (n < 0 || n >= (int)bufsz) { n = -1; break; }
                 if (is_float32) {
                     float back = (float)strtod(buf, NULL);
                     if (back == (float)x) break;
@@ -164,26 +167,23 @@ static void print_float_typed(FILE *out, double x, int is_float32)
             }
         }
     }
-    if (n < 0) { fputs("0.0", out); return; }
+    if (n < 0) return -1;
     /* snprintf("%E") emits "1.5E+02" / "1E+05". Strip the leading '+'
      * after E so the form matches JVM ("1.5E2", "1E5") -- JVM's
      * Double.toString never carries the '+'. Negative exponents keep
      * their '-'. */
-    sci_cleaned = 0;
     for (i = 0; i + 2 < n; i++) {
         if (buf[i] == 'E' && buf[i + 1] == '+') {
             int j;
             for (j = i + 1; j + 1 < n; j++) buf[j] = buf[j + 1];
             n--;
             buf[n] = '\0';
-            sci_cleaned = 1;
             break;
         }
     }
     /* JVM also strips a leading zero on a two-digit exponent: "E05" -> "E5".
      * The snprintf output keeps the leading zero on macOS / glibc;
      * trim a single leading zero in the exponent for parity. */
-    (void)sci_cleaned;
     for (i = 0; i + 2 < n; i++) {
         if (buf[i] == 'E' &&
             (buf[i + 1] == '-' || (buf[i + 1] >= '0' && buf[i + 1] <= '9'))) {
@@ -212,18 +212,35 @@ static void print_float_typed(FILE *out, double x, int is_float32)
         for (i = 0; i < n; i++) {
             if (buf[i] == 'E') { e_at = i; break; }
         }
-        if (e_at >= 0 && n + 2 < (int)sizeof(buf)) {
+        if (e_at >= 0 && n + 2 < (int)bufsz) {
             int j;
             for (j = n; j > e_at; j--) buf[j + 1] = buf[j - 1];
             buf[e_at]     = '.';
             buf[e_at + 1] = '0';
             n += 2;
-            buf[n] = '\0';
             needs_dot = 0;
         }
     }
-    fputs(buf, out);
-    if (needs_dot) fputs(".0", out);
+    if (needs_dot && n + 2 < (int)bufsz) {
+        buf[n] = '.';
+        buf[n + 1] = '0';
+        n += 2;
+    }
+    buf[n] = '\0';
+    return n;
+}
+
+int print_float_to_buf(char *buf, size_t bufsz, double x)
+{
+    return format_float_typed(buf, bufsz, x, 0);
+}
+
+static void print_float_typed(FILE *out, double x, int is_float32)
+{
+    char buf[64];
+    int  n = format_float_typed(buf, sizeof(buf), x, is_float32);
+    if (n < 0) { fputs("0.0", out); return; }
+    fwrite(buf, 1, (size_t)n, out);
 }
 
 static void print_float(FILE *out, double x)

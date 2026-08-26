@@ -13,6 +13,28 @@
   (is (= "" (str)))
   (is (= "ab" (str "a" nil "b"))))
 
+(deftest str-of-float-matches-jvm-double-to-string
+  ;; str of a double uses Double.toString, the same formatter pr-str
+  ;; reads, so the two agree for every double.
+  (testing "scientific-notation doubles carry the JVM exponent form"
+    (is (= "1.0E21" (str 1e21)))
+    (is (= "2.0E20" (str 2e20)))
+    (is (= "1.0E-7" (str 1e-7)))
+    (is (= "9.999E-10" (str 9.999e-10)))
+    (is (= "1.2345678901234569E23" (str 123456789012345678901234.5))))
+  (testing "plain doubles keep their decimal point"
+    (is (= "1.5" (str 1.5)))
+    (is (= "1.0" (str 1.0)))
+    (is (= "9999999.0" (str 9999999.0)))
+    (is (= "0.001" (str 0.001))))
+  (testing "str and pr-str agree for every double in the sweep"
+    (doseq [x [1e21 1e-7 1.5 1.0 2e20 9.999e-10 0.00001 -0.0 0.0]]
+      (is (= (pr-str x) (str x)) x)))
+  (testing "non-finite doubles print the plain Java names"
+    (is (= "NaN" (str ##NaN)))
+    (is (= "Infinity" (str ##Inf)))
+    (is (= "-Infinity" (str ##-Inf)))))
+
 (deftest subs-fn
   (is (= "el" (subs "hello" 1 3)))
   (is (= "llo" (subs "hello" 2))))

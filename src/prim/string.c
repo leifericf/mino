@@ -1547,26 +1547,16 @@ mino_val *prim_str(mino_state *S, mino_val *args, mino_env *env)
                 break;
             }
             case MINO_FLOAT: {
+                /* Route through the printer's Double.toString formatter:
+                 * JVM str of a double matches pr-str of it, including
+                 * the scientific-notation thresholds and exponent form. */
                 if (isnan(a->as.f)) {
                     n = snprintf(tmp, sizeof(tmp), "NaN");
                 } else if (isinf(a->as.f)) {
                     n = snprintf(tmp, sizeof(tmp), "%sInfinity",
                                  a->as.f > 0 ? "" : "-");
                 } else {
-                    char fb[64];
-                    int fn2 = snprintf(fb, sizeof(fb), "%g", a->as.f);
-                    int needs_dot = 1, k;
-                    for (k = 0; k < fn2; k++) {
-                        if (fb[k] == '.' || fb[k] == 'e' || fb[k] == 'E') {
-                            needs_dot = 0; break;
-                        }
-                    }
-                    if (needs_dot) {
-                        fb[fn2] = '.'; fb[fn2+1] = '0'; fb[fn2+2] = '\0';
-                        fn2 += 2;
-                    }
-                    n = fn2;
-                    memcpy(tmp, fb, (size_t)n + 1);
+                    n = print_float_to_buf(tmp, sizeof(tmp), a->as.f);
                 }
                 break;
             }

@@ -112,6 +112,11 @@ int fn_lazy_safe_rest(mino_val *fn);
 
 void print_val(mino_state *S, FILE *out, const mino_val *v, int readably);
 
+/* JVM Double.toString float formatting (print.c), shared by the
+ * printer and prim str: str of a double matches pr-str of it. Writes
+ * at most bufsz-1 bytes plus NUL; returns the length, -1 on failure. */
+int print_float_to_buf(char *buf, size_t bufsz, double x);
+
 /* Print dynvar plumbing. Top-level print entrypoints (pr / prn / print
  * / println / pr-str) call resolve to snapshot *print-length* and
  * *print-level* / *print-readably* / *print-meta* / *print-dup* /
