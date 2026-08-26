@@ -553,6 +553,9 @@
   ;; incompatible types -- the total-order deviation is specific to the
   ;; implicit default comparator, not to `compare`.
   (is (thrown? (sorted-set-by compare 1 "a" :k))))
+
+;; --- Host array constructors ---
+
 (deftest char-array-from-string
   ;; A string argument sequences as its chars, one array slot per
   ;; codepoint, matching JVM Clojure.
