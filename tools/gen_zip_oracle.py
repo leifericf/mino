@@ -402,15 +402,35 @@ def gen_zip_half():
     )
     archive("encrypted.bin", enc_archive, {})
 
-    # bomb.bin -- stored entry whose central directory declares a
-    # ~4 GiB uncompressed size over a 4-byte body: the declared-size
-    # cap must fire before any allocation.
+    # bomb.bin -- a deflate entry whose central directory declares a
+    # ~4 GiB uncompressed size over a tiny compressed body (the
+    # zip-bomb shape; a stored entry with mismatched sizes is
+    # rejected at central-directory walk by both miniz and python).
+    # The declared-size cap must fire before any allocation.
     bomb_name = b"bomb.bin"
-    bomb_data = b"BOOM"
-    bomb_archive = craft_zip(
-        [craft_loc(bomb_name, bomb_data)],
-        [craft_cdh(bomb_name, bomb_data, 0, uncomp_override=0xFFFFFFF0)],
+    bomb_raw = b"BOOM"
+    bomb_comp = zlib.compress(bomb_raw, 9)[2:-4]  # raw deflate body
+    bomb_crc = zlib.crc32(bomb_raw) & 0xFFFFFFFF
+    bomb_loc = (
+        struct.pack(
+            "<IHHHHHIIIHH",
+            LOC_SIG, 20, 0, 8, 0, 0x21,
+            bomb_crc, len(bomb_comp), len(bomb_raw), len(bomb_name), 0,
+        )
+        + bomb_name
+        + bomb_comp
     )
+    bomb_cdh = craft_cdh(
+        bomb_name, bomb_raw, 0, method=8, uncomp_override=0xFFFFFFF0
+    )
+    # craft_cdh writes comp_size = len(data); the compressed body is
+    # the deflate stream, so patch the CDH compressed-size word.
+    bomb_cdh = (
+        bomb_cdh[:20]
+        + struct.pack("<I", len(bomb_comp))
+        + bomb_cdh[24:]
+    )
+    bomb_archive = craft_zip([bomb_loc], [bomb_cdh])
     archive("bomb.bin", bomb_archive, {})
 
     # The manifest: per-archive SHA-256, the expected entry vector in

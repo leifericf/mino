@@ -27,11 +27,11 @@
                  :size 15 :compressed-size 15 :crc32 294000732
                  :method :store :mtime nil :directory? false
                  :comment "nested comment"}]}
- :bomb {:sha256 "5de09e2b89958c6b67d4ba68fd1cee4a2e8bd6a9d4a8f53cdcc32056415547a3"
+ :bomb {:sha256 "8813b4e75dca55593a7656e331b20fdce4ef1c78c07e40221f09e6c1e28ac82b"
   :contents {}
   :entries [{:name "bomb.bin"
-                 :size 4294967280 :compressed-size 4 :crc32 336849840
-                 :method :store :mtime nil :directory? false
+                 :size 4294967280 :compressed-size 6 :crc32 336849840
+                 :method :deflate :mtime nil :directory? false
                  :comment ""}]}
  :cp437 {:sha256 "dd53f2c631fca5bb8f3cf84fd9c21627d9082965904098a941299b6a1befad7c"
   :contents {"äö437.txt" "d802e18292f828f2725c27e8f0ca600dd5c12d668b1e6ded4174f1f9acb457ed"}

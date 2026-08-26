@@ -589,6 +589,15 @@ gz_status mino_inflate_raw(const unsigned char *in, size_t in_len,
                            size_t max_out, gz_out *out, size_t *consumed);
 extern const mino_prim_def k_prims_compress[];
 extern const size_t        k_prims_compress_count;
+
+/* zip.c -- k_prims_archive registers the zip container prims
+ * (zip-entries, zip-read; zip-write joins in p4) under the "archive"
+ * domain key (the "zip" string already belongs to the clojure.zip
+ * capability registry). All prims are file-local static; the CDH
+ * walk, CP437 decode, and DOS timestamp decode are file-local too
+ * (no cross-TU consumers). */
+extern const mino_prim_def k_prims_archive[];
+extern const size_t        k_prims_archive_count;
 extern const mino_prim_def k_prims_gzip[];
 extern const size_t        k_prims_gzip_count;
 mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
