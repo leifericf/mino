@@ -10,10 +10,30 @@
  */
 
 #include "prim/internal.h"
+#include "prim/arglists_data.h"
 #include "mino.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+/* Binary search the generated arglists table by (ns, name). The table
+ * is sorted by strcmp on ns first, then name. */
+static const mino_prim_arglist_t *find_prim_arglists(const char *ns,
+                                                     const char *name)
+{
+    size_t lo = 0;
+    size_t hi = K_PRIM_ARGLISTS_COUNT;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        const mino_prim_arglist_t *e = &k_prim_arglists[mid];
+        int c = strcmp(ns, e->ns);
+        if (c == 0) c = strcmp(name, e->name);
+        if (c == 0) return e;
+        if (c < 0) hi = mid;
+        else       lo = mid + 1;
+    }
+    return NULL;
+}
 
 void prim_install_table(mino_state *S, mino_env *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count)
@@ -53,6 +73,34 @@ void prim_install_table_with_capability(mino_state *S, mino_env *env,
                  * the existing var on re-install, so the root is set
                  * on the same cell every time. */
                 mino_env_set(S, env, defs[i].name, var);
+                {
+                    const mino_prim_arglist_t *al =
+                        find_prim_arglists(ns_name, defs[i].name);
+                    if (al != NULL) {
+                        /* Data-only read of a committed table row; no
+                         * shared reader state needs saving (unlike the
+                         * core.clj source read below, which repoints
+                         * reader_file for error attribution). */
+                        const char *end   = NULL;
+                        mino_val   *forms = mino_read(S, al->arglists, &end);
+                        /* Class I: committed table corrupt; no try
+                         * frame to recover through at install */
+                        if (forms == NULL) {
+                            fprintf(stderr,
+                                    "arglists parse error for %s/%s: %s\n",
+                                    ns_name, defs[i].name,
+                                    mino_last_error(S));
+                            abort();
+                        }
+                        if (*end != '\0') {
+                            fprintf(stderr,
+                                    "arglists trailing data for %s/%s\n",
+                                    ns_name, defs[i].name);
+                            abort();
+                        }
+                        var_attach_arglists_meta(S, var, forms, NULL, 0);
+                    }
+                }
             }
         }
         if (defs[i].doc != NULL) {

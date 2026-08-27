@@ -145,6 +145,26 @@ void print_dynvars_resolve(mino_state *S, mino_env *env,
 void print_dynvars_restore(mino_state *S, const print_dynvars_saved_t *saved);
 
 /* ------------------------------------------------------------------------- */
+/* defs.c                                                                    */
+/* ------------------------------------------------------------------------- */
+
+/* Merge a user metadata map (plus optional docstring) onto a var's
+ * meta map so (meta #'x) surfaces :arglists / :doc. Declared here (not
+ * prim/internal.h) because the implementation lives in eval/defs.c;
+ * prim/install.c attaches :arglists at prim-install time through the
+ * transitive include chain prim/internal.h -> runtime/internal.h ->
+ * here. */
+void var_attach_user_meta(mino_state *S, mino_val *var,
+                          mino_val *name_meta,
+                          const char *doc, size_t doc_len);
+
+/* Build {:arglists al} and merge it (plus the optional docstring)
+ * onto the var's meta map; shared by eval_defmacro and prim install. */
+void var_attach_arglists_meta(mino_state *S, mino_val *var,
+                              mino_val *al,
+                              const char *doc, size_t doc_len);
+
+/* ------------------------------------------------------------------------- */
 /* bindings_destr.c                                                          */
 /* ------------------------------------------------------------------------- */
 

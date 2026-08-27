@@ -2568,7 +2568,7 @@
 (extend-type :default Navigable (nav [_coll _k v] v))
 
 (defn reduce "Reduces coll using f. With 2 args, uses the first element as init.
-  With 3 args, uses init explicitly. Consults CollReduce: a user
+  With 3 args, uses val explicitly. Consults CollReduce: a user
   type or :default override on coll-reduce takes precedence over the
   built-in seq-driven reduction."
     ([f coll]
@@ -2587,13 +2587,13 @@
              (f)
              (impl (rest s) f (first s))))
          (internal-reduce f coll))))
-    ([f init coll]
-     (let [table @CollReduce--coll-reduce
-           impl  (or (get table (type coll))
-                     (get table :default))]
-       (if impl
-         (impl coll f init)
-         (internal-reduce f init coll)))))
+     ([f val coll]
+      (let [table @CollReduce--coll-reduce
+            impl  (or (get table (type coll))
+                      (get table :default))]
+        (if impl
+          (impl coll f val)
+          (internal-reduce f val coll)))))
 
 (defn reduce-kv
   "Reduces a map (or any associative source) with f taking

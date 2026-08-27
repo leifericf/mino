@@ -553,10 +553,8 @@ mino_val *eval_ns(mino_state *S, mino_val *form,
 
 /* --- def, defmacro, declare --- */
 
-/* Forward declaration: defined below, used by eval_defmacro. */
-static void var_attach_user_meta(mino_state *S, mino_val *var,
-                                 mino_val *name_meta,
-                                 const char *doc, size_t doc_len);
+/* var_attach_user_meta is declared in eval/internal.h; prim/install.c
+ * shares it for install-time :arglists attachment. */
 
 /* The defmacro's parameter vectors as a list, in declaration order:
  * the JVM :arglists shape. Single arity is the one params form; each
@@ -683,24 +681,12 @@ mino_val *eval_defmacro(mino_state *S, mino_val *form,
                  * not the GC-managed map read by (meta (resolve ...)). */
                 {
                     mino_val *al = defmacro_arglists(S, params, body);
-                    mino_val **ks;
-                    mino_val **vs;
-                    mino_val *al_map;
                     if (al == NULL) {
                         if (doc != NULL) {
                             var_attach_user_meta(S, var, NULL, doc, doc_len);
                         }
                     } else {
-                        gc_pin(al);
-                        ks = (mino_val **)gc_alloc_typed(
-                            S, GC_T_VALARR, sizeof(*ks));
-                        vs = (mino_val **)gc_alloc_typed(
-                            S, GC_T_VALARR, sizeof(*vs));
-                        gc_valarr_set(S, ks, 0, mino_keyword(S, "arglists"));
-                        gc_valarr_set(S, vs, 0, al);
-                        gc_unpin(1);
-                        al_map = mino_map(S, ks, vs, 1);
-                        var_attach_user_meta(S, var, al_map, doc, doc_len);
+                        var_attach_arglists_meta(S, var, al, doc, doc_len);
                     }
                 }
             }
@@ -809,9 +795,9 @@ static mino_val *eval_meta_map(mino_state *S, mino_val *meta, mino_env *env)
  * :deprecated, not just the synthesized :ns/:name/flag entries. The
  * caller must already have evaluated name_meta's values via
  * eval_meta_map. */
-static void var_attach_user_meta(mino_state *S, mino_val *var,
-                                 mino_val *name_meta,
-                                 const char *doc, size_t doc_len)
+void var_attach_user_meta(mino_state *S, mino_val *var,
+                          mino_val *name_meta,
+                          const char *doc, size_t doc_len)
 {
     mino_val *m = NULL;
     if (name_meta != NULL && mino_type_of(name_meta) == MINO_MAP) {
@@ -835,6 +821,27 @@ static void var_attach_user_meta(mino_state *S, mino_val *var,
     if (m == NULL) return;
     gc_write_barrier(S, var, var->meta, m);
     var->meta = m;
+}
+
+/* Attach {:arglists al} (plus an optional docstring) onto the var:
+ * the one shared construction for every arglists-bearing definition
+ * site (eval_defmacro here, prim install). Pins al across the
+ * singleton map's key/value array allocations. */
+void var_attach_arglists_meta(mino_state *S, mino_val *var,
+                              mino_val *al,
+                              const char *doc, size_t doc_len)
+{
+    mino_val **ks;
+    mino_val **vs;
+    mino_val  *al_map;
+    gc_pin(al);
+    ks = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, sizeof(*ks));
+    vs = (mino_val **)gc_alloc_typed(S, GC_T_VALARR, sizeof(*vs));
+    gc_valarr_set(S, ks, 0, mino_keyword(S, "arglists"));
+    gc_valarr_set(S, vs, 0, al);
+    gc_unpin(1);
+    al_map = mino_map(S, ks, vs, 1);
+    var_attach_user_meta(S, var, al_map, doc, doc_len);
 }
 
 mino_val *eval_def(mino_state *S, mino_val *form,

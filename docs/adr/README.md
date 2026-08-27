@@ -42,3 +42,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [31](31-unicode-case-tables.md) | Unicode case mappings from vendored tables generated at build time |
 | [32](32-classed-catch-kind-dispatch.md) | Classed catch clauses dispatch on diagnostic kind |
 | [33](33-var-based-namespace-env.md) | Namespace environments bind vars uniformly |
+| [34](34-c-prim-arglists.md) | C prims carry oracle arglists as var metadata |
