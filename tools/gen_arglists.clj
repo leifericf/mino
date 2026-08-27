@@ -3,9 +3,11 @@
             [clojure.string :as str]))
 
 ;; Regenerate src/prim/arglists_data.h, the committed install-time
-;; :arglists table for the arity-conformant C prims, from the census
-;; oracle surface. The script runs only when the oracle or the emit
-;; list changes; the Makefile never invokes it.
+;; :arglists table for the C prims, from the census oracle surface.
+;; Oracle-conformant and lax prims attach the oracle shapes verbatim;
+;; real arity gaps attach mino-true shapes derived from the prim
+;; sources. The script runs only when the oracle or the emit lists
+;; change; the Makefile never invokes it.
 ;;
 ;;   bb tools/gen_arglists.clj [path-to-surface.edn]
 ;;
@@ -19,44 +21,6 @@
   (or (first *command-line-args*)
       (System/getenv "CENSUS_SURFACE")
       default-surface))
-
-;; Divergent-arity prims, frozen from the 2026-08-27 arity sweep;
-;; regenerate via the sweep before extending. Their arities or error
-;; classes are fixed by later commits in the campaign (ADR 34).
-(def divergent-arities
-  #{
-  "clojure.core/<"
-  "clojure.core/<="
-  "clojure.core/="
-  "clojure.core/>"
-  "clojure.core/>="
-  "clojure.core/aget"
-  "clojure.core/all-ns"
-  "clojure.core/aset"
-  "clojure.core/bit-and"
-  "clojure.core/bit-or"
-  "clojure.core/bit-xor"
-  "clojure.core/byte-array"
-  "clojure.core/conj!"
-  "clojure.core/distinct?"
-  "clojure.core/get-thread-bindings"
-  "clojure.core/identical?"
-  "clojure.core/loaded-libs"
-  "clojure.core/object-array"
-  "clojure.core/realized?"
-  "clojure.core/ref"
-  "clojure.core/ref-history-count"
-  "clojure.core/ref-max-history"
-  "clojure.core/ref-min-history"
-  "clojure.core/release-pending-sends"
-  "clojure.core/resolve"
-  "clojure.core/send-via"
-  "clojure.core/slurp"
-  "clojure.core/spit"
-  "clojure.core/symbol"
-  "clojure.core/to-array"
-  "clojure.core/with-bindings*"
-  "clojure.core/with-meta"    })
 
 ;; Non-prim names the sweep tables list alongside prims: special-form
 ;; macros and core.clj def aliases. Their arglists come from their own
@@ -76,7 +40,7 @@
   "ns"
   "partition"    })
 
-;; The authoritative emit list: the 253 arity-conformant prim names
+;; The base emit list: the 253 arity-conformant prim names
 ;; ("ns/name") frozen from the 2026-08-27 sweep plus the ten the
 ;; slice-2/3 fixes admitted (ADR 34); regenerate via the sweep.
 (def emit-list
@@ -345,6 +309,73 @@
   "clojure.string/join"
   "clojure.string/split"    })
 
+;; Lax prims: mino accepts every oracle arity plus extras it tolerates
+;; silently. Lax arity acceptance verified by the 2026-08-27 sweep;
+;; oracle arglists attached, extra tolerated arities unclaimed (the
+;; extras become a census divergence entry in a later slice). spit was
+;; not swept (it writes files); prim_spit genuinely supports its
+;; option tail (:append honored, :encoding validated), so the oracle
+;; shape is true for it and it rides this class.
+(def lax-prims
+  #{
+  "clojure.core/<"
+  "clojure.core/<="
+  "clojure.core/="
+  "clojure.core/>"
+  "clojure.core/>="
+  "clojure.core/all-ns"
+  "clojure.core/bit-and"
+  "clojure.core/bit-or"
+  "clojure.core/bit-xor"
+  "clojure.core/byte-array"
+  "clojure.core/conj!"
+  "clojure.core/distinct?"
+  "clojure.core/get-thread-bindings"
+  "clojure.core/identical?"
+  "clojure.core/loaded-libs"
+  "clojure.core/object-array"
+  "clojure.core/realized?"
+  "clojure.core/ref-history-count"
+  "clojure.core/ref-max-history"
+  "clojure.core/ref-min-history"
+  "clojure.core/release-pending-sends"
+  "clojure.core/send-via"
+  "clojure.core/spit"
+  "clojure.core/symbol"
+  "clojure.core/to-array"
+  "clojure.core/with-meta"    })
+
+;; Real arity gaps: the prim rejects oracle-claimed arities, so the
+;; oracle shape would be lying metadata. Each shape is derived from
+;; the prim's own arg-count logic, borrowing oracle param names where
+;; the shape coincides; a key here overrides the oracle lookup. The
+;; missing arities are deferred (ADR 34) and become census
+;; divergences.
+(def mino-true
+  {"clojure.core/aget"
+   {:arglists '([array idx])
+    :reason "prim_aget accepts exactly (array idx); variadic index dims unimplemented"}
+
+   "clojure.core/aset"
+   {:arglists '([array idx val])
+    :reason "prim_aset accepts exactly (array idx val); variadic index dims unimplemented"}
+
+   "clojure.core/ref"
+   {:arglists '([x])
+    :reason "prim_ref requires an initial value; the options tail rejects every swept arity above 1 with MAR001"}
+
+   "clojure.core/resolve"
+   {:arglists '([sym])
+    :reason "prim_resolve accepts exactly one symbol; the env-arity is unimplemented"}
+
+   "clojure.core/slurp"
+   {:arglists '([f])
+    :reason "prim_slurp accepts exactly one path argument; the opts tail is unimplemented"}
+
+   "clojure.core/with-bindings*"
+   {:arglists '([binding-map f])
+    :reason "prim_with_bindings_star accepts exactly (binding-map f); the variadic args tail is unimplemented"}})
+
 (defn c-string [s]
   (-> s
       (str/replace "\\" "\\\\")
@@ -359,28 +390,37 @@
 
 (defn -main []
   (let [vars    (oracle-vars (edn/read-string (slurp surface-path)))
+        emitted (into emit-list (concat lax-prims (keys mino-true)))
+        _       (assert (and (empty? (clojure.set/intersection emit-list lax-prims))
+                             (empty? (clojure.set/intersection emit-list (set (keys mino-true))))
+                             (empty? (clojure.set/intersection lax-prims (set (keys mino-true)))))
+                        "emit populations must be disjoint")
         ;; Pair order, not composite-string order: install.c bsearches
         ;; by strcmp on ns then name, and the two orders diverge once
         ;; one namespace is a proper prefix of another.
         emit    (sort-by (fn [k] (let [[ns name] (str/split k #"/" 2)]
                                    [ns name]))
-                         emit-list)
-        banned  (into divergent-arities
-                      (map #(str "clojure.core/" %))
-                      non-prims)]
+                         emitted)
+        banned  (into #{} (map #(str "clojure.core/" %)) non-prims)]
     (when (some banned emit)
       (binding [*out* *err*]
         (println "emit list intersects the frozen exclusions:"
                  (pr-str (seq (filter banned emit)))))
       (System/exit 1))
-    (let [missing (remove #(some? (:arglists (get vars %))) emit)]
+    (let [missing (remove (fn [k]
+                            (or (some? (:arglists (get mino-true k)))
+                                (some? (:arglists (get vars k)))))
+                          emit)]
       (when (seq missing)
         (binding [*out* *err*]
           (doseq [m missing] (println "no oracle arglists for" m)))
         (System/exit 1)))
     (let [rows   (map (fn [k]
-                        (let [[ns name] (str/split k #"/" 2)]
-                          [ns name (pr-str (:arglists (get vars k)))]))
+                        (let [[ns name] (str/split k #"/" 2)
+                              al (if-some [override (:arglists (get mino-true k))]
+                                   (pr-str override)
+                                   (pr-str (:arglists (get vars k))))]
+                          [ns name al]))
                       emit)
           lines  (map (fn [[ns name al]]
                         (format "    {\"%s\", \"%s\", \"%s\"},"
@@ -403,6 +443,9 @@
                    ""])]
       (spit "src/prim/arglists_data.h" header)
       (println "wrote src/prim/arglists_data.h:" (count rows)
-               "entries from" surface-path))))
+               "entries from" surface-path
+               "(" (- (count rows) (count mino-true)) "oracle,"
+               (count mino-true) "mino-true,"
+               "0 excluded prims)"))))
 
 (-main)
