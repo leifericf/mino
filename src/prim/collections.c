@@ -150,7 +150,7 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
     mino_val *arg;
     size_t      n;
     arg_count(S, args, &n);
-    if (n == 2 && allow_init) {
+    if (n == 2) {
         mino_val *size_val = args->as.cons.car;
         mino_val *init     = args->as.cons.cdr->as.cons.car;
         mino_val *arr;
@@ -168,10 +168,39 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
             return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
         if (init == NULL) init = mino_nil(S);
-        /* init is register-live across the constructor's allocations
-         * while vals[] is malloc-owned; pin across the window. After
-         * the return the array is a young GC value whose slots are
-         * traced, and the fill loop allocates nothing. */
+        /* JVM array ctors take either a scalar fill (Number/char/boolean,
+         * only for kinds with the fill arity) or a seqable whose first
+         * `size` elements populate the array; a short seq leaves the
+         * kind's zero default in the remaining slots. */
+        if (seqable_p(init)) {
+            seq_iter_t it;
+            /* init is register-live across the constructor's
+             * allocations while vals[] is malloc-owned; pin across
+             * the window. After the return the array is a young GC
+             * value whose slots are traced. */
+            gc_pin(init);
+            arr = mino_host_array_new(S, (size_t)size, kind);
+            gc_unpin(1);
+            if (arr == NULL) return NULL;
+            gc_pin(arr);
+            seq_iter_init(S, &it, init);
+            for (i = 0; i < (size_t)size && !seq_iter_done(&it); i++) {
+                arr->as.host_array.vals[i] = seq_iter_val(S, &it);
+                seq_iter_next(S, &it);
+            }
+            gc_unpin(1);
+            return arr;
+        }
+        if (!allow_init) {
+            char buf[120];
+            snprintf(buf, sizeof(buf),
+                     "%s: init is not seqable", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
+        /* Scalar fill. init is register-live across the constructor's
+         * allocations while vals[] is malloc-owned; pin across the
+         * window. After the return the array is a young GC value whose
+         * slots are traced, and the fill loop allocates nothing. */
         gc_pin(init);
         arr = mino_host_array_new(S, (size_t)size, kind);
         gc_unpin(1);
@@ -237,11 +266,59 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *arg;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "byte-array requires one argument");
     }
     arg = args->as.cons.car;
+    if (args->as.cons.cdr != NULL && mino_is_cons(args->as.cons.cdr)) {
+        /* 2-arity: (byte-array size seqable) takes the first `size`
+         * elements, per JVM. A non-seqable init errors, as on the JVM
+         * (byte arrays have no scalar fill arity). */
+        mino_val *size_val = arg;
+        mino_val *init     = args->as.cons.cdr->as.cons.car;
+        long long n2;
+        size_t i2;
+        unsigned char *buf2;
+        seq_iter_t it2;
+        if (size_val == NULL || !mino_val_int_p(size_val)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "byte-array: size must be an integer");
+        }
+        n2 = mino_val_int_get(size_val);
+        if (n2 < 0) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "byte-array: negative array size");
+        }
+        if (init == NULL) init = mino_nil(S);
+        if (!seqable_p(init)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "byte-array: init is not seqable");
+        }
+        buf2 = (unsigned char *)malloc((size_t)n2 > 0 ? (size_t)n2 : 1);
+        if (buf2 == NULL) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                "byte-array: out of memory");
+        }
+        seq_iter_init(S, &it2, init);
+        for (i2 = 0; i2 < (size_t)n2 && !seq_iter_done(&it2); i2++) {
+            long long bv;
+            if (as_long(seq_iter_val(S, &it2), &bv)) {
+                buf2[i2] = (unsigned char)bv;
+            } else {
+                free(buf2);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "byte-array: element is not a byte");
+            }
+            seq_iter_next(S, &it2);
+        }
+        for (; i2 < (size_t)n2; i2++) buf2[i2] = 0;
+        {
+            mino_val *res2 = mino_bytes(S, buf2, (size_t)n2);
+            free(buf2);
+            return res2;
+        }
+    }
     if (arg != NULL && mino_val_int_p(arg)) {
         long long n = mino_val_int_get(arg);
         if (n < 0) {

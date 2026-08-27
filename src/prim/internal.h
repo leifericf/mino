@@ -38,6 +38,7 @@ int          as_long(const mino_val *v, long long *out);  /* pure extraction */
 double       tower_to_double(const mino_val *v);           /* full numeric tower */
 size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
 int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
+int          seqable_p(const mino_val *v);              /* pure, shared */
 mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
 /* print_dynvars_saved_t, print_dynvars_resolve, print_dynvars_restore:

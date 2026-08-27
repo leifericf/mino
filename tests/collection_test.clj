@@ -597,6 +597,20 @@
     (is (thrown? (short-array 3 7)))
     (is (thrown? (object-array 3 :x)))
     (is (thrown? (to-array 3 :x))))
+  (testing "seqable init fills the first size slots, per JVM"
+    (is (= [9 9 9] (vec (int-array 3 (repeat 9)))))
+    (is (= [9 9 9] (vec (short-array 3 (repeat 9)))))
+    (is (= [\z \z \z] (vec (char-array 3 (repeat \z)))))
+    (is (= 3 (count (byte-array 3 (repeat 9)))))
+    (is (= [1 2] (vec (long-array 2 [1 2 3]))))
+    (is (= [4 5] (vec (int-array 2 [4 5 6]))))
+    (is (= [true false] (vec (boolean-array 2 [true]))))
+    (is (= [0.5 0.0 0.0] (vec (float-array 3 [0.5]))))
+    (is (= [\a \b] (vec (char-array 2 [\a \b \c]))))
+    (is (= 3 (count (byte-array 3 [1 2 3])))))
+  (testing "non-seqable init on seq-only kinds errors, per JVM"
+    (is (thrown? (short-array 3 :k)))
+    (is (thrown? (byte-array 3 7))))
   (testing "guard rails"
     (is (thrown? (char-array -1 \a)))
     (is (thrown? (char-array "ab" \a)))))

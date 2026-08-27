@@ -2109,11 +2109,9 @@ static mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
     }
 }
 
-/* apply's final argument is spread as an argument seq, so a tail that
- * is neither nil nor a seqable collection is an argument error, not a
- * silently-empty arg list (JVM apply rejects such tails). Strings are
- * excluded: apply's spread contract requires a collection tail. */
-static int apply_tail_seqable(const mino_val *v)
+/* Shared seqable predicate: true when val_to_seq/seq_iter accept the
+ * value without throwing. Strings count (they sequence as chars). */
+int seqable_p(const mino_val *v)
 {
     if (v == NULL) return 1;
     switch (mino_type_of(v)) {
@@ -2201,7 +2199,7 @@ static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
         /* Append elements from `last` collection. */
         if (last != NULL && mino_type_of(last) != MINO_NIL) {
             seq_iter_t it;
-            if (!apply_tail_seqable(last)) {
+            if (!seqable_p(last)) {
                 char msg[96];
                 snprintf(msg, sizeof(msg),
                          "apply: last argument must be seqable, got %s",
@@ -2238,7 +2236,7 @@ static mino_val *prim_apply(mino_state *S, mino_val *args, mino_env *env)
         mino_val *head = mino_nil(S);
         mino_val *tail2 = NULL;
         seq_iter_t it;
-        if (!apply_tail_seqable(last)) {
+        if (!seqable_p(last)) {
             char msg[96];
             snprintf(msg, sizeof(msg),
                      "apply: last argument must be seqable, got %s",
