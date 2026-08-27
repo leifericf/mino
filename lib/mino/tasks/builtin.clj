@@ -2445,10 +2445,12 @@
 (defn test-suite
   "Run the test suite."
   []
-  (doseq [k (range 1 (inc suite-shard-count))]
-    (println (sh! "sh" "-c"
-                  (str "MINO_TEST_SHARD=" k "/" suite-shard-count
-                       " " mino-bin " tests/run.clj")))))
+  ;; run-suite-with-test-bin, not sh!: sh!'s throw truncates captured
+  ;; output to 512 chars, which hid which test actually failed (the
+  ;; shard's FAIL lines and summary never reached the console). The
+  ;; helper prints the full combined output before surfacing the
+  ;; non-zero exit.
+  (run-suite-with-test-bin mino-bin []))
 
 (defn test-generative
   "Run the generative property tests (tests/json_property_test.clj).
