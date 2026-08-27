@@ -230,15 +230,14 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
     while (mino_is_cons(opts)) {
         mino_val *k = opts->as.cons.car;
         mino_val *v;
-        if (k == NULL || mino_type_of(k) != MINO_KEYWORD) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "ref: option keys must be keywords");
-        }
         if (!mino_is_cons(opts->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "ref: option key without value");
+            return prim_throw_dangling_key(S, k);
         }
         v = opts->as.cons.cdr->as.cons.car;
+        if (k == NULL || mino_type_of(k) != MINO_KEYWORD) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "ref: option key must be a keyword");
+        }
         if (k->as.s.len == 9 && memcmp(k->as.s.data, "validator", 9) == 0) {
             if (v != NULL && mino_type_of(v) != MINO_NIL
                 && mino_type_of(v) != MINO_FN
@@ -265,7 +264,7 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
             snprintf(msg, sizeof(msg),
                 "ref: unknown option :%.*s",
                 (int)k->as.s.len, k->as.s.data);
-            return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
         }
         opts = opts->as.cons.cdr->as.cons.cdr;
     }

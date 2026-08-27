@@ -36,10 +36,13 @@ dangling key-value or option counts with the arity code MAR001 where
 JVM rejects the same call with a value error (hash-map, sorted-map,
 sorted-map-by, atom, agent, assoc, restart-agent): the arity is
 accepted at the signature level and only the value shape is wrong, so
-the arity check is miscoded, not the signature. The rest are real
-missing arities (slurp opts, resolve env-arity, ref options,
-with-bindings* variadic, require and use zero-arity, disj! one-arity,
-aset and aget variadic dimensions).
+the arity check is miscoded, not the signature. Live probing later
+showed ref belongs to this class too: its option tail is accepted, and
+its option-tail rejections were miscoded MAR001 (the sweep's sentinel
+probes hit the unknown-key path), fixed the same way. The rest are
+real missing arities (slurp opts, resolve env-arity, with-bindings*
+variadic, require and use zero-arity, disj! one-arity, aset and aget
+variadic dimensions).
 
 The wider set is laxity: comparators accepting zero args, bit-fns
 accepting one, and roughly twenty prims that silently ignore extra
@@ -63,7 +66,7 @@ arguments. Richer-than-oracle does not flag in the census.
    - require and use accept the zero arity but reject it with a
      value error matching the JVM; disj! gains its one-arity. Their
      oracle arglists then apply verbatim.
-   - Real gaps (slurp, resolve, ref, with-bindings*, aset, aget, and
+   - Real gaps (slurp, resolve, with-bindings*, aset, aget, and
      any residue) attach mino-true arglists and get census divergence
      entries; the missing arities themselves are out of scope.
    - Lax prims attach oracle arglists unchanged; the lax class is
@@ -126,7 +129,7 @@ arguments. Richer-than-oracle does not flag in the census.
 
 ## Deferred
 
-- Implementing the real missing arities (slurp opts, ref options,
+- Implementing the real missing arities (slurp opts,
   resolve env-arity, variadic aset/aget, with-bindings* args).
 - Riding :doc into prim var meta.
 - Tightening the lax prims to reject extra arguments.

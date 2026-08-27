@@ -204,7 +204,7 @@ static const mino_prim_arglist_t k_prim_arglists[] = {
     {"clojure.core", "record?", "([x])"},
     {"clojure.core", "reduced", "([x])"},
     {"clojure.core", "reduced?", "([x])"},
-    {"clojure.core", "ref", "([x])"},
+    {"clojure.core", "ref", "([x] [x & options])"},
     {"clojure.core", "ref-history-count", "([ref])"},
     {"clojure.core", "ref-max-history", "([ref] [ref n])"},
     {"clojure.core", "ref-min-history", "([ref] [ref n])"},

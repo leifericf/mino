@@ -41,8 +41,8 @@
   "partition"    })
 
 ;; The base emit list: the 253 arity-conformant prim names
-;; ("ns/name") frozen from the 2026-08-27 sweep plus the ten the
-;; slice-2/3 fixes admitted (ADR 34); regenerate via the sweep.
+;; ("ns/name") frozen from the 2026-08-27 sweep plus the eleven the
+;; follow-up class fixes admitted (ADR 34); regenerate via the sweep.
 (def emit-list
   #{
   "clojure.core/*"
@@ -225,6 +225,7 @@
   "clojure.core/record?"
   "clojure.core/reduced"
   "clojure.core/reduced?"
+  "clojure.core/ref"
   "clojure.core/ref-set"
   "clojure.core/refer"
   "clojure.core/rem"
@@ -357,12 +358,8 @@
     :reason "prim_aget accepts exactly (array idx); variadic index dims unimplemented"}
 
    "clojure.core/aset"
-   {:arglists '([array idx val])
-    :reason "prim_aset accepts exactly (array idx val); variadic index dims unimplemented"}
-
-   "clojure.core/ref"
-   {:arglists '([x])
-    :reason "prim_ref requires an initial value; canonical keyword option pairs are accepted (sweep sentinels MAR001 as bad option keys), so only [x] is claimed"}
+    {:arglists '([array idx val])
+     :reason "prim_aset accepts exactly (array idx val); variadic index dims unimplemented"}
 
    "clojure.core/resolve"
    {:arglists '([sym])
