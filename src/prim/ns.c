@@ -1049,6 +1049,23 @@ static mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *
     return arg->as.var.bound ? mino_true(S) : mino_false(S);
 }
 
+/* Root read bypassing the thread-binding stack. with-redefs saves the
+ * root (JVM .getRoot), never the binding-visible value, so a with-redefs
+ * inside a binding restores the true root instead of clobbering it with
+ * the bound value. Unbound reads as nil; the restore path only writes
+ * when the var was bound, keeping declared vars unbound. */
+static mino_val *prim_var_root(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *arg;
+    (void)env;
+    if (!ns_one_arg(S, args, "-var-root", &arg)) return NULL;
+    if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "-var-root: expected a var");
+    }
+    return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
+}
+
 /* Mutating a var's root must also update the ns env binding so future
  * unqualified lookups observe the new value (the env is what callers
  * actually walk). */
@@ -1172,6 +1189,8 @@ const mino_prim_def k_prims_ns[] = {
      "Apply a function to a var's root and store the result."},
     {"-var-root-bound?", prim_var_root_bound_p,
      "Return true if the var has a root binding. Internal helper backing the variadic Clojure-level bound?."},
+    {"-var-root", prim_var_root,
+     "Return the var's root value, bypassing thread bindings. Internal helper for with-redefs."},
 };
 
 const size_t k_prims_ns_count =

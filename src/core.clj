@@ -3882,7 +3882,7 @@
    of var -> new-value."
   [bindings-map thunk]
   (let [pairs (vec bindings-map)
-        olds  (mapv (fn [pair] [(first pair) (deref (first pair))]) pairs)]
+        olds  (mapv (fn [pair] [(first pair) (-var-root (first pair))]) pairs)]
     (try
       (doseq [pair pairs]
         (alter-var-root (first pair) (constantly (second pair))))
@@ -4131,7 +4131,7 @@
         try-form     (apply list 'try (concat sets body (list finally-form)))]
     (list 'let
           (vec (concat
-                 (mapcat (fn [old v] [old (list 'deref (list 'var v))])
+                 (mapcat (fn [old v] [old (list '-var-root (list 'var v))])
                          olds var-syms)
                  (mapcat (fn [new-sym new-val] [new-sym new-val])
                          news new-vals)))

@@ -588,7 +588,25 @@
       (with-redefs-fn {#'my-fn-w-redefs-fn_ (fn [] :redef)}
                       (fn [] (reset! observed (my-fn-w-redefs-fn_))))
       (is (= :redef    @observed))
-      (is (= :original (my-fn-w-redefs-fn_))))))
+      (is (= :original (my-fn-w-redefs-fn_)))))
+
+  (testing "saves the root, not the thread-binding value"
+    ;; JVM with-redefs-fn reads getRawRoot: inside a binding the root
+    ;; save must not capture the bound value.
+    (def ^:dynamic wr-dyn_ 1)
+    (with-redefs-fn {#'wr-dyn_ 9}
+      (fn []
+        (binding [wr-dyn_ 2]
+          (is (= 2 wr-dyn_)))))
+    (is (= 1 wr-dyn_)))
+
+  (testing "with-redefs inside binding restores the true root"
+    (def ^:dynamic wr-dyn2_ 1)
+    (binding [wr-dyn2_ 2]
+      (is (= 2 wr-dyn2_))
+      (with-redefs [wr-dyn2_ 3]
+        (is (= 2 wr-dyn2_) "binding still shadows the new root")))
+    (is (= 1 wr-dyn2_) "root restored to pre-redef value, not 2")))
 
 (def ^:dynamic *bf-x* 1)
 
