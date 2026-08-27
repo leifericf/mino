@@ -113,6 +113,20 @@ mino_val *prim_throw_error(mino_state *S, const char *msg)
     return prim_throw_classified(S, "internal", "MIN001", msg);
 }
 
+/* Throw the JVM-parity value error for a key-value or option tail that
+ * ends on a key with no value: the count is within the signature, only
+ * the value shape is wrong, so eval/type MTY001, not eval/arity MAR001
+ * (ADR 34). Message matches the JVM, naming the dangling key. */
+mino_val *prim_throw_dangling_key(mino_state *S, const mino_val *key)
+{
+    char        buf[256];
+    mino_val *printed = print_to_string(S, key);
+    snprintf(buf, sizeof(buf), "No value supplied for key: %.*s",
+             printed != NULL ? (int)printed->as.s.len : 0,
+             printed != NULL ? printed->as.s.data : "");
+    return prim_throw_classified(S, "eval/type", "MTY001", buf);
+}
+
 int as_double(const mino_val *v, double *out)
 {
     if (v == NULL) {

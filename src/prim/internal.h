@@ -33,11 +33,15 @@ int          args_have_float(mino_val *args);             /* pure predicate */
 mino_val  *prim_throw_error(mino_state *S, const char *msg); /* longjmp or set_error+NULL */
 mino_val  *prim_throw_classified(mino_state *S, const char *kind,
                                    const char *code, const char *msg);
+/* Dangling kv/option-tail key: eval/type MTY001 naming the key. */
+mino_val  *prim_throw_dangling_key(mino_state *S, const mino_val *key);
 int          as_double(const mino_val *v, double *out);   /* pure extraction */
 int          as_long(const mino_val *v, long long *out);  /* pure extraction */
 double       tower_to_double(const mino_val *v);           /* full numeric tower */
 size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
 int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
+int          args_nth_forced(mino_state *S, mino_val *args, size_t i,
+                             mino_val **out); /* forces lazy tails */
 int          seqable_p(const mino_val *v);              /* pure, shared */
 mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 

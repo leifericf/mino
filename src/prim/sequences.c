@@ -2659,7 +2659,9 @@ static mino_val *prim_sorted_map(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n % 2 != 0) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "sorted-map requires an even number of arguments");
+        mino_val *k;
+        if (!args_nth_forced(S, args, n - 1, &k)) return NULL;
+        return prim_throw_dangling_key(S, k);
     }
     pairs = n / 2;
     if (pairs == 0) return mino_sorted_map(S, NULL, NULL, 0);
@@ -2697,9 +2699,14 @@ static mino_val *prim_sorted_map_by(mino_state *S, mino_val *args, mino_env *env
     mino_val *comparator, **ks, **vs, *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 1 || (n - 1) % 2 != 0) {
+    if (n < 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "sorted-map-by requires a comparator and an even number of keys and values");
+            "sorted-map-by requires a comparator");
+    }
+    if ((n - 1) % 2 != 0) {
+        mino_val *k;
+        if (!args_nth_forced(S, args, n - 1, &k)) return NULL;
+        return prim_throw_dangling_key(S, k);
     }
     comparator = args->as.cons.car;
     if (comparator == NULL

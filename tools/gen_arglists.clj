@@ -22,7 +22,11 @@
 
 ;; Divergent-arity prims, frozen from the 2026-08-27 arity sweep;
 ;; regenerate via the sweep before extending. Their arities or error
-;; classes are fixed by later commits in the campaign.
+;; classes are fixed by later commits in the campaign. The seven
+;; dangling-count prims (agent assoc atom hash-map restart-agent
+;; sorted-map sorted-map-by) left this set after the slice-2 fix
+;; flipped their parity rejections from MAR001 to MTY001; verified
+;; against the oracle shapes before moving.
 (def divergent-arities
   #{
   "clojure.core/<"
@@ -30,12 +34,9 @@
   "clojure.core/="
   "clojure.core/>"
   "clojure.core/>="
-  "clojure.core/agent"
   "clojure.core/aget"
   "clojure.core/all-ns"
   "clojure.core/aset"
-  "clojure.core/assoc"
-  "clojure.core/atom"
   "clojure.core/bit-and"
   "clojure.core/bit-or"
   "clojure.core/bit-xor"
@@ -44,7 +45,6 @@
   "clojure.core/disj!"
   "clojure.core/distinct?"
   "clojure.core/get-thread-bindings"
-  "clojure.core/hash-map"
   "clojure.core/identical?"
   "clojure.core/loaded-libs"
   "clojure.core/object-array"
@@ -56,11 +56,8 @@
   "clojure.core/release-pending-sends"
   "clojure.core/require"
   "clojure.core/resolve"
-  "clojure.core/restart-agent"
   "clojure.core/send-via"
   "clojure.core/slurp"
-  "clojure.core/sorted-map"
-  "clojure.core/sorted-map-by"
   "clojure.core/spit"
   "clojure.core/symbol"
   "clojure.core/to-array"
@@ -86,10 +83,13 @@
   "ns"
   "partition"    })
 
-;; The authoritative emit list for commit 1: 253 arity-conformant
-;; prim names ("ns/name"), frozen from the 2026-08-27 arity sweep;
-;; regenerate via the sweep before extending. The oracle lookup
-;; supplies each name's arglists text.
+;; The authoritative emit list: the 253 arity-conformant prim names
+;; ("ns/name") frozen from the 2026-08-27 arity sweep, plus the seven
+;; dangling-count prims (agent assoc atom hash-map restart-agent
+;; sorted-map sorted-map-by) admitted after the slice-2 error-class fix
+;; flipped their parity rejections to MTY001; their oracle arglists
+;; were verified honest before the move. The oracle lookup supplies
+;; each name's arglists text.
 (def emit-list
   #{
   "clojure.core/*"
@@ -101,6 +101,7 @@
   "clojure.core//"
   "clojure.core/NaN?"
   "clojure.core/add-watch"
+  "clojure.core/agent"
   "clojure.core/agent-error"
   "clojure.core/alength"
   "clojure.core/alias"
@@ -108,7 +109,9 @@
   "clojure.core/alter-meta!"
   "clojure.core/alter-var-root"
   "clojure.core/apply"
+  "clojure.core/assoc"
   "clojure.core/assoc!"
+  "clojure.core/atom"
   "clojure.core/await"
   "clojure.core/await-for"
   "clojure.core/bigdec"
@@ -190,6 +193,7 @@
   "clojure.core/get-validator"
   "clojure.core/group-by"
   "clojure.core/hash"
+  "clojure.core/hash-map"
   "clojure.core/hash-set"
   "clojure.core/in-ns"
   "clojure.core/inc"
@@ -275,6 +279,7 @@
   "clojure.core/requiring-resolve"
   "clojure.core/reset!"
   "clojure.core/reset-vals!"
+  "clojure.core/restart-agent"
   "clojure.core/rest"
   "clojure.core/reverse"
   "clojure.core/rseq"
@@ -294,6 +299,8 @@
   "clojure.core/some"
   "clojure.core/some?"
   "clojure.core/sort"
+  "clojure.core/sorted-map"
+  "clojure.core/sorted-map-by"
   "clojure.core/sorted-set"
   "clojure.core/sorted-set-by"
   "clojure.core/str"

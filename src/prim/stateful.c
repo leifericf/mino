@@ -148,8 +148,7 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
         mino_val *v;
         k = rest->as.cons.car;
         if (!mino_is_cons(rest->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "atom: option key requires a value");
+            return prim_throw_dangling_key(S, k);
         }
         v    = rest->as.cons.cdr->as.cons.car;
         rest = rest->as.cons.cdr->as.cons.cdr;

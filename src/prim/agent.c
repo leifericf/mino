@@ -1124,8 +1124,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
         mino_val *key = opts->as.cons.car;
         mino_val *val;
         if (!mino_is_cons(opts->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "agent: option key without value");
+            return prim_throw_dangling_key(S, key);
         }
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
@@ -1419,8 +1418,7 @@ mino_val *prim_restart_agent(mino_state *S, mino_val *args,
         mino_val *key = opts->as.cons.car;
         mino_val *val;
         if (!mino_is_cons(opts->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "restart-agent: option key without value");
+            return prim_throw_dangling_key(S, key);
         }
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;

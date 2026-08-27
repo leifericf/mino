@@ -660,6 +660,25 @@ int arg_count(mino_state *S, mino_val *args, size_t *out)
     return 1;
 }
 
+/* Element i (0-based) of an argument chain with lazy tails forced, so
+ * a dangling-tail diagnostic can name the key; this walk and
+ * list_length see the same chain. Returns 0 only when forcing fails. */
+int args_nth_forced(mino_state *S, mino_val *args, size_t i,
+                    mino_val **out)
+{
+    mino_val *p = args;
+    size_t k;
+    for (k = 0; k < i; k++) {
+        p = p->as.cons.cdr;
+        while (p != NULL && mino_type_of(p) == MINO_LAZY) {
+            p = lazy_force(S, p);
+            if (p == NULL) return 0;
+        }
+    }
+    *out = p->as.cons.car;
+    return 1;
+}
+
 static mino_val *prim_count_step(mino_state *S, mino_val *coll,
                                     mino_env *env)
 {
@@ -815,7 +834,9 @@ mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n % 2 != 0) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "hash-map requires an even number of arguments");
+        mino_val *k;
+        if (!args_nth_forced(S, args, n - 1, &k)) return NULL;
+        return prim_throw_dangling_key(S, k);
     }
     if (n == 0) {
         return mino_map(S, NULL, NULL, 0);
@@ -1424,8 +1445,14 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
     mino_val *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 3 || (n - 1) % 2 != 0) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "assoc requires a collection and an even number of k/v pairs");
+    if (n < 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "assoc requires a collection and a key");
+    }
+    if ((n - 1) % 2 != 0) {
+        mino_val *k;
+        if (!args_nth_forced(S, args, n - 1, &k)) return NULL;
+        return prim_throw_dangling_key(S, k);
     }
     coll = args->as.cons.car;
     extra_pairs = (n - 1) / 2;
