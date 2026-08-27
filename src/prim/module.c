@@ -423,6 +423,16 @@ static int apply_refer_options(mino_state *S, mino_val *mod_sym,
                 {
                     mino_val *var = var_find(S, modbuf, rbuf);
                     if (var != NULL) {
+                        /* JVM refer refuses private vars by name. */
+                        if (var->as.var.is_private) {
+                            char msg[600];
+                            snprintf(msg, sizeof(msg),
+                                "require: var %s is not public", rbuf);
+                            set_eval_diag(S,
+                                mino_current_ctx(S)->eval_current_form,
+                                "name", "MNS001", msg);
+                            return -1;
+                        }
                         bind_val = var;
                     } else if (src != NULL) {
                         env_binding_t *b = env_find_here(src, rbuf);
@@ -511,6 +521,9 @@ static int apply_refer_options(mino_state *S, mino_val *mod_sym,
                  * consumer namespace (mirrors prim_refer in ns.c). */
                 var = var_find(S, modbuf, bname);
                 if (var != NULL) {
+                    /* :refer :all refers publics only, like the
+                     * by-name path and JVM refer. */
+                    if (var->as.var.is_private) continue;
                     env_bind(S, target, nbuf, var);
                 } else {
                     env_bind(S, target, nbuf, src->bindings[ri].val);

@@ -342,7 +342,9 @@
   (is (eval (read-string "(do (def x 1) (nil? (get (ns-refers *ns*) 'x)))")))
   (is (eval (read-string "(do (require '[clojure.string :refer [includes?]]) (some? (get (ns-refers *ns*) 'includes?)))")))
   (testing "private vars are not referred"
-    (is (eval (read-string "(every? (fn [[_ v]] (not (:private (meta v)))) (ns-refers *ns*))")))))
+    (is (eval (read-string "(every? (fn [[_ v]] (not (:private (meta v)))) (ns-refers *ns*))")))
+    ;; Referring a private var by name errors, as on the JVM.
+    (is (thrown? (eval (read-string "(require '[clojure.test :refer [run-tests-impl]])"))))))
 
 ;; ---- ns-map-test ----
 
