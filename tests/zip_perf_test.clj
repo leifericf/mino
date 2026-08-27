@@ -165,12 +165,23 @@
     (is (< ms 500) (str "zip-read 1 MiB member took " ms "ms"))))
 
 (deftest zperf-zip-entries-within-budget
-  (let [[ms entries] (zperf-ms #(zip-entries zperf-ten-k-archive))]
+  ;; Best-of-three, not single-shot: the budget bounds the walk's
+  ;; intrinsic cost, but a single measurement on a loaded host (a
+  ;; concurrent build or a sibling test campaign) lands a major GC or
+  ;; a descheduled window inside the timed region and reported
+  ;; 655-1067ms against a 73ms land-time. The minimum of three
+  ;; attempts measures the prim whenever any window is quiet, so the
+  ;; absolute budget keeps its meaning without inflation.
+  (let [run-once (fn [] (first (zperf-ms #(zip-entries zperf-ten-k-archive))))
+        attempts (mapv (fn [_] (run-once)) (range 3))
+        ms (apply min attempts)
+        entries (zip-entries zperf-ten-k-archive)]
     (is (= zperf-ten-k-entry-count (count entries))
         "every entry listed")
     (is (= "f00000.txt" (:name (first entries))))
     (is (= "f09999.txt" (:name (last entries))))
-    (is (< ms 500) (str "zip-entries 10k-entry directory took " ms "ms"))))
+    (is (< ms 500) (str "zip-entries 10k-entry directory took "
+                        ms "ms (best of " attempts ")"))))
 
 ;;; ---- zip-write budgets and the zip64 auto-switch (p4t3) ----
 
