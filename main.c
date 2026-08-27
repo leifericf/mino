@@ -569,7 +569,10 @@ static void repl_set_special(mino_state *S, mino_env *core_env,
         var_set_root(S, var, val);
     }
     if (core_env != NULL) {
-        mino_env_set(S, core_env, name, val);
+        /* Bind the var cell (uniform ns-env representation); reads
+         * deref once. Falls back to the raw value only when the
+         * intern failed. */
+        mino_env_set(S, core_env, name, var != NULL ? var : val);
     }
 }
 

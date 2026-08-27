@@ -135,4 +135,75 @@
   (defn ^{:k (+ 1 1)} def-meta-eval-f7 [] 1)
   (is (= 2 (:k (meta #'def-meta-eval-f7)))))
 
+;; --- var-based ns env: def/intern/defmacro bind the var --------------------
+
+(deftest def-return-readback-is-var
+  ;; (def b (def a 33)): the inner def form yields #'a, and reading b
+  ;; derefs b's OWN var exactly once, so b reads back as #'a (JVM
+  ;; single-level deref semantics), never as 33 or a double-deref.
+  (def dr-a 33)
+  (def dr-b (def dr-a 33))
+  (is (var? dr-b))
+  (is (identical? dr-b #'dr-a))
+  (is (= "#'user/dr-a" (str dr-b))))
+
+(deftest def-var-quote-value-readback-is-var
+  ;; Same one-deref rule for a def whose value form is an explicit
+  ;; var reference: the binding holds the var, the read exposes it.
+  (def dr-va 5)
+  (def dr-vb (var dr-va))
+  (is (var? dr-vb))
+  (is (identical? dr-vb #'dr-va)))
+
+(deftest def-read-derefs-to-value
+  ;; The critical invariant: reading a def'd name yields the VALUE.
+  (def dr-val 7)
+  (is (= 7 dr-val))
+  (is (= 7 ((fn [] dr-val)))))
+
+(deftest def-redef-reads-new-value
+  ;; Redefinition must invalidate cached reads; the fn body is
+  ;; bytecode-compiled on the bc/jit lanes, so this pins SETGLOBAL
+  ;; redef plus inline-cache invalidation end to end.
+  (def dr-r 1)
+  (defn dr-read [] dr-r)
+  (is (= 1 (dr-read)))
+  (def dr-r 2)
+  (is (= 2 dr-r))
+  (is (= 2 (dr-read))))
+
+(deftest intern-binds-var-into-ns-env
+  ;; intern binds the var itself; plain reads deref to the root and
+  ;; resolve reports the same var object intern returned.
+  (intern *ns* 'dr-iv 9)
+  (is (= 9 dr-iv))
+  (is (var? (resolve 'dr-iv)))
+  (is (identical? (intern *ns* 'dr-iv2 10) (var dr-iv2)))
+  (alter-var-root #'dr-iv (constantly 11))
+  (is (= 11 dr-iv)))
+
+(deftest defmacro-name-resolves-and-reads
+  ;; defmacro binds its var into the ns env; reads deref to the macro,
+  ;; resolve yields the var, and a later def through the same name
+  ;; re-roots it.
+  (defmacro dr-mac [] :m)
+  (is (var? (resolve 'dr-mac)))
+  (is (= :m (dr-mac)))
+  (def dr-mac :redef)
+  (is (= :redef dr-mac)))
+
+(deftest syntax-quote-still-qualifies-defd-names
+  ;; A var binding must qualify to the var's own ns/name inside
+  ;; syntax-quote; behavior is unchanged from the raw-binding era.
+  (def dr-sq 1)
+  (is (= '(user/dr-sq clojure.core/inc) `(dr-sq inc))))
+
+(deftest print-length-alter-var-root-still-applies
+  ;; Keep-green guard for the printer's dynvar resolution: an
+  ;; alter-var-root on *print-length* must still truncate prints when
+  ;; the ns env cell is a var rather than a raw value.
+  (alter-var-root #'*print-length* (constantly 2))
+  (is (= "[1 2 ...]" (pr-str [1 2 3 4])))
+  (alter-var-root #'*print-length* (constantly nil)))
+
 (run-tests-and-exit)

@@ -185,6 +185,12 @@ int eval_try_host_syntax(mino_state *S, mino_val *form,
                 mino_env *amb = ns_env_lookup(S, S->ns_vars.fn_ambient_ns);
                 if (amb != NULL) type_val = mino_env_get(amb, stem_buf);
             }
+            /* Ns env cells hold vars now; unwrap one level so a
+             * def'd record type still matches MINO_TYPE below. */
+            if (type_val != NULL && mino_type_of(type_val) == MINO_VAR) {
+                type_val = type_val->as.var.bound
+                    ? type_val->as.var.root : NULL;
+            }
             if (type_val != NULL && mino_type_of(type_val) == MINO_TYPE) {
                 char        ctor_buf[256 + 2];
                 mino_val *ctor = NULL;

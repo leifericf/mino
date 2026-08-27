@@ -128,11 +128,28 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
     }
 
     /* Primitives live in the ns env but aren't interned as vars, so a
-     * var_find miss falls back to the ns env's own bindings. */
+     * var_find miss falls back to the ns env's own bindings. A cell
+     * that holds a var (a referred or def'd mapping whose var is
+     * registered under another ns) reads through the same deref as
+     * the fast path: dyn-stack consult, then the root. An unbound
+     * var falls through to the diagnostics below. */
     target_env = ns_env_lookup(S, resolved_ns);
     if (target_env != NULL) {
         env_binding_t *b = env_find_here(target_env, sym_name);
-        if (b != NULL) return b->val;
+        if (b != NULL) {
+            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
+                if (b->val->as.var.bound) {
+                    if (mino_current_ctx(S)->dyn_stack != NULL) {
+                        mino_val *bv = dyn_lookup_var_or_name(
+                            S, b->val, b->val->as.var.sym);
+                        if (bv != NULL) return bv;
+                    }
+                    return b->val->as.var.root;
+                }
+            } else {
+                return b->val;
+            }
+        }
     }
 
     is_alias = (resolved_ns != ns_buf);

@@ -3475,7 +3475,16 @@ static mino_val *probe_head_value(compiler_t *c, mino_val *head)
         mino_env *target_env = ns_env_lookup(S, resolved_ns);
         if (target_env != NULL) {
             env_binding_t *b = env_find_here(target_env, sym_name);
-            if (b != NULL) return b->val;
+            if (b != NULL) {
+                mino_val *bv = b->val;
+                /* A cell may hold a var (refer'd or def'd mapping);
+                 * unwrap so macro/fn/type probes match the root. */
+                if (bv != NULL && mino_type_of(bv) == MINO_VAR
+                    && bv->as.var.bound) {
+                    bv = bv->as.var.root;
+                }
+                if (bv != NULL) return bv;
+            }
         }
         return NULL;
     }

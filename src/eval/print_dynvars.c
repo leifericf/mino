@@ -31,6 +31,16 @@ static mino_val *resolve_print_dynvar(mino_state *S, mino_env *env,
     }
     if (v == NULL && env != NULL) {
         v = mino_env_get(env, name);
+        /* Ns env cells hold vars; unwrap one level (identity-keyed
+         * thread binding wins, then the root) so the integer/boolean
+         * adapters see the configured value, not the cell. */
+        if (v != NULL && mino_type_of(v) == MINO_VAR) {
+            if (mino_current_ctx(S)->dyn_stack != NULL) {
+                mino_val *bv = dyn_lookup_var(S, v);
+                if (bv != NULL) return bv;
+            }
+            v = v->as.var.bound ? v->as.var.root : NULL;
+        }
     }
     if (v == NULL) {
         var = var_find(S, "clojure.core", name);

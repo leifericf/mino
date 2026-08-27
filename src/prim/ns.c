@@ -1008,10 +1008,10 @@ static mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
     if (val_arg != NULL) {
         var_set_root(S, var, val_arg);
     }
-    /* Make the intern visible to unqualified resolution by also
-     * binding into the target ns env. */
-    env_bind(S, target, s_buf,
-             val_arg != NULL ? val_arg : var->as.var.root);
+    /* Make the intern visible to unqualified resolution by binding
+     * the var itself into the target ns env (same representation as
+     * def/refer/declare); reads deref to the root. */
+    env_bind(S, target, s_buf, var);
     return var;
 }
 

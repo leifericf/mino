@@ -704,7 +704,10 @@ mino_val *eval_defmacro(mino_state *S, mino_val *form,
                     }
                 }
             }
-            env_bind(S, current_ns_env(S), buf, mac);
+            /* Bind the var (root holds the macro) like def does, so
+             * every ns mapping is a var cell; reads deref once. */
+            env_bind(S, current_ns_env(S), buf,
+                     var != NULL ? var : mac);
         }
         gc_unpin(1);
         meta_set(S, buf, doc, doc_len, form);
@@ -885,6 +888,10 @@ mino_val *eval_def(mino_state *S, mino_val *form,
                 if (is_dynamic) var->as.var.dynamic = 1;
                 if (is_priv)    var->as.var.is_private = 1;
                 var_attach_user_meta(S, var, eval_m, NULL, 0);
+                /* Bind the unbound var so the mapping exists like any
+                 * other def; reads surface "Var is unbound" instead of
+                 * a resolve miss (same discipline as declare). */
+                env_bind(S, current_ns_env(S), buf, var);
             }
             meta_set(S, buf, NULL, 0, form);
             return var != NULL ? var : mino_nil(S);
@@ -923,7 +930,12 @@ mino_val *eval_def(mino_state *S, mino_val *form,
                 if (is_priv)    var->as.var.is_private = 1;
                 var_attach_user_meta(S, var, eval_m, doc, doc_len);
             }
-            env_bind(S, current_ns_env(S), buf, value);
+            /* Bind the VAR (root already set above), like refer and
+             * declare: eval_symbol's ns-env deref then applies exactly
+             * one deref per name, so (def b (def a v)) reads back as
+             * #'a rather than a deref'd value. */
+            env_bind(S, current_ns_env(S), buf,
+                     var != NULL ? var : value);
             gc_unpin(1);
             meta_set(S, buf, doc, doc_len, form);
             /* Clojure semantics: def returns the var, not the value. */
