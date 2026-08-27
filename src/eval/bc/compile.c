@@ -516,8 +516,9 @@ static mino_bc_insn_t set_A_field(mino_bc_insn_t ins, unsigned new_a)
 
 /* True iff `op` writes a value to its A operand. The peephole only
  * folds these producers; OP_CALL (result goes to C), OP_SETGLOBAL
- * (writes to a global, not a register), OP_RETURN / OP_TAILCALL
- * (don't produce a value-in-register at all) are not folded. */
+ * (writes a global and leaves the var in A, but folding def results
+ * buys nothing), OP_RETURN / OP_TAILCALL (don't produce a
+ * value-in-register at all) are not folded. */
 static int producer_writes_to_A_dst(unsigned op)
 {
     switch (op) {
@@ -3410,10 +3411,9 @@ static int compile_def(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)val_reg, (unsigned)nk);
     }
     emit_abx(c, OP_SETGLOBAL, (unsigned)val_reg, (unsigned)k);
-    /* Deviation from both JVM Clojure and mino tree-walker (eval_def):
-     * BC path returns the bound value, not the Var (#'x). JVM Clojure
-     * and eval_def both return the Var. Callers inside BC-compiled fns
-     * must not rely on (def ...) returning a Var. */
+    /* The def form's value is the Var (#'name): SETGLOBAL writes the
+     * var back into the source register, mirroring eval_def and JVM
+     * Clojure. */
     emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)val_reg, 0);
     c->next_reg = saved_next;
     return 0;

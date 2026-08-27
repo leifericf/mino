@@ -975,12 +975,13 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
         var_set_root(S, var, v);
         /* Bind the var cell like the tree-tier eval_def does so the
          * ns env representation is uniform across tiers; reads deref
-         * once through eval_symbol. The RESULT stays the value (the
-         * def-returns-var emit change is a separate step). */
+         * once through eval_symbol. The register now carries the var
+         * so compile_def's def form evaluates to #'name on this tier
+         * too. */
         env_bind(S, current_ns_env(S), sym->as.s.data, var);
         S->ns_vars.ic_gen++;
         regs = S->bc.bc_regs + base;
-        regs[a] = v;
+        regs[a] = var;
         return 1;
     }
 

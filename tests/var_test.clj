@@ -206,4 +206,11 @@
   (is (= "[1 2 ...]" (pr-str [1 2 3 4])))
   (alter-var-root #'*print-length* (constantly nil)))
 
+
+(deftest def-returns-var-in-fn-body
+  ;; BC-compiled fn bodies: the def form's value is the Var, mirroring
+  ;; eval_def and JVM Clojure.
+  (is (true? ((fn [] (var? (def vr-bc-1 33))))))
+  (is (true? (var? ((fn [] (def vr-bc-2 44) (def vr-bc-3 vr-bc-2)))))))
+
 (run-tests-and-exit)
