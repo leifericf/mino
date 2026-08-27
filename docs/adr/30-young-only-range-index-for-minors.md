@@ -27,7 +27,14 @@ a new src/gc/ranges.c translation unit. Minor-side merge and compact
 walk young data only. A promoted header's entry rides one cycle in the
 young array; the next compact routes entries whose header flipped OLD
 into a sorted ranges_o_pending that folds at index rebuild.
-promotion_age stays 1 pending measured evidence for another value.
+promotion_age defaulted to 1 when this ADR landed; the follow-up
+measurement (2026-08-27, recorded in docs/RANGE_INDEX.md) raised the
+default to 2 on the split index: promotion volume and major count fall
+about 10x on the json/regex workload, the shard-2 glibc peak-RSS top
+cluster drops under the 3 GiB gate with no measured regression, and
+p99 pauses shrink. Age 3 was measured and rejected (peak-RSS tail
+regressed). The raise rides the split; alone it would not remove the
+O(live) term the split removes.
 
 ## Consequences
 

@@ -178,7 +178,13 @@ static void state_init(mino_state *S)
             if (v >= 64u * 1024u) S->gc.nursery_bytes = (size_t)v;
         }
     }
-    S->gc.promotion_age        = 1;
+    /* Promote on the second survived minor, not the first. Measured
+     * basis in docs/RANGE_INDEX.md: ~10x less promotion volume and
+     * majors accordingly on the json/regex perf workload, the shard-2
+     * glibc peak-RSS top cluster under the 3 GiB gate, and p99 pauses
+     * down; the extra young-survival cycle is covered by the remset
+     * walker's multi-cycle retention (see minor.c). */
+    S->gc.promotion_age        = 2;
     S->gc.major_growth_tenths  = 15;        /* 1.5x old-gen growth */
     /* Bump allocator on by default; MINO_BUMP_ALLOC=0 disables it for
      * A/B comparison or to fall back to the calloc-only path. The

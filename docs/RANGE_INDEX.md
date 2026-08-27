@@ -77,3 +77,25 @@ environment; the common cluster sits under the 3 GiB gate on both
 sides and the gate is straddled by seed variance, not by the index.
 RSS reduction work therefore belongs to the perf-file workloads, not
 to the collector.
+
+## Promotion age
+
+Measured 2026-08-27 over the same rituals (split build, ages via
+MINO_GC_PROMOTION_AGE, no rebuild between ages). Age 2 raised the
+default; age 3 measured and rejected.
+
+Shard 2 peak RSS, amd64, N=20 per age: at age 1 the distribution
+clusters at 1.3 / 2.95 / 3.36 GiB with 6 of 20 runs over the 3 GiB
+gate; at age 2, 19 of 20 runs land at 2.81 GiB and none clears the
+gate (top cluster -16.6 pct). aarch64 N=3: 2.95 GiB at age 1 vs
+2.80 / 1.82 GiB at ages 2-3. At age 3 the amd64 tail regresses (max
+3.79 GiB, 3 of 20 over the gate), which rejects it.
+
+Collector counters on the json/regex perf workload: promotion volume
+514 to 54 MB (-89.5 pct), majors 83 to 4, remset high-water 52206 to
+36842 entries, per-minor index walk up 6 pct (more young survivors;
+minor mark+sweep time still falls). Full-suite wall time, mac,
+back-to-back: 259.8 / 239.0 / 260.6 s at ages 1 / 2 / 3. Pause
+percentiles on the perf workload: p99 47.1 to 6.9 ms, p50 flat under
+1 ms. All correctness surfaces green at every age: full suite, the
+Docker shard runs, and MINO_GC_VERIFY=1 over the gc subset.

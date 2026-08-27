@@ -357,6 +357,22 @@
           (str "ranges-len must sum the generation slices: len " len
                " vs young+old+pending " (+ young old pend))))))
 
+;; The default promotion age is two: a live header stays YOUNG through
+;; its first survived minor and promotes on the second. Index 1 of
+;; :young-age-buckets (survival ages 2-3) is unreachable when the
+;; default is 1 -- every survivor promotes at age 1 -- so a positive
+;; bucket-1 read after two full collections pins the raised default.
+(deftest default-promotion-age-lets-headers-survive-two-minors
+  (let [live (set (map #(str "age-" %) (range 4096)))]
+    (gc!)
+    (gc!)
+    (is (pos? (count live)) "live set present")
+    (let [buckets (:young-age-buckets (gc-stats))]
+      (is (pos? (long (nth buckets 0)))
+          "bucket wiring live: something survived a first minor")
+      (is (pos? (long (nth buckets 1)))
+          "no header survived two minors: default promotion age is 1"))))
+
 ;; Promotion must not drop index coverage: a header promoted at a
 ;; minor sweep keeps resolvable through every buffer transition, so a
 ;; collection aged to OLD and then churned past further minors (each
