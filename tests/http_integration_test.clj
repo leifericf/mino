@@ -57,12 +57,12 @@
         (is (= "application/json" (:seen b))))
       (let [e (try (http/post (str base "/echo-json")
                               {:body "plain text" :content-type :text})
-                   (catch e e))]
+                   (catch Throwable e e))]
         (is (= "HTTP 400" (ex-message e)))
         (is (= 400 (:status (ex-data e)))))
       (let [e (try (http/post (str base "/echo-json")
                               {:body "{\"oops\": " :content-type :json})
-                   (catch e e))]
+                   (catch Throwable e e))]
         (is (= 400 (:status (ex-data e))))))))
 
 (deftest gist-pagination-iterates-two-pages-via-continuation-param
@@ -90,7 +90,7 @@
 (deftest not-found-throws-with-the-response-as-ex-data
   (hi-with-server
     (fn [base]
-      (let [e (try (http/get (str base "/missing")) (catch e e))
+      (let [e (try (http/get (str base "/missing")) (catch Throwable e e))
             d (ex-data e)]
         (is (= "HTTP 404" (ex-message e)))
         (is (= 404 (:status d)))
@@ -162,7 +162,7 @@
     (fn [base]
       (let [t0 (time-ms)
             e  (try (http/get (str base "/hold") {:timeout 400})
-                    (catch e e))
+                    (catch Throwable e e))
             dt (- (time-ms) t0)]
         (is (= :timeout (-> (ex-data e) :error :kind)))
         (is (< dt 2400) (str "read timeout fired at " dt " ms"))))))

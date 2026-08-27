@@ -163,7 +163,7 @@
                            "localhost"
                            {:insecure? true :read-timeout 500
                             :write-timeout 500})
-                          (catch e e))]
+                          (catch Throwable e e))]
             (is (= :tls (:mino/kind r))
                 (str "iteration " i " len " len " got "
                      (pr-str r)))))))))
@@ -177,7 +177,7 @@
                                              (:port srv) t-opts)
                                 "localhost"
                                 (dissoc t-opts :insecure?))
-                   (catch e e))]
+                   (catch Throwable e e))]
         (is (= :tls (:mino/kind r)))))))
 
 (deftest tls-eof-during-handshake-classifies-as-tls
@@ -190,7 +190,7 @@
                                 "localhost"
                                 {:insecure? true :connect-timeout 3000
                                  :read-timeout 3000 :write-timeout 3000})
-                   (catch e e))]
+                   (catch Throwable e e))]
         (is (= :tls (:mino/kind r)))
         (is (str/includes? (:mino/message r) "closed by peer"))))))
 
@@ -201,7 +201,7 @@
   ;; kind and the addressed host are the invariants either way.
   (let [port (tls-free-dead-port)
         r (try (tls-connect "127.0.0.1" port t-opts)
-               (catch e e))]
+               (catch Throwable e e))]
     (is (= :net/connect (:mino/kind r)))
     (is (str/includes? (:mino/message r) "127.0.0.1"))))
 

@@ -247,6 +247,7 @@ const char *mino_bc_op_name(unsigned op)
     case OP_PUSHCATCH: return "OP_PUSHCATCH";
     case OP_POPCATCH: return "OP_POPCATCH";
     case OP_THROW: return "OP_THROW";
+    case OP_CATCH_MATCH: return "OP_CATCH_MATCH";
     case OP_PUSHDYN: return "OP_PUSHDYN";
     case OP_POPDYN: return "OP_POPDYN";
     case OP_MAKE_LAZY: return "OP_MAKE_LAZY";
@@ -1467,6 +1468,18 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                 pc = (size_t)((ptrdiff_t)pc + off);
                 if (off < 0) { MINO_BC_BACKJUMP_POLL(); }
             }
+            break;
+        }
+
+        case OP_CATCH_MATCH: {
+            /* Classed catch dispatch (ADR 32): the try dispatcher a
+             * PUSHCATCH landing pad resumed at tests each clause's
+             * class against the normalized diagnostic in regs[B]. */
+            unsigned a  = A_OF(ins);
+            unsigned b  = B_OF(ins);
+            unsigned ci = C_OF(ins);
+            regs[a] = mino_catch_class_matches(S, (int)ci, regs[b])
+                ? mino_true(S) : mino_false(S);
             break;
         }
 

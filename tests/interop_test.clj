@@ -66,16 +66,16 @@
 
 (deftest host-error-messages
   (is (= "unknown type: :Nope"
-         (try (host/new :Nope) (catch e e))))
+         (try (host/new :Nope) (catch Throwable e e))))
   (let [c (host/new :Counter)]
     (is (= "member not found: :Counter/:nope"
-           (try (host/call c :nope) (catch e e))))
+           (try (host/call c :nope) (catch Throwable e e))))
     (is (= "member not found: :Counter/:nope"
-           (try (host/get c :nope) (catch e e)))))
+           (try (host/get c :nope) (catch Throwable e e)))))
   (is (= "member not found: :Math/:nope"
-         (try (host/static-call :Math :nope) (catch e e))))
+         (try (host/static-call :Math :nope) (catch Throwable e e))))
   (is (= "target is not a host handle"
-         (try (host/call "string" :method) (catch e e)))))
+         (try (host/call "string" :method) (catch Throwable e e)))))
 
 ;; --- syntax: .method ---
 

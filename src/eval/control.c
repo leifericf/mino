@@ -5,17 +5,97 @@
 #include "eval/special_internal.h"
 #include "eval/bc/internal.h"  /* mino_bc_fn_t + mino_bc_source_lookup */
 
-/* try_clauses_t -- the partitioned shape of a (try body... [catch e ...]
+/* catch-class table (ADR 32): maps a JVM exception class name to the
+ * diagnostic :mino/kind strings its clause accepts. kinds[0] == NULL
+ * marks a catch-all. Shared C data: the bytecode tier's OP_CATCH_MATCH
+ * and compile-time class validation read the same table. The type and
+ * accessors are declared in eval/special_internal.h and
+ * eval/bc/internal.h. */
+const mino_catch_class_t mino_catch_classes[] = {
+    {":default",                    {NULL}},
+    {"Throwable",                   {NULL}},
+    {"Exception",                   {NULL}},
+    {"Object",                      {NULL}},
+    {"ExceptionInfo",               {"user", NULL}},
+    {"Error",                       {"internal", NULL}},
+    {"ClassCastException",          {"eval/type", NULL}},
+    {"ArithmeticException",         {"eval/type", NULL}},
+    {"NullPointerException",        {"eval/type", NULL}},
+    {"NumberFormatException",       {"eval/type", NULL}},
+    {"IllegalArgumentException",   {"eval/arity", "eval/contract", NULL}},
+    {"UnsupportedOperationException", {"eval/contract", NULL}},
+    {"IndexOutOfBoundsException",   {"eval/bounds", NULL}},
+    {"StringIndexOutOfBoundsException", {"eval/bounds", NULL}},
+    {"IllegalStateException",       {"eval/state", NULL}},
+};
+
+int mino_catch_class_index(const char *name)
+{
+    size_t n = sizeof(mino_catch_classes) / sizeof(mino_catch_classes[0]);
+    /* Qualified names (clojure.lang.ExceptionInfo) match on the tail
+     * after the last dot, which also covers the simple name. */
+    const char *tail = strrchr(name, '.');
+    if (tail != NULL) {
+        tail++;
+    } else {
+        tail = name;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (strcmp(mino_catch_classes[i].name, tail) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag)
+{
+    const mino_catch_class_t *cc;
+    mino_val *kind;
+    if (class_idx < 0 || class_idx >= (int)(sizeof(mino_catch_classes)
+                                            / sizeof(mino_catch_classes[0]))) {
+        return 0;
+    }
+    cc = &mino_catch_classes[class_idx];
+    if (cc->kinds[0] == NULL) {
+        return 1;
+    }
+    kind = (diag != NULL && mino_type_of(diag) == MINO_MAP)
+        ? map_get_val(diag, mino_keyword(S, "mino/kind"))
+        : NULL;
+    for (int i = 0; i < 3 && cc->kinds[i] != NULL; i++) {
+        if (kw_eq(kind, cc->kinds[i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int unknown_catch_class(mino_state *S, mino_val *form,
+                               const char *name)
+{
+    char ebuf[384];
+    snprintf(ebuf, sizeof(ebuf), "unknown catch class: %s", name);
+    set_eval_diag(S, form, "syntax", "MSY004", ebuf);
+    return -1;
+}
+
+#define MAX_CATCH_CLAUSES 8
+
+/* try_clauses_t -- the partitioned shape of a (try body... [catch ...]
  * [finally ...]) form. body_head is a freshly-built cons list of the
  * body forms (so eval_implicit_do can walk it); catch_body and
- * finally_body are tails of the original args list (no copy). */
+ * finally_body are tails of the original args list (no copy).
+ * catch_class[i] is -1 for a bare catch-all clause, else an index into
+ * mino_catch_classes. */
 typedef struct {
     mino_val *body_head;
-    mino_val *catch_body;
     mino_val *finally_body;
-    int         has_catch;
     int         has_finally;
-    char        catch_var[256];
+    int         n_catch;
+    mino_val *catch_body[MAX_CATCH_CLAUSES];
+    char        catch_var[MAX_CATCH_CLAUSES][256];
+    int         catch_class[MAX_CATCH_CLAUSES];
 } try_clauses_t;
 
 /* partition_try_clauses -- walk args once, classifying each top-level
@@ -29,46 +109,98 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
     mino_val *rest      = args;
 
     out->body_head    = NULL;
-    out->catch_body   = NULL;
     out->finally_body = NULL;
-    out->has_catch    = 0;
     out->has_finally  = 0;
-    out->catch_var[0] = '\0';
+    out->n_catch      = 0;
 
     while (mino_is_cons(rest)) {
         mino_val *clause = rest->as.cons.car;
         if (mino_is_cons(clause)
             && sym_eq(clause->as.cons.car, "catch")) {
-            /* (catch e handler...)
-             * DEVIATION: JVM Clojure requires (catch ExceptionType e handler...)
-             * and filters by type. mino omits the type argument and catches ALL
-             * exceptions unconditionally. This is intentional: mino has a single
-             * exception kind (a diagnostic map) rather than a class hierarchy, so
-             * type-based dispatch has no meaning here. The type argument is
-             * silently absent from the syntax. */
+            /* (catch e handler...) is the bare catch-all;
+             * (catch Class e handler...) is classed and dispatches on
+             * the diagnostic's :mino/kind (ADR 32). Two leading
+             * symbols is classed even when the first would also work
+             * as a binding name, mirroring the JVM grammar. */
+            mino_val *tail = clause->as.cons.cdr;
             mino_val *cv;
-            size_t      vl;
-            if (!mino_is_cons(clause->as.cons.cdr)) {
+            mino_val *body;
+            int        cls = -1;
+            char       clsbuf[300];
+            if (!mino_is_cons(tail)) {
                 set_eval_diag(S, form, "syntax", "MSY001",
                     "catch requires a binding symbol");
                 return -1;
             }
-            cv = clause->as.cons.cdr->as.cons.car;
-            if (cv == NULL || mino_type_of(cv) != MINO_SYMBOL) {
+            cv = tail->as.cons.car;
+            if (mino_type_of(cv) == MINO_KEYWORD) {
+                size_t kl = cv->as.s.len;
+                if (kl + 2 > sizeof(clsbuf)) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                        "catch class name too long");
+                    return -1;
+                }
+                clsbuf[0] = ':';
+                memcpy(clsbuf + 1, cv->as.s.data, kl);
+                clsbuf[kl + 1] = '\0';
+                cls = mino_catch_class_index(clsbuf);
+                if (cls < 0) {
+                    return unknown_catch_class(S, form, clsbuf);
+                }
+                if (!mino_is_cons(tail->as.cons.cdr)
+                    || (tail->as.cons.cdr->as.cons.car == NULL
+                        || mino_type_of(tail->as.cons.cdr->as.cons.car)
+                           != MINO_SYMBOL)) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                        "catch binding must be a symbol");
+                    return -1;
+                }
+                cv   = tail->as.cons.cdr->as.cons.car;
+                body = tail->as.cons.cdr->as.cons.cdr;
+            } else if (cv != NULL && mino_type_of(cv) == MINO_SYMBOL) {
+                mino_val *second = mino_is_cons(tail->as.cons.cdr)
+                    ? tail->as.cons.cdr->as.cons.car : NULL;
+                if (second != NULL && mino_type_of(second) == MINO_SYMBOL) {
+                    size_t cl = cv->as.s.len;
+                    if (cl >= sizeof(clsbuf)) {
+                        set_eval_diag(S, form, "syntax", "MSY001",
+                            "catch class name too long");
+                        return -1;
+                    }
+                    memcpy(clsbuf, cv->as.s.data, cl);
+                    clsbuf[cl] = '\0';
+                    cls = mino_catch_class_index(clsbuf);
+                    if (cls < 0) {
+                        return unknown_catch_class(S, form, clsbuf);
+                    }
+                    cv   = second;
+                    body = tail->as.cons.cdr->as.cons.cdr;
+                } else {
+                    body = tail->as.cons.cdr;
+                }
+            } else {
                 set_eval_diag(S, form, "syntax", "MSY001",
                     "catch binding must be a symbol");
                 return -1;
             }
-            vl = cv->as.s.len;
-            if (vl >= sizeof(out->catch_var)) {
+            if (out->n_catch >= MAX_CATCH_CLAUSES) {
                 set_eval_diag(S, form, "syntax", "MSY001",
-                    "catch variable name too long");
+                    "too many catch clauses");
                 return -1;
             }
-            memcpy(out->catch_var, cv->as.s.data, vl);
-            out->catch_var[vl] = '\0';
-            out->catch_body = clause->as.cons.cdr->as.cons.cdr;
-            out->has_catch  = 1;
+            {
+                size_t vl = cv->as.s.len;
+                if (vl >= sizeof(out->catch_var[0])) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                        "catch variable name too long");
+                    return -1;
+                }
+                memcpy(out->catch_var[out->n_catch], cv->as.s.data, vl);
+                out->catch_var[out->n_catch][vl] = '\0';
+            }
+            out->catch_class[out->n_catch] = cls;
+            out->catch_body[out->n_catch]  = body;
+            out->n_catch++;
             rest = rest->as.cons.cdr;
             continue;
         }
@@ -351,12 +483,30 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         got_exception = 1;
     }
 
-    /* Catch: run the handler if the body threw. */
-    if (got_exception && clauses.has_catch) {
-        mino_val *ex_val = normalize_exception(S,
+    /* Catch: run the first matching handler if the body threw. A
+     * classed clause whose class does not accept the diagnostic's
+     * :mino/kind is skipped; a bare clause accepts everything. When
+     * no clause matches, got_exception stays set so finally still
+     * runs and the throw propagates below. ex_val and matched are
+     * assigned before any setjmp in this function and never after,
+     * so they stay valid across the handler's longjmp paths. */
+    int         matched = -1;
+    mino_val *ex_val  = NULL;
+    if (got_exception && clauses.n_catch > 0) {
+        ex_val = normalize_exception(S,
             vol_ex ? (mino_val *)vol_ex : mino_nil(S));
+        for (int i = 0; i < clauses.n_catch; i++) {
+            if (clauses.catch_class[i] < 0
+                || mino_catch_class_matches(S, clauses.catch_class[i],
+                                            ex_val)) {
+                matched = i;
+                break;
+            }
+        }
+    }
+    if (got_exception && matched >= 0) {
         mino_env *local  = env_child(S, env);
-        env_bind(S, local, clauses.catch_var, ex_val);
+        env_bind(S, local, clauses.catch_var[matched], ex_val);
 
         if (clauses.has_finally) {
             /* Inner try frame catches re-throws from the catch handler
@@ -382,7 +532,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
-                r = eval_implicit_do(S, clauses.catch_body, local);
+                r = eval_implicit_do(S, clauses.catch_body[matched], local);
                 mino_current_ctx(S)->try_depth = is;
                 if (r == NULL) {
                     eval_implicit_do(S, clauses.finally_body, env);
@@ -429,7 +579,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
              * which is exactly the contract -- there is no finally on
              * this frame to run on the unwind. */
             mino_val *r =
-                eval_implicit_do(S, clauses.catch_body, local);
+                eval_implicit_do(S, clauses.catch_body[matched], local);
             if (r == NULL) {
                 return NULL;
             }

@@ -192,7 +192,7 @@
     (fn [srv]
       (let [t0 (time-ms)
             r  (try (hr-get srv "/hold" {:read-timeout 400})
-                    (catch e e))
+                    (catch Throwable e e))
             dt (- (time-ms) t0)]
         (is (= :net/timeout (:mino/kind r)))
         (is (< dt 2400) (str "read timeout fired at " dt " ms"))))))
@@ -200,7 +200,7 @@
 (deftest body-cap-throws-limit
   (hr-with-server
     (fn [srv]
-      (let [r (try (hr-get srv "/big" {:max-bytes 1000}) (catch e e))]
+      (let [r (try (hr-get srv "/big" {:max-bytes 1000}) (catch Throwable e e))]
         (is (= :codec/limit (:mino/kind r)))
         (is (str/includes? (:mino/message r) "cap"))))))
 
@@ -209,7 +209,7 @@
                               :host "host-that-cannot-resolve.invalid"
                               :port 80 :target "/"
                               :connect-timeout 2000})
-               (catch e e))]
+               (catch Throwable e e))]
     (is (= :net/dns (:mino/kind r)))
     (is (str/includes? (:mino/message r) "cannot resolve"))))
 

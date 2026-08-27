@@ -27,7 +27,7 @@
   (let [r (with-redefs [mino.http/execute-request* (mock-exec response)]
             (try
               (http/request m)
-              (catch e e)))]
+              (catch Throwable e e)))]
     [r @captured]))
 
 (defn- throw-via-mock
@@ -37,7 +37,7 @@
   (with-redefs [mino.http/execute-request* (mock-exec response)]
     (try
       (http/request m)
-      (catch e e))))
+      (catch Throwable e e))))
 
 (def ^:private canned-200
   {:status 200
@@ -397,7 +397,7 @@
                                :mino/message "fixture failure"}))]
               (try
                 (http/request {:method :get :uri "http://h/x"})
-                (catch e e)))
+                (catch Throwable e e)))
           d (ex-data e)]
       (is (= want (-> d :error :kind))
           (str kind " must translate to " want))
@@ -483,7 +483,7 @@
     (fn [base _]
       (let [e (try
                 (http/get (str base "/missing"))
-                (catch e e))
+                (catch Throwable e e))
             d (ex-data e)]
         (is (= "HTTP 404" (ex-message e)))
         (is (= 404 (:status d)))

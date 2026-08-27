@@ -179,7 +179,7 @@
   ;; any other catch: (ex-data caught) returns the original data map.
   (testing "ex-info :data survives future -> deref -> catch"
     (let [f (future (throw (ex-info "boom" {:n 42 :tag :test})))
-          result (try (deref f) (catch e e))
+          result (try (deref f) (catch Throwable e e))
           data   (ex-data result)]
       (is (map? result))
       (is (= "boom" (get result :mino/message)))

@@ -109,7 +109,7 @@
     (def a (atom 42))
     (def result (try
       (swap! a (fn [v] (throw "oops")))
-      (catch e e)))
+      (catch Throwable e e)))
     (is (= "oops" (ex-data result)))
     ;; Atom should be unchanged after failed swap
     (is (= 42 @a))))

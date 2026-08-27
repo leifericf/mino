@@ -49,7 +49,7 @@
   "Runs (xml-parse s nil) and returns the error descriptor vector,
   the tree, or the thrown value."
   [s]
-  (try (xml-parse s nil) (catch e e)))
+  (try (xml-parse s nil) (catch Throwable e e)))
 
 ;;; ---- golden corpus ----
 

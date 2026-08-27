@@ -24,7 +24,7 @@
 
 (deftest test-propagates-test-fn-throw
   ;; The :test fn's own error flows out of (test v) unwrapped.
-  (let [e (try (test #'core-misc-failing-test-var) (catch e e))]
+  (let [e (try (test #'core-misc-failing-test-var) (catch Throwable e e))]
     (is (= {:why :spec} (ex-data e)))
     (is (= "test failed" (ex-message e)))))
 
@@ -43,7 +43,7 @@
 ;; --- Throwable->map ---
 
 (deftest throwable->map-shape
-  (let [e (try (throw (ex-info "boom" {:k 1})) (catch e e))
+  (let [e (try (throw (ex-info "boom" {:k 1})) (catch Throwable e e))
         m (Throwable->map e)]
     (is (map? m))
     (is (= "boom" (:cause m)))
@@ -55,7 +55,7 @@
     (is (vector? (:trace m)))))
 
 (deftest throwable->map-without-data
-  (let [e (try (throw (ex-info "plain" nil)) (catch e e))
+  (let [e (try (throw (ex-info "plain" nil)) (catch Throwable e e))
         m (Throwable->map e)]
     (is (= "plain" (:cause m)))
     (is (nil? (:data m)))

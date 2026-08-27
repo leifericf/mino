@@ -14,7 +14,7 @@
                      (catch e (throw e)))
                 (catch e (ex-data e))))))
   (testing "catch always receives diagnostic map"
-    (is (error? (try (throw "x") (catch e e))))))
+    (is (error? (try (throw "x") (catch Throwable e e))))))
 
 (deftest finally-runs-on-error
   (testing "finally runs after catch"

@@ -107,7 +107,7 @@
   ;; Random printable garbage runs through decode; every input either
   ;; yields a string or throws a classified :eval/contract error.
   (is (pct-qc (prop/for-all [s garbage-gen]
-           (let [r (try (percent-decode s) (catch e e))]
+           (let [r (try (percent-decode s) (catch Throwable e e))]
              (or (string? r)
                  (and (map? r) (= :eval/contract (:mino/kind r))))))
        424244)))

@@ -210,6 +210,13 @@ typedef enum {
     OP_PUSH_ENV,         /*                                                  */
     OP_POP_ENV,          /*                                                  */
     OP_ENV_BIND,         /* A=src reg, Bx=name symbol const idx              */
+    /* Classed catch dispatch (ADR 32). A=dst bool, B=diagnostic reg,
+     * C=index into control.c's mino_catch_classes table. Emitted by the
+     * catch dispatcher a try's OP_PUSHCATCH lands on; true when the
+     * class accepts the diagnostic's :mino/kind (catch-all entries are
+     * always true). Not JIT-stencilled: fns containing it stay on the
+     * interpreter like every other try op. */
+    OP_CATCH_MATCH,      /* A=dst, B=diag reg, C=catch-class index          */
     OP__COUNT
 } mino_bc_op_t;
 
@@ -760,6 +767,12 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
  * vm.c's OP_PUSHCATCH / OP_THROW paths. */
 void      mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
+
+/* eval/control.c -- catch-class table accessors (ADR 32) used by
+ * compile.c's classed-catch validation and vm.c's OP_CATCH_MATCH. The
+ * table itself is mino_catch_classes in eval/special_internal.h. */
+int mino_catch_class_index(const char *name);
+int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag);
 
 /* prim/prim.c -- error helper used by vm.c's protocol dispatch. */
 mino_val *prim_throw_classified(mino_state *S, const char *kind,

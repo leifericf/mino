@@ -68,7 +68,7 @@
   the raw fmt becomes the message."
   [fmt args]
   (try (apply format fmt args)
-       (catch e fmt)))
+       (catch Throwable e fmt)))
 
 ;; Imperative shell: the level gate, the timestamp, the stderr write.
 

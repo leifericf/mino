@@ -379,7 +379,7 @@
   (let [evals (atom 0)
         d     (delay (swap! evals inc)
                      (throw (ex-info "boom" {:n @evals})))]
-    (is (= 1 (:n (ex-data (try @d (catch e e))))))
-    (is (= 1 (:n (ex-data (try @d (catch e e))))))
+    (is (= 1 (:n (ex-data (try @d (catch Throwable e e))))))
+    (is (= 1 (:n (ex-data (try @d (catch Throwable e e))))))
     (is (= 1 @evals))
     (is (true? (realized? d)))))

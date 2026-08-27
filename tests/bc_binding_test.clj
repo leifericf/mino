@@ -46,7 +46,7 @@
   (testing "binding visible inside catch when binding wraps try"
     (defn t [] (binding [*bc-tx* 7]
                  (try (throw "x")
-                      (catch e *bc-tx*))))
+                      (catch Throwable e *bc-tx*))))
     (is (= 7 (t)))
     (is (= 0 *bc-tx*)))
   (testing "binding restores even on uncaught propagating throw"
@@ -69,13 +69,13 @@
   (testing "catch handler sees root after inner binding throws"
     (defn t [] (try (binding [*bc-tx* 999]
                       (throw "boom"))
-                    (catch e *bc-tx*)))
+                    (catch Throwable e *bc-tx*)))
     (is (= 0 (t))))
   (testing "outer binding visible after inner throws across nested binding"
     (defn t [] (binding [*bc-tx* :outer]
                  (try (binding [*bc-tx* :inner]
                         (throw "boom"))
-                      (catch e *bc-tx*))))
+                      (catch Throwable e *bc-tx*))))
     (is (= :outer (t)))
     (is (= 0 *bc-tx*)))
   (testing "catch rethrow from inner binding still reports outer state"
@@ -85,5 +85,5 @@
                      (binding [*bc-tx* :B]
                        (throw "inner"))
                      (catch e (throw "rethrown"))))
-                 (catch e *bc-tx*)))
+                 (catch Throwable e *bc-tx*)))
     (is (= 0 (t)))))

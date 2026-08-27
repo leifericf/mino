@@ -191,7 +191,7 @@
   ;; classified :eval/contract error; valid URLs in the mix exercise
   ;; the map arm, truncations and garbage the error arm.
   (is (url-qc (prop/for-all [s url-ish-gen]
-               (let [r (try (parse-url s) (catch e e))]
+               (let [r (try (parse-url s) (catch Throwable e e))]
                  (if (contains? r :mino/kind)
                    (= :eval/contract (:mino/kind r))
                    (shape-ok? r))))

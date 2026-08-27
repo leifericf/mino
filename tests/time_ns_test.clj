@@ -149,7 +149,7 @@
   ;; message and data, not fail inside ex-info
   (is (thrown-with-msg? #"expected epoch-ms"
                         (t/instant "2026-08-20")))
-  (let [e (try (t/instant "2026-08-20") (catch e e))]
+  (let [e (try (t/instant "2026-08-20") (catch Throwable e e))]
     (is (map? (ex-data e)))))
 
 (deftest add-months-clamp-holds-on-offset-maps

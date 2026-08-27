@@ -184,7 +184,7 @@
               ;; Force an allocation so the countdown fires.
               (vec [])
               :no-throw)
-          (catch e e))]
+          (catch Throwable e e))]
     (is (map? result)
         "OOM catch handler receives a map, not nil")
     (is (= :internal (:mino/kind result))

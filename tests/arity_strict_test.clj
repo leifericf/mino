@@ -101,7 +101,7 @@
   ;; the :mino/kind and :mino/code keys so port-from-JVM code can
   ;; dispatch on the structured form.
   (let [e (try ((fn [x] x) 1 2)
-               (catch e e))]
+               (catch Throwable e e))]
     (is (map? e))
     (is (= :eval/arity (:mino/kind e)))
     (is (#{"MAR001" "MAR002"} (:mino/code e)))

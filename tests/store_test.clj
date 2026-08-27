@@ -1250,7 +1250,7 @@
             (store/transact conn [[:db/add 100 :email "a@x.com"]
                                   [:db/add 200 :email "a@x.com"]])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "conflicting tx throws")
     (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
         "ex-data carries ::unique-conflict tag")
@@ -1293,7 +1293,7 @@
         e (try
             (store/transact conn [:db/add 1 :child 999])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) ":ref to nonexistent eid throws")
     (is (some? (re-find #"dangling-ref" (pr-str (ex-data e))))
         "ex-data carries ::dangling-ref tag")
@@ -1780,7 +1780,7 @@
         e (try
             (store/transact conn [:db/add 1 :n -1])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "pred rejection throws")
     (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
         "ex-data carries ::attr-pred-failed tag")
@@ -1795,7 +1795,7 @@
         e (try
             (store/transact conn [:db/add 1 :s "hi"])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "second pred failing throws")
     (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
         "failure reports the pred that rejected")))
@@ -1809,7 +1809,7 @@
         e (try
             (store/transact conn [:db/add 1 :n "not a number"])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "type mismatch throws")
     (is (nil? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
         "type error observed, pred never reached")))
@@ -1822,7 +1822,7 @@
             (store/transact conn [[:db/add 1 :n 5]
                                   [:db/add 2 :n -1]])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "pred failure on second fact throws")
     (is (= #{} (store/entities (store/db conn))) "first fact NOT applied (atomic)")
     (is (= 0 (:tx (store/db conn))) "tx not advanced")))
@@ -1837,7 +1837,7 @@
         e (try
             (store/transact conn [:db/add 1 :tags ""])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (= #{"x" "y"} (store/read db-ok 1 :tags)) "valid members accepted")
     (is (some? e) "pred rejection on a :many member throws")
     (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e)))))))
@@ -1884,7 +1884,7 @@
         e (try
             (store/transact conn {1 {:db/ensure :user :name "Alice"}})
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "missing required attr throws")
     (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e))))
         "ex-data carries ::entity-spec-failed tag")
@@ -1903,7 +1903,7 @@
         e (try
             (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "failing entity pred throws")
     (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e)))))
     (is (= #{} (store/entities (store/db conn))) "no facts applied")))
@@ -1926,7 +1926,7 @@
             (store/transact conn {1 {:db/ensure :user :name "Alice"}
                                   2 {:note "unrelated"}})
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "entity spec failure throws")
     (is (= #{} (store/entities (store/db conn))) "no facts applied (atomic)")
     (is (= 0 (:tx (store/db conn))) "tx not advanced")))
@@ -1963,7 +1963,7 @@
         e (try
             (store/migrate conn {:n {:type :long}})
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "violations throw without :force")
     (is (some? (re-find #"migration-conflict" (pr-str (ex-data e))))
         "ex-data carries ::migration-conflict tag")
@@ -2004,7 +2004,7 @@
         e (try
             (store/transact conn [:db/add 1 :n "not a number"])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "tightened type enforced on new txs")))
 
 (deftest store-migrate-durable
@@ -2371,7 +2371,7 @@
         _ (store/transact conn [[:db/add 1 :name "Alice"]
                                 [:db/add 2 :name "Bob"]])
         db (store/db conn)
-        e (try (store/find-by-range db :name 1 10) (catch e e))]
+        e (try (store/find-by-range db :name 1 10) (catch Throwable e e))]
     (is (some? e) "mixed-type range throws")
     (is (= :range-type-mismatch (:reason (ex-data e)))
         "classified :range-type-mismatch, not a raw ClassCastException")))
@@ -2456,7 +2456,7 @@
         e (try
             (store/transact conn [:db/add 2 :email "a@x.com"])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "duplicate :unique :value throws")
     (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
         "ex-data carries ::unique-conflict tag")))
@@ -2469,7 +2469,7 @@
         e (try
             (store/transact conn [:db/add 999 :email "a@x.com"])
             nil
-            (catch e e))]
+            (catch Throwable e e))]
     (is (some? e) "duplicate throws rather than upserting")
     (is (= #{100} (store/entities (store/db conn)))
         "no new entity written; existing eid unchanged")))

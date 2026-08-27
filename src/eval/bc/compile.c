@@ -2848,24 +2848,26 @@ static int compile_throw(compiler_t *c, mino_val *form, int dst, int tail)
     return 0;
 }
 
-/* Partition a try form's args into (body... [catch e ...] [finally ...]).
- * Mirrors partition_try_clauses in src/eval/control.c but pulls only the
- * shape the BC compiler currently emits: zero-or-one catch clause, an
- * optional finally clause, both placed after the body forms. Returns 1
- * on success, 0 to decline (let the tree-walker handle it). */
+/* Partition a try form's args into (body... [catch ...] [finally ...]).
+ * Mirrors partition_try_clauses in src/eval/control.c including the
+ * classed-catch grammar (ADR 32): (catch e body) is bare, (catch Class
+ * e body) is classed, two leading symbols is classed even when the
+ * first would also work as a binding name. Unknown classes decline so
+ * the tree-walker's eval_try raises the MSY004 diagnostic naming the
+ * class. Returns 1 on success, 0 to decline (let the tree-walker
+ * handle it). */
+#define BC_MAX_CATCH_CLAUSES 8
+
 typedef struct bc_try_clauses {
     mino_val *body;          /* GC-rooted list of body forms (linear, NULL-terminated cons) */
-    mino_val *catch_body;    /* tail of args list after `e` -- not deep-copied */
     mino_val *finally_body;  /* tail of args list after `finally` */
-    int         has_catch;
     int         has_finally;
-    mino_val *catch_var;     /* MINO_SYMBOL: the catch binding name */
+    int         n_catch;
+    mino_val *catch_body[BC_MAX_CATCH_CLAUSES];  /* tails of args lists -- not deep-copied */
+    mino_val *catch_var[BC_MAX_CATCH_CLAUSES];   /* MINO_SYMBOL: the catch binding name */
+    int         catch_class[BC_MAX_CATCH_CLAUSES]; /* -1 bare; else mino_catch_classes index */
 } bc_try_clauses_t;
 
-/* Deviation from JVM: mino catch clauses do not check the exception type
- * class; all catch clauses catch any throwable. The first element after
- * `catch` is treated directly as the binding symbol rather than as an
- * exception type followed by a binding symbol. */
 static int parse_try_clauses(compiler_t *c, mino_val *args,
                              bc_try_clauses_t *out)
 {
@@ -2873,24 +2875,58 @@ static int parse_try_clauses(compiler_t *c, mino_val *args,
     mino_val *rest      = args;
 
     out->body         = NULL;
-    out->catch_body   = NULL;
     out->finally_body = NULL;
-    out->has_catch    = 0;
     out->has_finally  = 0;
-    out->catch_var    = NULL;
+    out->n_catch      = 0;
 
     while (mino_is_cons(rest)) {
         mino_val *clause = rest->as.cons.car;
         if (mino_is_cons(clause)
             && sym_is(clause->as.cons.car, "catch")) {
-            if (!mino_is_cons(clause->as.cons.cdr)) { c->ok = 0; return 0; }
-            mino_val *cv = clause->as.cons.cdr->as.cons.car;
-            if (cv == NULL || mino_type_of(cv) != MINO_SYMBOL) {
+            mino_val *tail = clause->as.cons.cdr;
+            mino_val *cv;
+            mino_val *body;
+            int        cls = -1;
+            if (!mino_is_cons(tail)) { c->ok = 0; return 0; }
+            cv = tail->as.cons.car;
+            if (cv != NULL && mino_type_of(cv) == MINO_KEYWORD) {
+                char kbuf[280];
+                size_t kl = cv->as.s.len;
+                if (kl + 2 > sizeof(kbuf)) { c->ok = 0; return 0; }
+                kbuf[0] = ':';
+                memcpy(kbuf + 1, cv->as.s.data, kl);
+                kbuf[kl + 1] = '\0';
+                cls = mino_catch_class_index(kbuf);
+                if (cls < 0) { c->ok = 0; return 0; }
+                if (!mino_is_cons(tail->as.cons.cdr)
+                    || tail->as.cons.cdr->as.cons.car == NULL
+                    || mino_type_of(tail->as.cons.cdr->as.cons.car)
+                       != MINO_SYMBOL) {
+                    c->ok = 0; return 0;
+                }
+                cv   = tail->as.cons.cdr->as.cons.car;
+                body = tail->as.cons.cdr->as.cons.cdr;
+            } else if (cv != NULL && mino_type_of(cv) == MINO_SYMBOL) {
+                mino_val *second = mino_is_cons(tail->as.cons.cdr)
+                    ? tail->as.cons.cdr->as.cons.car : NULL;
+                if (second != NULL && mino_type_of(second) == MINO_SYMBOL) {
+                    cls = mino_catch_class_index(cv->as.s.data);
+                    if (cls < 0) { c->ok = 0; return 0; }
+                    cv   = second;
+                    body = tail->as.cons.cdr->as.cons.cdr;
+                } else {
+                    body = tail->as.cons.cdr;
+                }
+            } else {
                 c->ok = 0; return 0;
             }
-            out->catch_var  = cv;
-            out->catch_body = clause->as.cons.cdr->as.cons.cdr;
-            out->has_catch  = 1;
+            if (out->n_catch >= BC_MAX_CATCH_CLAUSES) {
+                c->ok = 0; return 0;
+            }
+            out->catch_var[out->n_catch]   = cv;
+            out->catch_body[out->n_catch]  = body;
+            out->catch_class[out->n_catch] = cls;
+            out->n_catch++;
             rest = rest->as.cons.cdr;
             continue;
         }
@@ -2917,24 +2953,84 @@ static int parse_try_clauses(compiler_t *c, mino_val *args,
     return 1;
 }
 
-/* (try body... [(catch e handler...)] [(finally f...)])
+/* Emit the catch dispatcher plus handler bodies that follow a
+ * PUSHCATCH landing pad (ADR 32). The pad stashes the normalized
+ * diagnostic in ex_reg and resumes at the first emitted instruction.
+ * Each classed clause tests its class against the diagnostic via
+ * OP_CATCH_MATCH and jumps to its handler on acceptance; a bare
+ * clause jumps unconditionally, so first-match-wins falls out of the
+ * test order. When no clause accepts, the trailing OP_THROW re-raises
+ * so the throw unwinds to the enclosing try (or the outer PUSHCATCH
+ * that runs finally). Every handler's exit jump is recorded in exits[]
+ * for the caller to patch at the clause join point. Returns 0 on
+ * success, -1 on failure (c->ok cleared). */
+static int emit_catch_dispatch(compiler_t *c, int dst, int handler_tail,
+                               int ex_reg, bc_try_clauses_t *cl,
+                               int *exits, int *n_exits)
+{
+    int to_handler[BC_MAX_CATCH_CLAUSES];
+    int t = alloc_reg(c);
+    if (t < 0) return -1;
+    for (int i = 0; i < cl->n_catch; i++) {
+        if (cl->catch_class[i] >= 0) {
+            emit_abc(c, OP_CATCH_MATCH, (unsigned)t, (unsigned)ex_reg,
+                     (unsigned)cl->catch_class[i]);
+            int jn = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)t);
+            if (jn < 0) return -1;
+            to_handler[i] = emit_jmp_placeholder(c, OP_JMP, 0);
+            if (to_handler[i] < 0) return -1;
+            patch_jmp(c, jn);
+        } else {
+            to_handler[i] = emit_jmp_placeholder(c, OP_JMP, 0);
+            if (to_handler[i] < 0) return -1;
+        }
+    }
+    emit_abc(c, OP_THROW, (unsigned)ex_reg, 0, 0);
+    for (int i = 0; i < cl->n_catch; i++) {
+        patch_jmp(c, to_handler[i]);
+        if (c->bc->captures) {
+            emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        }
+        int handler_locals = c->n_locals;
+        if (!bind_local(c, cl->catch_var[i]->as.s.data, ex_reg)) return -1;
+        if (c->bc->captures) {
+            int k = add_const(c, cl->catch_var[i]);
+            if (k < 0) return -1;
+            emit_abx(c, OP_ENV_BIND, (unsigned)ex_reg, (unsigned)k);
+        }
+        if (compile_body(c, cl->catch_body[i], dst, handler_tail) < 0) {
+            return -1;
+        }
+        if (c->bc->captures) {
+            emit_abc(c, OP_POP_ENV, 0, 0, 0);
+        }
+        c->n_locals = handler_locals;
+        exits[(*n_exits)++] = emit_jmp_placeholder(c, OP_JMP, 0);
+        if (exits[*n_exits - 1] < 0) return -1;
+    }
+    return 0;
+}
+
+/* (try body... [(catch Class e handler...)]* [(finally f...)])
  *
  * Three shapes:
  *   try-no-handlers -- just (do body...).
- *   try-catch (no finally) -- PUSHCATCH around body; handler binds the
- *      exception and runs in the catch scope.
+ *   try-catch (no finally) -- PUSHCATCH around body; the landing pad
+ *      resumes at the classed dispatcher, whose matched handler binds
+ *      the exception and runs in the catch scope.
  *   try with finally -- wrap in an outer PUSHCATCH so the finally block
  *      runs on both normal completion and on an uncaught throw before
  *      re-raising. When a catch is also present, the inner PUSHCATCH
  *      handles the body's throw and the outer wraps everything so
- *      finally runs even on a re-throw from the handler. */
+ *      finally runs even on a re-throw from the handler or on a throw
+ *      no clause accepted. */
 static int compile_try(compiler_t *c, mino_val *form, int dst, int tail)
 {
     mino_val *args = form->as.cons.cdr;
     bc_try_clauses_t cl;
     if (!parse_try_clauses(c, args, &cl)) return -1;
 
-    if (!cl.has_catch && !cl.has_finally) {
+    if (cl.n_catch == 0 && !cl.has_finally) {
         /* Degenerate (try body) -- semantically (do body). Body
          * inherits tail. */
         return compile_body(c, cl.body, dst, tail);
@@ -2964,6 +3060,8 @@ static int compile_try(compiler_t *c, mino_val *form, int dst, int tail)
 
     int saved_next = c->next_reg;
     int saved_locals = c->n_locals;
+    int exits[BC_MAX_CATCH_CLAUSES + 1];
+    int n_exits = 0;
 
     if (!cl.has_finally) {
         /* try + catch (no finally). */
@@ -2975,31 +3073,22 @@ static int compile_try(compiler_t *c, mino_val *form, int dst, int tail)
         emit_abc(c, OP_POPCATCH, 0, 0, 0);
         int end_jmp = emit_jmp_placeholder(c, OP_JMP, 0);
         if (end_jmp < 0) goto fail;
-        /* Handler entry: ex_reg holds the normalized exception. */
+        /* Handler entry: ex_reg holds the normalized exception and the
+         * dispatcher tests clauses in order. */
         patch_jmp(c, push_pos);
-        if (c->bc->captures) {
-            emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
-        }
-        if (!bind_local(c, cl.catch_var->as.s.data, ex_reg)) goto fail;
-        if (c->bc->captures) {
-            int k = add_const(c, cl.catch_var);
-            if (k < 0) goto fail;
-            emit_abx(c, OP_ENV_BIND, (unsigned)ex_reg, (unsigned)k);
-        }
-        if (compile_body(c, cl.catch_body, dst, handler_tail) < 0) goto fail;
-        if (c->bc->captures) {
-            emit_abc(c, OP_POP_ENV, 0, 0, 0);
-        }
+        if (emit_catch_dispatch(c, dst, handler_tail, ex_reg, &cl,
+                                exits, &n_exits) < 0) goto fail;
         patch_jmp(c, end_jmp);
+        for (int i = 0; i < n_exits; i++) patch_jmp(c, exits[i]);
         c->n_locals = saved_locals;
         c->next_reg = saved_next;
         return 0;
     }
 
     /* Finally is involved. Outer try frame catches re-throws (or
-     * uncaught body throws when there is no catch) so finally runs on
+     * uncaught body throws when no clause matches) so finally runs on
      * every exit path. The thrown value lands in outer_ex_reg; the
-     * inner handler binding (when a catch is present) lives in
+     * handler bindings (when catches are present) live in
      * inner_ex_reg. */
     int outer_ex_reg = alloc_reg(c);
     if (outer_ex_reg < 0) goto fail;
@@ -3007,7 +3096,7 @@ static int compile_try(compiler_t *c, mino_val *form, int dst, int tail)
                                            (unsigned)outer_ex_reg);
     if (outer_push < 0) goto fail;
 
-    if (cl.has_catch) {
+    if (cl.n_catch > 0) {
         int inner_ex_reg = alloc_reg(c);
         if (inner_ex_reg < 0) goto fail;
         int inner_push = emit_jmp_placeholder(c, OP_PUSHCATCH,
@@ -3018,22 +3107,12 @@ static int compile_try(compiler_t *c, mino_val *form, int dst, int tail)
         int after_inner = emit_jmp_placeholder(c, OP_JMP, 0);
         if (after_inner < 0) goto fail;
         patch_jmp(c, inner_push);
-        if (c->bc->captures) {
-            emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
-        }
-        int catch_locals = c->n_locals;
-        if (!bind_local(c, cl.catch_var->as.s.data, inner_ex_reg)) goto fail;
-        if (c->bc->captures) {
-            int k = add_const(c, cl.catch_var);
-            if (k < 0) goto fail;
-            emit_abx(c, OP_ENV_BIND, (unsigned)inner_ex_reg, (unsigned)k);
-        }
-        if (compile_body(c, cl.catch_body, dst, 0) < 0) goto fail;
-        if (c->bc->captures) {
-            emit_abc(c, OP_POP_ENV, 0, 0, 0);
-        }
-        c->n_locals = catch_locals;
+        if (emit_catch_dispatch(c, dst, 0, inner_ex_reg, &cl,
+                                exits, &n_exits) < 0) goto fail;
+        /* Join point: normal body completion and every handler exit. */
         patch_jmp(c, after_inner);
+        for (int i = 0; i < n_exits; i++) patch_jmp(c, exits[i]);
+        n_exits = 0;
     } else {
         /* No catch, just finally. Body executes inside the outer try. */
         if (compile_body(c, cl.body, dst, body_tail) < 0) goto fail;

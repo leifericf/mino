@@ -403,7 +403,7 @@
   (let [bb (:body-bytes prim)]
     {:status (:status prim)
      :body (if lenient?
-             (try (coerce-body (:as plan) bb) (catch e bb))
+             (try (coerce-body (:as plan) bb) (catch Throwable e bb))
              (coerce-body (:as plan) bb))
      :headers (:headers prim)
      :request-time (:request-time-ms prim)

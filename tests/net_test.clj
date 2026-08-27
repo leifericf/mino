@@ -144,7 +144,7 @@
 (deftest net-connect-dns-failure-classifies-as-net-dns
   (let [r (try (net-connect "host-that-cannot-resolve.invalid" 80
                             {:connect-timeout 2000})
-               (catch e e))]
+               (catch Throwable e e))]
     (is (= :net/dns (:mino/kind r)))
     (is (str/includes? (:mino/message r) "cannot resolve"))))
 
@@ -192,7 +192,7 @@
   (with-server :payload
     (fn [srv]
       (let [s (net-connect "127.0.0.1" (:port srv))
-            r (try (net-read-all s {:max-bytes 4}) (catch e e))]
+            r (try (net-read-all s {:max-bytes 4}) (catch Throwable e e))]
         (is (= :net/overflow (:mino/kind r)))
         (is (str/includes? (:mino/message r) "max-bytes"))
         (net-close s)))))
@@ -222,7 +222,7 @@
             t0 (time-ms)
             r  (try (do (net-write s "x")
                         (net-read s 10))
-                    (catch e e))
+                    (catch Throwable e e))
             dt (- (time-ms) t0)]
         ;; The server stays silent after consuming the request; a
         ;; working timeout surfaces at ~400ms. The elapsed bound is
@@ -234,7 +234,7 @@
 (deftest net-connect-refused-classifies-as-net-connect
   (let [port (free-dead-port)
         r (try (net-connect "127.0.0.1" port {:connect-timeout 2000})
-               (catch e e))]
+               (catch Throwable e e))]
     (is (= :net/connect (:mino/kind r)))
     ;; Refusal says "cannot connect"; a firewall that DROPs to the
     ;; unbound port surfaces the connect deadline instead. The kind
@@ -249,7 +249,7 @@
   ;; surprise connection means the fixture cannot work there, so it
   ;; skips rather than fails.
   (let [r (try (net-connect "10.255.255.1" 81 {:connect-timeout 250})
-               (catch e e))]
+               (catch Throwable e e))]
     (if (= :handle (type r))
       (do (net-close r)
           (println "  skip: 10.255.255.1 is reachable on this network"))
@@ -427,7 +427,7 @@
 (deftest net-accept-timeout-classifies-and-fires-on-schedule
   (let [l (net-listen "127.0.0.1" 0 {})
         t0 (time-ms)
-        r  (try (net-accept l {:accept-timeout 300}) (catch e e))
+        r  (try (net-accept l {:accept-timeout 300}) (catch Throwable e e))
         dt (- (time-ms) t0)]
     ;; Nothing connects: the accept deadline fires at ~300ms. The
     ;; elapsed bound is what gives the kind assertion teeth.

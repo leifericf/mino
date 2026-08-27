@@ -314,7 +314,7 @@
   (let [err (try
               (s/assert* int? "x")
               nil
-              (catch __e __e))]
+              (catch Throwable __e __e))]
     (is (some? err))
     ;; The thrown ex-info carries explain-data under ::s/problems in its
     ;; ex-data. A caught exception is not itself keyword-accessible in
@@ -324,7 +324,7 @@
 (deftest assert*-failure-key-in-exception
   ;; The exception's ex-data must include ::s/failure :assertion-failed
   ;; per canon.
-  (let [err (try (s/assert* int? "bad") nil (catch __e __e))]
+  (let [err (try (s/assert* int? "bad") nil (catch Throwable __e __e))]
     (is (some? err))
     (is (= :assertion-failed (::s/failure (ex-data err))))))
 

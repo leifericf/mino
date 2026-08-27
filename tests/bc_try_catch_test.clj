@@ -109,6 +109,62 @@
     (is (= "try nesting too deep"
            (try (rec__td2 200) (catch e (ex-message e)))))))
 
+(deftest bc-classed-catch-dispatch
+  ;; Classed clauses filter on the diagnostic's :mino/kind per the
+  ;; shared class table; first-match-wins, bare still catches all.
+  (testing "Exception catches and binds the diagnostic map"
+    (defn cc1 [] (try (throw (ex-info "boom" {:a 1}))
+                      (catch Exception e (:a (ex-data e)))))
+    (is (= 1 (cc1))))
+  (testing "out-of-class clause declines to outer"
+    (defn cc2 [] (try (try (throw (ex-info "x" {})) (catch Error e :err))
+                      (catch Exception e :outer)))
+    (is (= :outer (cc2))))
+  (testing "first-match-wins across classed clauses"
+    (defn cc3 [] (try (throw (ex-info "x" {}))
+                      (catch Error e :e)
+                      (catch Exception e :x)))
+    (is (= :x (cc3))))
+  (testing "bare clause after classed still catches"
+    (defn cc4 [] (try (throw (ex-info "x" {}))
+                      (catch Error e :e)
+                      (catch e :bare)))
+    (is (= :bare (cc4))))
+  (testing ":default keyword catch-all"
+    (defn cc5 [] (try (throw (ex-info "x" {})) (catch :default e :d)))
+    (is (= :d (cc5))))
+  (testing "IndexOutOfBoundsException catches nth OOB"
+    (defn cc6 [] (try (nth [1] 5) (catch IndexOutOfBoundsException e :oob)))
+    (is (= :oob (cc6)))
+    (defn cc7 [] (try (nth [1] 5) (catch Exception e :e)))
+    (is (= :e (cc7))))
+  (testing "IllegalArgumentException catches an arity error"
+    (defn cc8 [] (try ((fn [a] a)) (catch IllegalArgumentException e :iae)))
+    (is (= :iae (cc8))))
+  (testing "qualified ExceptionInfo symbol matches by name tail"
+    (defn cc9 [] (try (throw (ex-info "x" {}))
+                      (catch clojure.lang.ExceptionInfo e :ei)))
+    (is (= :ei (cc9)))))
+
+(deftest bc-classed-catch-finally
+  (testing "finally runs when no clause matches and the throw escapes"
+    (let [a (atom 0)]
+      (defn cf1 [] (try (throw (ex-info "x" {})) (catch Error e :e)
+                        (finally (reset! a 1))))
+      (is (thrown? (cf1)))
+      (is (= 1 @a))))
+  (testing "matched clause runs handler then finally"
+    (let [a (atom 0)]
+      (defn cf2 [] (try (throw (ex-info "x" {})) (catch Exception e :x)
+                        (finally (reset! a 2))))
+      (is (= :x (cf2)))
+      (is (= 2 @a)))))
+
+(deftest bc-classed-catch-unknown-class-errors
+  (defn cu1 [] (try 1 (catch NotAClass e 2)))
+  (let [msg (try (cu1) (catch e (ex-message e)))]
+    (is (clojure.string/includes? msg "NotAClass"))))
+
 (deftest bc-catch-releases-intermediate-frame-state
   ;; A throw from a deeply-nested fn unwinds through intermediate
   ;; bc_run frames whose bc_pop_window calls are skipped by the

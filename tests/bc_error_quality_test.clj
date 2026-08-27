@@ -19,7 +19,7 @@
             diagnostic whose :mino/location carries a non-nil file and
             a positive line number"
     (def bc-bad-add (fn [x] (+ x 1)))
-    (let [e   (try (bc-bad-add "not-an-int") (catch e e))
+    (let [e   (try (bc-bad-add "not-an-int") (catch Throwable e e))
           loc (diag-location e)]
       (is (some? e))
       (is (some? loc))
@@ -30,7 +30,7 @@
   (testing "integer division by zero from inside a bc fn carries a
             location"
     (def bc-divz (fn [x] (quot 10 x)))
-    (let [e   (try (bc-divz 0) (catch e e))
+    (let [e   (try (bc-divz 0) (catch Throwable e e))
           loc (diag-location e)]
       (is (some? e))
       (is (some? loc)))))
@@ -39,7 +39,7 @@
   (testing "calling an undefined var from inside a bc fn carries a
             location"
     (let [src "(ns mino.error-quality-test-1)\n(defn caller [] (this-var-is-undefined))\n(caller)"
-          e   (try (load-string src) (catch e e))
+          e   (try (load-string src) (catch Throwable e e))
           loc (diag-location e)]
       (is (some? e))
       (is (some? loc)))))
@@ -48,7 +48,7 @@
   (testing "the diagnostic's :mino/location :file is a string when
             present (interned filename pointer)"
     (def bc-throws (fn [x] (throw {:got x})))
-    (let [e (try (bc-throws 1) (catch e e))]
+    (let [e (try (bc-throws 1) (catch Throwable e e))]
       ;; throw of a map carries the map as ex-data; the diagnostic
       ;; layer wraps it but the location is still attached.
       (is (some? e)))))
@@ -63,19 +63,19 @@
   ;; or eval_current_form (fallback) and attaches :mino/location when
   ;; either has source info.
   (testing "throw of string carries location"
-    (let [loc (diag-location (try (throw "boom") (catch e e)))]
+    (let [loc (diag-location (try (throw "boom") (catch Throwable e e)))]
       (is (some? loc))
       (is (some? (:file loc)))
       (is (some? (:line loc)))))
   (testing "throw of ex-info carries location"
     (let [loc (diag-location
-                (try (throw (ex-info "msg" {:k :v})) (catch e e)))]
+                (try (throw (ex-info "msg" {:k :v})) (catch Throwable e e)))]
       (is (some? loc))
       (is (some? (:file loc)))
       (is (some? (:line loc)))))
   (testing "throw of bare map carries location"
     (let [loc (diag-location
-                (try (throw {:custom :data}) (catch e e)))]
+                (try (throw {:custom :data}) (catch Throwable e e)))]
       (is (some? loc))
       (is (some? (:file loc))))))
 
@@ -88,7 +88,7 @@
   ;; and normalize_exception now prefer the BC PC when available.
   (testing "arity-error inside a BC fn body has a non-nil line"
     (def bc-bad (fn [] (assoc nil)))
-    (let [loc (diag-location (try (bc-bad) (catch e e)))]
+    (let [loc (diag-location (try (bc-bad) (catch Throwable e e)))]
       ;; Pre-fix this would still set loc but to the (bc-bad) call
       ;; site instead of the inner (assoc nil) line. The strong
       ;; differential assertion is fragile across deftest/testing
@@ -120,7 +120,7 @@
     ;; location reported the inner nil literal's position (often
     ;; (0,0) since nil literals carry no source info), on the fixed
     ;; path it reports the (assoc nil) call form.
-    (let [e   (try (assoc nil) (catch e e))
+    (let [e   (try (assoc nil) (catch Throwable e e))
           loc (diag-location e)]
       (is (some? e))
       (is (some? loc))

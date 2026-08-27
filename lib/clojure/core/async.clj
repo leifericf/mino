@@ -845,7 +845,7 @@
      :finally-body (when finally-clause (vec (rest finally-clause)))}))
 
 (defn go-try-park?
-  "Returns true if form is (try body... (catch e handler)) where body contains parks."
+  "Returns true if form is (try body... (catch Throwable e handler)) where body contains parks."
   [form]
   (and (cons? form)
        (= 'try (first form))

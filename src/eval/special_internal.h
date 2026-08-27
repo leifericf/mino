@@ -76,6 +76,20 @@ mino_val *eval_try(mino_state *S, mino_val *form,
 void mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
+/* control.c -- classed catch dispatch (ADR 32). The table maps a JVM
+ * exception class name to the diagnostic :mino/kind strings its clause
+ * accepts; kinds[0] == NULL marks a catch-all. mino_catch_class_index
+ * matches a symbol or keyword name (":default" for the keyword) on the
+ * tail after the last dot, and returns -1 for unknown classes. */
+typedef struct mino_catch_class {
+    const char *name;
+    const char *kinds[3];
+} mino_catch_class_t;
+
+extern const mino_catch_class_t mino_catch_classes[];
+int mino_catch_class_index(const char *name);
+int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag);
+
 /* fn.c */
 mino_val *eval_fn(mino_state *S, mino_val *form,
                     mino_val *args, mino_env *env, int tail);
