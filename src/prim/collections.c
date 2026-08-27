@@ -662,12 +662,17 @@ int arg_count(mino_state *S, mino_val *args, size_t *out)
 
 /* Element i (0-based) of an argument chain with lazy tails forced, so
  * a dangling-tail diagnostic can name the key; this walk and
- * list_length see the same chain. Returns 0 only when forcing fails. */
+ * list_length see the same chain, including a leading LAZY. Returns 0
+ * only when forcing fails. */
 int args_nth_forced(mino_state *S, mino_val *args, size_t i,
                     mino_val **out)
 {
     mino_val *p = args;
     size_t k;
+    while (p != NULL && mino_type_of(p) == MINO_LAZY) {
+        p = lazy_force(S, p);
+        if (p == NULL) return 0;
+    }
     for (k = 0; k < i; k++) {
         p = p->as.cons.cdr;
         while (p != NULL && mino_type_of(p) == MINO_LAZY) {
@@ -1445,14 +1450,18 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
     mino_val *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 2) {
+    /* Arity 2 is below the smallest oracle signature ([map key val]);
+     * the JVM throws an arity error there, and ADR 34's gate requires
+     * every undeclared arity to stay MAR001. Only the odd-tail call
+     * is a value error, and the JVM words that one as a count
+     * mismatch, not a dangling key. */
+    if (n < 3) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "assoc requires a collection and a key");
+            "assoc requires a collection, a key, and a value");
     }
     if ((n - 1) % 2 != 0) {
-        mino_val *k;
-        if (!args_nth_forced(S, args, n - 1, &k)) return NULL;
-        return prim_throw_dangling_key(S, k);
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "assoc expects even number of arguments after map/vector, found odd number");
     }
     coll = args->as.cons.car;
     extra_pairs = (n - 1) / 2;

@@ -22,13 +22,7 @@
 
 ;; Divergent-arity prims, frozen from the 2026-08-27 arity sweep;
 ;; regenerate via the sweep before extending. Their arities or error
-;; classes are fixed by later commits in the campaign. The seven
-;; dangling-count prims (agent assoc atom hash-map restart-agent
-;; sorted-map sorted-map-by) left this set after the slice-2 fix
-;; flipped their parity rejections from MAR001 to MTY001; verified
-;; against the oracle shapes before moving. The three trivial-arity
-;; prims (disj! require use) left after the slice-3 fix added their
-;; missing arities (disj! one-arity, require and use zero-arity).
+;; classes are fixed by later commits in the campaign (ADR 34).
 (def divergent-arities
   #{
   "clojure.core/<"
@@ -83,14 +77,8 @@
   "partition"    })
 
 ;; The authoritative emit list: the 253 arity-conformant prim names
-;; ("ns/name") frozen from the 2026-08-27 arity sweep, plus the seven
-;; dangling-count prims (agent assoc atom hash-map restart-agent
-;; sorted-map sorted-map-by) admitted after the slice-2 error-class fix
-;; flipped their parity rejections to MTY001, plus the three
-;; trivial-arity prims (disj! require use) admitted after the slice-3
-;; arity fix made the oracle arities honest (disj! one-arity, require
-;; and use zero-arity). The oracle lookup supplies each name's
-;; arglists text.
+;; ("ns/name") frozen from the 2026-08-27 sweep plus the ten the
+;; slice-2/3 fixes admitted (ADR 34); regenerate via the sweep.
 (def emit-list
   #{
   "clojure.core/*"
