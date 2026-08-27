@@ -17,7 +17,9 @@
 
 (deftest defmacro-docstring
   (defmacro my-id__rt "identity macro" (x) x)
-  (is (= "identity macro" (doc-string 'my-id__rt))))
+  ;; defmacro vars carry :arglists (the params form as declared), so
+  ;; doc renders the JVM shape: name line, arglists line, docstring.
+  (is (= "my-id__rt\n((x))\nidentity macro" (doc-string 'my-id__rt))))
 
 (deftest apropos-finds
   (let [results (apropos "cons")]

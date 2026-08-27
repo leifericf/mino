@@ -975,13 +975,85 @@ static mino_val *doc_render_with_capability(mino_state *S,
     }
 }
 
-/* (doc name) -- print the docstring for a def/defmacro binding. */
+/* Resolve the doc'd symbol to a var: a qualified ns/name first, then
+ * the bare name in the current namespace and clojure.core, mirroring
+ * the meta-table name conventions doc already uses. */
+static mino_val *doc_resolve_var(mino_state *S, const char *buf, size_t n)
+{
+    const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
+    mino_val   *var;
+    char        ns_buf[256];
+    size_t      ns_len;
+    if (slash != NULL && slash[1] != '\0') {
+        ns_len = (size_t)(slash - buf);
+        if (ns_len >= sizeof(ns_buf)) return NULL;
+        memcpy(ns_buf, buf, ns_len);
+        ns_buf[ns_len] = '\0';
+        return var_find(S, ns_buf, slash + 1);
+    }
+    var = var_find(S, S->ns_vars.current_ns, buf);
+    if (var == NULL) var = var_find(S, "clojure.core", buf);
+    return var;
+}
+
+/* The docstring part for buf: the meta-table entry (with its
+ * capability line), the qualified-name fallback, then namespace
+ * metadata. Returns nil when nothing is registered. */
+static mino_val *doc_lookup_docstring(mino_state *S, const char *buf,
+                                        size_t n)
+{
+    meta_entry_t *e;
+    const char   *slash;
+    e = meta_find(S, buf);
+    if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
+        return doc_render_with_capability(S, e);
+    }
+    /* Qualified-name fallback: docstrings register under the bare name,
+     * so ns/sym lookups should also try the part after the slash. */
+    slash = (n > 1) ? memchr(buf, '/', n) : NULL;
+    if (slash != NULL && slash[1] != '\0') {
+        e = meta_find(S, slash + 1);
+        if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
+            return doc_render_with_capability(S, e);
+        }
+    }
+    /* Fall back to namespace metadata: (ns foo "docstring" ...) puts
+     * {:doc "..."} on the namespace; surface it through doc when no
+     * named-binding docstring is registered. */
+    if (ns_env_lookup(S, buf) != NULL) {
+        mino_val *meta = ns_env_get_meta(S, buf);
+        if (meta != NULL && mino_type_of(meta) == MINO_MAP) {
+            mino_val *doc_kw = mino_keyword(S, "doc");
+            mino_val *doc    = map_get_val(meta, doc_kw);
+            if (doc != NULL && mino_type_of(doc) == MINO_STRING) {
+                return doc;
+            }
+        }
+    }
+    return mino_nil(S);
+}
+
+/* (doc name) -- render the documentation for a def/defmacro binding:
+ * the name and arglists lines (JVM doc shape) when the var's meta
+ * carries :arglists, then the docstring. */
 static mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val   *name_val;
     char          buf[256];
     size_t        n;
-    meta_entry_t *e;
+    mino_val   *al_kw;
+    mino_val   *var;
+    mino_val   *arglists = NULL;
+    mino_val   *doc_part;
+    const char *slash;
+    const char *name;
+    size_t       name_len;
+    mino_val   *al_str;
+    size_t       al_len;
+    size_t       doc_len;
+    size_t       total;
+    char        *out;
+    mino_val   *res;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001", "doc requires one argument");
@@ -999,35 +1071,44 @@ static mino_val *prim_doc(mino_state *S, mino_val *args, mino_env *env)
     }
     memcpy(buf, name_val->as.s.data, n);
     buf[n] = '\0';
-    e = meta_find(S, buf);
-    if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
-        return doc_render_with_capability(S, e);
+    al_kw = mino_keyword(S, "arglists");
+    var   = doc_resolve_var(S, buf, n);
+    if (var != NULL && var->meta != NULL &&
+        mino_type_of(var->meta) == MINO_MAP) {
+        mino_val *al = map_get_val(var->meta, al_kw);
+        if (al != NULL && !MINO_IS_NIL(al)) arglists = al;
     }
-    /* Qualified-name fallback: docstrings register under the bare name,
-     * so ns/sym lookups should also try the part after the slash. */
-    {
-        const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
-        if (slash != NULL && slash[1] != '\0') {
-            e = meta_find(S, slash + 1);
-            if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
-                return doc_render_with_capability(S, e);
-            }
-        }
+    if (arglists == NULL) {
+        return doc_lookup_docstring(S, buf, n);
     }
-    /* Fall back to namespace metadata: (ns foo "docstring" ...) puts
-     * {:doc "..."} on the namespace; surface it through doc when no
-     * named-binding docstring is registered. */
-    if (ns_env_lookup(S, buf) != NULL) {
-        mino_val *meta = ns_env_get_meta(S, buf);
-        if (meta != NULL && mino_type_of(meta) == MINO_MAP) {
-            mino_val *doc_kw = mino_keyword(S, "doc");
-            mino_val *doc    = map_get_val(meta, doc_kw);
-            if (doc != NULL && mino_type_of(doc) == MINO_STRING) {
-                return doc;
-            }
-        }
+    /* Pin each rendered part across the other's allocation; between
+     * the unpin and the byte copy no collection can run. */
+    gc_pin(arglists);
+    al_str = print_to_string(S, arglists);
+    gc_unpin(1);
+    if (al_str == NULL) return NULL;
+    gc_pin(al_str);
+    doc_part = doc_lookup_docstring(S, buf, n);
+    gc_unpin(1);
+    slash    = (n > 1) ? memchr(buf, '/', n) : NULL;
+    name     = (slash != NULL && slash[1] != '\0') ? slash + 1 : buf;
+    name_len = strlen(name);
+    al_len   = al_str->as.s.len;
+    doc_len  = mino_type_of(doc_part) == MINO_STRING ? doc_part->as.s.len : 0;
+    total    = name_len + 1 + al_len + (doc_len > 0 ? 1 + doc_len : 0);
+    out = (char *)malloc(total + 1);
+    if (out == NULL) return doc_part;
+    memcpy(out, name, name_len);
+    out[name_len] = '\n';
+    memcpy(out + name_len + 1, al_str->as.s.data, al_len);
+    if (doc_len > 0) {
+        out[name_len + 1 + al_len] = '\n';
+        memcpy(out + name_len + 2 + al_len, doc_part->as.s.data, doc_len);
     }
-    return mino_nil(S);
+    out[total] = '\0';
+    res = mino_string_n(S, out, total);
+    free(out);
+    return res;
 }
 
 /* (source name) -- return the source form of a def/defmacro binding. */
@@ -1262,7 +1343,7 @@ const size_t k_prims_module_count =
  * lib/clojure/repl.clj as a referable var on top of these. */
 const mino_prim_def k_prims_clojure_repl[] = {
     {"doc-string",  prim_doc,
-     "Returns the documentation string for the named var, or nil."},
+     "Returns the documentation string for the named var: name, arglists, and docstring lines when the var's meta carries :arglists, else the bare docstring. Returns nil when undocumented."},
     {"source-form", prim_source,
      "Returns the source form for the named var, or nil."},
 };
