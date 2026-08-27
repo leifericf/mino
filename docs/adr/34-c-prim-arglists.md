@@ -60,8 +60,9 @@ arguments. Richer-than-oracle does not flag in the census.
    - The seven dangling-count prims change their parity rejection
      from MAR001 to a value-type error, after which the oracle
      arglists are honest for them.
-   - require and use gain zero-arity no-ops; disj! gains its
-     one-arity. Their oracle arglists then apply verbatim.
+   - require and use accept the zero arity but reject it with a
+     value error matching the JVM; disj! gains its one-arity. Their
+     oracle arglists then apply verbatim.
    - Real gaps (slurp, resolve, ref, with-bindings*, aset, aget, and
      any residue) attach mino-true arglists and get census divergence
      entries; the missing arities themselves are out of scope.

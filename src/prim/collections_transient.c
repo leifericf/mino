@@ -135,11 +135,15 @@ mino_val *prim_disj_bang(mino_state *S, mino_val *args, mino_env *env)
     mino_val *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 2) {
+    if (n < 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "disj! requires at least a transient and a key");
+            "disj! requires a set");
     }
     t = args->as.cons.car;
+    /* No keys: return the set unchanged, per Clojure. */
+    if (n == 1) {
+        return t;
+    }
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
         t = mino_disj_bang(S, t, p->as.cons.car);

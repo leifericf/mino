@@ -26,7 +26,9 @@
 ;; dangling-count prims (agent assoc atom hash-map restart-agent
 ;; sorted-map sorted-map-by) left this set after the slice-2 fix
 ;; flipped their parity rejections from MAR001 to MTY001; verified
-;; against the oracle shapes before moving.
+;; against the oracle shapes before moving. The three trivial-arity
+;; prims (disj! require use) left after the slice-3 fix added their
+;; missing arities (disj! one-arity, require and use zero-arity).
 (def divergent-arities
   #{
   "clojure.core/<"
@@ -42,7 +44,6 @@
   "clojure.core/bit-xor"
   "clojure.core/byte-array"
   "clojure.core/conj!"
-  "clojure.core/disj!"
   "clojure.core/distinct?"
   "clojure.core/get-thread-bindings"
   "clojure.core/identical?"
@@ -54,14 +55,12 @@
   "clojure.core/ref-max-history"
   "clojure.core/ref-min-history"
   "clojure.core/release-pending-sends"
-  "clojure.core/require"
   "clojure.core/resolve"
   "clojure.core/send-via"
   "clojure.core/slurp"
   "clojure.core/spit"
   "clojure.core/symbol"
   "clojure.core/to-array"
-  "clojure.core/use"
   "clojure.core/with-bindings*"
   "clojure.core/with-meta"    })
 
@@ -87,9 +86,11 @@
 ;; ("ns/name") frozen from the 2026-08-27 arity sweep, plus the seven
 ;; dangling-count prims (agent assoc atom hash-map restart-agent
 ;; sorted-map sorted-map-by) admitted after the slice-2 error-class fix
-;; flipped their parity rejections to MTY001; their oracle arglists
-;; were verified honest before the move. The oracle lookup supplies
-;; each name's arglists text.
+;; flipped their parity rejections to MTY001, plus the three
+;; trivial-arity prims (disj! require use) admitted after the slice-3
+;; arity fix made the oracle arities honest (disj! one-arity, require
+;; and use zero-arity). The oracle lookup supplies each name's
+;; arglists text.
 (def emit-list
   #{
   "clojure.core/*"
@@ -154,6 +155,7 @@
   "clojure.core/deref"
   "clojure.core/destructure"
   "clojure.core/disj"
+  "clojure.core/disj!"
   "clojure.core/dissoc"
   "clojure.core/dissoc!"
   "clojure.core/doall"
@@ -276,6 +278,7 @@
   "clojure.core/rem"
   "clojure.core/remove-ns"
   "clojure.core/remove-watch"
+  "clojure.core/require"
   "clojure.core/requiring-resolve"
   "clojure.core/reset!"
   "clojure.core/reset-vals!"
@@ -337,6 +340,7 @@
   "clojure.core/unchecked-subtract"
   "clojure.core/unchecked-subtract-int"
   "clojure.core/unsigned-bit-shift-right"
+  "clojure.core/use"
   "clojure.core/uuid?"
   "clojure.core/vals"
   "clojure.core/var-get"

@@ -541,9 +541,11 @@ mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *name_val;
     mino_val *result;
+    /* Zero args is in-signature but rejected with a value error,
+     * matching the JVM. */
     if (!mino_is_cons(args)) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
-        return NULL;
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "Nothing specified to load");
     }
     /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
     if (mino_is_cons(args->as.cons.cdr)) {
@@ -842,8 +844,8 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
     mino_val *arg;
     mino_val *last = mino_nil(S);
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "use requires at least one argument");
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "Nothing specified to load");
     }
     while (mino_is_cons(args)) {
         mino_val *libspec;
