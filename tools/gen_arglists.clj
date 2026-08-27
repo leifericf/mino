@@ -362,7 +362,7 @@
 
    "clojure.core/ref"
    {:arglists '([x])
-    :reason "prim_ref requires an initial value; the options tail rejects every swept arity above 1 with MAR001"}
+    :reason "prim_ref requires an initial value; canonical keyword option pairs are accepted (sweep sentinels MAR001 as bad option keys), so only [x] is claimed"}
 
    "clojure.core/resolve"
    {:arglists '([sym])
