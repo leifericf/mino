@@ -616,13 +616,21 @@ static mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
         bind_name = rename_lookup(rename_v, name, nlen, rbuf, sizeof(rbuf));
         if (bind_name == NULL) bind_name = name;
         /* Prefer to bind the source var so syntax-quote and meta-on-var
-         * still see the source namespace. Auto-intern when the source
-         * env carries a primitive without an interned var so the same
-         * delegation works for clojure.core entries. */
+         * still see the source namespace. Install-time interning puts
+         * a var in every prim cell, so var_find usually hits; a raw
+         * embedder binding still promotes here. A cell that already
+         * holds a var binds that var directly. */
         var = var_find(S, ns_buf, name);
         if (var == NULL) {
-            var = var_intern(S, ns_buf, name);
-            if (var != NULL) var_set_root(S, var, src->bindings[i].val);
+            if (src->bindings[i].val != NULL
+                && mino_type_of(src->bindings[i].val) == MINO_VAR) {
+                var = src->bindings[i].val;
+            } else {
+                var = var_intern(S, ns_buf, name);
+                if (var != NULL) {
+                    var_set_root(S, var, src->bindings[i].val);
+                }
+            }
         }
         if (var != NULL) {
             env_bind(S, dst, bind_name, var);
@@ -782,6 +790,12 @@ static mino_val *resolve_in_ns(mino_state *S, const char *ns_name,
     if (e != NULL) {
         env_binding_t *b = env_find_here(e, sym_name);
         if (b != NULL) {
+            /* A binding that already holds a var (install-time
+             * interning, refer) is the answer; a fresh intern would
+             * wrap that var in a new cell's root. */
+            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
+                return b->val;
+            }
             /* Promote env binding into a var so callers can deref it. */
             mino_val *promoted = var_intern(S, ns_name, sym_name);
             if (promoted != NULL) {
@@ -1038,13 +1052,16 @@ static mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *
 /* Mutating a var's root must also update the ns env binding so future
  * unqualified lookups observe the new value (the env is what callers
  * actually walk). */
-static void var_sync_env(mino_state *S, mino_val *var, mino_val *val)
+/* Keep the owning ns env cell pointing at the var. Install-time cells
+ * already hold the var and re-binding it is a no-op overwrite; def'd
+ * cells flip to the var so subsequent reads track the root cell. */
+static void var_sync_env(mino_state *S, mino_val *var)
 {
     mino_env *e;
     if (var == NULL || mino_type_of(var) != MINO_VAR) return;
     e = ns_env_lookup(S, var->as.var.ns);
     if (e != NULL && var->as.var.sym != NULL) {
-        env_bind(S, e, var->as.var.sym, val);
+        env_bind(S, e, var->as.var.sym, var);
     }
 }
 
@@ -1065,7 +1082,7 @@ static mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env)
             "var-set: expected a var");
     }
     var_set_root(S, var_arg, val_arg);
-    var_sync_env(S, var_arg, val_arg);
+    var_sync_env(S, var_arg);
     return val_arg;
 }
 
@@ -1097,7 +1114,7 @@ static mino_val *prim_alter_var_root(mino_state *S, mino_val *args,
     gc_unpin(1);
     if (new_val == NULL) return NULL;
     var_set_root(S, var_arg, new_val);
-    var_sync_env(S, var_arg, new_val);
+    var_sync_env(S, var_arg);
     return new_val;
 }
 

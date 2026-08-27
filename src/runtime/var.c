@@ -350,6 +350,9 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     var->as.var.root  = val;
     var->as.var.bound = 1;
     var->as.var.version++;
+    /* Same invalidation as the fast path: a root swap through the
+     * watched/validated path must also retire cached call slots. */
+    S->ns_vars.ic_gen++;
     /* Watches: dispatch after the publish. JVM Clojure's Var watches
      * fire on (alter-var-root v f) and on def with rebind. The
      * callback signature is (fn key var old new). A watch that throws

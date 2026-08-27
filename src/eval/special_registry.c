@@ -75,11 +75,16 @@ static mino_val *var_find_qualified_sym(mino_state *S,
     var = var_find(S, ns_buf, name);
     if (var != NULL) return var;
     /* Auto-promote env binding to var so #'clojure.core/inc works
-     * for primitives that were never explicitly interned. */
+     * for primitives that were never explicitly interned. A binding
+     * that already holds a var (install-time interning, refer) is
+     * that var; re-rooting would wrap the var in a fresh cell. */
     target = ns_env_lookup(S, ns_buf);
     if (target != NULL) {
         env_binding_t *b = env_find_here(target, name);
         if (b != NULL) {
+            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
+                return b->val;
+            }
             var = var_intern(S, ns_buf, name);
             if (var != NULL) {
                 var_set_root(S, var, b->val);
@@ -92,7 +97,9 @@ static mino_val *var_find_qualified_sym(mino_state *S,
 
 /* Look up vbuf in env, falling back to current_ns_env. If found, intern a var
  * in clojure.core with that value as its root and return it. Returns
- * NULL if vbuf is not bound in either environment. */
+ * NULL if vbuf is not bound in either environment. A binding that is
+ * already a var is returned as-is: prim install interns at install
+ * time, so the common case reuses that var instead of re-rooting. */
 static mino_val *var_promote_prim_to_var(mino_state *S,
                                           mino_env *env, const char *vbuf)
 {
@@ -104,7 +111,9 @@ static mino_val *var_promote_prim_to_var(mino_state *S,
         if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
     }
     if (val == NULL) return NULL;
+    if (mino_type_of(val) == MINO_VAR) return val;
     var = var_intern(S, "clojure.core", vbuf);
+    if (var == NULL) return NULL;
     var_set_root(S, var, val);
     return var;
 }

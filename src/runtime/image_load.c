@@ -1048,6 +1048,9 @@ static int img_splice_roots(img_reader *r, char *buf)
                 int found = 0;
                 if (new_env->parent == NULL)
                     new_env->parent = S->ns_vars.mino_core_env;
+                /* Restored ns roots keep the not-lexical-scope flag so
+                 * the symbol walk still derefs their var cells. */
+                new_env->is_ns_root = 1;
                 for (j = 0; j < S->ns_vars.ns_env_len; j++) {
                     if (S->ns_vars.ns_env_table[j].name != NULL &&
                         strcmp(S->ns_vars.ns_env_table[j].name,

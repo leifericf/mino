@@ -761,7 +761,9 @@ static mino_val *ic_resolve_global(mino_state *S,
         if (dyn_v != NULL) return dyn_v;
     }
     if (env != NULL) {
-        mino_val *env_v = mino_env_get_sym(env, slot->sym);
+        /* Lexical frames only: a ns root env past the chain holds var
+         * cells that must deref through resolve_global, not spill. */
+        mino_val *env_v = mino_env_get_sym_lex(env, slot->sym);
         if (env_v != NULL) return env_v;
     }
     if (!dyn_active

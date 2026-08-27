@@ -3440,8 +3440,13 @@ static mino_val *probe_head_value(compiler_t *c, mino_val *head)
     if (slash != NULL) {
         /* Qualified: ns/name. Try literal env binding first (rare:
          * something like (host/new ...) in lexical scope). */
-        mino_val *v = mino_env_get_sym(c->env, head);
-        if (v != NULL) return v;
+        mino_val *v = mino_env_get_sym_lex(c->env, head);
+        if (v != NULL) {
+            if (mino_type_of(v) == MINO_VAR && v->as.var.bound) {
+                v = v->as.var.root;
+            }
+            return v;
+        }
 
         char  ns_buf[256];
         size_t ns_len = (size_t)(slash - data);
@@ -3476,7 +3481,10 @@ static mino_val *probe_head_value(compiler_t *c, mino_val *head)
     }
 
     /* Unqualified: lexical -> defining_ns env. */
-    mino_val *v = mino_env_get_sym(c->env, head);
+    mino_val *v = mino_env_get_sym_lex(c->env, head);
+    if (v != NULL && mino_type_of(v) == MINO_VAR && v->as.var.bound) {
+        v = v->as.var.root;
+    }
     if (v != NULL) return v;
     if (c->defining_ns != NULL) {
         mino_env *ns_env = ns_env_lookup(S, c->defining_ns);

@@ -78,6 +78,7 @@ mino_env *ns_env_ensure(mino_state *S, const char *name)
     if (S->ns_vars.mino_core_env == NULL) {
         mino_env *core_env = env_alloc(S, NULL);
         ns_env_register_root(S, core_env);   /* may longjmp on OOM; assign only after */
+        core_env->is_ns_root = 1;
         S->ns_vars.mino_core_env = core_env;
         if (S->ns_vars.ns_env_len == S->ns_vars.ns_env_cap) ns_env_table_grow(S);
         S->ns_vars.ns_env_table[S->ns_vars.ns_env_len].name = intern_filename(S, "clojure.core");
@@ -89,6 +90,7 @@ mino_env *ns_env_ensure(mino_state *S, const char *name)
 
     /* Create the requested ns env with parent → clojure.core. */
     e = env_alloc(S, S->ns_vars.mino_core_env);
+    e->is_ns_root = 1;
     ns_env_register_root(S, e);
     iname = intern_filename(S, name);
     if (S->ns_vars.ns_env_len == S->ns_vars.ns_env_cap) ns_env_table_grow(S);

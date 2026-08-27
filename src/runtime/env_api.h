@@ -20,6 +20,13 @@ env_binding_t *env_find_here_n(mino_env *env, const char *name, size_t nlen);
 /* Symbol-aware lookup. Caller already has sym->as.s.{data,len}; we
  * skip strlen and walk the parent chain with the cached length. */
 mino_val    *mino_env_get_sym(mino_env *env, const mino_val *sym);
+/* Same, but the walk treats a ns root env as a boundary: only genuine
+ * lexical frames are searched. */
+mino_val    *mino_env_get_sym_lex(mino_env *env, const mino_val *sym);
+/* Same, but reports via *from_ns whether the hit landed in a ns root
+ * frame (a namespace cell needing var read semantics). */
+mino_val    *mino_env_get_sym_ns(mino_env *env, const mino_val *sym,
+                                 int *from_ns);
 void           env_bind(mino_state *S, mino_env *env,
                         const char *name,                      /* borrowed (copied) */
                         mino_val *val);                      /* GC-owned, retained */

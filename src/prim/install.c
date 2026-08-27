@@ -40,10 +40,20 @@ void prim_install_table_with_capability(mino_state *S, mino_env *env,
         if (defs[i].fn2 != NULL && defs[i].fn != NULL) {
             pv->as.prim.fn = defs[i].fn;
         }
+        /* The raw binding first keeps pv GC-rooted across var_intern
+         * (the env is a root; locals are not). */
         mino_env_set(S, env, defs[i].name, pv);
         if (ns_name != NULL) {
             mino_val *var = var_intern(S, ns_name, defs[i].name);
-            if (var != NULL) var_set_root(S, var, pv);
+            if (var != NULL) {
+                var_set_root(S, var, pv);
+                /* Rebind the cell to the var: symbol reads deref
+                 * through the root, so var-set / alter-var-root are
+                 * visible without an env rebind. var_intern returns
+                 * the existing var on re-install, so the root is set
+                 * on the same cell every time. */
+                mino_env_set(S, env, defs[i].name, var);
+            }
         }
         if (defs[i].doc != NULL) {
             meta_set(S, defs[i].name,

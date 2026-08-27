@@ -366,6 +366,47 @@ mino_val *mino_env_get_sym(mino_env *env, const mino_val *sym)
     return NULL;
 }
 
+/* Lexical-scope variant: the walk stops at a ns root env, whose
+ * bindings are namespace cells (often vars) rather than locals.
+ * Globals then resolve through the caller's ns path, which derefs
+ * vars; a raw var must not spill into value position. */
+mino_val *mino_env_get_sym_lex(mino_env *env, const mino_val *sym)
+{
+    const char *name = sym->as.s.data;
+    size_t      nlen = sym->as.s.len;
+    uint32_t    h    = sym->as.s.hash;
+    while (env != NULL) {
+        if (env->is_ns_root) return NULL;
+        env_binding_t *b = env_find_here_hashed(env, name, nlen, h);
+        if (b != NULL) return b->val;
+        env = env->parent;
+    }
+    return NULL;
+}
+
+/* Walk all frames like mino_env_get_sym, but report via *from_ns
+ * whether the hit landed in a ns root frame. A closure captured in a
+ * namespace (core.clj macros and fns) resolves free symbols through
+ * its defining ns this way; the caller applies var semantics (deref,
+ * thread bindings) to such hits instead of returning a raw var. */
+mino_val *mino_env_get_sym_ns(mino_env *env, const mino_val *sym,
+                                int *from_ns)
+{
+    const char *name = sym->as.s.data;
+    size_t      nlen = sym->as.s.len;
+    uint32_t    h    = sym->as.s.hash;
+    *from_ns = 0;
+    while (env != NULL) {
+        env_binding_t *b = env_find_here_hashed(env, name, nlen, h);
+        if (b != NULL) {
+            if (env->is_ns_root) *from_ns = 1;
+            return b->val;
+        }
+        env = env->parent;
+    }
+    return NULL;
+}
+
 /* Free a chain of dynamic bindings (node storage only). */
 void dyn_binding_list_free(dyn_binding_t *head)
 {

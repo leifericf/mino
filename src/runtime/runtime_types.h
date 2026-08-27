@@ -159,7 +159,13 @@ struct mino_env {
     size_t         cap;
     mino_env    *parent;
     size_t        *ht_buckets;  /* hash index: maps hash -> binding slot */
-    size_t         ht_cap;      /* power of 2; SIZE_MAX = empty slot */
+    unsigned       ht_cap;      /* power of 2; SIZE_MAX = empty slot.
+                                 * Narrow (a frame holding 2^32 bindings
+                                 * is beyond addressable memory) so the
+                                 * ns-root flag shares the word and the
+                                 * GC-allocated struct stays 48 bytes. */
+    unsigned       is_ns_root;  /* ns root env: its cells are namespace
+                                 * bindings, not lexical scope */
 };
 
 #endif /* RUNTIME_TYPES_H */

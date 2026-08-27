@@ -55,7 +55,19 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
 
     /* Try full name as a literal env binding first (e.g. "host/new"). */
     v = mino_env_get(env, data);
-    if (v != NULL) return v;
+    if (v != NULL) {
+        /* A var cell here is an ns binding reached through the parent
+         * chain; read it like any other var access. */
+        if (mino_type_of(v) == MINO_VAR) {
+            if (mino_current_ctx(S)->dyn_stack != NULL) {
+                mino_val *bv = dyn_lookup_var_or_name(S, v, v->as.var.sym);
+                if (bv != NULL) return bv;
+            }
+            if (!v->as.var.bound) return NULL;
+            return v->as.var.root;
+        }
+        return v;
+    }
 
     /* Host capability primitives ("host/new", "host/call", etc.) are
      * installed under their literal slash-name in the clojure.core
@@ -67,7 +79,13 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
         mino_env *core_env = ns_env_lookup(S, "clojure.core");
         if (core_env != NULL) {
             env_binding_t *b = env_find_here(core_env, data);
-            if (b != NULL) return b->val;
+            if (b != NULL && b->val != NULL) {
+                if (mino_type_of(b->val) == MINO_VAR) {
+                    if (!b->val->as.var.bound) return NULL;
+                    return b->val->as.var.root;
+                }
+                return b->val;
+            }
         }
     }
 
@@ -183,10 +201,18 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
      * ns env lookup (vs. lexical/dynamic) so we can auto-deref var
      * bindings only on the ns-env path -- lexical/dynamic bindings to
      * a var (e.g. `(let [v (resolve 'foo)] ...)`) must preserve the
-     * var as the binding value. */
+     * var as the binding value. The lexical walk continues through ns
+     * root frames (a closure captured in a namespace resolves free
+     * symbols through its defining ns, core.clj macros especially),
+     * but a hit there is a namespace cell: from_ns_env routes it
+     * through the deref below instead of spilling a raw var. */
     v = (mino_current_ctx(S)->dyn_stack != NULL)
         ? dyn_lookup_sym(S, data, n) : NULL;
-    if (v == NULL) v = mino_env_get_sym(env, form);
+    if (v == NULL) {
+        int lex_from_ns = 0;
+        v = mino_env_get_sym_ns(env, form, &lex_from_ns);
+        if (v != NULL && lex_from_ns) from_ns_env = 1;
+    }
     if (v == NULL) {
         mino_env *ns_env = current_ns_env(S);
         if (ns_env != NULL) {
