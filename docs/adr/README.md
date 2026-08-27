@@ -41,3 +41,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [30](30-young-only-range-index-for-minors.md) | Minor collections touch a young-only range index |
 | [31](31-unicode-case-tables.md) | Unicode case mappings from vendored tables generated at build time |
 | [32](32-classed-catch-kind-dispatch.md) | Classed catch clauses dispatch on diagnostic kind |
+| [33](33-var-based-namespace-env.md) | Namespace environments bind vars uniformly |
