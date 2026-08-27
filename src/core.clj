@@ -150,7 +150,14 @@
                     (mapv fn-arity-with-prepost fdecl))
         form     (if (vector? (first fdecl))
                    (cons 'fn rewritten)
-                   (apply list 'fn rewritten))]
+                   (apply list 'fn rewritten))
+        ;; The declared parameter vectors in declaration order, stored
+        ;; under :arglists on the var the way JVM defn does. The value
+        ;; is quoted so def's metadata evaluation yields the raw forms.
+        arglists (if (vector? (first fdecl))
+                   (list (first fdecl))
+                   (apply list (mapv first fdecl)))
+        name     (vary-meta name assoc :arglists (list 'quote arglists))]
     (if doc
       `(def ~name ~doc ~form)
       `(def ~name ~form))))

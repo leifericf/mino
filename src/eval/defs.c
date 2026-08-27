@@ -558,6 +558,36 @@ static void var_attach_user_meta(mino_state *S, mino_val *var,
                                  mino_val *name_meta,
                                  const char *doc, size_t doc_len);
 
+/* The defmacro's parameter vectors as a list, in declaration order:
+ * the JVM :arglists shape. Single arity is the one params form; each
+ * multi-arity clause contributes its leading params form. Returns NULL
+ * on a malformed clause. */
+static mino_val *defmacro_arglists(mino_state *S, mino_val *params,
+                                   mino_val *clauses)
+{
+    mino_val *out  = mino_nil(S);
+    mino_val *tail = NULL;
+    mino_val *rest;
+    if (params != NULL) {
+        return mino_cons(S, params, mino_nil(S));
+    }
+    rest = clauses;
+    while (mino_is_cons(rest)) {
+        mino_val *clause = rest->as.cons.car;
+        mino_val *cell;
+        if (!mino_is_cons(clause)) return NULL;
+        cell = mino_cons(S, clause->as.cons.car, mino_nil(S));
+        if (tail == NULL) {
+            out = cell;
+        } else {
+            mino_cons_cdr_set(S, tail, cell);
+        }
+        tail = cell;
+        rest = rest->as.cons.cdr;
+    }
+    return out;
+}
+
 mino_val *eval_defmacro(mino_state *S, mino_val *form,
                           mino_val *args, mino_env *env, int tail)
 {
@@ -651,8 +681,27 @@ mino_val *eval_defmacro(mino_state *S, mino_val *form,
                  * (meta (resolve 'name)) returns the correct :doc entry.
                  * meta_set updates the C-level table used by (doc ...) but
                  * not the GC-managed map read by (meta (resolve ...)). */
-                if (doc != NULL) {
-                    var_attach_user_meta(S, var, NULL, doc, doc_len);
+                {
+                    mino_val *al = defmacro_arglists(S, params, body);
+                    mino_val **ks;
+                    mino_val **vs;
+                    mino_val *al_map;
+                    if (al == NULL) {
+                        if (doc != NULL) {
+                            var_attach_user_meta(S, var, NULL, doc, doc_len);
+                        }
+                    } else {
+                        gc_pin(al);
+                        ks = (mino_val **)gc_alloc_typed(
+                            S, GC_T_VALARR, sizeof(*ks));
+                        vs = (mino_val **)gc_alloc_typed(
+                            S, GC_T_VALARR, sizeof(*vs));
+                        gc_valarr_set(S, ks, 0, mino_keyword(S, "arglists"));
+                        gc_valarr_set(S, vs, 0, al);
+                        gc_unpin(1);
+                        al_map = mino_map(S, ks, vs, 1);
+                        var_attach_user_meta(S, var, al_map, doc, doc_len);
+                    }
                 }
             }
             env_bind(S, current_ns_env(S), buf, mac);

@@ -114,4 +114,70 @@
   (is (not= '(and true false) (macroexpand-1 '(and true false))))
   (is (not= '(or nil 1) (macroexpand-1 '(or nil 1)))))
 
+;; --- :arglists on vars ---
+
+(deftest defn-arglists-single-arity
+  ;; JVM parity: defn stores the declared parameter vector in :arglists.
+  (defn al-single__mt [x y] x)
+  (is (= '([x y]) (:arglists (meta (resolve 'al-single__mt))))))
+
+(deftest defn-arglists-multi-arity
+  ;; Multi-arity arglists keep declaration order, JVM-shaped.
+  (defn al-multi__mt ([a] a) ([a b] b))
+  (is (= '([a] [a b]) (:arglists (meta (resolve 'al-multi__mt))))))
+
+(deftest defn-arglists-variadic
+  ;; Variadic markers stay in the parameter vector as written.
+  (defn al-vari__mt ([x & ys] ys))
+  (is (= '([x & ys]) (:arglists (meta (resolve 'al-vari__mt)))))
+  (defn al-vari2__mt [& xs] xs)
+  (is (= '([& xs]) (:arglists (meta (resolve 'al-vari2__mt))))))
+
+(deftest defn-arglists-docstring
+  ;; The docstring form attaches :arglists and :doc together.
+  (defn al-doc__mt "docstr" [x] x)
+  (let [m (meta (resolve 'al-doc__mt))]
+    (is (= '([x]) (:arglists m)))
+    (is (= "docstr" (:doc m)))))
+
+(deftest defn-arglists-with-name-meta
+  ;; ^meta on the defn name and defn-'s :private ride along with :arglists.
+  (defn ^{:custom 7} al-cust__mt [x] x)
+  (let [m (meta (resolve 'al-cust__mt))]
+    (is (= '([x]) (:arglists m)))
+    (is (= 7 (:custom m))))
+  (defn- al-priv__mt [x] x)
+  (let [m (meta (resolve 'al-priv__mt))]
+    (is (= '([x]) (:arglists m)))
+    (is (true? (:private m)))))
+
+(deftest defmacro-arglists
+  ;; defmacro vars carry :arglists like JVM Clojure.
+  (defmacro al-mac__mt [x] x)
+  (is (= '([x]) (:arglists (meta (resolve 'al-mac__mt)))))
+  (defmacro al-macm__mt ([a] a) ([a b] b))
+  (is (= '([a] [a b]) (:arglists (meta (resolve 'al-macm__mt))))))
+
+(deftest def-of-fn-has-no-arglists
+  ;; JVM parity: plain (def f (fn ...)) attaches no :arglists to the var.
+  (def al-deffn__mt (fn [x] x))
+  (is (nil? (:arglists (meta (resolve 'al-deffn__mt))))))
+
+(deftest defn-arglists-redef-updates
+  ;; A re-defn replaces :arglists with the new declaration's shape.
+  (defn al-ru__mt ([a] a))
+  (defn al-ru__mt ([b c] c))
+  (is (= '([b c]) (:arglists (meta (resolve 'al-ru__mt))))))
+
+(deftest defn-arglists-survive-plain-redef
+  ;; A later meta-less (def ...) leaves the var's metadata in place.
+  (defn al-rd__mt [x] x)
+  (def al-rd__mt 9)
+  (is (= '([x]) (:arglists (meta (resolve 'al-rd__mt))))))
+
+(deftest core-defn-arglists
+  ;; Core fns defined through defn carry arglists from the boot image.
+  (is (= '([x] [x y] [x y & more])
+         (:arglists (meta (resolve 'not=))))))
+
 (run-tests-and-exit)
