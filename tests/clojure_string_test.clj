@@ -182,3 +182,15 @@
     (let [{:keys [exit out]} (sh "timeout" "10" "./mino" script)]
       (is (zero? exit))
       (is (= "Abc" (str/trim out))))))
+
+(deftest str-case-maps-unicode
+  ;; 1:1 Unicode mappings from the generated tables (ADR 31);
+  ;; expectations pinned against JVM Clojure.
+  (is (= "ÆØÅ"   (str/upper-case "æøå")))
+  (is (= "æøå"   (str/lower-case "ÆØÅ")))
+  (is (= "Æøå"   (str/capitalize "æøå")))
+  (is (= "HELLO WÖRLD" (str/upper-case "hello wörld")))
+  (is (= "ĐŽ"    (str/upper-case "đž")))
+  (is (= "ДЕТО"  (str/upper-case "дето")))
+  (is (= "無"    (str/upper-case "無")))
+  (is (= "ABC"   (str/upper-case "abc"))))

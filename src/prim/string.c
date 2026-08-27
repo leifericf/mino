@@ -1305,60 +1305,137 @@ static mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
     return mino_false(S);
 }
 
-static mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
+/* Case mapping over UTF-8 codepoints. ASCII-only strings keep the
+ * byte-wise fast path; anything with a high byte decodes each
+ * codepoint, maps it through the generated Unicode tables (ADR 31),
+ * and re-encodes. Malformed sequences (a lone high byte) copy
+ * verbatim rather than being re-encoded as a different codepoint. */
+#include "unicode_case.h"
+
+static uint32_t utf8_decode(const char *p, size_t len)
+{
+    unsigned char b = (unsigned char)p[0];
+    if (b < 0x80) return b;
+    if ((b & 0xE0) == 0xC0 && len >= 2)
+        return ((uint32_t)(b & 0x1F) << 6)
+             | (uint32_t)((unsigned char)p[1] & 0x3F);
+    if ((b & 0xF0) == 0xE0 && len >= 3)
+        return ((uint32_t)(b & 0x0F) << 12)
+             | ((uint32_t)((unsigned char)p[1] & 0x3F) << 6)
+             | (uint32_t)((unsigned char)p[2] & 0x3F);
+    if ((b & 0xF8) == 0xF0 && len >= 4)
+        return ((uint32_t)(b & 0x07) << 18)
+             | ((uint32_t)((unsigned char)p[1] & 0x3F) << 12)
+             | ((uint32_t)((unsigned char)p[2] & 0x3F) << 6)
+             | (uint32_t)((unsigned char)p[3] & 0x3F);
+    return b;
+}
+
+static size_t utf8_encode(char *p, uint32_t cp)
+{
+    if (cp <= 0x7F) {
+        p[0] = (char)cp;
+        return 1;
+    }
+    if (cp <= 0x7FF) {
+        p[0] = (char)(0xC0 | (cp >> 6));
+        p[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp <= 0xFFFF) {
+        p[0] = (char)(0xE0 | (cp >> 12));
+        p[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        p[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    p[0] = (char)(0xF0 | (cp >> 18));
+    p[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    p[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    p[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+static mino_val *string_case_map(mino_state *S, mino_val *args,
+                                 int to_upper, const char *opname)
 {
     mino_val *s;
-    char       *buf;
-    size_t      i;
-    (void)env;
+    char     msg[80];
+    size_t   i;
+
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "upper-case requires one string argument");
+        snprintf(msg, sizeof(msg), "%s requires one string argument", opname);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
     }
     s = args->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "upper-case requires one string argument");
+        snprintf(msg, sizeof(msg), "%s requires one string argument", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
-    buf = (char *)malloc(s->as.s.len);
-    if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
-        return NULL;
-    }
+
+    /* ASCII fast path: no high byte, byte-wise casing is exact. */
     for (i = 0; i < s->as.s.len; i++) {
-        buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
+        if ((unsigned char)s->as.s.data[i] >= 0x80) break;
     }
+    if (i == s->as.s.len) {
+        char *buf = (char *)malloc(s->as.s.len + 1);
+        mino_val *result;
+        size_t j;
+        if (buf == NULL && s->as.s.len > 0) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        for (j = 0; j < s->as.s.len; j++) {
+            buf[j] = (char)(to_upper
+                ? toupper((unsigned char)s->as.s.data[j])
+                : tolower((unsigned char)s->as.s.data[j]));
+        }
+        result = mino_string_n(S, buf, s->as.s.len);
+        free(buf);
+        return result;
+    }
+
+    /* Unicode path. Worst case every 2-byte codepoint maps to a
+     * 4-byte one, so bound the buffer at twice the input length. */
     {
-        mino_val *result = mino_string_n(S, buf, s->as.s.len);
+        char    *buf = (char *)malloc(2 * s->as.s.len + 4);
+        size_t   pos = 0, out = 0;
+        mino_val *result;
+        if (buf == NULL) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        while (pos < s->as.s.len) {
+            size_t step = utf8_codepoint_step(s->as.s.data, s->as.s.len, pos);
+            uint32_t cp;
+            if (step <= 1 && (unsigned char)s->as.s.data[pos] >= 0x80) {
+                /* malformed lead byte: copy verbatim */
+                buf[out++] = s->as.s.data[pos];
+                pos += 1;
+                continue;
+            }
+            cp = utf8_decode(s->as.s.data + pos, step);
+            cp = to_upper ? mino_unicode_to_upper(cp) : mino_unicode_to_lower(cp);
+            out += utf8_encode(buf + out, cp);
+            pos += step;
+        }
+        result = mino_string_n(S, buf, out);
         free(buf);
         return result;
     }
 }
 
+static mino_val *prim_upper_case(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    return string_case_map(S, args, 1, "upper-case");
+}
+
 static mino_val *prim_lower_case(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *s;
-    char       *buf;
-    size_t      i;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "lower-case requires one string argument");
-    }
-    s = args->as.cons.car;
-    if (s == NULL || mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "lower-case requires one string argument");
-    }
-    buf = (char *)malloc(s->as.s.len);
-    if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
-        return NULL;
-    }
-    for (i = 0; i < s->as.s.len; i++) {
-        buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
-    }
-    {
-        mino_val *result = mino_string_n(S, buf, s->as.s.len);
-        free(buf);
-        return result;
-    }
+    return string_case_map(S, args, 0, "lower-case");
 }
 
 static mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
