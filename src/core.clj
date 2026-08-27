@@ -615,28 +615,28 @@
   ([f]   (lazy-seq (cons (f) (repeatedly f))))
   ([n f] (take n (repeatedly f))))
 
-(def interleave
+(def ^:private interleave2
+  (fn interleave2 [c1 c2]
+    (lazy-seq
+      (let [s1 (seq c1) s2 (seq c2)]
+        (when (and s1 s2)
+          (cons (first s1)
+                (cons (first s2)
+                      (interleave2 (rest s1)
+                                   (rest s2)))))))))
+
+(defn interleave
   "Returns a lazy sequence of the first item in each collection, then
    the second, and so on."
-  (let [interleave2
-        (fn interleave2 [c1 c2]
-          (lazy-seq
-            (let [s1 (seq c1) s2 (seq c2)]
-              (when (and s1 s2)
-                (cons (first s1)
-                      (cons (first s2)
-                            (interleave2 (rest s1)
-                                         (rest s2))))))))]
-    (fn
-      ([] ())
-      ([c1] (lazy-seq (seq c1)))
-      ([c1 c2] (interleave2 c1 c2))
-      ([c1 c2 & colls]
-       (lazy-seq
-         (let [ss (map seq (cons c1 (cons c2 colls)))]
-           (when (every? identity ss)
-             (concat (map first ss)
-                     (apply interleave (map rest ss))))))))))
+  ([] ())
+  ([c1] (lazy-seq (seq c1)))
+  ([c1 c2] (interleave2 c1 c2))
+  ([c1 c2 & colls]
+   (lazy-seq
+     (let [ss (map seq (cons c1 (cons c2 colls)))]
+       (when (every? identity ss)
+         (concat (map first ss)
+                 (apply interleave (map rest ss))))))))
 
 (defn interpose
   "Returns a lazy sequence of the items in coll separated by sep. When
@@ -684,30 +684,31 @@
                    xs seen)))]
      (step coll #{}))))
 
-(def partition
+(def ^:private part-impl
+  (fn part-impl [n step coll]
+    (lazy-seq
+      (when-let [s (seq coll)]
+        (let [p (doall (take n s))]
+          (when (= n (count p))
+            (cons p (part-impl n step (drop step s)))))))))
+
+(def ^:private part-pad-impl
+  (fn part-pad-impl [n step pad coll]
+    (lazy-seq
+      (when-let [s (seq coll)]
+        (let [p (doall (take n s))]
+          (if (= n (count p))
+            (cons p (part-pad-impl n step pad (drop step s)))
+            (list (take n (concat p pad)))))))))
+
+(defn partition
   "Returns a lazy sequence of lists of n items each, at offsets step
    apart. With pad, the final partition is filled from pad to reach
    n; if pad is shorter than needed, returns a partition with fewer
    than n items."
-  (let [part-impl
-        (fn part-impl [n step coll]
-          (lazy-seq
-            (when-let [s (seq coll)]
-              (let [p (doall (take n s))]
-                (when (= n (count p))
-                  (cons p (part-impl n step (drop step s))))))))
-        part-pad-impl
-        (fn part-pad-impl [n step pad coll]
-          (lazy-seq
-            (when-let [s (seq coll)]
-              (let [p (doall (take n s))]
-                (if (= n (count p))
-                  (cons p (part-pad-impl n step pad (drop step s)))
-                  (list (take n (concat p pad))))))))]
-    (fn
-      ([n coll]            (part-impl n n coll))
-      ([n step coll]       (part-impl n step coll))
-      ([n step pad coll]   (part-pad-impl n step pad coll)))))
+  ([n coll]          (part-impl n n coll))
+  ([n step coll]     (part-impl n step coll))
+  ([n step pad coll] (part-pad-impl n step pad coll)))
 
 (defn partition-by
   "Splits coll into lazy sequences of consecutive items with the same
@@ -797,7 +798,10 @@
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
 ;; not-any? / not-every? are C primitives (see src/prim/sequences.c).
 ;; distinct? is registered as a C primitive (see src/prim/sequences.c).
-(def array-map    "Creates a hash-map." hash-map)
+;; Alias of the hash-map prim: :arglists ride def metadata because the
+;; value is a var, not a fn form defn could derive them from.
+(def ^{:arglists '([] [& keyvals])} array-map
+  "Creates a hash-map." hash-map)
 (defn sorted?
   "Returns true if x is a sorted collection."
   [x]
@@ -1245,19 +1249,20 @@
 
 ;; --- Collection utilities ---
 
-(def get-in
+(def ^:private get-in-step
+  (fn get-in-step [m ks not-found sentinel]
+    (if ks
+      (let [v (get m (first ks) sentinel)]
+        (if (= v sentinel)
+          not-found
+          (get-in-step v (next ks) not-found sentinel)))
+      m)))
+
+(defn get-in
   "Returns the value in a nested associative structure at the given
    key path."
-  (let [step (fn step [m ks nf sentinel]
-               (if ks
-                 (let [v (get m (first ks) sentinel)]
-                   (if (= v sentinel)
-                     nf
-                     (step v (next ks) nf sentinel)))
-                 m))]
-    (fn
-      ([m ks]     (reduce get m ks))
-      ([m ks nf]  (step m (seq ks) nf (gensym))))))
+  ([m ks] (reduce get m ks))
+  ([m ks not-found] (get-in-step m (seq ks) not-found (gensym))))
 
 (defn assoc-in
   "Associates a value in a nested associative structure at the given
