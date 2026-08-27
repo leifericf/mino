@@ -439,40 +439,50 @@ int eval_is_special_form_name(const char *name, size_t len)
 typedef struct {
     const char *name;
     const char *doc;
+    const char *arglists; /* NULL: no :arglists in the meta map */
 } public_form_doc;
 
 static const public_form_doc k_public_form_docs[] = {
     { "fn",
       "Defines an anonymous function. Takes an optional name, a vector "
       "of parameters, and a body; supports multiple arities and a "
-      "variadic & rest parameter." },
+      "variadic & rest parameter.",
+      "([& sigs])" },
     { "let",
       "Evaluates the body with a sequence of local bindings established "
       "left to right from the binding vector; later bindings may refer "
-      "to earlier ones." },
+      "to earlier ones.",
+      "([bindings & body])" },
     { "loop",
       "Like let, but establishes a recursion point: a recur in tail "
       "position rebinds the loop locals and jumps back to the top "
-      "without growing the stack." },
+      "without growing the stack.",
+      "([bindings & body])" },
     { "lazy-seq",
       "Returns a sequence whose body is not evaluated until the first "
       "element is requested, then caches the realized sequence for "
-      "later traversals." },
+      "later traversals.",
+      "([& body])" },
     { "binding",
       "Establishes thread-local bindings for dynamic vars over the "
       "extent of the body, restoring the prior roots when the body "
-      "returns or unwinds." },
+      "returns or unwinds.",
+      "([bindings & body])" },
     { "declare",
       "Interns one or more names as unbound vars so they can be "
-      "referred to before their defining form appears." },
+      "referred to before their defining form appears.",
+      "([& names])" },
     { "defmacro",
       "Defines a macro: a named function, invoked at expansion time, "
       "whose return value replaces the calling form before it is "
-      "evaluated." },
+      "evaluated.",
+      "([name doc-string? attr-map? [params*] body] "
+      "[name doc-string? attr-map? ([params*] body) + attr-map?])" },
     { "ns",
       "Selects or creates a namespace and applies its require / refer / "
       "import clauses, becoming the current namespace for the forms "
-      "that follow." },
+      "that follow.",
+      "([name docstring? attr-map? references*])" },
     { "when",
       "If test is logical true, evaluates body in an implicit do, "
       "returning the result of the last expression. If test is false "
@@ -528,13 +538,14 @@ void eval_special_register_vars(mino_state *S)
     mino_val *placeholder = mino_keyword(S, "mino/special-form");
     mino_val *macro_kw = mino_keyword(S, "macro");
     mino_val *doc_kw = mino_keyword(S, "doc");
+    mino_val *arglists_kw = mino_keyword(S, "arglists");
     mino_val *yes = mino_true(S);
     size_t i;
 
     if (core_env == NULL || placeholder == NULL) {
         return;
     }
-    /* Pin the three keywords allocated above: var_intern (and the other
+    /* Pin the four keywords allocated above: var_intern (and the other
      * allocation calls inside the loop) can trigger GC, and a
      * conservative scanner may miss pointers that the compiler keeps
      * only in registers.
@@ -546,9 +557,11 @@ void eval_special_register_vars(mino_state *S)
     gc_pin(placeholder);
     gc_pin(macro_kw);
     gc_pin(doc_kw);
+    gc_pin(arglists_kw);
     for (i = 0; i < k_public_form_docs_count; i++) {
         const char *name = k_public_form_docs[i].name;
         const char *doc  = k_public_form_docs[i].doc;
+        const char *arglists = k_public_form_docs[i].arglists;
         mino_val *var  = var_intern(S, "clojure.core", name);
         if (var == NULL) {
             continue;
@@ -558,20 +571,49 @@ void eval_special_register_vars(mino_state *S)
         /* :macro is synthesized from var->meta (overlaid on the def-site
          * map by synth_var_meta) since the placeholder root is not a
          * MINO_MACRO.  Include :doc when available so that
-         * (:doc (meta (resolve 'when))) returns the docstring directly. */
+         * (:doc (meta (resolve 'when))) returns the docstring directly,
+         * and :arglists (census-oracle shape) when the entry carries one. */
         {
+            mino_val *keys[3];
+            mino_val *vals[3];
+            size_t    nkeys = 0;
+            mino_val *al = NULL;
             mino_val *new_meta;
+            if (arglists != NULL) {
+                /* Data-only read of a committed table row; no shared
+                 * reader state needs saving (same class as the prim
+                 * table read in prim/install.c). */
+                const char *end = NULL;
+                al = mino_read(S, arglists, &end);
+                /* Committed table corrupt; no try frame to recover
+                 * through at sf_init time. */
+                if (al == NULL || *end != '\0') {
+                    fprintf(stderr,
+                            "special-form arglists parse error for %s\n",
+                            name);
+                    abort();
+                }
+                gc_pin(al);
+                keys[nkeys] = arglists_kw;
+                vals[nkeys] = al;
+                nkeys++;
+            }
+            keys[nkeys] = macro_kw;
+            vals[nkeys] = yes;
+            nkeys++;
             if (doc != NULL) {
                 mino_val *doc_str = mino_string(S, doc);
                 gc_pin(doc_str);
-                {
-                    mino_val *keys[2] = {macro_kw, doc_kw};
-                    mino_val *vals[2] = {yes,       doc_str};
-                    new_meta = mino_map(S, keys, vals, 2);
-                }
+                keys[nkeys] = doc_kw;
+                vals[nkeys] = doc_str;
+                nkeys++;
+                new_meta = mino_map(S, keys, vals, nkeys);
                 gc_unpin(1); /* doc_str */
             } else {
-                new_meta = mino_map(S, &macro_kw, &yes, 1);
+                new_meta = mino_map(S, keys, vals, nkeys);
+            }
+            if (al != NULL) {
+                gc_unpin(1); /* al */
             }
             gc_write_barrier(S, var, var->meta, new_meta);
             var->meta = new_meta;
@@ -580,5 +622,5 @@ void eval_special_register_vars(mino_state *S)
             meta_set(S, name, doc, strlen(doc), NULL);
         }
     }
-    gc_unpin(3); /* placeholder, macro_kw, doc_kw */
+    gc_unpin(4); /* placeholder, macro_kw, doc_kw, arglists_kw */
 }
