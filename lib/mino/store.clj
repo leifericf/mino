@@ -623,6 +623,32 @@
   (swap! conn->backend dissoc conn)
   nil)
 
+(defn- require-backend
+  "Returns the backend registered for conn, throwing a classified
+  ::no-backend error when none is. Durability ops route through the
+  seam (ADR 35); an unregistered conn is one that never came from open
+  or was closed, and publishing on it silently would bypass the
+  backend's durability contract."
+  [conn op]
+  (or (backend-for conn)
+      (throw
+        (ex-info (str "no backend registered for conn; cannot route "
+                      op " through the seam")
+                 {::no-backend {:op op}}))))
+
+(defn- backend-commit
+  "Publishes new-db on conn through the registered backend's :commit
+  op (ADR 35). The op owns the durable-append-before-publish ordering:
+  both built-in backends delegate to store-commit*, whose C edge
+  WAL-appends (fflush + fsync) before the in-memory publish on a
+  path-bearing conn and publishes plain on a pathless one, so the
+  routing is byte-identical to the direct store-commit* call it
+  replaced. tx-info nil means publish only (compact); a map is the WAL
+  line (transact, migrate). One registry lookup per call."
+  [conn new-db tx-info]
+  (let [backend (require-backend conn :commit)]
+    ((:commit backend) conn new-db tx-info)))
+
 ;; ---------------------------------------------------------------------------
 ;; Lifecycle
 ;; ---------------------------------------------------------------------------
@@ -886,11 +912,12 @@
   "Registers f to be called with {:db-before :db-after :tx-data} on
   each transact. key is used for unregistration. Returns nil.
 
-  Scope is the transaction stream only: `put`, `retract`, and
-  `transact` (which they delegate to) all fire f. The maintenance and
-  schema ops `compact` and `migrate` do NOT fire f -- they bypass the
-  tx log and publish directly via store-commit*. If you need to react
-  to a compact/migrate db change, poll `(db conn)` after the call.
+   Scope is the transaction stream only: `put`, `retract`, and
+   `transact` (which they delegate to) all fire f. The maintenance and
+   schema ops `compact` and `migrate` do NOT fire f -- they bypass the
+   tx log and publish through the backend :commit op with no listener
+   event. If you need to react to a compact/migrate db change, poll
+   `(db conn)` after the call.
   (The C-level `add-watch` does not cover stores either: stores are
   not in the watchable-get table, so store->watches is never populated.
   `listen`/`fire-listeners` is the only observer surface.)"
@@ -914,8 +941,10 @@
 (defn transact
   "Transacts facts against the store connection. Atomic: all-or-nothing.
   tx-data accepts any of the parse-tx-data forms, plus [:db/retractEntity eid].
-  Returns {:tx N :db-after db :tx-data [...]}. On a durable store, the
-  transaction is appended to the WAL before the in-memory publish."
+  Returns {:tx N :db-after db :tx-data [...]}. The publish routes
+  through the registered backend's :commit op (ADR 35): on a durable
+  store the transaction is appended to the WAL before the in-memory
+  publish, and a conn with no registered backend throws."
   [conn tx-data]
   (let [cur @conn
         tx-num (:tx cur)
@@ -925,7 +954,7 @@
         tx-facts (:tx-data result)
         new-db (dissoc result :tx-data)
         tx-info {:tx tx-num :instant instant :tx-data tx-data}]
-    (store-commit* conn new-db tx-info)
+    (backend-commit conn new-db tx-info)
     (fire-listeners conn {:db-before cur :db-after new-db :tx-data tx-facts})
     {:tx tx-num :db-after new-db :tx-data tx-facts}))
 
@@ -1222,8 +1251,9 @@
 
 (defn compact
   "Bounds the log of a durable or long-lived store by dropping old
-  facts while preserving the materialized view. Does not write to the
-  WAL — compaction is a maintenance operation; checkpoint afterwards to
+  facts while preserving the materialized view. Publishes through the
+  backend :commit op with no tx-info, so it does not write to the WAL;
+  compaction is a maintenance operation; checkpoint afterwards to
   persist the compacted state.
 
   listeners do NOT fire for compact (it bypasses the tx log); see
@@ -1233,16 +1263,17 @@
   With a keep-spec map:
     {:keep-last N}     keep the last N facts
     {:keep-since T}    keep facts at or after instant T"
-  ([conn]
-   (let [cur @conn]
-     (store-commit* conn {:entities (:entities cur)
-                          :log []
-                          :tx (:tx cur)
-                          :schema (get cur :schema {})
-                          :closed? (get cur :closed? false)
-                          :indexed-attrs (get cur :indexed-attrs #{})
-                          :indexes (get cur :indexes {})
-                          :history (get cur :history)})))
+   ([conn]
+    (let [cur @conn]
+      (backend-commit conn {:entities (:entities cur)
+                            :log []
+                            :tx (:tx cur)
+                            :schema (get cur :schema {})
+                            :closed? (get cur :closed? false)
+                            :indexed-attrs (get cur :indexed-attrs #{})
+                            :indexes (get cur :indexes {})
+                            :history (get cur :history)}
+                      nil)))
   ([conn keep-spec]
    (let [valid-last  (and (map? keep-spec)
                           (contains? keep-spec :keep-last)
@@ -1265,15 +1296,16 @@
                 (and (map? keep-spec) (:keep-since keep-spec))
                 (filter #(>= (:instant %) (:keep-since keep-spec)) log)
 
-                :else log)]
-     (store-commit* conn {:entities (:entities cur)
-                          :log (vec kept)
-                          :tx (:tx cur)
-                          :schema (get cur :schema {})
-                          :closed? (get cur :closed? false)
-                          :indexed-attrs (get cur :indexed-attrs #{})
-                          :indexes (get cur :indexes {})
-                          :history (get cur :history)}))))
+                 :else log)]
+      (backend-commit conn {:entities (:entities cur)
+                            :log (vec kept)
+                            :tx (:tx cur)
+                            :schema (get cur :schema {})
+                            :closed? (get cur :closed? false)
+                            :indexed-attrs (get cur :indexed-attrs #{})
+                            :indexes (get cur :indexes {})
+                            :history (get cur :history)}
+                      nil))))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema and migration
@@ -1299,8 +1331,9 @@
   Returns {:db-after new-db :violations [...] :tx N}.
   Throws ::migration-conflict when violations exist without :force.
 
-  listeners do NOT fire for migrate (it publishes via store-commit*,
-  bypassing the tx log); see `listen` for the scope contract."
+  listeners do NOT fire for migrate (it publishes via the backend
+  :commit op, bypassing the tx log); see `listen` for the scope
+  contract."
   ([conn new-schema] (migrate conn new-schema {}))
   ([conn new-schema opts]
    (let [cur @conn
@@ -1341,10 +1374,10 @@
          new-db (if (:data opts)
                   (:db-after (with new-db ((:data opts))))
                   new-db)
-         tx-num (:tx cur)
-         instant (store-clock* conn)]
-     (store-commit* conn new-db {:tx tx-num :instant instant :migration true})
-     {:db-after new-db :violations violations :tx tx-num})))
+          tx-num (:tx cur)
+          instant (store-clock* conn)]
+    (backend-commit conn new-db {:tx tx-num :instant instant :migration true})
+    {:db-after new-db :violations violations :tx tx-num})))
 
 ;; ---------------------------------------------------------------------------
 ;; Datalog query

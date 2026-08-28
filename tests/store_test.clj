@@ -2931,4 +2931,99 @@
       (store/close reopened)))
   (rm-rf store-test-dir))
 
+;; ---------------------------------------------------------------------------
+;; Durability routing (ADR 35)
+;; ---------------------------------------------------------------------------
+
+(deftest transact-commit-routes-through-the-memory-backend
+  ;; transact no longer calls store-commit* directly: the registered
+  ;; backend's :commit op owns the publish, once per transact, and put
+  ;; and retract delegate to transact so they route through the same
+  ;; op. The memory path publishes exactly as before.
+  (let [conn (store/open)
+        base (store/memory-backend)
+        calls (atom [])
+        wrapped (assoc base :commit
+                       (fn [c new-db tx-info]
+                         (swap! calls conj (:tx tx-info))
+                         ((:commit base) c new-db tx-info)))]
+    (store/register-on-open conn wrapped)
+    (store/transact conn [:db/add 1 :name "Alice"])
+    (store/put conn 2 :name "Bob")
+    (store/retract conn 1 :name)
+    (is (= [0 1 2] @calls)
+        "one :commit route per transact, put, and retract")
+    (is (= "Bob" (store/read (store/db conn) 2 :name))
+        "the published db value is in effect")
+    (store/close conn)))
+
+(deftest transact-commit-routes-one-wal-line-per-tx
+  ;; On a durable conn each transact routes through :commit and leaves
+  ;; exactly one WAL line, preserving ADR 11's append-before-publish
+  ;; ordering through the seam.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/route-wal.db")
+        conn (store/open path)
+        base (store/file-backend path)
+        calls (atom [])
+        wrapped (assoc base :commit
+                       (fn [c new-db tx-info]
+                         (swap! calls conj (:tx tx-info))
+                         ((:commit base) c new-db tx-info)))]
+    (store/register-on-open conn wrapped)
+    (store/transact conn [:db/add 1 :name "Alice"])
+    (store/transact conn [:db/add 2 :name "Bob"])
+    (is (= [0 1] @calls) "one :commit route per transact")
+    (is (= 2 (count ((:wal-entries base)))) "one WAL line per transact")
+    (store/close conn))
+  (rm-rf store-test-dir))
+
+(deftest compact-and-migrate-publish-through-backend-commit
+  ;; The maintenance publishes route through the same :commit op:
+  ;; compact passes no tx-info (no WAL line), migrate passes its
+  ;; :migration tx-info (one WAL line), matching the direct prim calls
+  ;; they replaced.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/route-maint.db")
+        conn (store/open path {:schema {:name {:type :string}}})
+        base (store/file-backend path)
+        calls (atom [])
+        wrapped (assoc base :commit
+                       (fn [c new-db tx-info]
+                         (swap! calls conj (cond
+                                             (nil? tx-info) :no-wal
+                                             (:migration tx-info) :migration
+                                             :else :tx))
+                         ((:commit base) c new-db tx-info)))]
+    (store/register-on-open conn wrapped)
+    (store/transact conn [:db/add 1 :name "Alice"])
+    (store/compact conn)
+    (store/migrate conn {:name {:type :string} :email {:type :string}})
+    (is (= [:tx :no-wal :migration] @calls)
+        "transact, compact, and migrate each route once through :commit")
+    (is (= 2 (count ((:wal-entries base))))
+        "compact adds no WAL line, migrate adds its migration line")
+    (is (= "Alice" (store/read (store/db conn) 1 :name))
+        "the maintenance publishes took effect")
+    (store/close conn))
+  (rm-rf store-test-dir))
+
+(deftest transact-on-unregistered-conn-throws
+  ;; The seam owns durability: a conn with no registered backend has
+  ;; no :commit op to route through, so transact throws a classified
+  ;; ::no-backend error instead of silently publishing.
+  (let [conn (store/open)]
+    (store/dissoc-on-close conn)
+    (let [e (try
+              (store/transact conn [:db/add 1 :a 1])
+              nil
+              (catch Throwable e e))]
+      (is (some? e) "transact without a registered backend throws")
+      (is (some? (re-find #"no-backend" (pr-str (ex-data e))))
+          "ex-data carries ::no-backend tag")
+      (is (empty? (:entities (store/db conn)))
+          "nothing was published"))))
+
 (run-tests-and-exit)
