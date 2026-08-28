@@ -183,6 +183,9 @@ static int append_print_chunk(mino_state *S, mino_val *v,
         src  = formatted->as.s.data;
         slen = formatted->as.s.len;
     }
+    /* A zero-length chunk never grows the buffer, so *buf can still
+     * be NULL; null-base pointer arithmetic is UB even at offset 0. */
+    if (slen == 0) return 0;
     {
         size_t need;
         if (!checked_add_sz(*len, slen, &need)) {
@@ -370,7 +373,11 @@ static mino_val *print_args_to_out(mino_state *S, mino_val *args,
                     cap = nc;
                 }
             }
-            memcpy(buf + len, formatted->as.s.data, formatted->as.s.len);
+            /* Empty form: buf can be NULL and null+0 is UB. */
+            if (formatted->as.s.len > 0) {
+                memcpy(buf + len, formatted->as.s.data,
+                       formatted->as.s.len);
+            }
             len += formatted->as.s.len;
         } else {
             if (append_print_chunk(S, v, &buf, &len, &cap, 0) < 0) {

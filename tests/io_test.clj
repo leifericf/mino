@@ -66,6 +66,13 @@
 (deftest print-str-no-newline
   (is (= "1 2 3" (print-str 1 2 3))))
 
+(deftest print-empty-string-emits-nothing
+  (is (= "" (with-out-str (print ""))))
+  (is (= nil (print ""))))
+
+(deftest print-str-empty-string-is-empty
+  (is (= "" (print-str ""))))
+
 (deftest println-str-trailing-newline
   (is (= "a b\n" (println-str "a" "b"))))
 
