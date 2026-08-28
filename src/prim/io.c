@@ -754,8 +754,7 @@ static mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
         mino_val *k = opts->as.cons.car;
         mino_val *v;
         if (!mino_is_cons(opts->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
-                "spit: options must be key/value pairs");
+            return prim_throw_dangling_key(S, k);
         }
         v    = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
