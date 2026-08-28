@@ -237,6 +237,32 @@ static mino_val *find_arity_clause(mino_state *S, mino_val *clauses,
  * evaluator's function-call path and by primitives (e.g. update) that
  * need to call back into user-defined code.
  */
+/* Build and set the shared "no matching arity" MAR002 diagnostic,
+ * naming the callee from the head of the in-progress form. */
+static void emit_no_matching_arity(mino_state *S, int argc,
+                                   const char *ctx_suffix)
+{
+    char              msg[256];
+    char              name_buf[128] = {0};
+    const mino_val *cur = mino_current_ctx(S)->eval_current_form;
+    /* Name the callee from the in-progress (callee args...) cons
+     * so the user sees which fn / macro mismatched. */
+    if (cur != NULL && mino_is_cons(cur)) {
+        mino_val *head = cur->as.cons.car;
+        if (head != NULL && mino_type_of(head) == MINO_SYMBOL
+            && head->as.s.len > 0
+            && head->as.s.len < sizeof(name_buf) - 4) {
+            snprintf(name_buf, sizeof(name_buf), " `%.*s`",
+                     (int)head->as.s.len, head->as.s.data);
+        }
+    }
+    snprintf(msg, sizeof(msg),
+             "no matching arity%s for %d args%s",
+             name_buf, argc, ctx_suffix);
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                  "eval/arity", "MAR002", msg);
+}
+
 /* dispatch_multi_arity -- when a fn was defined with multiple arity
  * clauses, fn->as.fn.params is NULL and fn->as.fn.body is a clause
  * list. Pick the clause matching the current argc, update *params and
@@ -251,29 +277,59 @@ static int dispatch_multi_arity(mino_state *S, mino_val *clauses,
     int         argc   = list_len(call_args);
     mino_val *clause = find_arity_clause(S, clauses, argc);
     if (clause == NULL) {
-        char              msg[256];
-        char              name_buf[128] = {0};
-        const mino_val *cur = mino_current_ctx(S)->eval_current_form;
-        /* Name the callee from the in-progress (callee args...) cons
-         * so the user sees which fn / macro mismatched. */
-        if (cur != NULL && mino_is_cons(cur)) {
-            mino_val *head = cur->as.cons.car;
-            if (head != NULL && mino_type_of(head) == MINO_SYMBOL
-                && head->as.s.len > 0
-                && head->as.s.len < sizeof(name_buf) - 4) {
-                snprintf(name_buf, sizeof(name_buf), " `%.*s`",
-                         (int)head->as.s.len, head->as.s.data);
-            }
-        }
-        snprintf(msg, sizeof(msg),
-                 "no matching arity%s for %d args%s",
-                 name_buf, argc, ctx_suffix);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "eval/arity", "MAR002", msg);
+        emit_no_matching_arity(S, argc, ctx_suffix);
         return -1;
     }
     *out_params = clause->as.cons.car;
     *out_body   = clause->as.cons.cdr;
+    return 0;
+}
+
+/* Count call args for the single-clause arity guard. Lazy spine tails
+ * are forced only while the count could still change the verdict, so
+ * an infinite tail never realizes just to be counted: past the fixed
+ * minimum a rest clause accepts and a fixed clause rejects without
+ * forcing. Returns -1 when a forced cell realized to an error (diag
+ * already set by the realization). */
+static int guard_count_args(mino_state *S, mino_val *args,
+                            int fixed, int has_rest)
+{
+    mino_val *cur = args;
+    int argc = 0;
+    for (;;) {
+        while (mino_is_cons(cur)) {
+            argc++;
+            if (has_rest && argc >= fixed) return argc;
+            cur = cur->as.cons.cdr;
+        }
+        if (!has_rest && argc > fixed) return argc;
+        if (cur != NULL && mino_type_of(cur) == MINO_LAZY
+            && (has_rest ? argc < fixed : argc <= fixed)) {
+            cur = lazy_force(S, cur);
+            if (cur == NULL) return -1;
+            continue;
+        }
+        return argc;
+    }
+}
+
+/* Single-clause arity guard for the tree-walk tier. The bc tier
+ * rejects wrong arities at clause selection (mino_bc_run) and
+ * multi-arity fns reject at dispatch_multi_arity; without this guard
+ * the tree-walk tier surfaced fixed-arity misses from the binder as
+ * syntax-class diagnostics and nil-filled variadic sub-minimum calls
+ * so the body ran on missing params. Returns 1 when the arity is
+ * acceptable, 0 with the MAR002 diagnostic set when not (or when arg
+ * counting itself failed). */
+static int single_clause_arity_ok(mino_state *S, mino_val *params,
+                                  mino_val *args)
+{
+    int has_rest = 0;
+    int fixed    = param_arity(params, &has_rest);
+    int argc     = guard_count_args(S, args, fixed, has_rest);
+    if (argc < 0) return 0;
+    if (argc >= fixed && (has_rest || argc == fixed)) return 1;
+    emit_no_matching_arity(S, argc, "");
     return 0;
 }
 
@@ -692,6 +748,12 @@ static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
          * the teardown join. On the embedder thread mino_tls_cancel_ptr
          * is NULL, so this is a single predicted-false branch. */
         if (iterated && !mino_bc_safepoint(S)) {
+            S->ns_vars.current_ns    = saved_ns;
+            S->ns_vars.fn_ambient_ns = saved_ambient;
+            return NULL; /* leave frame for trace */
+        }
+        if (mino_type_of(fn) == MINO_FN && cur_params != NULL
+            && !single_clause_arity_ok(S, cur_params, call_args)) {
             S->ns_vars.current_ns    = saved_ns;
             S->ns_vars.fn_ambient_ns = saved_ambient;
             return NULL; /* leave frame for trace */
