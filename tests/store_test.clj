@@ -2739,4 +2739,102 @@
         "listener fired exactly once (transact only, not compact/migrate)")
     (store/close conn)))
 
+;; ---------------------------------------------------------------------------
+;; Backend seam (ADR 35)
+;; ---------------------------------------------------------------------------
+
+(deftest memory-backend-shape
+  ;; The default backend carries the five contract ops as fns, tagged
+  ;; :kind :memory, and serves no segments.
+  (let [b (store/memory-backend)]
+    (is (= :memory (:kind b)))
+    (is (true? (store/backend? b)) "constructor output passes backend?")
+    (doseq [op [:initial :wal-entries :commit :checkpoint :close]]
+      (is (fn? (get b op)) (str "op " op " is a fn")))
+    (is (nil? ((:initial b))) "no snapshot segment")
+    (is (nil? ((:wal-entries b))) "no WAL segment")))
+
+(deftest memory-backend-commit-publishes
+  ;; :commit on a pathless conn is a plain publish: the new db value is
+  ;; in effect after the call, and :checkpoint stays a nil no-op.
+  (let [conn (store/open)
+        b (store/memory-backend)
+        db (assoc (store/db conn) :entities {1 {:name "a"}})]
+    (is (= db ((:commit b) conn db {:tx 0 :instant 0 :tx-data []}))
+        ":commit returns the published db")
+    (is (= db (store/db conn)) ":commit publishes the db value")
+    (is (nil? ((:checkpoint b) conn)) ":checkpoint is a no-op returning nil")
+    (store/close conn)))
+
+(deftest file-backend-shape
+  ;; The file backend is tagged :kind :file and reads its segments
+  ;; through the C prims: a fresh path yields no snapshot and no WAL.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/backend-shape.db")
+        b (store/file-backend path)]
+    (is (= :file (:kind b)))
+    (is (true? (store/backend? b)) "constructor output passes backend?")
+    (is (nil? ((:initial b))) "no snapshot at a fresh path")
+    (is (nil? ((:wal-entries b))) "no WAL at a fresh path"))
+  (rm-rf store-test-dir))
+
+(deftest file-backend-reads-written-segments
+  ;; A transact on a real durable conn leaves WAL bytes that the file
+  ;; backend's :wal-entries op parses back as tx-info.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/backend-segments.db")
+        conn (store/open path)
+        _ (store/transact conn {1 {:name "Alice"}})
+        entries ((:wal-entries (store/file-backend path)))]
+    (is (= 1 (count entries)) "one WAL entry after one transact")
+    (is (= 0 (:tx (first entries))) "entry carries the tx number")
+    (is (= {1 {:name "Alice"}} (:tx-data (first entries)))
+        "entry carries the original tx-data")
+    (store/close conn))
+  (rm-rf store-test-dir))
+
+(deftest backend?-rejects-malformed-backends
+  ;; Malformed backends throw classified ::invalid-backend errors: a
+  ;; non-map, a missing or non-keyword :kind, a missing op, a non-fn op.
+  (let [invalid (fn [x]
+                  (try
+                    (store/backend? x)
+                    nil
+                    (catch Throwable e e)))
+        e1 (invalid 42)
+        e2 (invalid {:initial (fn [] nil)})
+        e3 (invalid {:kind "memory"})
+        e4 (invalid {:kind :memory :initial (fn [] nil)})
+        e5 (invalid {:kind :memory :initial "not a fn"
+                     :wal-entries (fn [] nil)
+                     :commit (fn [conn new-db tx-info] new-db)
+                     :checkpoint (fn [conn] nil)
+                     :close (fn [conn] nil)})]
+    (is (every? some? [e1 e2 e3 e4 e5]) "each malformed shape throws")
+    (doseq [e [e1 e2 e3 e4 e5]]
+      (is (some? (re-find #"invalid-backend" (pr-str (ex-data e))))
+          "ex-data carries ::invalid-backend tag"))
+    (is (some? (re-find #"wal-entries" (pr-str (ex-data e4))))
+        "the missing-op error names the op")))
+
+(deftest backend-registry-round-trip
+  ;; Registration binds conn to backend, dissoc removes the binding,
+  ;; and a failed registration leaves no entry behind.
+  (let [conn (store/open)
+        b (store/memory-backend)]
+    (is (nil? (store/backend-for conn)) "fresh conn has no backend")
+    (is (nil? (store/register-on-open conn b)) "registration returns nil")
+    (is (= b (store/backend-for conn)) "registered backend reads back")
+    (is (nil? (store/dissoc-on-close conn)) "dissoc returns nil")
+    (is (nil? (store/backend-for conn)) "dissoc removes the binding")
+    (let [e (try
+              (store/register-on-open conn {:kind :memory})
+              nil
+              (catch Throwable e e))]
+      (is (some? e) "registering a malformed backend throws")
+      (is (nil? (store/backend-for conn)) "failed registration leaves no entry"))
+    (store/close conn)))
+
 (run-tests-and-exit)
