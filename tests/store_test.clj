@@ -3026,4 +3026,52 @@
       (is (empty? (:entities (store/db conn)))
           "nothing was published"))))
 
+(deftest checkpoint-routes-through-backend-checkpoint
+  ;; checkpoint routes through the registered backend's :checkpoint
+  ;; op; the durable effects (snapshot bytes, WAL delete) stay pinned
+  ;; unedited by the durability tests above.
+  (let [conn (store/open)
+        base (store/memory-backend)
+        calls (atom [])
+        wrapped (assoc base :checkpoint
+                       (fn [c]
+                         (swap! calls conj :route)
+                         ((:checkpoint base) c)))]
+    (store/register-on-open conn wrapped)
+    (is (nil? (store/checkpoint conn))
+        "checkpoint returns nil through the seam")
+    (is (= 1 (count @calls)) ":checkpoint routed once")
+    (store/close conn)))
+
+(deftest checkpoint-on-unregistered-conn-throws
+  ;; Like transact, checkpoint requires a registered backend: a conn
+  ;; with no entry has no :checkpoint op to route through.
+  (let [conn (store/open)]
+    (store/dissoc-on-close conn)
+    (let [e (try
+              (store/checkpoint conn)
+              nil
+              (catch Throwable e e))]
+      (is (some? e) "checkpoint without a registered backend throws")
+      (is (some? (re-find #"no-backend" (pr-str (ex-data e))))
+          "ex-data carries ::no-backend tag"))))
+
+(deftest close-routes-through-backend-close-and-deregisters
+  ;; close routes through the backend :close op and deregisters the
+  ;; backend alongside the listener registry; a second close finds no
+  ;; registered backend and stays the documented no-op.
+  (let [conn (store/open)
+        base (store/memory-backend)
+        calls (atom [])
+        wrapped (assoc base :close
+                       (fn [c]
+                         (swap! calls conj :route)
+                         ((:close base) c)))]
+    (store/register-on-open conn wrapped)
+    (store/close conn)
+    (is (= 1 (count @calls)) ":close routed once")
+    (is (nil? (store/backend-for conn)) "close deregisters the backend")
+    (is (nil? (store/close conn)) "second close is still a no-op")
+    (is (= 1 (count @calls)) "second close does not route again")))
+
 (run-tests-and-exit)

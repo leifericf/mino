@@ -697,13 +697,16 @@
      conn)))
 
 (defn close
-  "Flushes (if durable) and closes the store. Idempotent. Also clears
-  any listeners registered on conn so the process-global listener
-  registry does not retain the conn (or its listener closures) after
-  close."
+  "Flushes (if durable) and closes the store through the backend
+  :close op (ADR 35). Idempotent. Deregisters the backend alongside
+  any listeners registered on conn so the process-global registries
+  do not retain the conn (or its listener closures) after close; a
+  second close finds no registered backend and is a no-op."
   [conn]
   (swap! listener-registry dissoc conn)
-  (store-close* conn)
+  (when-let [backend (backend-for conn)]
+    (dissoc-on-close conn)
+    ((:close backend) conn))
   nil)
 
 (defn db
@@ -712,10 +715,14 @@
   @conn)
 
 (defn checkpoint
-  "Writes the db value to disk if the store is durable. No-op for an
-  in-memory store."
+  "Writes the db value to disk through the backend :checkpoint op
+  (ADR 35): the file backend's C edge writes the snapshot (0x00
+  version header + EDN via .tmp + rename + fsync) and deletes the
+  WAL; the memory backend no-ops. Throws ::no-backend for a conn with
+  no registered backend."
   [conn]
-  (store-checkpoint* conn)
+  (let [backend (require-backend conn :checkpoint)]
+    ((:checkpoint backend) conn))
   nil)
 
 (defn store?
