@@ -1,7 +1,9 @@
 # ADR 34: C-prim arglists
 
 Date: 2026-08-27
-Status: proposed (implementation starting)
+Status: accepted (implemented; measured startup unchanged at 10 ms,
+RSS delta bounded by roughly 300 metadata maps, below measurement
+noise)
 
 ## Context
 
