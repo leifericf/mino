@@ -832,16 +832,27 @@
            (= 'finally (first form)))))
 
 (defn go-parse-try
-  "Parse a try form into {:body-forms [...] :catch-sym sym :catch-body [...] :finally-body [...]}."
+  "Parse a try form into {:body-forms [...] :catch-class class
+   :catch-sym sym :catch-body [...] :finally-body [...]}. The catch
+   clause grammar mirrors the evaluator's (ADR 32): (catch Class e
+   body...) and (catch :kind e body...) are classed, (catch e body...)
+   is the bare catch-all. Two leading symbols read as classed even
+   when the first would also serve as a binding name."
   [form]
   (let [args (vec (rest form))
         body-forms (vec (take-while (complement go-try-clause?) args))
         rest-clauses (drop (count body-forms) args)
         catch-clause (first (filter (fn [c] (and (cons? c) (= 'catch (first c)))) rest-clauses))
-        finally-clause (first (filter (fn [c] (and (cons? c) (= 'finally (first c)))) rest-clauses))]
+        finally-clause (first (filter (fn [c] (and (cons? c) (= 'finally (first c)))) rest-clauses))
+        cargs   (when catch-clause (vec (rest catch-clause)))
+        classed (and (seq cargs)
+                     (or (keyword? (first cargs))
+                         (symbol? (get cargs 1))))
+        shift   (if classed 1 0)]
     {:body-forms body-forms
-     :catch-sym (when catch-clause (second catch-clause))
-     :catch-body (when catch-clause (vec (rest (rest catch-clause))))
+     :catch-class (when (and catch-clause classed) (first cargs))
+     :catch-sym (when catch-clause (get cargs shift))
+     :catch-body (when catch-clause (vec (drop (inc shift) cargs)))
      :finally-body (when finally-clause (vec (rest finally-clause)))}))
 
 (defn go-try-park?
@@ -1072,7 +1083,7 @@
 
             ;; Try with parks in body
             (go-try-park? stmt)
-            (let [{:keys [body-forms catch-sym catch-body finally-body]}
+            (let [{:keys [body-forms catch-class catch-sym catch-body finally-body]}
                     (go-parse-try stmt)
                   pre-state   {:body current :park nil
                                :use-val has-park :bind bind-sym}
@@ -1080,7 +1091,8 @@
                                 (first body-forms)
                                 (cons 'do body-forms))
                   sub-states  (go-transform inner-body result-ch loop-ctx)
-                  try-ctx     {:catch-sym (or catch-sym (gensym "e_"))
+                  try-ctx     {:catch-class catch-class
+                               :catch-sym (or catch-sym (gensym "e_"))
                                :catch-body (or catch-body ['nil])
                                :finally-body finally-body}
                   tagged      (mapv (fn [s] (assoc s :try-ctx try-ctx))
@@ -1251,7 +1263,8 @@
    in the catch handler (only on exception, not on normal park)."
   [expr state result-ch last-try?]
   (if-let [tc (:try-ctx state)]
-    (let [catch-sym    (:catch-sym tc)
+    (let [catch-class (:catch-class tc)
+          catch-sym    (:catch-sym tc)
           catch-body   (:catch-body tc)
           finally-body (:finally-body tc)
           catch-result (gensym "catch_r_")
@@ -1262,10 +1275,15 @@
                            (chan-close* ~result-ch))
           catch-handler (if (and finally-body (not last-try?))
                           `(do ~catch-core ~@(seq finally-body))
-                          catch-core)]
+                          catch-core)
+          ;; Re-emit the clause with its class and binding intact so the
+          ;; handler body sees the user's catch symbol in scope.
+          catch-clause  (if (some? catch-class)
+                          `(catch ~catch-class ~catch-sym ~catch-handler)
+                          `(catch ~catch-sym ~catch-handler))]
       (if (and finally-body last-try?)
-        `(try ~expr (catch ~catch-sym ~catch-handler) (finally ~@(seq finally-body)))
-        `(try ~expr (catch ~catch-sym ~catch-handler))))
+        `(try ~expr ~catch-clause (finally ~@(seq finally-body)))
+        `(try ~expr ~catch-clause)))
     expr))
 
 (defn go-emit-machine

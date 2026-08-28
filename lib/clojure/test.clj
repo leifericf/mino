@@ -617,7 +617,7 @@
                                 *testing-contexts* ()]
                         (try
                           (each-wrap tfn)
-                          (catch e
+                          (catch Throwable e
                             (inc-report-counter :error)
                             (when *report-counters*
                               (swap! *report-counters* update :failures

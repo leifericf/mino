@@ -232,6 +232,23 @@
                                 (+ (note-arg order :b 2) (a/<! ch)))))))
       (is (= [:a :b] @order)))))
 
+(deftest go-try-catch-binding-survives-park
+  ;; Regression: the go state-machine rewrite re-emitted each try
+  ;; state's catch clause as (catch <class> <handler>), dropping the
+  ;; exception binding, so a classed (catch Throwable e ...) whose
+  ;; handler referenced e failed with MNS001 "unbound symbol: e".
+  (testing "classed catch binding is visible in the handler after a park"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 42)
+      (is (= "caught:x"
+             (a/<!! (a/go (try (do (a/<! ch) (throw "x"))
+                               (catch Throwable e (str "caught:" (ex-data e))))))))))
+  (testing "bare catch binding still resolves"
+    (let [ch (a/chan 1)]
+      (a/>!! ch 42)
+      (is (= :caught (a/<!! (a/go (try (do (a/<! ch) (throw "x"))
+                                        (catch e :caught)))))))))
+
 (deftest timeout-channels-wake-blocking-takes
   (testing "blocking take on a timeout channel returns nil at deadline"
     (is (nil? (a/<!! (a/timeout 30)))))
