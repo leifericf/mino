@@ -140,15 +140,14 @@ $(BIN): $(HEADERS)
 # inline regex literals like `/\\/` look path-shaped and get
 # rewritten before the tool parses them. Reading the script from a
 # file keeps it off the command line entirely; -f's argument is the
-# file path, which path translation handles correctly.
+# file path, which path translation handles correctly. bundle.awk
+# writes the whole header, banner included, so its bytes match what
+# `gen-core-header` / `gen-stdlib-headers` emit for every entry.
 $(HEADERS): src/bundle.awk Makefile
 	@for pair in $(BUNDLED); do \
 	    sym=$${pair%%:*}; \
 	    src=$${pair##*:}; \
-	    out=src/$$sym.h; \
-	    printf 'static const char *%s_src =\n' "$$sym" > "$$out"; \
-	    awk -f src/bundle.awk "$$src" >> "$$out"; \
-	    printf '    ;\n' >> "$$out"; \
+	    awk -v sym="$$sym" -v src="$$src" -f src/bundle.awk "$$src" > "src/$$sym.h"; \
 	done
 
 clean:
