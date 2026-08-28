@@ -507,42 +507,168 @@
               {} entities))))
 
 ;; ---------------------------------------------------------------------------
+;; Backend seam (ADR 35)
+;; ---------------------------------------------------------------------------
+
+(def ^:private backend-ops
+  "The five contract ops every backend carries (ADR 35)."
+  [:initial :wal-entries :commit :checkpoint :close])
+
+(defn backend?
+  "Returns true when x is a valid backend: a map tagged with a :kind
+  keyword and carrying every contract op as a fn. Throws ex-info
+  tagged ::invalid-backend on a non-map, a missing or non-keyword
+  :kind, a missing op, or a non-fn op. Any keyword kind is valid;
+  :memory and :file are the built-ins, any other keyword names a
+  third-party backend."
+  [x]
+  (when-not (map? x)
+    (throw
+      (ex-info (str "backend must be a map of fns tagged :kind, got: "
+                    (pr-str x))
+               {::invalid-backend {:reason :not-a-map :got x}})))
+  (when-not (keyword? (:kind x))
+    (throw
+      (ex-info (str "backend :kind must be a keyword, got: "
+                    (pr-str (:kind x)))
+               {::invalid-backend {:reason :bad-kind :kind (:kind x)}})))
+  (doseq [op backend-ops]
+    (when-not (fn? (get x op))
+      (throw
+        (ex-info (str "backend is missing op " op " or the op is not a fn")
+                 {::invalid-backend {:reason :bad-op :op op}}))))
+  true)
+
+(defn memory-backend
+  "Returns the default in-memory backend (ADR 35): no segments, plain
+  publish on :commit, no-op :checkpoint and :close through the
+  pathless C prims."
+  []
+  (let [backend {:kind :memory
+                 :initial (fn [] nil)
+                 :wal-entries (fn [] nil)
+                 :commit (fn [conn new-db tx-info]
+                           (store-commit* conn new-db tx-info))
+                 :checkpoint (fn [conn] (store-checkpoint* conn))
+                 :close (fn [conn] (store-close* conn))}]
+    (backend? backend)
+    backend))
+
+(defn file-backend
+  "Returns a file backend at path (ADR 35). Each op delegates to the
+  C store prims, the native edge that owns fsync, atomic rename, and
+  EDN segment parsing; the on-disk format (ADR 11) is unchanged."
+  [path]
+  (let [backend {:kind :file
+                 :initial (fn [] (store-read-snapshot* path))
+                 :wal-entries (fn [] (store-read-wal* path))
+                 :commit (fn [conn new-db tx-info]
+                           (store-commit* conn new-db tx-info))
+                 :checkpoint (fn [conn] (store-checkpoint* conn))
+                 :close (fn [conn] (store-close* conn))}]
+    (backend? backend)
+    backend))
+
+(defn- resolve-backend
+  "Resolves the backend for open (ADR 35): a path selects the :file
+  backend at path, no path the :memory default. opts :backend
+  overrides with :memory, :file (which requires a path), or a prebuilt
+  backend map validated by backend?. Unusable values throw classified
+  ::invalid-backend errors. The backend owns segments only; the path
+  itself still flows to store-open* so the C handle and its commit
+  machinery are unchanged."
+  [path opts]
+  (let [given (:backend opts)]
+    (cond
+      (nil? given) (if path (file-backend path) (memory-backend))
+
+      (= given :memory) (memory-backend)
+
+      (= given :file)
+      (if path
+        (file-backend path)
+        (throw (ex-info "the :file backend requires a path string"
+                        {::invalid-backend {:reason :file-without-path}})))
+
+      (map? given) (do (backend? given) given)
+
+      :else
+      (throw (ex-info (str "no built-in backend " (pr-str given)
+                           "; expected :memory, :file, or a backend map")
+                      {::invalid-backend {:reason :unknown-backend
+                                          :backend given}})))))
+
+(def ^:private conn->backend
+  "conn to backend registry, the listener-registry pattern: open
+  registers, close deregisters, and a GC-finalized conn leaks its
+  entry exactly as it leaks listener entries (ADR 35)."
+  (atom {}))
+
+(defn register-on-open
+  "Binds conn to backend in the backend registry. Throws
+  ::invalid-backend when backend fails validation. Returns nil."
+  [conn backend]
+  (backend? backend)
+  (swap! conn->backend assoc conn backend)
+  nil)
+
+(defn backend-for
+  "Returns the backend registered for conn, or nil when none is."
+  [conn]
+  (get @conn->backend conn))
+
+(defn dissoc-on-close
+  "Removes conn's entry from the backend registry. Returns nil."
+  [conn]
+  (swap! conn->backend dissoc conn)
+  nil)
+
+;; ---------------------------------------------------------------------------
 ;; Lifecycle
 ;; ---------------------------------------------------------------------------
 
 (defn open
-  "Opens a store connection. With no args, opens an in-memory store.
-  With a path string, opens a durable store (reads snapshot + replays
-  WAL if files exist). The options map may carry:
+  "Opens a store connection on a backend (ADR 35). With no path
+  string, opens on the in-memory :memory backend; with a path, opens
+  on the :file backend at path (reads snapshot + replays WAL if files
+  exist). The options map may carry:
     :schema    map of attribute -> {:type :cardinality} spec
     :closed    when true, reject attributes not in :schema (default false)
     :indexes   set of attributes to maintain reverse indexes for
     :history   {:keep-last N} or {:keep-since T} for auto-compaction
+    :backend   :memory, :file, or a prebuilt backend map; overrides the
+               path-derived default (:file requires a path)
   Schema, indexes, and history are set at first open and stored in the
-  db value; on reopen the snapshot's values take precedence."
-  ([] (store-open* (empty-db) nil))
+  db value; on reopen the snapshot's values take precedence. The
+  backend supplies the segments, replay stays here, and the conn is
+  registered with its backend; the path still reaches store-open* so
+  the C handle keeps it."
+  ([] (open nil))
   ([path] (open path nil))
   ([path opts]
-   (let [schema (validate-schema (:schema opts))
-         snap-db (when path (store-read-snapshot* path))
+   (let [backend (resolve-backend path opts)
+         schema (validate-schema (:schema opts))
+         snap-db ((:initial backend))
          base (or snap-db
-                    (-> (empty-db schema (:closed opts))
-                        (assoc :indexed-attrs (set/union (or (:indexes opts) #{})
-                                                          (unique-attrs schema)))
-                        (assoc :history (:history opts))
-                        (assoc :entity-specs (:entity-specs opts))))
-          entries (when path (store-read-wal* path))
-          db (if (seq entries)
-               (let [snapshot-tx (:tx base)]
-                 (reduce (fn [d entry]
-                           (if (< (:tx entry) snapshot-tx)
-                             d
-                             (dissoc (apply-tx d (:tx entry) (:instant entry)
-                                       (:tx-data entry)) :tx-data)))
-                         base entries))
-               base)
-          db (maybe-compact-log db)]
-     (store-open* db path))))
+                  (-> (empty-db schema (:closed opts))
+                      (assoc :indexed-attrs (set/union (or (:indexes opts) #{})
+                                                        (unique-attrs schema)))
+                      (assoc :history (:history opts))
+                      (assoc :entity-specs (:entity-specs opts))))
+         entries ((:wal-entries backend))
+         db (if (seq entries)
+              (let [snapshot-tx (:tx base)]
+                (reduce (fn [d entry]
+                          (if (< (:tx entry) snapshot-tx)
+                            d
+                            (dissoc (apply-tx d (:tx entry) (:instant entry)
+                                      (:tx-data entry)) :tx-data)))
+                        base entries))
+              base)
+         db (maybe-compact-log db)
+         conn (store-open* db path)]
+     (register-on-open conn backend)
+     conn)))
 
 (defn close
   "Flushes (if durable) and closes the store. Idempotent. Also clears
@@ -784,94 +910,6 @@
   (let [listeners (get @listener-registry conn)]
     (doseq [[_ f] listeners]
       (f event))))
-
-;; ---------------------------------------------------------------------------
-;; Backend seam (ADR 35)
-;; ---------------------------------------------------------------------------
-
-(def ^:private backend-ops
-  "The five contract ops every backend carries (ADR 35)."
-  [:initial :wal-entries :commit :checkpoint :close])
-
-(defn backend?
-  "Returns true when x is a valid backend: a map tagged with a :kind
-  keyword and carrying every contract op as a fn. Throws ex-info
-  tagged ::invalid-backend on a non-map, a missing or non-keyword
-  :kind, a missing op, or a non-fn op. Any keyword kind is valid;
-  :memory and :file are the built-ins, any other keyword names a
-  third-party backend."
-  [x]
-  (when-not (map? x)
-    (throw
-      (ex-info (str "backend must be a map of fns tagged :kind, got: "
-                    (pr-str x))
-               {::invalid-backend {:reason :not-a-map :got x}})))
-  (when-not (keyword? (:kind x))
-    (throw
-      (ex-info (str "backend :kind must be a keyword, got: "
-                    (pr-str (:kind x)))
-               {::invalid-backend {:reason :bad-kind :kind (:kind x)}})))
-  (doseq [op backend-ops]
-    (when-not (fn? (get x op))
-      (throw
-        (ex-info (str "backend is missing op " op " or the op is not a fn")
-                 {::invalid-backend {:reason :bad-op :op op}}))))
-  true)
-
-(defn memory-backend
-  "Returns the default in-memory backend (ADR 35): no segments, plain
-  publish on :commit, no-op :checkpoint and :close through the
-  pathless C prims."
-  []
-  (let [backend {:kind :memory
-                 :initial (fn [] nil)
-                 :wal-entries (fn [] nil)
-                 :commit (fn [conn new-db tx-info]
-                           (store-commit* conn new-db tx-info))
-                 :checkpoint (fn [conn] (store-checkpoint* conn))
-                 :close (fn [conn] (store-close* conn))}]
-    (backend? backend)
-    backend))
-
-(defn file-backend
-  "Returns a file backend at path (ADR 35). Each op delegates to the
-  C store prims, the native edge that owns fsync, atomic rename, and
-  EDN segment parsing; the on-disk format (ADR 11) is unchanged."
-  [path]
-  (let [backend {:kind :file
-                 :initial (fn [] (store-read-snapshot* path))
-                 :wal-entries (fn [] (store-read-wal* path))
-                 :commit (fn [conn new-db tx-info]
-                           (store-commit* conn new-db tx-info))
-                 :checkpoint (fn [conn] (store-checkpoint* conn))
-                 :close (fn [conn] (store-close* conn))}]
-    (backend? backend)
-    backend))
-
-(def ^:private conn->backend
-  "conn to backend registry, the listener-registry pattern: open
-  registers, close deregisters, and a GC-finalized conn leaks its
-  entry exactly as it leaks listener entries (ADR 35)."
-  (atom {}))
-
-(defn register-on-open
-  "Binds conn to backend in the backend registry. Throws
-  ::invalid-backend when backend fails validation. Returns nil."
-  [conn backend]
-  (backend? backend)
-  (swap! conn->backend assoc conn backend)
-  nil)
-
-(defn backend-for
-  "Returns the backend registered for conn, or nil when none is."
-  [conn]
-  (get @conn->backend conn))
-
-(defn dissoc-on-close
-  "Removes conn's entry from the backend registry. Returns nil."
-  [conn]
-  (swap! conn->backend dissoc conn)
-  nil)
 
 (defn transact
   "Transacts facts against the store connection. Atomic: all-or-nothing.

@@ -2821,10 +2821,13 @@
 
 (deftest backend-registry-round-trip
   ;; Registration binds conn to backend, dissoc removes the binding,
-  ;; and a failed registration leaves no entry behind.
+  ;; and a failed registration leaves no entry behind. open seeds the
+  ;; registry with the resolved backend, so the round trip starts from
+  ;; the seeded entry.
   (let [conn (store/open)
         b (store/memory-backend)]
-    (is (nil? (store/backend-for conn)) "fresh conn has no backend")
+    (is (= :memory (:kind (store/backend-for conn)))
+        "open seeds the registry with the resolved backend")
     (is (nil? (store/register-on-open conn b)) "registration returns nil")
     (is (= b (store/backend-for conn)) "registered backend reads back")
     (is (nil? (store/dissoc-on-close conn)) "dissoc returns nil")
@@ -2836,5 +2839,96 @@
       (is (some? e) "registering a malformed backend throws")
       (is (nil? (store/backend-for conn)) "failed registration leaves no entry"))
     (store/close conn)))
+
+;; ---------------------------------------------------------------------------
+;; Backend-selected open (ADR 35)
+;; ---------------------------------------------------------------------------
+
+(deftest open-resolves-backends-from-arguments
+  ;; open selects its backend from its arguments: no path opens the
+  ;; :memory backend, a path opens the :file backend at that path, and
+  ;; the resolved backend is registered for the conn at open.
+  (let [mem0 (store/open)
+        mem1 (store/open nil)]
+    (is (= :memory (:kind (store/backend-for mem0)))
+        "(open) resolves the memory backend")
+    (is (= :memory (:kind (store/backend-for mem1)))
+        "(open nil) resolves the memory backend")
+    (store/close mem0)
+    (store/close mem1))
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/open-default.db")
+        conn (store/open path)]
+    (is (= :file (:kind (store/backend-for conn)))
+        "(open path) resolves the file backend at path")
+    (store/close conn))
+  (rm-rf store-test-dir))
+
+(deftest open-backend-option-overrides-the-default
+  ;; The :backend option overrides the path-derived default in both
+  ;; directions: :memory alongside a path, :file spelled out, and a
+  ;; prebuilt backend map each register as given.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [mem-path (str store-test-dir "/open-opt-memory.db")
+        mem-conn (store/open mem-path {:backend :memory})
+        file-path (str store-test-dir "/open-opt-file.db")
+        file-conn (store/open file-path {:backend :file})
+        built-path (str store-test-dir "/open-opt-built.db")
+        built-conn (store/open built-path {:backend (store/file-backend built-path)})]
+    (is (= :memory (:kind (store/backend-for mem-conn)))
+        ":backend :memory wins over a path")
+    (is (= :file (:kind (store/backend-for file-conn)))
+        ":backend :file resolves at the path")
+    (is (= :file (:kind (store/backend-for built-conn)))
+        "a prebuilt backend map registers as-is")
+    (store/close mem-conn)
+    (store/close file-conn)
+    (store/close built-conn))
+  (rm-rf store-test-dir))
+
+(deftest open-rejects-unusable-backends
+  ;; Values that are neither a built-in backend keyword nor a valid
+  ;; backend map throw classified ::invalid-backend errors from open
+  ;; before any conn is created.
+  (let [rejected (fn [opts]
+                   (try
+                     (store/open nil opts)
+                     nil
+                     (catch Throwable e e)))
+        e1 (rejected {:backend 42})
+        e2 (rejected {:backend {:kind :memory}})
+        e3 (rejected {:backend :sqlite})
+        e4 (rejected {:backend :file})]
+    (is (every? some? [e1 e2 e3 e4])
+        "each unusable value throws")
+    (doseq [e [e1 e2 e3 e4]]
+      (is (some? (re-find #"invalid-backend" (pr-str (ex-data e))))
+          "ex-data carries ::invalid-backend tag"))
+    (is (some? (re-find #"file-without-path" (pr-str (ex-data e4))))
+        "the :file error names the missing-path reason")))
+
+(deftest open-routing-preserves-reopen-behavior
+  ;; The rerouted open keeps its behavior: a durable store's segments
+  ;; still replay on reopen through the backend, and the reopened conn
+  ;; binds the file backend. The unedited durability tests above pin
+  ;; the rest of the surface.
+  (rm-rf store-test-dir)
+  (mkdir-p store-test-dir)
+  (let [path (str store-test-dir "/open-reopen.db")
+        conn (store/open path {:schema {:name {:type :string}}})]
+    (store/transact conn {1 {:name "Alice"}})
+    (store/checkpoint conn)
+    (store/close conn)
+    (let [reopened (store/open path)
+          db (store/db reopened)]
+      (is (= "Alice" (store/read db 1 :name))
+          "the snapshot replays through the seam")
+      (is (= 1 (:tx db)) "the tx counter survives the reopen")
+      (is (= :file (:kind (store/backend-for reopened)))
+          "the reopened conn carries the file backend")
+      (store/close reopened)))
+  (rm-rf store-test-dir))
 
 (run-tests-and-exit)
