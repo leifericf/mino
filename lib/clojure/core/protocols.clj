@@ -38,8 +38,8 @@
 (defprotocol InternalReduce
   "Protocol for seq types that can provide their own reduction
   strategy. The default walks the seq with the built-in reduction."
-  (internal-reduce [s f start]))
+  (internal-reduce [seq f start]))
 
 (extend-type :default InternalReduce
-  (internal-reduce [s f start]
-    (clojure.core/internal-reduce f start s)))
+  (internal-reduce [seq f start]
+    (clojure.core/internal-reduce f start seq)))

@@ -1,5 +1,6 @@
 (ns tools.gen-arglists
   (:require [clojure.edn :as edn]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
 ;; Regenerate src/prim/arglists_data.h, the committed install-time
@@ -19,11 +20,29 @@
 ;; Surface path resolves from the first CLI arg, else $CENSUS_SURFACE,
 ;; else the default census checkout below. Run from the repo root; the
 ;; output path is relative.
+;;
+;; Report mode prints the CURRENT divergences instead of emitting the
+;; header:
+;;
+;;   bb tools/gen_arglists.clj --report-only [path-to-surface.edn]
+;;
+;; The mino binary is probed one-shot (a small script it evaluates,
+;; printing the live ns-publics arglists as EDN, mirroring the census
+;; capture) and every oracle var with :arglists is classified as
+;; exact, name-diff (same arity shape, different parameter names; the
+;; rename targets), shape-diff (documented mino-true versus genuine
+;; gap), bare-var, or var-absent. Exit 1 when name-diffs remain, so a
+;; lane can gate on zero. Binary resolution: $MINO_BIN, else ./mino,
+;; else PATH; rebuild first after core.clj or lib/ changes.
 
 (def default-surface "/Users/leif/Code/clojure-census/clojure/1.12.4-surface.edn")
 
+(def cli-args (remove #{"--report-only"} *command-line-args*))
+
+(def report-only? (boolean (some #{"--report-only"} *command-line-args*)))
+
 (def surface-path
-  (or (first *command-line-args*)
+  (or (first cli-args)
       (System/getenv "CENSUS_SURFACE")
       default-surface))
 
@@ -414,6 +433,170 @@
                        (:vars nsdef))))
         (:namespaces surface)))
 
+;;;; Report mode =====================================================
+
+;; Shapes with a documented divergence: the mino-true prim overrides
+;; plus the lib-alias overrides (both carry :reason). Every other
+;; shape mismatch is a genuine gap the report surfaces but no slice
+;; has dispositioned.
+(def documented-shape-divergences
+  (into {}
+        (mapcat (fn [m] (map (fn [[k v]] [k (:reason v)])
+                              (filter (fn [[_ v]] (:reason v)) m))))
+        [mino-true lib-aliases]))
+
+(defn mino-bin []
+  (or (System/getenv "MINO_BIN")
+      (when (.exists (java.io.File. "mino")) "./mino")
+      "mino"))
+
+(defn strip-non-edn-prefix
+  "Skip any text a host prints before the first EDN collection."
+  [s]
+  (let [idx (str/index-of s "{")]
+    (if (pos? idx) (subs s idx) s)))
+
+(def probe-form-template
+  '(do
+     (def probe-out (atom {}))
+     (doseq [n probe-nss]
+       (try (require n)
+            (let [the-ns (find-ns n)]
+              (when the-ns
+                (swap! probe-out assoc n
+                       (into {} (map (fn [e] [(key e)
+                                               (:arglists (meta (val e)))])
+                                     (ns-publics the-ns))))))
+            (catch err
+              (binding [*out* *err*]
+                (println "; report probe: could not require" n)))))
+     (prn @probe-out)))
+
+(defn probe-script
+  "The one-shot introspection script the binary evaluates: require
+  every oracle namespace best-effort, print one EDN map of ns to
+  var-name to its live :arglists (nil when bare). Diagnostics go to
+  stderr only. mino's catch binds a single symbol. The body rides a
+  quoted template so a paren slip breaks the tool load, not the run."
+  [nss]
+  (str "(def probe-nss " (pr-str (list 'quote (vec nss))) ")\n"
+       (pr-str probe-form-template)))
+
+(defn probe-current-arglists
+  "Run the binary over the probe script and parse the printed EDN."
+  [bin nss]
+  (let [script (java.io.File.
+                (str (System/getProperty "java.io.tmpdir")
+                     "/mino_gen_arglists_probe.clj"))
+        _      (spit script (probe-script nss))
+        {:keys [exit out err]} (shell/sh bin (str script))]
+    (when-not (zero? exit)
+      (binding [*out* *err*]
+        (println "probe failed (exit" (str exit ")") "stderr:" err))
+      (System/exit 2))
+    (edn/read-string (strip-non-edn-prefix out))))
+
+(defn norm-arglists [al]
+  (when al (mapv vec al)))
+
+(defn clause-shape
+  "One arglist clause as :& / :sym / :form per element; destructure
+  forms collapse to :form."
+  [clause]
+  (mapv (fn [f] (cond (and (symbol? f) (= '& f)) :&
+                      (symbol? f) :sym
+                      :else :form))
+        clause))
+
+(defn pure-name-diff?
+  "True when oracle and mino arglists agree on clause count, order,
+  length, & placement, and every destructure form, and differ only in
+  plain parameter names."
+  [o m]
+  (and (= (count o) (count m))
+       (every? (fn [[oc mc]]
+                 (and (= (count oc) (count mc))
+                      (= (clause-shape oc) (clause-shape mc))
+                      (every? (fn [[of mf]]
+                                (or (symbol? of)
+                                    (and (not (symbol? of)) (= of mf))))
+                              (map vector oc mc))))
+               (map vector o m))))
+
+(defn classify-var
+  [{:keys [oracle mino var-exists]}]
+  (cond
+    (nil? mino)                        (if var-exists :bare-var :var-absent)
+    (= (norm-arglists oracle)
+       (norm-arglists mino))           :exact
+    (pure-name-diff? oracle mino)      :name-diff
+    :else                              :shape))
+
+(defn report-main []
+  (let [surface   (edn/read-string (slurp surface-path))
+        nss       (sort (keys (:namespaces surface)))
+        bin       (mino-bin)
+        current   (probe-current-arglists bin nss)
+        rows      (for [[ns nsd] (:namespaces surface)
+                        [nm info] (:vars nsd)
+                        :when (:arglists info)
+                        :let [inner (get current ns)]]
+                    {:id         (str ns "/" nm)
+                     :ns         ns
+                     :oracle     (:arglists info)
+                     :mino       (get inner nm)
+                     :var-exists (contains? inner nm)})
+        by-class  (group-by classify-var rows)
+        count-of  (fn [k] (count (get by-class k [])))
+        name-diff (sort-by :id (by-class :name-diff))
+        shape     (sort-by :id (by-class :shape))
+        documented (filter (fn [r] (contains? documented-shape-divergences (:id r))) shape)
+        genuine    (remove (fn [r] (contains? documented-shape-divergences (:id r))) shape)]
+    (println "mino arglists report")
+    (println "  surface:" surface-path)
+    (println "  binary: " bin)
+    (println "  oracle vars with :arglists:" (count rows))
+    (println "  exact:     " (count-of :exact))
+    (println "  name-diff: " (count-of :name-diff) "(rename targets)")
+    (println "  shape-diff:" (count-of :shape)
+             "(" (count documented) "documented mino-true,"
+             (count genuine) "genuine gaps)")
+    (println "  bare-var:  " (count-of :bare-var))
+    (println "  var-absent:" (count-of :var-absent))
+    (when (seq name-diff)
+      (println)
+      (println "-- name diffs (rename params to oracle names) --")
+      (doseq [r name-diff]
+        (println (:id r))
+        (println "  mino:  " (pr-str (:mino r)))
+        (println "  oracle:" (pr-str (:oracle r)))))
+    (when (seq shape)
+      (println)
+      (println "-- shape diffs --")
+      (doseq [[label rs] [["documented mino-true" documented]
+                          ["genuine gaps" genuine]]]
+        (doseq [r rs]
+          (println "[" label "]" (:id r))
+          (println "  mino:  " (pr-str (:mino r)))
+          (println "  oracle:" (pr-str (:oracle r)))
+          (when-let [reason (get documented-shape-divergences (:id r))]
+            (println "  reason:" reason))))
+      (println))
+    (when-let [absent (seq (by-class :var-absent))]
+      (println "-- vars absent from mino:" (count absent) "--")
+      (doseq [r (sort-by :id absent)]
+        (print (:id r) " "))
+      (println))
+    (when-let [bare (seq (by-class :bare-var))]
+      (println "-- vars present but bare:" (count bare) "--")
+      (doseq [r (sort-by :id bare)]
+        (println (:id r))))
+    (when (pos? (count-of :name-diff))
+      (binding [*out* *err*]
+        (println "name diffs remain:" (count-of :name-diff)))
+      (System/exit 1))
+    (println "name diffs: 0")))
+
 (defn -main []
   (let [vars    (oracle-vars (edn/read-string (slurp surface-path)))
         emitted (into emit-list (concat lax-prims (keys mino-true)))
@@ -495,4 +678,6 @@
                "oracle,"
                (count (filter :reason (vals lib-aliases))) "mino-true)"))))
 
-(-main)
+(if report-only?
+  (report-main)
+  (-main))

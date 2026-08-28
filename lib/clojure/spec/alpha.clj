@@ -63,7 +63,7 @@
 
 (def invalid ::invalid)
 
-(defn invalid? [v] (= v ::invalid))
+(defn invalid? [ret] (= ret ::invalid))
 
 (defn registry [] @registry-ref)
 
@@ -169,17 +169,17 @@
   "Coerce x to a spec value: spec maps pass through, registered
   keywords resolve, anything callable as a predicate is promoted to a
   pred spec.  The binary arity uses form as the promoted description."
-  ([x] (as-spec x))
-  ([x form]
+  ([_] (as-spec _))
+  ([_ form]
    (cond
-     (spec-map? x)          x
-     (and (keyword? x)
-          (get @registry-ref x))
-                            (get @registry-ref x)
-     (ifn? x)               (pred-spec form x)
+     (spec-map? _)          _
+     (and (keyword? _)
+          (get @registry-ref _))
+                            (get @registry-ref _)
+     (ifn? _)               (pred-spec form _)
      :else                  (throw (ex-info (str "Unable to coerce to spec: "
-                                                 (pr-str x))
-                                            {:spec x})))))
+                                                 (pr-str _))
+                                            {:spec _})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public conform / valid? / explain entry points.
@@ -202,8 +202,8 @@
   conforms to spec and conforms to it back to y.  For specs without
   an inverse (registered :clojure.spec.alpha/conformer specs without
   an :unform key), unform returns y unchanged."
-  [spec y]
-  (unform* (as-spec spec) y))
+  [spec x]
+  (unform* (as-spec spec) x))
 
 (defn explain-data*
   "Lower-level explain entry point: run explain* with the given path,
@@ -283,11 +283,11 @@
 (defn form
   "Return the form of the spec, or :clojure.spec.alpha/unknown if x is
   not a registered spec."
-  [x]
+  [spec]
   (cond
-    (keyword? x)             (when-let [s (get @registry-ref x)]
+    (keyword? spec)             (when-let [s (get @registry-ref spec)]
                                (or (::form s) ::unknown))
-    (and (map? x) (::form x)) (::form x)
+    (and (map? spec) (::form spec)) (::form spec)
     :else                    ::unknown))
 
 (defn abbrev
@@ -975,10 +975,10 @@
                             (get @registry-ref sp)
     :else                   nil))
 
-(defn cat-impl [keys forms specs]
+(defn cat-impl [ks ps forms]
   {::kind ::regex ::regex true ::op ::cat
-   ::form (cons 'clojure.spec.alpha/cat (interleave keys forms))
-   ::keys keys ::forms forms ::specs specs})
+   ::form (cons 'clojure.spec.alpha/cat (interleave ks ps))
+   ::keys ks ::forms ps ::specs forms})
 
 (defn rep-impl [op form spec]
   {::kind ::regex ::regex true ::op op
@@ -990,33 +990,33 @@
 (defn rep+impl
   "Build a + regex spec: one or more occurrences of pred.  Callers
   normally use the + macro."
-  [form pred]
-  (rep-impl ::+ form pred))
+  [form p]
+  (rep-impl ::+ form p))
 
 (defn maybe-impl
   "Build a ? regex spec: zero or one occurrence of pred.  Callers
   normally use the ? macro.  Note the canonical argument order: pred
   first, form second."
-  [pred form]
-  (rep-impl ::? form pred))
+  [p form]
+  (rep-impl ::? form p))
 
-(defn alt-impl [keys forms specs]
+(defn alt-impl [ks ps forms]
   {::kind ::regex ::regex true ::op ::alt
-   ::form (cons 'clojure.spec.alpha/alt (interleave keys forms))
-   ::keys keys ::forms forms ::specs specs})
+   ::form (cons 'clojure.spec.alpha/alt (interleave ks ps))
+   ::keys ks ::forms ps ::specs forms})
 
 (defn amp-impl
   "Build an ::amp regex spec: re-spec is consumed normally; the
   conformed sequence is then threaded through each pred as a spec
   (see the ::amp branch of re-consume).  Any ::invalid step yields
   ::invalid for the whole consume."
-  [re-form pred-forms re-spec pred-fns]
+  [re re-form preds pred-forms]
   {::kind ::regex ::regex true ::op ::amp
-   ::form (cons 'clojure.spec.alpha/& (cons re-form pred-forms))
-   ::re-form    re-form
-   ::pred-forms pred-forms
-   ::re         re-spec
-   ::preds      pred-fns})
+   ::form (cons 'clojure.spec.alpha/& (cons re re-form))
+   ::re-form    re
+   ::pred-forms re-form
+   ::re         preds
+   ::preds      pred-forms})
 
 (declare re-conform re-consume re-explain)
 
@@ -1537,7 +1537,7 @@
   honoring an attached with-gen generator. path and rmap are accepted
   for the canonical signature; recursion limiting arrives with the
   dynamic-var wave."
-  [spec overrides _path _rmap]
+  [spec overrides path rmap]
   (if-let [gfn (and (map? spec) (::gen spec))]
     (gfn)
     (gen spec overrides)))
@@ -1862,8 +1862,8 @@
 (defn with-gen*
   "Protocol-shaped with-gen: return a copy of the spec value carrying
   gen-fn as its generator."
-  [spec gen-fn]
-  (assoc (as-spec spec) ::gen gen-fn))
+  [spec gfn]
+  (assoc (as-spec spec) ::gen gfn))
 
 (defn with-gen
   "Return a copy of spec that uses gen-fn as its generator. spec may
@@ -1897,13 +1897,13 @@
 (defmacro and
   "Compose specs left to right; each receives the conformed value of
   the previous."
-  [& forms]
-  `(clojure.spec.alpha/and-spec-impl '~(map res forms) ~(vec forms)))
+  [& pred-forms]
+  `(clojure.spec.alpha/and-spec-impl '~(map res pred-forms) ~(vec pred-forms)))
 
 (defmacro or
   "Branches with named tags; the first match wins."
-  [& key-pred-pairs]
-  (let [pairs (partition 2 key-pred-pairs)
+  [& key-pred-forms]
+  (let [pairs (partition 2 key-pred-forms)
         keys  (mapv first pairs)
         forms (mapv second pairs)]
     `(clojure.spec.alpha/or-spec-impl '~keys '~(map res forms) ~forms)))
@@ -1924,10 +1924,10 @@
 
 (defmacro map-of
   "Validate a map of key-spec to val-spec."
-  [k-pred v-pred & opts]
+  [kpred vpred & opts]
   (let [opts-map (apply hash-map opts)]
-    `(clojure.spec.alpha/map-of-impl '~(res k-pred) '~(res v-pred)
-                                     ~k-pred ~v-pred ~opts-map)))
+    `(clojure.spec.alpha/map-of-impl '~(res kpred) '~(res vpred)
+                                     ~kpred ~vpred ~opts-map)))
 
 (defmacro tuple
   "Validate a fixed-length, position-indexed vector."
@@ -1941,31 +1941,31 @@
 
 (defmacro cat
   "Sequence of named tagged elements."
-  [& key-pred-pairs]
-  (let [pairs (partition 2 key-pred-pairs)
+  [& key-pred-forms]
+  (let [pairs (partition 2 key-pred-forms)
         keys  (mapv first pairs)
         forms (mapv second pairs)]
     `(clojure.spec.alpha/cat-impl '~keys '~(map res forms) ~forms)))
 
 (defmacro *
   "Zero or more occurrences of pred."
-  [pred]
-  `(clojure.spec.alpha/rep-impl :clojure.spec.alpha/* '~(res pred) ~pred))
+  [pred-form]
+  `(clojure.spec.alpha/rep-impl :clojure.spec.alpha/* '~(res pred-form) ~pred-form))
 
 (defmacro +
   "One or more occurrences of pred."
-  [pred]
-  `(clojure.spec.alpha/rep+impl '~(res pred) ~pred))
+  [pred-form]
+  `(clojure.spec.alpha/rep+impl '~(res pred-form) ~pred-form))
 
 (defmacro ?
   "Zero or one occurrence of pred."
-  [pred]
-  `(clojure.spec.alpha/maybe-impl ~pred '~(res pred)))
+  [pred-form]
+  `(clojure.spec.alpha/maybe-impl ~pred-form '~(res pred-form)))
 
 (defmacro alt
   "Alternation: branches with named tags, single-element."
-  [& key-pred-pairs]
-  (let [pairs (partition 2 key-pred-pairs)
+  [& key-pred-forms]
+  (let [pairs (partition 2 key-pred-forms)
         keys  (mapv first pairs)
         forms (mapv second pairs)]
     `(clojure.spec.alpha/alt-impl '~keys '~(map res forms) ~forms)))
@@ -1995,8 +1995,8 @@
 (defmacro fdef
   "Register a function spec under the qualified symbol of fn-sym.
   Options: :args, :ret, :fn (each a spec form)."
-  [fn-sym & opts]
-  (let [opts-map (apply hash-map opts)
+  [fn-sym & specs]
+  (let [opts-map (apply hash-map specs)
         args     (:args opts-map)
         ret      (:ret  opts-map)
         fn-spec  (get opts-map :fn)
@@ -2045,18 +2045,18 @@
 (defmacro keys*
   "Like keys but produces a regex spec that matches inline key/value
   pairs in a sequence.  Conforms to a map."
-  [& opts]
-  (let [opts-map (apply hash-map opts)]
+  [& kspecs]
+  (let [opts-map (apply hash-map kspecs)]
     `(clojure.spec.alpha/keys*-impl
-       (clojure.spec.alpha/keys-impl '~opts ~opts-map))))
+       (clojure.spec.alpha/keys-impl '~kspecs ~opts-map))))
 
 (defmacro merge
   "Conjunction of map specs.  x must conform to every branch; the
   conformed maps are merged left to right."
-  [& specs]
+  [& pred-forms]
   `(clojure.spec.alpha/merge-spec-impl
-     '~(mapv res specs)
-     ~(vec specs)
+     '~(mapv res pred-forms)
+     ~(vec pred-forms)
      nil))
 
 (defmacro multi-spec

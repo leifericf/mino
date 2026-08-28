@@ -335,16 +335,16 @@
 ;; as a bare unqualified symbol in the binding form.  Syntax-quote would
 ;; qualify it to clojure.test/*testing-contexts*, but mino's dyn_lookup
 ;; searches by bare name and would miss the qualified binding.
-(defmacro testing [desc & body]
-  (list 'binding ['*testing-contexts* (list 'cons desc '*testing-contexts*)]
+(defmacro testing [string & body]
+  (list 'binding ['*testing-contexts* (list 'cons string '*testing-contexts*)]
         (cons 'do body)))
 
-(defmacro are [bindings expr & args]
-  (let [n     (count bindings)
+(defmacro are [argv expr & args]
+  (let [n     (count argv)
         rows  (partition n args)
         tests (apply list
                 (map (fn [row]
-                       (let [smap (zipmap bindings row)]
+                       (let [smap (zipmap argv row)]
                          `(is ~(postwalk-replace smap expr))))
                      rows))]
     `(do ~@tests)))
@@ -354,28 +354,28 @@
 ;; deftest creates a public var whose value is a fn that calls test-var
 ;; on itself, and whose :test metadata holds the test body fn.
 ;; It also registers the test in tests-registry for run-tests-and-exit.
-(defmacro deftest [tname & body]
+(defmacro deftest [name & body]
   (when *load-tests*
     `(do
-       (def ~tname (fn [] (test-var (var ~tname))))
-       (alter-meta! (var ~tname) assoc :test (fn [] ~@body))
+       (def ~name (fn [] (test-var (var ~name))))
+       (alter-meta! (var ~name) assoc :test (fn [] ~@body))
        (swap! tests-registry conj
-              {:name (name '~tname)
+              {:name (name '~name)
                :ns   (str *ns*)
-               :fn   (:test (meta (var ~tname)))}))))
+               :fn   (:test (meta (var ~name)))}))))
 
 ;; deftest- is like deftest but marks the var private.
-(defmacro deftest- [tname & body]
+(defmacro deftest- [name & body]
   (when *load-tests*
     `(do
-       (def ~tname (fn [] (test-var (var ~tname))))
-       (alter-meta! (var ~tname) assoc
+       (def ~name (fn [] (test-var (var ~name))))
+       (alter-meta! (var ~name) assoc
                     :test (fn [] ~@body)
                     :private true)
        (swap! tests-registry conj
-              {:name (name '~tname)
+              {:name (name '~name)
                :ns   (str *ns*)
-               :fn   (:test (meta (var ~tname)))}))))
+               :fn   (:test (meta (var ~name)))}))))
 
 ;; with-test evaluates the definition form and attaches a :test fn.
 ;; When *load-tests* is false, only the definition is evaluated.

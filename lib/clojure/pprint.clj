@@ -424,8 +424,8 @@
   "Returns a pretty-printing writer wrapping base-writer, or a default
   output sink when base-writer is nil. The result is usable as *out* for
   write-out."
-  [base-writer]
-  (or base-writer :mino/stdout))
+  [writer]
+  (or writer :mino/stdout))
 
 (defn fresh-line
   "Emit a newline only when output is not already at the start of a line.

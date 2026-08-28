@@ -45,11 +45,11 @@
       (str (prim-upper-case (subs s 0 1))
            (prim-lower-case (subs s 1))))))
 
-(defn starts-with? [s prefix]
-  (prim-starts-with? (as-str s) prefix))
+(defn starts-with? [s substr]
+  (prim-starts-with? (as-str s) substr))
 
-(defn ends-with? [s suffix]
-  (prim-ends-with? (as-str s) suffix))
+(defn ends-with? [s substr]
+  (prim-ends-with? (as-str s) substr))
 
 (defn escape [s cmap]
   (let [s (assert-string s)]

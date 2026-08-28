@@ -204,8 +204,8 @@
    `inst?` recognises it; the map content itself stays free of
    marker keys so equality with user-constructed maps of the same
    shape isn't accidentally broken."
-  [s]
-  (with-meta (validated (parse-timestamp s))
+  [cs]
+  (with-meta (validated (parse-timestamp cs))
              {:mino/instant true}))
 
 (defn inst?
