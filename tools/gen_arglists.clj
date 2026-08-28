@@ -9,6 +9,11 @@
 ;; sources. The script runs only when the oracle or the emit lists
 ;; change; the Makefile never invokes it.
 ;;
+;; The 2026-08-28 extension covers the namespaces beyond
+;; clojure.core/string/repl: no C prims exist in them, so their bare
+;; vars (the def-alias re-exports in lib/) attach at their def sites
+;; and are recorded here only as the lib-alias class.
+;;
 ;;   bb tools/gen_arglists.clj [path-to-surface.edn]
 ;;
 ;; Surface path resolves from the first CLI arg, else $CENSUS_SURFACE,
@@ -369,9 +374,33 @@
    {:arglists '([f])
     :reason "prim_slurp accepts exactly one path argument; the opts tail is unimplemented"}
 
-   "clojure.core/with-bindings*"
-   {:arglists '([binding-map f])
-    :reason "prim_with_bindings_star accepts exactly (binding-map f); the variadic args tail is unimplemented"}})
+    "clojure.core/with-bindings*"
+    {:arglists '([binding-map f])
+     :reason "prim_with_bindings_star accepts exactly (binding-map f); the variadic args tail is unimplemented"}})
+
+;; Lib def-alias re-exports: plain (def name clojure.core/name) forms
+;; in lib/ whose vars were bare while the oracle carries arglists
+;; (2026-08-28 probe). No prim table installs into their namespaces,
+;; so the table cannot attach them; the shapes ride def metadata at
+;; each alias site (the array-map precedent in core.clj), preserving
+;; fn identity with the core twins. Entries without :reason are frozen
+;; oracle-verbatim and must stay equal to the oracle arglists; a
+;; :reason marks a mino-true override whose oracle arities the alias
+;; target rejects.
+(def lib-aliases
+  {"clojure.walk/walk"            {:arglists '([inner outer form])}
+   "clojure.walk/postwalk"        {:arglists '([f form])}
+   "clojure.walk/prewalk"         {:arglists '([f form])}
+   "clojure.walk/postwalk-replace" {:arglists '([smap form])}
+   "clojure.walk/prewalk-replace" {:arglists '([smap form])}
+   "clojure.core.protocols/coll-reduce"
+   {:arglists '([coll f init])
+    :reason "the defprotocol dispatch fn accepts exactly (coll f init); the oracle 2-arity is unimplemented"}
+   "clojure.core.protocols/kv-reduce" {:arglists '([amap f init])}
+   "clojure.core.protocols/datafy"    {:arglists '([o])}
+   "clojure.core.protocols/nav"       {:arglists '([coll k v])}
+   "clojure.datafy/datafy"       {:arglists '([x])}
+   "clojure.datafy/nav"          {:arglists '([coll k v])}})
 
 (defn c-string [s]
   (-> s
@@ -389,15 +418,30 @@
   (let [vars    (oracle-vars (edn/read-string (slurp surface-path)))
         emitted (into emit-list (concat lax-prims (keys mino-true)))
         _       (assert (and (empty? (clojure.set/intersection emit-list lax-prims))
-                             (empty? (clojure.set/intersection emit-list (set (keys mino-true))))
-                             (empty? (clojure.set/intersection lax-prims (set (keys mino-true)))))
-                        "emit populations must be disjoint")
+                              (empty? (clojure.set/intersection emit-list (set (keys mino-true))))
+                              (empty? (clojure.set/intersection lax-prims (set (keys mino-true)))))
+                         "emit populations must be disjoint")
+        _       (assert (empty? (clojure.set/intersection
+                                 (set (concat emit-list lax-prims (keys mino-true)))
+                                 (set (keys lib-aliases))))
+                        "lib-alias class must stay disjoint from the prim classes")
+        ;; Lib-alias cross-check against the oracle: every entry must
+        ;; exist there, oracle-verbatim entries must match its
+        ;; arglists exactly, and overrides must carry a reason.
+        _       (doseq [[k {:keys [arglists reason]}] lib-aliases]
+                  (let [o (get vars k)]
+                    (assert (some? o) (str "lib-alias " k " absent from the oracle"))
+                    (if reason
+                      (assert (not= arglists (:arglists o))
+                              (str "lib-alias " k " claims divergence but matches the oracle"))
+                      (assert (= arglists (:arglists o))
+                              (str "lib-alias " k " drifted from the oracle shape")))))
         ;; Pair order, not composite-string order: install.c bsearches
         ;; by strcmp on ns then name, and the two orders diverge once
         ;; one namespace is a proper prefix of another.
         emit    (sort-by (fn [k] (let [[ns name] (str/split k #"/" 2)]
-                                   [ns name]))
-                         emitted)
+                                    [ns name]))
+                          emitted)
         banned  (into #{} (map #(str "clojure.core/" %)) non-prims)]
     (when (some banned emit)
       (binding [*out* *err*]
@@ -443,6 +487,12 @@
                "entries from" surface-path
                "(" (- (count rows) (count mino-true)) "oracle,"
                (count mino-true) "mino-true,"
-               "0 excluded prims)"))))
+               "0 excluded prims)")
+      (println "lib-alias class (def-site metadata, not in the table):"
+               (count lib-aliases) "entries"
+               "(" (- (count lib-aliases)
+                      (count (filter :reason (vals lib-aliases))))
+               "oracle,"
+               (count (filter :reason (vals lib-aliases))) "mino-true)"))))
 
 (-main)

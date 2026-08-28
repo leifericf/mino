@@ -5,13 +5,18 @@
 ;; needed across the standard library. Re-export the canonical
 ;; clojure.walk surface here so portable Clojure code that calls
 ;; (clojure.walk/postwalk ...) resolves the same vars without
-;; depending on the bundled-core organization.
+;; depending on the bundled-core organization. The re-exports carry
+;; their census-oracle arglists (tools/gen_arglists.clj, lib-alias
+;; class): each init value is a var, so the shapes ride def metadata
+;; like the array-map alias in core.clj.
 
-(def walk             clojure.core/walk)
-(def postwalk         clojure.core/postwalk)
-(def prewalk          clojure.core/prewalk)
-(def postwalk-replace clojure.core/postwalk-replace)
-(def prewalk-replace  clojure.core/prewalk-replace)
+(def ^{:arglists '([inner outer form])} walk clojure.core/walk)
+(def ^{:arglists '([f form])} postwalk clojure.core/postwalk)
+(def ^{:arglists '([f form])} prewalk clojure.core/prewalk)
+(def ^{:arglists '([smap form])} postwalk-replace
+  clojure.core/postwalk-replace)
+(def ^{:arglists '([smap form])} prewalk-replace
+  clojure.core/prewalk-replace)
 
 (defn keywordize-keys
   "Recursively transforms all map keys from strings to keywords."

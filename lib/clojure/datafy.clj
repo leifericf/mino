@@ -7,5 +7,8 @@
 (ns clojure.datafy
   (:require clojure.core.protocols))
 
-(def datafy clojure.core/datafy)
-(def nav    clojure.core/nav)
+;; Both re-exports carry their census-oracle arglists
+;; (tools/gen_arglists.clj, lib-alias class) on def metadata: the init
+;; values are vars, not fn forms.
+(def ^{:arglists '([x])} datafy clojure.core/datafy)
+(def ^{:arglists '([coll k v])} nav clojure.core/nav)

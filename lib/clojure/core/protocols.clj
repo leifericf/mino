@@ -15,10 +15,14 @@
 (def Datafiable clojure.core/Datafiable)
 (def Navigable  clojure.core/Navigable)
 
-(def coll-reduce clojure.core/coll-reduce)
-(def kv-reduce   clojure.core/kv-reduce)
-(def datafy      clojure.core/datafy)
-(def nav         clojure.core/nav)
+;; The four dispatch-fn re-exports carry census-oracle arglists
+;; (tools/gen_arglists.clj, lib-alias class) on def metadata. coll-reduce
+;; is the one mino-true override: the defprotocol dispatch fn accepts
+;; exactly [coll f init], so the oracle's 2-arity stays unclaimed.
+(def ^{:arglists '([coll f init])} coll-reduce clojure.core/coll-reduce)
+(def ^{:arglists '([amap f init])} kv-reduce clojure.core/kv-reduce)
+(def ^{:arglists '([o])} datafy clojure.core/datafy)
+(def ^{:arglists '([coll k v])} nav clojure.core/nav)
 
 (def CollReduce--coll-reduce clojure.core/CollReduce--coll-reduce)
 (def IKVReduce--kv-reduce    clojure.core/IKVReduce--kv-reduce)
