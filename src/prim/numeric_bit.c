@@ -17,16 +17,16 @@
 /* ------------------------------------------------------------------------- */
 
 /* Shared variadic fold for the two-operand bitwise prims: folds op
- * left-to-right across every argument. Per JVM bit-and/bit-or/bit-xor,
- * a single argument folds to itself; zero arguments is an arity error. */
+ * left-to-right across every argument. Per the JVM arglists
+ * ([x y] [x y & more]), zero or one argument is an arity error. */
 static mino_val *bit_fold(mino_state *S, mino_val *args, const char *name,
                           long long (*op)(long long, long long))
 {
     long long acc;
     mino_val  *p;
     char       msg[64];
-    if (!mino_is_cons(args)) {
-        snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires at least two arguments", name);
         return prim_throw_classified(S, "eval/arity", "MAR001", msg);
     }
     if (!as_long(args->as.cons.car, &acc)) {

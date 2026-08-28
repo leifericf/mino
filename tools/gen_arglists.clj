@@ -5,10 +5,10 @@
 
 ;; Regenerate src/prim/arglists_data.h, the committed install-time
 ;; :arglists table for the C prims, from the census oracle surface.
-;; Oracle-conformant and lax prims attach the oracle shapes verbatim;
-;; real arity gaps attach mino-true shapes derived from the prim
-;; sources. The script runs only when the oracle or the emit lists
-;; change; the Makefile never invokes it.
+;; Oracle-conformant prims attach the oracle shapes verbatim; real
+;; arity gaps attach mino-true shapes derived from the prim sources.
+;; The script runs only when the oracle or the emit lists change; the
+;; Makefile never invokes it.
 ;;
 ;; The 2026-08-28 extension covers the namespaces beyond
 ;; clojure.core/string/repl: no C prims exist in them, so their bare
@@ -65,8 +65,11 @@
   "partition"    })
 
 ;; The base emit list: the 253 arity-conformant prim names
-;; ("ns/name") frozen from the 2026-08-27 sweep plus the eleven the
-;; follow-up class fixes admitted (ADR 34); regenerate via the sweep.
+;; ("ns/name") frozen from the 2026-08-27 sweep, the eleven the
+;; follow-up class fixes admitted (ADR 34), and the twenty-six lax
+;; prims tightened on 2026-08-28 to reject their undeclared arities
+;; (verified by the arglists conformance gate that day); regenerate
+;; via the sweep.
 (def emit-list
   #{
   "clojure.core/*"
@@ -76,12 +79,18 @@
   "clojure.core/-"
   "clojure.core/-'"
   "clojure.core//"
+  "clojure.core/<"
+  "clojure.core/<="
+  "clojure.core/="
+  "clojure.core/>"
+  "clojure.core/>="
   "clojure.core/NaN?"
   "clojure.core/add-watch"
   "clojure.core/agent"
   "clojure.core/agent-error"
   "clojure.core/alength"
   "clojure.core/alias"
+  "clojure.core/all-ns"
   "clojure.core/alter"
   "clojure.core/alter-meta!"
   "clojure.core/alter-var-root"
@@ -94,12 +103,16 @@
   "clojure.core/bigdec"
   "clojure.core/bigint"
   "clojure.core/biginteger"
+  "clojure.core/bit-and"
   "clojure.core/bit-not"
+  "clojure.core/bit-or"
   "clojure.core/bit-shift-left"
   "clojure.core/bit-shift-right"
+  "clojure.core/bit-xor"
   "clojure.core/boolean-array"
   "clojure.core/boolean?"
   "clojure.core/byte"
+  "clojure.core/byte-array"
   "clojure.core/bytes?"
   "clojure.core/char"
   "clojure.core/char-array"
@@ -119,6 +132,7 @@
   "clojure.core/compare-and-set!"
   "clojure.core/complement"
   "clojure.core/conj"
+  "clojure.core/conj!"
   "clojure.core/cons"
   "clojure.core/contains?"
   "clojure.core/count"
@@ -134,6 +148,7 @@
   "clojure.core/disj!"
   "clojure.core/dissoc"
   "clojure.core/dissoc!"
+  "clojure.core/distinct?"
   "clojure.core/doall"
   "clojure.core/dorun"
   "clojure.core/double"
@@ -168,11 +183,13 @@
   "clojure.core/future?"
   "clojure.core/gensym"
   "clojure.core/get"
+  "clojure.core/get-thread-bindings"
   "clojure.core/get-validator"
   "clojure.core/group-by"
   "clojure.core/hash"
   "clojure.core/hash-map"
   "clojure.core/hash-set"
+  "clojure.core/identical?"
   "clojure.core/in-ns"
   "clojure.core/inc"
   "clojure.core/inc'"
@@ -189,6 +206,7 @@
   "clojure.core/list?"
   "clojure.core/load-file"
   "clojure.core/load-string"
+  "clojure.core/loaded-libs"
   "clojure.core/long"
   "clojure.core/long-array"
   "clojure.core/macroexpand"
@@ -219,6 +237,7 @@
   "clojure.core/nth"
   "clojure.core/number?"
   "clojure.core/numerator"
+  "clojure.core/object-array"
   "clojure.core/odd?"
   "clojure.core/parse-double"
   "clojure.core/parse-long"
@@ -246,12 +265,17 @@
   "clojure.core/re-pattern"
   "clojure.core/read-line"
   "clojure.core/read-string"
+  "clojure.core/realized?"
   "clojure.core/record?"
   "clojure.core/reduced"
   "clojure.core/reduced?"
   "clojure.core/ref"
+  "clojure.core/ref-history-count"
+  "clojure.core/ref-max-history"
+  "clojure.core/ref-min-history"
   "clojure.core/ref-set"
   "clojure.core/refer"
+  "clojure.core/release-pending-sends"
   "clojure.core/rem"
   "clojure.core/remove-ns"
   "clojure.core/remove-watch"
@@ -259,13 +283,14 @@
   "clojure.core/requiring-resolve"
   "clojure.core/reset!"
   "clojure.core/reset-vals!"
-  "clojure.core/restart-agent"
   "clojure.core/rest"
+  "clojure.core/restart-agent"
   "clojure.core/reverse"
   "clojure.core/rseq"
   "clojure.core/rsubseq"
   "clojure.core/send"
   "clojure.core/send-off"
+  "clojure.core/send-via"
   "clojure.core/seq"
   "clojure.core/seq?"
   "clojure.core/set"
@@ -283,6 +308,7 @@
   "clojure.core/sorted-map-by"
   "clojure.core/sorted-set"
   "clojure.core/sorted-set-by"
+  "clojure.core/spit"
   "clojure.core/str"
   "clojure.core/string?"
   "clojure.core/subs"
@@ -290,8 +316,10 @@
   "clojure.core/subvec"
   "clojure.core/swap!"
   "clojure.core/swap-vals!"
+  "clojure.core/symbol"
   "clojure.core/symbol?"
   "clojure.core/the-ns"
+  "clojure.core/to-array"
   "clojure.core/transient"
   "clojure.core/true?"
   "clojure.core/type"
@@ -329,46 +357,12 @@
   "clojure.core/volatile!"
   "clojure.core/volatile?"
   "clojure.core/vreset!"
+  "clojure.core/with-meta"
   "clojure.core/zero?"
   "clojure.core/zipmap"
   "clojure.string/join"
   "clojure.string/split"    })
 
-;; Lax prims: mino accepts every oracle arity plus extras it tolerates
-;; silently. Lax arity acceptance verified by the 2026-08-27 sweep;
-;; oracle arglists attached, extra tolerated arities unclaimed (the
-;; extras become a census divergence entry in a later slice). spit was
-;; not swept (it writes files); prim_spit genuinely supports its
-;; option tail (:append honored, :encoding validated), so the oracle
-;; shape is true for it and it rides this class.
-(def lax-prims
-  #{
-  "clojure.core/<"
-  "clojure.core/<="
-  "clojure.core/="
-  "clojure.core/>"
-  "clojure.core/>="
-  "clojure.core/all-ns"
-  "clojure.core/bit-and"
-  "clojure.core/bit-or"
-  "clojure.core/bit-xor"
-  "clojure.core/byte-array"
-  "clojure.core/conj!"
-  "clojure.core/distinct?"
-  "clojure.core/get-thread-bindings"
-  "clojure.core/identical?"
-  "clojure.core/loaded-libs"
-  "clojure.core/object-array"
-  "clojure.core/realized?"
-  "clojure.core/ref-history-count"
-  "clojure.core/ref-max-history"
-  "clojure.core/ref-min-history"
-  "clojure.core/release-pending-sends"
-  "clojure.core/send-via"
-  "clojure.core/spit"
-  "clojure.core/symbol"
-  "clojure.core/to-array"
-  "clojure.core/with-meta"    })
 
 ;; Real arity gaps: the prim rejects oracle-claimed arities, so the
 ;; oracle shape would be lying metadata. Each shape is derived from
@@ -599,13 +593,11 @@
 
 (defn -main []
   (let [vars    (oracle-vars (edn/read-string (slurp surface-path)))
-        emitted (into emit-list (concat lax-prims (keys mino-true)))
-        _       (assert (and (empty? (clojure.set/intersection emit-list lax-prims))
-                              (empty? (clojure.set/intersection emit-list (set (keys mino-true))))
-                              (empty? (clojure.set/intersection lax-prims (set (keys mino-true)))))
+        emitted (into emit-list (keys mino-true))
+        _       (assert (empty? (clojure.set/intersection emit-list (set (keys mino-true))))
                          "emit populations must be disjoint")
         _       (assert (empty? (clojure.set/intersection
-                                 (set (concat emit-list lax-prims (keys mino-true)))
+                                 (set (concat emit-list (keys mino-true)))
                                  (set (keys lib-aliases))))
                         "lib-alias class must stay disjoint from the prim classes")
         ;; Lib-alias cross-check against the oracle: every entry must

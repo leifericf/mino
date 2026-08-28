@@ -114,8 +114,11 @@ mino_val *mino_snapshot_thread_bindings(mino_state *S)
 mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
-    (void)args;
     (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "get-thread-bindings takes no arguments");
+    }
     return mino_snapshot_thread_bindings(S);
 }
 

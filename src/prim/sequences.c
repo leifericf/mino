@@ -3235,7 +3235,8 @@ static mino_val *prim_distinct_p(mino_state *S, mino_val *args, mino_env *env)
     size_t n_args = 0;
     (void)env;
     if (cur == NULL || mino_is_nil(cur) || !mino_is_cons(cur)) {
-        return mino_true(S);
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "distinct? requires at least one argument");
     }
     seen = mino_set(S, NULL, 0);
     while (mino_is_cons(cur)) {

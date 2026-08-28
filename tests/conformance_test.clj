@@ -157,7 +157,12 @@
   (is (distinct? 1)))
 
 (deftest distinct?-empty
-  (is (distinct?)))
+  ;; Zero args is undeclared on the JVM shape ([x] [x y & more]);
+  ;; the tightened prim rejects it as an arity error.
+  (let [e (try (distinct?)
+               (catch Throwable e e))]
+    (is (= :eval/arity (:mino/kind e)))
+    (is (= "MAR001" (:mino/code e)))))
 
 ;; --- type predicates ---
 

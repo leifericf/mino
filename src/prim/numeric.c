@@ -2233,7 +2233,8 @@ mino_val *prim_eq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        return mino_true(S);
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "= requires at least one argument");
     }
     {
         mino_val *first = args->as.cons.car;
@@ -2310,7 +2311,8 @@ static mino_val *prim_identical(mino_state *S, mino_val *args,
 {
     mino_val *a, *b;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "identical? requires 2 arguments");
     }
     a = args->as.cons.car;
@@ -2380,7 +2382,8 @@ static int tower_cmp(const mino_val *a, const mino_val *b)
  *   - Any NaN operand short-circuits to `false` for every relation
  *     (NaN is unordered).
  *   - Otherwise return true iff each successive pair satisfies the
- *     relation; trivially true on zero or one argument.
+ *     relation; trivially true on a single argument, an arity error
+ *     on none (the JVM arglists claim one or more).
  */
 static int has_nan(const mino_val *v)
 {
@@ -2390,7 +2393,11 @@ static int has_nan(const mino_val *v)
 
 static mino_val *compare_chain(mino_state *S, mino_val *args, const char *name, int op)
 {
-    if (!mino_is_cons(args)) return mino_true(S);
+    if (!mino_is_cons(args)) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
     if (!mino_is_cons(args->as.cons.cdr)) {
         /* Single-arg form: Clojure short-circuits and never inspects
          * the operand's type, so even non-numeric arguments return
@@ -2460,7 +2467,12 @@ static mino_val *compare_chain_argv(mino_state *S, mino_val **argv,
 {
     int i;
     const mino_val *prev;
-    if (argc <= 1) return mino_true(S);
+    if (argc < 1) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
+    if (argc == 1) return mino_true(S);
     prev = argv[0];
     if (!is_compare_number(prev)) {
         char msg[64];

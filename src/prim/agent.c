@@ -1631,8 +1631,13 @@ static mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
 
 static mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
 {
-    (void)args;
+    size_t n;
     (void)env;
+    arg_count(S, args, &n);
+    if (n < 3) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "send-via requires an executor, an agent, and a function");
+    }
     /* JVM-canon (send-via executor a fn & args) routes the action
      * through a host-supplied Executor. mino has no public Executor
      * type yet (the embedder API surface for handing in a custom
@@ -1652,8 +1657,11 @@ static mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
     mino_thread_ctx_t *ctx;
     long long          count = 0;
     mino_val        *p;
-    (void)args;
     (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "release-pending-sends takes no arguments");
+    }
     /* JVM canon: returns the number of sends that were queued by the
      * current transaction and clears them so they will NOT fire on
      * commit. Outside a transaction it's a no-op returning 0. mino's

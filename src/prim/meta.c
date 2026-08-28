@@ -178,7 +178,8 @@ static mino_val *prim_with_meta(mino_state *S, mino_val *args,
 {
     mino_val *obj, *m, *copy;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "with-meta requires 2 arguments");
     }
     obj = args->as.cons.car;

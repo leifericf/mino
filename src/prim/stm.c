@@ -175,10 +175,12 @@ static mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
 static mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
+    size_t n;
     (void)env;
-    if (!mino_is_cons(args)) {
+    arg_count(S, args, &n);
+    if (n < 1 || n > 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ref-min-history requires a ref");
+            "ref-min-history accepts a ref and an optional n");
     }
     return mino_int(S, 0);
 }
@@ -186,10 +188,12 @@ static mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
 static mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
                                   mino_env *env)
 {
+    size_t n;
     (void)env;
-    if (!mino_is_cons(args)) {
+    arg_count(S, args, &n);
+    if (n < 1 || n > 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ref-max-history requires a ref");
+            "ref-max-history accepts a ref and an optional n");
     }
     return mino_int(S, 10);
 }
@@ -197,8 +201,10 @@ static mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
 static mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
                                     mino_env *env)
 {
+    size_t n;
     (void)env;
-    if (!mino_is_cons(args)) {
+    arg_count(S, args, &n);
+    if (n != 1) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "ref-history-count requires a ref");
     }

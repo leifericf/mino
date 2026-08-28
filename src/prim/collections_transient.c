@@ -81,15 +81,20 @@ mino_val *prim_assoc_bang(mino_state *S, mino_val *args, mino_env *env)
 
 mino_val *prim_conj_bang(mino_state *S, mino_val *args, mino_env *env)
 {
-    /* Clojure: (conj!)              -> (transient [])
-     *          (conj! tcoll)        -> tcoll unchanged
-     *          (conj! tcoll x)      -> tcoll with x added
-     *          (conj! tcoll x & xs) -> additional values conj'd left-
-     *                                  to-right; final transient is
-     *                                  returned. */
+    /* Clojure: (conj!)       -> (transient [])
+     *          (conj! tcoll) -> tcoll unchanged
+     *          (conj! tcoll x) -> tcoll with x added. The JVM
+     *          arglists stop there; three or more arguments is an
+     *          arity error. */
     mino_val *t;
     mino_val *p;
+    size_t      n;
     (void)env;
+    arg_count(S, args, &n);
+    if (n > 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "conj! accepts at most a transient and one value");
+    }
     if (!mino_is_cons(args)) {
         return mino_transient(S, mino_vector(S, NULL, 0));
     }

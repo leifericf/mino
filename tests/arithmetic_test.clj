@@ -69,10 +69,11 @@
   (is (= 5  (bit-xor 1 3 7)))
   ;; ((15 & ~3) & ~1)
   (is (= 12 (bit-and-not 15 3 1)))
-  ;; a single argument folds to itself
-  (is (= 7 (bit-and 7)))
-  (is (= 7 (bit-or 7)))
-  (is (= 7 (bit-xor 7)))
+  ;; a single argument is undeclared on the JVM shape
+  ;; ([x y] [x y & more]) and rejects as an arity error
+  (is (= :eval/arity (try (bit-and 7) (catch Throwable e (:mino/kind e)))))
+  (is (= :eval/arity (try (bit-or 7) (catch Throwable e (:mino/kind e)))))
+  (is (= :eval/arity (try (bit-xor 7) (catch Throwable e (:mino/kind e)))))
   (is (= 7 (bit-and-not 7))))
 
 (deftest bit-shift-boundary

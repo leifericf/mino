@@ -179,6 +179,9 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
         mino_val *name_arg = args->as.cons.cdr->as.cons.car;
         char buf[512];
         size_t pos = 0;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
+        }
         if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
             return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name must be a string");
         }

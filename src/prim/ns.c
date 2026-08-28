@@ -745,8 +745,11 @@ static mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val **tmp;
     size_t       i;
-    (void)args;
     (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "all-ns takes no arguments");
+    }
     if (S->ns_vars.ns_env_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                           S->ns_vars.ns_env_len * sizeof(*tmp));
@@ -764,8 +767,11 @@ static mino_val *prim_loaded_libs(mino_state *S, mino_val *args,
 {
     mino_val **tmp;
     size_t       i;
-    (void)args;
     (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "loaded-libs takes no arguments");
+    }
     if (S->module.module_cache_len == 0) return mino_vector(S, NULL, 0);
     tmp = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                           S->module.module_cache_len * sizeof(*tmp));
