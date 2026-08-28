@@ -949,17 +949,19 @@
 ;; a (delay? x) check is no longer needed; the 3-arg form
 ;; (deref ref ms timeout-val) is supported natively by the same
 ;; prim for blocking refs (futures/promises).
-;; Override C realized? to also handle delays and futures
+;; Override C realized? to also handle delays and futures. defn form
+;; so the override carries its own :arglists (a def-with-docstring
+;; replaces var meta wholesale, which would drop the prim's).
 (let [c-realized? realized?]
-  (def realized?
+  (defn realized?
     "Returns true if a delay, lazy sequence, future, or promise has
      been realized."
-    (fn [x]
-      (cond
-        (nil? x)    (throw "realized? requires a non-nil argument")
-        (delay? x)  (not= :pending (:status @(:delay/state x)))
-        (future? x) (future-done? x)
-        :else       (c-realized? x)))))
+    [x]
+    (cond
+      (nil? x)    (throw "realized? requires a non-nil argument")
+      (delay? x)  (not= :pending (:status @(:delay/state x)))
+      (future? x) (future-done? x)
+      :else       (c-realized? x))))
 
 ;; --- Sequence navigation ---
 
