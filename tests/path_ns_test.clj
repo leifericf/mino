@@ -74,4 +74,36 @@
          (try (path/glob "*" "." {:match-dot 1})
               (catch e (:mino/kind e))))))
 
+(deftest ns-relativize
+  ;; the docstring examples, verbatim
+  (is (= "c/d" (path/relativize "/a/b" "/a/b/c/d")))
+  (is (= ".." (path/relativize "/a/b/c" "/a/b")))
+  (is (= "../c" (path/relativize "/a/b" "/a/c")))
+  (is (= "" (path/relativize "/a/b" "/a/b")))
+  ;; identical relative paths answer "" too
+  (is (= "" (path/relativize "a/b" "a/b")))
+  ;; nested one level
+  (is (= "c" (path/relativize "/a/b" "/a/b/c")))
+  ;; target two levels above base
+  (is (= "../.." (path/relativize "/a/b/c" "/a")))
+  ;; sibling divergence deeper on both sides
+  (is (= "../../x/y" (path/relativize "/a/b/c" "/a/x/y")))
+  ;; relative base and target
+  (is (= "d/e" (path/relativize "a/b/c" "a/b/c/d/e")))
+  (is (= "../../p" (path/relativize "a/b/c" "a/p")))
+  ;; the root as base
+  (is (= "a/b" (path/relativize "/" "/a/b")))
+  ;; normalizes both sides before diffing
+  (is (= "c/d" (path/relativize "/a/./b" "/a/b/x/../c/d"))))
+
+(deftest ns-relativize-errors
+  ;; mixing absolute and relative cannot be relativized: classified throw
+  (is (= :path/relativize
+         (try (path/relativize "/a/b" "a/b") (catch e (:mino/kind e)))))
+  (is (= :path/relativize
+         (try (path/relativize "a/b" "/a/b") (catch e (:mino/kind e)))))
+  ;; the diagnostic carries the offending paths
+  (is (= {:base "/a" :target "x"}
+         (try (path/relativize "/a" "x") (catch e (:mino/data e))))))
+
 (run-tests-and-exit)

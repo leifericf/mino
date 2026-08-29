@@ -139,6 +139,52 @@
   [s]
   (path-expand-home s))
 
+;;;; Errors
+
+(defn- path-fail
+  "Throws a classified mino.path diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
+;;;; Relative paths
+
+(defn relativize
+  "The relative path FROM base TO target, so that resolving the answer
+  against base yields target (java.nio Path.relativize, lexical). Both
+  sides are normalized first (\\ folds to /, . and redundant .. cancel);
+  the shared leading segments are dropped, each remaining base segment
+  becomes a \"..\", and the remaining target segments follow. Identical
+  paths answer \"\". Base and target must agree on absoluteness: an
+  absolute path against a relative one (or the reverse) cannot be
+  relativized and throws a diagnostic with :mino/kind :path/relativize
+  carrying the offending :base and :target. No filesystem contact."
+  [base target]
+  (when (not= (path-absolute? base) (path-absolute? target))
+    (path-fail :path/relativize "MPR001"
+               "mino.path/relativize: base and target must both be absolute or both relative"
+               {:base base :target target}))
+  (let [strip (fn [s]
+                (let [segs (path-split (path-normalize s))]
+                  (if (and (seq segs) (= "/" (first segs)))
+                    (rest segs)
+                    segs)))
+        b (strip base)
+        t (strip target)
+        common (loop [n 0 bs b ts t]
+                 (if (and (seq bs) (seq ts)
+                          (= (first bs) (first ts)))
+                   (recur (inc n) (rest bs) (rest ts))
+                   n))
+        up (repeat (- (count b) common) "..")
+        down (drop common t)
+        parts (concat up down)]
+    (if (seq parts)
+      (apply path-join parts)
+      "")))
+
 ;;;; Discovery
 
 (defn glob
