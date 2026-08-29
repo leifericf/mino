@@ -1,11 +1,18 @@
 (ns mino.http.server
-  "HTTP server: Ring-shaped handler maps over the net prims (ADR 36).
+  "HTTP server: Ring maps over the net prims (ADR 36).
 
   (require '[mino.http.server :as srv])
   (srv/run-server handler {:port 8080}) => {:port 8080 :stop fn}
 
   A handler takes a request map and returns a response map; both are
-  plain data in the mino.http vocabulary. The connection loop is one
+  plain data in the mino.http vocabulary. The request map keys:
+  :request-method :uri :query-string :headers :body :scheme
+  :http-version :conn. :remote-addr is omitted until net-accept
+  widens to expose the peer address. The response map keys: :status
+  (100..599), :headers (a map or a vector of pairs, values strings),
+  :body (string, bytes, or nil); Content-Length, Transfer-Encoding,
+  Connection, and Date belong to the server, and handler supply of
+  them is answered with a 500 close. The connection loop is one
   tail-recursive function per connection with its state in loop
   locals, parked in a blocking read between iterations; a throwing
   handler yields a 500 text/plain response and a close, never
@@ -101,10 +108,22 @@
         base (if-let [h (:headers resp)] (assoc base :headers h) base)]
     (if-let [b (:body resp)] (assoc base :body b) base)))
 
+(def ^:private allowed-conn-keys
+  #{:idle-timeout :request-timeout
+    :max-header-bytes :max-body-bytes :max-headers})
+
 (defn- normalize-opts
   "Public opts into engine opts; every deadline carries its unit and
-  is type-checked here, the single normalization pass."
+  is type-checked here, the single normalization pass. Unknown keys
+  are an error naming them."
   [opts]
+  (when-not (map? opts)
+    (bad "the connection opts must be a map"))
+  (let [unknown (filter (fn [k] (not (contains? allowed-conn-keys k)))
+                        (keys opts))]
+    (when (seq unknown)
+      (bad (str "unknown connection key(s): "
+                (str/join ", " (map pr-str unknown))))))
   {:idle-timeout-ms (opt-long (:idle-timeout opts)
                               :idle-timeout default-idle-timeout-ms)
    :request-timeout-ms (opt-long (:request-timeout opts)
@@ -237,9 +256,12 @@
                                  :acceptors default-acceptors)
         max-conns (opt-pos-int (:max-conns opts)
                                :max-conns default-max-conns)
-        _ (doseq [k [:max-header-bytes :max-body-bytes :max-headers]]
-            (check-cap opts k))
-        poll-ms (socket-poll-ms idle-timeout)
+         _ (doseq [k [:max-header-bytes :max-body-bytes :max-headers]]
+             (check-cap opts k))
+         conn-opts (select-keys opts [:idle-timeout :request-timeout
+                                      :max-header-bytes :max-body-bytes
+                                      :max-headers])
+         poll-ms (socket-poll-ms idle-timeout)
         l (net-listen host port {:backlog 16})
         running? (atom true)
         permits (a/chan max-conns)
@@ -254,19 +276,19 @@
                             :read-timeout poll-ms
                             :write-timeout write-timeout-ms})
                        (catch e nil)))
-        spawn-conn! (fn [c]
-                      (swap! active inc)
-                      (if-let [fut (try (future-call
-                                          (fn []
-                                            (run-conn! c handler opts permits)
-                                            (swap! active dec)))
-                                        (catch e nil))]
-                        nil
-                        (do (swap! active dec)
-                            ;; no thread to spare: the spawner becomes
-                            ;; this connection's worker, and permits
-                            ;; still bound what queues behind it
-                            (run-conn! c handler opts permits))))
+         spawn-conn! (fn [c]
+                       (swap! active inc)
+                       (if-let [fut (try (future-call
+                                           (fn []
+                                             (run-conn! c handler conn-opts permits)
+                                             (swap! active dec)))
+                                         (catch e nil))]
+                         nil
+                         (do (swap! active dec)
+                             ;; no thread to spare: the spawner becomes
+                             ;; this connection's worker, and permits
+                             ;; still bound what queues behind it
+                             (run-conn! c handler conn-opts permits))))
         spawner-thunk (fn []
                         (loop []
                           (let [[c src] (a/alts!! [mailbox stop-sig])]
@@ -427,7 +449,8 @@
   locals; every blocking read parks the future. Public as the test
   and embedding seam over the private loop, not part of the request
   vocabulary. opts: :idle-timeout :request-timeout :max-header-bytes
-  :max-body-bytes :max-headers."
+  :max-body-bytes :max-headers; unknown keys are an error naming
+  them."
   [c handler opts]
   (let [opts (normalize-opts opts)]
     (loop [seed []

@@ -82,10 +82,10 @@
                                               :read-timeout poll-ms
                                               :write-timeout 8000})
                                (catch e nil))]
-                    (when c
-                      (swap! results conj
-                             (try (srv/serve-conn* c handler o)
-                                  (catch e :engine-crash)))
+                     (when c
+                       (swap! results conj
+                              (try (srv/serve-conn* c handler (dissoc o :poll-ms))
+                                   (catch e :engine-crash)))
                       (try (net-close c) (catch e nil)))
                     (recur (inc i)))))
               (try (net-close l) (catch e nil))
@@ -700,5 +700,49 @@
           (try (net-close r) (catch e nil)))
         (thread-sleep 300)
         (served s "/three" 200)))))
+
+;;;; the frozen public surface
+
+(deftest ns-publics-are-run-server-and-the-serve-conn-seam
+  (is (= #{'run-server 'serve-conn*}
+         (set (keys (ns-publics 'mino.http.server))))))
+
+(deftest every-public-var-carries-a-docstring
+  (doseq [v (vals (ns-publics 'mino.http.server))]
+    (is (string? (:doc (meta v)))
+        (str (:name (meta v)) " lacks a docstring"))
+    (is (pos? (count (:doc (meta v))))
+        (str (:name (meta v)) " has an empty docstring"))))
+
+(deftest request-map-carries-exactly-the-frozen-keys
+  (let [seen (atom nil)
+        h (fn [req] (reset! seen req) {:status 200})]
+    (srv-with 1 h {}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          (srv-send c (srv-req "GET" "/x?k=v"))
+          (let [x (srv-read-one c [])]
+            (is (= 200 (:code (:resp x)))))
+          (try (net-close c) (catch e nil)))))
+    (is (= #{:request-method :uri :query-string :headers :body
+             :scheme :http-version :conn}
+           (set (keys @seen))))
+    (is (not (contains? @seen :remote-addr))
+        "the peer-address gap stays omitted until net-accept widens")))
+
+(deftest serve-conn-seam-rejects-unknown-opts-naming-them
+  (let [h (fn [req] {:status 200})]
+    (is (thrown? (srv/serve-conn* nil h {:bogus 1 :worse 2})))
+    (let [msg (try (srv/serve-conn* nil h {:bogus 1})
+                   (catch e (ex-message e)))]
+      (is (re-find #"bogus" msg))
+      (is (re-find #"connection" msg)))))
+
+(deftest run-server-names-every-unknown-opt-in-one-error
+  (let [h (fn [req] {:status 200})
+        msg (try (srv/run-server h {:bogus 1 :worse 2})
+                 (catch e (ex-message e)))]
+    (is (re-find #":bogus" msg))
+    (is (re-find #":worse" msg))))
 
 (run-tests-and-exit)
