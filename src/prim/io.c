@@ -9,6 +9,9 @@
 #if !defined(_MSC_VER)
 #  include <dirent.h>
 #  include <sys/stat.h>
+#  include <sys/utsname.h>
+#  include <unistd.h>
+#  include <pwd.h>
 #else
 #  include "win_dirent.h"
 #endif
@@ -933,6 +936,90 @@ mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env)
     return mino_int(S, mino_monotonic_ns());
 }
 
+/* (uname) -- operating system identification in the os.uname shape:
+ * a map of :sysname, :nodename, :release, :version, and :machine.
+ * On Windows the release/version/machine fields are empty strings
+ * (no stable query exists for them under the supported toolchain). */
+static mino_val *prim_uname(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *ks[5], *vs[5];
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "uname takes no arguments");
+    }
+#ifdef _WIN32
+    {
+        char node[256] = "";
+        DWORD node_len = (DWORD)sizeof(node);
+        if (!GetComputerNameExA(ComputerNameDnsHostname,
+                                node, &node_len)) {
+            node[0] = '\0';
+        }
+        ks[0] = mino_keyword(S, "sysname");
+        vs[0] = mino_string(S, "Windows");
+        ks[1] = mino_keyword(S, "nodename");
+        vs[1] = mino_string(S, node);
+        ks[2] = mino_keyword(S, "release");
+        vs[2] = mino_string(S, "");
+        ks[3] = mino_keyword(S, "version");
+        vs[3] = mino_string(S, "");
+        ks[4] = mino_keyword(S, "machine");
+        vs[4] = mino_string(S, "");
+    }
+#else
+    {
+        struct utsname u;
+        if (uname(&u) != 0) {
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "uname: failed to query host");
+        }
+        ks[0] = mino_keyword(S, "sysname");
+        vs[0] = mino_string(S, u.sysname);
+        ks[1] = mino_keyword(S, "nodename");
+        vs[1] = mino_string(S, u.nodename);
+        ks[2] = mino_keyword(S, "release");
+        vs[2] = mino_string(S, u.release);
+        ks[3] = mino_keyword(S, "version");
+        vs[3] = mino_string(S, u.version);
+        ks[4] = mino_keyword(S, "machine");
+        vs[4] = mino_string(S, u.machine);
+    }
+#endif
+    return mino_map(S, ks, vs, 5);
+}
+
+/* (user-name) -- the current effective user's login name. POSIX uses
+ * the passwd database for the effective uid; Windows reads the
+ * USERNAME environment variable. */
+static mino_val *prim_user_name(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "user-name takes no arguments");
+    }
+#ifdef _WIN32
+    {
+        const char *u = getenv("USERNAME");
+        if (u == NULL || u[0] == '\0') {
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "user-name: USERNAME is not set");
+        }
+        return mino_string(S, u);
+    }
+#else
+    {
+        struct passwd *pw = getpwuid(geteuid());
+        if (pw == NULL || pw->pw_name == NULL || pw->pw_name[0] == '\0') {
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "user-name: cannot determine current user");
+        }
+        return mino_string(S, pw->pw_name);
+    }
+#endif
+}
+
 /* (getcwd) -- return the current working directory as a string. */
 static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
 {
@@ -1131,6 +1218,10 @@ const mino_prim_def k_prims_io[] = {
      "Returns a vector of all file paths under a directory, recursively."},
     {"getenv",   prim_getenv,
      "Returns the value of an environment variable, or nil."},
+    {"uname",    prim_uname,
+     "Returns a map of host identity: :sysname, :nodename, :release, :version, :machine."},
+    {"user-name", prim_user_name,
+     "Returns the current effective user's login name."},
     {"getcwd",   prim_getcwd,
      "Returns the current working directory."},
     {"chdir",    prim_chdir,

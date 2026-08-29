@@ -1,4 +1,5 @@
 (require "tests/test")
+(require '[clojure.string :as str])
 
 ;; I/O operations: spit, slurp, println, prn.
 
@@ -178,3 +179,26 @@
         (is (= "piped-bytes\n" (slurp fifo)))
         (finally
           (sh "sh" "-c" (str "rm -f " fifo)))))))
+
+(deftest uname-reports-host-identity
+  (let [u (uname)]
+    (is (string? (:sysname u)))
+    (is (string? (:nodename u)))
+    (is (string? (:release u)))
+    (is (string? (:version u)))
+    (is (string? (:machine u)))
+    ;; On POSIX the identity fields are non-empty and agree with the
+    ;; system's own uname.
+    (when-not windows?
+      (is (not= "" (:sysname u)))
+      (is (not= "" (:nodename u)))
+      (is (not= "" (:machine u)))
+      (is (= (str/trim (:out (sh "uname" "-s"))) (:sysname u)))
+      (is (= (str/trim (:out (sh "uname" "-n"))) (:nodename u)))
+      (is (= (str/trim (:out (sh "uname" "-m"))) (:machine u))))))
+
+(deftest user-name-reports-the-current-login
+  (is (string? (user-name)))
+  (when-not windows?
+    (is (not= "" (user-name)))
+    (is (= (str/trim (:out (sh "whoami"))) (user-name)))))
