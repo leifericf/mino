@@ -25,7 +25,23 @@
   ;; json / csv are gated data libraries, not floor prims: their reader
   ;; prims carry the capability tag like every other install group.
   (is (= :json (mino-capability 'json-parse)))
-  (is (= :csv  (mino-capability 'csv-parse))))
+  (is (= :csv  (mino-capability 'csv-parse)))
+  ;; The remaining pure-data libraries moved out of the floor too: each
+  ;; prim reports its own install group.
+  (is (= :time     (mino-capability 'now)))
+  (is (= :time     (mino-capability 'parse-time)))
+  (is (= :digest   (mino-capability 'sha256)))
+  (is (= :digest   (mino-capability 'crc32)))
+  (is (= :html     (mino-capability 'html-parse)))
+  (is (= :xml      (mino-capability 'xml-parse)))
+  (is (= :yaml     (mino-capability 'yaml-parse)))
+  (is (= :toml     (mino-capability 'toml-parse)))
+  (is (= :compress (mino-capability 'gzip-compress)))
+  (is (= :archive  (mino-capability 'zip-entries)))
+  (is (= :term     (mino-capability 'terminal-width)))
+  (is (= :path     (mino-capability 'path-join)))
+  (is (= :codec    (mino-capability 'percent-encode)))
+  (is (= :codec    (mino-capability 'base64-encode))))
 
 (deftest mino-capability-nil-for-core
   ;; Core primitives carry no capability label.

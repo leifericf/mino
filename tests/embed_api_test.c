@@ -323,6 +323,141 @@ static void test_net_mns002_diagnostic(void)
     mino_state_free(S);
 }
 
+/* The remaining pure-data libraries (time, digest, html, xml, yaml,
+ * toml, compress, archive, template, term, env, log, cli, path, codec)
+ * were floor-installed, so introspection lied about them exactly as it
+ * did for json / csv: mino-installed? reported them absent while their
+ * prims and bundled sources were present in every state. Each now
+ * carries its own capability bit -- absent under a minimal install
+ * (with MNS002 naming the capability for its prims), present under an
+ * explicit install and under DEFAULT (floor behavior preserved), and
+ * with the small dependency closure honored: net pulls in codec (the
+ * http client percent-encodes and base64s), log pulls in time (its
+ * lines timestamp with format-time), and html pulls in zip (the
+ * mino.html.select surface navigates clojure.zip locs). */
+static void test_pure_data_lib_gating(void)
+{
+    struct cap_label { uint64_t bit; const char *label; };
+    static const struct cap_label caps[] = {
+        { MINO_CAP_TIME, "time" },   { MINO_CAP_DIGEST, "digest" },
+        { MINO_CAP_HTML, "html" },   { MINO_CAP_XML, "xml" },
+        { MINO_CAP_YAML, "yaml" },   { MINO_CAP_TOML, "toml" },
+        { MINO_CAP_COMPRESS, "compress" }, { MINO_CAP_ARCHIVE, "archive" },
+        { MINO_CAP_TEMPLATE, "template" }, { MINO_CAP_TERM, "term" },
+        { MINO_CAP_ENV, "env" },     { MINO_CAP_LOG, "log" },
+        { MINO_CAP_CLI, "cli" },     { MINO_CAP_PATH, "path" },
+        { MINO_CAP_CODEC, "codec" },
+    };
+    const size_t ncaps = sizeof(caps) / sizeof(caps[0]);
+    size_t i;
+
+    /* (a) Minimal: none of the fifteen bits set, and each prim-backed
+     * capability surfaces MNS002 naming itself rather than a bare
+     * unbound-symbol error. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        const char *err;
+        static const struct { const char *expr; const char *label; } probes[] = {
+            { "(now)",                    "time" },
+            { "(sha256 \"x\")",           "digest" },
+            { "(html-parse \"<p>\")",     "html" },
+            { "(xml-parse \"<a/>\")",     "xml" },
+            { "(yaml-parse \"a: 1\")",    "yaml" },
+            { "(toml-parse \"a=1\")",     "toml" },
+            { "(gzip-compress \"x\")",    "compress" },
+            { "(zip-entries \"x\")",      "archive" },
+            { "(terminal-width)",         "term" },
+            { "(path-join \"a\" \"b\")",  "path" },
+            { "(percent-encode \"x\")",   "codec" },
+        };
+        const size_t nprobes = sizeof(probes) / sizeof(probes[0]);
+        mino_install_minimal(S, env);
+        for (i = 0; i < ncaps; i++) {
+            REQUIRE(!mino_capability_installed(S, caps[i].bit),
+                    "puredata/gate: minimal must not install the capability");
+        }
+        for (i = 0; i < nprobes; i++) {
+            char needle[48];
+            r = mino_eval_string(S, probes[i].expr, env);
+            REQUIRE(r == NULL,
+                    "puredata/gate: gated prim unbound under minimal");
+            err = mino_last_error(S);
+            snprintf(needle, sizeof(needle), "capability '%s'", probes[i].label);
+            REQUIRE(err != NULL && strstr(err, needle) != NULL,
+                    "puredata/gate: MNS002 names the prim's capability");
+        }
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+
+    /* (b) DEFAULT carries all fifteen -- the standalone binary and the
+     * sandbox preset keep the surface they had when it lived in the
+     * floor. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install_sandbox(S, env);
+        for (i = 0; i < ncaps; i++) {
+            REQUIRE(mino_capability_installed(S, caps[i].bit),
+                    "puredata/gate: DEFAULT carries the capability");
+        }
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+
+    /* (c) Explicit single install brings both the prim and the bundled
+     * lib online for one representative capability. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        mino_install(S, env, MINO_CAP_TIME);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_TIME),
+                "puredata/gate: MINO_CAP_TIME installs on demand");
+        r = mino_eval_string(S, "(integer? (now))", env);
+        REQUIRE(r == mino_true(S),
+                "puredata/gate: now works once time is installed");
+        r = mino_eval_string(S,
+            "(do (require '[mino.time :as t]) (integer? (t/now)))", env);
+        REQUIRE(r == mino_true(S),
+                "puredata/gate: mino.time lib loads under the time cap");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+
+    /* (d) Dependency closure: a cap that leans on another's prims pulls
+     * it in so the bundled library is never half-installed. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install(S, env, MINO_CAP_NET);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_CODEC),
+                "puredata/gate: net pulls in codec");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install(S, env, MINO_CAP_LOG);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_TIME),
+                "puredata/gate: log pulls in time");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install(S, env, MINO_CAP_HTML);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_ZIP),
+                "puredata/gate: html pulls in zip for the select surface");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+}
+
 #if defined(__GNUC__)
 #  define MINO_NOINLINE __attribute__((noinline))
 #else
@@ -888,6 +1023,7 @@ int main(void)
     test_net_capability_gate();
     test_json_csv_capability_gate();
     test_net_mns002_diagnostic();
+    test_pure_data_lib_gating();
     test_atom_reset_tenured();
     test_predicate_grid(S, env);
     test_options(S, env);

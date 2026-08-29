@@ -2573,6 +2573,15 @@ const mino_prim_def k_prims_html[] = {
      "Returns the tree, or an error descriptor vector "
      "[:html/error code line col text] the facade converts to "
      "ex-info."},
+};
+
+const size_t k_prims_html_count =
+    sizeof(k_prims_html) / sizeof(k_prims_html[0]);
+
+/* xml-parse gates under its own MINO_CAP_XML (clojure.xml), split from
+ * the HTML table so a host can take the tolerant HTML reader without the
+ * strict XML one or the reverse. */
+const mino_prim_def k_prims_xml[] = {
     {"xml-parse", prim_xml_parse,
      "Parses a well-formed XML 1.0 document into the JVM "
      "clojure.xml element shape (ADR 28, strict mode): elements "
@@ -2598,5 +2607,5 @@ const mino_prim_def k_prims_html[] = {
      "facade converts to positioned ex-info."},
 };
 
-const size_t k_prims_html_count =
-    sizeof(k_prims_html) / sizeof(k_prims_html[0]);
+const size_t k_prims_xml_count =
+    sizeof(k_prims_xml) / sizeof(k_prims_xml[0]);

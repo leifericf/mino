@@ -1620,21 +1620,52 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 
 #define MINO_CAP_CSV           (1ull << 35) /* clojure.data.csv */
 
+/* Pure-data / info-only bundled libraries. Each was historically
+ * floor-installed; they now gate honestly so a minimal embed carries
+ * neither the prims nor the bundled source, and introspection tells the
+ * truth. All fifteen are in MINO_CAP_DEFAULT, so the standalone binary
+ * and the sandbox preset are unchanged. */
+#define MINO_CAP_TIME          (1ull << 36) /* mino.time + time prims */
+#define MINO_CAP_DIGEST        (1ull << 37) /* mino.digest + digest/crc32 prims */
+#define MINO_CAP_HTML          (1ull << 38) /* mino.html(.select) + html-parse */
+#define MINO_CAP_XML           (1ull << 39) /* clojure.xml + xml-parse */
+#define MINO_CAP_YAML          (1ull << 40) /* mino.yaml + yaml-parse */
+#define MINO_CAP_TOML          (1ull << 41) /* mino.toml + toml-parse */
+#define MINO_CAP_COMPRESS      (1ull << 42) /* gzip / deflate / zlib stream prims */
+#define MINO_CAP_ARCHIVE       (1ull << 43) /* mino.zip + zip container prims */
+#define MINO_CAP_TEMPLATE      (1ull << 44) /* mino.template */
+#define MINO_CAP_TERM          (1ull << 45) /* mino.term + tty / terminal prims */
+#define MINO_CAP_ENV           (1ull << 46) /* mino.env */
+#define MINO_CAP_LOG           (1ull << 47) /* mino.log (needs time) */
+#define MINO_CAP_CLI           (1ull << 48) /* mino.cli */
+#define MINO_CAP_PATH          (1ull << 49) /* mino.path + path algebra prims */
+#define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
+
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
  * unsigned and widen implicitly when combined with 64-bit caps. */
 
 /* The sandbox preset: floor + Clojure-core (multimethods, protocols,
  * transducers, regex, bignum) + the bundled libraries that have no I/O
- * surface (string, set, walk, edn, data, test, datafy). Excludes IO, FS,
- * PROC, HOST, STM, AGENT, ASYNC. */
+ * surface (string, set, walk, edn, data, test, datafy, the json / csv
+ * codecs, and the pure-data / info-only family: time, digest, html,
+ * xml, yaml, toml, compress, archive, template, term, env, log, cli,
+ * path, codec). Excludes IO, FS, PROC, HOST, STM, AGENT, ASYNC, NET,
+ * STORE. The pure-data family lived in the floor before it gated, so
+ * its membership here keeps the sandbox surface unchanged. */
 #define MINO_CAP_DEFAULT (MINO_CAP_FLOOR | MINO_CAP_REGEX | MINO_CAP_BIGNUM | \
                           MINO_CAP_MULTIMETHODS | MINO_CAP_PROTOCOLS | \
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
                           MINO_CAP_SET_LIB | MINO_CAP_WALK | MINO_CAP_EDN | \
                           MINO_CAP_DATA | MINO_CAP_TEST | MINO_CAP_DATAFY | \
                           MINO_CAP_MATH_LIB | MINO_CAP_REDUCERS | \
-                          MINO_CAP_JSON | MINO_CAP_CSV)
+                          MINO_CAP_JSON | MINO_CAP_CSV | \
+                          MINO_CAP_TIME | MINO_CAP_DIGEST | MINO_CAP_HTML | \
+                          MINO_CAP_XML | MINO_CAP_YAML | MINO_CAP_TOML | \
+                          MINO_CAP_COMPRESS | MINO_CAP_ARCHIVE | \
+                          MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
+                          MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
+                          MINO_CAP_CODEC)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull

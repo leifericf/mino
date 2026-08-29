@@ -226,19 +226,13 @@ static const mino_prim_domain k_core_domains[] = {
     {"sequences",   k_prims_sequences,   &k_prims_sequences_count},
     {"lazy",        k_prims_lazy,        &k_prims_lazy_count},
     {"string",      k_prims_string,      &k_prims_string_count},
-    {"url",         k_prims_url,         &k_prims_url_count},
-    {"codec",       k_prims_codec,       &k_prims_codec_count},
-    {"toml",        k_prims_toml,        &k_prims_toml_count},
-    {"yaml",        k_prims_yaml,        &k_prims_yaml_count},
-    {"html",        k_prims_html,        &k_prims_html_count},
-    {"digest",      k_prims_digest,      &k_prims_digest_count},
-    {"time",        k_prims_time,        &k_prims_time_count},
-    {"term",        k_prims_term,        &k_prims_term_count},
-    {"path",        k_prims_path,        &k_prims_path_count},
+    /* http message codec: pure encode/decode shared by the net client
+     * and any server, with no bundled namespace of its own, so it stays
+     * in the floor. The pure-data libraries that used to sit here
+     * (url/codec, toml, yaml, html, digest, time, term, path, the
+     * compression prims, and the zip container) now install under their
+     * own capabilities. */
     {"http",        k_prims_http,        &k_prims_http_count},
-    {"gzip",        k_prims_gzip,        &k_prims_gzip_count},
-    {"compress",    k_prims_compress,    &k_prims_compress_count},
-    {"archive",     k_prims_archive,     &k_prims_archive_count},
     {"reflection",  k_prims_reflection,  &k_prims_reflection_count},
     {"stateful",    k_prims_stateful,    &k_prims_stateful_count},
     {"module",      k_prims_module,      &k_prims_module_count},
@@ -326,6 +320,36 @@ static const mino_capability_info k_capability_info[] = {
       "clojure.data.csv (read-csv / write-csv)." },
     { "net",          MINO_CAP_NET,
       "TCP sockets (net-connect / net-read / net-read-all / net-write / net-close)." },
+    { "time",         MINO_CAP_TIME,
+      "mino.time + the clock and calendar prims (now / parse-time / format-time)." },
+    { "digest",       MINO_CAP_DIGEST,
+      "mino.digest + sha256 / sha1 / md5 / hmac-sha256 / crc32." },
+    { "html",         MINO_CAP_HTML,
+      "mino.html + mino.html.select + the tolerant html-parse reader." },
+    { "xml",          MINO_CAP_XML,
+      "clojure.xml + the strict xml-parse reader." },
+    { "yaml",         MINO_CAP_YAML,
+      "mino.yaml + the YAML-subset yaml-parse reader." },
+    { "toml",         MINO_CAP_TOML,
+      "mino.toml + the toml-parse reader." },
+    { "compress",     MINO_CAP_COMPRESS,
+      "gzip / deflate / zlib compression stream prims." },
+    { "archive",      MINO_CAP_ARCHIVE,
+      "mino.zip + the zip container prims (zip-entries / zip-read)." },
+    { "template",     MINO_CAP_TEMPLATE,
+      "mino.template (data-driven string templating)." },
+    { "term",         MINO_CAP_TERM,
+      "mino.term + tty? / terminal-width / terminal-height." },
+    { "env",          MINO_CAP_ENV,
+      "mino.env (dotenv parsing and a getenv overlay)." },
+    { "log",          MINO_CAP_LOG,
+      "mino.log (data-shaped log lines on *err*; pulls in time)." },
+    { "cli",          MINO_CAP_CLI,
+      "mino.cli (option parsing over the core string and reader prims)." },
+    { "path",         MINO_CAP_PATH,
+      "mino.path + the pure path-algebra prims (path-join / path-normalize / ...)." },
+    { "codec",        MINO_CAP_CODEC,
+      "percent-encode / percent-decode / parse-url / base64 / hex." },
     { NULL,           0u,                                                NULL },
 };
 
@@ -435,6 +459,22 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_NET,    k_prims_tls,         &k_prims_tls_count         },
     { MINO_CAP_NET,    k_prims_pool,        &k_prims_pool_count        },
     { MINO_CAP_NET,    k_prims_http_client, &k_prims_http_client_count },
+    /* The pure-data / info-only families gated out of the floor: an
+     * unbound now / sha256 / html-parse / path-join reports its
+     * capability instead of a bare unbound-symbol error. */
+    { MINO_CAP_TIME,     k_prims_time,     &k_prims_time_count     },
+    { MINO_CAP_DIGEST,   k_prims_digest,   &k_prims_digest_count   },
+    { MINO_CAP_HTML,     k_prims_html,     &k_prims_html_count     },
+    { MINO_CAP_XML,      k_prims_xml,      &k_prims_xml_count      },
+    { MINO_CAP_YAML,     k_prims_yaml,     &k_prims_yaml_count     },
+    { MINO_CAP_TOML,     k_prims_toml,     &k_prims_toml_count     },
+    { MINO_CAP_COMPRESS, k_prims_gzip,     &k_prims_gzip_count     },
+    { MINO_CAP_COMPRESS, k_prims_compress, &k_prims_compress_count },
+    { MINO_CAP_ARCHIVE,  k_prims_archive,  &k_prims_archive_count  },
+    { MINO_CAP_TERM,     k_prims_term,     &k_prims_term_count     },
+    { MINO_CAP_PATH,     k_prims_path,     &k_prims_path_count     },
+    { MINO_CAP_CODEC,    k_prims_url,      &k_prims_url_count      },
+    { MINO_CAP_CODEC,    k_prims_codec,    &k_prims_codec_count    },
 };
 
 #define K_CAP_PRIM_TABLE_COUNT \
@@ -637,63 +677,14 @@ static mino_env *floor_install_prim_tables(mino_state *S)
                                k_prims_clojure_repl_count);
         }
     }
-    /* mino.time bundled lib: ungated like its prims (reading a clock
-     * is info-only; ADR 21), so it registers in the floor and every
-     * embedder can (require '[mino.time]). */
-    mino_install_mino_time(S, NULL);
-    /* mino.path bundled lib: the algebra prims are ungated floor
-     * prims and the ns source only layers names over them, so it
-     * registers in the floor too (ADR 22). The glob fn inside
-     * resolves only when the fs capability is installed. */
-    mino_install_mino_path(S, NULL);
-    /* mino.cli bundled lib: pure option parsing over core string
-     * and reader fns, so it registers in the floor like mino.path. */
-    mino_install_mino_cli(S, NULL);
-    /* mino.digest bundled lib: pure hex sugar over floor digest
-     * prims, so it registers in the floor like mino.cli. */
-    mino_install_mino_digest(S, NULL);
-    /* mino.env bundled lib: pure dotenv parsing plus a Clojure-side
-     * getenv overlay, so it registers in the floor like mino.cli;
-     * the process-env fallback and slurp resolve at call time and
-     * need the io capability like any other caller. */
-    mino_install_mino_env(S, NULL);
-    /* mino.term bundled lib: ANSI styling as data over the floor
-     * tty? / terminal-width prims, so it registers in the floor like
-     * mino.env; the color gate consults (tty? :stdout) at call
-     * time. */
-    mino_install_mino_term(S, NULL);
-    /* mino.log bundled lib: pure Clojure over the floor time prims
-     * and the *err* routing, so it registers in the floor like
-     * mino.term; the timestamp and stderr write resolve at call
-     * time. */
-    mino_install_mino_log(S, NULL);
-    /* mino.toml bundled lib: pure regex-driven reader over the floor
-     * regex prims, so it registers in the floor like mino.log. */
-    mino_install_mino_toml(S, NULL);
-    /* mino.yaml bundled lib: the YAML subset reader facade (ADR 26),
-     * registering in the floor like mino.toml. */
-    mino_install_mino_yaml(S, NULL);
-    /* mino.html bundled lib: the tolerant HTML reader facade (ADR
-     * 28) over the floor html-parse prim, registering like
-     * mino.yaml. */
-    mino_install_mino_html(S, NULL);
-    /* mino.html.select bundled lib: the hickory.select subset over
-     * clojure.zip locs, pure Clojure over the bundled zip, so it
-     * registers in the floor like mino.html. */
-    mino_install_mino_html_select(S, NULL);
-    /* clojure.xml bundled lib: the JVM clojure.xml mirror (ADR 28)
-     * over the floor xml-parse prim, registering in the floor like
-     * mino.html (the prim is the reader; this is sugar plus the
-     * error contract). */
-    mino_install_clojure_xml(S, NULL);
-    /* mino.template bundled lib: the pure Selmer-shaped renderer,
-     * so it registers in the floor like mino.yaml; render-file
-     * resolves its slurp at call time. */
-    mino_install_mino_template(S, NULL);
-    /* mino.zip bundled lib: the thin archive facade (ADR 29) over
-     * the floor zip prims, registering in the floor like
-     * mino.html; it never touches clojure.zip. */
-    mino_install_mino_zip(S, NULL);
+    /* The pure-data / info-only bundled libraries (mino.time, mino.path,
+     * mino.cli, mino.digest, mino.env, mino.term, mino.log, mino.toml,
+     * mino.yaml, mino.html(.select), clojure.xml, mino.template,
+     * mino.zip) no longer register in the floor. Each installs under its
+     * own capability so a minimal embed carries neither the prim nor the
+     * bundled source, and introspection tells the truth. They remain in
+     * MINO_CAP_DEFAULT, so the standalone binary and the sandbox preset
+     * are unchanged. */
     return core_env;
 }
 

@@ -77,6 +77,26 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_MATCH,       mino_install_clojure_match   },
     { MINO_CAP_LOGIC,       mino_install_clojure_logic   },
     { MINO_CAP_TOOLING,     mino_install_mino_tooling    },
+    /* Pure-data / info-only families. Ordered so a prerequisite installs
+     * before its dependent when the closure pulls both in: codec before
+     * net, time before log, zip (above) before html. */
+    { MINO_CAP_CODEC,       mino_install_codec           },
+    { MINO_CAP_TIME,        mino_install_mino_time       },
+    { MINO_CAP_DIGEST,      mino_install_mino_digest     },
+    { MINO_CAP_HTML,        mino_install_mino_html       },
+    /* Same bit as html: the select subset ships alongside the reader. */
+    { MINO_CAP_HTML,        mino_install_mino_html_select},
+    { MINO_CAP_XML,         mino_install_clojure_xml     },
+    { MINO_CAP_YAML,        mino_install_mino_yaml       },
+    { MINO_CAP_TOML,        mino_install_mino_toml       },
+    { MINO_CAP_COMPRESS,    mino_install_compress        },
+    { MINO_CAP_ARCHIVE,     mino_install_mino_zip        },
+    { MINO_CAP_TEMPLATE,    mino_install_mino_template   },
+    { MINO_CAP_TERM,        mino_install_mino_term       },
+    { MINO_CAP_ENV,         mino_install_mino_env        },
+    { MINO_CAP_LOG,         mino_install_mino_log        },
+    { MINO_CAP_CLI,         mino_install_mino_cli        },
+    { MINO_CAP_PATH,        mino_install_mino_path       },
     { MINO_CAP_STORE,       mino_install_store           },
     { MINO_CAP_JSON,        mino_install_clojure_data_json },
     { MINO_CAP_CSV,         mino_install_clojure_data_csv  },
@@ -92,6 +112,42 @@ static const cap_dispatch_t k_cap_dispatch[] = {
 #define K_CAP_DISPATCH_COUNT \
     (sizeof(k_cap_dispatch) / sizeof(k_cap_dispatch[0]))
 
+/* Capability prerequisites. A key capability's bundled library leans on
+ * a value capability's prims, so requesting the key implies the value.
+ * The dispatch table above orders each value before its key, so a single
+ * forward pass installs them in the right order. */
+typedef struct {
+    uint64_t cap;
+    uint64_t needs;
+} cap_requires_t;
+
+static const cap_requires_t k_cap_requires[] = {
+    { MINO_CAP_NET,  MINO_CAP_CODEC   }, /* mino.http: percent-encode / base64 / parse-url */
+    { MINO_CAP_LOG,  MINO_CAP_TIME    }, /* mino.log: format-time on every line */
+    { MINO_CAP_HTML, MINO_CAP_ZIP     }, /* mino.html.select: clojure.zip navigation */
+    { MINO_CAP_TIME, MINO_CAP_INSTANT }, /* mino.time: #inst reader in its source */
+};
+
+#define K_CAP_REQUIRES_COUNT \
+    (sizeof(k_cap_requires) / sizeof(k_cap_requires[0]))
+
+/* Expand a requested capability set to include every prerequisite,
+ * iterating to a fixpoint so transitive requirements are covered. */
+static uint64_t cap_closure(uint64_t caps)
+{
+    uint64_t prev;
+    do {
+        size_t i;
+        prev = caps;
+        for (i = 0; i < K_CAP_REQUIRES_COUNT; i++) {
+            if (caps & k_cap_requires[i].cap) {
+                caps |= k_cap_requires[i].needs;
+            }
+        }
+    } while (caps != prev);
+    return caps;
+}
+
 void mino_install(mino_state *S, mino_env *env, uint64_t caps)
 {
     size_t i;
@@ -105,6 +161,10 @@ void mino_install(mino_state *S, mino_env *env, uint64_t caps)
     if ((S->caps_installed & MINO_CAP_FLOOR) == 0) {
         mino_install_minimal(S, env);
     }
+
+    /* Pull in prerequisite capabilities so no bundled library installs
+     * half-satisfied (e.g. net without the codec prims it calls). */
+    caps = cap_closure(caps);
 
     if (caps == 0) {
         /* Floor-only path. */
@@ -120,7 +180,8 @@ void mino_install(mino_state *S, mino_env *env, uint64_t caps)
      * capability installed. core.clj evaluates exactly once per state;
      * after that, additional capabilities install their C prims into
      * the existing env without re-running the script-side surface. */
-    first_non_floor_install = ((S->caps_installed & ~MINO_CAP_FLOOR) == 0);
+    first_non_floor_install =
+        ((S->caps_installed & ~(uint64_t)MINO_CAP_FLOOR) == 0);
 
     /* Install C primitives and register bundled sources for each bit
      * in `wanted`. After this loop every capability the embedder asked
@@ -146,7 +207,7 @@ void mino_install(mino_state *S, mino_env *env, uint64_t caps)
      * capability. Skip on subsequent installs against the same state:
      * the script-side surface is already in place and re-evaluation
      * would redefine bindings already shadowed by user code. */
-    if (first_non_floor_install && (caps & ~MINO_CAP_FLOOR) != 0) {
+    if (first_non_floor_install && (caps & ~(uint64_t)MINO_CAP_FLOOR) != 0) {
         mino_install_clojure_core(S, env);
     }
 }

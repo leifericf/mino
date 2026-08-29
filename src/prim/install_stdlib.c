@@ -127,13 +127,17 @@ void mino_install_clojure_zip(mino_state *S, mino_env *env)
     mino_register_bundled_lib(S, "clojure.zip", lib_clojure_zip_src);
 }
 
-/* clojure.xml: the JVM mirror over the floor xml-parse prim, so it
- * registers in the floor like mino.html (pure sugar; the prim is
- * the reader). */
+/* clojure.xml: the strict xml-parse reader prim installs under the XML
+ * capability, with the JVM-mirror sugar layered over it in the bundled
+ * source. Gated out of the floor so a minimal embed carries neither. */
 void mino_install_clojure_xml(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_xml, k_prims_xml_count, "xml");
     mino_register_bundled_lib(S, "clojure.xml", lib_clojure_xml_src);
+    S->caps_installed |= MINO_CAP_XML;
 }
 
 void mino_install_clojure_data(mino_state *S, mino_env *env)
@@ -321,64 +325,105 @@ void mino_install_mino_http(mino_state *S, mino_env *env)
     mino_register_bundled_lib(S, "mino.http", lib_mino_http_src);
 }
 
+/* Each of the pure-data / info-only namespaces below installs its C
+ * prims under its own capability (so a minimal embed carries neither the
+ * prim nor the bundled source), registers the bundled Clojure source,
+ * and sets the bit for a direct call. The install order relative to
+ * prerequisites (log needs time, html.select needs zip) is handled by
+ * the capability-dependency closure in mino_install. */
 void mino_install_mino_time(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_time, k_prims_time_count, "time");
     mino_register_bundled_lib(S, "mino.time", lib_mino_time_src);
+    S->caps_installed |= MINO_CAP_TIME;
 }
 
 void mino_install_mino_path(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_path, k_prims_path_count, "path");
     mino_register_bundled_lib(S, "mino.path", lib_mino_path_src);
+    S->caps_installed |= MINO_CAP_PATH;
 }
 
 void mino_install_mino_cli(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.cli", lib_mino_cli_src);
+    S->caps_installed |= MINO_CAP_CLI;
 }
 
 void mino_install_mino_digest(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_digest, k_prims_digest_count,
+                                       "digest");
     mino_register_bundled_lib(S, "mino.digest", lib_mino_digest_src);
+    S->caps_installed |= MINO_CAP_DIGEST;
 }
 
 void mino_install_mino_env(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.env", lib_mino_env_src);
+    S->caps_installed |= MINO_CAP_ENV;
 }
 
 void mino_install_mino_term(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_term, k_prims_term_count, "term");
     mino_register_bundled_lib(S, "mino.term", lib_mino_term_src);
+    S->caps_installed |= MINO_CAP_TERM;
 }
 
 void mino_install_mino_log(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.log", lib_mino_log_src);
+    S->caps_installed |= MINO_CAP_LOG;
 }
 
 void mino_install_mino_toml(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_toml, k_prims_toml_count, "toml");
     mino_register_bundled_lib(S, "mino.toml", lib_mino_toml_src);
+    S->caps_installed |= MINO_CAP_TOML;
 }
 
 void mino_install_mino_yaml(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_yaml, k_prims_yaml_count, "yaml");
     mino_register_bundled_lib(S, "mino.yaml", lib_mino_yaml_src);
+    S->caps_installed |= MINO_CAP_YAML;
 }
 
+/* HTML installs the tolerant html-parse prim plus both bundled sources:
+ * mino.html and the mino.html.select subset. The select surface leans on
+ * clojure.zip, which the closure pulls in alongside HTML. */
 void mino_install_mino_html(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_html, k_prims_html_count, "html");
     mino_register_bundled_lib(S, "mino.html", lib_mino_html_src);
+    S->caps_installed |= MINO_CAP_HTML;
 }
 
 void mino_install_mino_html_select(mino_state *S, mino_env *env)
@@ -386,18 +431,53 @@ void mino_install_mino_html_select(mino_state *S, mino_env *env)
     (void)env;
     mino_register_bundled_lib(S, "mino.html.select",
                               lib_mino_html_select_src);
+    S->caps_installed |= MINO_CAP_HTML;
 }
 
 void mino_install_mino_template(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.template", lib_mino_template_src);
+    S->caps_installed |= MINO_CAP_TEMPLATE;
 }
 
 void mino_install_mino_zip(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_archive, k_prims_archive_count,
+                                       "archive");
     mino_register_bundled_lib(S, "mino.zip", lib_mino_zip_src);
+    S->caps_installed |= MINO_CAP_ARCHIVE;
+}
+
+/* Prim-only capabilities: no bundled namespace, just the C prims tagged
+ * with their group so (mino-capability 'sym) and the MNS002 diagnostic
+ * report them. */
+void mino_install_codec(mino_state *S, mino_env *env)
+{
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_url, k_prims_url_count, "codec");
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_codec, k_prims_codec_count,
+                                       "codec");
+    S->caps_installed |= MINO_CAP_CODEC;
+}
+
+void mino_install_compress(mino_state *S, mino_env *env)
+{
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_gzip, k_prims_gzip_count,
+                                       "compress");
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_compress, k_prims_compress_count,
+                                       "compress");
+    S->caps_installed |= MINO_CAP_COMPRESS;
 }
 
 void mino_install_all(mino_state *S, mino_env *env)
