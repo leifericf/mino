@@ -101,10 +101,14 @@
     (if-let [b (:body resp)] (assoc base :body b) base)))
 
 (defn- normalize-opts
-  "Public opts into engine opts; every deadline carries its unit."
+  "Public opts into engine opts; every deadline carries its unit and
+  is type-checked here, the single normalization pass."
   [opts]
-  {:idle-timeout-ms (or (:idle-timeout opts) default-idle-timeout-ms)
-   :request-timeout-ms (or (:request-timeout opts) default-request-timeout-ms)
+  {:idle-timeout-ms (opt-long (:idle-timeout opts)
+                              :idle-timeout default-idle-timeout-ms)
+   :request-timeout-ms (opt-long (:request-timeout opts)
+                                  :request-timeout
+                                  default-request-timeout-ms)
    :max-header-bytes (:max-header-bytes opts)
    :max-body-bytes (:max-body-bytes opts)
    :max-headers (:max-headers opts)})
@@ -117,6 +121,11 @@
             (if-let [v (get opts k)] (assoc o k v) o))
           {}
           [:max-header-bytes :max-body-bytes :max-headers]))
+
+(defn- expired?
+  "Pure: has now-ms passed since-ms by budget-ms?"
+  [now-ms since-ms budget-ms]
+  (>= (- now-ms since-ms) budget-ms))
 
 ;;;; the run-server lifecycle
 
@@ -177,7 +186,10 @@
         poll-ms (socket-poll-ms idle-timeout)
         l (net-listen host port {:backlog 16})
         running? (atom true)
-        conns (atom [])
+        ;; one sequential acceptor: at most one connection is in
+        ;; flight, so the sweep face tracks exactly that one instead
+        ;; of accumulating handles for the server's lifetime
+        current-conn (atom nil)
         fut (future
               (loop []
                 (when @running?
@@ -187,12 +199,13 @@
                                     :write-timeout write-timeout-ms})
                                (catch e nil))]
                     (when c
-                      (swap! conns conj c)
+                      (reset! current-conn c)
                       ;; serve-conn* owns the single normalization pass;
                       ;; opts arrives in its public shape
                       (try (serve-conn* c handler opts)
                            (catch e nil))
-                      (try (net-close c) (catch e nil)))
+                      (try (net-close c) (catch e nil))
+                      (reset! current-conn nil))
                     (recur))))
               :served)]
     {:port (net-listener-port l)
@@ -202,10 +215,10 @@
              (let [joined (try (deref fut stop-grace-ms :grace-expired)
                                (catch e :future-error))]
                ;; Sweep only after the loop joined: a live loop owns
-               ;; its parked sockets and closes them itself once their
+               ;; its parked socket and closes it itself once its
                ;; reads end.
                (when (not= :grace-expired joined)
-                 (doseq [c @conns]
+                 (when-let [c @current-conn]
                    (try (net-close c) (catch e nil))))
                nil))}))
 
@@ -241,8 +254,8 @@
           (= :error (:status parsed)) {:kind :bad-request}
 
           (and first-byte-ms
-               (>= (- (time-ms) first-byte-ms)
-                   (:request-timeout-ms opts)))
+               (expired? (time-ms) first-byte-ms
+                         (:request-timeout-ms opts)))
           {:kind :request-timeout}
 
           :else
@@ -254,8 +267,8 @@
 
               (= :tick chunk)
               (if (and (nil? first-byte-ms)
-                       (>= (- (time-ms) idle-since-ms)
-                           (:idle-timeout-ms opts)))
+                       (expired? (time-ms) idle-since-ms
+                                 (:idle-timeout-ms opts)))
                 {:kind :idle-timeout}
                 (recur buf first-byte-ms))
 

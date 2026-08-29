@@ -442,7 +442,9 @@
     (is (thrown? (srv/run-server h {:port "eighty"})))
     (is (thrown? (srv/run-server h {:idle-timeout "soon"})))
     (is (thrown? (srv/run-server h {:max-body-bytes "big"})))
-    (is (thrown? (srv/run-server h :not-a-map)))))
+    (is (thrown? (srv/run-server h :not-a-map)))
+    ;; the connection seam validates its own opts at the boundary
+    (is (thrown? (srv/serve-conn* nil h {:request-timeout "later"})))))
 
 (deftest run-server-stop-is-idempotent
   (let [h (fn [req] {:status 200})
