@@ -148,6 +148,28 @@
                  (catch e (:location (ex-data e))))]
     (is (= 3 (:line loc)))))
 
+;;;; read-str option policy
+
+(deftest read-str-key-fn-supported
+  ;; :key-fn is the one supported reader option: a per-key transform
+  ;; passed straight to the json-parse prim.
+  (is (= {:a 1} (json/read-str "{\"a\":1}" :key-fn keyword))))
+
+(deftest read-str-rejects-unknown-option
+  ;; Unknown reader options throw rather than silently ignoring them,
+  ;; mirroring write-str's works-or-throws policy.
+  (is (thrown? (json/read-str "1" :bogus 2)))
+  (is (= :json/opts
+         (try (json/read-str "1" :bogus 2) (catch e (:mino/kind e))))))
+
+(deftest read-str-rejects-value-fn
+  ;; :value-fn has no native support; reject it with a clear diagnostic
+  ;; rather than silently dropping the requested transform.
+  (is (thrown? (json/read-str "1" :value-fn (fn [_ v] v))))
+  (is (= :json/opts
+         (try (json/read-str "1" :value-fn (fn [_ v] v))
+              (catch e (:mino/kind e))))))
+
 ;;;; JSON writer
 
 (deftest write-nil

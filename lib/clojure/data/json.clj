@@ -9,10 +9,29 @@
 
 ;;;; Public API
 
+(defn- json-fail
+  "Throws a classified clojure.data.json diagnostic (ADR 37): :mino/kind
+  names the error class so classed catch dispatches on it, :mino/message
+  the human string, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 (defn read-str
   "Parse a JSON string into Clojure data. Objects return as maps with
-   string keys by default. Pass {:key-fn keyword} for keyword keys."
+   string keys by default.
+
+   The only supported option is :key-fn, a per-key transform applied to
+   object keys (pass keyword for keyword keys). :value-fn is not
+   implemented and is rejected rather than silently ignored, as is any
+   other unknown option: read-str works or throws, it never drops a
+   requested transform."
   [string & {:as opts}]
+  (doseq [k (keys opts)]
+    (when-not (= k :key-fn)
+      (json-fail :json/opts "MJO001"
+                 (str "read-str option is not supported: " k)
+                 {:option k})))
   (json-parse string (:key-fn opts)))
 
 ;;;; String escaping (writer)
