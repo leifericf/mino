@@ -1,6 +1,7 @@
 /*
- * digest.c -- message digest primitives: md5, sha1, sha256, HMAC-SHA256
- * over the vendored BearSSL implementations, and crc32 over the miniz
+ * digest.c -- message digest primitives: md5, sha1, sha256, sha512,
+ * HMAC-SHA256, HMAC-SHA512 over the vendored BearSSL implementations,
+ * and crc32 over the miniz
  * mz_crc32 the gzip layer verifies trailers with.
  *
  * Digests take a string or bytes value (a string contributes its UTF-8
@@ -105,8 +106,19 @@ static mino_val *digest_md5(mino_state *S, const unsigned char *data,
     return mino_bytes(S, out, sizeof out);
 }
 
-/* (sha256 data) / (sha1 data) / (md5 data) -- string or bytes in, the
- * raw digest as a bytes value out. */
+static mino_val *digest_sha512(mino_state *S, const unsigned char *data,
+                               size_t len)
+{
+    br_sha512_context cc;
+    unsigned char     out[br_sha512_SIZE];
+    br_sha512_init(&cc);
+    br_sha512_update(&cc, data, len);
+    br_sha512_out(&cc, out);
+    return mino_bytes(S, out, sizeof out);
+}
+
+/* (sha256 data) / (sha1 data) / (md5 data) / (sha512 data) -- string or
+ * bytes in, the raw digest as a bytes value out. */
 static mino_val *prim_sha256(mino_state *S, mino_val *args, mino_env *env)
 {
     const unsigned char *data;
@@ -132,6 +144,15 @@ static mino_val *prim_md5(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!digest_one_arg(S, args, "md5", &data, &len)) return NULL;
     return digest_md5(S, data, len);
+}
+
+static mino_val *prim_sha512(mino_state *S, mino_val *args, mino_env *env)
+{
+    const unsigned char *data;
+    size_t               len;
+    (void)env;
+    if (!digest_one_arg(S, args, "sha512", &data, &len)) return NULL;
+    return digest_sha512(S, data, len);
 }
 
 /* (hmac-sha256 key data) -- HMAC over SHA-256 (RFC 2104), key and data
@@ -169,6 +190,39 @@ static mino_val *prim_hmac_sha256(mino_state *S, mino_val *args,
     return mino_bytes(S, out, sizeof out);
 }
 
+/* (hmac-sha512 key data) -- HMAC over SHA-512 (RFC 2104), the full
+ * 64-byte tag as a bytes value. Same key rules as hmac-sha256. */
+static mino_val *prim_hmac_sha512(mino_state *S, mino_val *args,
+                                  mino_env *env)
+{
+    const unsigned char  *key, *data;
+    size_t                key_len, len;
+    br_hmac_key_context   kc;
+    br_hmac_context       hc;
+    unsigned char         out[br_sha512_SIZE];
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "hmac-sha512 requires two arguments");
+    }
+    if (!digest_text_arg(args->as.cons.car, &key, &key_len)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "hmac-sha512: key must be a string or "
+                                     "bytes value");
+    }
+    if (!digest_text_arg(args->as.cons.cdr->as.cons.car, &data, &len)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "hmac-sha512: data must be a string or "
+                                     "bytes value");
+    }
+    br_hmac_key_init(&kc, &br_sha512_vtable, key, key_len);
+    br_hmac_init(&hc, &kc, 0);
+    br_hmac_update(&hc, data, len);
+    br_hmac_out(&hc, out);
+    return mino_bytes(S, out, sizeof out);
+}
+
 /* (crc32 data) -- the gzip-spec CRC-32 (same polynomial and byte order
  * as zlib), returned as an unsigned integer in 0..2^32-1. */
 static mino_val *prim_crc32(mino_state *S, mino_val *args, mino_env *env)
@@ -194,9 +248,17 @@ const mino_prim_def k_prims_digest[] = {
      "Computes the MD5 digest of a string or bytes value and returns "
      "the 16-byte digest as a bytes value. MD5 is collision-broken; "
      "use only for non-security checksums."},
+    {"sha512", prim_sha512,
+     "Computes the SHA-512 digest of a string or bytes value (a string "
+     "contributes its UTF-8 bytes) and returns the 64-byte digest as a "
+     "bytes value. Pair with hex-encode for display."},
     {"hmac-sha256", prim_hmac_sha256,
      "Computes the HMAC-SHA256 tag (RFC 2104) of data under key, each a "
      "string or bytes value, and returns the full 32-byte tag as a "
+     "bytes value."},
+    {"hmac-sha512", prim_hmac_sha512,
+     "Computes the HMAC-SHA512 tag (RFC 2104) of data under key, each a "
+     "string or bytes value, and returns the full 64-byte tag as a "
      "bytes value."},
     {"crc32", prim_crc32,
      "Computes the gzip-spec CRC-32 of a string or bytes value and "

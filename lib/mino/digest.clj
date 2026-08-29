@@ -7,7 +7,7 @@
   (digest/hmac-hex :sha256 \"Jefe\" \"what do ya want for nothing?\")
   ;; => \"5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843\"
 
-  The prims (sha256, sha1, md5, hmac-sha256) answer raw bytes values;
+  The prims (sha256, sha1, md5, sha512, hmac-sha256, hmac-sha512) answer raw bytes values;
   these wrappers answer the lowercase hex string scripts usually want.
   Input is a string or bytes value exactly like the prims. An algorithm
   keyword without a prim throws a diagnostic with :mino/kind :digest/alg
@@ -30,24 +30,26 @@
     :sha256 sha256
     :sha1   sha1
     :md5    md5
+    :sha512 sha512
     (digest-fail :digest/alg "MDA001"
                  (str "mino.digest: no digest algorithm " (pr-str alg)
-                      "; known: :sha256, :sha1, :md5")
+                      "; known: :sha256, :sha1, :md5, :sha512")
                  {:alg alg})))
 
 (defn digest-hex
-  "Hex digest of data under alg (:sha256, :sha1, or :md5). data is a
-  string or bytes value, as the prims take."
+  "Hex digest of data under alg (:sha256, :sha1, :md5, or :sha512). data
+  is a string or bytes value, as the prims take."
   [alg data]
   (hex-encode ((digest-fn alg) data)))
 
 (defn hmac-hex
-  "Hex HMAC tag of data under key with alg (:sha256). key and data are
-  string or bytes values, as hmac-sha256 takes."
+  "Hex HMAC tag of data under key with alg (:sha256 or :sha512). key and
+  data are string or bytes values, as the hmac prims take."
   [alg key data]
-  (if (= :sha256 alg)
-    (hex-encode (hmac-sha256 key data))
+  (case alg
+    :sha256 (hex-encode (hmac-sha256 key data))
+    :sha512 (hex-encode (hmac-sha512 key data))
     (digest-fail :digest/alg "MDA002"
                  (str "mino.digest: no HMAC algorithm for " (pr-str alg)
-                      "; known: :sha256")
+                      "; known: :sha256, :sha512")
                  {:alg alg})))

@@ -144,13 +144,13 @@
 (deftest digest-hex-unknown-alg-is-classed
   (require '[mino.digest :as digest])
   (is (= :digest/alg
-         (try (digest/digest-hex :sha512 "abc")
+         (try (digest/digest-hex :sha3-256 "abc")
               (catch e (:mino/kind e)))))
   (is (= :caught
-         (try (digest/digest-hex :sha512 "abc")
+         (try (digest/digest-hex :sha3-256 "abc")
               (catch :digest/alg _ :caught))))
-  (let [e (try (digest/digest-hex :sha512 "abc") (catch e (do e)))]
-    (is (= :sha512 (:alg (ex-data e))))))
+  (let [e (try (digest/digest-hex :sha3-256 "abc") (catch e (do e)))]
+    (is (= :sha3-256 (:alg (ex-data e))))))
 
 (deftest hmac-hex-unknown-alg-is-classed
   (require '[mino.digest :as digest])
