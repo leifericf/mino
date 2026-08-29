@@ -391,4 +391,95 @@
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
+;;;; the run-server lifecycle
+
+(defn- rs-with
+  "Run (body server) against a fresh run-server instance; the server
+  is stopped after the body whether it passed, threw, or errored."
+  [handler opts body]
+  (let [s (srv/run-server handler opts)]
+    (try
+      (body s)
+      (finally
+        ((:stop s))))))
+
+(deftest run-server-serves-traffic-and-stops
+  (let [h (fn [req] {:status 200 :body (str "saw:" (:uri req))})]
+    (rs-with h {}
+      (fn [s]
+        (is (int? (:port s)))
+        (is (> (:port s) 0))
+        (let [c (srv-connect (:port s))]
+          (srv-send c (srv-req "GET" "/first"))
+          (let [x1 (srv-read-one c [])]
+            (is (= 200 (:code (:resp x1))))
+            (is (= (srv-bb "saw:/first") (:body (:resp x1))))
+            (srv-send c (srv-close-req "GET" "/last"))
+            (let [x2 (srv-read-one c (:pending x1))]
+              (is (= 200 (:code (:resp x2))))
+              (is (= (srv-bb "saw:/last") (:body (:resp x2))))
+              (is (= "close"
+                     (get (:headers (:resp x2)) "connection")))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest run-server-port-zero-reads-back-the-kernel-choice
+  (let [h (fn [req] {:status 200 :body "p"})]
+    (rs-with h {:port 0}
+      (fn [s]
+        (is (<= 1 (:port s) 65535))
+        (let [c (srv-connect (:port s))]
+          (srv-send c (srv-close-req "GET" "/"))
+          (let [x (srv-read-one c [])]
+            (is (= 200 (:code (:resp x)))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest run-server-rejects-unknown-and-malformed-opts
+  (let [h (fn [req] {:status 200})]
+    (is (thrown? (srv/run-server h {:bogus 1 :worse 2})))
+    (is (re-find #"bogus"
+                 (try (srv/run-server h {:bogus 1})
+                      (catch e (ex-message e)))))
+    (is (thrown? (srv/run-server h {:port "eighty"})))
+    (is (thrown? (srv/run-server h {:idle-timeout "soon"})))
+    (is (thrown? (srv/run-server h {:max-body-bytes "big"})))
+    (is (thrown? (srv/run-server h :not-a-map)))))
+
+(deftest run-server-stop-is-idempotent
+  (let [h (fn [req] {:status 200})
+        s (srv/run-server h {})]
+    (is (nil? ((:stop s))))
+    (is (nil? ((:stop s))))))
+
+(deftest run-server-stop-is-bounded-under-a-parked-connection
+  (let [h (fn [req] {:status 200 :body "never"})
+        s (srv/run-server h {:request-timeout 5500})]
+    (let [c (srv-connect (:port s))]
+      (srv-send c "GET / HTTP/1.1\r\nHost: t.example\r\n")
+      ;; give the engine a moment to park on the partial request
+      (let [t0 (time-ms)
+            r ((:stop s))
+            elapsed (- (time-ms) t0)]
+        (is (nil? r))
+        ;; the parked request outlives the join grace; stop still
+        ;; returns in bounded time instead of waiting for it
+        (is (< elapsed 7000) (str "stop took " elapsed "ms"))
+        ;; the listener is gone: fresh connects are refused
+        (is (thrown? (net-connect "127.0.0.1" (:port s) {}))))
+      ;; the straggler connection is closed by its own deadline, not
+      ;; leaked and never closed underneath its parked read
+      (is (nil? (try (net-read c 65536) (catch e :err))))
+      (try (net-close c) (catch e nil)))))
+
+(deftest run-server-survives-repeated-start-stop-cycles
+  (let [h (fn [req] {:status 200 :body "cycle"})]
+    (dotimes [i 5]
+      (rs-with h {}
+        (fn [s]
+          (let [c (srv-connect (:port s))]
+            (srv-send c (srv-close-req "GET" "/"))
+            (let [x (srv-read-one c [])]
+              (is (= 200 (:code (:resp x))) (str "cycle " i))
+              (is (= (srv-bb "cycle") (:body (:resp x))) (str "cycle " i)))
+            (try (net-close c) (catch e nil))))))))
+
 (run-tests-and-exit)

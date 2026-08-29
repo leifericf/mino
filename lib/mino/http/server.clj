@@ -118,6 +118,97 @@
           {}
           [:max-header-bytes :max-body-bytes :max-headers]))
 
+;;;; the run-server lifecycle
+
+(def ^:private allowed-server-keys
+  #{:port :host :idle-timeout :request-timeout
+    :max-header-bytes :max-body-bytes :max-headers})
+
+(def ^:private accept-poll-ms 250)
+(def ^:private write-timeout-ms 5000)
+(def ^:private stop-grace-ms 5000)
+
+(defn- opt-long
+  [v k default]
+  (cond (nil? v) default
+        (int? v) v
+        :else (bad (str "key :" (name k) " must be an integer"))))
+
+(defn- check-cap
+  [opts k]
+  (when-let [v (get opts k)]
+    (when-not (int? v)
+      (bad (str "key :" (name k) " must be an integer")))))
+
+(defn- socket-poll-ms
+  "Socket read-timeout derived from the idle budget: a poll interval
+  well under the budget, so a quiet connection wakes and re-parks
+  inside it."
+  [idle-timeout-ms]
+  (max 20 (min 250 (quot idle-timeout-ms 4))))
+
+(defn run-server
+  "Start handler on a loopback listener; returns {:port :stop}. opts:
+  :port (default 0, kernel-chosen and read back), :host (default
+  127.0.0.1), :idle-timeout, :request-timeout, :max-header-bytes,
+  :max-body-bytes, :max-headers. Unknown keys are an error naming
+  them. One acceptor future serves connections sequentially; stop
+  ends the accept loop, closes the listener, and joins the future
+  with a bounded grace. Accepted sockets are closed by their own
+  serve cycle, never underneath a parked read; a connection that
+  outlives the grace is left to its own deadline."
+  [handler opts]
+  (when-not (map? opts)
+    (bad "the server opts must be a map"))
+  (let [unknown (filter (fn [k] (not (contains? allowed-server-keys k)))
+                        (keys opts))]
+    (when (seq unknown)
+      (bad (str "unknown server key(s): "
+                (str/join ", " (map pr-str unknown))))))
+  (let [host (or (:host opts) "127.0.0.1")
+        port (opt-long (:port opts) :port 0)
+        idle-timeout (opt-long (:idle-timeout opts)
+                                :idle-timeout default-idle-timeout-ms)
+        request-timeout (opt-long (:request-timeout opts)
+                                   :request-timeout
+                                   default-request-timeout-ms)
+        _ (doseq [k [:max-header-bytes :max-body-bytes :max-headers]]
+            (check-cap opts k))
+        poll-ms (socket-poll-ms idle-timeout)
+        l (net-listen host port {:backlog 16})
+        running? (atom true)
+        conns (atom [])
+        fut (future
+              (loop []
+                (when @running?
+                  (let [c (try (net-accept
+                                 l {:accept-timeout accept-poll-ms
+                                    :read-timeout poll-ms
+                                    :write-timeout write-timeout-ms})
+                               (catch e nil))]
+                    (when c
+                      (swap! conns conj c)
+                      ;; serve-conn* owns the single normalization pass;
+                      ;; opts arrives in its public shape
+                      (try (serve-conn* c handler opts)
+                           (catch e nil))
+                      (try (net-close c) (catch e nil)))
+                    (recur))))
+              :served)]
+    {:port (net-listener-port l)
+     :stop (fn []
+             (reset! running? false)
+             (try (net-close l) (catch e nil))
+             (let [joined (try (deref fut stop-grace-ms :grace-expired)
+                               (catch e :future-error))]
+               ;; Sweep only after the loop joined: a live loop owns
+               ;; its parked sockets and closes them itself once their
+               ;; reads end.
+               (when (not= :grace-expired joined)
+                 (doseq [c @conns]
+                   (try (net-close c) (catch e nil))))
+               nil))}))
+
 ;;;; the connection loop
 
 (defn- read-chunk
