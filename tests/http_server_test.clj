@@ -395,13 +395,24 @@
 
 (defn- rs-with
   "Run (body server) against a fresh run-server instance; the server
-  is stopped after the body whether it passed, threw, or errored."
+  is stopped after the body whether it passed, threw, or errored. The
+  teardown waits for the thread grant to drain: a finished future
+  releases its worker slot asynchronously, and the next test's pool
+  must not start against a still-teardown grant."
   [handler opts body]
   (let [s (srv/run-server handler opts)]
     (try
       (body s)
       (finally
-        ((:stop s))))))
+        ((:stop s))
+        (srv-wait-for #(zero? (mino-thread-count)) 2000)))))
+
+(defn- srv-await-capacity
+  "Wait until the grant has n free worker slots, so a pool test that
+  needs simultaneous threads is not defeated by leftovers from the
+  tests before it."
+  [n]
+  (srv-wait-for #(<= n (- (mino-thread-limit) (mino-thread-count))) 5000))
 
 (deftest run-server-serves-traffic-and-stops
   (let [h (fn [req] {:status 200 :body (str "saw:" (:uri req))})]
@@ -483,5 +494,144 @@
               (is (= 200 (:code (:resp x))) (str "cycle " i))
               (is (= (srv-bb "cycle") (:body (:resp x))) (str "cycle " i)))
             (try (net-close c) (catch e nil))))))))
+
+;;;; the acceptor pool
+
+(defn- srv-wait-for
+  "Poll pred every 20ms until it answers truthy or ms elapses; nil when
+  the deadline passes first."
+  [pred ms]
+  (let [deadline (+ (time-ms) ms)]
+    (loop []
+      (or (pred)
+          (when (< (time-ms) deadline)
+            (thread-sleep 20)
+            (recur))))))
+
+(defn- srv-pool-k
+  "Concurrent handlers a barrier test may demand: one thread for the
+  accept loop machinery, then one per simultaneous handler."
+  []
+  (max 1 (min 3 (- (mino-thread-limit) 1))))
+
+(deftest pool-serves-concurrent-connections
+  (let [k (srv-pool-k)
+        _ (srv-await-capacity (+ k 2))
+        entered (atom 0)
+        releases (vec (repeatedly k promise))
+        h (fn [req]
+            (let [i (swap! entered inc)]
+              (deref (nth releases (dec i)) 9000 :t)
+              {:status 200 :body "c"}))]
+    (rs-with h {:acceptors 1 :max-conns 4
+                :idle-timeout 9000 :request-timeout 9000}
+      (fn [s]
+        (let [conns (mapv (fn [_] (srv-connect (:port s))) (range k))]
+          (doseq [c conns] (srv-send c (srv-req "GET" "/k")))
+          ;; every handler must be parked inside the server at once;
+          ;; a sequential server parks the second connection behind
+          ;; the first and this barrier never completes
+          (is (srv-wait-for #(= k @entered) 9000)
+              (str "only " @entered " of " k " handlers entered"))
+          (doseq [p releases] (deliver p :go))
+          (doseq [c conns]
+            (let [x (srv-read-one c [])]
+              (is (some? x))
+              (is (= 200 (:code (:resp x))))
+              (is (= (srv-bb "c") (:body (:resp x)))))
+            (try (net-close c) (catch e nil))))))))
+
+(deftest pool-keeps-serving-while-one-handler-parks
+  (let [_ (srv-await-capacity 5)
+        entered (atom false)
+        release (promise)
+        h (fn [req]
+            (case (:uri req)
+              "/park" (do (reset! entered true)
+                          (deref release 9000 :t)
+                          {:status 200 :body "parked"})
+              "/boom" (throw (ex-info "boom" {}))
+              {:status 200 :body "fine"}))]
+    (rs-with h {:acceptors 2 :max-conns 4
+                :idle-timeout 9000 :request-timeout 9000}
+      (fn [s]
+        (let [a (srv-connect (:port s))]
+          (srv-send a (srv-req "GET" "/park"))
+          (is (srv-wait-for #(true? @entered) 9000))
+          ;; two full request/response cycles complete while the first
+          ;; connection's handler is parked
+          (doseq [path ["/b" "/c"]]
+            (let [c (srv-connect (:port s))]
+              (srv-send c (srv-close-req "GET" path))
+              (let [x (srv-read-one c [])]
+                (is (= 200 (:code (:resp x))) path)
+                (is (= (srv-bb "fine") (:body (:resp x))) path))
+              (try (net-close c) (catch e nil))))
+          (deliver release :go)
+          (let [x (srv-read-one a [])]
+            (is (= 200 (:code (:resp x))))
+            (is (= (srv-bb "parked") (:body (:resp x)))))
+          (try (net-close a) (catch e nil)))
+        ;; a throwing handler answers 500 and the pool serves the next
+        ;; connection untouched
+        (let [d (srv-connect (:port s))]
+          (srv-send d (srv-close-req "GET" "/boom"))
+          (let [x (srv-read-one d [])]
+            (is (= 500 (:code (:resp x))))
+            (is (= "close" (get (:headers (:resp x)) "connection"))))
+          (try (net-close d) (catch e nil)))
+        (let [e2 (srv-connect (:port s))]
+          (srv-send e2 (srv-close-req "GET" "/after"))
+          (let [x (srv-read-one e2 [])]
+            (is (= 200 (:code (:resp x))))
+            (is (= (srv-bb "fine") (:body (:resp x)))))
+          (try (net-close e2) (catch e nil)))))))
+
+(deftest pool-max-conns-one-serializes-and-holds-the-backlog
+  (let [_ (srv-await-capacity 4)
+        st (atom {:inflight 0 :max 0 :served 0})
+        release (promise)
+        h (fn [req]
+            (swap! st (fn [m]
+                        (let [m2 (-> m (update :served inc) (update :inflight inc))]
+                          (assoc m2 :max (max (:max m) (:inflight m2))))))
+            (when (= "/park" (:uri req))
+              (deref release 9000 :t))
+            (swap! st update :inflight dec)
+            {:status 200 :body "s"})]
+    (rs-with h {:acceptors 2 :max-conns 1
+                :idle-timeout 9000 :request-timeout 9000}
+      (fn [s]
+        ;; the parked request asks to close, so its connection and its
+        ;; permit are released the moment the handler answers
+        (let [a (srv-connect (:port s))]
+          (srv-send a (srv-close-req "GET" "/park"))
+          (is (srv-wait-for #(= 1 (:served @st)) 9000))
+          ;; the kernel backlog takes the second connection even though
+          ;; the single permit is held; its handler cannot start
+          (let [b (srv-connect (:port s))]
+            (srv-send b (srv-close-req "GET" "/b"))
+            (is (not (srv-wait-for #(= 2 (:served @st)) 600))
+                "the second handler started while the permit was held")
+            (deliver release :go)
+            (is (srv-wait-for #(= 2 (:served @st)) 9000)
+                "the backlog connection was never served")
+            (let [x (srv-read-one b [])]
+              (is (= 200 (:code (:resp x)))))
+            (try (net-close b) (catch e nil)))
+          (let [x (srv-read-one a [])]
+            (is (= 200 (:code (:resp x)))))
+          (try (net-close a) (catch e nil)))
+        (is (= 1 (:max @st)) "two handlers ran at once")))))
+
+(deftest pool-opts-are-validated
+  (let [h (fn [req] {:status 200})]
+    (is (thrown? (srv/run-server h {:acceptors 0})))
+    (is (thrown? (srv/run-server h {:acceptors "two"})))
+    (is (thrown? (srv/run-server h {:max-conns 0})))
+    (is (thrown? (srv/run-server h {:max-conns -2})))
+    (is (re-find #"acceptors"
+                 (try (srv/run-server h {:acceptors 0})
+                      (catch e (ex-message e)))))))
 
 (run-tests-and-exit)

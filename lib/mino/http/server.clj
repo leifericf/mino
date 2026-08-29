@@ -10,7 +10,8 @@
   locals, parked in a blocking read between iterations; a throwing
   handler yields a 500 text/plain response and a close, never
   propagation."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [clojure.core.async :as a]))
 
 ;;;; pure decisions
 
@@ -131,17 +132,28 @@
 
 (def ^:private allowed-server-keys
   #{:port :host :idle-timeout :request-timeout
-    :max-header-bytes :max-body-bytes :max-headers})
+    :max-header-bytes :max-body-bytes :max-headers
+    :acceptors :max-conns})
 
+(def ^:private default-acceptors 2)
+(def ^:private default-max-conns 16)
 (def ^:private accept-poll-ms 250)
 (def ^:private write-timeout-ms 5000)
 (def ^:private stop-grace-ms 5000)
+(def ^:private spawn-retries 12)
+(def ^:private spawn-retry-ms 25)
 
 (defn- opt-long
   [v k default]
   (cond (nil? v) default
         (int? v) v
         :else (bad (str "key :" (name k) " must be an integer"))))
+
+(defn- opt-pos-int
+  [v k default]
+  (cond (nil? v) default
+        (and (int? v) (pos? v)) v
+        :else (bad (str "key :" (name k) " must be a positive integer"))))
 
 (defn- check-cap
   [opts k]
@@ -156,16 +168,56 @@
   [idle-timeout-ms]
   (max 20 (min 250 (quot idle-timeout-ms 4))))
 
+(defn- spawn-future
+  "future-call with a short retry against a momentarily-full thread
+  grant; nil when the grant stays exhausted. A grant too small for
+  the pool's shape degrades it (fewer acceptors, the spawner serving
+  connections inline) instead of failing the server."
+  [thunk]
+  (loop [n spawn-retries]
+    (or (try (future-call thunk) (catch e nil))
+        (when (pos? n)
+          (thread-sleep spawn-retry-ms)
+          (recur (dec n))))))
+
+(defn- run-conn!
+  "One connection's whole life on whatever thread runs this: serve,
+  close, and hand the permit back. The catch is the pool boundary; a
+  connection that somehow escapes serve-conn* still closes and still
+  returns its permit."
+  [c handler opts permits]
+  (try (serve-conn* c handler opts) (catch e nil))
+  (try (net-close c) (catch e nil))
+  (try (a/>!! permits :p) (catch e nil)))
+
+(defn- sweep-mailbox!
+  "Close every connection still waiting in the mailbox and return its
+  permit. A swept connection has no worker, so nothing is parked on
+  it and closing is safe; channel takes are exactly-once, so a racing
+  spawner can never double-own one."
+  [mailbox permits]
+  (loop []
+    (when-let [c (a/poll! mailbox)]
+      (try (net-close c) (catch e nil))
+      (try (a/>!! permits :p) (catch e nil))
+      (recur))))
+
 (defn run-server
   "Start handler on a loopback listener; returns {:port :stop}. opts:
   :port (default 0, kernel-chosen and read back), :host (default
-  127.0.0.1), :idle-timeout, :request-timeout, :max-header-bytes,
-  :max-body-bytes, :max-headers. Unknown keys are an error naming
-  them. One acceptor future serves connections sequentially; stop
-  ends the accept loop, closes the listener, and joins the future
-  with a bounded grace. Accepted sockets are closed by their own
-  serve cycle, never underneath a parked read; a connection that
-  outlives the grace is left to its own deadline."
+  127.0.0.1), :acceptors (default 2, futures racing on the shared
+  listener), :max-conns (default 16, the permit count bounding
+  simultaneous connections), :idle-timeout, :request-timeout,
+  :max-header-bytes, :max-body-bytes, :max-headers. Unknown keys are
+  an error naming them. An acceptor takes a permit before it accepts,
+  so a full permit set parks the acceptors and the kernel backlog
+  absorbs the waiting connections; each accepted connection goes to
+  its own worker future, which serves it to completion and returns
+  the permit at close. stop wakes every acceptor, closes the
+  listener, drains unserved connections from the mailbox, and joins
+  the pool within a bounded grace; a connection that outlives the
+  grace is left to its own deadline, never closed underneath a
+  parked read."
   [handler opts]
   (when-not (map? opts)
     (bad "the server opts must be a map"))
@@ -181,46 +233,107 @@
         request-timeout (opt-long (:request-timeout opts)
                                    :request-timeout
                                    default-request-timeout-ms)
+        acceptors-n (opt-pos-int (:acceptors opts)
+                                 :acceptors default-acceptors)
+        max-conns (opt-pos-int (:max-conns opts)
+                               :max-conns default-max-conns)
         _ (doseq [k [:max-header-bytes :max-body-bytes :max-headers]]
             (check-cap opts k))
         poll-ms (socket-poll-ms idle-timeout)
         l (net-listen host port {:backlog 16})
         running? (atom true)
-        ;; one sequential acceptor: at most one connection is in
-        ;; flight, so the sweep face tracks exactly that one instead
-        ;; of accumulating handles for the server's lifetime
-        current-conn (atom nil)
-        fut (future
-              (loop []
-                (when @running?
-                  (let [c (try (net-accept
-                                 l {:accept-timeout accept-poll-ms
-                                    :read-timeout poll-ms
-                                    :write-timeout write-timeout-ms})
-                               (catch e nil))]
-                    (when c
-                      (reset! current-conn c)
-                      ;; serve-conn* owns the single normalization pass;
-                      ;; opts arrives in its public shape
-                      (try (serve-conn* c handler opts)
-                           (catch e nil))
-                      (try (net-close c) (catch e nil))
-                      (reset! current-conn nil))
-                    (recur))))
-              :served)]
-    {:port (net-listener-port l)
-     :stop (fn []
-             (reset! running? false)
-             (try (net-close l) (catch e nil))
-             (let [joined (try (deref fut stop-grace-ms :grace-expired)
-                               (catch e :future-error))]
-               ;; Sweep only after the loop joined: a live loop owns
-               ;; its parked socket and closes it itself once its
-               ;; reads end.
-               (when (not= :grace-expired joined)
-                 (when-let [c @current-conn]
-                   (try (net-close c) (catch e nil))))
-               nil))}))
+        permits (a/chan max-conns)
+        mailbox (a/chan max-conns)
+        stop-sig (a/chan)
+        active (atom 0)
+        _ (dotimes [i max-conns] (a/>!! permits i))
+        sweep! (fn [] (sweep-mailbox! mailbox permits))
+        accept! (fn []
+                  (try (net-accept
+                         l {:accept-timeout accept-poll-ms
+                            :read-timeout poll-ms
+                            :write-timeout write-timeout-ms})
+                       (catch e nil)))
+        spawn-conn! (fn [c]
+                      (swap! active inc)
+                      (if-let [fut (try (future-call
+                                          (fn []
+                                            (run-conn! c handler opts permits)
+                                            (swap! active dec)))
+                                        (catch e nil))]
+                        nil
+                        (do (swap! active dec)
+                            ;; no thread to spare: the spawner becomes
+                            ;; this connection's worker, and permits
+                            ;; still bound what queues behind it
+                            (run-conn! c handler opts permits))))
+        spawner-thunk (fn []
+                        (loop []
+                          (let [[c src] (a/alts!! [mailbox stop-sig])]
+                            (when (= src mailbox)
+                              (spawn-conn! c)
+                              (recur))))
+                        (sweep!)
+                        :spawner-done)
+        spawner (spawn-future spawner-thunk)
+        acceptor-thunk (fn []
+                         (loop []
+                           (when @running?
+                             (let [[p src] (a/alts!! [permits stop-sig])]
+                               (when (= src permits)
+                                 (let [c (accept!)]
+                                   (cond
+                                     (nil? c)
+                                     (do (try (a/>!! permits :p) (catch e nil))
+                                         (recur))
+
+                                     ;; the stop raced the accept: this
+                                     ;; connection is unserved and this
+                                     ;; acceptor still holds its permit
+                                     (not @running?)
+                                     (do (try (net-close c) (catch e nil))
+                                         (try (a/>!! permits :p)
+                                              (catch e nil)))
+
+                                     :else
+                                     (do (try (a/>!! mailbox c)
+                                              (catch e nil))
+                                         (recur))))))))
+                         :acceptor-done)]
+    (when (nil? spawner)
+      (reset! running? false)
+      (a/close! stop-sig)
+      (try (net-close l) (catch e nil))
+      (bad "the connection spawner could not start; the host thread grant is too small"))
+    (let [acc-futs (atom [])
+          _ (dotimes [i acceptors-n]
+              (when-let [f (spawn-future acceptor-thunk)]
+                (swap! acc-futs conj f)))
+          _ (when (empty? @acc-futs)
+              (reset! running? false)
+              (a/close! stop-sig)
+              (try (net-close l) (catch e nil))
+              (try (deref spawner stop-grace-ms :grace-expired)
+                   (catch e nil))
+              (bad "no acceptor could start; the host thread grant is too small"))]
+      {:port (net-listener-port l)
+       :stop (fn []
+               (reset! running? false)
+               (a/close! stop-sig)
+               (try (net-close l) (catch e nil))
+               (let [t0 (time-ms)
+                     left (fn []
+                            (max 0 (- (+ t0 stop-grace-ms) (time-ms))))]
+                 (doseq [f @acc-futs]
+                   (try (deref f (left) :grace-expired) (catch e nil)))
+                 (try (deref spawner (left) :grace-expired)
+                      (catch e nil))
+                 (sweep!)
+                 (loop []
+                   (when (and (pos? @active) (pos? (left)))
+                     (thread-sleep 25)
+                     (recur))))
+               nil)})))
 
 ;;;; the connection loop
 
