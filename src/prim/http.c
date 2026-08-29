@@ -3,7 +3,8 @@
  * orchestration prim: request serialization (http-encode-request,
  * http-encode-chunk), response serialization (http-encode-response),
  * response parsing (http-parse-response,
- * http-parse-response-chunks), and http-request, which composes the
+ * http-parse-response-chunks), request parsing (http-parse-request,
+ * http-parse-request-chunks), and http-request, which composes the
  * pool, socket, TLS, redirect, and gzip layers into one call.
  *
  * The codec is a pure layer over buffers with no sockets and no
@@ -94,10 +95,13 @@ struct mino_http_parser {
     size_t         section_start;  /* cap accounting origin for lines */
     size_t         body_start;     /* CL / close body offset in buf */
     size_t         reason_off, reason_len;
+    size_t         method_off, method_len;
+    size_t         target_off, target_len;
     long long      content_length; /* -1 until decided */
     long long      chunk_remaining;
     int            state, status, framing;
     int            code, http10;
+    int            is_request;
     int            info_count;
     int            bodiless;  /* caller knows the method has no body */
     size_t         max_header_bytes;
@@ -135,6 +139,19 @@ static int http_tchar(unsigned char c)
 static int http_ows(unsigned char c)
 {
     return c == ' ' || c == '\t';
+}
+
+/* Nonempty with no SP or control byte: the shape every wire slot
+ * (target, host) requires; NUL included in the rejection. */
+static int http_valid_target(const char *s, size_t len)
+{
+    size_t i;
+    if (len == 0) return 0;
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c <= 0x20 || c == 0x7f) return 0;
+    }
+    return 1;
 }
 
 static int http_hex_val(unsigned char c)
@@ -209,15 +226,19 @@ static int http_reserve(mino_http_parser_t *p, unsigned char **buf,
     return 0;
 }
 
-/* ---- response parser (untrusted input) ----
+/* ---- message parser (untrusted input, both directions) ----
  *
- * The parser stays TU-local: http-request drives it in this same TU
- * (the net.c precedent of one TU per layer), so the C API is static
- * until a second TU needs it. */
+ * One incremental parser drives both directions: responses for the
+ * client, requests for the server (is_request). It stays TU-local:
+ * http-request drives it in this same TU (the net.c precedent of one
+ * TU per layer), so the C API is static until a second TU needs it.
+ * A :done request carries its unparsed tail as leftover bytes so a
+ * keep-alive caller can seed the next parse. */
 
 static mino_http_parser_t *http_parser_new(size_t max_header_bytes,
-                                           size_t max_headers,
-                                           long long max_body_bytes)
+                                            size_t max_headers,
+                                            long long max_body_bytes,
+                                            int is_request)
 {
     mino_http_parser_t *p =
         (mino_http_parser_t *)malloc(sizeof(*p));
@@ -237,6 +258,7 @@ static mino_http_parser_t *http_parser_new(size_t max_header_bytes,
     p->state            = HTTP_ST_LINE;
     p->status           = HTTP_MORE;
     p->framing          = HTTP_FR_NONE;
+    p->is_request       = is_request;
     return p;
 }
 
@@ -340,6 +362,65 @@ static void http_parse_status_line(mino_http_parser_t *p, size_t start,
     }
     p->reason_off = start + 13;
     p->reason_len = end - p->reason_off;
+}
+
+/* "METHOD SP request-target SP HTTP/1.0|1.1". The method is 1+
+ * tchars, the target is origin-form only (a leading slash; absolute,
+ * authority, and asterisk forms are proxy shapes and rejected here),
+ * and exactly one SP separates each part. */
+static void http_parse_request_line(mino_http_parser_t *p, size_t start,
+                                    size_t end)
+{
+    size_t i = start, t_start, t_end;
+    while (i < end && p->buf[i] != ' ') {
+        if (!http_tchar(p->buf[i])) {
+            http_fail(p, "http: invalid character in method");
+            return;
+        }
+        i++;
+    }
+    if (i == start) {
+        http_fail(p, "http: empty method");
+        return;
+    }
+    if (i >= end) {
+        http_fail(p, "http: malformed request line");
+        return;
+    }
+    p->method_off = start;
+    p->method_len = i - start;
+    t_start       = i + 1;
+    if (t_start >= end || p->buf[t_start] != '/') {
+        http_fail(p, "http: request target must be origin-form");
+        return;
+    }
+    i = t_start;
+    while (i < end && p->buf[i] != ' ') i++;
+    t_end = i;
+    if (i >= end) {
+        http_fail(p, "http: malformed request line");
+        return;
+    }
+    if (!http_valid_target((const char *)(p->buf + t_start),
+                           t_end - t_start)) {
+        http_fail(p, "http: invalid character in request target");
+        return;
+    }
+    p->target_off = t_start;
+    p->target_len = t_end - t_start;
+    if (end - (t_end + 1) != 8
+        || memcmp(p->buf + t_end + 1, "HTTP/1.", 7) != 0) {
+        http_fail(p, "http: unsupported HTTP version");
+        return;
+    }
+    if (p->buf[end - 1] == '0') {
+        p->http10 = 1;
+    } else if (p->buf[end - 1] == '1') {
+        p->http10 = 0;
+    } else {
+        http_fail(p, "http: unsupported HTTP version");
+        return;
+    }
 }
 
 /* Parse one header/trailer line into the row store. The name must be
@@ -457,6 +538,39 @@ static void http_decide_framing(mino_http_parser_t *p)
             }
         }
     }
+    if (p->is_request) {
+        /* Request framing: chunked or Content-Length only. Neither
+         * framing header means bodiless; requests are never
+         * close-delimited (RFC 7230 3.3.3). */
+        if (have_te) {
+            if (have_cl) {
+                http_fail(p,
+                          "http: both content-length and "
+                          "transfer-encoding");
+                return;
+            }
+            if (p->http10) {
+                http_fail(p, "http: chunked requests need HTTP/1.1");
+                return;
+            }
+            p->framing        = HTTP_FR_CHUNKED;
+            p->content_length = -1;
+            return;
+        }
+        if (have_cl) {
+            if (cl > p->max_body_bytes) {
+                http_fail_limit(p,
+                                "http: content-length exceeds the %lld "
+                                "byte cap", p->max_body_bytes);
+                return;
+            }
+            p->framing        = HTTP_FR_CL;
+            p->content_length = cl;
+            return;
+        }
+        p->framing = HTTP_FR_NONE;
+        return;
+    }
     if (have_te) {
         if (have_cl) {
             http_fail(p, "http: both content-length and transfer-encoding");
@@ -498,7 +612,11 @@ static int http_run(mino_http_parser_t *p)
                                 &start, &end, &advance))
                 return p->status;
             p->pos = advance;
-            http_parse_status_line(p, start, end);
+            if (p->is_request) {
+                http_parse_request_line(p, start, end);
+            } else {
+                http_parse_status_line(p, start, end);
+            }
             if (p->status == HTTP_ERR) return p->status;
             p->state = HTTP_ST_HDRS;
             continue;
@@ -759,17 +877,6 @@ static int http_name_in(const char *const *owned, const char *name,
 static const char *const k_request_owned[] = {
     "host", "content-length", "transfer-encoding", NULL
 };
-
-static int http_valid_target(const char *s, size_t len)
-{
-    size_t i;
-    if (len == 0) return 0;
-    for (i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c <= 0x20 || c == 0x7f) return 0;
-    }
-    return 1;
-}
 
 static int http_valid_field_value(const char *s, size_t len)
 {
@@ -1397,6 +1504,68 @@ static mino_val *http_result_map(mino_state *S,
     }
 }
 
+/* Request result map: :status :need-more | :done | :error; a :done
+ * map carries :method :target :http-version :headers :body :chunked?
+ * :trailers :leftover. :leftover is every byte past the message, the
+ * seed for the next request on a keep-alive connection. */
+static mino_val *http_request_result_map(mino_state *S,
+                                         const mino_http_parser_t *p)
+{
+    mino_val *keys[9], *vals[9];
+    const unsigned char *body;
+    size_t body_len;
+    if (p->status == HTTP_ERR) {
+        keys[0] = mino_keyword(S, "status");
+        vals[0] = mino_keyword(S, "error");
+        keys[1] = mino_keyword(S, "error");
+        vals[1] = mino_string_n(S, p->err, strlen(p->err));
+        return mino_map(S, keys, vals, 2);
+    }
+    if (p->status == HTTP_MORE) {
+        keys[0] = mino_keyword(S, "status");
+        vals[0] = mino_keyword(S, "need-more");
+        return mino_map(S, keys, vals, 1);
+    }
+    if (p->framing == HTTP_FR_CHUNKED) {
+        body     = p->body;
+        body_len = p->body_len;
+    } else {
+        body     = p->buf + p->body_start;
+        body_len = p->pos - p->body_start;
+    }
+    mino_current_ctx(S)->gc_depth++;
+    keys[0] = mino_keyword(S, "status");
+    vals[0] = mino_keyword(S, "done");
+    keys[1] = mino_keyword(S, "method");
+    vals[1] = mino_string_n(S, (const char *)(p->buf + p->method_off),
+                            p->method_len);
+    keys[2] = mino_keyword(S, "target");
+    vals[2] = mino_string_n(S, (const char *)(p->buf + p->target_off),
+                            p->target_len);
+    keys[3] = mino_keyword(S, "http-version");
+    vals[3] = mino_string_n(S, p->http10 ? "HTTP/1.0" : "HTTP/1.1", 8);
+    keys[4] = mino_keyword(S, "headers");
+    vals[4] = http_rows_map(S, p, 0,
+                            p->trailer_start == (size_t)-1
+                                ? p->nrows : p->trailer_start);
+    keys[5] = mino_keyword(S, "body");
+    vals[5] = mino_bytes(S, body, body_len);
+    keys[6] = mino_keyword(S, "chunked?");
+    vals[6] = p->framing == HTTP_FR_CHUNKED
+        ? mino_true(S) : mino_false(S);
+    keys[7] = mino_keyword(S, "trailers");
+    vals[7] = p->trailer_start == (size_t)-1
+        ? mino_map(S, NULL, NULL, 0)
+        : http_rows_map(S, p, p->trailer_start, p->nrows);
+    keys[8] = mino_keyword(S, "leftover");
+    vals[8] = mino_bytes(S, p->buf + p->pos, p->buf_len - p->pos);
+    {
+        mino_val *m = mino_map(S, keys, vals, 9);
+        mino_current_ctx(S)->gc_depth--;
+        return m;
+    }
+}
+
 /* Parse-opts triple shared by both parse prims. */
 typedef struct {
     size_t    max_header_bytes;
@@ -1441,7 +1610,9 @@ static mino_val *http_parse_drive(mino_state *S, const http_parse_opts_t *o,
 {
     mino_val *result;
     if (o->eof) http_parser_eof(p);
-    result = http_result_map(S, p);
+    result = p->is_request
+        ? http_request_result_map(S, p)
+        : http_result_map(S, p);
     http_parser_free(p);
     return result;
 }
@@ -1697,7 +1868,7 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
     }
     if (http_read_parse_opts(S, opts, &o) != 0) return NULL;
     p = http_parser_new(o.max_header_bytes, o.max_headers,
-                        o.max_body_bytes);
+                        o.max_body_bytes, 0);
     if (p == NULL) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
@@ -1741,7 +1912,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
     }
     if (http_read_parse_opts(S, opts, &o) != 0) return NULL;
     p = http_parser_new(o.max_header_bytes, o.max_headers,
-                        o.max_body_bytes);
+                        o.max_body_bytes, 0);
     if (p == NULL) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
@@ -1754,6 +1925,109 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
             http_parser_free(p);
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "http-parse-response-chunks: "
+                                         "every chunk must be a string or "
+                                         "bytes value");
+        }
+        if (http_parser_feed(p, data, len) == HTTP_ERR) break;
+    }
+    return http_parse_drive(S, &o, p);
+}
+
+/* (http-parse-request data opts?) -> map. :status is :need-more,
+ * :done, or :error; a :done map carries :method :target
+ * :http-version :headers :body :chunked? :trailers :leftover (bytes
+ * past the message: the next request's seed on a keep-alive
+ * connection). Re-feeds the given prefix through a fresh parser each
+ * call. */
+static mino_val *prim_http_parse_request(mino_state *S, mino_val *args,
+                                         mino_env *env)
+{
+    mino_val *data_val, *opts = NULL;
+    const unsigned char *data;
+    size_t len;
+    http_parse_opts_t o;
+    mino_http_parser_t *p;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "http-parse-request requires "
+                                     "data");
+    }
+    data_val = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "http-parse-request takes at "
+                                         "most 2 arguments");
+        }
+    }
+    if (!http_text_arg(data_val, &data, &len)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "http-parse-request: data must be "
+                                     "a string or bytes value");
+    }
+    if (http_read_parse_opts(S, opts, &o) != 0) return NULL;
+    p = http_parser_new(o.max_header_bytes, o.max_headers,
+                        o.max_body_bytes, 1);
+    if (p == NULL) {
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "http: out of memory");
+    }
+    http_parser_feed(p, data, len);
+    return http_parse_drive(S, &o, p);
+}
+
+/* (http-parse-request-chunks chunks opts?) -> same map, fed through
+ * one parser across every buffer in the vector: the server's
+ * split-read surface. */
+static mino_val *prim_http_parse_request_chunks(mino_state *S,
+                                                mino_val *args,
+                                                mino_env *env)
+{
+    mino_val *vec, *opts = NULL;
+    http_parse_opts_t o;
+    mino_http_parser_t *p;
+    size_t i;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "http-parse-request-chunks requires "
+                                     "a vector of buffers");
+    }
+    vec = args->as.cons.car;
+    args = args->as.cons.cdr;
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "http-parse-request-chunks takes "
+                                         "at most 2 arguments");
+        }
+    }
+    if (vec == NULL || mino_type_of(vec) != MINO_VECTOR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "http-parse-request-chunks: "
+                                     "argument must be a vector");
+    }
+    if (http_read_parse_opts(S, opts, &o) != 0) return NULL;
+    p = http_parser_new(o.max_header_bytes, o.max_headers,
+                        o.max_body_bytes, 1);
+    if (p == NULL) {
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "http: out of memory");
+    }
+    for (i = 0; i < vec->as.vec.len; i++) {
+        const unsigned char *data;
+        size_t len;
+        mino_val *el = vec_nth(vec, i);
+        if (!http_text_arg(el, &data, &len)) {
+            http_parser_free(p);
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "http-parse-request-chunks: "
                                          "every chunk must be a string or "
                                          "bytes value");
         }
@@ -3349,7 +3623,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
          * wire bytes that follow). */
         parser = http_parser_new(HTTP_DEFAULT_MAX_HEADER_BYTES,
                                  HTTP_DEFAULT_MAX_HEADERS,
-                                 parts.max_bytes);
+                                 parts.max_bytes, 0);
         if (parser == NULL) {
             res = prim_throw_classified(S, "internal", "MIN001",
                                         "http-request: out of memory");
@@ -3723,6 +3997,27 @@ const mino_prim_def k_prims_http[] = {
      "(mutually exclusive); :date is a preformatted string emitted as "
      "the Date header. Header order is handler headers, Date, "
      "Connection, Content-Length. Returns bytes."},
+    {"http-parse-request", prim_http_parse_request,
+      "Parses a prefix of an HTTP request from a string or bytes value "
+      "and returns {:status :need-more | :done | :error}. A :done map "
+      "carries :method :target :http-version :headers :body :chunked? "
+      ":trailers :leftover; :leftover is every byte past the message, "
+      "the seed for the next request on a keep-alive connection. "
+      "Origin-form targets only (absolute, authority, and asterisk "
+      "forms are rejected); request framing is Content-Length or "
+      "chunked only, and neither header means bodiless (requests are "
+      "never close-delimited); chunked requests on HTTP/1.0 are "
+      "rejected. The header, chunk, and smuggling rules are the "
+      "response parser's: lowercased names, repeats into vectors, "
+      "obs-fold rejected, both framing headers and conflicting lengths "
+      "rejected. Opts as http-parse-response. Each call parses its "
+      "whole input fresh."},
+    {"http-parse-request-chunks", prim_http_parse_request_chunks,
+      "Parses an HTTP request from a vector of string or bytes buffers "
+      "fed through one parser in order, and returns the same shape as "
+      "http-parse-request. Arbitrary read splits give the same result "
+      "as a single feed; opts are shared, with :eof true signalling "
+      "end of stream."},
     {"redirect-next", prim_redirect_next,
      "Decides one redirect hop from a request map, a response map, "
      "and opts. Returns {:action :follow :request next-request} or "
