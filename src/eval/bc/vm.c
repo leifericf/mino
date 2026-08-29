@@ -248,6 +248,7 @@ const char *mino_bc_op_name(unsigned op)
     case OP_POPCATCH: return "OP_POPCATCH";
     case OP_THROW: return "OP_THROW";
     case OP_CATCH_MATCH: return "OP_CATCH_MATCH";
+    case OP_CATCH_MATCH_KIND: return "OP_CATCH_MATCH_KIND";
     case OP_PUSHDYN: return "OP_PUSHDYN";
     case OP_POPDYN: return "OP_POPDYN";
     case OP_MAKE_LAZY: return "OP_MAKE_LAZY";
@@ -1486,6 +1487,23 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             unsigned b  = B_OF(ins);
             unsigned ci = C_OF(ins);
             regs[a] = mino_catch_class_matches(S, (int)ci, regs[b])
+                ? mino_true(S) : mino_false(S);
+            break;
+        }
+
+        case OP_CATCH_MATCH_KIND: {
+            /* Native keyword-kind dispatch (ADR 37): regs[A] gets true
+             * when regs[B]'s :mino/kind equals the keyword constant named
+             * by the following word's Bx. The trailing word is consumed
+             * here via pc++ so the main dispatch never decodes it. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_bc_insn_t kw_word;
+            unsigned ki;
+            if (pc >= bc->code_len) { ok = 0; goto dispatch_done; }
+            kw_word = code[pc++];
+            ki = Bx_OF(kw_word);
+            regs[a] = mino_catch_kind_matches(S, bc->consts[ki], regs[b])
                 ? mino_true(S) : mino_false(S);
             break;
         }

@@ -217,6 +217,11 @@ typedef enum {
      * always true). Not JIT-stencilled: fns containing it stay on the
      * interpreter like every other try op. */
     OP_CATCH_MATCH,      /* A=dst, B=diag reg, C=catch-class index          */
+    /* Native keyword-kind dispatch (ADR 37): true when regs[B]'s
+     * :mino/kind equals the keyword at const-index Bx of the following
+     * word. Two-word, like OP_CALL_CACHED; the second word's op byte is
+     * OP_NOP. Not JIT-stencilled -- try bodies stay on the interpreter. */
+    OP_CATCH_MATCH_KIND, /* A=dst, B=diag reg; word2 Bx=keyword const idx   */
     OP__COUNT
 } mino_bc_op_t;
 
@@ -768,11 +773,17 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
 void      mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
-/* eval/control.c -- catch-class table accessors (ADR 32) used by
- * compile.c's classed-catch validation and vm.c's OP_CATCH_MATCH. The
- * table itself is mino_catch_classes in eval/special_internal.h. */
+/* eval/control.c -- catch-class table accessors (ADR 32, ADR 37) used
+ * by compile.c's classed-catch validation and vm.c's OP_CATCH_MATCH /
+ * OP_CATCH_MATCH_KIND. The table itself is mino_catch_classes in
+ * eval/special_internal.h; these sentinels mirror that header. */
+#ifndef MINO_CATCH_CLASS_ANY
+#define MINO_CATCH_CLASS_ANY  (-1) /* bare (catch e ...): matches anything */
+#define MINO_CATCH_CLASS_KIND (-2) /* (catch :kw e ...): match :mino/kind == kw */
+#endif
 int mino_catch_class_index(const char *name);
 int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag);
+int mino_catch_kind_matches(mino_state *S, mino_val *kind_kw, mino_val *diag);
 
 /* prim/prim.c -- error helper used by vm.c's protocol dispatch. */
 mino_val *prim_throw_classified(mino_state *S, const char *kind,

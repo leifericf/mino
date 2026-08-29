@@ -76,19 +76,37 @@ mino_val *eval_try(mino_state *S, mino_val *form,
 void mino_throw_capture_site(mino_state *S);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 
-/* control.c -- classed catch dispatch (ADR 32). The table maps a JVM
- * exception class name to the diagnostic :mino/kind strings its clause
- * accepts; kinds[0] == NULL marks a catch-all. mino_catch_class_index
- * matches a symbol or keyword name (":default" for the keyword) on the
- * tail after the last dot, and returns -1 for unknown classes. */
+/* control.c -- classed catch dispatch (ADR 32, ADR 37). The table maps
+ * a source-compatibility class-name token to the diagnostic :mino/kind
+ * strings its clause accepts; kinds[0] == NULL marks a catch-all.
+ * mino_catch_class_index matches a symbol or keyword name (":default"
+ * for the keyword) on the tail after the last dot, and returns -1 for
+ * names outside the table.
+ *
+ * ADR 37: a keyword catch class that is NOT a table alias is not an
+ * error -- it is mino's native, open dispatch on a diagnostic's
+ * :mino/kind. The parser records it as MINO_CATCH_CLASS_KIND and stashes
+ * the keyword; both tiers match it by equality via
+ * mino_catch_kind_matches. The class-name table stays frozen: symbols
+ * are the compat surface (unknown symbol = error), keywords are data. */
 typedef struct mino_catch_class {
     const char *name;
     const char *kinds[3];
 } mino_catch_class_t;
 
+/* Sentinels stored in a clause's catch-class slot. Non-negative values
+ * index mino_catch_classes; these two are the special cases. Mirrored in
+ * eval/bc/internal.h for the bytecode tier. */
+#ifndef MINO_CATCH_CLASS_ANY
+#define MINO_CATCH_CLASS_ANY  (-1) /* bare (catch e ...): matches anything */
+#define MINO_CATCH_CLASS_KIND (-2) /* (catch :kw e ...): match :mino/kind == kw */
+#endif
+
 extern const mino_catch_class_t mino_catch_classes[];
 int mino_catch_class_index(const char *name);
 int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag);
+/* True iff diag is a map whose :mino/kind equals kind_kw (ADR 37). */
+int mino_catch_kind_matches(mino_state *S, mino_val *kind_kw, mino_val *diag);
 
 /* fn.c */
 mino_val *eval_fn(mino_state *S, mino_val *form,

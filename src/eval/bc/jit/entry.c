@@ -151,6 +151,7 @@ int mino_jit_op_extra_words(unsigned op)
     case OP_PROTOCOL_TAILCALL_CACHED:
     case OP_LOOP_INT_LT_ACC:
     case OP_LOOP_INT_DEC_ACC:
+    case OP_CATCH_MATCH_KIND:
         return 1;
     default:
         return 0;

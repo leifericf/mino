@@ -2853,10 +2853,11 @@ static int compile_throw(compiler_t *c, mino_val *form, int dst, int tail)
  * Mirrors partition_try_clauses in src/eval/control.c including the
  * classed-catch grammar (ADR 32): (catch e body) is bare, (catch Class
  * e body) is classed, two leading symbols is classed even when the
- * first would also work as a binding name. Unknown classes decline so
- * the tree-walker's eval_try raises the MSY004 diagnostic naming the
- * class. Returns 1 on success, 0 to decline (let the tree-walker
- * handle it). */
+ * first would also work as a binding name. Unknown SYMBOL classes
+ * decline so the tree-walker's eval_try raises the MSY004 diagnostic
+ * naming the class; a keyword class outside the compat table is native
+ * :mino/kind dispatch (ADR 37), not a decline. Returns 1 on success, 0
+ * to decline (let the tree-walker handle it). */
 #define BC_MAX_CATCH_CLAUSES 8
 
 typedef struct bc_try_clauses {
@@ -2866,7 +2867,8 @@ typedef struct bc_try_clauses {
     int         n_catch;
     mino_val *catch_body[BC_MAX_CATCH_CLAUSES];  /* tails of args lists -- not deep-copied */
     mino_val *catch_var[BC_MAX_CATCH_CLAUSES];   /* MINO_SYMBOL: the catch binding name */
-    int         catch_class[BC_MAX_CATCH_CLAUSES]; /* -1 bare; else mino_catch_classes index */
+    int         catch_class[BC_MAX_CATCH_CLAUSES]; /* MINO_CATCH_CLASS_ANY/KIND, else table index */
+    mino_val *catch_kind[BC_MAX_CATCH_CLAUSES];  /* KIND clauses: keyword matched vs :mino/kind */
 } bc_try_clauses_t;
 
 static int parse_try_clauses(compiler_t *c, mino_val *args,
@@ -2887,6 +2889,7 @@ static int parse_try_clauses(compiler_t *c, mino_val *args,
             mino_val *tail = clause->as.cons.cdr;
             mino_val *cv;
             mino_val *body;
+            mino_val *kind_kw = NULL;
             int        cls = -1;
             if (!mino_is_cons(tail)) { c->ok = 0; return 0; }
             cv = tail->as.cons.car;
@@ -2898,7 +2901,12 @@ static int parse_try_clauses(compiler_t *c, mino_val *args,
                 memcpy(kbuf + 1, cv->as.s.data, kl);
                 kbuf[kl + 1] = '\0';
                 cls = mino_catch_class_index(kbuf);
-                if (cls < 0) { c->ok = 0; return 0; }
+                if (cls < 0) {
+                    /* Native keyword-kind dispatch on :mino/kind (ADR 37);
+                     * not a decline -- the bc tier handles it directly. */
+                    cls     = MINO_CATCH_CLASS_KIND;
+                    kind_kw = cv;
+                }
                 if (!mino_is_cons(tail->as.cons.cdr)
                     || tail->as.cons.cdr->as.cons.car == NULL
                     || mino_type_of(tail->as.cons.cdr->as.cons.car)
@@ -2927,6 +2935,7 @@ static int parse_try_clauses(compiler_t *c, mino_val *args,
             out->catch_var[out->n_catch]   = cv;
             out->catch_body[out->n_catch]  = body;
             out->catch_class[out->n_catch] = cls;
+            out->catch_kind[out->n_catch]  = kind_kw;
             out->n_catch++;
             rest = rest->as.cons.cdr;
             continue;
@@ -2973,7 +2982,22 @@ static int emit_catch_dispatch(compiler_t *c, int dst, int handler_tail,
     int t = alloc_reg(c);
     if (t < 0) return -1;
     for (int i = 0; i < cl->n_catch; i++) {
-        if (cl->catch_class[i] >= 0) {
+        if (cl->catch_class[i] == MINO_CATCH_CLASS_KIND) {
+            /* Native keyword-kind dispatch (ADR 37): match :mino/kind
+             * against the clause keyword. Two-word encoding -- word 1
+             * tests the diagnostic in ex_reg into t, word 2 carries the
+             * keyword's constant index in Bx (op byte OP_NOP so a stray
+             * decode is harmless, mirroring OP_CALL_CACHED). */
+            int k = add_const(c, cl->catch_kind[i]);
+            if (k < 0) return -1;
+            emit_abc(c, OP_CATCH_MATCH_KIND, (unsigned)t, (unsigned)ex_reg, 0);
+            emit_abx(c, OP_NOP, 0, (unsigned)k);
+            int jn = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)t);
+            if (jn < 0) return -1;
+            to_handler[i] = emit_jmp_placeholder(c, OP_JMP, 0);
+            if (to_handler[i] < 0) return -1;
+            patch_jmp(c, jn);
+        } else if (cl->catch_class[i] >= 0) {
             emit_abc(c, OP_CATCH_MATCH, (unsigned)t, (unsigned)ex_reg,
                      (unsigned)cl->catch_class[i]);
             int jn = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)t);

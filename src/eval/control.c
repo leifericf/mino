@@ -71,6 +71,20 @@ int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag)
     return 0;
 }
 
+/* ADR 37: native keyword-kind dispatch. A keyword catch class outside
+ * the compat table matches the diagnostic's :mino/kind by equality --
+ * mino's error model is data, so dispatch is on the data, not on a
+ * class hierarchy. No widening, no approximation. */
+int mino_catch_kind_matches(mino_state *S, mino_val *kind_kw, mino_val *diag)
+{
+    mino_val *kind;
+    if (kind_kw == NULL || diag == NULL || mino_type_of(diag) != MINO_MAP) {
+        return 0;
+    }
+    kind = map_get_val(diag, mino_keyword(S, "mino/kind"));
+    return kind != NULL && mino_eq(kind, kind_kw);
+}
+
 static int unknown_catch_class(mino_state *S, mino_val *form,
                                const char *name)
 {
@@ -96,6 +110,9 @@ typedef struct {
     mino_val *catch_body[MAX_CATCH_CLAUSES];
     char        catch_var[MAX_CATCH_CLAUSES][256];
     int         catch_class[MAX_CATCH_CLAUSES];
+    /* For MINO_CATCH_CLASS_KIND clauses: the keyword to match against
+     * :mino/kind (ADR 37). Unused (NULL) for other clause kinds. */
+    mino_val *catch_kind[MAX_CATCH_CLAUSES];
 } try_clauses_t;
 
 /* partition_try_clauses -- walk args once, classifying each top-level
@@ -119,12 +136,16 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
             && sym_eq(clause->as.cons.car, "catch")) {
             /* (catch e handler...) is the bare catch-all;
              * (catch Class e handler...) is classed and dispatches on
-             * the diagnostic's :mino/kind (ADR 32). Two leading
-             * symbols is classed even when the first would also work
-             * as a binding name, mirroring the JVM grammar. */
+             * the diagnostic's :mino/kind. A symbol Class names an entry
+             * in the frozen compat table (ADR 32); a keyword Class that
+             * is not a table alias matches :mino/kind by equality, the
+             * native data dispatch (ADR 37). Two leading symbols is
+             * classed even when the first would also work as a binding
+             * name. */
             mino_val *tail = clause->as.cons.cdr;
             mino_val *cv;
             mino_val *body;
+            mino_val *kind_kw = NULL;
             int        cls = -1;
             char       clsbuf[300];
             if (!mino_is_cons(tail)) {
@@ -145,7 +166,11 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
                 clsbuf[kl + 1] = '\0';
                 cls = mino_catch_class_index(clsbuf);
                 if (cls < 0) {
-                    return unknown_catch_class(S, form, clsbuf);
+                    /* Not a table alias: native keyword-kind dispatch on
+                     * :mino/kind by equality (ADR 37). Never an error --
+                     * keywords are open data, unlike symbol class names. */
+                    cls     = MINO_CATCH_CLASS_KIND;
+                    kind_kw = cv;
                 }
                 if (!mino_is_cons(tail->as.cons.cdr)
                     || (tail->as.cons.cdr->as.cons.car == NULL
@@ -199,6 +224,7 @@ static int partition_try_clauses(mino_state *S, mino_val *form,
                 out->catch_var[out->n_catch][vl] = '\0';
             }
             out->catch_class[out->n_catch] = cls;
+            out->catch_kind[out->n_catch]  = kind_kw;
             out->catch_body[out->n_catch]  = body;
             out->n_catch++;
             rest = rest->as.cons.cdr;
@@ -496,9 +522,17 @@ mino_val *eval_try(mino_state *S, mino_val *form,
         ex_val = normalize_exception(S,
             vol_ex ? (mino_val *)vol_ex : mino_nil(S));
         for (int i = 0; i < clauses.n_catch; i++) {
-            if (clauses.catch_class[i] < 0
-                || mino_catch_class_matches(S, clauses.catch_class[i],
-                                            ex_val)) {
+            int cc = clauses.catch_class[i];
+            int hit;
+            if (cc == MINO_CATCH_CLASS_KIND) {
+                hit = mino_catch_kind_matches(S, clauses.catch_kind[i],
+                                              ex_val);
+            } else if (cc == MINO_CATCH_CLASS_ANY) {
+                hit = 1;
+            } else {
+                hit = mino_catch_class_matches(S, cc, ex_val);
+            }
+            if (hit) {
                 matched = i;
                 break;
             }

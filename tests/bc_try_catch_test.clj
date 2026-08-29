@@ -165,6 +165,34 @@
   (let [msg (try (cu1) (catch e (ex-message e)))]
     (is (clojure.string/includes? msg "NotAClass"))))
 
+;; ADR 37: keyword-kind catch classes dispatch on :mino/kind by
+;; equality in the bytecode tier too (OP_CATCH_MATCH_KIND). Same
+;; contract as the tree-walker; parity is the point.
+(deftest bc-classed-catch-keyword-kind-matches
+  (defn kk1 [] (try (throw {:mino/kind :time/zone :mino/message "z"})
+                    (catch :time/zone e :caught)))
+  (is (= :caught (kk1)))
+  (defn kk2 [] (try (throw {:mino/kind :time/zone :mino/message "z"})
+                    (catch :time/zone e (:mino/kind e))))
+  (is (= :time/zone (kk2))))
+
+(deftest bc-classed-catch-keyword-kind-declines
+  (defn kk3 [] (try (try (throw {:mino/kind :time/parse})
+                         (catch :time/zone e :inner))
+                    (catch :default e :outer)))
+  (is (= :outer (kk3))))
+
+(deftest bc-classed-catch-keyword-kind-first-match-and-mix
+  (defn kk4 [] (try (throw {:mino/kind :app/b})
+                    (catch :app/a e :a)
+                    (catch :app/b e :b)
+                    (catch Throwable e :t)))
+  (is (= :b (kk4)))
+  (defn kk5 [] (try (throw {:mino/kind :something/else})
+                    (catch :json/parse e :kind)
+                    (catch :default e :d)))
+  (is (= :d (kk5))))
+
 (deftest bc-catch-releases-intermediate-frame-state
   ;; A throw from a deeply-nested fn unwinds through intermediate
   ;; bc_run frames whose bc_pop_window calls are skipped by the

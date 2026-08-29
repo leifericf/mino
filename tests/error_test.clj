@@ -126,3 +126,51 @@
 (deftest bare-catch-still-binds-the-diagnostic
   (is (= :user (try (throw (ex-info "x" {})) (catch e (:mino/kind e)))))
   (is (= 1 (try (throw (ex-info "boom" {:a 1})) (catch e (:a (ex-data e)))))))
+
+;; ADR 37: a keyword catch class that is not a table alias matches the
+;; thrown diagnostic's :mino/kind by equality. This is mino's native,
+;; open dispatch on library- and user-defined kinds; the symbol class
+;; names stay a frozen compatibility surface.
+(deftest classed-catch-keyword-kind-matches-by-equality
+  (is (= :caught
+         (try (throw {:mino/kind :time/zone :mino/message "bad zone"})
+              (catch :time/zone e :caught))))
+  ;; The bound value is the diagnostic map itself, kind readable.
+  (is (= :time/zone
+         (try (throw {:mino/kind :time/zone :mino/message "bad zone"})
+              (catch :time/zone e (:mino/kind e))))))
+
+(deftest classed-catch-keyword-kind-declines-other-kinds
+  ;; A :time/zone clause must NOT catch a :time/parse diagnostic; the
+  ;; outer clause takes it. No hierarchy, no widening.
+  (is (= :outer
+         (try (try (throw {:mino/kind :time/parse :mino/message "x"})
+                   (catch :time/zone e :inner))
+              (catch :default e :outer)))))
+
+(deftest classed-catch-keyword-kind-first-match-wins
+  (is (= :b
+         (try (throw {:mino/kind :app/b})
+              (catch :app/a e :a)
+              (catch :app/b e :b)
+              (catch :default e :d)))))
+
+(deftest classed-catch-keyword-kind-mixes-with-symbol-and-default
+  ;; Keyword-kind, symbol compat class, and :default coexist in one try.
+  (is (= :kind
+         (try (throw {:mino/kind :json/parse :mino/message "eof"})
+              (catch :json/parse e :kind)
+              (catch Throwable e :thrown))))
+  (is (= :d
+         (try (throw {:mino/kind :something/else})
+              (catch :json/parse e :kind)
+              (catch :default e :d)))))
+
+(deftest classed-catch-keyword-kind-user-throw-non-diagnostic-declines
+  ;; A plain ex-info throw (no top-level :mino/kind) normalizes to
+  ;; :user, so a specific keyword-kind clause declines and the bare
+  ;; clause binds it.
+  (is (= :bare
+         (try (throw (ex-info "x" {:kind :time/zone}))
+              (catch :time/zone e :kind)
+              (catch e :bare)))))
