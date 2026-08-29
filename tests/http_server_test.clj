@@ -150,6 +150,42 @@
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
+(deftest head-response-carries-length-but-no-body-and-does-not-desync
+  ;; A HEAD request must get the same headers a GET would (including
+  ;; Content-Length) but zero body octets. The client parses with
+  ;; :bodiless true because it knows it sent HEAD; the follow-up GET on
+  ;; the same keep-alive socket must then frame cleanly, proving the
+  ;; server did not leave body bytes on the wire.
+  (let [h (fn [req] {:status 200 :body (str "hello:" (:uri req))})
+        read-bodiless
+        (fn [c pending]
+          (loop [acc pending]
+            (let [r (http-parse-response (byte-array acc) {:bodiless true})]
+              (if (= :done (:status r))
+                (let [s (apply str (map char acc))
+                      end (+ (str/index-of s "\r\n\r\n") 4)]
+                  {:resp r :pending (vec (drop end acc))})
+                (let [b (try (net-read c 65536) (catch e nil))]
+                  (when b (recur (into acc (vec b)))))))))
+        r (srv-with 1 h {}
+             (fn [s]
+               (let [c (srv-connect (:port s))]
+                 (srv-send c (srv-req "HEAD" "/page") (srv-req "GET" "/page"))
+                 (let [x1 (read-bodiless c [])]
+                   (is (some? x1))
+                   (is (= 200 (:code (:resp x1))))
+                   ;; Content-Length reports the entity length a GET
+                   ;; would return ("hello:/page" is 11 bytes).
+                   (is (= "11" (get (:headers (:resp x1)) "content-length")))
+                   ;; but no body octets arrived
+                   (is (= (srv-bb "") (:body (:resp x1))))
+                   ;; the pipelined GET frames cleanly: no desync
+                   (let [x2 (srv-read-one c (:pending x1))]
+                     (is (some? x2))
+                     (is (= (srv-bb "hello:/page") (:body (:resp x2))))))
+                 (try (net-close c) (catch e nil)))))]
+    (srv-was-clean r)))
+
 (deftest pipelined-requests-in-one-write-split-exactly
   (let [h (fn [req] {:status 200 :body (name (:request-method req))})
         r (srv-with 1 h {}

@@ -1098,6 +1098,7 @@ typedef struct {
     int                 http10;
     int                 want_close;
     int                 want_keepalive;
+    int                 head_only;  /* HEAD: keep framing, drop body */
     const char         *date;    /* NULL: no Date header */
     size_t              date_len;
 } http_response_t;
@@ -1211,7 +1212,8 @@ static int http_encode_response(const http_response_t *resp,
         }
     }
     if (http_out_str(&o, "\r\n") != 0) goto oom;
-    if (resp->body != NULL && resp->body_len > 0) {
+    /* HEAD keeps the Content-Length above but sends no body octets. */
+    if (resp->body != NULL && resp->body_len > 0 && !resp->head_only) {
         if (http_out_put(&o, resp->body, resp->body_len) != 0) goto oom;
     }
     *out     = o.p;
@@ -1582,6 +1584,7 @@ typedef struct {
     size_t    max_headers;
     long long max_body_bytes;
     int       eof;
+    int       bodiless;  /* caller sent HEAD: complete at the blank line */
 } http_parse_opts_t;
 
 static int http_read_parse_opts(mino_state *S, const mino_val *opts,
@@ -1592,6 +1595,7 @@ static int http_read_parse_opts(mino_state *S, const mino_val *opts,
     out->max_headers      = HTTP_DEFAULT_MAX_HEADERS;
     out->max_body_bytes   = HTTP_DEFAULT_MAX_BODY_BYTES;
     out->eof              = 0;
+    out->bodiless         = 0;
     if (opts == NULL || mino_type_of(opts) == MINO_NIL) return 0;
     if (mino_type_of(opts) != MINO_MAP) {
         prim_throw_classified(S, "eval/type", "MTY001",
@@ -1611,6 +1615,7 @@ static int http_read_parse_opts(mino_state *S, const mino_val *opts,
         return -1;
     out->max_body_bytes = v;
     if (http_opt_bool(S, opts, "eof", &out->eof) != 0) return -1;
+    if (http_opt_bool(S, opts, "bodiless", &out->bodiless) != 0) return -1;
     return 0;
 }
 
@@ -1799,6 +1804,7 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
     if (http_opt_bool(S, m, "close?", &resp.want_close) != 0) return NULL;
     if (http_opt_bool(S, m, "keep-alive?", &resp.want_keepalive) != 0)
         return NULL;
+    if (http_opt_bool(S, m, "head?", &resp.head_only) != 0) return NULL;
 
     v = map_get_val(m, mino_keyword(S, "headers"));
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
@@ -1883,6 +1889,7 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
+    p->bodiless = o.bodiless;
     http_parser_feed(p, data, len);
     return http_parse_drive(S, &o, p);
 }
@@ -1927,6 +1934,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
         return prim_throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
+    p->bodiless = o.bodiless;
     for (i = 0; i < vec->as.vec.len; i++) {
         const unsigned char *data;
         size_t len;
@@ -3992,9 +4000,12 @@ const mino_prim_def k_prims_http[] = {
       "bodiless; obs-fold, both Content-Length and Transfer-Encoding, "
       "conflicting Content-Length values, and control bytes other than "
       "HTAB in field values are rejected. "
-     "Opts: :eof true ends a close-delimited body, :max-header-bytes "
-     "(default 65536), :max-headers (default 100), :max-body-bytes "
-     "(default 16777216). Each call parses its whole input fresh."},
+     "Opts: :eof true ends a close-delimited body, :bodiless true "
+     "completes at the blank line whatever the framing headers claim "
+     "(set it when the request was HEAD, whose headers describe the "
+     "entity not the wire), :max-header-bytes (default 65536), "
+     ":max-headers (default 100), :max-body-bytes (default 16777216). "
+     "Each call parses its whole input fresh."},
     {"http-parse-response-chunks", prim_http_parse_response_chunks,
      "Parses an HTTP response from a vector of string or bytes "
      "buffers fed through one parser in order, and returns the same "

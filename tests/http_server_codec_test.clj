@@ -56,6 +56,22 @@
   (is (= (http-bb "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
          (http-encode-response {:status 200 :body ""}))))
 
+(deftest head-keeps-content-length-but-omits-body
+  ;; RFC 9110: a HEAD response carries the same header fields as the
+  ;; GET would, including Content-Length, but no body octets. :head?
+  ;; keeps the framing and drops only the body bytes off the wire, so
+  ;; a keep-alive peer that reads Content-Length bytes as the "body"
+  ;; does not desync onto the next response.
+  (is (= (http-bb "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n")
+         (http-encode-response {:status 200 :body "abc" :head? true})))
+  ;; The Content-Length still reflects the real entity length.
+  (is (= (http-bb "HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n")
+         (http-encode-response {:status 200 :body "hello world"
+                                :head? true})))
+  ;; head? on a bodiless response is a plain bodiless response.
+  (is (= (http-bb "HTTP/1.1 200 OK\r\n\r\n")
+         (http-encode-response {:status 200 :head? true}))))
+
 (deftest present-body-is-always-length-framed-even-on-204
   ;; Bodiless emission for 204/304/HEAD is the handler's contract; the
   ;; encoder stays mechanical about a body it is handed.

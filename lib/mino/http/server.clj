@@ -440,7 +440,12 @@
     (net-write c (http-encode-response
                    (merge (response-spec (handler req))
                           (response-flags (:http-version req) alive?)
-                          {:date (format-time (now) :rfc1123)})))
+                          {:date (format-time (now) :rfc1123)}
+                          ;; RFC 9110: a HEAD response keeps the same
+                          ;; header fields (including Content-Length)
+                          ;; as GET but carries no body octets.
+                          (when (= :head (:request-method req))
+                            {:head? true}))))
     (catch e
       (send-error-response c 500 error-body))))
 
