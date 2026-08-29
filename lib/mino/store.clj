@@ -26,7 +26,56 @@
   and a materialized view (entity -> attribute -> value). Stores are
   per-state isolated; cross-runtime transfer uses mino_clone.
 
-  In-memory by default; durability via snapshot-on-checkpoint.")
+  In-memory by default; durability via snapshot-on-checkpoint.
+
+  ## Backend seam (ADR 35)
+
+  Durability routes through a pluggable backend: a dumb segment store
+  that owns bytes and their durability ordering, never db logic. The db
+  value stays a persistent map and replay, schema, and compaction stay
+  here, so a backend cannot drift db semantics.
+
+  A backend is a plain map (no defprotocol) tagged with a :kind keyword
+  and carrying five contract ops, each a fn. `backend?` validates the
+  shape and throws a :store/backend diagnostic on any violation.
+
+    :kind         a keyword naming the backend. :memory and :file are
+                  the built-ins; any other keyword names a third-party
+                  backend.
+    :initial      (fn []) -> the snapshot segment as a db value, or nil
+                  when absent.
+    :wal-entries  (fn []) -> the WAL segment as a vector of parsed
+                  tx-info maps, or nil when absent. A torn final line
+                  stops the read at the parse edge.
+    :commit       (fn [conn new-db tx-info]) -> the published db. Owns
+                  the durable-append-before-publish ordering. tx-info
+                  nil means publish only (compact/migrate carry no WAL
+                  line); a map is the WAL line (transact).
+    :checkpoint   (fn [conn]) -> writes the snapshot, deletes the WAL.
+    :close        (fn [conn]) -> performs the final checkpoint, releases
+                  the handle.
+
+  The segment-ownership boundary: a backend owns durable bytes (snapshot
+  and WAL segments) and their ordering only. Everything else -- fact
+  application, schema validation, index maintenance, log compaction,
+  replay on reopen -- lives in this namespace and is identical across
+  backends. `open` reads the snapshot via :initial, replays the WAL via
+  :wal-entries, then registers the conn against its backend; `close`
+  deregisters and runs the backend's :close.
+
+  Lifecycle. `open` resolves the backend (a path selects :file, no path
+  the :memory default; the :backend option overrides) then
+  `register-on-open` binds the conn to its backend in a process-global
+  atom registry keyed by conn -- the same pattern the listener registry
+  uses. Every durability op (`transact`, `checkpoint`, `compact`,
+  `migrate`, `close`) looks the backend up through that registry and
+  throws :store/backend when a conn carries no entry (never came from
+  `open`, or was already closed). `close` removes the entry; a
+  GC-finalized conn leaks its registry entry exactly as it leaks
+  listener entries -- accepted precedent, not a new hazard. The registry
+  accessors `register-on-open`, `backend-for`, and `dissoc-on-close` are
+  public so a host that builds a conn outside `open` (or simulates a
+  crash by dropping the entry) can drive the seam directly.")
 
 ;; The clojure.core store? predicate is referred into this namespace at
 ;; load time. Capturing it under a private alias lets the public store?
@@ -628,20 +677,30 @@
   (atom {}))
 
 (defn register-on-open
-  "Binds conn to backend in the backend registry. Throws a diagnostic
-  with :mino/kind :store/backend when backend fails validation. Returns nil."
+  "Binds conn to backend in the process-global backend registry, the
+  step `open` runs after building the conn (ADR 35). Public so a host
+  that constructs a conn outside `open` can join it to the seam.
+  Validates backend first: throws a :store/backend diagnostic when it
+  fails `backend?`, leaving the registry untouched. Returns nil."
   [conn backend]
   (backend? backend)
   (swap! conn->backend assoc conn backend)
   nil)
 
 (defn backend-for
-  "Returns the backend registered for conn, or nil when none is."
+  "Returns the backend registered for conn, or nil when none is. The
+  read side of the registry `register-on-open` writes and
+  `dissoc-on-close` clears; every durability op resolves its backend
+  through this lookup."
   [conn]
   (get @conn->backend conn))
 
 (defn dissoc-on-close
-  "Removes conn's entry from the backend registry. Returns nil."
+  "Removes conn's entry from the backend registry, the step `close`
+  runs before the backend's :close op (ADR 35). Public so a host can
+  simulate a crash -- drop the registry entry without a checkpoint, so
+  only the already-appended WAL survives a reopen. A subsequent
+  durability op on the conn then throws :store/backend. Returns nil."
   [conn]
   (swap! conn->backend dissoc conn)
   nil)
