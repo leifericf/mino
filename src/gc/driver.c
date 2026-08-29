@@ -583,11 +583,27 @@ void gc_bump_slab_release(mino_state *S)
             free(set);
         }
     }
-    /* Keep the warm prefix reachable by refill; free the rest. */
+    /* Keep the warm prefix reachable by refill, but cap the whole warm
+     * pool at GC_BUMP_WARM_POOL across releases (not just per release)
+     * so adversarial retire/refill phasing cannot grow it without
+     * bound; free the overflow. Freelist entries into every kept slab
+     * were already purged above, so freeing one here cannot alias. */
     {
         gc_bump_slab_t **wp = &S->gc_bump_warm;
-        while (*wp != NULL) wp = &(*wp)->next;
-        *wp = kept;
+        size_t warm_n = 0;
+        while (*wp != NULL) { warm_n++; wp = &(*wp)->next; }
+        while (kept != NULL) {
+            gc_bump_slab_t *nx = kept->next;
+            if (warm_n < GC_BUMP_WARM_POOL) {
+                kept->next = NULL;
+                *wp = kept;
+                wp = &kept->next;
+                warm_n++;
+            } else {
+                gc_bump_slab_region_free(kept);
+            }
+            kept = nx;
+        }
     }
     while (freeme != NULL) {
         gc_bump_slab_t *nx = freeme->next;
