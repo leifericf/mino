@@ -228,4 +228,12 @@
 (deftest round-trip-unicode
   (is (= "\u00e9" (json/read-str (json/write-str "\u00e9")))))
 
+(deftest write-str-rejects-unsupported-options
+  ;; This port does not implement the writer options yet; rather than
+  ;; silently ignoring them and returning output that differs from what
+  ;; the caller asked for, write-str throws (works-or-throws).
+  (is (= "{\"a\":1}" (json/write-str {:a 1})))
+  (is (thrown? (json/write-str {:a 1} :key-fn name)))
+  (is (thrown? (json/write-str {:a 1} :escape-unicode false))))
+
 (run-tests-and-exit)

@@ -160,6 +160,15 @@
 (defn write-str
   "Serialize Clojure data to a JSON string. nil becomes null, keywords
    become strings (via name), maps become objects, vectors and seqs
-   become arrays."
+   become arrays.
+
+   This port does not yet implement clojure.data.json's writer options
+   (:key-fn, :value-fn, :escape-unicode, :escape-slash). Passing any of
+   them throws rather than silently ignoring them and producing output
+   that differs from what the caller asked for."
   [x & {:as opts}]
+  (when (seq opts)
+    (throw (ex-info (str "write-str options are not supported: "
+                         (vec (keys opts)))
+                    {:unsupported (vec (keys opts))})))
   (write-json x))
