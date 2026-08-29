@@ -17,8 +17,8 @@
   quotes and interpret \\\\ \\\" \\n \\r \\t \\f \\b escapes (any other
   backslash pair passes through). CRLF is tolerated and a leading
   UTF-8 BOM is dropped. A line that is neither blank, a comment, nor
-  KEY=VALUE throws ex-info with :kind :env/parse, the 1-based :line,
-  and the raw :text.
+  KEY=VALUE throws a diagnostic with :mino/kind :env/parse, the
+  1-based :line, and the raw :text.
 
   load-env reads the file via slurp and installs the parsed map as
   the overlay mino.env/getenv consults before the process
@@ -58,15 +58,25 @@
 
 ;;;; Errors
 
+(defn- env-fail
+  "Throws a classified mino.env diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 (defn- throw-parse
   [msg line text]
-  (throw (ex-info (str "mino.env: " msg " (line " line ")")
-                  {:kind :env/parse :line line :text text})))
+  (env-fail :env/parse "MEP001"
+            (str "mino.env: " msg " (line " line ")")
+            {:line line :text text}))
 
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.env: " msg)
-                  {:kind :env/opts :arg arg})))
+  (env-fail :env/opts "MEO001"
+            (str "mino.env: " msg)
+            {:arg arg}))
 
 ;;;; Value scanning
 
@@ -163,7 +173,8 @@
 
 (defn- parse-line
   "Trimmed line -> [key value], nil for blank and comment lines;
-  throws :env/parse on anything else. The grammar runs through one
+  throws a diagnostic with :mino/kind :env/parse on anything else.
+  The grammar runs through one
   anchored regex match; walk loops only touch quoted values."
   [t line]
   (when-not (or (= "" t) (= "#" (subs t 0 1)))

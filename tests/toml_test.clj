@@ -15,10 +15,10 @@
 ;; start, not the escape itself.
 
 (defn- err
-  "ex-data of parse-string on s, or :no-throw when it succeeds."
+  "parse-string on s: {:kind :mino/kind, ...ex-data}, or :no-throw."
   [s]
   (try (toml/parse-string s) :no-throw
-       (catch e (ex-data e))))
+       (catch e (assoc (ex-data e) :kind (:mino/kind e)))))
 
 (defn- err-at
   "parse-string on s must throw :toml/parse with the given reason
@@ -30,6 +30,38 @@
          (= reason (:reason d))
          (= line (get-in d [:location :line]))
          (= col (get-in d [:location :col])))))
+
+;;; Promoted diagnostic shape (ADR 37): :mino/kind is top-level
+
+(deftest parse-error-carries-mino-kind
+  ;; the thrown map classes as :toml/parse for classed catch
+  (is (= :toml/parse
+         (try (toml/parse-string "a = 1 2\n")
+              (catch e (:mino/kind e)))))
+  ;; classed catch dispatches on the kind
+  (is (= :caught
+         (try (toml/parse-string "a = 1 2\n")
+              (catch :toml/parse _ :caught))))
+  ;; ex-message returns the human string, ex-data the detail
+  (is (string? (try (toml/parse-string "a = 1 2\n")
+                    (catch e (ex-message e)))))
+  (is (= :unexpected-text
+         (try (toml/parse-string "a = 1 2\n")
+              (catch e (:reason (ex-data e))))))
+  (is (= {:line 1 :col 7}
+         (try (toml/parse-string "a = 1 2\n")
+              (catch e (:location (ex-data e)))))))
+
+(deftest opts-error-carries-mino-kind
+  (is (= :toml/opts
+         (try (toml/parse-string 42)
+              (catch e (:mino/kind e)))))
+  (is (= :caught
+         (try (toml/parse-string 42)
+              (catch :toml/opts _ :caught))))
+  (is (= 42
+         (try (toml/parse-string 42)
+              (catch e (:arg (ex-data e)))))))
 
 ;;; Tables, nesting, dotted keys
 

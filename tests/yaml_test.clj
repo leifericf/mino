@@ -9,13 +9,23 @@
 ;; seventeen, underscored and sexagesimal numbers are strings; those
 ;; are the recorded divergences from 1.1 parsers.
 ;;
-;; Error vectors pin :kind :yaml/parse plus a :reason keyword and, for
-;; the indentation and position classes, :location {:line :col} over
-;; 1-based byte positions. Out-of-subset constructs (anchors, aliases,
-;; tags, directives, complex keys) are errors, never silent misparses.
+;; Error diagnostics carry :mino/kind :yaml/parse at the top level (ADR
+;; 37, so classed catch dispatches on the class) plus a :reason keyword
+;; and, for the indentation and position classes, :location {:line
+;; :col} over 1-based byte positions in the diagnostic data ex-data
+;; reads. Out-of-subset constructs (anchors, aliases, tags, directives,
+;; complex keys) are errors, never silent misparses.
+
+(defn- yaml-kind
+  ":mino/kind of the diagnostic parse-string throws on s, or :no-throw
+  when it succeeds."
+  [s]
+  (try (yaml/parse-string s) :no-throw
+       (catch e (:mino/kind e))))
 
 (defn- yaml-err
-  "ex-data of parse-string on s, or :no-throw when it succeeds."
+  "ex-data (the detail map) of parse-string on s, or :no-throw when it
+  succeeds."
   [s]
   (try (yaml/parse-string s) :no-throw
        (catch e (ex-data e))))
@@ -23,15 +33,15 @@
 (defn- yaml-err-reason
   [s reason]
   (let [d (yaml-err s)]
-    (and (map? d)
-         (= :yaml/parse (:kind d))
+    (and (= :yaml/parse (yaml-kind s))
+         (map? d)
          (= reason (:reason d)))))
 
 (defn- yaml-err-at
   [s reason line col]
   (let [d (yaml-err s)]
-    (and (map? d)
-         (= :yaml/parse (:kind d))
+    (and (= :yaml/parse (yaml-kind s))
+         (map? d)
          (= reason (:reason d))
          (= line (get-in d [:location :line]))
          (= col (get-in d [:location :col])))))
@@ -678,6 +688,48 @@
   (is (thrown? (yaml/parse-string nil)))
   (is (thrown? (yaml/parse-string "a: 1\n" :not-a-map)))
   (is (thrown? (yaml/parse-string "a: 1\n" {:keywords :yes}))))
+
+;;; Errors: classified shape (ADR 37)
+
+(deftest yaml-parse-error-is-classified
+  ;; malformed input throws a diagnostic whose top-level :mino/kind is
+  ;; the class, so classed catch can dispatch on it
+  (is (= :yaml/parse
+         (try (yaml/parse-string "a:\n\tb: c\n")
+              (catch e (:mino/kind e))))))
+
+(deftest yaml-parse-error-classed-catch-dispatches
+  ;; the class keyword names the catch: it fires on the parse error
+  (is (= :caught
+         (try (yaml/parse-string "a:\n\tb: c\n")
+              (catch :yaml/parse _ :caught)))))
+
+(deftest yaml-parse-error-detail-in-ex-data
+  ;; the detail keys (:reason :location :text) live in ex-data, and the
+  ;; message ex-message returns is the human string
+  (let [e (try (yaml/parse-string "a:\n\tb: c\n") nil
+               (catch e (do e)))
+        d (ex-data e)]
+    (is (= :yaml/parse (:mino/kind e)))
+    (is (= :tab-indentation (:reason d)))
+    (is (= {:line 2 :col 1} (:location d)))
+    (is (string? (ex-message e)))
+    ;; :kind is no longer buried in the detail
+    (is (nil? (:kind d)))))
+
+(deftest yaml-opts-error-is-classified
+  ;; option validation throws :yaml/opts with the bad arg in ex-data
+  (is (= :yaml/opts
+         (try (yaml/parse-string "a: 1\n" :not-a-map)
+              (catch e (:mino/kind e)))))
+  (is (= :caught
+         (try (yaml/parse-string 42)
+              (catch :yaml/opts _ :caught))))
+  (let [e (try (yaml/parse-string "a: 1\n" {:keywords :yes}) nil
+               (catch e (do e)))]
+    (is (= :yaml/opts (:mino/kind e)))
+    (is (= :yes (:arg (ex-data e))))
+    (is (nil? (:kind (ex-data e))))))
 
 (deftest yaml-parse-string-all-shape
   (is (vector? (yaml/parse-string-all "a: 1\n")))

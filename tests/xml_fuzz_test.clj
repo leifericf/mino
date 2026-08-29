@@ -12,7 +12,7 @@
 ;; nearly everything, strict XML must refuse most corruption
 ;; (FR-9: never silently misparse), so this lane also pins an
 ;; error-rate floor: most mutations must error, and every error
-;; carries :kind :xml/parse, a :code keyword, and integral
+;; carries :mino/kind :xml/parse, a :code keyword, and integral
 ;; :location line and col. The mutation engine is the html lane's
 ;; (seeded LCG arithmetic, yaml_perf fixture-generator discipline):
 ;; deterministic, identical on every run and platform. This file
@@ -99,7 +99,7 @@
 
 (defn- xml-fz-classify
   "One parse under measurement: a root element map is a tree;
-  anything else must be a positioned ex-info (:kind :xml/parse,
+  anything else must be a positioned diagnostic (:mino/kind :xml/parse,
   :code keyword, integral :location line and col). Returns the
   record; :bad carries the first offender's description."
   [s]
@@ -115,7 +115,7 @@
     (catch e
       (let [d (ex-data e)]
         (if (and (map? d)
-                 (= :xml/parse (:kind d))
+                 (= :xml/parse (:mino/kind e))
                  (keyword? (:code d))
                  (map? (:location d))
                  (int? (:line (:location d)))
@@ -162,8 +162,12 @@
 ;;; entity floods, NUL-laden text) ----
 
 (defn- xml-fz-err-data
+  "Returns the caught diagnostic's ex-data detail merged with its
+  :mino/kind, so callers read the class and the :code/:location detail
+  from one map."
   [thunk]
-  (try (thunk) :no-throw (catch e (ex-data e))))
+  (try (thunk) :no-throw
+       (catch e (assoc (ex-data e) :mino/kind (:mino/kind e)))))
 
 (defn- xml-fz-timed
   "Runs thunk, asserts the elapsed bound, returns the value."
@@ -183,7 +187,7 @@
     (is (= 1 (count (:content t)))))
   (let [d (xml-fz-err-data #(xml/parse (xml-fz-rep 257 "<a>")))]
     (is (map? d))
-    (is (= :xml/parse (:kind d)))
+    (is (= :xml/parse (:mino/kind d)))
     (is (= :max-depth (:code d)))
     (is (map? (:location d)))))
 
@@ -208,7 +212,7 @@
                                             (xml-fz-rep 500 "&nosuch;")
                                             "</a>")))]
     (is (map? d))
-    (is (= :xml/parse (:kind d)))
+    (is (= :xml/parse (:mino/kind d)))
     (is (= :undefined-entity (:code d)))
     (is (map? (:location d)))))
 
@@ -217,7 +221,7 @@
   ;; never a crash (strict XML rejects instead of replacing)
   (let [d (xml-fz-err-data #(xml/parse "<a>x\u0000y</a>"))]
     (is (map? d))
-    (is (= :xml/parse (:kind d)))
+    (is (= :xml/parse (:mino/kind d)))
     (is (keyword? (:code d)))
     (is (and (map? (:location d))
              (int? (:line (:location d)))

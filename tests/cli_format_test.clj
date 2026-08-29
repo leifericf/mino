@@ -55,7 +55,14 @@
     (cli/format-opts {:spec {:port {:default 80}} :order [:port :bogus]})
     (is false "expected a throw")
     (catch e
-      (is (= :cli/parse (:kind (ex-data e))))
+      (is (= :cli/parse (:mino/kind e)))
       (is (= :bogus (:option (ex-data e)))))))
+
+(deftest order-naming-an-unknown-option-dispatches-classed-catch
+  ;; ADR 37: format-opts routes :order misses through the same
+  ;; :cli/parse class, so a classed catch fires.
+  (is (= :caught (try (cli/format-opts {:spec {:port {:default 80}}
+                                        :order [:port :bogus]})
+                      (catch :cli/parse _ :caught)))))
 
 (run-tests-and-exit)

@@ -10,8 +10,16 @@
 ;; tests below); interpolation does not escape (Selmer does not
 ;; escape by default).
 
+(defn- tpl-kind
+  "The :mino/kind class of the diagnostic f throws (ADR 37), or
+  :no-throw when it succeeds."
+  [f]
+  (try (f) :no-throw
+       (catch e (:mino/kind e))))
+
 (defn- tpl-err
-  "ex-data of calling f, or :no-throw when it succeeds."
+  "ex-data of calling f (the :mino/data detail map), or :no-throw when
+  it succeeds."
   [f]
   (try (f) :no-throw
        (catch e (ex-data e))))
@@ -20,9 +28,10 @@
   "render on t must throw :template/parse with reason and the
   1-based line/col of the offending tag."
   [t reason line col]
-  (let [d (tpl-err #(tpl/render t {}))]
-    (and (map? d)
-         (= :template/parse (:kind d))
+  (let [k (tpl-kind #(tpl/render t {}))
+        d (tpl-err #(tpl/render t {}))]
+    (and (= :template/parse k)
+         (map? d)
          (= reason (:reason d))
          (= line (get-in d [:location :line]))
          (= col (get-in d [:location :col])))))
@@ -94,8 +103,8 @@
   (is (= "ab" (tpl/render "a{{#each xs}}X{{/each}}b" {:other 1}))))
 
 (deftest tpl-each-rejects-non-collections
-  (is (= :template/each (:kind (tpl-err #(tpl/render "{{#each xs}}X{{/each}}" {:xs 5})))))
-  (is (= :template/each (:kind (tpl-err #(tpl/render "{{#each xs}}X{{/each}}" {:xs "ab"}))))))
+  (is (= :template/each (tpl-kind #(tpl/render "{{#each xs}}X{{/each}}" {:xs 5}))))
+  (is (= :template/each (tpl-kind #(tpl/render "{{#each xs}}X{{/each}}" {:xs "ab"})))))
 
 ;;; if
 
@@ -151,19 +160,21 @@
       "join over a missing value renders nothing"))
 
 (deftest tpl-filter-join-rejects-scalars
-  (let [d (tpl-err #(tpl/render "{{x|join:\",\"}}" {:x 5}))]
-    (is (and (map? d) (= :template/filter (:kind d)) (= :not-a-collection (:reason d))))))
+  (let [k (tpl-kind #(tpl/render "{{x|join:\",\"}}" {:x 5}))
+        d (tpl-err #(tpl/render "{{x|join:\",\"}}" {:x 5}))]
+    (is (and (= :template/filter k) (map? d) (= :not-a-collection (:reason d))))))
 
 (deftest tpl-unknown-filter-throws
-  (let [d (tpl-err #(tpl/render "{{x|title}}" {:x "ab"}))]
-    (is (and (map? d) (= :template/filter (:kind d)) (= "title" (:filter d)))))
-  (is (= :template/filter (:kind (tpl-err #(tpl/compile "{{x|}}"))))))
+  (let [k (tpl-kind #(tpl/render "{{x|title}}" {:x "ab"}))
+        d (tpl-err #(tpl/render "{{x|title}}" {:x "ab"}))]
+    (is (and (= :template/filter k) (map? d) (= "title" (:filter d)))))
+  (is (= :template/filter (tpl-kind #(tpl/compile "{{x|}}")))))
 
 (deftest tpl-filter-arity-errors
   (is (= :template/filter
-         (:kind (tpl-err #(tpl/render "{{x|upper:\",\"}}" {:x "ab"})))))
+         (tpl-kind #(tpl/render "{{x|upper:\",\"}}" {:x "ab"}))))
   (is (= :template/filter
-         (:kind (tpl-err #(tpl/render "{{x|lower:\",\"}}" {:x "ab"}))))))
+         (tpl-kind #(tpl/render "{{x|lower:\",\"}}" {:x "ab"})))))
 
 ;;; Delimiter opts
 
@@ -205,7 +216,7 @@
       "compile bakes the delimiter opts into the AST"))
 
 (deftest tpl-render-many-validates-input
-  (is (= :template/opts (:kind (tpl-err #(tpl/render-many "not compiled" {}))))))
+  (is (= :template/opts (tpl-kind #(tpl/render-many "not compiled" {})))))
 
 ;;; Parse errors
 
@@ -228,19 +239,65 @@
   (is (tpl-parse-err-at "{{#each}}x{{/each}}" :bad-block 1 1)))
 
 (deftest tpl-unknown-filter-also-from-compile
-  (is (= :template/filter (:kind (tpl-err #(tpl/compile "{{x|nope}}"))))))
+  (is (= :template/filter (tpl-kind #(tpl/compile "{{x|nope}}")))))
 
 ;;; Argument and opts validation
 
 (deftest tpl-argument-validation
-  (is (= :template/opts (:kind (tpl-err #(tpl/render 5 {})))))
-  (is (= :template/opts (:kind (tpl-err #(tpl/render "x" 5)))))
-  (is (= :template/opts (:kind (tpl-err #(tpl/render "x" {} {:tag-open "ab"})))))
-  (is (= :template/opts (:kind (tpl-err #(tpl/render "x" {} {:tag-open 5})))))
-  (is (= :template/opts (:kind (tpl-err #(tpl/render "x" {} {:filter-tag "||"})))))
-  (is (= :template/opts (:kind (tpl-err #(tpl/compile 5)))))
+  (is (= :template/opts (tpl-kind #(tpl/render 5 {}))))
+  (is (= :template/opts (tpl-kind #(tpl/render "x" 5))))
+  (is (= :template/opts (tpl-kind #(tpl/render "x" {} {:tag-open "ab"}))))
+  (is (= :template/opts (tpl-kind #(tpl/render "x" {} {:tag-open 5}))))
+  (is (= :template/opts (tpl-kind #(tpl/render "x" {} {:filter-tag "||"}))))
+  (is (= :template/opts (tpl-kind #(tpl/compile 5))))
   (is (= "ok" (tpl/render "{{a}}" {"a" "ok"} nil))
       "a nil opts map is accepted"))
+
+;;; Classified diagnostics (ADR 37)
+
+(deftest tpl-throws-carry-mino-kind
+  ;; The class is on :mino/kind, not on :kind inside ex-data, so a
+  ;; bare catch reads the error class straight off the map.
+  (is (= :template/parse
+         (try (tpl/render "{{x" {}) (catch e (:mino/kind e))))
+      "a malformed template carries :mino/kind :template/parse")
+  (is (= :template/filter
+         (try (tpl/render "{{x|nope}}" {:x "a"}) (catch e (:mino/kind e))))
+      "a bad filter carries :mino/kind :template/filter")
+  (is (= :template/each
+         (try (tpl/render "{{#each xs}}Y{{/each}}" {:xs 5})
+              (catch e (:mino/kind e)))))
+  (is (= :template/opts
+         (try (tpl/render 5 {}) (catch e (:mino/kind e))))))
+
+(deftest tpl-classed-catch-dispatches-on-kind
+  ;; A classed catch selects the handler by the thrown map's
+  ;; :mino/kind (ADR 37), and skips it for a different class.
+  (is (= :caught
+         (try (tpl/render "{{x" {})
+              (catch :template/parse _ :caught)))
+      "a :template/parse catch fires on a malformed template")
+  (is (= :caught
+         (try (tpl/render "{{x|nope}}" {:x "a"})
+              (catch :template/filter _ :caught))))
+  (is (= :fellthrough
+         (try (try (tpl/render "{{x" {})
+                   (catch :template/filter _ :wrong))
+              (catch :template/parse _ :fellthrough)))
+      "a mismatched class does not catch; the parse class does"))
+
+(deftest tpl-diagnostic-detail-and-code
+  ;; ex-data reads the :mino/data detail; :mino/code is a stable
+  ;; per-kind string.
+  (let [d (tpl-err #(tpl/render "{{x|nope}}" {:x "a"}))]
+    (is (= "nope" (:filter d)))
+    (is (= :unknown (:reason d)))
+    (is (nil? (:kind d)) "the class no longer leaks into the detail map"))
+  (let [d (tpl-err #(tpl/render "{{x" {}))]
+    (is (= :unterminated-tag (:reason d)))
+    (is (= 1 (get-in d [:location :line]))))
+  (let [code (try (tpl/render "{{x" {}) (catch e (:mino/code e)))]
+    (is (string? code) "the diagnostic carries a stable :mino/code")))
 
 ;;; render-file
 

@@ -169,15 +169,19 @@
   [thunk]
   (try (thunk) :no-throw (catch e (ex-data e))))
 
+(defn- html-ser-err-kind
+  [thunk]
+  (try (thunk) :no-throw (catch e (:mino/kind e))))
+
 (deftest html-ser-opts-validation
   ;; opts are keyword maps, reserved and ignored in v1
   (is (= "<p>x</p>" (html/to-html (html-ser-el :p ["x"]) nil)))
   (is (= "<p>x</p>" (html/to-html (html-ser-el :p ["x"]) {})))
-  (is (= :html/opts (:kind (html-ser-err-data
-                             #(html/to-html (html-ser-el :p) :nope)))))
-  (is (= :html/opts (:kind (html-ser-err-data #(html/to-html 5)))))
-  (is (= :html/opts (:kind (html-ser-err-data
-                             #(html/to-html {:attrs {} :content []}))))))
+  (is (= :html/opts (html-ser-err-kind
+                      #(html/to-html (html-ser-el :p) :nope))))
+  (is (= :html/opts (html-ser-err-kind #(html/to-html 5))))
+  (is (= :html/opts (html-ser-err-kind
+                      #(html/to-html {:attrs {} :content []})))))
 
 ;;; ---- byte-exactness over canonical-form fixtures (D10) ----
 

@@ -48,6 +48,13 @@
   (try (env/parse-dotenv s) :no-throw
        (catch e (ex-data e))))
 
+(defn- parse-kind
+  "The :mino/kind on the diagnostic parse-dotenv throws for s, or
+  :no-throw when it succeeds."
+  [s]
+  (try (env/parse-dotenv s) :no-throw
+       (catch e (:mino/kind e))))
+
 (deftest parse-dotenv-basic-fixture
   (is (= basic-golden (env/parse-dotenv (slurp (str fx "basic.env"))))))
 
@@ -86,15 +93,33 @@
                     ["A=\"closed\" junk" 1]
                     ["A='closed' junk" 1]]]
     (let [e (parse-error s)]
-      (is (map? e) (str "throws ex-info for " (pr-str s)))
-      (is (= :env/parse (:kind e)))
+      (is (map? e) (str "throws a diagnostic for " (pr-str s)))
+      (is (= :env/parse (parse-kind s)))
       (is (= line (:line e)))
       (is (string? (:text e))))))
+
+(deftest parse-dotenv-classifies-with-mino-kind
+  ;; ADR 37: the thrown diagnostic carries :mino/kind so a classed
+  ;; catch dispatches on it, and ex-data still reads the detail.
+  (is (= :env/parse (parse-kind "NOT_AN_ASSIGNMENT"))
+      "a malformed KEY=VALUE line classifies as :env/parse")
+  (is (= :env/parse (parse-kind "OPEN=\"unterminated"))
+      "an unterminated quoted value classifies as :env/parse")
+  (is (= :caught
+         (try (env/parse-dotenv "BAD KEY=x")
+              (catch :env/parse _ :caught)))
+      "a classed catch on :env/parse dispatches")
+  (is (= :env/opts
+         (try (env/parse-dotenv :not-a-string) (catch e (:mino/kind e))))
+      "a bad argument classifies as :env/opts")
+  (let [d (try (env/parse-dotenv "A=1\nBROKEN") (catch e (ex-data e)))]
+    (is (= 2 (:line d)) "ex-data still reads the 1-based line")
+    (is (string? (:text d)))))
 
 (deftest parse-dotenv-requires-a-string
   (let [e (parse-error :not-a-string)]
     (is (map? e))
-    (is (= :env/opts (:kind e)))))
+    (is (= :env/opts (parse-kind :not-a-string)))))
 
 (deftest parse-dotenv-is-pure
   (let [s "P=one\nQ=two\n"]
@@ -149,16 +174,13 @@
         "the return is the merged overlay, not just the file")))
 
 (deftest load-env-and-getenv-validate-arguments
-  (let [e (try (env/getenv :KEY) (catch e (ex-data e)))]
-    (is (map? e))
-    (is (= :env/opts (:kind e))))
-  (let [e (try (env/load-env (str fx "basic.env") :not-a-map)
-               (catch e (ex-data e)))]
-    (is (map? e))
-    (is (= :env/opts (:kind e))))
-  (let [e (try (env/load-env 42) (catch e (ex-data e)))]
-    (is (map? e))
-    (is (= :env/opts (:kind e)))))
+  (let [k (try (env/getenv :KEY) (catch e (:mino/kind e)))]
+    (is (= :env/opts k)))
+  (let [k (try (env/load-env (str fx "basic.env") :not-a-map)
+               (catch e (:mino/kind e)))]
+    (is (= :env/opts k)))
+  (let [k (try (env/load-env 42) (catch e (:mino/kind e)))]
+    (is (= :env/opts k))))
 
 (deftest load-env-propagates-slurp-errors
   (is (thrown-with-msg? #"slurp"

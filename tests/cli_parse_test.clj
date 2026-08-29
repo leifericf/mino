@@ -3,8 +3,8 @@
 ;; mino.cli parse-opts: the babashka.cli option-parser shape over
 ;; plain strings and keyword spec maps. Open world: unknown options
 ;; parse, positionals ride along as metadata, defaults fill absent
-;; keys, and every failed coercion throws ex-info carrying
-;; :kind :cli/parse.
+;; keys, and every failed coercion throws a diagnostic carrying
+;; :mino/kind :cli/parse.
 
 (require '[mino.cli :as cli])
 
@@ -102,16 +102,28 @@
     (cli/parse-opts ["--port" "abc"] {:spec cli-spec})
     (is false "expected a throw")
     (catch e
-      (is (= :cli/parse (:kind (ex-data e))))
+      (is (= :cli/parse (:mino/kind e)))
       (is (= :port (:option (ex-data e))))
       (is (= "abc" (:value (ex-data e)))))))
+
+(deftest long-coercion-failure-carries-classified-kind
+  ;; ADR 37: the thrown diagnostic classifies as :cli/parse on
+  ;; :mino/kind, the dispatch axis a classed catch reads.
+  (is (= :cli/parse (try (cli/parse-opts ["--port" "abc"] {:spec cli-spec})
+                         (catch e (:mino/kind e))))))
+
+(deftest long-coercion-failure-dispatches-classed-catch
+  ;; A classed catch on the promoted kind fires; a non-matching class
+  ;; would let the throw escape.
+  (is (= :caught (try (cli/parse-opts ["--port" "abc"] {:spec cli-spec})
+                      (catch :cli/parse _ :caught)))))
 
 (deftest boolean-coercion-failure-throws-cli-parse
   (try
     (cli/parse-opts ["--dry-run=maybe"] {:spec cli-spec})
     (is false "expected a throw")
     (catch e
-      (is (= :cli/parse (:kind (ex-data e))))
+      (is (= :cli/parse (:mino/kind e)))
       (is (= :dry-run (:option (ex-data e)))))))
 
 (deftest edn-coercion-failure-throws-cli-parse
@@ -119,8 +131,18 @@
     (cli/parse-opts ["--cfg" "(unclosed"] {:spec cli-spec})
     (is false "expected a throw")
     (catch e
-      (is (= :cli/parse (:kind (ex-data e))))
+      (is (= :cli/parse (:mino/kind e)))
       (is (= :cfg (:option (ex-data e)))))))
+
+(deftest bad-spec-shape-throws-cli-parse
+  ;; spec-entries rejects a non-map, non-vector :spec with the same
+  ;; :cli/parse class and the offending value under :spec in :mino/data.
+  (is (= :cli/parse (try (cli/parse-opts ["--x" "1"] {:spec 42})
+                         (catch e (:mino/kind e)))))
+  (is (= 42 (try (cli/parse-opts ["--x" "1"] {:spec 42})
+                 (catch e (:spec (ex-data e))))))
+  (is (= :caught (try (cli/parse-opts ["--x" "1"] {:spec 42})
+                      (catch :cli/parse _ :caught)))))
 
 (deftest fn-coercion-returning-nil-throws-cli-parse
   (is (thrown? (cli/parse-opts ["--letter" "alpha"]

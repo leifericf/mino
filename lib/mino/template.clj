@@ -34,16 +34,29 @@
   context map, and render composes the two. render-file reads its
   template with slurp.
 
-  Errors are thrown ex-info: :kind :template/parse with :reason,
-  1-based :location {:line :col}, and the offending :text for
-  malformed templates; :kind :template/filter with :filter for an
-  unknown filter or a bad filter call (checked at compile, except a
-  join over a scalar, a render-time value error); :kind :template/each
-  when each meets a non-collection value; :kind :template/opts for
-  argument and opts validation. The parser walks character indices
+  Errors are thrown as diagnostics (ADR 37): :mino/kind :template/parse
+  with :reason, 1-based :location {:line :col}, and the offending :text
+  for malformed templates; :mino/kind :template/filter with :filter for
+  an unknown filter or a bad filter call (checked at compile, except a
+  join over a scalar, a render-time value error); :mino/kind
+  :template/each when each meets a non-collection value; :mino/kind
+  :template/opts for argument and opts validation. The class rides on
+  :mino/kind so a classed catch dispatches on it; the detail is under
+  :mino/data, which ex-data returns. The parser walks character indices
   with no regex use, so the namespace needs no capability beyond the
   floor."
   (:require [clojure.string :as str]))
+
+;;;; Errors
+
+(defn- template-fail
+  "Throws a classified mino.template diagnostic (ADR 37): :mino/kind
+  names the error class so classed catch dispatches on it, :mino/message
+  the human string ex-message returns, :mino/data the detail ex-data
+  reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
 
 ;;;; Opts and validation
 
@@ -52,8 +65,8 @@
 
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.template: " msg)
-                  {:kind :template/opts :arg arg})))
+  (template-fail :template/opts "MTPO001"
+                 (str "mino.template: " msg) {:arg arg}))
 
 (defn- delimiter
   "The one-character string for delimiter key k, from opts or the
@@ -162,12 +175,12 @@
 (defn- throw-parse
   [tpl reason idx]
   (let [[line col] (line-col tpl idx)]
-    (throw (ex-info (str "mino.template: " (name reason)
-                         " (line " line ", column " col ")")
-                    {:kind :template/parse
-                     :reason reason
-                     :location {:line line :col col}
-                     :text (snippet tpl idx)}))))
+    (template-fail :template/parse "MTPP001"
+                   (str "mino.template: " (name reason)
+                        " (line " line ", column " col ")")
+                   {:reason reason
+                    :location {:line line :col col}
+                    :text (snippet tpl idx)})))
 
 ;;;; Tokenizer
 ;; Tokens: [:text s], [:var path filters idx], [:open name path idx],
@@ -222,16 +235,14 @@
         arg (when j (unquote-arg (subs part (inc j))))]
     (let [max-args (get filter-max-args name)]
       (when (nil? max-args)
-        (throw (ex-info (str "mino.template: unknown filter " name)
-                        {:kind :template/filter
-                         :filter name
-                         :reason :unknown})))
+        (template-fail :template/filter "MTPF001"
+                       (str "mino.template: unknown filter " name)
+                       {:filter name :reason :unknown}))
       (when (and (some? arg) (zero? max-args))
-        (throw (ex-info (str "mino.template: filter " name
-                             " takes no argument")
-                        {:kind :template/filter
-                         :filter name
-                         :reason :arg-not-expected})))
+        (template-fail :template/filter "MTPF001"
+                       (str "mino.template: filter " name
+                            " takes no argument")
+                       {:filter name :reason :arg-not-expected}))
       [name arg])))
 
 (defn- expr-token
@@ -410,10 +421,10 @@
     :else (cond
             (nil? v) ""
             (coll? v) (if arg (str/join arg v) (str/join v))
-            :else (throw (ex-info "mino.template: join needs a collection"
-                                  {:kind :template/filter
-                                   :filter "join"
-                                   :reason :not-a-collection})))))
+            :else (template-fail :template/filter "MTPF001"
+                                 "mino.template: join needs a collection"
+                                 {:filter "join"
+                                  :reason :not-a-collection}))))
 
 (declare render-node)
 
@@ -429,8 +440,9 @@
       (nil? v) ""
       (map? v) (str/join (mapv body-of (vals v)))
       (coll? v) (str/join (mapv body-of v))
-      :else (throw (ex-info "mino.template: each over a non-collection"
-                            {:kind :template/each :value v})))))
+      :else (template-fail :template/each "MTPE001"
+                           "mino.template: each over a non-collection"
+                           {:value v}))))
 
 (defn- render-node
   [node scopes]

@@ -139,6 +139,30 @@
 (deftest crc32-returns-a-nonnegative-integer
   (is (integer? (crc32 "abc"))))
 
+;;; ADR 37: unknown-algorithm throws carry :mino/kind :digest/alg
+
+(deftest digest-hex-unknown-alg-is-classed
+  (require '[mino.digest :as digest])
+  (is (= :digest/alg
+         (try (digest/digest-hex :sha512 "abc")
+              (catch e (:mino/kind e)))))
+  (is (= :caught
+         (try (digest/digest-hex :sha512 "abc")
+              (catch :digest/alg _ :caught))))
+  (let [e (try (digest/digest-hex :sha512 "abc") (catch e (do e)))]
+    (is (= :sha512 (:alg (ex-data e))))))
+
+(deftest hmac-hex-unknown-alg-is-classed
+  (require '[mino.digest :as digest])
+  (is (= :digest/alg
+         (try (digest/hmac-hex :sha1 "k" "d")
+              (catch e (:mino/kind e)))))
+  (is (= :caught
+         (try (digest/hmac-hex :sha1 "k" "d")
+              (catch :digest/alg _ :caught))))
+  (let [e (try (digest/hmac-hex :sha1 "k" "d") (catch e (do e)))]
+    (is (= :sha1 (:alg (ex-data e))))))
+
 ;;; shared contract: type and arity errors
 
 (deftest digest-type-and-arity-errors

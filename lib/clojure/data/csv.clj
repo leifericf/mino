@@ -10,6 +10,15 @@
 
 (require '[clojure.string :as str])
 
+;;;; Errors
+
+(defn- csv-fail
+  "Throws a classified diagnostic (ADR 37): :mino/kind is the dispatch
+  axis, :mino/message the human string, :mino/data the ex-data detail."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 ;;;; Options
 
 (defn- check-char-opt
@@ -17,8 +26,8 @@
   against every parsed character and silently yields garbage."
   [kind k v]
   (when-not (char? v)
-    (throw (ex-info (str "csv: :" k " must be a character")
-                    {:kind kind :option k :value v}))))
+    (csv-fail kind "MCS001" (str "csv: :" k " must be a character")
+              {:option k :value v})))
 
 (defn- newline-str
   [newline]
@@ -26,8 +35,8 @@
     :lf   "\n"
     :crlf "\r\n"
     :cr   "\r"
-    (throw (ex-info "csv: :newline must be :lf, :crlf or :cr"
-                    {:kind :csv/write :option :newline :value newline}))))
+    (csv-fail :csv/write "MCS002" "csv: :newline must be :lf, :crlf or :cr"
+              {:option :newline :value newline})))
 
 ;;;; Reader
 
@@ -54,11 +63,12 @@
                         (if (string? s)
                           (do (reset! input "")
                               (csv-parse s sep q))
-                          (throw (ex-info "read-csv: cursor atom must hold a string"
-                                          {:kind :csv/parse :input input}))))
-      :else           (throw (ex-info
-                               "read-csv: input must be CSV text or a string-cursor atom"
-                               {:kind :csv/parse :input input})))))
+                          (csv-fail :csv/parse "MCS003"
+                                    "read-csv: cursor atom must hold a string"
+                                    {:input input})))
+      :else           (csv-fail :csv/parse "MCS003"
+                                "read-csv: input must be CSV text or a string-cursor atom"
+                                {:input input}))))
 
 ;;;; Writer
 

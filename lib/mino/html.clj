@@ -27,22 +27,30 @@
   semicolon-terminated names only inside attribute values), bogus
   comments, name lowercasing, PLAINTEXT rest-of-input, and NUL to
   U+FFFD in text. This namespace owns argument validation and the
-  error contract: errors throw ex-info with :kind :html/parse, a
-  :code keyword, :location {:line :col} (1-based, bytes), and the
-  offending :text (source line). v1 code: :max-depth (the 256
-  open-element cap; everything else recovers).
+  error contract: errors throw a diagnostic with :mino/kind
+  :html/parse, a :code keyword, :location {:line :col} (1-based,
+  bytes), and the offending :text (source line) in :mino/data. v1
+  code: :max-depth (the 256 open-element cap; everything else
+  recovers).
 
   Divergences from hickory, pinned by tests: parse returns the node
   map directly (no parser object), and malformed input a browser
   would recover from yields either the recovered tree or a positioned
-  ex-info where hickory never throws. opts are keyword maps,
+  diagnostic where hickory never throws. opts are keyword maps,
   reserved and ignored in v1."
   (:require [clojure.string :as str]))
 
+(defn- html-fail
+  "Throws a classified mino.html diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.html: " msg)
-                  {:kind :html/opts :arg arg})))
+  (html-fail :html/opts "MHO001" (str "mino.html: " msg) {:arg arg}))
 
 (defn- run-prim
   [who s opts fragment]
@@ -54,12 +62,11 @@
     (if (and (vector? r)
              (seq r)
              (= :html/error (nth r 0)))
-      (throw (ex-info (str "mino.html: " (nth r 1))
-                      {:kind :html/parse
-                       :code (keyword (nth r 1))
-                       :location {:line (nth r 2)
-                                  :col (nth r 3)}
-                       :text (nth r 4)}))
+      (html-fail :html/parse "MHP001" (str "mino.html: " (nth r 1))
+                 {:code (keyword (nth r 1))
+                  :location {:line (nth r 2)
+                             :col (nth r 3)}
+                  :text (nth r 4)})
       r)))
 
 (defn parse
@@ -72,9 +79,9 @@
   => {:type :document :content [{:type :element :tag :html ...}]}
 
   opts is a keyword map, reserved and accepted but ignored in v1.
-  Throws ex-info :kind :html/parse with :code, :location {:line
-  :col}, and :text on the only non-recovering edge, the 256-deep
-  open-element cap (:code :max-depth)."
+  Throws a diagnostic with :mino/kind :html/parse carrying :code,
+  :location {:line :col}, and :text on the only non-recovering edge,
+  the 256-deep open-element cap (:code :max-depth)."
   ([s] (parse s nil))
   ([s opts]
    (run-prim "parse" s opts false)))
@@ -278,7 +285,7 @@
   output is byte-exact over canonical-form fixtures (lowercase
   names, double-quoted values, explicit closes). opts is a keyword
   map, reserved and accepted but ignored in v1; invalid nodes and
-  opts throw ex-info :kind :html/opts."
+  opts throw a diagnostic with :mino/kind :html/opts."
   ([node] (to-html node nil))
   ([node opts]
    (when-not (or (nil? opts) (map? opts))
@@ -386,8 +393,8 @@
   structured :name/:publicid/:systemid attrs; mino nodes carry the
   raw doctype text per ADR 28). script and style content is verbatim
   (parse kept their interiors raw) and a non-string child under them
-  throws ex-info :kind :html/opts, as hickory errors on the same
-  shape.
+  throws a diagnostic with :mino/kind :html/opts, as hickory errors
+  on the same shape.
 
   node may be any to-html input: a node map, a bare string (escaped
   text), or a sequential collection (each element converted; a

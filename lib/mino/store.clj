@@ -42,6 +42,18 @@
 (require '[clojure.set :as set])
 
 ;; ---------------------------------------------------------------------------
+;; Errors
+;; ---------------------------------------------------------------------------
+
+(defn- store-fail
+  "Throws a classified mino.store diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
+;; ---------------------------------------------------------------------------
 ;; Data shape helpers
 ;; ---------------------------------------------------------------------------
 
@@ -67,7 +79,8 @@
 (def ^:private long-max 9223372036854775807)
 
 (defn- check-type
-  "Returns nil if v matches type-spec, throws ex-info otherwise.
+  "Returns nil if v matches type-spec, throws a diagnostic
+  with :mino/kind :store/schema otherwise.
   Supported types: :string, :keyword, :long, :double, :boolean,
   :instant (treated as :long, 64-bit signed), :any (no check).
   Unknown type-spec values throw -- they are treated as schema
@@ -95,15 +108,15 @@
                    :any     true
                    ;; Unknown type keyword: surface as a schema error instead
                    ;; of silently passing every value.
-                   (throw
-                     (ex-info (str "Unknown schema type spec for attribute " attr
-                                   ": " type-spec)
-                              {:attribute attr :type-spec type-spec})))]
+                   (store-fail :store/schema "MSTS001"
+                     (str "Unknown schema type spec for attribute " attr
+                          ": " type-spec)
+                     {:attribute attr :type-spec type-spec}))]
          (when-not ok?
-           (throw
-             (ex-info (str "Type mismatch for attribute " attr
-                           ": expected " type-spec)
-                      {:attribute attr :value val :expected type-spec}))))))))
+           (store-fail :store/schema "MSTS001"
+             (str "Type mismatch for attribute " attr
+                  ": expected " type-spec)
+             {:attribute attr :value val :expected type-spec})))))))
 
 (defn- eid-ok?
   "Returns true if e is a valid entity id: a positive integer (>= 1,
@@ -128,35 +141,36 @@
     :else false))
 
 (defn- validate-fact
-  "Validates a single fact against the schema. Throws ex-info on
+  "Validates a single fact against the schema. Throws a diagnostic
+  with :mino/kind :store/schema on
   violation: nil entity-id, nil attribute, unknown attribute in a
   closed schema, or type mismatch on :db/add. No-op when schema is
   empty. nil as a fact value on :db/add is a documented v1 design
   choice (see store-add-nil-value) and is allowed."
   [schema closed? {:keys [e a v op]}]
   (when (nil? e)
-    (throw
-      (ex-info "nil entity id is not allowed"
-               {:attribute a})))
+    (store-fail :store/schema "MSTS001"
+      "nil entity id is not allowed"
+      {:attribute a}))
   (when (not (eid-ok? e))
-    (throw
-      (ex-info (str "Invalid entity id (must be a positive integer or a keyword): "
-                    (pr-str e))
-               {:entity e :attribute a})))
+    (store-fail :store/schema "MSTS001"
+      (str "Invalid entity id (must be a positive integer or a keyword): "
+           (pr-str e))
+      {:entity e :attribute a}))
   (when (nil? a)
-    (throw
-      (ex-info "nil attribute is not allowed"
-               {:entity e})))
+    (store-fail :store/schema "MSTS001"
+      "nil attribute is not allowed"
+      {:entity e}))
   (when (not (attr-ok? a))
-    (throw
-      (ex-info (str "Invalid attribute (must be a non-empty keyword or string): "
-                    (pr-str a))
-               {:entity e :attribute a})))
+    (store-fail :store/schema "MSTS001"
+      (str "Invalid attribute (must be a non-empty keyword or string): "
+           (pr-str a))
+      {:entity e :attribute a}))
   (let [spec (get schema a)]
     (when (and closed? (not spec))
-      (throw
-        (ex-info (str "Unknown attribute in closed schema: " a)
-                 {:attribute a :entity e})))
+      (store-fail :store/schema "MSTS001"
+        (str "Unknown attribute in closed schema: " a)
+        {:attribute a :entity e}))
     (when (and spec (:type spec) (not= (:type spec) :any)
                (= op :db/add))
       (check-type a v (:type spec) (:cardinality spec)))))
@@ -180,7 +194,8 @@
   either a function value (passed directly) or a symbol (resolved in
   the calling namespace, mirroring how migrate's docstring names the
   value as a 'coerce-fn-sym'). Symbols are not callable in mino; an
-  unresolved symbol throws ::invalid-coerce so the failure surfaces
+  unresolved symbol throws a diagnostic with :mino/kind :store/coerce
+  so the failure surfaces
   at migration time rather than silently producing nil."
   [cf]
   (cond
@@ -188,17 +203,19 @@
     (symbol? cf)
     (let [v (resolve cf)]
       (when-not (and v (fn? @v))
-        (throw (ex-info (str "migrate :coerce symbol not resolvable to a function: " cf)
-                        {::invalid-coerce cf})))
+        (store-fail :store/coerce "MSTC001"
+          (str "migrate :coerce symbol not resolvable to a function: " cf)
+          cf))
       @v)
-    :else (throw (ex-info (str "migrate :coerce spec must be a function or symbol: " cf)
-                          {::invalid-coerce cf}))))
+    :else (store-fail :store/coerce "MSTC001"
+            (str "migrate :coerce spec must be a function or symbol: " cf)
+            cf)))
 
 (defn- validate-preds
   "Validates attribute predicates on a fact. Each pred symbol is
   resolved and called with the value. For :many cardinality with a
   set value, each member is checked. Falsy return throws
-  ::attr-pred-failed."
+  a diagnostic with :mino/kind :store/schema."
   [schema {:keys [e a v op]}]
   (when (= op :db/add)
     (let [spec (get schema a)
@@ -208,9 +225,9 @@
       (doseq [pred preds
               val vals]
         (when-not (pred val)
-            (throw
-              (ex-info (str "Attribute predicate failed for " a)
-                       {::attr-pred-failed {:attr a :value val}})))))))
+            (store-fail :store/schema "MSTS001"
+              (str "Attribute predicate failed for " a)
+              {:attr a :value val}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Index maintenance
@@ -280,10 +297,10 @@
   (doseq [[attr spec] schema]
     (when (and (:unique spec)
                (= :many (:cardinality spec)))
-      (throw
-        (ex-info (str "Attribute " attr " cannot be :unique"
-                      " with :cardinality :many")
-                 {:attribute attr :spec spec}))))
+      (store-fail :store/schema "MSTS001"
+        (str "Attribute " attr " cannot be :unique"
+             " with :cardinality :many")
+        {:attribute attr :spec spec})))
   schema)
 
 (defn- unique-attrs
@@ -330,8 +347,9 @@
               existing (seq (get-in indexes [ref-attr ref-val]))]
           (if existing
             [op (first existing) a v]
-            (throw (ex-info (str "Lookup-ref " e " does not resolve")
-                            {:lookup-ref e}))))
+            (store-fail :store/schema "MSTS001"
+              (str "Lookup-ref " e " does not resolve")
+              {:lookup-ref e})))
         [op e a v]))))
 
 (defn- resolve-upserts
@@ -355,14 +373,16 @@
               (cond
                 ;; Two tx claims on same unique value, different eids
                 (and tx-existing (not= tx-existing mapped-e))
-                (throw (ex-info (str "Unique conflict on " a ": " v)
-                                {::unique-conflict {:attr a :value v}}))
+                (store-fail :store/schema "MSTS001"
+                  (str "Unique conflict on " a ": " v)
+                  {:attr a :value v})
 
                 ;; Pre-existing + :value + different eid = conflict (no upsert)
                 (and pre-existing (= u-type :value)
                      (not= (first pre-existing) mapped-e))
-                (throw (ex-info (str "Unique conflict on " a ": " v)
-                                {::unique-conflict {:attr a :value v}}))
+                (store-fail :store/schema "MSTS001"
+                  (str "Unique conflict on " a ": " v)
+                  {:attr a :value v})
 
                 ;; Pre-existing + :identity + different eid = upsert
                 (and pre-existing (= u-type :identity)
@@ -410,7 +430,7 @@
 
 (defn- validate-entity-specs
   "Validates entity specs on entities that had :db/ensure. Called after
-  all facts are applied. Throws ::entity-spec-failed."
+  all facts are applied. Throws a diagnostic with :mino/kind :store/schema."
   [entities entity-specs ensures]
   (let [db-proxy {:entities entities}]
     (doseq [[eid spec-name] ensures]
@@ -420,21 +440,22 @@
           (let [required (:required-attrs spec)
                 missing (filter #(nil? (get entity %)) required)]
             (when (seq missing)
-              (throw
-                (ex-info (str "Entity spec " spec-name " failed for entity " eid
-                              ": missing required attrs " (vec missing))
-                         {::entity-spec-failed {:eid eid :spec spec-name
-                                                :missing-attrs (vec missing)}}))))
+              (store-fail :store/schema "MSTS001"
+                (str "Entity spec " spec-name " failed for entity " eid
+                     ": missing required attrs " (vec missing))
+                {:eid eid :spec spec-name
+                 :missing-attrs (vec missing)})))
           (doseq [pred (:preds spec)]
             (when-not (pred db-proxy eid)
-                (throw
-                  (ex-info (str "Entity spec " spec-name
-                                " predicate failed for entity " eid)
-                           {::entity-spec-failed {:eid eid :spec spec-name}})))))))))
+                (store-fail :store/schema "MSTS001"
+                  (str "Entity spec " spec-name
+                       " predicate failed for entity " eid)
+                  {:eid eid :spec spec-name}))))))))
 
 (defn- validate-refs
   "Validates that :db/add facts on :ref attrs target eids that exist
-  in the pre-tx db or are created in this tx. Throws ::dangling-ref."
+  in the pre-tx db or are created in this tx. Throws a diagnostic
+  with :mino/kind :store/schema."
   [db ops]
   (let [schema (:schema db)
         r-attrs (ref-attrs schema)
@@ -446,10 +467,10 @@
       (let [vals (if (set? v) v #{v})]
         (doseq [val vals]
           (when-not (contains? all-known val)
-            (throw
-              (ex-info (str "Dangling ref: " a " = " val
-                            " does not reference an existing entity")
-                       {::dangling-ref {:attr a :value val :entity e}}))))))))
+            (store-fail :store/schema "MSTS001"
+              (str "Dangling ref: " a " = " val
+                   " does not reference an existing entity")
+              {:attr a :value val :entity e})))))))
 
 (defn- cleanup-dangling-refs
   "After applying facts, removes ref values that point at entities that
@@ -516,27 +537,27 @@
 
 (defn backend?
   "Returns true when x is a valid backend: a map tagged with a :kind
-  keyword and carrying every contract op as a fn. Throws ex-info
-  tagged ::invalid-backend on a non-map, a missing or non-keyword
+  keyword and carrying every contract op as a fn. Throws a diagnostic
+  with :mino/kind :store/backend on a non-map, a missing or non-keyword
   :kind, a missing op, or a non-fn op. Any keyword kind is valid;
   :memory and :file are the built-ins, any other keyword names a
   third-party backend."
   [x]
   (when-not (map? x)
-    (throw
-      (ex-info (str "backend must be a map of fns tagged :kind, got: "
-                    (pr-str x))
-               {::invalid-backend {:reason :not-a-map :got x}})))
+    (store-fail :store/backend "MSTB001"
+      (str "backend must be a map of fns tagged :kind, got: "
+           (pr-str x))
+      {:reason :not-a-map :got x}))
   (when-not (keyword? (:kind x))
-    (throw
-      (ex-info (str "backend :kind must be a keyword, got: "
-                    (pr-str (:kind x)))
-               {::invalid-backend {:reason :bad-kind :kind (:kind x)}})))
+    (store-fail :store/backend "MSTB001"
+      (str "backend :kind must be a keyword, got: "
+           (pr-str (:kind x)))
+      {:reason :bad-kind :kind (:kind x)}))
   (doseq [op backend-ops]
     (when-not (fn? (get x op))
-      (throw
-        (ex-info (str "backend is missing op " op " or the op is not a fn")
-                 {::invalid-backend {:reason :bad-op :op op}}))))
+      (store-fail :store/backend "MSTB001"
+        (str "backend is missing op " op " or the op is not a fn")
+        {:reason :bad-op :op op})))
   true)
 
 (defn memory-backend
@@ -574,7 +595,7 @@
   backend at path, no path the :memory default. opts :backend
   overrides with :memory, :file (which requires a path), or a prebuilt
   backend map validated by backend?. Unusable values throw classified
-  ::invalid-backend errors. The backend owns segments only; the path
+  :store/backend diagnostics. The backend owns segments only; the path
   itself still flows to store-open* so the C handle and its commit
   machinery are unchanged."
   [path opts]
@@ -587,16 +608,18 @@
       (= given :file)
       (if path
         (file-backend path)
-        (throw (ex-info "the :file backend requires a path string"
-                        {::invalid-backend {:reason :file-without-path}})))
+        (store-fail :store/backend "MSTB001"
+          "the :file backend requires a path string"
+          {:reason :file-without-path}))
 
       (map? given) (do (backend? given) given)
 
       :else
-      (throw (ex-info (str "no built-in backend " (pr-str given)
-                           "; expected :memory, :file, or a backend map")
-                      {::invalid-backend {:reason :unknown-backend
-                                          :backend given}})))))
+      (store-fail :store/backend "MSTB001"
+        (str "no built-in backend " (pr-str given)
+             "; expected :memory, :file, or a backend map")
+        {:reason :unknown-backend
+         :backend given}))))
 
 (def ^:private conn->backend
   "conn to backend registry, the listener-registry pattern: open
@@ -605,8 +628,8 @@
   (atom {}))
 
 (defn register-on-open
-  "Binds conn to backend in the backend registry. Throws
-  ::invalid-backend when backend fails validation. Returns nil."
+  "Binds conn to backend in the backend registry. Throws a diagnostic
+  with :mino/kind :store/backend when backend fails validation. Returns nil."
   [conn backend]
   (backend? backend)
   (swap! conn->backend assoc conn backend)
@@ -624,17 +647,17 @@
   nil)
 
 (defn- require-backend
-  "Returns the backend registered for conn, throwing a classified
-  ::no-backend error when none is. Durability ops route through the
-  seam (ADR 35); an unregistered conn is one that never came from open
-  or was closed, and publishing on it silently would bypass the
-  backend's durability contract."
+  "Returns the backend registered for conn, throwing a diagnostic
+  with :mino/kind :store/backend when none is. Durability ops route
+  through the seam (ADR 35); an unregistered conn is one that never
+  came from open or was closed, and publishing on it silently would
+  bypass the backend's durability contract."
   [conn op]
   (or (backend-for conn)
-      (throw
-        (ex-info (str "no backend registered for conn; cannot route "
-                      op " through the seam")
-                 {::no-backend {:op op}}))))
+      (store-fail :store/backend "MSTB001"
+        (str "no backend registered for conn; cannot route "
+             op " through the seam")
+        {:op op})))
 
 (defn- backend-commit
   "Publishes new-db on conn through the registered backend's :commit
@@ -718,8 +741,8 @@
   "Writes the db value to disk through the backend :checkpoint op
   (ADR 35): the file backend's C edge writes the snapshot (0x00
   version header + EDN via .tmp + rename + fsync) and deletes the
-  WAL; the memory backend no-ops. Throws ::no-backend for a conn with
-  no registered backend."
+  WAL; the memory backend no-ops. Throws a diagnostic with :mino/kind
+  :store/backend for a conn with no registered backend."
   [conn]
   (let [backend (require-backend conn :checkpoint)]
     ((:checkpoint backend) conn))
@@ -754,10 +777,12 @@
       4 [[(tx-data 0) (tx-data 1) (tx-data 2) (tx-data 3)]]
       3 (if (= (first tx-data) :db/retract)
           [[:db/retract (tx-data 1) (tx-data 2) nil]]
-          (throw (ex-info "[:db/add e a] is missing a value"
-                          {:tx-data tx-data})))
-      (throw (ex-info "tx-data vector has wrong arity (expected 3 or 4 elements)"
-                      {:tx-data tx-data})))
+          (store-fail :store/tx "MSTT001"
+            "[:db/add e a] is missing a value"
+            {:tx-data tx-data}))
+      (store-fail :store/tx "MSTT001"
+        "tx-data vector has wrong arity (expected 3 or 4 elements)"
+        {:tx-data tx-data}))
 
     (map? tx-data)
     (vec (for [[e attrs] tx-data
@@ -772,7 +797,7 @@
     (mapcat parse-tx-data tx-data)
 
     :else
-    (throw (ex-info "Invalid tx-data format" {:tx-data tx-data}))))
+    (store-fail :store/tx "MSTT001" "Invalid tx-data format" {:tx-data tx-data})))
 
 (defn- expand-retract-entity
   "Pre-processes tx-data to expand [:db/retractEntity eid] into
@@ -1079,16 +1104,16 @@
   for the tx branch.
 
   Validates point is either an inst or an integer; anything else
-  throws ::invalid-point so callers see a clear argument error
-  rather than a downstream numeric-comparator crash."
+  throws a diagnostic with :mino/kind :store/point so callers see a
+  clear argument error rather than a downstream numeric-comparator crash."
   [point]
   (cond
     (point-as-instant? point) (inst-ms point)
     (integer? point) point
-    :else (throw
-            (ex-info (str "as-of/since point must be an inst or an integer, got: "
-                          (pr-str point))
-                     {::invalid-point point}))))
+    :else (store-fail :store/point "MSTP001"
+            (str "as-of/since point must be an inst or an integer, got: "
+                 (pr-str point))
+            point)))
 
 (defn as-of
   "Returns the db value as it was at tx N or instant T. Replays the log
@@ -1291,9 +1316,10 @@
                           (integer? (:keep-since keep-spec)))]
      (if (or valid-last valid-since)
        nil
-       (throw (ex-info (str "compact keep-spec must be {:keep-last N} or {:keep-since T}, got: "
-                            (pr-str keep-spec))
-                       {::invalid-keep-spec keep-spec}))))
+       (store-fail :store/keep-spec "MSTK001"
+         (str "compact keep-spec must be {:keep-last N} or {:keep-since T}, got: "
+              (pr-str keep-spec))
+         keep-spec)))
    (let [cur @conn
          log (:log cur)
          kept (cond
@@ -1336,7 +1362,8 @@
     :data     fn — called as a tx on the migrated db (for data migration)
 
   Returns {:db-after new-db :violations [...] :tx N}.
-  Throws ::migration-conflict when violations exist without :force.
+  Throws a diagnostic with :mino/kind :store/migration when violations
+  exist without :force.
 
   listeners do NOT fire for migrate (it publishes via the backend
   :commit op, bypassing the tx log); see `listen` for the scope
@@ -1367,8 +1394,9 @@
                                        (not (type-matches? v (:type spec))))]
                         {:entity e :attr a :value v :expected (:type spec)}))
          _ (when (and (seq violations) (not (:force opts)))
-             (throw (ex-info (str "Migration conflict: " (count violations) " violations")
-                             {::migration-conflict violations})))
+             (store-fail :store/migration "MSTM001"
+               (str "Migration conflict: " (count violations) " violations")
+               violations))
          new-db {:entities entities
                  :log (:log cur)
                  :tx (:tx cur)
@@ -1400,12 +1428,13 @@
 
 (defn- parse-query
   "Parses a Datalog query vector into {:find :with :in :order-by :where}.
-  Throws ex-info tagged ::invalid-query when the input is not a vector
-  beginning with :find."
+  Throws a diagnostic with :mino/kind :store/query when the input is
+  not a vector beginning with :find."
   [query]
   (when-not (and (vector? query) (= (first query) :find))
-    (throw (ex-info "Invalid query: expected a vector starting with :find"
-                    {::invalid-query query})))
+    (store-fail :store/query "MSTQ001"
+      "Invalid query: expected a vector starting with :find"
+      query))
   (loop [q query find-vars [] with-vars [] in-vars [] order-by nil clauses [] mode nil]
     (if (empty? q)
       {:find find-vars :with with-vars :in in-vars
@@ -1526,9 +1555,9 @@
          el)))
 
 (defn- validate-query
-  "Validates a parsed query. Throws ex-info tagged ::invalid-query for
-  malformed clauses, unbound find vars, or an :order-by var that is
-  not projected by :find."
+  "Validates a parsed query. Throws a diagnostic with :mino/kind
+  :store/query for malformed clauses, unbound find vars, or an
+  :order-by var that is not projected by :find."
   [find where order-by]
   (let [bound-vars (reduce
                      (fn [acc clause]
@@ -1549,9 +1578,9 @@
                          (not-clause? clause) acc
                          (not-join-clause? clause) acc
                          :else
-                         (throw
-                           (ex-info "Invalid Datalog clause: must be [e a v] pattern, [(pred ...)] predicate, (not ...), (not-join ...), or (or ...)"
-                                    {::invalid-query clause}))))
+                         (store-fail :store/query "MSTQ001"
+                           "Invalid Datalog clause: must be [e a v] pattern, [(pred ...)] predicate, (not ...), (not-join ...), or (or ...)"
+                           clause)))
                      #{} where)
         find-vars-for-check (flatten
                               (for [v find]
@@ -1561,15 +1590,15 @@
                                   :else [])))
         unbound (filter #(not (contains? bound-vars %)) find-vars-for-check)]
     (when (seq unbound)
-      (throw
-        (ex-info (str "Query var(s) not bound by any clause: " (vec unbound))
-                 {::invalid-query {:find find :unbound (vec unbound)}})))
+      (store-fail :store/query "MSTQ001"
+        (str "Query var(s) not bound by any clause: " (vec unbound))
+        {:find find :unbound (vec unbound)}))
     (when (and order-by (variable? (:var order-by)))
       (let [ob-var (:var order-by)]
         (when-not (contains? bound-vars ob-var)
-          (throw
-            (ex-info (str "Query :order-by var not bound by any clause: " ob-var)
-                     {::invalid-query {:order-by ob-var}})))))))
+          (store-fail :store/query "MSTQ001"
+            (str "Query :order-by var not bound by any clause: " ob-var)
+            {:order-by ob-var}))))))
 
 (defn- process-not
   "Filters bindings: removes any binding where the negated pattern matches."
@@ -1635,14 +1664,14 @@
         arg-specs (rest pred-form)
         pred-var  (resolve pred-sym)
         _         (when-not pred-var
-                    (throw
-                      (ex-info (str "Query predicate not resolvable: " pred-sym)
-                               {::invalid-query {:predicate pred-sym}})))
+                    (store-fail :store/query "MSTQ001"
+                      (str "Query predicate not resolvable: " pred-sym)
+                      {:predicate pred-sym}))
         pred-fn   @pred-var
         _         (when-not (fn? pred-fn)
-                    (throw
-                      (ex-info (str "Query predicate not a function: " pred-sym)
-                               {::invalid-query {:predicate pred-sym}})))]
+                    (store-fail :store/query "MSTQ001"
+                      (str "Query predicate not a function: " pred-sym)
+                      {:predicate pred-sym}))]
     (filter (fn [b]
               (let [args (for [a arg-specs]
                            (if (variable? a) (get b a) a))]
@@ -2003,16 +2032,16 @@
   in-range member.
 
   Bounds and attribute values must be mutually comparable: a numeric
-  range over a string attr (or vice versa) throws a classified
-  ::range-type-mismatch error rather than a raw ClassCastException."
+  range over a string attr (or vice versa) throws a diagnostic with
+  :mino/kind :store/range rather than a raw ClassCastException."
   [db-val attr lo hi]
   (let [lo-cat (range-value-category lo)
         hi-cat (range-value-category hi)]
     (when (and lo-cat hi-cat (not= lo-cat hi-cat))
-      (throw
-        (ex-info (str "find-by-range: lo and hi must be the same type, got "
-                      (pr-str lo) " and " (pr-str hi))
-                 {:reason :range-type-mismatch :attr attr :lo lo :hi hi})))
+      (store-fail :store/range "MSTR001"
+        (str "find-by-range: lo and hi must be the same type, got "
+             (pr-str lo) " and " (pr-str hi))
+        {:reason :range-type-mismatch :attr attr :lo lo :hi hi}))
     (->> (:entities db-val)
          (keep (fn [[e attrs]]
                  (let [v (get attrs attr)]
@@ -2025,21 +2054,21 @@
                                                            (not= (range-value-category %) lo-cat))
                                                  %) v)]
                                 (when bad
-                                  (throw
-                                    (ex-info (str "find-by-range: value " (pr-str bad)
-                                                  " for " attr " is not comparable to bounds "
-                                                  (pr-str lo) ".." (pr-str hi))
-                                             {:reason :range-type-mismatch
-                                              :attr attr :value bad :entity e})))
+                                  (store-fail :store/range "MSTR001"
+                                    (str "find-by-range: value " (pr-str bad)
+                                         " for " attr " is not comparable to bounds "
+                                         (pr-str lo) ".." (pr-str hi))
+                                    {:reason :range-type-mismatch
+                                     :attr attr :value bad :entity e}))
                                 (let [in-range (filter #(and (>= % lo) (<= % hi)) v)]
                                   (when (seq in-range)
                                     [e (reduce min in-range)])))
                      (and lo-cat (not= (range-value-category v) lo-cat))
-                     (throw
-                       (ex-info (str "find-by-range: value " (pr-str v) " for " attr
-                                     " is not comparable to bounds " (pr-str lo) ".." (pr-str hi))
-                                {:reason :range-type-mismatch
-                                 :attr attr :value v :entity e}))
+                     (store-fail :store/range "MSTR001"
+                       (str "find-by-range: value " (pr-str v) " for " attr
+                            " is not comparable to bounds " (pr-str lo) ".." (pr-str hi))
+                       {:reason :range-type-mismatch
+                        :attr attr :value v :entity e})
                      (and (>= v lo) (<= v hi)) [e v]
                      :else nil))))
          (sort-by second)
@@ -2061,5 +2090,6 @@
       :eavt (sort-by (fn [d] [(:e d) (:a d)]) entries)
       :avet (sort-by (fn [d] [(:a d) (:v d)]) entries)
       :aevt (sort-by (fn [d] [(:a d) (:e d)]) entries)
-      (throw (ex-info (str "Unknown index: " index)
-                      {:index index})))))
+      (store-fail :store/index "MSTI001"
+        (str "Unknown index: " index)
+        {:index index}))))

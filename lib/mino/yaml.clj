@@ -26,14 +26,22 @@
   2 s/1MB bar, in interpreter dispatch and per-call regex compiles,
   the same primitive-contract wall ADRs 23, 24, and 25 record). This
   namespace owns argument validation and the error contract: errors
-  are thrown ex-info with :kind :yaml/parse, a :reason keyword, and
-  :location {:line :col} over bytes."
+  are thrown as a diagnostic with :mino/kind :yaml/parse (ADR 37, so
+  classed catch dispatches on the class), a :reason keyword, and
+  :location {:line :col} over bytes in the :mino/data detail."
   (:require [clojure.string :as str]))
+
+(defn- yaml-fail
+  "Throws a classified mino.yaml diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
 
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.yaml: " msg)
-                  {:kind :yaml/opts :arg arg})))
+  (yaml-fail :yaml/opts "MYO001" (str "mino.yaml: " msg) {:arg arg}))
 
 (defn- parse-opts
   [who s opts]
@@ -52,19 +60,18 @@
     (if (and (vector? r)
              (seq r)
              (= :yaml/error (nth r 0)))
-      (throw (ex-info (str "mino.yaml: " (nth r 1))
-                      {:kind :yaml/parse
-                       :reason (keyword (nth r 1))
-                       :location {:line (nth r 2)
-                                  :col (nth r 3)}
-                       :text (nth r 4)}))
+      (yaml-fail :yaml/parse "MYP001" (str "mino.yaml: " (nth r 1))
+                 {:reason (keyword (nth r 1))
+                  :location {:line (nth r 2)
+                             :col (nth r 3)}
+                  :text (nth r 4)})
       r)))
 
 (defn parse-string
   "Parses the first YAML document in s into plain data. Keyword keys
-  by default; {:keywords false} keeps string keys. Throws ex-info
-  :kind :yaml/parse with :reason and :location {:line :col} on
-  malformed or out-of-subset input."
+  by default; {:keywords false} keeps string keys. Throws a diagnostic
+  with :mino/kind :yaml/parse, :reason and :location {:line :col} in
+  its data, on malformed or out-of-subset input."
   ([s] (parse-string s nil))
   ([s opts]
    (let [kw (parse-opts "parse-string" s opts)

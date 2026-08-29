@@ -21,8 +21,8 @@
   The gate: nothing is emitted unless (tty? :stdout) is true, the
   --color=auto default; {:force true} in the trailing opts map
   overrides it for redirects that still want the bytes. Bad style
-  data throws ex-info with :kind :term/style and the offending :key;
-  bad argument shapes throw :kind :term/opts.
+  data throws a diagnostic with :mino/kind :term/style and the
+  offending :key; bad argument shapes throw :mino/kind :term/opts.
 
   Progress bars:
 
@@ -39,7 +39,7 @@
   pure data-in fn; progress is the gated shell that answers the
   plain label-and-percentage line when stdout is not a terminal and
   {:force true} is absent. :ratio must be a number within 0..1;
-  anything else throws :kind :term/opts."
+  anything else throws a diagnostic with :mino/kind :term/opts."
   (:require [clojure.string :as str]))
 
 (def ^:private esc "\033")
@@ -63,15 +63,25 @@
 
 (def ^:private attr-keys #{:bold :italic :underline :reverse})
 
+;;;; Errors
+
+(defn- term-fail
+  "Throws a classified mino.term diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 (defn- throw-style
   [msg spec key]
-  (throw (ex-info (str "mino.term: " msg)
-                  {:kind :term/style :spec spec :key key})))
+  (term-fail :term/style "MTS001" (str "mino.term: " msg)
+             {:spec spec :key key}))
 
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.term: " msg)
-                  {:kind :term/opts :arg arg})))
+  (term-fail :term/opts "MTO001" (str "mino.term: " msg)
+             {:arg arg}))
 
 (defn- check-spec
   "spec must be a map whose keys are the style keys; attribute values

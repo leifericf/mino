@@ -335,12 +335,34 @@
   [thunk]
   (try (thunk) :no-throw (catch e (ex-data e))))
 
-;; The facade converts the descriptor to positioned ex-info in the
-;; yaml reader contract (:kind/:code/:location/:text).
+(defn- xml-facade-err-kind
+  "Runs thunk and returns the thrown diagnostic's :mino/kind (ADR 37),
+  or :no-throw if it returns."
+  [thunk]
+  (try (thunk) :no-throw (catch e (:mino/kind e))))
+
+;; ADR 37: the facade throws a classified diagnostic; :mino/kind names
+;; the error class at top level so classed catch dispatches on it.
+(deftest xml-facade-diagnostic-is-classified
+  ;; a bare catch binds the whole diagnostic; read :mino/kind off it
+  (is (= :xml/parse
+         (try (xml/parse "<a>&nbsp;</a>") (catch e (:mino/kind e)))))
+  ;; a classed catch dispatches on :xml/parse
+  (is (= :caught
+         (try (xml/parse "<a/>\n<b/>") (catch :xml/parse _ :caught))))
+  ;; opts errors carry :xml/opts and dispatch classed too
+  (is (= :xml/opts (xml-facade-err-kind #(xml/parse 5))))
+  (is (= :caught
+         (try (xml/parse "<a/>" :nope) (catch :xml/opts _ :caught)))))
+
+;; The facade converts the descriptor to a positioned diagnostic in the
+;; yaml reader contract: :mino/kind classifies, ex-data carries
+;; :code/:location/:text.
 (deftest xml-facade-positioned-ex-info
   (let [d (xml-facade-err-data #(xml/parse "<a>&nbsp;</a>"))]
     (is (map? d))
-    (is (= :xml/parse (:kind d)))
+    (is (= :xml/parse
+           (try (xml/parse "<a>&nbsp;</a>") (catch e (:mino/kind e)))))
     (is (= :undefined-entity (:code d)))
     (is (= {:line 1 :col 4} (:location d)))
     (is (string? (:text d))))
@@ -357,9 +379,9 @@
   (is (map? (xml/parse "<a/>")))
   (is (map? (xml/parse "<a/>" nil)))
   (is (map? (xml/parse "<a/>" {})))
-  (is (= :xml/opts (:kind (xml-facade-err-data #(xml/parse 5))))
+  (is (= :xml/opts (xml-facade-err-kind #(xml/parse 5)))
       "input must be a string")
-  (is (= :xml/opts (:kind (xml-facade-err-data #(xml/parse "<a/>" :nope))))
+  (is (= :xml/opts (xml-facade-err-kind #(xml/parse "<a/>" :nope)))
       "opts must be a map"))
 
 ;; Divergence (AC-5): parse returns the root element map directly,

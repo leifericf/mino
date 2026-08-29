@@ -117,23 +117,27 @@
   [thunk]
   (try (thunk) :no-throw (catch e (ex-data e))))
 
+(defn- html-hi-err-kind
+  [thunk]
+  (try (thunk) :no-throw (catch e (:mino/kind e))))
+
 (deftest html-hi-argument-errors
   ;; opts keyword maps reserved in v1; bad nodes are :html/opts
   (is (= [:p {} "x"] (html/as-hiccup (first (html/parse-fragment "<p>x")) nil)))
   (is (= [:p {} "x"] (html/as-hiccup (first (html/parse-fragment "<p>x")) {})))
-  (is (= :html/opts (:kind (html-hi-err-data
-                             #(html/as-hiccup [:p {}] :nope)))))
-  (is (= :html/opts (:kind (html-hi-err-data #(html/as-hiccup 5)))))
-  (is (= :html/opts (:kind (html-hi-err-data
-                             #(html/as-hiccup {:type :bogus :content []})))))
-  (is (= :html/opts (:kind (html-hi-err-data
-                             #(html/as-hiccup {:attrs {} :content []})))))
+  (is (= :html/opts (html-hi-err-kind
+                      #(html/as-hiccup [:p {}] :nope))))
+  (is (= :html/opts (html-hi-err-kind #(html/as-hiccup 5))))
+  (is (= :html/opts (html-hi-err-kind
+                      #(html/as-hiccup {:type :bogus :content []}))))
+  (is (= :html/opts (html-hi-err-kind
+                      #(html/as-hiccup {:attrs {} :content []}))))
   ;; hickory throws on non-string script children; so does mino
   (is (= :html/opts
-         (:kind (html-hi-err-data
-                  #(html/as-hiccup {:type :element :tag :script :attrs {}
-                                    :content [{:type :element :tag :b
-                                               :attrs {} :content []}]}))))))
+         (html-hi-err-kind
+           #(html/as-hiccup {:type :element :tag :script :attrs {}
+                             :content [{:type :element :tag :b
+                                        :attrs {} :content []}]})))))
 
 ;;; ---- reconversion property ----
 

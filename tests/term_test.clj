@@ -91,9 +91,10 @@
                (str/split-lines (str/trim (:out r)))))))))
 
 (defn- bad
-  "kind keyword of calling f, or :no-throw when it succeeds."
+  "kind keyword of calling f, or :no-throw when it succeeds. Reads the
+  promoted :mino/kind (ADR 37), so classed catch dispatches on it."
   [f]
-  (try (f) :no-throw (catch e (:kind (ex-data e)))))
+  (try (f) :no-throw (catch e (:mino/kind e))))
 
 (deftest term-throws-on-unknown-style-data
   ;; unknown palette colors and unknown keys are :term/style
@@ -112,11 +113,21 @@
   (is (= :term/opts (bad (fn [] (term/style {} 42 {:force true})))))
   (is (= :term/opts (bad (fn [] (term/style {} "x" :nope))))))
 
+(deftest term-kinds-dispatch-classed-catch
+  ;; ADR 37: the promoted :mino/kind lets a classed catch select the throw
+  (is (= :caught (try (term/ansi {:fg :pink} {:force true})
+                      (catch :term/style _ :caught))))
+  (is (= :caught (try (term/ansi [:fg :red])
+                      (catch :term/opts _ :caught)))))
+
 (deftest style-throw-carries-the-offending-key
   (let [e (try (term/ansi {:fg :pink} {:force true}) :no-throw
                (catch e (ex-data e)))]
     (is (map? e))
-    (is (= :term/style (:kind e)))
-    (is (= :fg (:key e)))))
+    (is (= :fg (:key e)))
+    ;; the class no longer leaks into the detail map
+    (is (nil? (:kind e))))
+  (is (= :term/style (try (term/ansi {:fg :pink} {:force true})
+                          (catch e (:mino/kind e))))))
 
 (run-tests-and-exit)

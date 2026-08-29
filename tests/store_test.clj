@@ -38,6 +38,49 @@
   (is (not (store? nil)))
   (is (not (store? {:entities {}}))))
 
+;; ---------------------------------------------------------------------------
+;; Error taxonomy (ADR 37): every store error carries a :store/* :mino/kind
+;; so classed catch dispatches on it, ex-message returns the human string,
+;; and ex-data returns the useful detail.
+;; ---------------------------------------------------------------------------
+
+(deftest store-query-error-is-classed
+  (let [db (store/db (store/open))]
+    (is (= :store/query
+           (try (store/q db [:not-a-query]) (catch e (:mino/kind e))))
+        ":mino/kind on a malformed query is :store/query")
+    (is (= :caught
+           (try (store/q db [:not-a-query]) (catch :store/query _ :caught)))
+        "classed catch dispatches on :store/query")
+    (is (= [:not-a-query]
+           (try (store/q db [:not-a-query]) (catch e (ex-data e))))
+        "ex-data returns the offending query")
+    (is (some? (try (store/q db [:not-a-query])
+                    (catch e (re-find #"Invalid query" (ex-message e)))))
+        "ex-message returns the human string")))
+
+(deftest store-backend-error-is-classed
+  (is (= :store/backend
+         (try (store/backend? 42) (catch e (:mino/kind e))))
+      ":mino/kind on a bad backend is :store/backend")
+  (is (= :caught
+         (try (store/backend? 42) (catch :store/backend _ :caught)))
+      "classed catch dispatches on :store/backend")
+  (is (= 42
+         (try (store/backend? 42) (catch e (:got (ex-data e)))))
+      "ex-data carries the rejected value"))
+
+(deftest store-schema-error-is-classed
+  (let [trigger (fn []
+                  (store/open nil {:schema {:tags {:cardinality :many
+                                                   :unique :identity}}}))]
+    (is (= :store/schema
+           (try (trigger) (catch e (:mino/kind e))))
+        ":mino/kind on a bad schema is :store/schema")
+    (is (= :caught
+           (try (trigger) (catch :store/schema _ :caught)))
+        "classed catch dispatches on :store/schema")))
+
 (deftest store-close-idempotent
   (let [conn (store/open)]
     (store/close conn)
@@ -1244,7 +1287,7 @@
 
 (deftest store-unique-conflict-throws
   ;; Two distinct new entities carrying the same unique value within a
-  ;; single tx must throw, tagged ::unique-conflict, and apply nothing.
+  ;; single tx must throw :store/schema and apply nothing.
   (let [conn (store/open nil {:schema {:email {:unique :identity}}})
         e (try
             (store/transact conn [[:db/add 100 :email "a@x.com"]
@@ -1252,8 +1295,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "conflicting tx throws")
-    (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
-        "ex-data carries ::unique-conflict tag")
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the conflict as :store/schema")
+    (is (= "a@x.com" (:value (ex-data e)))
+        "ex-data carries the conflicting value")
     (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
     (is (= 0 (:tx (store/db conn))) "tx counter not advanced on throw")))
 
@@ -1287,16 +1332,18 @@
     (is (= 1 (store/read db 2 :child)))))
 
 (deftest store-ref-dangling-throws
-  ;; A :ref value that is not an existing eid at apply time throws,
-  ;; tagged ::dangling-ref, and applies nothing.
+  ;; A :ref value that is not an existing eid at apply time throws
+  ;; :store/schema and applies nothing.
   (let [conn (store/open nil {:schema {:child {:type :ref}}})
         e (try
             (store/transact conn [:db/add 1 :child 999])
             nil
             (catch Throwable e e))]
     (is (some? e) ":ref to nonexistent eid throws")
-    (is (some? (re-find #"dangling-ref" (pr-str (ex-data e))))
-        "ex-data carries ::dangling-ref tag")
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the dangling ref as :store/schema")
+    (is (= 999 (:value (ex-data e)))
+        "ex-data carries the dangling value")
     (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
     (is (= 0 (:tx (store/db conn))) "tx counter not advanced on throw")))
 
@@ -1749,7 +1796,7 @@
 ;;
 ;; :db/add value is passed to each predicate (resolved via resolve) AFTER
 ;; the type check and BEFORE the fact is applied. Falsy return aborts
-;; the whole tx tagged ::attr-pred-failed.
+;; the whole tx with :mino/kind :store/schema.
 ;; ---------------------------------------------------------------------------
 
 (defn store-pred-positive-num
@@ -1782,8 +1829,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "pred rejection throws")
-    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
-        "ex-data carries ::attr-pred-failed tag")
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the pred failure as :store/schema")
+    (is (some? (re-find #"Attribute predicate failed" (ex-message e)))
+        "message names the failing predicate")
     (is (= #{} (store/entities (store/db conn))) "no facts applied on throw")
     (is (= 0 (:tx (store/db conn))) "tx counter not advanced")))
 
@@ -1797,7 +1846,9 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "second pred failing throws")
-    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the pred failure as :store/schema")
+    (is (some? (re-find #"Attribute predicate failed" (ex-message e)))
         "failure reports the pred that rejected")))
 
 (deftest store-attr-pred-runs-after-type-check
@@ -1811,8 +1862,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "type mismatch throws")
-    (is (nil? (re-find #"attr-pred-failed" (pr-str (ex-data e))))
-        "type error observed, pred never reached")))
+    (is (nil? (re-find #"Attribute predicate failed" (ex-message e)))
+        "type error observed, pred never reached")
+    (is (some? (re-find #"Type mismatch" (ex-message e)))
+        "the type check is what surfaced")))
 
 (deftest store-attr-pred-tx-atomic
   ;; A pred failure on any one fact in a multi-fact tx aborts ALL facts.
@@ -1840,7 +1893,8 @@
             (catch Throwable e e))]
     (is (= #{"x" "y"} (store/read db-ok 1 :tags)) "valid members accepted")
     (is (some? e) "pred rejection on a :many member throws")
-    (is (some? (re-find #"attr-pred-failed" (pr-str (ex-data e)))))))
+    (is (= :store/schema (:mino/kind e)))
+    (is (some? (re-find #"Attribute predicate failed" (ex-message e))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entity specs (:db/ensure)
@@ -1848,7 +1902,7 @@
 ;; Spec-first. Entity specs are registered at open time under
 ;; :entity-specs. tx-data map form carries a virtual :db/ensure spec-name
 ;; key. After all facts apply, each ensured entity is checked for
-;; required-attrs and preds. Failure aborts tagged ::entity-spec-failed.
+;; required-attrs and preds. Failure aborts with :mino/kind :store/schema.
 ;; ---------------------------------------------------------------------------
 
 (defn store-spec-email-has-at
@@ -1886,8 +1940,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "missing required attr throws")
-    (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e))))
-        "ex-data carries ::entity-spec-failed tag")
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the entity-spec failure as :store/schema")
+    (is (= [:email] (:missing-attrs (ex-data e)))
+        "ex-data carries the missing attrs")
     (is (= #{} (store/entities (store/db conn))) "no facts applied")))
 
 (deftest store-entity-spec-pred-passes
@@ -1905,7 +1961,8 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "failing entity pred throws")
-    (is (some? (re-find #"entity-spec-failed" (pr-str (ex-data e)))))
+    (is (= :store/schema (:mino/kind e)))
+    (is (some? (re-find #"predicate failed" (ex-message e))))
     (is (= #{} (store/entities (store/db conn))) "no facts applied")))
 
 (deftest store-entity-spec-on-new-entity
@@ -1957,7 +2014,7 @@
 
 (deftest store-migrate-tighten-type-throws
   ;; Tightening :any -> :long when existing data is non-long throws
-  ;; ::migration-conflict without :force.
+  ;; :store/migration without :force.
   (let [conn (store/open nil {:schema {:n {}}})
         _ (store/transact conn [:db/add 1 :n "not a number"])
         e (try
@@ -1965,8 +2022,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "violations throw without :force")
-    (is (some? (re-find #"migration-conflict" (pr-str (ex-data e))))
-        "ex-data carries ::migration-conflict tag")
+    (is (= :store/migration (:mino/kind e))
+        ":mino/kind classes the conflict as :store/migration")
+    (is (seq (ex-data e))
+        "ex-data carries the violations vector")
     (is (= "not a number" (store/read (store/db conn) 1 :n))
         "existing db unchanged on throw")))
 
@@ -2373,6 +2432,8 @@
         db (store/db conn)
         e (try (store/find-by-range db :name 1 10) (catch Throwable e e))]
     (is (some? e) "mixed-type range throws")
+    (is (= :store/range (:mino/kind e))
+        ":mino/kind classes the mismatch as :store/range")
     (is (= :range-type-mismatch (:reason (ex-data e)))
         "classified :range-type-mismatch, not a raw ClassCastException")))
 
@@ -2458,8 +2519,10 @@
             nil
             (catch Throwable e e))]
     (is (some? e) "duplicate :unique :value throws")
-    (is (some? (re-find #"unique-conflict" (pr-str (ex-data e))))
-        "ex-data carries ::unique-conflict tag")))
+    (is (= :store/schema (:mino/kind e))
+        ":mino/kind classes the conflict as :store/schema")
+    (is (= "a@x.com" (:value (ex-data e)))
+        "ex-data carries the conflicting value")))
 
 (deftest store-unique-value-no-upsert
   ;; Unlike :identity, :unique :value does NOT rewrite the eid; the
@@ -2796,8 +2859,8 @@
   (rm-rf store-test-dir))
 
 (deftest backend?-rejects-malformed-backends
-  ;; Malformed backends throw classified ::invalid-backend errors: a
-  ;; non-map, a missing or non-keyword :kind, a missing op, a non-fn op.
+  ;; Malformed backends throw :store/backend diagnostics: a non-map, a
+  ;; missing or non-keyword :kind, a missing op, a non-fn op.
   (let [invalid (fn [x]
                   (try
                     (store/backend? x)
@@ -2814,9 +2877,9 @@
                      :close (fn [conn] nil)})]
     (is (every? some? [e1 e2 e3 e4 e5]) "each malformed shape throws")
     (doseq [e [e1 e2 e3 e4 e5]]
-      (is (some? (re-find #"invalid-backend" (pr-str (ex-data e))))
-          "ex-data carries ::invalid-backend tag"))
-    (is (some? (re-find #"wal-entries" (pr-str (ex-data e4))))
+      (is (= :store/backend (:mino/kind e))
+          ":mino/kind classes each as :store/backend"))
+    (is (= :wal-entries (:op (ex-data e4)))
         "the missing-op error names the op")))
 
 (deftest backend-registry-round-trip
@@ -2890,8 +2953,8 @@
 
 (deftest open-rejects-unusable-backends
   ;; Values that are neither a built-in backend keyword nor a valid
-  ;; backend map throw classified ::invalid-backend errors from open
-  ;; before any conn is created.
+  ;; backend map throw :store/backend diagnostics from open before any
+  ;; conn is created.
   (let [rejected (fn [opts]
                    (try
                      (store/open nil opts)
@@ -2904,9 +2967,9 @@
     (is (every? some? [e1 e2 e3 e4])
         "each unusable value throws")
     (doseq [e [e1 e2 e3 e4]]
-      (is (some? (re-find #"invalid-backend" (pr-str (ex-data e))))
-          "ex-data carries ::invalid-backend tag"))
-    (is (some? (re-find #"file-without-path" (pr-str (ex-data e4))))
+      (is (= :store/backend (:mino/kind e))
+          ":mino/kind classes each as :store/backend"))
+    (is (= :file-without-path (:reason (ex-data e4)))
         "the :file error names the missing-path reason")))
 
 (deftest open-routing-preserves-reopen-behavior
@@ -3012,8 +3075,8 @@
 
 (deftest transact-on-unregistered-conn-throws
   ;; The seam owns durability: a conn with no registered backend has
-  ;; no :commit op to route through, so transact throws a classified
-  ;; ::no-backend error instead of silently publishing.
+  ;; no :commit op to route through, so transact throws :store/backend
+  ;; instead of silently publishing.
   (let [conn (store/open)]
     (store/dissoc-on-close conn)
     (let [e (try
@@ -3021,8 +3084,10 @@
               nil
               (catch Throwable e e))]
       (is (some? e) "transact without a registered backend throws")
-      (is (some? (re-find #"no-backend" (pr-str (ex-data e))))
-          "ex-data carries ::no-backend tag")
+      (is (= :store/backend (:mino/kind e))
+          ":mino/kind classes the unregistered conn as :store/backend")
+      (is (= :commit (:op (ex-data e)))
+          "ex-data names the op that could not route")
       (is (empty? (:entities (store/db conn)))
           "nothing was published"))))
 
@@ -3053,8 +3118,10 @@
               nil
               (catch Throwable e e))]
       (is (some? e) "checkpoint without a registered backend throws")
-      (is (some? (re-find #"no-backend" (pr-str (ex-data e))))
-          "ex-data carries ::no-backend tag"))))
+      (is (= :store/backend (:mino/kind e))
+          ":mino/kind classes the unregistered conn as :store/backend")
+      (is (= :checkpoint (:op (ex-data e)))
+          "ex-data names the op that could not route"))))
 
 (deftest close-routes-through-backend-close-and-deregisters
   ;; close routes through the backend :close op and deregisters the

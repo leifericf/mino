@@ -102,7 +102,7 @@
 
 (defn- html-fz-classify
   "One parse under measurement: a :document map is a tree; anything
-  else must be a positioned ex-info (:kind :html/parse, :code
+  else must be a positioned diagnostic (:mino/kind :html/parse, :code
   keyword, integral :location line and col). Returns the record;
   :bad carries the first offender's description."
   [s]
@@ -118,7 +118,7 @@
     (catch e
       (let [d (ex-data e)]
         (if (and (map? d)
-                 (= :html/parse (:kind d))
+                 (= :html/parse (:mino/kind e))
                  (keyword? (:code d))
                  (map? (:location d))
                  (int? (:line (:location d)))
@@ -167,7 +167,7 @@
 
 (defn- html-fz-err-data
   [thunk]
-  (try (thunk) :no-throw (catch e (ex-data e))))
+  (try (thunk) :no-throw (catch e (assoc (ex-data e) :mino/kind (:mino/kind e)))))
 
 (defn- html-fz-timed
   "Runs thunk, asserts the elapsed bound, returns [ms value]."
@@ -189,7 +189,7 @@
   (let [d (html-fz-err-data #(html/parse-fragment
                                (html-fz-rep 257 "<div>")))]
     (is (map? d))
-    (is (= :html/parse (:kind d)))
+    (is (= :html/parse (:mino/kind d)))
     (is (= :max-depth (:code d)))
     (is (map? (:location d)))))
 

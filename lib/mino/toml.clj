@@ -23,23 +23,30 @@
   25; the same reader-in-C call ADR 23 made for JSON and ADR 24 for
   CSV after the mino-side readers measured far over budget). This
   namespace owns argument validation and the error contract: errors
-  are thrown ex-info with :kind :toml/parse, a :reason keyword,
-  :location {:line :col} (1-based byte positions), and the offending
-  :text."
+  are thrown as a diagnostic with :mino/kind :toml/parse (ADR 37),
+  and :mino/data carrying a :reason keyword, :location {:line :col}
+  (1-based byte positions), and the offending :text."
   (:require [clojure.string :as str]))
+
+(defn- toml-fail
+  "Throws a classified mino.toml diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
 
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "mino.toml: " msg)
-                  {:kind :toml/opts :arg arg})))
+  (toml-fail :toml/opts "MTOO001" (str "mino.toml: " msg) {:arg arg}))
 
 (defn parse-string
   "Parses TOML text into plain nested maps with keyword keys.
   opts map: {:parse-values f} applies f to every leaf scalar (it must
   be total); the intended use is date coercion, since RFC 3339
-  values stay raw strings otherwise. Throws ex-info :kind
-  :toml/parse with :reason, :location {:line :col}, and :text on
-  malformed documents."
+  values stay raw strings otherwise. Throws a diagnostic with
+  :mino/kind :toml/parse and :mino/data {:reason, :location
+  {:line :col}, :text} on malformed documents."
   ([s] (parse-string s nil))
   ([s opts]
    (when-not (string? s)
@@ -52,10 +59,10 @@
      (let [r (toml-parse s pv)]
        (if (and (vector? r)
                 (= :toml/error (nth r 0)))
-         (throw (ex-info (str "mino.toml: " (nth r 1))
-                         {:kind :toml/parse
-                          :reason (keyword (nth r 1))
-                          :location {:line (nth r 2)
-                                     :col (nth r 3)}
-                          :text (nth r 4)}))
+         (toml-fail :toml/parse "MTOP001"
+                    (str "mino.toml: " (nth r 1))
+                    {:reason (keyword (nth r 1))
+                     :location {:line (nth r 2)
+                                :col (nth r 3)}
+                     :text (nth r 4)})
          r)))))

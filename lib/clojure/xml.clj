@@ -27,9 +27,10 @@
   tabs and newlines to spaces; character references pass through).
   Line endings normalize to LF and a leading UTF-8 BOM drops.
 
-  Errors throw ex-info with :kind :xml/parse, a :code keyword,
-  :location {:line :col} (1-based, bytes, at the failing token),
-  and :text (the source line). v1 codes: :unexpected-eof,
+  Errors throw a diagnostic with :mino/kind :xml/parse, a :code
+  keyword, :location {:line :col} (1-based, bytes, at the failing
+  token), and :text (the source line) in :mino/data. v1 codes:
+  :unexpected-eof,
   :unexpected-token, :undefined-entity, :unsupported-doctype,
   :mismatched-end-tag, :duplicate-attribute, :multiple-roots,
   :content-before-root, :invalid-prolog, :invalid-name,
@@ -44,10 +45,18 @@
   keyword map, reserved and ignored in v1."
   (:require [clojure.string :as str]))
 
+(defn- xml-fail
+  "Throws a classified clojure.xml diagnostic (ADR 37): :mino/kind
+  names the error class so classed catch dispatches on it,
+  :mino/message the human string ex-message returns, :mino/data the
+  detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 (defn- throw-opts
   [msg arg]
-  (throw (ex-info (str "clojure.xml: " msg)
-                  {:kind :xml/opts :arg arg})))
+  (xml-fail :xml/opts "MXO001" (str "clojure.xml: " msg) {:arg arg}))
 
 (defn parse
   "Parses s, a string of XML 1.0, into the root element map
@@ -59,8 +68,8 @@
   => {:tag :rss :attrs {:version \"2.0\"} :content []}
 
   opts is a keyword map, reserved and accepted but ignored in v1.
-  Throws ex-info :kind :xml/parse with :code, :location {:line
-  :col}, and :text on malformed input; strict XML never silently
+  Throws :mino/kind :xml/parse with :code, :location {:line :col},
+  and :text on malformed input; strict XML never silently
   misparses. Non-string input and non-map opts throw :xml/opts."
   ([s] (parse s nil))
   ([s opts]
@@ -72,10 +81,10 @@
      (if (and (vector? r)
               (seq r)
               (= :xml/error (nth r 0)))
-       (throw (ex-info (str "clojure.xml: " (nth r 1))
-                       {:kind :xml/parse
-                        :code (keyword (nth r 1))
-                        :location {:line (nth r 2)
-                                   :col (nth r 3)}
-                        :text (nth r 4)}))
+       (xml-fail :xml/parse "MXP001"
+                 (str "clojure.xml: " (nth r 1))
+                 {:code (keyword (nth r 1))
+                  :location {:line (nth r 2)
+                             :col (nth r 3)}
+                  :text (nth r 4)})
        r))))

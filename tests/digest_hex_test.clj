@@ -3,8 +3,8 @@
 
 ;; Keyword sugar over the digest prims: digest-hex and hmac-hex answer
 ;; lowercase hex strings, dispatching on :sha256/:sha1/:md5. Anything
-;; else throws ex-info in the mino error shape with the algorithm in
-;; the data map.
+;; else throws a diagnostic with :mino/kind :digest/alg and the
+;; algorithm in the data map (ADR 37).
 
 (def abc-sha256 "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 (def abc-sha1 "a9993e364706816aba3e25717850c26c9cd0d89d")
@@ -23,10 +23,10 @@
 
 (deftest digest-hex-rejects-unknown-algorithms
   (let [e (try (digest/digest-hex :sha512 "abc")
-               (catch ex (ex-data ex)))]
-    (is (map? e) "unknown algorithm throws ex-info")
-    (is (= :digest/alg (:kind e)))
-    (is (= :sha512 (:alg e))))
+               (catch ex (do ex)))]
+    (is (= :digest/alg (:mino/kind e)))
+    (is (map? (ex-data e)) "unknown algorithm carries a data map")
+    (is (= :sha512 (:alg (ex-data e)))))
   (is (thrown-with-msg? #"algorithm"
                         (digest/digest-hex "sha256" "abc")))
   (is (thrown-with-msg? #"algorithm"
@@ -41,9 +41,9 @@
 
 (deftest hmac-hex-rejects-algorithms-without-an-hmac-prim
   (let [e (try (digest/hmac-hex :sha1 "k" "d")
-               (catch ex (ex-data ex)))]
-    (is (= :digest/alg (:kind e)))
-    (is (= :sha1 (:alg e))))
+               (catch ex (do ex)))]
+    (is (= :digest/alg (:mino/kind e)))
+    (is (= :sha1 (:alg (ex-data e)))))
   (is (thrown-with-msg? #"algorithm" (digest/hmac-hex :md5 "k" "d"))))
 
 (run-tests-and-exit)

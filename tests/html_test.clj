@@ -453,6 +453,10 @@
   [thunk]
   (try (thunk) :no-throw (catch e (ex-data e))))
 
+(defn- html-err-kind
+  [thunk]
+  (try (thunk) :no-throw (catch e (:mino/kind e))))
+
 ;; Rule 14: open-element depth beyond 256 throws :max-depth with a
 ;; position. 255 open parses; 257 throws (A-2 boundary pins).
 (deftest html-error-max-depth-boundary
@@ -464,7 +468,8 @@
                    d)))))
   (let [d (html-err-data #(html/parse-fragment (html-deep-open 257)))]
     (is (map? d))
-    (is (= :html/parse (:kind d)))
+    (is (= :html/parse
+           (html-err-kind #(html/parse-fragment (html-deep-open 257)))))
     (is (= :max-depth (:code d)))
     (is (= {:line 1 :col 1281} (:location d)))
     (is (string? (:text d)))))
@@ -493,7 +498,8 @@
 (deftest html-surface-positioned-ex-info
   (let [d (html-err-data #(html/parse (html-deep-open 300)))]
     (is (map? d))
-    (is (= :html/parse (:kind d)))
+    (is (= :html/parse
+           (html-err-kind #(html/parse (html-deep-open 300)))))
     (is (contains? d :location))))
 
 ;; Divergence: opts are keyword maps, reserved in v1 (accepted and
@@ -502,9 +508,37 @@
   (is (map? (html/parse "<p>x" nil)))
   (is (map? (html/parse "<p>x" {})))
   (is (vector? (html/parse-fragment "<p>x" nil)))
-  (is (= :html/opts (:kind (html-err-data #(html/parse "<p>x" :nope))))
+  (is (= :html/opts (html-err-kind #(html/parse "<p>x" :nope)))
       "opts must be a map")
-  (is (= :html/opts (:kind (html-err-data #(html/parse-fragment 5))))
+  (is (= :html/opts (html-err-kind #(html/parse-fragment 5)))
       "input must be a string"))
+
+;; ADR 37: the throws carry :mino/kind so classed catch dispatches on
+;; the error class, and ex-data reads the detail submap.
+(deftest html-error-mino-kind-classification
+  ;; the parse edge (max-depth) classifies as :html/parse
+  (is (= :html/parse
+         (try (html/parse-fragment (html-deep-open 257))
+              (catch e (:mino/kind e)))))
+  ;; the opts edge classifies as :html/opts
+  (is (= :html/opts
+         (try (html/parse "<p>x" :nope)
+              (catch e (:mino/kind e)))))
+  ;; classed catch dispatches on the promoted parse kind
+  (is (= :caught
+         (try (html/parse-fragment (html-deep-open 257))
+              (catch :html/parse _ :caught))))
+  ;; classed catch dispatches on the promoted opts kind
+  (is (= :caught
+         (try (html/parse "<p>x" :nope)
+              (catch :html/opts _ :caught))))
+  ;; ex-data reads the detail: the parse code rides in the data submap
+  (is (= :max-depth
+         (try (html/parse-fragment (html-deep-open 257))
+              (catch e (:code (ex-data e))))))
+  ;; the opts detail carries the offending arg
+  (is (= :nope
+         (try (html/parse "<p>x" :nope)
+              (catch e (:arg (ex-data e)))))))
 
 (run-tests-and-exit)

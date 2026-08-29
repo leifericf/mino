@@ -23,13 +23,23 @@
   leftover positionals ride on the result's metadata under
   :mino.cli/args, and a -- inside the args moves the rest there.
 
-  A coercion that cannot succeed throws ex-info with :kind
-  :cli/parse, :option, and :value in the data map.
+  A coercion that cannot succeed throws a diagnostic with :mino/kind
+  :cli/parse, and :option and :value in its :mino/data map.
 
   (cli/format-opts {:spec {:port {:alias :p :default 80
                                   :desc \"The port.\"}}})
   ;; => \"  -p, --port  The port. (default: 80)\""
   (:require [clojure.string :as str]))
+
+;;;; Errors
+
+(defn- cli-fail
+  "Throws a classified mino.cli diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
 
 ;;;; Spec shape
 
@@ -42,8 +52,9 @@
     (nil? spec)    nil
     (map? spec)    (seq spec)
     (vector? spec) (seq spec)
-    :else (throw (ex-info "mino.cli: :spec must be a map or a vector of pairs"
-                          {:kind :cli/parse :spec spec}))))
+    :else (cli-fail :cli/parse "MCP001"
+                    "mino.cli: :spec must be a map or a vector of pairs"
+                    {:spec spec})))
 
 (defn- alias->name
   "Alias keyword to option name, over the spec entries."
@@ -61,7 +72,7 @@
 ;;;; Coercion
 
 (defn- throw-parse [msg option value]
-  (throw (ex-info msg {:kind :cli/parse :option option :value value})))
+  (cli-fail :cli/parse "MCP002" msg {:option option :value value}))
 
 (defn- auto-coerce [s]
   (cond

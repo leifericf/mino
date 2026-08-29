@@ -10,8 +10,18 @@
   The prims (sha256, sha1, md5, hmac-sha256) answer raw bytes values;
   these wrappers answer the lowercase hex string scripts usually want.
   Input is a string or bytes value exactly like the prims. An algorithm
-  keyword without a prim throws ex-info with :kind :digest/alg and the
-  offending :alg in the data map.")
+  keyword without a prim throws a diagnostic with :mino/kind :digest/alg
+  and the offending :alg in the data map.")
+
+;;;; Errors
+
+(defn- digest-fail
+  "Throws a classified mino.digest diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
 
 (defn- digest-fn
   "Prim for the algorithm keyword, or throws :digest/alg."
@@ -20,9 +30,10 @@
     :sha256 sha256
     :sha1   sha1
     :md5    md5
-    (throw (ex-info (str "mino.digest: no digest algorithm " (pr-str alg)
-                         "; known: :sha256, :sha1, :md5")
-                    {:kind :digest/alg :alg alg}))))
+    (digest-fail :digest/alg "MDA001"
+                 (str "mino.digest: no digest algorithm " (pr-str alg)
+                      "; known: :sha256, :sha1, :md5")
+                 {:alg alg})))
 
 (defn digest-hex
   "Hex digest of data under alg (:sha256, :sha1, or :md5). data is a
@@ -36,6 +47,7 @@
   [alg key data]
   (if (= :sha256 alg)
     (hex-encode (hmac-sha256 key data))
-    (throw (ex-info (str "mino.digest: no HMAC algorithm for " (pr-str alg)
-                         "; known: :sha256")
-                    {:kind :digest/alg :alg alg}))))
+    (digest-fail :digest/alg "MDA002"
+                 (str "mino.digest: no HMAC algorithm for " (pr-str alg)
+                      "; known: :sha256")
+                 {:alg alg})))

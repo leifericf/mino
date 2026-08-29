@@ -76,9 +76,10 @@
     (is (= (term/render-progress bar 40) (term/render-progress bar 40)))))
 
 (defn- bad
-  "kind keyword of calling f, or :no-throw when it succeeds."
+  "kind keyword of calling f, or :no-throw when it succeeds. Reads the
+  promoted :mino/kind (ADR 37), so classed catch dispatches on it."
   [f]
-  (try (f) :no-throw (catch e (:kind (ex-data e)))))
+  (try (f) :no-throw (catch e (:mino/kind e))))
 
 (deftest progress-validates-its-data
   (is (= :term/opts (bad (fn [] (term/render-progress {:label 42
@@ -108,6 +109,17 @@
   (is (= :term/opts (bad (fn [] (term/progress {:label "x" :ratio 2})))))
   (is (= :term/opts (bad (fn [] (term/progress {:label "x" :ratio 0.5}
                                                :nope))))))
+
+(deftest progress-opts-dispatch-classed-catch
+  ;; ADR 37: :term/opts is a real class a classed catch can select, and
+  ;; the offending arg rides ex-data, not a :kind in the detail map
+  (is (= :caught (try (term/render-progress {:label "x" :ratio 2} 40)
+                      (catch :term/opts _ :caught))))
+  (let [e (try (term/render-progress [:label "x"] 40) :no-throw
+               (catch e (ex-data e)))]
+    (is (map? e))
+    (is (nil? (:kind e)))
+    (is (= [:label "x"] (:arg e)))))
 
 (deftest progress-plain-when-not-tty-shaped-when-forced
   (when (and (not windows?) bin)

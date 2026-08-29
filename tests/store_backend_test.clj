@@ -125,10 +125,14 @@
         "the well-formed custom backend passes validation")
     (is (every? some? [e1 e2 e3]) "each malformed shape throws")
     (doseq [e [e1 e2 e3]]
-      (is (some? (re-find #"invalid-backend" (pr-str (ex-data e))))
-          "ex-data carries the ::invalid-backend tag"))
-    (is (some? (re-find #":commit" (pr-str (ex-data e1))))
-        "the missing-op error names the op")))
+      (is (= :store/backend (:mino/kind e))
+          ":mino/kind classes each as :store/backend"))
+    (is (= :commit (:op (ex-data e1)))
+        "the missing-op error names the op")
+    (is (= :caught
+           (try (sstore/open nil {:backend (dissoc good :commit)})
+                (catch :store/backend _ :caught)))
+        "classed catch dispatches on :store/backend")))
 
 ;; ---------------------------------------------------------------------------
 ;; Byte identity across the seam (ADR 11 through ADR 35)

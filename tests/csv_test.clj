@@ -173,11 +173,15 @@
   (is (thrown? (csv/write-csv *out* [["a"]] {:newline :nolf}))))
 
 (deftest write-bad-newline-error-data
-  (try
-    (csv/write-csv *out* [["a"]] {:newline :nolf})
-    (is false "expected a throw")
-    (catch e
-      (is (= :csv/write (:kind (ex-data e)))))))
+  ;; ADR 37: the class is the top-level :mino/kind (dispatchable), the
+  ;; option detail stays in ex-data.
+  (is (= :csv/write (try (csv/write-csv *out* [["a"]] {:newline :nolf})
+                         (catch e (:mino/kind e)))))
+  (is (= :newline (try (csv/write-csv *out* [["a"]] {:newline :nolf})
+                       (catch e (:option (ex-data e))))))
+  ;; classed catch dispatches on the promoted kind
+  (is (= :caught (try (csv/write-csv *out* [["a"]] {:newline :nolf})
+                      (catch :csv/write _ :caught)))))
 
 ;;;; Writer: path destination
 
