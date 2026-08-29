@@ -699,28 +699,75 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg), "slurp: cannot open file: %s", path);
         return prim_throw_classified(S, "host", "MHO001", msg);
     }
-    fseek(f, 0, SEEK_END);
+    /* Seekable sources (regular files) take one sized read. A stream
+     * that cannot probe its size (FIFO, pipe, /dev/stdin, process
+     * substitution) is read to EOF in chunks instead. */
+    sz = -1;
+    if (fseek(f, 0, SEEK_END) == 0) {
 #if defined(_WIN32) && defined(_MSC_VER)
-    sz = _ftelli64(f);
+        sz = _ftelli64(f);
 #else
-    sz = (long long)ftell(f);
+        sz = (long long)ftell(f);
 #endif
-    if (sz < 0) {
-        fclose(f);
-        return prim_throw_classified(S, "host", "MHO001", "slurp: cannot determine file size");
+        if (sz < 0) {
+            /* Position is now undefined; rewind for the chunked path. */
+            (void)fseek(f, 0, SEEK_SET);
+        } else if (fseek(f, 0, SEEK_SET) != 0) {
+            sz = -1;
+        }
     }
-    fseek(f, 0, SEEK_SET);
-    buf = (char *)malloc((size_t)sz + 1);
-    if (buf == NULL) {
+    if (sz >= 0) {
+        buf = (char *)malloc((size_t)sz + 1);
+        if (buf == NULL) {
+            fclose(f);
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "slurp: out of memory");
+        }
+        rd = fread(buf, 1, (size_t)sz, f);
         fclose(f);
-        return prim_throw_classified(S, "host", "MHO001", "slurp: out of memory");
+        buf[rd] = '\0';
+        result = mino_string_n(S, buf, rd);
+        free(buf);
+        return result;
     }
-    rd = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    buf[rd] = '\0';
-    result = mino_string_n(S, buf, rd);
-    free(buf);
-    return result;
+    {
+        size_t cap = 16384, len = 0, got;
+        buf = (char *)malloc(cap);
+        if (buf == NULL) {
+            fclose(f);
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "slurp: out of memory");
+        }
+        for (;;) {
+            if (len + 4097 > cap) {
+                char *grown = (char *)realloc(buf, cap * 2);
+                if (grown == NULL) {
+                    free(buf);
+                    fclose(f);
+                    return prim_throw_classified(S, "host", "MHO001",
+                                                 "slurp: out of memory");
+                }
+                buf = grown;
+                cap *= 2;
+            }
+            got = fread(buf + len, 1, 4096, f);
+            len += got;
+            if (got < 4096) {
+                if (ferror(f)) {
+                    free(buf);
+                    fclose(f);
+                    return prim_throw_classified(S, "host", "MHO001",
+                                                 "slurp: read error");
+                }
+                break; /* EOF */
+            }
+        }
+        fclose(f);
+        buf[len] = '\0';
+        result = mino_string_n(S, buf, len);
+        free(buf);
+        return result;
+    }
 }
 
 /* Case-insensitive compare of a length-delimited string against a

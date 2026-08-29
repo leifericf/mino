@@ -5,6 +5,8 @@
 (def ^:private tmpdir
   (or (getenv "TMPDIR") (getenv "TEMP") (getenv "TMP") "/tmp"))
 
+(def ^:private windows? (some? (getenv "OS")))
+
 (deftest spit-and-slurp
   (let [f (str tmpdir "/mino_test_spit.txt")]
     (spit f "hello")
@@ -160,3 +162,19 @@
     (is (= "enc" (slurp path)))
     (is (thrown? (spit path "x" :encoding "latin-1")))
     (is (thrown? (spit path "x" :no-such-opt 1)))))
+
+(deftest slurp-reads-non-seekable-sources-to-eof
+  ;; A FIFO has no size to probe; the contents are whatever the writer
+  ;; sends until EOF. Slurping /dev/stdin or process substitution has
+  ;; the same shape. The writer must be an external, backgrounded
+  ;; process: an in-process future parks the scheduler before the
+  ;; reader opens, and a foreground child deadlocks with the reader.
+  (when-not windows?
+    (let [fifo (str tmpdir "/mino_slurp_fifo_" (nano-time))]
+      (sh "mkfifo" fifo)
+      (try
+        (sh "sh" "-c"
+            (str "(echo piped-bytes > " fifo ") >/dev/null 2>&1 &"))
+        (is (= "piped-bytes\n" (slurp fifo)))
+        (finally
+          (sh "sh" "-c" (str "rm -f " fifo)))))))
