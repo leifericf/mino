@@ -285,6 +285,7 @@
    ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]
    ["lib/mino/store.clj"              "mino.store"              "lib_mino_store"]
      ["lib/mino/http.clj"               "mino.http"               "lib_mino_http"]
+     ["lib/mino/http/server.clj"        "mino.http.server"        "lib_mino_http_server"]
     ["lib/mino/time.clj"               "mino.time"               "lib_mino_time"]
     ["lib/mino/path.clj"               "mino.path"               "lib_mino_path"]
     ["lib/mino/cli.clj"                "mino.cli"                "lib_mino_cli"]

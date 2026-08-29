@@ -108,6 +108,7 @@ BUNDLED = \
     lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj \
     lib_mino_store:lib/mino/store.clj \
     lib_mino_http:lib/mino/http.clj \
+    lib_mino_http_server:lib/mino/http/server.clj \
     lib_mino_time:lib/mino/time.clj \
                     lib_mino_path:lib/mino/path.clj \
                     lib_mino_cli:lib/mino/cli.clj \
