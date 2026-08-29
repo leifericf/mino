@@ -24,6 +24,7 @@
 #include "prim/internal.h"
 #include "mino.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -344,7 +345,7 @@ static int yp_digits_int(yp_t *t, size_t p, const unsigned char *s, size_t n,
     return (*out == NULL) ? -1 : 0;
 }
 
-static int yp_radix_int(yp_t *t, const unsigned char *s, size_t n,
+static int yp_radix_int(yp_t *t, size_t p, const unsigned char *s, size_t n,
                         int base, int offset, mino_val **out)
 {
     long long acc = 0;
@@ -357,6 +358,10 @@ static int yp_radix_int(yp_t *t, const unsigned char *s, size_t n,
         else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
         else d = -1;
         if (d < 0 || d >= base) break;
+        if (acc > (LLONG_MAX - d) / base) {
+            yp_fail(t, "int-overflow", p);
+            return -1;
+        }
         acc = acc * base + d;
     }
     *out = mino_int(t->S, acc);
@@ -407,7 +412,7 @@ static mino_val *yp_resolve(yp_t *t, size_t p,
                   (c >= 'A' && c <= 'F'))) break;
         }
         if (i == n) {
-            if (yp_radix_int(t, s, n, 16, 2, &v) != 0) return NULL;
+            if (yp_radix_int(t, p, s, n, 16, 2, &v) != 0) return NULL;
             return v;
         }
     }
@@ -418,7 +423,7 @@ static mino_val *yp_resolve(yp_t *t, size_t p,
             if (s[i] < '0' || s[i] > '7') break;
         }
         if (i == n) {
-            if (yp_radix_int(t, s, n, 8, 2, &v) != 0) return NULL;
+            if (yp_radix_int(t, p, s, n, 8, 2, &v) != 0) return NULL;
             return v;
         }
     }
@@ -701,7 +706,7 @@ static long yp_decode_escape(yp_t *t, size_t q, yp_buf_t *b,
     case '\n': return -2;
     case 'x': case 'u': case 'U': {
         int want = (c == 'x') ? 2 : (c == 'u') ? 4 : 8;
-        int cp = 0;
+        unsigned long cp = 0;
         int i;
         for (i = 0; i < want; i++) {
             int d = yp_hexv(yp_peek(t, q + 2 + i));
@@ -709,13 +714,13 @@ static long yp_decode_escape(yp_t *t, size_t q, yp_buf_t *b,
                 yp_fail(t, "invalid-escape", q);
                 return -1;
             }
-            cp = cp * 16 + d;
+            cp = cp * 16 + (unsigned long)d;
         }
         if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
             yp_fail(t, "bad-codepoint", q);
             return -1;
         }
-        n = yp_utf8(cp, tmp);
+        n = yp_utf8((int)cp, tmp);
         if (yp_buf_putn(t, b, tmp, n) != 0) return -1;
         *consumed = (size_t)want + 2;
         return 0;

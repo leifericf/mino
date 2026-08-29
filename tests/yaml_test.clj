@@ -625,7 +625,14 @@
   ;; core schema has no signed radix and no binary/underscore/sexagesimal forms
   (is (= {:a "-0x1A" :b "+0x1A" :c "0b101" :d "1_000" :e "1:30" :f "12:34:56"}
          (yaml/parse-string "a: -0x1A\nb: +0x1A\nc: 0b101\nd: 1_000\ne: 1:30\nf: 12:34:56\n")))
-  (is (yaml-err-at "a: 9223372036854775808\n" :int-overflow 1 4)))
+  (is (yaml-err-at "a: 9223372036854775808\n" :int-overflow 1 4))
+  ;; hex and octal accumulate with the same overflow guard as decimal:
+  ;; a value past the int64 range throws rather than wrapping (which
+  ;; would be signed-overflow UB the UBSan build traps).
+  (is (yaml-err-at "a: 0x8000000000000000\n" :int-overflow 1 4))
+  (is (yaml-err-at "a: 0xFFFFFFFFFFFFFFFF\n" :int-overflow 1 4))
+  (is (= {:a 9223372036854775807}
+         (yaml/parse-string "a: 0x7FFFFFFFFFFFFFFF\n"))))
 
 (deftest yaml-resolves-floats
   (is (= {:a 0.0 :b -0.5 :c 0.5 :d 5.0}
