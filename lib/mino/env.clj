@@ -8,8 +8,8 @@
   (env/load-env \"more.env\" {:merge true})  ; merges over it
   (env/getenv \"KEY\")                      ; overlay, else process env
 
-  Parsing follows the common dotenv conventions (docker-compose and
-  ruby-dotenv): KEY=VALUE lines, an optional `export ` prefix,
+  Parsing follows the common .env-file conventions: KEY=VALUE
+  lines, an optional `export ` prefix,
   full-line and trailing # comments (a trailing comment needs
   whitespace before the hash, so values may contain #), blank lines
   skipped, KEY= is the empty string, and a later duplicate key wins.
@@ -25,7 +25,7 @@
   environment; {:merge true} merges the file over the loaded overlay
   instead of replacing it (later loads win on conflicts). The
   process environment is never mutated: subprocesses and the core
-  getenv prim see nothing, the clj-dotenv / environ accessor model.
+  getenv prim see nothing, the overlay-accessor model.
 
   getenv takes one string name and answers the overlay value, else
   the process environment value, else nil. Parsing needs the regex

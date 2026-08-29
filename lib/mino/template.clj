@@ -1,5 +1,5 @@
 (ns mino.template
-  "Selmer-shaped string templating over plain data.
+  "String templating over plain data.
 
   (require '[mino.template :as tpl])
   (tpl/render \"Hello {{name}}\" {:name \"World\"})  ; => \"Hello World\"
@@ -12,15 +12,15 @@
   elements, a map iterates its vals; {{.}} inside is the current
   element and lookups resolve against the element first, then the
   enclosing scopes) and {{#if x}} ... {{else}} ... {{/if}} (nil,
-  false, the empty string, and empty collections are falsy, Selmer's
-  if semantics). Filters: upper, lower, and join, which takes an
+  false, the empty string, and empty collections are falsy).
+  Filters: upper, lower, and join, which takes an
   optional separator ({{xs|join:\", \"}}) and joins with the empty
   string without one, clojure.string/join's default. Filter chains
   apply left to right; a filter argument is everything after the
   filter's first colon with one layer of surrounding quotes stripped.
 
-  Interpolation does not escape (Selmer does not escape by default),
-  unknown variables render as the empty string, and non-string values
+  Interpolation does not escape, unknown variables render as the
+  empty string, and non-string values
   interpolate through str.
 
   opts: {:tag-open \\{ :tag-close \\} :filter-tag \\|} override the
@@ -214,8 +214,8 @@
 
 (defn- unquote-arg
   "One layer of matching surrounding quotes comes off a filter
-  argument (the Django shape: {{xs|join:\", \"}} separates with a
-  comma and space); anything else stays verbatim."
+  argument (the filter-argument syntax: {{xs|join:\", \"}} separates
+  with a comma and space); anything else stays verbatim."
   [arg]
   (if (and (>= (count arg) 2)
            (or (and (str/starts-with? arg "\"")
@@ -401,8 +401,8 @@
         nil))))
 
 (defn- truthy?
-  "Selmer's if semantics: nil, false, the empty string, and empty
-  collections are falsy; every other value, 0 included, is truthy."
+  "nil, false, the empty string, and empty collections are falsy;
+  every other value, 0 included, is truthy."
   [v]
   (not (or (nil? v)
            (false? v)
@@ -478,8 +478,8 @@
   (render-nodes compiled [(check-ctx ctx)]))
 
 (defn render
-  "Renders a template string against a context map in the Selmer
-  call shape; opts overrides the delimiters."
+  "Renders a template string against a context map;
+  opts overrides the delimiters."
   ([tpl ctx] (render tpl ctx nil))
   ([tpl ctx opts]
    (render-many (compile tpl opts) ctx)))

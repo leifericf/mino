@@ -32,7 +32,7 @@
   tags drop, misnested end tags pop-until, the WHATWG void list, the
   trailing solidus honored on every start tag, script/style RAWTEXT
   with title/textarea RCDATA, entity decoding through the
-  python-oracle table (semicolonless legacy names resolve in text,
+  reference entity table (semicolonless legacy names resolve in text,
   semicolon-terminated names only inside attribute values), bogus
   comments, name lowercasing, PLAINTEXT rest-of-input, and NUL to
   U+FFFD in text. This namespace owns argument validation and the

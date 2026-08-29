@@ -1,6 +1,5 @@
 (ns mino.log
-  "Logging facade in the clojure.tools.logging call shape, events as
-  data-shaped lines on stderr.
+  "A logging facade, events as data-shaped lines on stderr.
 
   (require '[mino.log :as log])
   (log/info \"started\")                        ; one line on stderr
@@ -13,8 +12,8 @@
    :msg \"started\"}
 
   :ts is ISO 8601 UTC from the time prims (ADR 21), :level the level
-  keyword, :ns the namespace of the calling form (read at
-  macroexpansion, the tools.logging model), :msg the message.
+  keyword, :ns the namespace of the calling form (resolved at
+  macroexpansion), :msg the message.
   Exception calls append :ex-message and, when the exception carries
   data, :ex-data, rendered readably. Newlines and tabs inside values
   print as their escape sequences, so an event is always one physical

@@ -2679,7 +2679,7 @@
 
 (defn- valid-tag? [x]
   ;; A derive tag must be a Named (keyword/symbol) or a record/host-type
-  ;; value. mino, like babashka and cljs, does not require namespacing.
+  ;; value. mino does not require namespacing.
   (or (keyword? x) (symbol? x) (record-type? x)))
 
 (defn- valid-hierarchy? [h]

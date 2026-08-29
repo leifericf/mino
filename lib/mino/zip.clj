@@ -10,7 +10,7 @@
   Thin aliases, no second entry shape: write entries are
   {:name :data :mtime :level :method :comment} and read entries add
   :size, :compressed-size, :crc32, and :directory? (field names
-  follow the JVM ZipEntry accessors and python ZipInfo attributes).
+  follow the JVM ZipEntry accessors).
   Output is deterministic by contract: the same entries and opts
   give byte-identical archives (defaults {:method :deflate
   :level 6 :mtime 0}, with :mtime 0 mapped to the DOS minimum
@@ -25,7 +25,7 @@
   :compressed-size :crc32 :method :mtime :directory? :comment}, in
   archive order, from the central directory. Names decode as UTF-8
   when the entry sets the language-encoding flag (bit 11), else
-  CP437: the python zipfile behavior, so listing and lookup agree.
+  CP437, so listing and lookup agree.
   :mtime is epoch seconds, nil at the DOS minimum 1980-01-01;
   :method is :deflate, :store, or an unknown method's integer code;
   duplicate names all appear (read resolves them to the first)."

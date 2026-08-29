@@ -17,9 +17,9 @@
   to every leaf scalar (array elements and inline-table values
   included) and must be total.
 
-  Semantics follow python3 tomllib as the oracle, with two recorded
-  divergences: integer literals must fit signed 64-bit (tomllib
-  accepts wider), and dates are shape-checked but not calendar-
+  Semantics follow the TOML 1.0 spec, with two recorded
+  divergences: integer literals must fit signed 64-bit (the spec
+  allows wider), and dates are shape-checked but not calendar-
   validated. CRLF is normalized to LF everywhere up front, so any
   remaining carriage return is an error.
 

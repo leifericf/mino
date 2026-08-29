@@ -1,5 +1,5 @@
 (ns mino.cli
-  "The babashka.cli option parser over a seq of argument strings.
+  "An option parser over a seq of argument strings.
 
   (require '[mino.cli :as cli])
   (cli/parse-opts [\"--port\" \"8080\"] {:spec {:port {:coerce :long}}})
@@ -124,7 +124,7 @@
                               " for --" (name k))
                          k s))))
 
-;; :bool and :int are the babashka synonyms of :boolean and :long.
+;; :bool and :int are synonyms of :boolean and :long.
 (defn- coerce-dispatch [k f s]
   (coerce-value k (case f :bool :boolean, :int :long, f) s))
 
@@ -206,7 +206,7 @@
       :else              "")))
 
 (defn format-opts
-  "Renders a spec into the babashka.cli usage block, one row per
+  "Renders a spec into a usage block, one row per
   option: the alias and long-name column (with ref), two spaces,
   then the description with any default in parentheses. Takes
   {:spec spec} with optional {:order [names]} (selects and orders;
@@ -243,7 +243,7 @@
 ;;;; parse-opts
 
 (defn parse-opts
-  "Parses argument strings into an options map, babashka.cli shape.
+  "Parses argument strings into an options map.
   opts carries the spec under :spec; spec defaults fill absent keys.
   Leftover positional arguments ride on the result's metadata under
   :mino.cli/args. See the namespace docstring for the contract."

@@ -23,9 +23,8 @@
   carve-out: \\ in a glob or match pattern is an escape, never a
   separator.
 
-  Edge rules (the cross-language majority, verified against
-  node, Python, Elixir, bb, and Go): extension carries the dot
-  and a dotfile answers \"\"; join does not reset on an absolute
+  Edge rules (the common cross-language convention): extension
+  carries the dot and a dotfile answers \"\"; join does not reset on an absolute
   later segment, so (p/join \"/foo\" \"/bar\") is \"/foo/bar\";
   normalize is lexical and strips the trailing separator; the
   glob walker hides dotfiles unless the pattern segment itself
@@ -35,20 +34,21 @@
   explicit path and resolve through symlinks), and answers a
   byte-order sorted vector rendered as-given.
 
-  Babashka fs mapping (documented, not aliased; one canonical
-  name per operation; every divergence noted so a port is never
-  silent):
+  Filesystem-operation mapping (documented, not aliased; one
+  canonical name per operation; every divergence noted so a port
+  is never silent):
     fs/path           (p/join & parts)       ; also fs/file; ours
                                           ; does not reset on an
                                           ; absolute later segment
     fs/file-name      (p/basename s)
     fs/parent         (p/dirname s)          ; ours answers "."
-                                          ; where bb answers nil
+                                          ; where the common
+                                          ; mapping answers nil
     fs/components     (p/split s)            ; ours keeps a
                                           ; leading "/" element
     fs/extension      (p/extension s)        ; ours keeps the dot
     fs/strip-ext      (p/stem s)             ; ours is the
-                                          ; basename stem; bb's
+                                          ; basename stem; the
                                           ; whole-path strip-ext
                                           ; is (first (p/split-ext s))
     fs/split-ext      (p/split-ext s)        ; ours keeps the dot
@@ -56,11 +56,12 @@
     fs/absolute?      (p/absolute? s)
     fs/expand-home    (p/expand-home s)
     fs/glob           (p/glob pattern root? opts?)
-                       ; ours takes the pattern first; bb's
-                       ; {:hidden true} is {:match-dot true}
-    fs/match          (p/glob ...)           ; bb's match is a
-                       ; directory walker like glob; ours (p/match
-                       ; pattern s) is the pure boolean matcher
+                       ; ours takes the pattern first; the common
+                       ; {:hidden true} is our {:match-dot true}
+    fs/match          (p/glob ...)           ; the conventional
+                       ; match is a directory walker like glob;
+                       ; ours (p/match pattern s) is the pure
+                       ; boolean matcher
 
   glob requires the fs capability (it reads directories); every
   other fn here is ungated string algebra over the floor prims

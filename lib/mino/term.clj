@@ -32,7 +32,7 @@
   (term/render-progress {:label \"downloading\" :ratio 0.42} 40)
   ;; the pure render at an explicit width, gate-free
 
-  progress renders one tqdm-shaped line: label, percentage, then the
+  progress renders one progress line: label, percentage, then the
   bar between rails, sized so the whole line fills the width (from
   {:width n} or terminal-width). The bar fills in eighth blocks
   (U+2588 and the U+258F..U+2589 partials). render-progress is the
@@ -282,7 +282,7 @@
         (str head "|" (bar-chars room ratio) "|")))))
 
 (defn progress
-  "One tqdm-shaped progress line for bar {:label string :ratio
+  "One progress line for bar {:label string :ratio
   0..1}. Width comes from {:width n} in opts or terminal-width. On a
   terminal (or with {:force true}) the answer is the shaped bar from
   render-progress; when stdout is not a terminal the answer is the
