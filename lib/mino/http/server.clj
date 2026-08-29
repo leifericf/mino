@@ -286,11 +286,13 @@
                                              (swap! active dec)))
                                          (catch e nil))]
                          nil
-                         (do (swap! active dec)
-                             ;; no thread to spare: the spawner becomes
-                             ;; this connection's worker, and permits
-                             ;; still bound what queues behind it
-                             (run-conn! c handler conn-opts permits))))
+                         ;; no thread to spare: the spawner becomes this
+                         ;; connection's worker. Keep it counted in
+                         ;; active across the inline serve so the stop
+                         ;; drain waits for it like any pooled worker;
+                         ;; permits still bound what queues behind it.
+                         (try (run-conn! c handler conn-opts permits)
+                              (finally (swap! active dec)))))
         spawner-thunk (fn []
                         (loop []
                           (let [[c src] (a/alts!! [mailbox stop-sig])]
