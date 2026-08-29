@@ -164,7 +164,8 @@
             e  (try (http/get (str base "/hold") {:timeout 400})
                     (catch Throwable e e))
             dt (- (time-ms) t0)]
-        (is (= :timeout (-> (ex-data e) :error :kind)))
+        (is (= :net (-> (ex-data e) :error :kind))
+            "a read timeout is a connection-level :net failure")
         (is (< dt 2400) (str "read timeout fired at " dt " ms"))))))
 
 (deftest throwing-handler-answers-500-through-the-client

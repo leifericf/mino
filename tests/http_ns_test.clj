@@ -387,10 +387,17 @@
     (is (str/includes? (ex-message e) "Unexpected character"))))
 
 (deftest transport-errors-translate-to-error-kinds
-  (doseq [[kind want] [[:net/dns :dns] [:net/connect :connect]
-                       [:net/timeout :timeout] [:tls :tls]
-                       [:codec/limit :http] [:net/overflow :http]
-                       [:http/request :http]]]
+  ;; Connection-level failures collapse to :net; a size cap to
+  ;; :overflow; a bad content-encoding / decode to :codec; a real
+  ;; request-shaping error stays :http.
+  (doseq [[kind want] [[:net/dns :net] [:net/connect :net]
+                       [:net/timeout :net] [:tls :net]
+                       [:net/overflow :overflow] [:codec/limit :overflow]
+                       [:codec/truncated :codec] [:codec/magic :codec]
+                       [:codec/corrupt :codec] [:codec/crc :codec]
+                       [:codec/unsupported :codec]
+                       [:http/request :http] [:http/method :http]
+                       [:http/headers :http]]]
     (let [e (with-redefs
               [mino.http/execute-request*
                (fn [_] (throw {:mino/kind kind
@@ -402,6 +409,62 @@
       (is (= want (-> d :error :kind))
           (str kind " must translate to " want))
       (is (= "fixture failure" (-> d :error :message))))))
+
+;; ---- max-bytes, content-encoding, and the OPTIONS verb ----
+
+(deftest max-bytes-threads-through-to-the-prim
+  (let [[_ prim] (via-mock {:method :get :uri "http://h/x"
+                            :max-bytes 4096}
+                           canned-200)]
+    (is (= 4096 (:max-bytes prim))))
+  (let [[_ prim] (via-mock {:method :get :uri "http://h/x"} canned-200)]
+    (is (nil? (:max-bytes prim))
+        "no :max-bytes key when the option is absent")))
+
+(deftest max-bytes-must-be-an-integer
+  (is (str/includes? (ex-message (throw-via-mock
+                                   {:method :get :uri "http://h/x"
+                                    :max-bytes "big"}
+                                   canned-200))
+                     ":max-bytes")))
+
+(deftest content-encoding-request-option-sets-the-header
+  (let [[_ prim] (via-mock {:method :post :uri "http://h/x"
+                            :body "raw" :content-encoding "gzip"}
+                           canned-200)]
+    (is (= "gzip"
+           (clojure.core/get (:headers prim) "content-encoding"))))
+  (is (str/includes?
+        (ex-message (throw-via-mock
+                      {:method :post :uri "http://h/x"
+                       :content-encoding :gzip}
+                      canned-200))
+        ":content-encoding")
+      ":content-encoding must be a string"))
+
+(deftest content-encoding-request-option-conflicts-with-a-header
+  (let [e (throw-via-mock {:method :post :uri "http://h/x"
+                           :content-encoding "gzip"
+                           :headers {"content-encoding" "deflate"}}
+                          canned-200)]
+    (is (str/includes? (ex-message e) "content-encoding"))))
+
+(deftest undecoded-content-encoding-surfaces-on-the-response
+  (let [canned (assoc canned-200
+                      :content-encoding "br"
+                      :body-bytes (byte-array (map int "compressed")))
+        [r _] (via-mock {:method :get :uri "http://h/x" :as :bytes}
+                        canned)]
+    (is (= "br" (:content-encoding r))))
+  (let [[r _] (via-mock {:method :get :uri "http://h/x"} canned-200)]
+    (is (nil? (:content-encoding r))
+        "no :content-encoding on the response when the prim omits it")))
+
+(deftest options-verb-builds-an-options-request
+  (reset! captured nil)
+  (with-redefs [mino.http/execute-request* (mock-exec canned-200)]
+    (http/options "http://example.com/x"))
+  (is (= "OPTIONS" (:method @captured))))
 
 (deftest invalid-utf-8-body-throws-on-string-coercion
   (let [canned (assoc canned-200

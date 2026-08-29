@@ -10,8 +10,14 @@
   Because requests and responses are plain maps, iteration, pagination,
   and pmap compose directly. 4xx/5xx statuses throw ex-info whose
   ex-data is the full response map; :throw false returns them as data.
-  Transport failures throw ex-info with ex-data
-  {:error {:kind :dns | :connect | :tls | :timeout | :http}}."
+  Transport failures throw ex-info with ex-data {:error {:kind ...}}
+  where :kind is :net (dns, connect, tls, or timeout), :overflow (the
+  response body exceeded a size cap), :codec (a compressed body could
+  not be decoded), or :http (a request-shaping fault).
+
+  Capabilities: this client needs MINO_CAP_NET (it is not in the
+  default capability set, so an embedder must install it). The server
+  side (mino.http-server) needs MINO_CAP_ASYNC."
   (:require [clojure.string :as str]))
 
 ;;;; Public API
@@ -33,7 +39,12 @@
   (Bearer; conflicts with :basic-auth and an Authorization header),
   :accept and :content-type (:json :edn :text :html :xml :form keywords
   or a full media-type string; :content-type names the body's type,
-  never encodes it, and is sent even on bodyless requests), :as
+  never encodes it, and is sent even on bodyless requests),
+  :content-encoding string (sent as the content-encoding header,
+  naming an already-applied body encoding; the layer never encodes the
+  body; conflicts with an explicit content-encoding header),
+  :max-bytes (caps the response body; a body past the cap fails with
+  {:error {:kind :overflow}}), :as
   (:string default, :bytes, :json; :json needs
   the json capability), :throw (default true: 4xx/5xx throw ex-info
   with the response as ex-data; a 4xx/5xx body that fails the :as
@@ -85,6 +96,11 @@
   ([uri] (request {:method :patch :uri uri}))
   ([uri opts] (request (into {:method :patch :uri uri} opts))))
 
+(defn options
+  "OPTIONS shorthand: (options uri opts?) sends :method :options."
+  ([uri] (request {:method :options :uri uri}))
+  ([uri opts] (request (into {:method :options :uri uri} opts))))
+
 (defn execute-request*
   "Executor seam: runs one normalized parts map through the http-request
   prim and returns its raw response map. Public only so tests and tools
@@ -97,9 +113,9 @@
 
 (def ^:private allowed-keys
   #{:method :uri :url :headers :query-params :body :form-params
-    :basic-auth :oauth-token :accept :content-type :as :throw :timeout
-    :connect-timeout :follow-redirects :max-redirects :user-agent
-    :keepalive :insecure? :decompress-body? :async})
+    :basic-auth :oauth-token :accept :content-type :content-encoding
+    :as :throw :timeout :connect-timeout :follow-redirects :max-redirects
+    :user-agent :keepalive :insecure? :decompress-body? :max-bytes :async})
 
 (def ^:private media-types
   {:json "application/json"
@@ -213,13 +229,21 @@
         accept (:accept m)
         ua (:user-agent m)
         ct-opt (:content-type m)
+        ce-opt (:content-encoding m)
         content-type (cond ct-opt
                            {"content-type" (media-type ":content-type" ct-opt)}
 
                            (:form-params m)
                            {"content-type" "application/x-www-form-urlencoded"}
 
-                           :else {})]
+                           :else {})
+        content-encoding (cond (nil? ce-opt) {}
+                               (string? ce-opt)
+                               (if (clojure.core/get user-hdrs "content-encoding")
+                                 (bad (str ":content-encoding conflicts with a "
+                                           "content-encoding header"))
+                                 {"content-encoding" ce-opt})
+                               :else (bad ":content-encoding must be a string"))]
     (when (and ua (not (string? ua)))
       (bad ":user-agent must be a string"))
     (merge {"user-agent" (or ua (str "mino/" (clojure-version)))}
@@ -227,6 +251,7 @@
            (when accept {"accept" (media-type ":accept" accept)})
            (authorization-header m user-hdrs)
            content-type
+           content-encoding
            user-hdrs)))
 
 ;;;; Params and body
@@ -345,6 +370,8 @@
         target (request-target parsed m)
         user-hdrs (user-headers m)
         body (request-body m)
+        max-bytes (when (contains? m :max-bytes)
+                    (opt-long (:max-bytes m) :max-bytes nil))
         prim {:method (method-string m)
               :scheme (keyword (:scheme parsed))
               :host (:host parsed)
@@ -361,7 +388,8 @@
               :max-redirects (opt-long (:max-redirects m) :max-redirects 10)
               :decompress-body? (opt-boolean (:decompress-body? m)
                                              :decompress-body? true)
-              :insecure? (opt-boolean (:insecure? m) :insecure? false)}]
+              :insecure? (opt-boolean (:insecure? m) :insecure? false)}
+        prim (if max-bytes (assoc prim :max-bytes max-bytes) prim)]
     {:prim (if (nil? body) prim (assoc prim :body body))
      :echo (assoc (dissoc m :url) :uri (canonical-uri parsed target))
      :as (as-coercion m)
@@ -371,12 +399,16 @@
 ;;;; Execution and response shaping
 
 (defn- translate-kind
+  "Collapses the prim's fine-grained transport kind into the client's
+  four public error kinds: :net (connection-level: dns, connect, tls,
+  timeout), :overflow (a size cap tripped), :codec (a compressed body
+  would not decode), and :http (a request-shaping fault)."
   [kind]
   (case kind
-    :net/dns :dns
-    :net/connect :connect
-    :net/timeout :timeout
-    :tls :tls
+    (:net/dns :net/connect :net/timeout :tls) :net
+    (:net/overflow :codec/limit) :overflow
+    (:codec/truncated :codec/magic :codec/corrupt :codec/crc
+     :codec/unsupported) :codec
     :http))
 
 (defn- perform
@@ -400,15 +432,18 @@
   failed body coercion from masking the status: the body falls back
   to raw bytes."
   [plan prim lenient?]
-  (let [bb (:body-bytes prim)]
-    {:status (:status prim)
-     :body (if lenient?
-             (try (coerce-body (:as plan) bb) (catch Throwable e bb))
-             (coerce-body (:as plan) bb))
-     :headers (:headers prim)
-     :request-time (:request-time-ms prim)
-     :request (:echo plan)
-     :trace-redirects (:trace-redirects prim)}))
+  (let [bb (:body-bytes prim)
+        base {:status (:status prim)
+              :body (if lenient?
+                      (try (coerce-body (:as plan) bb) (catch Throwable e bb))
+                      (coerce-body (:as plan) bb))
+              :headers (:headers prim)
+              :request-time (:request-time-ms prim)
+              :request (:echo plan)
+              :trace-redirects (:trace-redirects prim)}]
+    (if-let [ce (:content-encoding prim)]
+      (assoc base :content-encoding ce)
+      base)))
 
 (defn- coerce-body
   [as bb]
