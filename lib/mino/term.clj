@@ -39,10 +39,53 @@
   pure data-in fn; progress is the gated shell that answers the
   plain label-and-percentage line when stdout is not a terminal and
   {:force true} is absent. :ratio must be a number within 0..1;
-  anything else throws a diagnostic with :mino/kind :term/opts."
+  anything else throws a diagnostic with :mino/kind :term/opts.
+
+  Terminal capabilities:
+
+  (term/tty? :stdout)      ; is a standard stream a terminal?
+  (term/terminal-width)    ; columns (ioctl, else COLUMNS, else 80)
+  (term/terminal-height)   ; rows (ioctl, else ROWS, else 24)
+  (term/size)              ; => {:cols 80 :rows 24}
+
+  tty?, terminal-width, and terminal-height re-export the floor prims
+  of the same name so callers of this namespace never reach back into
+  clojure.core for the --color=auto gate. size bundles the two getters
+  into one {:cols :rows} map."
   (:require [clojure.string :as str]))
 
 (def ^:private esc "\033")
+
+;;;; Terminal capabilities
+
+(defn tty?
+  "Returns true when the given standard stream (:stdout, :stderr, or
+  :stdin) is attached to a terminal, false for files, pipes, and other
+  redirects. The floor of the --color=auto gate this namespace applies
+  by default."
+  [stream]
+  (clojure.core/tty? stream))
+
+(defn terminal-width
+  "Returns the terminal width in columns: the ioctl size when a
+  standard stream is a terminal (stdout first), else the COLUMNS
+  environment variable when it is a plain numeric value, else 80."
+  []
+  (clojure.core/terminal-width))
+
+(defn terminal-height
+  "Returns the terminal height in rows: the ioctl size when a standard
+  stream is a terminal (stdout first), else the ROWS environment
+  variable when it is a plain numeric value, else 24."
+  []
+  (clojure.core/terminal-height))
+
+(defn size
+  "The terminal size as one map: {:cols <terminal-width> :rows
+  <terminal-height>}. Both dimensions fall back independently, so the
+  map always carries positive integers."
+  []
+  {:cols (terminal-width) :rows (terminal-height)})
 
 (def ^:private fg-codes
   {:black 30 :red 31 :green 32 :yellow 33 :blue 34 :magenta 35

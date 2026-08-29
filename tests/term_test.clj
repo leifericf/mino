@@ -96,6 +96,32 @@
   [f]
   (try (f) :no-throw (catch e (:mino/kind e))))
 
+(deftest term-reexports-the-tty-prim
+  ;; mino.term re-exports the terminal-capability floor prims so users
+  ;; of the namespace never reach back into clojure.core: tty? answers
+  ;; a boolean for any standard stream.
+  (is (contains? #{true false} (term/tty? :stdout)))
+  (is (contains? #{true false} (term/tty? :stderr)))
+  (is (contains? #{true false} (term/tty? :stdin))))
+
+(deftest term-reexports-the-size-getters
+  ;; terminal-width / terminal-height fall back to 80 / 24, so they
+  ;; always answer a positive integer; only the shape is assertable.
+  (is (and (int? (term/terminal-width)) (pos? (term/terminal-width))))
+  (is (and (int? (term/terminal-height)) (pos? (term/terminal-height)))))
+
+(deftest term-size-agrees-with-the-getters
+  ;; size bundles the two getters into one map; it must agree with the
+  ;; individual getters rather than name its own dimensions.
+  (let [s (term/size)]
+    (is (map? s))
+    (is (contains? s :cols))
+    (is (contains? s :rows))
+    (is (int? (:cols s)))
+    (is (int? (:rows s)))
+    (is (= (term/terminal-width) (:cols s)))
+    (is (= (term/terminal-height) (:rows s)))))
+
 (deftest term-throws-on-unknown-style-data
   ;; unknown palette colors and unknown keys are :term/style
   (is (= :term/style (bad (fn [] (term/ansi {:fg :pink} {:force true})))))
