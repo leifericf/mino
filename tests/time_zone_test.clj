@@ -300,7 +300,12 @@
                    :iso8601 {:zone "Asia/Kathmandu"}))))
 
 (deftest tz-sugar-unknown-zone-carries-data
-  (let [r (try (t/in-zone "America/Nowhere" 0)
-               (catch e (ex-data e)))]
-    (is (= :time/zone (:kind r)))
-    (is (= "America/Nowhere" (:zone r)))))
+  ;; The facade rethrow keeps the classification (ADR 37): :mino/kind is
+  ;; the dispatch axis, the zone name rides in ex-data as detail.
+  (is (= :time/zone (try (t/in-zone "America/Nowhere" 0)
+                         (catch e (:mino/kind e)))))
+  (is (= "America/Nowhere" (try (t/in-zone "America/Nowhere" 0)
+                                (catch e (:zone (ex-data e))))))
+  ;; classed catch dispatches on the promoted kind
+  (is (= :caught (try (t/in-zone "America/Nowhere" 0)
+                      (catch :time/zone _ :caught)))))

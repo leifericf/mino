@@ -32,6 +32,16 @@
   timing code (the wall clock can jump). cpu-ms measures process
   CPU time.")
 
+;;;; Errors
+
+(defn- time-fail
+  "Throws a classified mino.time diagnostic (ADR 37): :mino/kind names
+  the error class so classed catch dispatches on it, :mino/message the
+  human string ex-message returns, :mino/data the detail ex-data reads."
+  [kind code msg data]
+  (throw {:mino/kind kind :mino/code code :mino/message msg
+          :mino/data data}))
+
 ;;;; Clocks
 
 (defn now
@@ -67,10 +77,10 @@
     (int? t) t
     (and (map? t) (contains? t :epoch-ms)) (:epoch-ms t)
     (map? t) (time-map->epoch t)
-    :else (throw (ex-info
-                  (str "mino.time/instant: expected epoch-ms, a parse "
-                       "result, or a time map")
-                  {:got t}))))
+    :else (time-fail :eval/type "MTY001"
+                     (str "mino.time/instant: expected epoch-ms, a parse "
+                          "result, or a time map")
+                     {:got t})))
 
 ;;;; Parsing and formatting
 
@@ -85,7 +95,8 @@
   ([s] (clojure.core/parse-time s))
   ([s opts]
    (when-not (map? opts)
-     (throw (ex-info "mino.time/parse: opts must be a map" {:arg opts})))
+     (time-fail :eval/type "MTY001"
+                "mino.time/parse: opts must be a map" {:arg opts}))
    (clojure.core/parse-time s opts)))
 
 (defn format
@@ -142,9 +153,9 @@
   [t units]
   (let [extra (filter #(not (contains? add-units %)) (keys units))]
     (when (seq extra)
-      (throw (ex-info (str "mino.time/add: unknown units "
-                           (pr-str (vec extra)))
-                      {:units (vec extra)}))))
+      (time-fail :time/field "MTF001"
+                 (str "mino.time/add: unknown units " (pr-str (vec extra)))
+                 {:units (vec extra)})))
   (let [map-out (map? t)
         e0 (instant t)
         e1 (+ e0 (or (:ms units) 0) (* (or (:days units) 0) 86400000))]
@@ -215,15 +226,15 @@
 
 (defn- tz-zone-checked
   "Runs (zone-fn) and rethrows :time/zone errors with the zone in
-  the ex-info data, so facade callers see which name missed."
+  the diagnostic data, so facade callers see which name missed."
   [zone zone-fn]
   (try
     (zone-fn)
     (catch e
       (if (= :time/zone (:mino/kind e))
-        (throw (ex-info (str "mino.time: unknown time zone "
-                             (pr-str zone))
-                        {:kind :time/zone :zone zone}))
+        (time-fail :time/zone "MTZ001"
+                   (str "mino.time: unknown time zone " (pr-str zone))
+                   {:zone zone})
         (throw e)))))
 
 (defn in-zone
@@ -259,7 +270,8 @@
   second) folds to 59 and nanoseconds truncate to milliseconds."
   [v]
   (when-not (inst? v)
-    (throw (ex-info "mino.time/from-inst: not an inst" {:got v})))
+    (time-fail :eval/type "MTY001"
+               "mino.time/from-inst: not an inst" {:got v}))
   (let [{:keys [years months days hours minutes seconds nanoseconds
                 offset-sign offset-hours offset-minutes]} v
         off-min (* (or offset-sign 1)
