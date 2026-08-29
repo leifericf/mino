@@ -588,7 +588,7 @@ static size_t hp_utf8(unsigned long cp, unsigned char *out)
 
 /* Emit one numeric code point per the oracle policing; returns the
  * new write index. */
-static long hp_emit_cp(unsigned long cp, unsigned char *buf, long w)
+static long long hp_emit_cp(unsigned long cp, unsigned char *buf, long long w)
 {
     if (cp == 0) {
         cp = 0xFFFD;
@@ -601,7 +601,7 @@ static long hp_emit_cp(unsigned long cp, unsigned char *buf, long w)
     } else if (hp_dropped_cp(cp)) {
         return w;
     }
-    return w + (long)hp_utf8(cp, buf + w);
+    return w + (long long)hp_utf8(cp, buf + w);
 }
 
 static int hp_ent_cmp(const void *a, const void *b)
@@ -624,8 +624,8 @@ static const mino_html_entity_t *hp_ent_lookup(const char *cand)
  * when nothing matches (the caller emits a literal '&'). attr
  * selects the tier rule 8 attribute mode: named references require
  * the semicolon. */
-static long hp_ref(const unsigned char **pp, const unsigned char *to,
-                   int attr, unsigned char *buf, long w)
+static long long hp_ref(const unsigned char **pp, const unsigned char *to,
+                   int attr, unsigned char *buf, long long w)
 {
     const unsigned char *r = *pp + 1;
     size_t alen;
@@ -676,7 +676,7 @@ static long hp_ref(const unsigned char **pp, const unsigned char *to,
         vlen = strlen(e->value);
         memcpy(buf + w, e->value, vlen);
         *pp = r + alen + 1;
-        return w + (long)vlen;
+        return w + (long long)vlen;
     }
     /* text mode: exact semicolon form, then bare prefixes from the
      * longest down (the oracle's longest-match rule) */
@@ -692,7 +692,7 @@ static long hp_ref(const unsigned char **pp, const unsigned char *to,
             vlen = strlen(e->value);
             memcpy(buf + w, e->value, vlen);
             *pp = r + alen + 1;
-            return w + (long)vlen;
+            return w + (long long)vlen;
         }
     }
     {
@@ -708,7 +708,7 @@ static long hp_ref(const unsigned char **pp, const unsigned char *to,
                 vlen = strlen(e->value);
                 memcpy(buf + w, e->value, vlen);
                 *pp = r + L;
-                return w + (long)vlen;
+                return w + (long long)vlen;
             }
         }
     }
@@ -720,14 +720,14 @@ static long hp_ref(const unsigned char **pp, const unsigned char *to,
 /* Decode [from,to) into buf at w (entities per the text rule, NUL to
  * U+FFFD). Returns the new write index or -1. buf is grown to fit by
  * the caller. */
-static long hp_decode_into(const unsigned char *from,
+static long long hp_decode_into(const unsigned char *from,
                            const unsigned char *to, unsigned char *buf,
-                           long w)
+                           long long w)
 {
     const unsigned char *r = from;
     while (r < to) {
         if (*r == '&') {
-            long nw = hp_ref(&r, to, 0, buf, w);
+            long long nw = hp_ref(&r, to, 0, buf, w);
             if (nw < 0) {
                 buf[w++] = '&';
                 r++;
@@ -769,7 +769,7 @@ static mino_val *hp_text_val(hp_t *h, const unsigned char *from,
         /* worst growth: NUL to three bytes, entities under two */
         size_t cap = (size_t)(to - from) * 3 + 16;
         unsigned char *buf;
-        long w;
+        long long w;
         int saved = mino_current_ctx(S)->gc_depth;
         mino_val *out;
         mino_current_ctx(S)->gc_depth = saved + 1;
@@ -858,7 +858,7 @@ static int hp_pend_fold(hp_t *h, const unsigned char *upto)
 {
     size_t w = h->pend_w;
     int saved;
-    long nw;
+    long long nw;
     if (h->pend_from == NULL || h->pend_from >= upto) {
         h->pend_from = NULL;
         return 0;
@@ -870,7 +870,7 @@ static int hp_pend_fold(hp_t *h, const unsigned char *upto)
     saved = mino_current_ctx(h->S)->gc_depth;
     mino_current_ctx(h->S)->gc_depth = saved + 1;
     nw = hp_decode_into(h->pend_from, upto, h->pend_buf,
-                        (long)w);
+                        (long long)w);
     mino_current_ctx(h->S)->gc_depth = saved;
     if (nw < 0) return -1;
     h->pend_w = (size_t)nw;
@@ -1016,7 +1016,7 @@ static mino_val *hp_attr_value(hp_t *h, const unsigned char *from,
         size_t cap = (size_t)(to - from) * 3 + 16;
         unsigned char *buf;
         const unsigned char *r = from;
-        long w = 0;
+        long long w = 0;
         int saved = mino_current_ctx(S)->gc_depth;
         mino_val *out;
         mino_current_ctx(S)->gc_depth = saved + 1;
@@ -1027,7 +1027,7 @@ static mino_val *hp_attr_value(hp_t *h, const unsigned char *from,
         }
         while (r < to) {
             if (*r == '&') {
-                long nw = hp_ref(&r, to, 1, buf, w);
+                long long nw = hp_ref(&r, to, 1, buf, w);
                 if (nw < 0) {
                     buf[w++] = '&';
                     r++;
