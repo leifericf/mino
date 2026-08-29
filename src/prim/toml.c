@@ -738,7 +738,10 @@ static mino_val *tp_scalar(tp_t *t, size_t vline, size_t vcol)
             buf[w] = '\0';
             return mino_float(S, strtod(buf, NULL));
         }
-        return mino_int(S, neg ? -(long long)acc : (long long)acc);
+        /* acc may equal 2^63 for INT64_MIN; unsigned negation keeps the
+         * conversion well-defined (signed -acc is UB there). */
+        return mino_int(S,
+                        neg ? (long long)(0ULL - acc) : (long long)acc);
     }
 }
 
