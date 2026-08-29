@@ -851,4 +851,196 @@
           (is (= 200 (:status r)))
           (is (= "gen:/two" (:body r))))))))
 
+;;;; slow peers, caps, and resource exhaustion
+
+(defn- srv-drop-outcome
+  "One bounded read classifying how the server ended the connection:
+  :served response bytes, :eof a clean close, :reset an aborted
+  close, :held still open when the read budget lapsed."
+  [c]
+  (try
+    (let [r (net-read c 65536)]
+      (if (and r (pos? (count r))) :served :eof))
+    (catch e
+      (if (= :net/timeout (:mino/kind e)) :held :reset))))
+
+(defn- srv-drip!
+  "Write parts on c, one every ms, on its own future so the caller
+  watches the connection while the peer is still dripping. A peer
+  dripping past a working deadline gets its pipe broken mid-drip;
+  broken writes are swallowed."
+  [c parts ms]
+  (future
+    (doseq [p parts]
+      (try (net-write c p) (catch e nil))
+      (thread-sleep ms))))
+
+(defn- srv-parts
+  "Byte seq cut into slices of n for the drip writer."
+  [bs n]
+  (mapv byte-array (partition-all n (vec bs))))
+
+(deftest drip-fed-headers-are-dropped-past-the-request-deadline
+  (let [_ (srv-await-capacity 5)
+        served (atom 0)
+        h (fn [req] (swap! served inc) {:status 200 :body "ok"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                 :idle-timeout 20000 :request-timeout 800}
+      (fn [s]
+        (let [c (srv-connect (:port s))
+              req (srv-bb "GET /slow HTTP/1.1\r\nHost: t.example\r\n"
+                          "X-Drip: aaaa\r\n")
+              drip (srv-drip! c (srv-parts req 8) 100)
+              t0 (time-ms)
+              out (srv-drop-outcome c)
+              elapsed (- (time-ms) t0)]
+          (is (contains? #{:eof :reset} out)
+              (str "a dripping peer is dropped, not served; got " out))
+          ;; the drop cannot beat the deadline; only host stretch
+          ;; moves it the other way
+          (is (>= elapsed 700)
+              (str "dropped at " elapsed "ms, before the deadline"))
+          (is (< elapsed 6000) (str "drop took " elapsed "ms"))
+          (try (deref drip 4000 :drip-timeout) (catch e nil))
+          (try (net-close c) (catch e nil)))))
+    (is (zero? @served) "the drip request was never served")))
+
+(deftest drip-fed-body-is-dropped-past-the-request-deadline
+  (let [_ (srv-await-capacity 5)
+        h (fn [req] {:status 200 :body "never"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :idle-timeout 20000 :request-timeout 800
+                :max-body-bytes 4096}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          (srv-send c "POST /slow HTTP/1.1\r\nHost: t.example\r\n"
+                    "Content-Length: 12\r\n\r\n")
+          (let [drip (srv-drip! c (srv-parts (srv-bb "xxxxxxxxxxxx") 1) 100)
+                t0 (time-ms)
+                out (srv-drop-outcome c)
+                elapsed (- (time-ms) t0)]
+            (is (contains? #{:eof :reset} out)
+                (str "a body-dripping peer is dropped; got " out))
+            (is (>= elapsed 700)
+                (str "dropped at " elapsed "ms, before the deadline"))
+            (is (< elapsed 6000) (str "drop took " elapsed "ms"))
+            (try (deref drip 4000 :drip-timeout) (catch e nil)))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest a-slow-request-inside-the-deadline-is-still-served
+  (let [_ (srv-await-capacity 5)
+        h (fn [req] {:status 200 :body "slow but legal"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :idle-timeout 20000 :request-timeout 2500}
+      (fn [s]
+        (let [c (srv-connect (:port s))
+              req (srv-bb "GET /ok HTTP/1.1\r\nHost: t.example\r\n"
+                          "X-One: 1\r\nX-Two: 2\r\nX-Three: 3\r\n\r\n")
+              drip (srv-drip! c (srv-parts req 10) 80)]
+          (let [x (srv-read-one c [])]
+            (is (some? x) "a request completing inside the deadline is served")
+            (is (= 200 (:code (:resp x))))
+            (is (= (srv-bb "slow but legal") (:body (:resp x)))))
+          (try (deref drip 4000 :drip-timeout) (catch e nil))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest oversized-header-section-answers-400-before-the-request-completes
+  (let [h (fn [req] {:status 200 :body "never"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :max-header-bytes 200
+                :idle-timeout 20000 :request-timeout 3000}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          ;; the section crosses the cap mid-drip and the request is
+          ;; never completed: the 400 must come from the cap, not from
+          ;; an end of stream or a deadline
+          (srv-send c "GET /big HTTP/1.1\r\nHost: t.example\r\n"
+                    "X-Huge: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+          (dotimes [_ 4]
+            (srv-send c "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+            (thread-sleep 60))
+          (let [x (srv-read-one c [])]
+            (is (some? x) "the cap answers without the request completing")
+            (is (= 400 (:code (:resp x))))
+            (is (= "close" (get (:headers (:resp x)) "connection"))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest oversized-header-count-answers-400-before-the-request-completes
+  (let [h (fn [req] {:status 200 :body "never"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :max-headers 3
+                :idle-timeout 20000 :request-timeout 3000}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          ;; request line plus four header rows against a cap of three,
+          ;; and the blank line never arrives
+          (srv-send c "GET /many HTTP/1.1\r\nHost: t.example\r\n"
+                    "A: 1\r\nB: 2\r\nC: 3\r\nD: 4\r\n")
+          (let [x (srv-read-one c [])]
+            (is (some? x))
+            (is (= 400 (:code (:resp x))))
+            (is (= "close" (get (:headers (:resp x)) "connection"))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest oversized-content-length-answers-400-on-the-live-path
+  (let [h (fn [req] {:status 200 :body "never"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :max-body-bytes 64
+                :idle-timeout 20000 :request-timeout 3000}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          (srv-send c "POST /hoard HTTP/1.1\r\nHost: t.example\r\n"
+                    "Content-Length: 999999999\r\n\r\n")
+          (let [x (srv-read-one c [])]
+            (is (some? x) "the declared length is rejected at the header")
+            (is (= 400 (:code (:resp x))))
+            (is (= "close" (get (:headers (:resp x)) "connection"))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest idle-keep-alive-connection-is-reaped-and-its-permit-returns
+  (let [h (fn [req] {:status 200 :body "ok"})]
+    (rs-with h {:acceptors 1 :max-conns 1
+                :idle-timeout 700 :request-timeout 20000}
+      (fn [s]
+        (let [a (srv-connect (:port s))]
+          (srv-send a (srv-req "GET" "/one"))
+          (let [x (srv-read-one a [])]
+            (is (= 200 (:code (:resp x)))))
+          (let [t0 (time-ms)
+                out (srv-drop-outcome a)
+                elapsed (- (time-ms) t0)]
+            (is (contains? #{:eof :reset} out)
+                (str "a quiet keep-alive conn is reaped; got " out))
+            (is (< elapsed 8000) (str "reap took " elapsed "ms")))
+          (try (net-close a) (catch e nil)))
+        ;; one permit in play: the next connection proves the reap
+        ;; returned it
+        (let [b (srv-connect (:port s))]
+          (srv-send b (srv-close-req "GET" "/after"))
+          (let [x (srv-read-one b [])]
+            (is (= 200 (:code (:resp x)))))
+          (try (net-close b) (catch e nil)))))))
+
+(deftest silent-connection-hoard-is-reaped-and-the-server-stays-responsive
+  (let [h (fn [req] {:status 200 :body "still here"})]
+    (rs-with h {:acceptors 1 :max-conns 2
+                :idle-timeout 600 :request-timeout 20000}
+      (fn [s]
+        (let [hoard (mapv (fn [_] (srv-connect (:port s))) (range 3))]
+          (doseq [c hoard]
+            (let [t0 (time-ms)
+                  out (srv-drop-outcome c)
+                  elapsed (- (time-ms) t0)]
+              (is (contains? #{:eof :reset} out)
+                  (str "an idle silent conn is reaped; got " out))
+              (is (< elapsed 8000) (str "reap took " elapsed "ms")))
+            (try (net-close c) (catch e nil))))
+        (let [c (srv-connect (:port s))]
+          (srv-send c (srv-close-req "GET" "/probe"))
+          (let [x (srv-read-one c [])]
+            (is (some? x) "the server serves after the hoard is reaped")
+            (is (= 200 (:code (:resp x))))
+            (is (= (srv-bb "still here") (:body (:resp x)))))
+          (try (net-close c) (catch e nil)))))))
+
 (run-tests-and-exit)
