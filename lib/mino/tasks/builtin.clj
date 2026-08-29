@@ -980,8 +980,8 @@
   (into ["-DMINO_CPJIT=1"]
         (if windows?
           ["-DMINO_CPJIT_X86_64_WINDOWS"]
-          (let [os   (str/trim (str (get (sh "uname" "-s") :out)))
-                arch (str/trim (str (get (sh "uname" "-m") :out)))]
+          (let [os   (:sysname (uname))
+                arch (:machine (uname))]
             (cond
               (and (= os "Linux") (= arch "aarch64"))
               ["-DMINO_CPJIT_ARM64_LINUX"]
@@ -1104,7 +1104,7 @@
    `tonistiigi/binfmt` both register a handler whose name contains
    `aarch64`)."
   []
-  (or (= "aarch64" (str/trim (str (:out (sh "uname" "-m")))))
+  (or (= "aarch64" (:machine (uname)))
       (let [d "/proc/sys/fs/binfmt_misc"]
         (and (file-exists? (str d "/status"))
              (boolean
@@ -1713,8 +1713,8 @@
      ;; ws2_32 + bcrypt: the net and TLS layers' Windows link set,
      ;; same libs as the windows-amd64 cross target.
      :libs ["-lws2_32" "-lbcrypt"]}
-    (let [os   (str/trim (str (get (sh "uname" "-s") :out)))
-          arch (str/trim (str (get (sh "uname" "-m") :out)))]
+    (let [os   (:sysname (uname))
+          arch (:machine (uname))]
       (cond
         (= os "Darwin")
         {:triple "x86_64-macos" :define "MINO_CPJIT_X86_64_DARWIN"
