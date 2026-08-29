@@ -1,5 +1,6 @@
 (require "tests/test")
 (require '[clojure.string :as str])
+(require '[mino.http :as http])
 (require '[mino.http.server :as srv])
 
 ;; The connection engine: one accepted socket served as keep-alive
@@ -744,5 +745,110 @@
                  (catch e (ex-message e)))]
     (is (re-find #":bogus" msg))
     (is (re-find #":worse" msg))))
+
+;;;; end to end against the mino.http client
+
+;; The two halves prove each other: the real client stack (plain-map
+;; surface, encoder, pool, parser) against the real server engine.
+;; Client calls pin :keepalive 0 unless a test exercises pooling, so
+;; no idle pooled connection pins a worker past its test.
+
+(defn- e2e-base
+  [s]
+  (str "http://127.0.0.1:" (:port s)))
+
+(defn- e2e-text
+  [body]
+  {:status 200 :headers [["Content-Type" "text/plain"]] :body body})
+
+(deftest e2e-client-get-carries-query-params-to-the-handler
+  (let [h (fn [req] (e2e-text (str "uri=" (:uri req) " qs="
+                                   (or (:query-string req) ""))))]
+    (rs-with h {}
+      (fn [s]
+        (let [r (http/get (str (e2e-base s) "/find")
+                          {:query-params {:type "backend"} :keepalive 0})]
+          (is (= 200 (:status r)))
+          (is (= "uri=/find qs=type=backend" (:body r)))
+          (is (= "text/plain" (get (:headers r) "content-type"))))))))
+
+(deftest e2e-client-post-body-round-trips
+  (let [h (fn [req] (e2e-text (:body req)))]
+    (rs-with h {}
+      (fn [s]
+        (let [r (http/post (str (e2e-base s) "/echo")
+                           {:body "upload payload 42" :keepalive 0})]
+          (is (= 200 (:status r)))
+          (is (= "upload payload 42" (:body r))))))))
+
+(deftest e2e-chunked-request-body-dechunks-server-side
+  ;; the client codec's :chunked? path (header by http-encode-request,
+  ;; frames by http-encode-chunk) against the server's de-chunking
+  (let [h (fn [req] (e2e-text (:body req)))]
+    (rs-with h {}
+      (fn [s]
+        (let [c (srv-connect (:port s))]
+          (net-write c (http-encode-request {:method "POST" :target "/up"
+                                             :host "127.0.0.1"
+                                             :chunked? true}))
+          (net-write c (http-encode-chunk (srv-bb "hello ")))
+          (net-write c (http-encode-chunk (srv-bb "world")))
+          (net-write c (http-encode-chunk (srv-bb "")))
+          (let [x (srv-read-one c [])]
+            (is (some? x))
+            (is (= 200 (:code (:resp x))))
+            (is (= (srv-bb "hello world") (:body (:resp x)))))
+          (try (net-close c) (catch e nil)))))))
+
+(deftest e2e-keep-alive-connection-reuse-counted-server-side
+  (let [seen (atom [])
+        h (fn [req]
+            (when-not (some #(identical? % (:conn req)) @seen)
+              (swap! seen conj (:conn req)))
+            (if (= "/count" (:uri req))
+              (e2e-text (str (count @seen)))
+              (e2e-text "ok")))]
+    (rs-with h {:idle-timeout 600}
+      (fn [s]
+        (is (= 200 (:status (http/get (str (e2e-base s) "/a")))))
+        (is (= 200 (:status (http/get (str (e2e-base s) "/b")))))
+        (let [r (http/get (str (e2e-base s) "/count"))]
+          (is (= 200 (:status r)))
+          (is (= "1" (:body r))
+              "three requests must share one connection"))))))
+
+(deftest e2e-server-errors-reach-the-client-as-data
+  (let [h (fn [req]
+            (if (= "/boom" (:uri req))
+              (throw (ex-info "e2e boom" {}))
+              {:status 404 :headers [["Content-Type" "text/plain"]]
+               :body "no such route"}))]
+    (rs-with h {}
+      (fn [s]
+        (let [r404 (http/get (str (e2e-base s) "/missing")
+                             {:throw false :keepalive 0})]
+          (is (= 404 (:status r404)))
+          (is (= "no such route" (:body r404))))
+        (let [r500 (http/get (str (e2e-base s) "/boom")
+                             {:throw false :keepalive 0})]
+          (is (= 500 (:status r500)))
+          (is (= "internal server error" (:body r500)))
+          (is (= "text/plain" (get (:headers r500) "content-type"))))
+        (let [e (try (http/get (str (e2e-base s) "/boom") {:keepalive 0})
+                     (catch Throwable e e))]
+          (is (= "HTTP 500" (ex-message e)))
+          (is (= 500 (:status (ex-data e)))))))))
+
+(deftest e2e-stop-restart-serves-on-a-fresh-port
+  (let [h (fn [req] (e2e-text (str "gen:" (:uri req))))]
+    (rs-with h {}
+      (fn [s1]
+        (is (= 200 (:status (http/get (str (e2e-base s1) "/one")
+                                      {:keepalive 0}))))))
+    (rs-with h {}
+      (fn [s2]
+        (let [r (http/get (str (e2e-base s2) "/two") {:keepalive 0})]
+          (is (= 200 (:status r)))
+          (is (= "gen:/two" (:body r))))))))
 
 (run-tests-and-exit)
