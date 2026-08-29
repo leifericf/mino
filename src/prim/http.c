@@ -1280,6 +1280,11 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
         count = v->as.vec.len;
         *hdrs = count > 0
             ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
+        if (count > 0 && *hdrs == NULL) {
+            prim_throw_classified(S, "internal", "MIN001",
+                                  "http: out of memory");
+            return -1;
+        }
         for (i = 0; i < count; i++) {
             mino_val *entry = vec_nth(v, i);
             mino_val *k, *val;
@@ -1320,6 +1325,11 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
         count = v->as.map.len;
         *hdrs = count > 0
             ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
+        if (count > 0 && *hdrs == NULL) {
+            prim_throw_classified(S, "internal", "MIN001",
+                                  "http: out of memory");
+            return -1;
+        }
         for (i = 0; i < count; i++) {
             mino_val *k   = vec_nth(v->as.map.key_order, i);
             mino_val *val = map_get_val(v, k);
@@ -2166,6 +2176,13 @@ static int http_abs_url_ok(const char *s, size_t len)
         while (i < len && s[i] != ']') i++;
         if (i >= len) return -1;
         i++;
+        /* parse-url requires the byte after ']' to end the host: a
+         * port, a path, a query, a fragment, or end of text. Reject
+         * anything else here so parse-url cannot throw downstream. */
+        if (i < len && s[i] != ':' && s[i] != '/' && s[i] != '?'
+            && s[i] != '#') {
+            return -1;
+        }
     } else {
         while (i < len && s[i] != ':' && s[i] != '/' && s[i] != '?'
                && s[i] != '#') {

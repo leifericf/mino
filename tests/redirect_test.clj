@@ -174,6 +174,26 @@
                      (resp 302 "http://h.example:9090/y"))
                  [:request :uri]))))
 
+;;; malformed IPv6 authority in Location degrades, never throws
+
+(deftest ipv6-location-with-trailing-junk-is-bad-location
+  ;; The pre-validator must reject anything after ']' that is not a
+  ;; port, path, query, or fragment. Otherwise these pass the check
+  ;; but make the URL parser throw, and inside http-request that throw
+  ;; escapes the socket cleanup and leaks an fd per hostile redirect.
+  (doseq [loc ["http://[::1]xyz/p"
+               "https://[::1]junk"
+               "//[::1]nope/p"]]
+    (let [r (rn (base-req) (resp 302 loc))]
+      (is (= :stop (:action r)) (str loc))
+      (is (= :bad-location (:reason r)) (str loc))))
+  ;; A well-formed IPv6 authority still follows, with and without port
+  ;; (matching scheme so the downgrade block does not mask the parse).
+  (let [http-base {:method :get :uri "http://api.example.com/a"}]
+    (is (= :follow (:action (rn http-base (resp 302 "http://[::1]/p")))))
+    (is (= :follow (:action (rn http-base (resp 302 "http://[::1]:8080/p"))))))
+  (is (= :follow (:action (rn (base-req) (resp 302 "//[2001:db8::1]/p"))))))
+
 ;;; security: auth stripping and downgrade blocking
 
 (deftest cross-host-redirects-strip-authorization-and-cookie
