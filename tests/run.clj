@@ -237,18 +237,19 @@
               "tests/html_hiccup_test"
               "tests/html_perf_test"
               "tests/html_fuzz_test"
-             "tests/xml_fixture_test"
-              "tests/xml_test"
-              "tests/xml_perf_test"
-              "tests/xml_fuzz_test"
-              "tests/store_backend_test"])
+              "tests/xml_fixture_test"
+               "tests/xml_test"
+               "tests/xml_perf_test"
+               "tests/xml_fuzz_test"
+              "tests/store_backend_test"
+              "tests/http_server_codec_test"])
 
 (def ^:private shard-cuts
    "File-count prefix boundaries for MINO_TEST_SHARD partitions:
     shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
     glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
     tail grows past ~5GB. The final entry must equal the file count."
-   [0 103 129 195])
+   [0 103 129 196])
 
 (let [wired (set (map #(last (str/split % #"/")) suite-files))
       unwired (sort (set/difference disk-basenames wired other-lane-files))]

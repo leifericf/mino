@@ -1,7 +1,8 @@
 /*
  * http.c -- HTTP/1.1 message codec primitives and the request
  * orchestration prim: request serialization (http-encode-request,
- * http-encode-chunk), response parsing (http-parse-response,
+ * http-encode-chunk), response serialization (http-encode-response),
+ * response parsing (http-parse-response,
  * http-parse-response-chunks), and http-request, which composes the
  * pool, socket, TLS, redirect, and gzip layers into one call.
  *
@@ -739,14 +740,12 @@ static int http_out_str(http_out_t *o, const char *s)
 /* Header/method bytes the layer computes itself; a caller supplying
  * them is a contract error, not a smuggling attempt, but rejecting
  * keeps one authority over framing. */
-static int http_owned_name(const char *name, size_t len)
+static int http_name_in(const char *const *owned, const char *name,
+                        size_t len)
 {
-    static const char *const k_owned[] = {
-        "host", "content-length", "transfer-encoding", NULL
-    };
     size_t i, j;
-    for (i = 0; k_owned[i] != NULL; i++) {
-        const char *w = k_owned[i];
+    for (i = 0; owned[i] != NULL; i++) {
+        const char *w = owned[i];
         size_t wl = strlen(w);
         if (len != wl) continue;
         for (j = 0; j < len; j++) {
@@ -756,6 +755,10 @@ static int http_owned_name(const char *name, size_t len)
     }
     return 0;
 }
+
+static const char *const k_request_owned[] = {
+    "host", "content-length", "transfer-encoding", NULL
+};
 
 static int http_valid_target(const char *s, size_t len)
 {
@@ -849,7 +852,7 @@ static int http_encode_request(const http_request_t *req,
                      "or NUL byte");
             return -1;
         }
-        if (http_owned_name(h->name, h->name_len)) {
+        if (http_name_in(k_request_owned, h->name, h->name_len)) {
             snprintf(err, err_cap,
                      "http-encode-request: header %.*s is owned by the "
                      "HTTP layer",
@@ -932,6 +935,188 @@ static int http_encode_chunk(const unsigned char *data, size_t len,
     return 0;
 }
 
+/* ---- response serialization (server) ---- */
+
+static const struct {
+    int         code;
+    const char *reason;
+} k_http_reasons[] = {
+    {100, "Continue"}, {101, "Switching Protocols"},
+    {200, "OK"}, {201, "Created"}, {202, "Accepted"},
+    {203, "Non-Authoritative Information"}, {204, "No Content"},
+    {205, "Reset Content"}, {206, "Partial Content"},
+    {300, "Multiple Choices"}, {301, "Moved Permanently"},
+    {302, "Found"}, {303, "See Other"}, {304, "Not Modified"},
+    {307, "Temporary Redirect"}, {308, "Permanent Redirect"},
+    {400, "Bad Request"}, {401, "Unauthorized"},
+    {402, "Payment Required"}, {403, "Forbidden"}, {404, "Not Found"},
+    {405, "Method Not Allowed"}, {406, "Not Acceptable"},
+    {407, "Proxy Authentication Required"}, {408, "Request Timeout"},
+    {409, "Conflict"}, {410, "Gone"}, {411, "Length Required"},
+    {412, "Precondition Failed"}, {413, "Payload Too Large"},
+    {414, "URI Too Long"}, {415, "Unsupported Media Type"},
+    {416, "Range Not Satisfiable"}, {417, "Expectation Failed"},
+    {421, "Misdirected Request"}, {422, "Unprocessable Entity"},
+    {426, "Upgrade Required"}, {428, "Precondition Required"},
+    {429, "Too Many Requests"},
+    {431, "Request Header Fields Too Large"},
+    {451, "Unavailable For Legal Reasons"},
+    {500, "Internal Server Error"}, {501, "Not Implemented"},
+    {502, "Bad Gateway"}, {503, "Service Unavailable"},
+    {504, "Gateway Timeout"}, {505, "HTTP Version Not Supported"}
+};
+
+static const char *http_reason_for(int code)
+{
+    size_t i;
+    size_t n = sizeof(k_http_reasons) / sizeof(k_http_reasons[0]);
+    for (i = 0; i < n; i++) {
+        if (k_http_reasons[i].code == code) return k_http_reasons[i].reason;
+    }
+    return "";
+}
+
+/* The response wire is the server's: framing, connection policy, and
+ * Date never come from the handler. */
+static const char *const k_response_owned[] = {
+    "content-length", "transfer-encoding", "connection", "date", NULL
+};
+
+typedef struct {
+    int                 status;
+    const http_hdr_in_t *headers;
+    size_t              nheaders;
+    const unsigned char *body;   /* NULL: bodiless */
+    size_t              body_len;
+    int                 http10;
+    int                 want_close;
+    int                 want_keepalive;
+    const char         *date;    /* NULL: no Date header */
+    size_t              date_len;
+} http_response_t;
+
+/* Serialize a validated response into a malloc'd buffer. Pure; the
+ * caller frees *out. A present :body is always Content-Length framed;
+ * emitting a bodiless 204/304 is the handler's contract. Returns 0 on
+ * success, -1 with err filled. */
+static int http_encode_response(const http_response_t *resp,
+                                unsigned char **out, size_t *out_len,
+                                char *err, size_t err_cap)
+{
+    http_out_t o;
+    char numbuf[32];
+    const char *reason;
+    size_t i;
+    int numlen;
+    memset(&o, 0, sizeof(o));
+    *out = NULL;
+    *out_len = 0;
+
+    if (resp->status < 100 || resp->status > 599) {
+        snprintf(err, err_cap,
+                 "http-encode-response: :status must be in 100..599");
+        return -1;
+    }
+    if (resp->want_close && resp->want_keepalive) {
+        snprintf(err, err_cap,
+                 "http-encode-response: :close? and :keep-alive? are "
+                 "mutually exclusive");
+        return -1;
+    }
+    if (resp->date != NULL
+        && !http_valid_field_value(resp->date, resp->date_len)) {
+        snprintf(err, err_cap,
+                 "http-encode-response: :date has a CR, LF, or NUL byte");
+        return -1;
+    }
+    for (i = 0; i < resp->nheaders; i++) {
+        const http_hdr_in_t *h = &resp->headers[i];
+        size_t j;
+        if (h->name_len == 0) {
+            snprintf(err, err_cap,
+                     "http-encode-response: header name is empty");
+            return -1;
+        }
+        for (j = 0; j < h->name_len; j++) {
+            if (!http_tchar((unsigned char)h->name[j])) {
+                snprintf(err, err_cap,
+                         "http-encode-response: header name has a "
+                         "non-token character");
+                return -1;
+            }
+        }
+        if (!http_valid_field_value(h->value, h->value_len)) {
+            snprintf(err, err_cap,
+                     "http-encode-response: header value has a CR, LF, "
+                     "or NUL byte");
+            return -1;
+        }
+        if (http_name_in(k_response_owned, h->name, h->name_len)) {
+            snprintf(err, err_cap,
+                     "http-encode-response: header %.*s is owned by the "
+                     "server",
+                     (int)(h->name_len < 64 ? h->name_len : 64), h->name);
+            return -1;
+        }
+    }
+
+    reason = http_reason_for(resp->status);
+    if (http_out_str(&o, resp->http10 ? "HTTP/1.0 " : "HTTP/1.1 ") != 0)
+        goto oom;
+    numlen = snprintf(numbuf, sizeof(numbuf), "%d", resp->status);
+    if (http_out_put(&o, numbuf, (size_t)numlen) != 0) goto oom;
+    if (reason[0] != '\0') {
+        if (http_out_put(&o, " ", 1) != 0
+            || http_out_str(&o, reason) != 0) {
+            goto oom;
+        }
+    }
+    if (http_out_str(&o, "\r\n") != 0) goto oom;
+    for (i = 0; i < resp->nheaders; i++) {
+        if (http_out_put(&o, resp->headers[i].name,
+                         resp->headers[i].name_len) != 0
+            || http_out_str(&o, ": ") != 0
+            || http_out_put(&o, resp->headers[i].value,
+                            resp->headers[i].value_len) != 0
+            || http_out_str(&o, "\r\n") != 0) {
+            goto oom;
+        }
+    }
+    if (resp->date != NULL) {
+        if (http_out_str(&o, "Date: ") != 0
+            || http_out_put(&o, resp->date, resp->date_len) != 0
+            || http_out_str(&o, "\r\n") != 0) {
+            goto oom;
+        }
+    }
+    if (resp->want_close) {
+        if (http_out_str(&o, "Connection: close\r\n") != 0) goto oom;
+    } else if (resp->want_keepalive) {
+        if (http_out_str(&o, "Connection: keep-alive\r\n") != 0) goto oom;
+    }
+    if (resp->body != NULL) {
+        numlen = snprintf(numbuf, sizeof(numbuf), "%llu",
+                          (unsigned long long)resp->body_len);
+        if (http_out_str(&o, "Content-Length: ") != 0
+            || http_out_put(&o, numbuf, (size_t)numlen) != 0
+            || http_out_str(&o, "\r\n") != 0) {
+            goto oom;
+        }
+    }
+    if (http_out_str(&o, "\r\n") != 0) goto oom;
+    if (resp->body != NULL && resp->body_len > 0) {
+        if (http_out_put(&o, resp->body, resp->body_len) != 0) goto oom;
+    }
+    *out     = o.p;
+    *out_len = o.len;
+    return 0;
+
+oom:
+    free(o.p);
+    snprintf(err, err_cap, "http-encode-response: out of memory");
+    return -1;
+}
+
 /* ---- prim argument helpers ---- */
 
 /* String-or-bytes byte view, the codec-family convention. */
@@ -970,6 +1155,92 @@ static int http_name_arg(const mino_val *v, const char **name,
         *len  = v->as.s.len - skip;
         return 1;
     }
+    return 0;
+}
+
+/* :headers extraction shared by the encode prims: a vector of
+ * [name value] pairs or a map, string-or-keyword names, string
+ * values. Throws and returns -1 on a bad entry; the caller frees
+ * *hdrs. */
+static int http_headers_arg(mino_state *S, const mino_val *v,
+                            http_hdr_in_t **hdrs, size_t *n,
+                            const char *who)
+{
+    size_t i, count = 0;
+    *hdrs = NULL;
+    *n    = 0;
+    if (mino_type_of(v) == MINO_VECTOR) {
+        count = v->as.vec.len;
+        *hdrs = count > 0
+            ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
+        for (i = 0; i < count; i++) {
+            mino_val *entry = vec_nth(v, i);
+            mino_val *k, *val;
+            if (entry == NULL || mino_type_of(entry) != MINO_VECTOR
+                || entry->as.vec.len != 2) {
+                free(*hdrs);
+                *hdrs = NULL;
+                {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg),
+                             "%s: :headers entries must be "
+                             "[name value] pairs", who);
+                    prim_throw_classified(S, "eval/contract", "MCT001",
+                                          msg);
+                }
+                return -1;
+            }
+            k   = vec_nth(entry, 0);
+            val = vec_nth(entry, 1);
+            if (!http_name_arg(k, &(*hdrs)[i].name, &(*hdrs)[i].name_len)
+                || val == NULL || mino_type_of(val) != MINO_STRING) {
+                free(*hdrs);
+                *hdrs = NULL;
+                {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg),
+                             "%s: header names must be strings or "
+                             "keywords and values strings", who);
+                    prim_throw_classified(S, "eval/contract", "MCT001",
+                                          msg);
+                }
+                return -1;
+            }
+            (*hdrs)[i].value     = val->as.s.data;
+            (*hdrs)[i].value_len = val->as.s.len;
+        }
+    } else if (mino_type_of(v) == MINO_MAP) {
+        count = v->as.map.len;
+        *hdrs = count > 0
+            ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
+        for (i = 0; i < count; i++) {
+            mino_val *k   = vec_nth(v->as.map.key_order, i);
+            mino_val *val = map_get_val(v, k);
+            if (!http_name_arg(k, &(*hdrs)[i].name, &(*hdrs)[i].name_len)
+                || val == NULL || mino_type_of(val) != MINO_STRING) {
+                free(*hdrs);
+                *hdrs = NULL;
+                {
+                    char msg[160];
+                    snprintf(msg, sizeof(msg),
+                             "%s: header names must be strings or "
+                             "keywords and values strings", who);
+                    prim_throw_classified(S, "eval/contract", "MCT001",
+                                          msg);
+                }
+                return -1;
+            }
+            (*hdrs)[i].value     = val->as.s.data;
+            (*hdrs)[i].value_len = val->as.s.len;
+        }
+    } else {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "%s: :headers must be a vector of pairs or a map", who);
+        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return -1;
+    }
+    *n = count;
     return 0;
 }
 
@@ -1232,59 +1503,10 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
 
     v = map_get_val(m, mino_keyword(S, "headers"));
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
-        size_t n, i;
-        if (mino_type_of(v) == MINO_VECTOR) {
-            n = v->as.vec.len;
-            hdrs = n > 0 ? (http_hdr_in_t *)malloc(n * sizeof(*hdrs)) : NULL;
-            for (i = 0; i < n; i++) {
-                mino_val *entry = vec_nth(v, i);
-                mino_val *k, *val;
-                if (entry == NULL || mino_type_of(entry) != MINO_VECTOR
-                    || entry->as.vec.len != 2) {
-                    free(hdrs);
-                    return prim_throw_classified(S, "eval/contract",
-                        "MCT001",
-                        "http-encode-request: :headers entries must be "
-                        "[name value] pairs");
-                }
-                k   = vec_nth(entry, 0);
-                val = vec_nth(entry, 1);
-                if (!http_name_arg(k, &hdrs[i].name, &hdrs[i].name_len)
-                    || val == NULL || mino_type_of(val) != MINO_STRING) {
-                    free(hdrs);
-                    return prim_throw_classified(S, "eval/contract",
-                        "MCT001",
-                        "http-encode-request: header names must be "
-                        "strings or keywords and values strings");
-                }
-                hdrs[i].value     = val->as.s.data;
-                hdrs[i].value_len = val->as.s.len;
-            }
-        } else if (mino_type_of(v) == MINO_MAP) {
-            n = v->as.map.len;
-            hdrs = n > 0 ? (http_hdr_in_t *)malloc(n * sizeof(*hdrs)) : NULL;
-            for (i = 0; i < n; i++) {
-                mino_val *k   = vec_nth(v->as.map.key_order, i);
-                mino_val *val = map_get_val(v, k);
-                if (!http_name_arg(k, &hdrs[i].name, &hdrs[i].name_len)
-                    || val == NULL || mino_type_of(val) != MINO_STRING) {
-                    free(hdrs);
-                    return prim_throw_classified(S, "eval/contract",
-                        "MCT001",
-                        "http-encode-request: header names must be "
-                        "strings or keywords and values strings");
-                }
-                hdrs[i].value     = val->as.s.data;
-                hdrs[i].value_len = val->as.s.len;
-            }
-        } else {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
-                                         "http-encode-request: :headers "
-                                         "must be a vector of pairs or a "
-                                         "map");
-        }
-        req.nheaders = n;
-        req.headers  = hdrs;
+        if (http_headers_arg(S, v, &hdrs, &req.nheaders,
+                             "http-encode-request") != 0)
+            return NULL;
+        req.headers = hdrs;
     }
 
     v = map_get_val(m, mino_keyword(S, "body"));
@@ -1345,6 +1567,98 @@ static mino_val *prim_http_encode_chunk(mino_state *S, mino_val *args,
     result = mino_bytes(S, out, out_len);
     free(out);
     return result;
+}
+
+/* (http-encode-response m) -> bytes. Keys :status (required integer
+ * in 100..599), :headers (vector of [name value] pairs or a map),
+ * :body (bytes or string; present means Content-Length framed,
+ * absent means bodiless), :http10?, :close?, :keep-alive? (booleans;
+ * the last two are mutually exclusive), :date (string). The server
+ * owns Content-Length, Transfer-Encoding, Connection, and Date and
+ * rejects them in :headers. */
+static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
+                                           mino_env *env)
+{
+    mino_val *m, *v;
+    http_response_t resp;
+    http_hdr_in_t *hdrs = NULL;
+    unsigned char *out = NULL;
+    size_t out_len = 0;
+    char err[160];
+    (void)env;
+    memset(&resp, 0, sizeof(resp));
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "http-encode-response requires one "
+                                     "map");
+    }
+    m = args->as.cons.car;
+    if (m == NULL || mino_type_of(m) != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "http-encode-response: argument must "
+                                     "be a map");
+    }
+    v = map_get_val(m, mino_keyword(S, "status"));
+    if (v != NULL) {
+        long long status_ll;
+        if (!as_long(v, &status_ll)
+            || status_ll < 100 || status_ll > 599) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                                         "http-encode-response: :status "
+                                         "must be an integer in 100..599");
+        }
+        resp.status = (int)status_ll;
+    } else {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "http-encode-response: :status must "
+                                     "be an integer in 100..599");
+    }
+    if (http_opt_bool(S, m, "http10?", &resp.http10) != 0) return NULL;
+    if (http_opt_bool(S, m, "close?", &resp.want_close) != 0) return NULL;
+    if (http_opt_bool(S, m, "keep-alive?", &resp.want_keepalive) != 0)
+        return NULL;
+
+    v = map_get_val(m, mino_keyword(S, "headers"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (http_headers_arg(S, v, &hdrs, &resp.nheaders,
+                             "http-encode-response") != 0)
+            return NULL;
+        resp.headers = hdrs;
+    }
+
+    v = map_get_val(m, mino_keyword(S, "body"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (!http_text_arg(v, &resp.body, &resp.body_len)) {
+            free(hdrs);
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "http-encode-response: :body must "
+                                         "be bytes or a string");
+        }
+    }
+
+    v = map_get_val(m, mino_keyword(S, "date"));
+    if (v != NULL && mino_type_of(v) != MINO_NIL) {
+        if (mino_type_of(v) != MINO_STRING) {
+            free(hdrs);
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                                         "http-encode-response: :date must "
+                                         "be a string");
+        }
+        resp.date     = v->as.s.data;
+        resp.date_len = v->as.s.len;
+    }
+
+    if (http_encode_response(&resp, &out, &out_len, err, sizeof(err)) != 0) {
+        free(hdrs);
+        return prim_throw_classified(S, "eval/contract", "MCT001", err);
+    }
+    free(hdrs);
+    {
+        mino_val *result = mino_bytes(S, out, out_len);
+        free(out);
+        return result;
+    }
 }
 
 /* (http-parse-response data opts?) -> map. :status is :need-more,
@@ -2442,7 +2756,7 @@ static int httpreq_header_row(mino_val *k, mino_val *val,
         snprintf(err, err_cap, "http-request: header name is empty");
         return -1;
     }
-    if (http_owned_name(out->name, out->name_len)) {
+    if (http_name_in(k_request_owned, out->name, out->name_len)) {
         snprintf(err, err_cap, "http-request: header %.*s is computed "
                  "by the request layer",
                  (int)(out->name_len < 48 ? out->name_len : 48),
@@ -3396,6 +3710,19 @@ const mino_prim_def k_prims_http[] = {
      "shape as http-parse-response. Arbitrary read splits give the "
      "same result as a single feed; opts are shared, with :eof true "
      "signalling end of stream."},
+    {"http-encode-response", prim_http_encode_response,
+     "Serializes an HTTP response map to bytes: :status is a required "
+     "integer in 100..599 (reason phrase from a table of common codes, "
+     "unknown codes carry none); :headers is a vector of [name value] "
+     "pairs or a map (Content-Length, Transfer-Encoding, Connection, "
+     "and Date are computed by the server and rejected in :headers); "
+     ":body is bytes or a string and always emits Content-Length, "
+     "absent means bodiless (204/304/HEAD handlers must omit it); "
+     ":http10? selects the HTTP/1.0 status line; :close? emits "
+     "Connection: close and :keep-alive? emits Connection: keep-alive "
+     "(mutually exclusive); :date is a preformatted string emitted as "
+     "the Date header. Header order is handler headers, Date, "
+     "Connection, Content-Length. Returns bytes."},
     {"redirect-next", prim_redirect_next,
      "Decides one redirect hop from a request map, a response map, "
      "and opts. Returns {:action :follow :request next-request} or "
