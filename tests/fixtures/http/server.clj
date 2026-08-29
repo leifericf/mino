@@ -1,10 +1,11 @@
 (require '[clojure.string :as str])
 (require '[clojure.data.json :as json])
+(require '[mino.http.server :as srv])
 
-;; Loopback HTTP fixture server written in mino itself: the accept
-;; loop runs in a future on mino's worker threads over the net
-;; listener prims, so the client suites drive the real stack against
-;; the real socket prims with no subprocess and no platform gating.
+;; Loopback HTTP fixture server written in mino itself: the Ring
+;; routes ride the mino.http.server engine over the net listener
+;; prims, so the client suites drive the real stack against the real
+;; server library with no subprocess and no platform gating.
 ;;
 ;; Route table (GET unless noted):
 ;;   /hello         200 "hello world"
@@ -23,26 +24,32 @@
 ;;                  "final-landing")
 ;;   /r307          307 to /echo (method and body preserved; the
 ;;                  offered body is consumed before the redirect)
-;;   /chunked       200 raw chunked frames dechunking to "hello world"
+;;   /boom          throws; the engine answers 500 and the server
+;;                  survives (the isolation boundary, client-visible)
 ;;   /gzip          200 Content-Encoding: gzip; the payload constant
 ;;                  below carries its generation provenance
-;;   /hold          consumes the request, then silence until teardown
-;;                  (the read-timeout fixture; no delayed-response
-;;                  route exists)
 ;;   /conncount     200 the number of connections accepted so far
-;;   /close         200 "bye-close" with Connection: close
 ;;   /big           200 100000 bytes of "x"
+;;
+;; Raw-wire legs keep a slim custom serve path (exact wire shapes the
+;; Content-Length framed engine cannot emit):
+;;   /chunked       200 raw chunked frames dechunking to "hello world"
 ;;   /http10        raw HTTP/1.0 close-delimited response, then close
 ;;   /head-cl       HEAD: Content-Length 11, never a body
 ;;   /head-no-cl    HEAD: no framing header, never a body
+;;   /close         200 "bye-close" with Connection: close, then close
+;;   /hold          consumes the request, then silence until teardown
+;;                  (the read-timeout fixture; no delayed-response
+;;                  route exists)
 ;;   anything else  404 "not here"
 ;;
-;; Connections are served one at a time inside the accept future: a
-;; request loop per connection (keep-alive until the idle window or
-;; Connection: close), then the next accepted connection. The suites
-;; drive one conversation at a time, so no worker is pinned per idle
-;; connection and the fixture stays inside the host thread grant on
-;; small runners.
+;; The first request on a connection decides its path: a raw target
+;; stays on this loop, anything else hands the connection (seeded
+;; with the bytes already read) to the engine, which then owns its
+;; whole keep-alive life. Connections are accepted one at a time
+;; inside the accept future; the suites drive one conversation at a
+;; time, so no worker is pinned per idle connection and the fixture
+;; stays inside the host thread grant on small runners.
 
 (def ^:private fx-idle-ms
   "Keep-alive idle budget per connection: how long a served
@@ -75,7 +82,7 @@
   expected :codec/limit into :net/timeout."
   (apply str (repeat 100000 "x")))
 
-;;;; request parsing
+;;;; request peeking
 
 (defn- fx-bytes-text
   "Widen bytes through char; fixture requests are ASCII."
@@ -127,9 +134,11 @@
 
 (defn- fx-read-request
   "Read one request off c seeded with any leftover bytes. Returns a
-  parsed request map, {:idle acc} when no full request arrived within
-  the read window (acc keeps the partial bytes), :fx-too-large past
-  the byte cap, or nil when the peer went away."
+  parsed request map (carrying :seed, every byte read so far, so the
+  engine can reparse the connection without losing them), {:idle acc}
+  when no full request arrived within the read window (acc keeps the
+  partial bytes), :fx-too-large past the byte cap, or nil when the
+  peer went away."
   [c seed]
   (loop [acc (vec seed)]
     (let [s (apply str (map char acc))
@@ -158,7 +167,8 @@
                    :path path
                    :headers headers
                    :body (byte-array (take n (drop (+ hdr-end 4) acc)))
-                   :leftover (vec (drop total acc))}))
+                   :leftover (vec (drop total acc))
+                   :seed acc}))
 
         (> (count acc) fx-max-request) :fx-too-large
         :else (let [r (fx-read-step c acc)]
@@ -166,15 +176,7 @@
                   (recur (second r))
                   r))))))
 
-;;;; routes
-
-(defn- fx-reason [code]
-  (get {200 "OK"
-        301 "Moved Permanently"
-        307 "Temporary Redirect"
-        400 "Bad Request"
-        404 "Not Found"}
-       code "OK"))
+;;;; Ring routes (served by the mino.http.server engine)
 
 (defn- fx-headers-echo [path q headers]
   {"path" path
@@ -187,18 +189,18 @@
 (defn- fx-json-echo [headers body]
   (let [ctype (or (get headers "content-type") "")]
     (if (not (str/starts-with? ctype "application/json"))
-      {:code 400
-       :ctype "application/json"
+      {:status 400
+       :headers [["Content-Type" "application/json"]]
        :body (json/write-str
                {:error (str "expected application/json, got " ctype)})}
       (try
-        {:code 200
-         :ctype "application/json"
+        {:status 200
+         :headers [["Content-Type" "application/json"]]
          :body (json/write-str {:echo (json/read-str (fx-bytes-text body))
                                 :seen ctype})}
         (catch e
-          {:code 400
-           :ctype "application/json"
+          {:status 400
+           :headers [["Content-Type" "application/json"]]
            :body (json/write-str {:error "body is not valid JSON"})})))))
 
 (defn- fx-items-page [q]
@@ -208,72 +210,105 @@
       {:page 2 :items ["gamma"] :next_page nil}
       {:page 1 :items ["alpha" "beta"] :next_page 2})))
 
-(defn- fx-route
-  "One parsed request to [response-spec close-after?]. A :raw spec is
-  written verbatim; a :hold spec answers nothing and goes silent."
-  [{:keys [method path headers body]} srv]
-  (let [[p q] (fx-split-path path)]
-    (cond
-      (= p "/hello") [{:code 200 :body "hello world"} false]
-      (= p "/echo") [{:code 200 :body (or body (byte-array 0))} false]
-      (str/starts-with? p "/echo-path") [{:code 200 :body path} false]
-      (= p "/echo-headers") [{:code 200 :ctype "application/json"
-                              :body (json/write-str
-                                      (fx-headers-echo path q headers))}
-                             false]
-      (= p "/echo-json") [(fx-json-echo headers body) false]
-      (= p "/items") [{:code 200 :ctype "application/json"
-                       :body (json/write-str (fx-items-page
-                                               (fx-parse-query q)))}
-                      false]
-      (= p "/r1") [{:code 301 :body "moved"
-                    :headers [["Location" "/r2"]]} false]
-      (= p "/r2") [{:code 301 :body "moved"
-                    :headers [["Location" "/final"]]} false]
-      (= p "/final") [{:code 200 :body "final-landing"} false]
-      ;; The offered body was already consumed by the request reader;
-      ;; the redirect itself keeps the method and payload.
-      (= p "/r307") [{:code 307 :body "keep it"
-                      :headers [["Location" "/echo"]]} false]
-      (= p "/chunked")
-      [{:raw (str "HTTP/1.1 200 OK\r\n"
-                  "Transfer-Encoding: chunked\r\n\r\n"
-                  "6\r\nhello \r\n"
-                  "5\r\nworld\r\n"
-                  "0\r\n\r\n")}
-       false]
-      (= p "/gzip") [{:code 200 :body (base64-decode fx-gzip-b64)
-                      :headers [["Content-Encoding" "gzip"]]} false]
-      (= p "/hold") [{:hold true} false]
-      (= p "/conncount") [{:code 200 :body (str @(:accepts srv))} false]
-      (= p "/close") [{:code 200 :body "bye-close"
-                       :headers [["Connection" "close"]]} true]
-      (= p "/big") [{:code 200 :body fx-big}
-                    false]
-      (= p "/http10")
-      [{:raw (str "HTTP/1.0 200 OK\r\n"
-                  "Content-Type: text/plain\r\n"
-                  "\r\nclose-delimited-body")}
-       true]
-      (and (= method "HEAD") (= p "/head-cl"))
-      [{:raw (str "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: text/plain\r\n"
-                  "Content-Length: 11\r\n\r\n")}
-       false]
-      (and (= method "HEAD") (= p "/head-no-cl"))
-      [{:raw (str "HTTP/1.1 200 OK\r\n"
-                  "Content-Type: text/plain\r\n\r\n")}
-       false]
-      (= method "HEAD") [{:raw "HTTP/1.1 200 OK\r\n\r\n"} false]
-      :else [{:code 404 :body "not here"} false])))
+(defn- fx-text
+  "A text/plain response body."
+  [status body]
+  {:status status
+   :headers [["Content-Type" "text/plain"]]
+   :body body})
+
+(defn- fx-ring-handler
+  "The fixture's Ring route table, served keep-alive by the engine."
+  [accepts]
+  (fn [req]
+    (let [uri (:uri req)
+          q (or (:query-string req) "")
+          path (if (= "" q) uri (str uri "?" q))
+          headers (:headers req)]
+      (cond
+        (= uri "/hello") (fx-text 200 "hello world")
+        (= uri "/echo") (fx-text 200 (or (:body req) (byte-array 0)))
+        (str/starts-with? uri "/echo-path") (fx-text 200 path)
+        (= uri "/echo-headers")
+        {:status 200
+         :headers [["Content-Type" "application/json"]]
+         :body (json/write-str (fx-headers-echo path q headers))}
+        (= uri "/echo-json") (fx-json-echo headers (:body req))
+        (= uri "/items")
+        {:status 200
+         :headers [["Content-Type" "application/json"]]
+         :body (json/write-str (fx-items-page (fx-parse-query q)))}
+        (= uri "/r1") {:status 301 :headers [["Content-Type" "text/plain"]
+                                             ["Location" "/r2"]]
+                       :body "moved"}
+        (= uri "/r2") {:status 301 :headers [["Content-Type" "text/plain"]
+                                             ["Location" "/final"]]
+                       :body "moved"}
+        (= uri "/final") (fx-text 200 "final-landing")
+        (= uri "/r307") {:status 307 :headers [["Content-Type" "text/plain"]
+                                               ["Location" "/echo"]]
+                         :body "keep it"}
+        (= uri "/boom") (throw (ex-info "fixture boom route" {}))
+        (= uri "/gzip") {:status 200
+                         :headers [["Content-Type" "text/plain"]
+                                   ["Content-Encoding" "gzip"]]
+                         :body (base64-decode fx-gzip-b64)}
+        (= uri "/conncount") (fx-text 200 (str @accepts))
+        (= uri "/big") (fx-text 200 fx-big)
+        :else (fx-text 404 "not here")))))
+
+;;;; raw-wire routes (served by this file's slim loop)
+
+(defn- fx-reason [code]
+  (get {200 "OK"
+        301 "Moved Permanently"
+        307 "Temporary Redirect"
+        400 "Bad Request"
+        404 "Not Found"}
+       code "OK"))
+
+(defn- fx-raw-route
+  "One peeked request to a [response-spec close-after?] pair on the
+  raw-wire legs, or nil when the request belongs to the engine. A
+  :raw spec is written verbatim; a :hold spec answers nothing and
+  goes silent."
+  [method p]
+  (cond
+    (= p "/chunked")
+    [{:raw (str "HTTP/1.1 200 OK\r\n"
+                "Transfer-Encoding: chunked\r\n\r\n"
+                "6\r\nhello \r\n"
+                "5\r\nworld\r\n"
+                "0\r\n\r\n")}
+     false]
+    (= p "/http10")
+    [{:raw (str "HTTP/1.0 200 OK\r\n"
+                "Content-Type: text/plain\r\n"
+                "\r\nclose-delimited-body")}
+     true]
+    (= p "/close")
+    [{:code 200 :body "bye-close"
+      :headers [["Connection" "close"]]} true]
+    (and (= method "HEAD") (= p "/head-cl"))
+    [{:raw (str "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: 11\r\n\r\n")}
+     false]
+    (and (= method "HEAD") (= p "/head-no-cl"))
+    [{:raw (str "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/plain\r\n\r\n")}
+     false]
+    (= p "/hold") [{:hold true} false]
+    :else nil))
 
 ;;;; serving
 
 (defn- fx-send
-  "Write one response spec. Framed bodies carry Content-Length; :raw
-  specs are written exactly as given. Every framed response carries
-  a Date header (RFC 1123 via format-time, dogfooding the time
-  layer) so tests can exercise Date-header parsing end to end."
+  "Write one raw-path response spec. Framed bodies carry
+  Content-Length; :raw specs are written exactly as given. Every
+  framed response carries a Date header (RFC 1123 via format-time,
+  dogfooding the time layer) so tests can exercise Date-header
+  parsing end to end."
   [c spec]
   (if-let [raw (:raw spec)]
     (net-write c raw)
@@ -303,8 +338,10 @@
           (recur))))))
 
 (defn- fx-serve-conn
-  "Serve keep-alive requests on one connection until the peer goes
-  quiet for the idle budget, asks to close, or teardown begins. The
+  "Serve one connection: the first request decides its path. A
+  raw-wire target stays on this slim loop; anything else hands the
+  connection, seeded with every byte already read, to the server
+  engine, which owns its whole keep-alive life from there. The
   socket's read timeout is only a poll interval: a quiet connection
   is re-parked while it is still inside the budget and its reads can
   still end on their own."
@@ -316,13 +353,18 @@
         (:idle r) (when (and @(:running? srv)
                               (< (- (time-ms) idle-since) fx-idle-ms))
                     (recur (:acc r) idle-since))
-        (map? r) (let [[spec close-after] (fx-route r srv)]
-                   (if (:hold spec)
-                     (fx-hold-open c (:running? srv))
-                     (do
-                       (fx-send c spec)
-                       (when-not close-after
-                         (recur (:leftover r) (time-ms))))))))))
+        (map? r)
+        (let [[p _q] (fx-split-path (:path r))]
+          (if-let [[spec close-after] (fx-raw-route (:method r) p)]
+            (if (:hold spec)
+              (fx-hold-open c (:running? srv))
+              (do
+                (fx-send c spec)
+                (when-not close-after
+                  (recur (:leftover r) (time-ms)))))
+            (srv/serve-conn* c (:handler srv)
+                             {:idle-timeout fx-idle-ms
+                              :seed (:seed r)})))))))
 
 (defn- fx-accept-loop [l srv]
   (loop []
@@ -351,11 +393,13 @@
   blocked read."
   []
   (let [l (net-listen "127.0.0.1" 0 {:backlog 16})
+        accepts (atom 0)
         srv {:port (net-listener-port l)
              :listener l
              :running? (atom true)
              :conns (atom [])
-             :accepts (atom 0)}
+             :accepts accepts
+             :handler (fx-ring-handler accepts)}
         fut (future (fx-accept-loop l srv))]
     (assoc srv
            :stop (fn []
@@ -364,9 +408,9 @@
                    (let [r (deref fut 5000 :fx-grace-expired)]
                      ;; After the loop joined, any straggler it failed
                      ;; to close (an unexpected throw) is safe to sweep.
-                     (doseq [c @(:conns srv)]
-                       (try (net-close c) (catch e nil)))
-                     r)))))
+                      (doseq [c @(:conns srv)]
+                        (try (net-close c) (catch e nil)))
+                      r)))))
 
 (defn fx-with-server
   "Run (body srv) with a fresh fixture server; teardown runs whether

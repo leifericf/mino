@@ -109,13 +109,14 @@
     (if-let [b (:body resp)] (assoc base :body b) base)))
 
 (def ^:private allowed-conn-keys
-  #{:idle-timeout :request-timeout
+  #{:idle-timeout :request-timeout :seed
     :max-header-bytes :max-body-bytes :max-headers})
 
 (defn- normalize-opts
   "Public opts into engine opts; every deadline carries its unit and
   is type-checked here, the single normalization pass. Unknown keys
-  are an error naming them."
+  are an error naming them. :seed is bytes already read off the
+  socket before the engine takes it (embedding use)."
   [opts]
   (when-not (map? opts)
     (bad "the connection opts must be a map"))
@@ -124,14 +125,15 @@
     (when (seq unknown)
       (bad (str "unknown connection key(s): "
                 (str/join ", " (map pr-str unknown))))))
-  {:idle-timeout-ms (opt-long (:idle-timeout opts)
-                              :idle-timeout default-idle-timeout-ms)
-   :request-timeout-ms (opt-long (:request-timeout opts)
-                                  :request-timeout
-                                  default-request-timeout-ms)
-   :max-header-bytes (:max-header-bytes opts)
-   :max-body-bytes (:max-body-bytes opts)
-   :max-headers (:max-headers opts)})
+  (let [m {:idle-timeout-ms (opt-long (:idle-timeout opts)
+                                      :idle-timeout default-idle-timeout-ms)
+           :request-timeout-ms (opt-long (:request-timeout opts)
+                                         :request-timeout
+                                         default-request-timeout-ms)
+           :max-header-bytes (:max-header-bytes opts)
+           :max-body-bytes (:max-body-bytes opts)
+           :max-headers (:max-headers opts)}]
+    (if-let [s (:seed opts)] (assoc m :seed (vec s)) m)))
 
 (defn- parse-caps
   "Engine opts into http-parse-request caps; absent caps stay absent
@@ -449,11 +451,12 @@
   locals; every blocking read parks the future. Public as the test
   and embedding seam over the private loop, not part of the request
   vocabulary. opts: :idle-timeout :request-timeout :max-header-bytes
-  :max-body-bytes :max-headers; unknown keys are an error naming
-  them."
+  :max-body-bytes :max-headers, plus :seed (bytes already read off
+  the socket before the engine takes it, embedding use); unknown keys
+  are an error naming them."
   [c handler opts]
   (let [opts (normalize-opts opts)]
-    (loop [seed []
+    (loop [seed (or (:seed opts) [])
            idle-since-ms (time-ms)]
       (let [r (read-request c seed opts idle-since-ms)]
         (case (:kind r)

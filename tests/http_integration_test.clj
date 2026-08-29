@@ -167,4 +167,18 @@
         (is (= :timeout (-> (ex-data e) :error :kind)))
         (is (< dt 2400) (str "read timeout fired at " dt " ms"))))))
 
+(deftest throwing-handler-answers-500-through-the-client
+  ;; the fixture's Ring routes ride the lib engine, so a crashing
+  ;; handler answers a 500 text/plain close and the server survives
+  (hi-with-server
+    (fn [base]
+      (let [r (http/get (str base "/boom") {:throw false})]
+        (is (= 500 (:status r)))
+        (is (= "internal server error" (:body r)))
+        (is (= "text/plain" (get (:headers r) "content-type"))))
+      (let [e (try (http/get (str base "/boom")) (catch Throwable e e))]
+        (is (= "HTTP 500" (ex-message e)))
+        (is (= 500 (:status (ex-data e)))))
+      (is (= 200 (:status (http/get (str base "/hello"))))))))
+
 (run-tests-and-exit)
