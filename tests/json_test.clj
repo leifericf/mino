@@ -131,6 +131,23 @@
 (deftest read-single-quotes-throws
   (is (thrown? (json/read-str "{'a':1}"))))
 
+(deftest read-error-is-classified-json-parse
+  ;; Parse failures classify as :json/parse and carry a 1-based
+  ;; :location {:line :col} in ex-data, matching the toml/yaml readers.
+  (is (= :json/parse
+         (try (json/read-str "hello") (catch e (:mino/kind e)))))
+  ;; classed catch dispatches on the promoted kind
+  (is (= :caught
+         (try (json/read-str "[1,2,]") (catch :json/parse _ :caught))))
+  (let [loc (try (json/read-str "{'a':1}")
+                 (catch e (:location (ex-data e))))]
+    (is (= 1 (:line loc)))
+    (is (= 2 (:col loc))))
+  ;; multi-line input reports the failing line
+  (let [loc (try (json/read-str "[\n  1,\n  bad\n]")
+                 (catch e (:location (ex-data e))))]
+    (is (= 3 (:line loc)))))
+
 ;;;; JSON writer
 
 (deftest write-nil

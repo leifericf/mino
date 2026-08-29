@@ -33,6 +33,11 @@ int          args_have_float(mino_val *args);             /* pure predicate */
 mino_val  *prim_throw_error(mino_state *S, const char *msg); /* longjmp or set_error+NULL */
 mino_val  *prim_throw_classified(mino_state *S, const char *kind,
                                    const char *code, const char *msg);
+/* Same, but the map's :mino/data carries `data` (a detail map read by
+ * ex-data) instead of nil. Pass NULL for the plain form. */
+mino_val  *prim_throw_classified_data(mino_state *S, const char *kind,
+                                      const char *code, const char *msg,
+                                      mino_val *data);
 /* Dangling kv/option-tail key: eval/type MTY001 naming the key. */
 mino_val  *prim_throw_dangling_key(mino_state *S, const mino_val *key);
 int          as_double(const mino_val *v, double *out);   /* pure extraction */

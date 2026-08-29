@@ -28,6 +28,7 @@
 typedef struct {
     mino_state           *S;
     mino_env             *env;
+    const unsigned char  *start; /* buffer head, for line/col of an error */
     const unsigned char  *p;
     const unsigned char  *end;
     mino_val             *key_fn; /* nil or per-key transform */
@@ -38,9 +39,34 @@ static mino_val *jp_value(jp_t *j);
 
 /* ---- errors ---- */
 
+/* Classify a parse failure as :json/parse with the 1-based line/col of
+ * the cursor in ex-data's :location, matching the toml/yaml/xml readers.
+ * Line/col are counted over the bytes consumed so far; a lone '\r' and a
+ * '\r\n' pair each advance one line. */
 static mino_val *jp_err(jp_t *j, const char *msg)
 {
-    return prim_throw_classified(j->S, "user", "MUS001", msg);
+    long line = 1, col = 1;
+    const unsigned char *c;
+    mino_val *lkeys[2], *lvals[2];
+    mino_val *dkeys[1], *dvals[1];
+    mino_val *loc, *data;
+    for (c = j->start; c < j->p && c < j->end; c++) {
+        if (*c == '\n') {
+            line++; col = 1;
+        } else if (*c == '\r') {
+            line++; col = 1;
+            if (c + 1 < j->end && c[1] == '\n') c++;
+        } else {
+            col++;
+        }
+    }
+    lkeys[0] = mino_keyword(j->S, "line");  lvals[0] = mino_int(j->S, line);
+    lkeys[1] = mino_keyword(j->S, "col");   lvals[1] = mino_int(j->S, col);
+    loc = mino_map(j->S, lkeys, lvals, 2);
+    dkeys[0] = mino_keyword(j->S, "location"); dvals[0] = loc;
+    data = mino_map(j->S, dkeys, dvals, 1);
+    return prim_throw_classified_data(j->S, "json/parse", "MJP001",
+                                      msg, data);
 }
 
 static mino_val *jp_err_eof(jp_t *j, const char *what)
@@ -575,6 +601,7 @@ static mino_val *prim_json_parse(mino_state *S, mino_val *args,
     j.S      = S;
     j.env    = env;
     j.p      = (const unsigned char *)s_val->as.s.data;
+    j.start  = j.p;
     j.end    = j.p + s_val->as.s.len;
     j.key_fn = key_fn;
     j.depth  = 0;

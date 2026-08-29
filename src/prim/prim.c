@@ -34,8 +34,9 @@ int args_have_float(mino_val *args)
 /* Throw a classified catchable exception from a primitive.  If inside a
  * try block, this longjmps to the catch handler.  Otherwise it sets a
  * fatal error and the caller returns NULL to propagate to the host. */
-mino_val *prim_throw_classified(mino_state *S, const char *kind,
-                                  const char *code, const char *msg)
+mino_val *prim_throw_classified_data(mino_state *S, const char *kind,
+                                     const char *code, const char *msg,
+                                     mino_val *data)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
         /* Build a diagnostic map so catch normalization preserves the
@@ -82,7 +83,7 @@ mino_val *prim_throw_classified(mino_state *S, const char *kind,
         vals[n] = mino_string(S, msg);
         n++;
         keys[n] = mino_keyword(S, "mino/data");
-        vals[n] = mino_nil(S);
+        vals[n] = (data != NULL) ? data : mino_nil(S);
         n++;
         if (loc_file != NULL && loc_line > 0) {
             mino_val *lkeys[3], *lvals[3];
@@ -103,6 +104,12 @@ mino_val *prim_throw_classified(mino_state *S, const char *kind,
     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, kind, code, msg);
     append_trace(S);
     return NULL;
+}
+
+mino_val *prim_throw_classified(mino_state *S, const char *kind,
+                                  const char *code, const char *msg)
+{
+    return prim_throw_classified_data(S, kind, code, msg, NULL);
 }
 
 /* Throws with internal/MIN001 classification.  Used by call sites that
