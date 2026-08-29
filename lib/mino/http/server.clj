@@ -115,8 +115,8 @@
 (defn- normalize-opts
   "Public opts into engine opts; every deadline carries its unit and
   is type-checked here, the single normalization pass. Unknown keys
-  are an error naming them. :seed is bytes already read off the
-  socket before the engine takes it (embedding use)."
+  are an error naming them. :seed is already-read socket bytes (any
+  byte seq) handed to the engine by an embedder."
   [opts]
   (when-not (map? opts)
     (bad "the connection opts must be a map"))
@@ -254,17 +254,17 @@
         request-timeout (opt-long (:request-timeout opts)
                                    :request-timeout
                                    default-request-timeout-ms)
-        acceptors-n (opt-pos-int (:acceptors opts)
-                                 :acceptors default-acceptors)
-        max-conns (opt-pos-int (:max-conns opts)
-                               :max-conns default-max-conns)
+         acceptors-n (opt-pos-int (:acceptors opts)
+                                  :acceptors default-acceptors)
+         max-conns (opt-pos-int (:max-conns opts)
+                                :max-conns default-max-conns)
          _ (doseq [k [:max-header-bytes :max-body-bytes :max-headers]]
              (check-cap opts k))
          conn-opts (select-keys opts [:idle-timeout :request-timeout
                                       :max-header-bytes :max-body-bytes
                                       :max-headers])
          poll-ms (socket-poll-ms idle-timeout)
-        l (net-listen host port {:backlog 16})
+         l (net-listen host port {:backlog 16})
         running? (atom true)
         permits (a/chan max-conns)
         mailbox (a/chan max-conns)
@@ -451,9 +451,8 @@
   locals; every blocking read parks the future. Public as the test
   and embedding seam over the private loop, not part of the request
   vocabulary. opts: :idle-timeout :request-timeout :max-header-bytes
-  :max-body-bytes :max-headers, plus :seed (bytes already read off
-  the socket before the engine takes it, embedding use); unknown keys
-  are an error naming them."
+  :max-body-bytes :max-headers, plus :seed (already-read socket
+  bytes, embedding use); unknown keys are an error naming them."
   [c handler opts]
   (let [opts (normalize-opts opts)]
     (loop [seed (or (:seed opts) [])
