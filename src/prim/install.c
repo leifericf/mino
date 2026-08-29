@@ -228,8 +228,6 @@ static const mino_prim_domain k_core_domains[] = {
     {"string",      k_prims_string,      &k_prims_string_count},
     {"url",         k_prims_url,         &k_prims_url_count},
     {"codec",       k_prims_codec,       &k_prims_codec_count},
-    {"json",        k_prims_json,        &k_prims_json_count},
-    {"csv",         k_prims_csv,         &k_prims_csv_count},
     {"toml",        k_prims_toml,        &k_prims_toml_count},
     {"yaml",        k_prims_yaml,        &k_prims_yaml_count},
     {"html",        k_prims_html,        &k_prims_html_count},
@@ -410,7 +408,7 @@ static const clj_name_capability_t k_clj_capability_names[] = {
  * (regex / bignum first; agent / host last) for the common-case win on
  * partial-install diagnostics. */
 typedef struct {
-    unsigned int          cap;
+    uint64_t              cap;
     const mino_prim_def  *defs;
     const size_t         *count_ptr;
 } cap_prim_table_t;
@@ -425,12 +423,24 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_STM,    k_prims_stm,    &k_prims_stm_count    },
     { MINO_CAP_HOST,   k_prims_host,   &k_prims_host_count   },
     { MINO_CAP_ASYNC,  k_prims_async,  &k_prims_async_count  },
+    /* Gated data libraries whose reader prims are no longer floor-
+     * installed: an unbound json-parse / csv-parse now reports its
+     * capability, matching the effectful tables above. */
+    { MINO_CAP_JSON,   k_prims_json,   &k_prims_json_count   },
+    { MINO_CAP_CSV,    k_prims_csv,    &k_prims_csv_count    },
+    { MINO_CAP_STORE,  k_prims_store,  &k_prims_store_count  },
+    /* The whole MINO_CAP_NET stack: sockets, TLS, keep-alive pool, and
+     * the http-request orchestrator all report the net capability. */
+    { MINO_CAP_NET,    k_prims_net,         &k_prims_net_count         },
+    { MINO_CAP_NET,    k_prims_tls,         &k_prims_tls_count         },
+    { MINO_CAP_NET,    k_prims_pool,        &k_prims_pool_count        },
+    { MINO_CAP_NET,    k_prims_http_client, &k_prims_http_client_count },
 };
 
 #define K_CAP_PRIM_TABLE_COUNT \
     (sizeof(k_cap_prim_tables) / sizeof(k_cap_prim_tables[0]))
 
-static const mino_capability_info *capability_info_for_bit(unsigned int bit)
+static const mino_capability_info *capability_info_for_bit(uint64_t bit)
 {
     const mino_capability_info *p;
     for (p = k_capability_info; p->name != NULL; p++) {
@@ -510,10 +520,12 @@ static mino_val *prim_mino_installed_p(mino_state *S, mino_val *args,
 static const mino_prim_def k_prims_capability[] = {
     {"mino-installed?", prim_mino_installed_p,
      "Returns true if a named capability has been installed on this "
-     "runtime. Argument is a keyword, symbol, or string; supported names "
-      "include :floor :regex :bignum :multimethods :protocols :transducers "
-      ":io :fs :proc :stm :agent :host :async :net. Used by core.clj sections "
-      "to gate optional surface on the host's install picks."},
+     "runtime. Argument is a keyword, symbol, or string carrying a "
+     "capability label; the full set of labels is the name column of "
+     "mino_capability_list (\"floor\", \"regex\", \"io\", \"net\", "
+     "\"json\", \"store\", and the rest). An unknown label returns false. "
+     "Used by core.clj sections to gate optional surface on the host's "
+     "install picks."},
 };
 
 static const size_t k_prims_capability_count =

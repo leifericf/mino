@@ -142,18 +142,35 @@ void mino_install_clojure_data(mino_state *S, mino_env *env)
     mino_register_bundled_lib(S, "clojure.data", lib_clojure_data_src);
 }
 
+/* clojure.data.json: the json-parse reader prim installs under the JSON
+ * capability (not the floor), so a minimal embed carries neither the
+ * prim nor the bundled read-str / write-str sugar layered over it. The
+ * bit is set here as well as by the capability dispatch loop, matching
+ * mino_install_store, so a direct call sets it too. */
 void mino_install_clojure_data_json(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_json, k_prims_json_count,
+                                       "json");
     mino_register_bundled_lib(S, "clojure.data.json",
                               lib_clojure_data_json_src);
+    S->caps_installed |= MINO_CAP_JSON;
 }
 
+/* clojure.data.csv: the csv-parse reader prim installs under the CSV
+ * capability, mirroring the json path above. */
 void mino_install_clojure_data_csv(mino_state *S, mino_env *env)
 {
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
     (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_csv, k_prims_csv_count,
+                                       "csv");
     mino_register_bundled_lib(S, "clojure.data.csv",
                               lib_clojure_data_csv_src);
+    S->caps_installed |= MINO_CAP_CSV;
 }
 
 /* clojure.test + clojure.template install together. clojure.template

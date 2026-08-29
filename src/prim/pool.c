@@ -624,7 +624,7 @@ static mino_val *prim_pool_close_all(mino_state *S, mino_val *args,
 
 /* ---- install ---- */
 
-static const mino_prim_def k_prims_pool[] = {
+const mino_prim_def k_prims_pool[] = {
     {"pool-checkout", prim_pool_checkout,
      "Returns a live idle keep-alive socket or TLS handle for the "
      "endpoint map {:scheme :host :port :insecure?}, or nil when "
@@ -648,7 +648,7 @@ static const mino_prim_def k_prims_pool[] = {
      "automatically, so pooled sockets never outlive their state."},
 };
 
-static const size_t k_prims_pool_count =
+const size_t k_prims_pool_count =
     sizeof(k_prims_pool) / sizeof(k_prims_pool[0]);
 
 void mino_install_pool(mino_state *S, mino_env *env)

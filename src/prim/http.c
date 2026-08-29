@@ -4072,7 +4072,7 @@ const size_t k_prims_http_count =
 
 /* ---- http-request install (MINO_CAP_NET) ---- */
 
-static const mino_prim_def k_prims_http_client[] = {
+const mino_prim_def k_prims_http_client[] = {
     {"http-request", prim_http_request,
      "Runs one HTTP request end to end from a normalized parts map and "
      "returns {:status :headers :body-bytes :http-version :from-pool? "
@@ -4102,7 +4102,7 @@ static const mino_prim_def k_prims_http_client[] = {
      "validation throws :http/method, :http/headers, or :http/request."},
 };
 
-static const size_t k_prims_http_client_count =
+const size_t k_prims_http_client_count =
     sizeof(k_prims_http_client) / sizeof(k_prims_http_client[0]);
 
 void mino_install_http_client(mino_state *S, mino_env *env)

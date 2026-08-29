@@ -1540,10 +1540,11 @@ void mino_set_resolver(mino_state *S, mino_resolve_fn fn, void *ctx);
  * The name is copied and freed at state teardown. Re-registering the
  * same name silently replaces the previous source.
  *
- * Use mino_install_clojure_<name> wrappers (declared below) when an
- * install hook fits the embedder's group; this raw API is exposed for
- * embedders that bundle their own non-clojure namespaces (mirroring
- * mino_set_resolver for the disk path).
+ * To bring a bundled clojure.* / mino.* namespace online, install its
+ * capability with mino_install(S, env, MINO_CAP_<name>) (see the
+ * capability bits below); that registers the source and its backing
+ * prims together. This raw API is exposed for embedders that bundle
+ * their own namespaces (mirroring mino_set_resolver for the disk path).
  */
 void mino_register_bundled_lib(mino_state *S, const char *name,
                                 const char *source);

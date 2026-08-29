@@ -1509,7 +1509,7 @@ void mino_net_handle_close(mino_val *v)
 
 /* ---- install ---- */
 
-static const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connect,
+const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connect,
      "Connects to host:port over TCP. Returns a socket handle. Opts "
       "map keys :connect-timeout :read-timeout :write-timeout "
       "(non-negative ms; 0 disables the timeout; defaults 10000 / "
@@ -1554,7 +1554,7 @@ static const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connec
      "handles are also closed by the garbage collector."},
 };
 
-static const size_t k_prims_net_count =
+const size_t k_prims_net_count =
     sizeof(k_prims_net) / sizeof(k_prims_net[0]);
 
 void mino_install_net(mino_state *S, mino_env *env)

@@ -235,6 +235,94 @@ static void test_net_capability_gate(void)
     mino_state_free(S);
 }
 
+/* json / csv were historically installed into the floor, so the runtime
+ * lied about them: mino-installed? reported them absent while the
+ * json-parse / csv-parse prims were present in every state. They now
+ * install under MINO_CAP_JSON / MINO_CAP_CSV like every other bundled
+ * data library. A minimal install must carry neither the bit nor the
+ * prim; an explicit install brings both online; and both stay in
+ * MINO_CAP_DEFAULT so the standalone binary is unchanged. */
+static void test_json_csv_capability_gate(void)
+{
+    /* (a) Floor-only: neither capability installed, prims gated out. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        const char *err;
+        mino_install_minimal(S, env);
+        REQUIRE(!mino_capability_installed(S, MINO_CAP_JSON),
+                "json/gate: minimal preset must not install json");
+        REQUIRE(!mino_capability_installed(S, MINO_CAP_CSV),
+                "csv/gate: minimal preset must not install csv");
+        r = mino_eval_string(S, "(mino-installed? :json)", env);
+        REQUIRE(r == mino_false(S),
+                "json/gate: mino-installed? :json is false under minimal");
+        /* The json-parse prim is gated out of the floor now, so a
+         * reference surfaces the MNS002 capability diagnostic rather
+         * than a bare unbound-symbol error. */
+        r = mino_eval_string(S, "(json-parse \"1\")", env);
+        REQUIRE(r == NULL, "json/gate: json-parse unbound under minimal");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "capability 'json'") != NULL,
+                "json/gate: MNS002 names the json capability");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    /* (b) Explicit install: the bits set and the prims work. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        mino_install(S, env, MINO_CAP_JSON | MINO_CAP_CSV);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_JSON),
+                "json/gate: MINO_CAP_JSON installs on demand");
+        REQUIRE(mino_capability_installed(S, MINO_CAP_CSV),
+                "csv/gate: MINO_CAP_CSV installs on demand");
+        r = mino_eval_string(S, "(vector? (json-parse \"[1,2]\"))", env);
+        REQUIRE(r == mino_true(S),
+                "json/gate: json-parse works once installed");
+        r = mino_eval_string(S, "(vector? (csv-parse \"a,b\"))", env);
+        REQUIRE(r == mino_true(S),
+                "csv/gate: csv-parse works once installed");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    /* (c) DEFAULT / sandbox still carries both -- standalone unchanged. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install_sandbox(S, env);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_JSON),
+                "json/gate: sandbox preset carries json (in DEFAULT)");
+        REQUIRE(mino_capability_installed(S, MINO_CAP_CSV),
+                "csv/gate: sandbox preset carries csv (in DEFAULT)");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+}
+
+/* A net-gated prim referenced without the net capability must surface
+ * the MNS002 capability diagnostic ("capability 'net' disabled by
+ * host"), not a bare unbound-symbol error. Pins the net entry in the
+ * MNS002 prim-table sweep so the effectful net stack is as legible on a
+ * partial install as the multimethod / regex capabilities already are. */
+static void test_net_mns002_diagnostic(void)
+{
+    mino_state *S   = mino_state_new();
+    mino_env   *env = mino_env_new(S);
+    mino_val   *r;
+    const char *err;
+    mino_install_sandbox(S, env);   /* DEFAULT: no net */
+    r = mino_eval_string(S, "(net-connect \"localhost\" 80)", env);
+    REQUIRE(r == NULL, "net/mns002: net-connect unbound without net cap");
+    err = mino_last_error(S);
+    REQUIRE(err != NULL && strstr(err, "capability 'net'") != NULL,
+            "net/mns002: diagnostic names the net capability");
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 #if defined(__GNUC__)
 #  define MINO_NOINLINE __attribute__((noinline))
 #else
@@ -798,6 +886,8 @@ int main(void)
     test_eval_ex_out_ex_payload(S, env);
     test_to_int_bignum_round_trip();
     test_net_capability_gate();
+    test_json_csv_capability_gate();
+    test_net_mns002_diagnostic();
     test_atom_reset_tenured();
     test_predicate_grid(S, env);
     test_options(S, env);

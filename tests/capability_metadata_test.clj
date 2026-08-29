@@ -21,7 +21,11 @@
   (is (= :fs   (mino-capability 'mkdir-p)))
   (is (= :fs   (mino-capability 'file-exists?)))
   (is (= :proc (mino-capability 'sh)))
-  (is (= :proc (mino-capability 'sh!))))
+  (is (= :proc (mino-capability 'sh!)))
+  ;; json / csv are gated data libraries, not floor prims: their reader
+  ;; prims carry the capability tag like every other install group.
+  (is (= :json (mino-capability 'json-parse)))
+  (is (= :csv  (mino-capability 'csv-parse))))
 
 (deftest mino-capability-nil-for-core
   ;; Core primitives carry no capability label.

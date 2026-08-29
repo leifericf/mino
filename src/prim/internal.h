@@ -384,13 +384,27 @@ mino_val *mino_module_load_bundled(mino_state *S, mino_env *env,
 mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env);
 void mino_install_proc(mino_state *S, mino_env *env);
 
-/* net.c -- prims are file-local static (registered by the table at TU
- * bottom) except prim_net_connect, called by tls.c for the host+port
+/* net.c -- prim_net_connect is called by tls.c for the host+port
  * convenience arity of tls-connect. net_opt_ms is the shared opts
  * timeout reader (also used by tls.c). */
 mino_val *prim_net_connect(mino_state *S, mino_val *args, mino_env *env);
 int       net_opt_ms(mino_state *S, mino_val *opts, const char *key,
                      long long def, long long *out);
+
+/* The four MINO_CAP_NET prim tables (sockets, TLS, keep-alive pool, and
+ * the http-request orchestrator) are cross-TU so the MNS002 capability
+ * sweep in install.c can map an unbound net symbol to the net
+ * capability on a partial install, the same way it maps regex / io /
+ * async symbols. They are still installed only through their gated
+ * mino_install_* entry points. */
+extern const mino_prim_def k_prims_net[];
+extern const size_t        k_prims_net_count;
+extern const mino_prim_def k_prims_tls[];
+extern const size_t        k_prims_tls_count;
+extern const mino_prim_def k_prims_pool[];
+extern const size_t        k_prims_pool_count;
+extern const mino_prim_def k_prims_http_client[];
+extern const size_t        k_prims_http_client_count;
 
 /* net.c fd bridge for prim/tls.c. The TLS engine pumps a connected
  * descriptor through these with the net prims' timeout and error
@@ -444,8 +458,9 @@ int  mino_tls_handle_recv(mino_state *S, mino_val *v, unsigned char *buf,
 /* pool.c -- keep-alive connection pool per endpoint, per state (the
  * registry hangs off S->net_pools; see runtime/internal.h). State
  * teardown calls the free hook so pooled sockets die with the state.
- * The prim table is file-local static (installed by mino_install_pool,
- * dispatched from the MINO_CAP_NET capability bit like tls.c). The
+ * The prim table is installed by mino_install_pool, dispatched from the
+ * MINO_CAP_NET capability bit like tls.c (its k_prims_pool table is
+ * declared with the net-stack externs above for the MNS002 sweep). The
  * C checkout/return pair is the request loop's seam: endpoint spelled
  * as parts plus the TLS verification mode (an insecure entry never
  * serves a verifying checkout), no prim-map construction, no throws

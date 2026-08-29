@@ -1188,7 +1188,7 @@ void mino_tls_handle_close(mino_val *v)
 
 /* ---- install ---- */
 
-static const mino_prim_def k_prims_tls[] = {
+const mino_prim_def k_prims_tls[] = {
     {"tls-connect",  prim_tls_connect,
      "Starts a TLS client session over a connected net socket "
      "((tls-connect sock host opts?)) or a fresh TCP connection "
@@ -1219,7 +1219,7 @@ static const mino_prim_def k_prims_tls[] = {
      "collector."},
 };
 
-static const size_t k_prims_tls_count =
+const size_t k_prims_tls_count =
     sizeof(k_prims_tls) / sizeof(k_prims_tls[0]);
 
 #ifndef _WIN32
