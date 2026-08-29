@@ -156,6 +156,24 @@
     (is (= (byte-array [104 195 169 108 108 111 32 122 105 112])
            (zip-read ar "s.txt")))))
 
+(deftest zip-write-non-ascii-name-keeps-store-method
+  ;; A name byte >= 0x80 must not leak into the compression-level
+  ;; nibble: :method :store stays stored (not silently deflated) and
+  ;; the bytes round-trip, whatever the name's encoding.
+  (let [payload (byte-array (repeat 300 65))
+        ar (zip-write [{:name "café.txt" :data payload
+                        :method :store}])
+        entries (zip-entries ar)]
+    (is (= [:store] (mapv :method entries)))
+    (is (= "café.txt" (:name (first entries))))
+    (is (= payload (zip-read ar "café.txt"))))
+  ;; A requested level survives untouched for a non-ASCII name too.
+  (let [payload (byte-array (repeat 300 66))
+        a (zip-write [{:name "ü.txt" :data payload :level 4}])
+        b (zip-write [{:name "ü.txt" :data payload :level 4}])]
+    (is (= a b) "non-ASCII name still encodes deterministically")
+    (is (= payload (zip-read a "ü.txt")))))
+
 (deftest zip-write-empty-archive-lists-nothing
   (is (= [] (zip-entries (zip-write [])))))
 

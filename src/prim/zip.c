@@ -607,6 +607,7 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
     size_t len, i;
     long long mtime = 0, n;
     int store = 0, level = def_level;
+    int non_ascii = 0;
     char msg[144];
 
 #define ZIP_WCONTRACT(...)                                              \
@@ -656,15 +657,18 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
     out->add_flags = 0;
     for (i = 0; i < len; i++) {
         out->name[i] = (bytes[i] == '\\') ? '/' : (char)bytes[i];
-        if ((unsigned char)out->name[i] >= 0x80) out->add_flags = 1;
+        if ((unsigned char)out->name[i] >= 0x80) non_ascii = 1;
     }
     out->name[len] = '\0';
     if (out->name[0] == '/')
         ZIP_WCONTRACT("zip-write: entry %lu :name must not start with a "
                       "slash", (unsigned long)idx);
-    /* Bit 11 carries the vendor's UTF-8 handling (D6): non-ASCII
-     * names set it, ASCII names leave it clear. */
-    if (out->add_flags == 0) out->add_flags = MZ_ZIP_FLAG_ASCII_FILENAME;
+    /* Bit 11 carries the vendor's UTF-8 handling (D6): non-ASCII names
+     * leave add_flags clear so miniz sets bit 11, ASCII names set the
+     * ASCII-filename flag. add_flags must stay a genuine flags value:
+     * it is OR'd with the level nibble at the vendor call, so a stray
+     * bit here would corrupt the compression level. */
+    if (!non_ascii) out->add_flags = MZ_ZIP_FLAG_ASCII_FILENAME;
 
     /* :data -- required, bytes or a string (its UTF-8 bytes). */
     v = map_get_val(entry, mino_keyword(S, "data"));
