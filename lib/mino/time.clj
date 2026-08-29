@@ -130,9 +130,17 @@
   (clojure.core/time-map->epoch m))
 
 (defn today
-  "Today's UTC date as a date-only time map (midnight, :ms 0)."
-  []
-  (epoch->time-map (* (quot (now) 86400000) 86400000)))
+  "Today's date as a date-only time map (midnight, :ms 0). The
+  0-arity gives the UTC date. The zone arity gives the civil date on
+  the zone's wall clock right now: the zone is an IANA name (string or
+  keyword, e.g. \"Europe/Oslo\") or a fixed offset in minutes, and the
+  result carries the zone's resolved :offset-min. An unknown zone
+  throws :time/zone. Either way the time fields are zeroed."
+  ([]
+   (epoch->time-map (* (quot (now) 86400000) 86400000)))
+  ([zone]
+   (let [m (in-zone zone (now))]
+     (assoc m :hour 0 :min 0 :sec 0 :ms 0))))
 
 ;;;; Arithmetic
 

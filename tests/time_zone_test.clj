@@ -299,6 +299,58 @@
          (t/format (t/parse "2026-08-25T12:00:00Z")
                    :iso8601 {:zone "Asia/Kathmandu"}))))
 
+(deftest tz-today-zoned
+  ;; (today zone) is the civil date on the zone's wall clock right now,
+  ;; as a date-only map: the same shape the 0-arity yields (time fields
+  ;; zeroed), carrying the zone's resolved offset. "now" is not fixed,
+  ;; so the live arm asserts the shape and the invariant, and the
+  ;; date-shift logic is pinned deterministically below.
+  (let [d (t/today "Australia/Sydney")]
+    (is (map? d))
+    (is (= 0 (:hour d)))
+    (is (= 0 (:min d)))
+    (is (= 0 (:sec d)))
+    (is (= 0 (:ms d)))
+    (is (contains? d :year))
+    (is (contains? d :month))
+    (is (contains? d :day))
+    ;; the zone's offset rides in the map, matching in-zone's shape
+    (is (contains? d :offset-min)))
+  ;; a second zone far from the first is also a well-formed date-only map
+  (let [d (t/today "America/Los_Angeles")]
+    (is (map? d))
+    (is (= 0 (:hour d)))
+    (is (= {:hour 0 :min 0 :sec 0 :ms 0}
+           (select-keys d [:hour :min :sec :ms]))))
+  ;; deterministic date-shift proof via the underlying machinery: an
+  ;; instant that is 2026-08-25T23:30:00Z is still Aug 25 in UTC but
+  ;; already Aug 26 on a +05:45 wall clock. The zoned today reduces to
+  ;; taking the zone-local civil date and zeroing the time fields.
+  (let [e 1787700600000                 ; 2026-08-25T23:30:00Z
+        m (t/in-zone "Asia/Kathmandu" e)]
+    ;; the UTC date at this instant is the 25th
+    (is (= 25 (:day (t/epoch->time-map e))))
+    ;; but the zone-local date is already the 26th
+    (is (= {:year 2026 :month 8 :day 26} (select-keys m [:year :month :day])))
+    ;; zeroing the time fields yields the zoned date-only map for this
+    ;; instant: same date as the wall clock, midnight, offset carried
+    (is (= {:year 2026 :month 8 :day 26 :hour 0 :min 0 :sec 0 :ms 0
+            :offset-min 345}
+           (select-keys (assoc m :hour 0 :min 0 :sec 0 :ms 0)
+                        [:year :month :day :hour :min :sec :ms
+                         :offset-min]))))
+  ;; the same instant read in UTC lands on the 25th, so the zone truly
+  ;; shifts the date, not merely the time
+  (let [e 1787700600000
+        m (t/in-zone "UTC" e)]
+    (is (= {:year 2026 :month 8 :day 25} (select-keys m [:year :month :day])))))
+
+(deftest tz-today-zoned-unknown-zone
+  ;; an unknown zone surfaces the classified :time/zone diagnostic,
+  ;; matching the rest of the facade (ADR 37 :mino/kind is the axis)
+  (is (= :time/zone (tz-kind #(t/today "America/Nowhere"))))
+  (is (= :time/zone (tz-kind #(t/today "Mars/Olympus")))))
+
 (deftest tz-sugar-unknown-zone-carries-data
   ;; The facade rethrow keeps the classification (ADR 37): :mino/kind is
   ;; the dispatch axis, the zone name rides in ex-data as detail.
