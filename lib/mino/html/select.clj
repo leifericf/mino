@@ -23,8 +23,8 @@
   name and value comparisons are case-insensitive, nth-child is
   1-based and counts element siblings only (leading or trailing
   text never disqualifies first-child and last-child), and
-  (nth-child n c) is the stride form with hickory's exact
-  (rem (- distance c) n) arithmetic.
+  (nth-child n c) is the stride form with hickory's exact an+b
+  arithmetic (match distance n*k + c for non-negative k only).
 
   Divergences from hickory, each pinned by tests/html_select_test:
   sequential input (a parse-fragment vector) selects per top-level
@@ -264,8 +264,9 @@
   "The n-moves-until core of hickory's nth-child family over element
   siblings: distance is the 1-based index of loc among its parent's
   element children counted from side-fn (zip/lefts or zip/rights);
-  match when n is 0 and distance equals c, or when distance is
-  congruent to c modulo n (hickory's arithmetic, k unbounded)."
+  match when n is 0 and distance equals c, or when distance equals
+  n*k + c for some non-negative integer k (hickory/CSS an+b, so the
+  stride reaches only positions at or beyond the first match)."
   [side-fn n c]
   (fn [loc]
     (if (sel-element-child-loc? loc)
@@ -276,8 +277,9 @@
         (if (zero? n)
           (if (= distance c)
             loc)
-          (if (zero? (rem (- distance c) n))
-            loc))))))
+          (let [d (- distance c)]
+            (if (and (zero? (rem d n)) (>= (quot d n) 0))
+              loc)))))))
 
 (defn nth-child
   "Returns a selector matching the nth element child of an element

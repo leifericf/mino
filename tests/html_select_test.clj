@@ -320,12 +320,16 @@
     (is (= ["1" "3"] (map sel/text (sel/select (sel/and (sel/tag :li)
                                                         (sel/nth-child 2 1))
                                                frag))))
-    ;; hickory's stride arithmetic is (rem (- distance c) n) with no
-    ;; k >= 0 bound, so distance 1 satisfies c=3 n=2 (CSS an+b would
-    ;; say 3 only); pinned hickory-exact
-    (is (= ["1" "3"] (map sel/text (sel/select (sel/and (sel/tag :li)
-                                                        (sel/nth-child 2 3))
-                                               frag))))
+    ;; hickory/CSS an+b matches distance = n*k + c for non-negative k
+    ;; only, so 2n+3 reaches 3, 5, 7... and never the earlier 1;
+    ;; over four <li> that is just position 3
+    (is (= ["3"] (map sel/text (sel/select (sel/and (sel/tag :li)
+                                                    (sel/nth-child 2 3))
+                                           frag))))
+    ;; 3n+4 reaches 4, 7... : position 4 only
+    (is (= ["4"] (map sel/text (sel/select (sel/and (sel/tag :li)
+                                                    (sel/nth-child 3 4))
+                                           frag))))
     ;; no 5th child
     (is (= [] (sel/select (sel/nth-child 5) frag))))
   ;; text siblings are skipped by the element count
