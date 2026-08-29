@@ -1,6 +1,9 @@
 (require "tests/test")
 (require '[mino.store :as sstore])
 (require '[clojure.string :as str])
+(require '[clojure.test.check :as tc])
+(require '[clojure.test.check.properties :as prop])
+(require '[clojure.test.check.generators :as gen])
 
 ;; mino.store backend seam (ADR 35), third-party side. A backend that
 ;; is neither :memory nor :file rides the whole lifecycle through the
@@ -126,5 +129,146 @@
           "ex-data carries the ::invalid-backend tag"))
     (is (some? (re-find #":commit" (pr-str (ex-data e1))))
         "the missing-op error names the op")))
+
+;; ---------------------------------------------------------------------------
+;; Byte identity across the seam (ADR 11 through ADR 35)
+;; ---------------------------------------------------------------------------
+
+(defn- direct-prim-transact
+  "The pre-seam transact, reconstructed: the pure apply, then the
+  direct store-commit* call carrying the same tx-info literal key
+  order, bypassing the backend seam."
+  [conn tx-data]
+  (let [cur @conn
+        tx-num (:tx cur)
+        instant (store-clock* conn)
+        new-db (:db-after (sstore/with cur tx-data))
+        tx-info {:tx tx-num :instant instant :tx-data tx-data}]
+    (store-commit* conn new-db tx-info)))
+
+(defn- clock-normalized
+  "Replaces every wall-clock :instant value with a fixed token; the
+  clock digits are the only bytes that differ between two runs."
+  [s]
+  (str/replace s #":instant [0-9]+" ":instant CLOCK"))
+
+(defn- wal-lines
+  "The non-empty lines of an already-slurped WAL string."
+  [wal]
+  (vec (filter seq (str/split wal #"\n"))))
+
+(deftest wal-and-snapshot-bytes-match-the-direct-prim-path
+  ;; The same sequence runs twice: once through the pre-seam direct
+  ;; prims, once through the seam. The WAL and snapshot files must be
+  ;; byte-identical modulo the wall clock, and pinned exactly: the
+  ;; golden line format, the 0x00 snapshot header, the printed-form
+  ;; round trip, and equality with the live db.
+  (rm-rf backend-test-dir)
+  (mkdir-p backend-test-dir)
+  (let [path-a (str backend-test-dir "/direct.db")
+        path-b (str backend-test-dir "/seam.db")]
+    (try
+      (let [conn-a (sstore/open path-a)
+            _ (direct-prim-transact conn-a {1 {:name "Alice" :age 30}})
+            _ (direct-prim-transact conn-a [[:db/add 2 :name "Bob"]])
+            wal-a (slurp (str path-a ".wal"))
+            live-a (sstore/db conn-a)
+            _ (do (store-checkpoint* conn-a)
+                  (store-close* conn-a)
+                  (sstore/dissoc-on-close conn-a))
+            snap-a (slurp path-a)
+            conn-b (sstore/open path-b)
+            _ (sstore/transact conn-b {1 {:name "Alice" :age 30}})
+            _ (sstore/transact conn-b [[:db/add 2 :name "Bob"]])
+            wal-b (slurp (str path-b ".wal"))
+            live-b (sstore/db conn-b)
+            _ (sstore/checkpoint conn-b)
+            _ (sstore/close conn-b)
+            snap-b (slurp path-b)
+            lines-a (wal-lines wal-a)
+            lines-b (wal-lines wal-b)]
+        (is (= (map clock-normalized lines-a)
+               (map clock-normalized lines-b))
+            "WAL lines identical on both sides of the seam")
+        (is (= ["{:tx 0, :instant CLOCK, :tx-data {1 {:name \"Alice\", :age 30}}}"
+                "{:tx 1, :instant CLOCK, :tx-data [[:db/add 2 :name \"Bob\"]]}"]
+               (map clock-normalized lines-b))
+            "the golden line format is pinned")
+        (is (= 10 (int (get wal-b (dec (count wal-b)))))
+            "the WAL ends with a newline")
+        (is (= 2 (count lines-b)) "one line per transact")
+        (doseq [l lines-b]
+          (is (= l (pr-str (read-string l)))
+              "each WAL line is exactly the printed tx-info"))
+        (is (= [{:tx 0 :tx-data {1 {:name "Alice" :age 30}}}
+                {:tx 1 :tx-data [[:db/add 2 :name "Bob"]]}]
+               (map #(dissoc % :instant) (map read-string lines-b)))
+            "the parsed entries carry the original tx-data")
+        (let [ins (map :instant (map read-string lines-b))]
+          (is (every? #(and (integer? %) (pos? %)) ins)
+              "the clock values are positive integers")
+          (is (<= (first ins) (second ins))
+              "the clock does not go backwards across txs"))
+        (is (= 0 (int (get snap-a 0))) "the direct path wrote the 0x00 header")
+        (is (= 0 (int (get snap-b 0))) "the seam path wrote the 0x00 header")
+        (is (= live-a (read-string (subs snap-a 1)))
+            "the direct snapshot is exactly the live db")
+        (is (= live-b (read-string (subs snap-b 1)))
+            "the seam snapshot is exactly the live db")
+        (is (= (subs snap-b 1) (pr-str (read-string (subs snap-b 1))))
+            "the snapshot body is exactly the printed db value")
+        (is (= (clock-normalized (subs snap-a 1))
+               (clock-normalized (subs snap-b 1)))
+            "snapshot bytes identical on both sides of the seam")
+        (is (not (file-exists? (str path-a ".wal")))
+            "checkpoint deleted the direct-path WAL")
+        (is (not (file-exists? (str path-b ".wal")))
+            "checkpoint deleted the seam-path WAL"))
+      (finally
+        (rm-rf backend-test-dir)))))
+
+;; ---------------------------------------------------------------------------
+;; Reopen-cycle property
+;; ---------------------------------------------------------------------------
+
+(def gen-fact
+  (gen/tuple (gen/return :db/add)
+             (gen/choose 1 4)
+             (gen/elements [:name :age :score])
+             (gen/elements ["alpha" "beta" "gamma" 7 42])))
+
+(defn- reopen-cycle-preserves-db
+  "Transacts the first half of batches, checkpoints, transacts the
+  rest, closes, and reopens: the reopened db must equal the live db
+  captured before the close, and the WAL must be gone."
+  [batches]
+  (rm-rf backend-test-dir)
+  (mkdir-p backend-test-dir)
+  (let [path (str backend-test-dir "/cycle.db")
+        conn (sstore/open path)
+        half (quot (count batches) 2)]
+    (doseq [b (take half batches)]
+      (sstore/transact conn (vec b)))
+    (sstore/checkpoint conn)
+    (doseq [b (drop half batches)]
+      (sstore/transact conn (vec b)))
+    (let [live (sstore/db conn)]
+      (sstore/close conn)
+      (let [reopened (sstore/open path)
+            ok (and (= live (sstore/db reopened))
+                    (not (file-exists? (str path ".wal"))))]
+        (sstore/close reopened)
+        (rm-rf backend-test-dir)
+        ok))))
+
+(deftest reopen-cycle-preserves-the-live-db
+  (is (true? (:result (tc/quick-check
+                        25
+                        (prop/for-all [batches (gen/vector
+                                                 (gen/vector gen-fact 1 3)
+                                                 1 5)]
+                          (reopen-cycle-preserves-db batches))
+                        :seed 20260829)))
+      "transact, checkpoint, transact, close, reopen equals the live db"))
 
 (run-tests-and-exit)
