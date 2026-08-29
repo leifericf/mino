@@ -634,4 +634,71 @@
                  (try (srv/run-server h {:acceptors 0})
                       (catch e (ex-message e)))))))
 
+(deftest teardown-under-load-stops-bounded-and-drains
+  (let [_ (srv-await-capacity 4)
+        k 2
+        inflight (atom 0)
+        releases (vec (repeatedly k promise))
+        h (fn [req]
+            (let [i (swap! inflight inc)]
+              (deref (nth releases (dec i)) 8000 :t)
+              (swap! inflight dec)
+              {:status 200 :body "done"}))
+        s (srv/run-server h {:acceptors 2 :max-conns 4
+                             :idle-timeout 9000 :request-timeout 9000})]
+    (try
+      (let [conns (mapv (fn [_] (srv-connect (:port s))) (range k))]
+        (doseq [c conns] (srv-send c (srv-close-req "GET" "/load")))
+        (is (srv-wait-for #(= k @inflight) 9000))
+        (let [t0 (time-ms)
+              r ((:stop s))
+              elapsed (- (time-ms) t0)]
+          (is (nil? r))
+          (is (< elapsed 8000) (str "stop took " elapsed "ms"))
+          ;; the straggler workers finish once released: every
+          ;; connection gets its response and closes, and the
+          ;; in-flight count drains to zero
+          (doseq [p releases] (deliver p :go))
+          (doseq [c conns]
+            (let [x (srv-read-one c [])]
+              (is (some? x))
+              (is (= 200 (:code (:resp x)))))
+            (is (nil? (try (net-read c 65536) (catch e :err)))
+                "connection did not close after stop and release")
+            (try (net-close c) (catch e nil)))
+          (is (srv-wait-for #(zero? @inflight) 9000)
+              "in-flight handlers never drained")))
+      (finally
+        ((:stop s))
+        (srv-wait-for #(zero? (mino-thread-count)) 2000)))))
+
+(deftest permits-return-on-normal-throwing-and-reset-paths
+  (let [_ (srv-await-capacity 4)
+        h (fn [req]
+            (if (= "/boom" (:uri req))
+              (throw (ex-info "boom" {}))
+              {:status 200 :body "ok"}))
+        served (fn [s path code]
+                 (let [c (srv-connect (:port s))]
+                   (srv-send c (srv-close-req "GET" path))
+                   (let [x (srv-read-one c [])]
+                     (is (some? x) path)
+                     (is (= code (:code (:resp x))) path))
+                   (try (net-close c) (catch e nil))))]
+    (rs-with h {:acceptors 2 :max-conns 1
+                :idle-timeout 9000 :request-timeout 9000}
+      (fn [s]
+        ;; one permit: any exit path that fails to return it hangs
+        ;; every leg after it
+        (served s "/one" 200)
+        (served s "/boom" 500)
+        (served s "/two" 200)
+        ;; a peer dies mid-request: partial headers, abrupt close; the
+        ;; cushion covers one acceptor poll before the next leg
+        (let [r (srv-connect (:port s))]
+          (srv-send r "GET / HTTP/1.1\r\nHost: t.example\r\n")
+          (try (net-close r) (catch e nil)))
+        (thread-sleep 300)
+        (served s "/three" 200)))))
+
 (run-tests-and-exit)
