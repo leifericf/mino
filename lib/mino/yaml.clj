@@ -1,6 +1,12 @@
 (ns mino.yaml
   "YAML 1.2 subset reader: parse YAML text into plain data (ADR 26).
 
+  Reader only, one-way. This namespace reads YAML into data; there is
+  no YAML emitter, so parsed data does not round-trip back to YAML
+  text. Multi-document streams are read (parse-string returns the first
+  document, parse-string-all every document), but only in the read
+  direction.
+
   (require '[mino.yaml :as yaml])
   (yaml/parse-string \"a: 1\\n\")              ; => {:a 1}
   (yaml/parse-string-all \"--- a\\n--- b\\n\") ; => [\"a\" \"b\"]
@@ -68,7 +74,8 @@
       r)))
 
 (defn parse-string
-  "Parses the first YAML document in s into plain data. Keyword keys
+  "Parses the first YAML document in s into plain data. Reading is
+  one-way: there is no companion emitter back to YAML. Keyword keys
   by default; {:keywords false} keeps string keys. Throws a diagnostic
   with :mino/kind :yaml/parse, :reason and :location {:line :col} in
   its data, on malformed or out-of-subset input."

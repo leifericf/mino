@@ -17,6 +17,15 @@
   parse-fragment returns a vector of top-level nodes with no
   synthesis and no wrapper.
 
+  Directions are asymmetric. parse and parse-fragment read HTML into
+  node maps. to-html serializes those node maps back to HTML text and
+  is the only round-trip path: (parse (to-html (parse s))) equals
+  (parse s) modulo the adjacent-text-run merge, for every input the
+  tolerance tier accepts (see to-html for the full normalization
+  contract). as-hiccup is a ONE-WAY conversion, node maps to hiccup
+  vectors only; there is no hiccup reader here, so hiccup does not
+  round-trip back to HTML through this namespace.
+
   The reader is the native single-pass html-parse prim (ADR 28, the
   json/csv/toml/yaml reader lineage) implementing the campaign's
   pinned tolerance tier: unclosed tags auto-balance at EOF, stray end
@@ -376,7 +385,10 @@
 
 (defn as-hiccup
   "Converts node to hiccup vectors, directly, with no reparse (the
-  hickory.convert/hickory-to-hiccup contract, FR-10).
+  hickory.convert/hickory-to-hiccup contract, FR-10). One-way only:
+  this is a lossy projection to hiccup (comments and document-types
+  collapse to literal strings, not structured forms), and there is no
+  hiccup-to-node inverse here, so the result does not round-trip back.
 
   (html/as-hiccup (html/parse \"<p>x\"))
   => [[:html {} [:head {}] [:body {} [:p {} \"x\"]]]]

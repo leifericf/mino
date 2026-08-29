@@ -1,6 +1,12 @@
 (ns clojure.xml
   "Read XML into the JVM clojure.xml node shape (ADR 28).
 
+  Reader only, one-way. This namespace reads XML into the element-tree
+  data via parse; it provides no emitter, so there is no round-trip
+  back to XML text from here. (An element tree of the shared
+  :tag/:attrs/:content shape can be serialized as HTML through
+  mino.html/to-html, but that is an HTML writer, not an XML emitter.)
+
   (require '[clojure.xml :as xml])
   (xml/parse \"<a k=\\\"1\\\">t &amp; more</a>\")
   => {:tag :a :attrs {:k \"1\"} :content [\"t & more\"]}
@@ -62,7 +68,8 @@
   "Parses s, a string of XML 1.0, into the root element map
   {:tag keyword :attrs {keyword string} :content [string|node]}
   (the JVM clojure.xml shape; see the namespace docstring for the
-  full contract).
+  full contract). Reading is one-way: this namespace has no emitter
+  back to XML.
 
   (xml/parse \"<rss version=\\\"2.0\\\"/>\")
   => {:tag :rss :attrs {:version \"2.0\"} :content []}

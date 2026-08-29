@@ -1,6 +1,10 @@
 (ns mino.toml
   "TOML 1.0 reader: parse TOML text into plain data.
 
+  Reader only, one-way. This namespace reads TOML into data via
+  parse-string; there is no TOML emitter, so parsed data does not
+  round-trip back to TOML text.
+
   (require '[mino.toml :as toml])
   (toml/parse-string \"a = 1\\n\")            ; => {:a 1}
   (toml/parse-string doc {:parse-values f})   ; f applied to leaves
@@ -41,7 +45,8 @@
   (toml-fail :toml/opts "MTOO001" (str "mino.toml: " msg) {:arg arg}))
 
 (defn parse-string
-  "Parses TOML text into plain nested maps with keyword keys.
+  "Parses TOML text into plain nested maps with keyword keys. Reading
+  is one-way: there is no companion emitter back to TOML.
   opts map: {:parse-values f} applies f to every leaf scalar (it must
   be total); the intended use is date coercion, since RFC 3339
   values stay raw strings otherwise. Throws a diagnostic with
