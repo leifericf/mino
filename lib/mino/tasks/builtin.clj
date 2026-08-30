@@ -1577,10 +1577,19 @@
    hosted runners (see run-suite-with-test-bin)."
   []
   (build-zig)
+  ;; `sh` + full print, not `sh!`: a failing shard must show its FAIL /
+  ;; ERROR lines and the run summary, not sh!'s 512-char-truncated throw
+  ;; message (which hid which test failed on this lane).
   (doseq [k (range 1 (inc suite-shard-count))]
-    (println (sh! "sh" "-c"
+    (let [res (sh "sh" "-c"
                   (str "MINO_TEST_SHARD=" k "/" suite-shard-count
-                       " ./mino_zig tests/run.clj")))))
+                       " ./mino_zig tests/run.clj 2>&1"))]
+      (print (:out res))
+      (flush)
+      (when (not= 0 (:exit res))
+        (throw (ex-info (str "test-zig: shard " k "/" suite-shard-count
+                             " exited " (:exit res))
+                        {:shard k :exit (:exit res)}))))))
 
 (defn build-debug-zig
   "Developer debug binary: compile mino with the pinned `zig cc` at
