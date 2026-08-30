@@ -79,4 +79,29 @@
           "truncated v1 image without CRC trailer is rejected")))
   (rm-rf image-test-dir))
 
+(deftest image-round-trip-preserves-immediate-valued-var
+  ;; A var bound to an immediate value (a fixnum, boolean, or char --
+  ;; values that are not heap pointers) must round-trip its VALUE, not
+  ;; just its name. Load into a fresh process so the check sees only what
+  ;; the image restored. The same immediates inside a vector or map
+  ;; already round-trip; a var root must too.
+  (when-not (some? (getenv "OS"))
+    (rm-rf image-test-dir)
+    (mkdir-p image-test-dir)
+    (let [path (str image-test-dir "/immediate.img")
+          ;; Save from a clean process so the image holds only these
+          ;; defs, then load into another clean process -- the
+          ;; cross-state round-trip embed_slad.c exercises in C.
+          save (sh "sh" "-c"
+                   (str "./mino -e '(def rt-fixnum 42) (def rt-flag true)"
+                        " (save-image \"" path "\")'"))
+          load (sh "sh" "-c"
+                   (str "./mino -e '(load-image-into \"" path
+                        "\") (prn [(= rt-fixnum 42) (= rt-flag true)])'"))]
+      (is (= 0 (:exit save)) "save process succeeded")
+      (is (= 0 (:exit load)) "load process succeeded")
+      (is (= "[true true]" (str/trim (:out load)))
+          "immediate-valued vars survived the image round-trip"))
+    (rm-rf image-test-dir)))
+
 (run-tests-and-exit)

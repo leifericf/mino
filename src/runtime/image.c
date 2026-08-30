@@ -459,7 +459,12 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
         img_idt_assign_val(t, v->as.volatile_.val);
         break;
     case MINO_VAR:
-        if (MINO_IS_PTR(v->as.var.root))
+        /* Assign the root whenever the var is bound -- an immediate
+         * value (fixnum, boolean, char) is not a heap pointer but still
+         * must be emitted, exactly as the same immediate is when it sits
+         * in a vector or map. Gating on MINO_IS_PTR dropped the value of
+         * every var bound to an immediate, so it reloaded as nil. */
+        if (v->as.var.bound)
             img_idt_assign_val(t, v->as.var.root);
         if (MINO_IS_PTR(v->as.var.watches))
             img_idt_assign_val(t, v->as.var.watches);
