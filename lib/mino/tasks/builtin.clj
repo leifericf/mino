@@ -891,6 +891,17 @@
                        "#endif\n"
                        "#ifndef _POSIX_C_SOURCE\n"
                        "#  define _POSIX_C_SOURCE 200809L\n"
+                       "#endif\n"
+                       ;; miniz is built with its stdio file APIs disabled
+                       ;; (mino only uses the in-memory codecs). miniz_core.c
+                       ;; defines this at its own top, but in this single TU
+                       ;; an earlier file inlines miniz.h first, so MZ_FILE
+                       ;; would bind to FILE* there and void* in the zip
+                       ;; implementation -- a conflicting-types error. Hoist
+                       ;; the define ahead of every miniz include so MZ_FILE
+                       ;; is void* throughout.\n"
+                       "#ifndef MINIZ_NO_STDIO\n"
+                       "#  define MINIZ_NO_STDIO 1\n"
                        "#endif\n\n")
           body    (str/join "" @chunks)]
       (spit "dist/mino.c" (str header body))
