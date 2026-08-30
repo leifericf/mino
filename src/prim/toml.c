@@ -615,7 +615,7 @@ static int tp_try_date_time(tp_t *t, mino_val **out)
         && tp_is_digit(q[0]) && tp_is_digit(q[1])
         && tp_is_digit(q[3]) && tp_is_digit(q[4])
         && tp_is_digit(q[6]) && tp_is_digit(q[7])) {
-        const unsigned char *scan = q + 8;
+        scan = q + 8;
         if (scan < t->end && *scan == '.') {
             const unsigned char *f = scan + 1;
             while (f < t->end && tp_is_digit(*f)) f++;
