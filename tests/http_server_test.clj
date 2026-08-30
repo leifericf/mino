@@ -451,12 +451,25 @@
         ((:stop s))
         (srv-wait-for #(zero? (mino-thread-count)) 2000)))))
 
+(defn- srv-capacity-target
+  "Free worker slots srv-await-capacity waits for, given a requested n
+  and the host grant. Never more than the grant holds: asking for more
+  free slots than exist can never be satisfied, so the wait collapses
+  to a no-op that lets a leftover thread from the prior test collide
+  with this one -- exactly the starvation a 3-vCPU CI runner hits. On
+  such a host the target clamps to the grant, so the wait means 'let
+  the grant fully drain'; on a host with slots to spare it stays n."
+  [n limit]
+  (min n (max 1 limit)))
+
 (defn- srv-await-capacity
-  "Wait until the grant has n free worker slots, so a pool test that
-  needs simultaneous threads is not defeated by leftovers from the
-  tests before it."
+  "Wait until the grant has enough free worker slots (see
+  srv-capacity-target) that a pool test needing simultaneous threads is
+  not defeated by leftovers from the tests before it."
   [n]
-  (srv-wait-for #(<= n (- (mino-thread-limit) (mino-thread-count))) 5000))
+  (let [want (srv-capacity-target n (mino-thread-limit))]
+    (srv-wait-for #(<= want (- (mino-thread-limit) (mino-thread-count)))
+                  5000)))
 
 (deftest run-server-serves-traffic-and-stops
   (let [h (fn [req] {:status 200 :body (str "saw:" (:uri req))})]
@@ -573,6 +586,19 @@
 (defn- skip-small-grant [name n]
   (println (str "  " name ": needs thread-limit >= " n
                 ", have " (mino-thread-limit) " -- skipped")))
+
+(deftest capacity-target-never-exceeds-the-grant
+  ;; With slots to spare the request is honored verbatim.
+  (is (= 5 (srv-capacity-target 5 8)))
+  (is (= 4 (srv-capacity-target 4 8)))
+  ;; A request larger than the grant clamps to the grant: the wait then
+  ;; means "let the whole grant drain", never an unsatisfiable no-op.
+  (is (= 3 (srv-capacity-target 5 3)))
+  (is (= 4 (srv-capacity-target 5 4)))
+  ;; A grant of exactly the request is a full drain, not an overshoot.
+  (is (= 3 (srv-capacity-target 3 3)))
+  ;; A degenerate grant still asks for at least one free slot.
+  (is (= 1 (srv-capacity-target 5 1))))
 
 (deftest pool-serves-concurrent-connections
   (let [k (srv-pool-k)
