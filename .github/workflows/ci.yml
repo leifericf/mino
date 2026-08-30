@@ -213,8 +213,9 @@ jobs:
       # non-Windows matrix leg. Running the plain suite (already covered
       # by the Test step above) plus ASan x2 plus parity on the slow
       # arm64 runner overran the watchdog. Those checks now run once each
-      # in the dedicated `invariants`, `asan`, and `jit-parity` jobs
-      # below, so no single job carries the whole gate. The full
+      # in the dedicated `invariants`, `asan-auto`/`asan-jit`, and
+      # `jit-parity` jobs below, so no single job carries the whole gate.
+      # The full
       # composite still runs self-contained in ci-nightly and as the
       # human pre-tag `release-gate` task.
 
@@ -252,18 +253,23 @@ jobs:
           ./mino task examples-amalgam
         timeout-minutes: 10
 
-  # Full suite under AddressSanitizer, both JIT modes. The ASan runtime
-  # is the host toolchain's libasan (zig ships none). Split off the old
-  # per-leg gate onto one dedicated Linux runner so the ~10x
-  # instrumentation cost is paid once, not on every matrix leg. Linux is
-  # the canonical ASan lane -- it carries LeakSanitizer (macOS ASan does
-  # not) and its 4-vCPU grant runs the concurrency suite without the
-  # thread-slot starvation a 3-vCPU macOS runner hits under ~10x
-  # instrumentation. arm64/macOS memory-safety stays covered by the
-  # native mac build plus the pinned-zig UBSan/TSan lane. Windows is
-  # absent because mingw ships no libsanitizer.
-  asan:
-    name: gate - asan suite
+  # Full suite under AddressSanitizer. The ASan runtime is the host
+  # toolchain's libasan (zig ships none). Linux is the canonical ASan
+  # lane -- it carries LeakSanitizer (macOS ASan does not) and its
+  # 4-vCPU grant runs the concurrency suite without the thread-slot
+  # starvation a 3-vCPU macOS runner hits under ~10x instrumentation.
+  # arm64/macOS memory-safety stays covered by the native mac build plus
+  # the pinned-zig UBSan/TSan lane. Windows is absent because mingw ships
+  # no libsanitizer.
+  #
+  # The two JIT modes run as SEPARATE PARALLEL jobs. One ASan pass takes
+  # ~16 min on a hosted runner, so a single job running AUTO then eager
+  # serially took ~32 min and overran the 25-minute watchdog (the
+  # watchdog's SIGABRT was misread as a crash; it was just walltime).
+  # Split, each job carries one pass and finishes well inside the cap;
+  # together they preserve the exact both-modes coverage.
+  asan-auto:
+    name: gate - asan suite (auto)
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -280,17 +286,49 @@ jobs:
       - name: Bootstrap mino
         run: make
 
-      - name: Full suite under ASan (auto + eager JIT)
-        # Own watchdog: the ASan suite is the slowest gate piece. Spawn
-        # the task, sleep just under the cap, then SIGABRT any live mino
-        # for a backtrace (crash_handler dumps a stack on SIGABRT, exit
-        # 134) instead of GHA's diagnostic-free SIGKILL.
+      - name: Full suite under ASan (auto JIT)
+        # Own watchdog: spawn the task, sleep just under the cap, then
+        # SIGABRT any live mino for a backtrace (crash_handler dumps a
+        # stack on SIGABRT, exit 134) instead of GHA's diagnostic-free
+        # SIGKILL.
         run: |
           set +e
-          ./mino task test-suite-asan &
+          ./mino task test-suite-asan-auto &
           T_PID=$!
           (sleep 1500; if kill -0 $T_PID 2>/dev/null; then
-             echo "##[warning]Watchdog: asan suite exceeded 25m; SIGABRT mino"
+             echo "##[warning]Watchdog: asan auto suite exceeded 25m; SIGABRT mino"
+             pkill -ABRT mino_asan 2>/dev/null
+             pkill -ABRT mino 2>/dev/null
+           fi) &
+          WD_PID=$!
+          wait $T_PID
+          RC=$?
+          sleep 2
+          kill $WD_PID 2>/dev/null || true
+          exit $RC
+        timeout-minutes: 28
+
+  asan-jit:
+    name: gate - asan suite (jit)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      MINO_SLOW_HOST: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Full suite under ASan (eager JIT)
+        run: |
+          set +e
+          ./mino task test-suite-asan-jit &
+          T_PID=$!
+          (sleep 1500; if kill -0 $T_PID 2>/dev/null; then
+             echo "##[warning]Watchdog: asan jit suite exceeded 25m; SIGABRT mino"
              pkill -ABRT mino_asan 2>/dev/null
              pkill -ABRT mino 2>/dev/null
            fi) &

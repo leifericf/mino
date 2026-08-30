@@ -26,6 +26,10 @@
                    :task mino.tasks.builtin/build-asan}
   test-suite-asan {:doc  "Build mino_asan and run the full suite under it in both JIT modes"
                    :task mino.tasks.builtin/test-suite-asan}
+  test-suite-asan-auto {:doc  "Full suite under ASan in AUTO JIT mode (parallel CI half)"
+                        :task mino.tasks.builtin/test-suite-asan-auto}
+  test-suite-asan-jit {:doc  "Full suite under ASan in eager --jit=on mode (parallel CI half)"
+                       :task mino.tasks.builtin/test-suite-asan-jit}
   build-ubsan     {:doc  "Build mino_ubsan with UndefinedBehaviorSanitizer"
                    :task mino.tasks.builtin/build-ubsan}
   build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"

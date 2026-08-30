@@ -1207,13 +1207,38 @@
    helpers / invoke) is instrumented via jit-enable-flags, so eager
    mode pushes every test through the native tier under ASan; the
    emitted machine code itself stays uninstrumented. The full suite
-   runs with no exclusions. Factored out of release-gate so the push CI
-   ASan job and the composite gate share one definition."
+   runs with no exclusions. Used by the local pre-land release gate,
+   which builds once and runs both passes serially. Push CI splits the
+   two passes across parallel jobs instead -- see test-suite-asan-auto
+   and test-suite-asan-jit -- so neither overruns its watchdog."
   []
   (build-asan)
   (run-suite-with-test-bin "./mino_asan" [])
   (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
   (println "  test-suite-asan: OK"))
+
+(defn test-suite-asan-auto
+  "Build mino_asan and run the full suite under it in AUTO JIT mode.
+   Push CI runs this alongside test-suite-asan-jit as two parallel
+   jobs: one ASan pass takes ~16 min on a hosted Linux runner, so a
+   single job running both passes serially overran the gate's 25-minute
+   watchdog. Split, each job carries one pass and finishes well inside
+   the cap while the two together preserve the exact both-modes
+   coverage the release gate runs locally."
+  []
+  (build-asan)
+  (run-suite-with-test-bin "./mino_asan" [])
+  (println "  test-suite-asan-auto: OK"))
+
+(defn test-suite-asan-jit
+  "Build mino_asan and run the full suite under it in eager --jit=on
+   mode, pushing every test through the native tier under ASan. The
+   eager half of the split ASan gate; see test-suite-asan-auto for why
+   the two passes run as separate parallel CI jobs."
+  []
+  (build-asan)
+  (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
+  (println "  test-suite-asan-jit: OK"))
 
 (defn build-ubsan
   "Build mino_ubsan with UndefinedBehaviorSanitizer. Catches signed
