@@ -1357,6 +1357,21 @@ int main(int argc, char **argv)
         if (sc > 0) { n = (int)sc; }
 #endif
         if (n < 1) { n = 1; }
+        /* MINO_THREAD_LIMIT overrides the auto-detected grant. Lets an
+         * operator cap mino's host-thread usage in a constrained
+         * container, and lets the suite reproduce a small-core host
+         * (the pool tests scale their concurrency to this grant). A
+         * non-positive or unparseable value is ignored. */
+        {
+            const char *raw = getenv("MINO_THREAD_LIMIT");
+            if (raw != NULL && raw[0] != '\0') {
+                char     *endp = NULL;
+                long      v    = strtol(raw, &endp, 10);
+                if (endp != raw && *endp == '\0' && v >= 1) {
+                    n = (int)v;
+                }
+            }
+        }
         mino_set_option(S, MINO_OPT_THREAD_LIMIT, (size_t)n);
     }
 
