@@ -254,25 +254,25 @@ jobs:
 
   # Full suite under AddressSanitizer, both JIT modes. The ASan runtime
   # is the host toolchain's libasan (zig ships none). Split off the old
-  # per-leg gate onto one Linux + one macOS runner: two architectures'
-  # worth of ASan coverage without paying the ~10x instrumentation cost
-  # on every matrix leg. Windows is absent because mingw ships no
-  # libsanitizer.
+  # per-leg gate onto one dedicated Linux runner so the ~10x
+  # instrumentation cost is paid once, not on every matrix leg. Linux is
+  # the canonical ASan lane -- it carries LeakSanitizer (macOS ASan does
+  # not) and its 4-vCPU grant runs the concurrency suite without the
+  # thread-slot starvation a 3-vCPU macOS runner hits under ~10x
+  # instrumentation. arm64/macOS memory-safety stays covered by the
+  # native mac build plus the pinned-zig UBSan/TSan lane. Windows is
+  # absent because mingw ships no libsanitizer.
   asan:
-    name: gate - asan suite (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14]
-    runs-on: ${{ matrix.os }}
+    name: gate - asan suite
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
     env:
-      # ASan runs the suite ~10x slower, and the macOS leg is a 3-vCPU
-      # runner; the parked-gc net stress scales its forced-collection
-      # churn down on this flag so its deep sweep does not starve the
-      # fixture accept loop into a read timeout under instrumentation.
+      # ASan runs the suite ~10x slower; the parked-gc net stress scales
+      # its forced-collection churn down on this flag so its deep sweep
+      # does not starve the fixture accept loop into a read timeout under
+      # instrumentation.
       MINO_SLOW_HOST: "1"
     steps:
       - uses: actions/checkout@v5
