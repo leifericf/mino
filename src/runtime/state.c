@@ -832,7 +832,18 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
     volatile char probe = 0;
     mino_val   *v;
     int           saved_try;
+    /* gc_save (the gc_pin stack) is a C-side root set. A prim that pins
+     * values and then throws leaves those pins on the stack: the throw
+     * longjmps past its own gc_unpin, and mino has no cleanup-on-unwind.
+     * gc_depth is rewound by the landing pads below, but gc_save_len is
+     * not -- so across many top-level evals on one reused state (an
+     * embedder loop, the fuzz harness) the leaked pins accumulate until
+     * the fixed pin stack overflows. Snapshot the length here and rewind
+     * it on every exit, the same boundary invariant gc_depth already
+     * keeps. */
+    int           saved_gc_save;
     saved_try = mino_current_ctx(S)->try_depth;
+    saved_gc_save = mino_current_ctx(S)->gc_save_len;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     mino_current_ctx(S)->eval_steps     = 0;
@@ -918,6 +929,9 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
                                   "uncaught exception");
                 }
             }
+            /* Rewind the pin stack the throw unwound past (see the
+             * saved_gc_save note above). */
+            mino_current_ctx(S)->gc_save_len = saved_gc_save;
             mino_current_ctx(S)->call_depth = 0;
             return NULL;
         }
@@ -932,6 +946,10 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
      * return path, which would silently disable collection. */
     assert(mino_current_ctx(S)->gc_depth
            == mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth);
+    /* A normal return balances its own pins; rewind defensively so a
+     * prim that leaks one on a non-throwing path still cannot accumulate
+     * across evals on a reused state. */
+    mino_current_ctx(S)->gc_save_len = saved_gc_save;
     if (v == NULL) {
         append_trace(S);
         mino_current_ctx(S)->call_depth = 0;
