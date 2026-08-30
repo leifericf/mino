@@ -28,7 +28,10 @@
 
 (def ascii-100k (apply str (repeat 100000 "x")))
 
-(def budget-ms 2000)
+;; A sanitizer build (MINO_SLOW_HOST) runs ~10x slower, so the drain
+;; still exercises the code path for memory safety but its throughput
+;; bound relaxes; native lanes keep the tight 2s budget.
+(def budget-ms (if (getenv "MINO_SLOW_HOST") 12000 2000))
 
 (deftest per-char-subs-stays-within-budget
   (let [t0 (nano-time)

@@ -175,7 +175,11 @@
   (let [t0 (nano-time)
         v (thunk)
         ms (quot (- (nano-time) t0) 1000000)]
-    (is (< ms 5000) (str "hostile vector took " ms "ms; bound 5000ms"))
+    ;; A sanitizer build (MINO_SLOW_HOST) runs ~10x slower; the parse
+    ;; still runs for its memory-safety coverage, only the linear-time
+    ;; guard relaxes. Native lanes keep the tight bound.
+    (let [bound (if (getenv "MINO_SLOW_HOST") 20000 5000)]
+      (is (< ms bound) (str "hostile vector took " ms "ms; bound " bound "ms")))
     v))
 
 (deftest xml-fz-hostile-cap-deep-nesting

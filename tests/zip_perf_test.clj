@@ -263,7 +263,11 @@
       (is (= (byte-array 0) (zip-read ar (format "f%05d" i)))
           (str "sampled read f" (format "%05d" i))))
     (is (= (byte-array 0) (zip-read ar "f65535")))
-    (is (< lms 5000) (str "zip-entries 65,536-entry zip64 directory "
-                          "took " lms "ms"))))
+    ;; Under a sanitizer build (MINO_SLOW_HOST) the ~10x instrumentation
+    ;; slowdown makes the wall-clock bound meaningless; the operation
+    ;; still runs for its memory-safety coverage, only the throughput
+    ;; guard relaxes. Native lanes keep the tight bound.
+    (is (< lms (if (getenv "MINO_SLOW_HOST") 20000 5000))
+        (str "zip-entries 65,536-entry zip64 directory took " lms "ms"))))
 
 (run-tests-and-exit)
