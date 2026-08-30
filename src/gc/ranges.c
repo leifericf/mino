@@ -134,10 +134,18 @@ void gc_build_range_index(mino_state *S)
         S->gc.ranges_o[S->gc.ranges_o_len].h     = h;
         S->gc.ranges_o_len++;
     }
-    qsort(S->gc.ranges_y, S->gc.ranges_y_len,
-          sizeof(*S->gc.ranges_y), gc_range_cmp);
-    qsort(S->gc.ranges_o, S->gc.ranges_o_len,
-          sizeof(*S->gc.ranges_o), gc_range_cmp);
+    /* Skip the sort when a generation is empty: gc_ranges_grow leaves the
+     * array pointer NULL until it first grows, and qsort declares its base
+     * argument non-null, so qsort(NULL, 0, ...) is undefined behavior a
+     * generation with no live headers would otherwise trigger. */
+    if (S->gc.ranges_y_len > 0) {
+        qsort(S->gc.ranges_y, S->gc.ranges_y_len,
+              sizeof(*S->gc.ranges_y), gc_range_cmp);
+    }
+    if (S->gc.ranges_o_len > 0) {
+        qsort(S->gc.ranges_o, S->gc.ranges_o_len,
+              sizeof(*S->gc.ranges_o), gc_range_cmp);
+    }
     S->gc.ranges_valid          = 1;
     S->gc.ranges_y_pending_len  = 0;
     S->gc.ranges_o_pending_len  = 0;
