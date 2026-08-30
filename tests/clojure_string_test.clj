@@ -177,9 +177,18 @@
   ;; with no require; mino must too. Spawned as a fresh process because
   ;; this suite itself requires the namespace: in-process the module
   ;; cache would mask a preload regression.
-  (let [script "/tmp/mino-str-no-require.clj"]
+  (let [script "/tmp/mino-str-no-require.clj"
+        ;; `timeout` on Linux, `gtimeout` (coreutils) on macOS, or no
+        ;; watchdog when neither is on PATH -- the macOS runner ships
+        ;; neither by default, so a hard dependency exits 127 there.
+        tc (cond
+             (zero? (:exit (sh "sh" "-c" "command -v timeout")))  "timeout"
+             (zero? (:exit (sh "sh" "-c" "command -v gtimeout"))) "gtimeout"
+             :else nil)]
     (spit script "(println (clojure.string/capitalize \"abc\"))\n")
-    (let [{:keys [exit out]} (sh "timeout" "10" "./mino" script)]
+    (let [{:keys [exit out]} (if tc
+                               (sh tc "10" "./mino" script)
+                               (sh "./mino" script))]
       (is (zero? exit))
       (is (= "Abc" (str/trim out))))))
 

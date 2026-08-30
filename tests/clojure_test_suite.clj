@@ -101,8 +101,19 @@
     (and (= (:fail summary) 0) (= (:error summary) 0))  :ok
     :else                    :test-failures))
 
+(defn- timeout-cmd
+  "The per-file watchdog command: `timeout` on Linux, `gtimeout` from
+  GNU coreutils on macOS, or nil when neither is on PATH (then each file
+  runs unbounded). Probed once so a runner without either still passes."
+  []
+  (cond
+    (zero? (:exit (sh "sh" "-c" "command -v timeout")))  "timeout"
+    (zero? (:exit (sh "sh" "-c" "command -v gtimeout"))) "gtimeout"
+    :else nil))
+
 (defn run-driver []
-  (let [files (sort (filter (fn [f]
+  (let [tc    (timeout-cmd)
+        files (sort (filter (fn [f]
                               (and (ends-with? f ".cljc")
                                    (not (ends-with? f "/portability.cljc"))
                                    (not (ends-with? f "/number_range.cljc"))))
@@ -110,11 +121,15 @@
         total (count files)
         results (atom [])]
 
-    (println (str "Running " total " suite files (sequential per-process, 30s/file)..."))
+    (println (str "Running " total " suite files (sequential per-process, "
+                  (if tc (str tc " 30s/file") "no per-file watchdog on PATH")
+                  ")..."))
     (doseq [f files]
       (let [base (last (split f "/"))
-            {:keys [exit out]} (sh "timeout" "30" "./mino" driver f)
-            timed-out? (= exit 124)
+            {:keys [exit out]} (if tc
+                                 (sh tc "30" "./mino" driver f)
+                                 (sh "./mino" driver f))
+            timed-out? (and tc (= exit 124))
             err-line (cond
                        timed-out? "TIMEOUT after 30s"
                        :else      (first-error-line out))
