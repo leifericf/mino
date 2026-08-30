@@ -263,11 +263,13 @@
       (is (= (byte-array 0) (zip-read ar (format "f%05d" i)))
           (str "sampled read f" (format "%05d" i))))
     (is (= (byte-array 0) (zip-read ar "f65535")))
-    ;; Under a sanitizer build (MINO_SLOW_HOST) the ~10x instrumentation
-    ;; slowdown makes the wall-clock bound meaningless; the operation
-    ;; still runs for its memory-safety coverage, only the throughput
-    ;; guard relaxes. Native lanes keep the tight bound.
-    (is (< lms (if (getenv "MINO_SLOW_HOST") 20000 5000))
+    ;; Listing a 65,536-entry zip64 directory is alloc-heavy and its
+    ;; wall time swings with the build: an optimized host cc lands well
+    ;; under a second, but a static zig build or a sanitizer build
+    ;; (MINO_SLOW_HOST) is several times slower. The bound is a coarse
+    ;; regression guard, not a micro-benchmark, so it leaves generous
+    ;; headroom over the slowest correct build rather than flaking on it.
+    (is (< lms (if (getenv "MINO_SLOW_HOST") 20000 10000))
         (str "zip-entries 65,536-entry zip64 directory took " lms "ms"))))
 
 (run-tests-and-exit)
