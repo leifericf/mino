@@ -79,8 +79,11 @@
                      "sys.stdout.buffer.write(zlib.compress(sys.stdin.buffer.read(),"
                      l "))' | base64"))]
         (is (zero? exit) (str "python3 level " l " encode failed: " out))
+        ;; GNU `base64` wraps at 76 columns; BSD `base64` (macOS) emits
+        ;; one line. Strip all whitespace so the strict base64-decode
+        ;; (no embedded whitespace) accepts either platform's output.
         (is (= (byte-array (map int payload))
-               (zlib-decompress (base64-decode (str/trim-newline out)))))))
+               (zlib-decompress (base64-decode (str/replace out #"\s" "")))))))
     (println "compress: python3 absent -- decode spread skipped")))
 
 ;;; writer header pins (byte-for-byte, headers only)
