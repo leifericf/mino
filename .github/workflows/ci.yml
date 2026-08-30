@@ -365,6 +365,13 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # TSan + UBSan instrumentation makes every stop-the-world
+      # collection far slower; the parked-gc net stress scales its
+      # forced-collection churn down on this flag so the fixture accept
+      # loop is not starved into a read timeout. Same knob the emulated
+      # jit-host canary uses; the deep sweep stays on native CI.
+      MINO_SLOW_HOST: "1"
     steps:
       - uses: actions/checkout@v5
 
