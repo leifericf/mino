@@ -1190,6 +1190,20 @@
   (build-sanitized "asan" "mino_asan"
                    ["-fsanitize=address"]))
 
+(defn test-suite-asan
+  "Build mino_asan and run the full suite under it in both JIT modes
+   (AUTO and eager --jit=on). The JIT's C side (emit / patcher /
+   helpers / invoke) is instrumented via jit-enable-flags, so eager
+   mode pushes every test through the native tier under ASan; the
+   emitted machine code itself stays uninstrumented. The full suite
+   runs with no exclusions. Factored out of release-gate so the push CI
+   ASan job and the composite gate share one definition."
+  []
+  (build-asan)
+  (run-suite-with-test-bin "./mino_asan" [])
+  (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
+  (println "  test-suite-asan: OK"))
+
 (defn build-ubsan
   "Build mino_ubsan with UndefinedBehaviorSanitizer. Catches signed
    overflow, misaligned loads, invalid shifts, and similar UB. The
@@ -2155,18 +2169,8 @@
    (check-reloc-mirror)
    (check-stencil-registry)
    (test-suite)
-   (build-asan)
-   ;; ASan suite in both JIT modes: the JIT's C side (emit / patcher /
-   ;; helpers / invoke) is enabled in the sanitizer build via
-   ;; jit-enable-flags, so eager mode pushes every test through the
-   ;; native tier under ASan. Emitted machine code itself stays
-   ;; uninstrumented (see sanitize-zig's boundary note). The full suite
-   ;; runs with no exclusions: the parked-thread scan + deferred
-   ;; finalization fixes closed the socket-fixture unsoundness the
-   ;; exclusion list used to hide (leak-sanitizer also verifies the
-   ;; exit-time teardown path).
-   (run-suite-with-test-bin "./mino_asan" [])
-   (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
+   ;; Full suite under ASan in both JIT modes (see test-suite-asan).
+   (test-suite-asan)
   (test-jit-parity)
   (examples)
   (examples-amalgam)
