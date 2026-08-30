@@ -70,12 +70,25 @@
   ;; soup waits in the kernel backlog until it does
   {:idle-timeout 1000 :request-timeout 400})
 
+(defn- fz-await-slot
+  "Wait for a free host-thread slot before spawning the acceptor
+  future. A finished worker's slot is released a beat after the future
+  that held it resolves, so on a loaded low-core CI runner a
+  back-to-back fixture can otherwise spawn into a momentarily-full grant
+  and throw MTH001. Bounded so a genuine exhaustion still surfaces."
+  []
+  (loop [n 300]
+    (when (and (>= (mino-thread-count) (mino-thread-limit)) (pos? n))
+      (thread-sleep 10)
+      (recur (dec n)))))
+
 (defn- fz-with
   "Run (body started) against a fresh listener serving n connections
   through serve-conn*, one after another inside a single future.
   Every served connection's engine outcome lands in :results; a
   :engine-crash entry means the engine let an exception escape."
   [n handler opts body]
+  (fz-await-slot)
   (let [l (net-listen "127.0.0.1" 0 {:backlog 16})
         o (merge fz-default-opts opts)
         running? (atom true)
