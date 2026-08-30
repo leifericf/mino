@@ -97,4 +97,20 @@
       (is (re-find #"\(\"foo\" \"bar\"\)" out))
       (is (not (re-find #"\(\"probe\"" out))))))
 
+(deftest thread-limit-env-overrides-the-host-grant
+  (when-not (some? (getenv "OS"))
+    ;; MINO_THREAD_LIMIT caps the auto-detected grant so an operator can
+    ;; constrain mino's host-thread usage; the suite relies on it to
+    ;; reproduce a small-core host for the pool concurrency tests.
+    (let [r (sh "sh" "-c"
+                "MINO_THREAD_LIMIT=3 ./mino -e '(mino-thread-limit)'")]
+      (is (= 0 (:exit r)))
+      (is (= "3" (str/trim (:out r)))))
+    ;; A non-positive or unparseable value is ignored; the grant falls
+    ;; back to the auto-detected count, which is always a positive int.
+    (let [r (sh "sh" "-c"
+                "MINO_THREAD_LIMIT=bogus ./mino -e '(pos? (mino-thread-limit))'")]
+      (is (= 0 (:exit r)))
+      (is (= "true" (str/trim (:out r)))))))
+
 (run-tests-and-exit)
