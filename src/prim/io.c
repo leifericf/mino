@@ -9,11 +9,16 @@
 #if !defined(_MSC_VER)
 #  include <dirent.h>
 #  include <sys/stat.h>
-#  include <sys/utsname.h>
 #  include <unistd.h>
-#  include <pwd.h>
 #else
 #  include "win_dirent.h"
+#endif
+/* POSIX-only host-identity headers: absent on every Windows toolchain
+ * (mingw included), so guard on _WIN32, not _MSC_VER. The prims that use
+ * them (uname, user-name) carry their own _WIN32 branches below. */
+#if !defined(_WIN32)
+#  include <sys/utsname.h>
+#  include <pwd.h>
 #endif
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
