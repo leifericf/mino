@@ -58,6 +58,12 @@ jobs:
       run:
         shell: bash
     timeout-minutes: 75
+    env:
+      # The gate runs the suite under ASan on 3-vCPU macOS + arm runners;
+      # the parked-gc net stress scales its forced-collection churn down
+      # on this flag so it does not starve the fixture accept loop under
+      # instrumentation. Same knob the push-path asan + sanitizer lanes use.
+      MINO_SLOW_HOST: "1"
     steps:
       - uses: actions/checkout@v5
 
