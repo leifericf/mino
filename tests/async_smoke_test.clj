@@ -259,3 +259,16 @@
           [v ch] (a/alts!! [(a/chan) t])]
       (is (nil? v))
       (is (= t ch)))))
+
+;; A timeout whose deadline never arrives is still queued in the timer
+;; subsystem when the process exits. State teardown must release the
+;; pending timer's retained callback while the ref registry is still
+;; live, then exit cleanly. POSIX-only: the sh prim needs a POSIX shell.
+(deftest unfired-timeout-tears-down-cleanly
+  (testing "a process holding a pending timeout channel exits 0"
+    (when-not (some? (getenv "OS"))
+      (let [r (sh "./mino" "-e"
+                  (str "(require (quote [clojure.core.async :as a])) "
+                       "(a/timeout 600000) (print \"ok\")"))]
+        (is (= 0 (:exit r)))
+        (is (= "ok" (:out r)))))))

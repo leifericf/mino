@@ -659,6 +659,13 @@ void mino_state_free(mino_state *S)
      * the stats ring is off. */
     mino_jit_stats_seal_all();
     state_free_root_envs(S);
+    /* Release the async run queue and any pending timers before the ref
+     * registry: an unfired timer still holds a mino_ref on its callback
+     * and drops it via mino_unref, which unlinks from S->ref_roots.
+     * Freeing the registry first would leave that unref touching (and
+     * double-freeing) already-freed nodes. Same ref-root dependency as
+     * mino_net_pool_state_free above. */
+    state_free_async(S);
     state_free_refs(S);
     state_free_ns_aliases(S);
     state_free_ns_env_table(S);
@@ -724,7 +731,6 @@ void mino_state_free(mino_state *S)
     state_free_gc_aux(S);
     state_free_diag_state(S);
     state_free_string_interns(S);
-    state_free_async(S);
     state_free_heap(S);
     mino_state_lock_destroy(S);
     mino_worker_list_lock_destroy(S);
