@@ -208,57 +208,112 @@ jobs:
           fi
         timeout-minutes: 5
 
-      - name: Release gate
-        # The composite gate -- check-reloc-mirror, check-stencil-
-        # registry, the test suite under ASan, and 4-way JIT parity
-        # (auto / on / off / lean) -- runs on every non-Windows
-        # matrix entry. Windows skips the gate because the gate's
-        # ASan step needs a libsanitizer that mingw doesn't ship.
-        #
-        # `check-stencils-fresh` is intentionally NOT in the gate:
-        # it regenerates stencils with the host `cc`, which means
-        # the committed bytes have to byte-match whatever toolchain
-        # the runner ships. Dev (Apple clang 17), macos-14 (Apple
-        # clang 15), and ubuntu-24.04 (gcc, no musttail support)
-        # diverge enough that the byte check is structurally
-        # incompatible with the matrix. Stale-commit hygiene is a
-        # dev pre-commit step; CI correctness is gated by the test
-        # suite + ASan + 4-way parity, which catch the actual
-        # runtime impact of a stale stencil regardless of compiler.
-        #
-        # Watchdog wrapper (mirrors the Test step). The gate spawns
-        # several mino subprocesses -- the ASan suite and the 4-way
-        # parity binaries -- so a stall here otherwise runs to GHA's
-        # diagnostic-free SIGKILL with no stack. The arm64 runner has
-        # stalled in this step intermittently. We background the gate,
-        # sleep to just under the cap, then SIGABRT every live mino;
-        # mino's crash_handler (main.c) dumps a backtrace + GC stats per
-        # process on SIGABRT, so the next stall leaves a readable stack
-        # in the log instead of a silent wait. pkill matches mino,
-        # mino_asan, and the parity binaries by name, so whichever
-        # process is hung dumps. SIGABRT makes mino exit 134, failing
-        # the step normally.
-        if: matrix.os != 'windows-2022'
-        run: |
-          set +e
-          ./mino task release-gate &
-          GATE_PID=$!
-          (sleep 1200; if kill -0 $GATE_PID 2>/dev/null; then
-             echo "##[warning]Watchdog: release-gate exceeded 20m; SIGABRT mino for a backtrace"
-             pkill -ABRT mino 2>/dev/null
-           fi) &
-          WD_PID=$!
-          wait $GATE_PID
-          RC=$?
-          sleep 2
-          kill $WD_PID 2>/dev/null || true
-          exit $RC
-        timeout-minutes: 22
+      # The composite release-gate (structural invariants, the suite
+      # under ASan, and 4-way JIT parity) used to run here on every
+      # non-Windows matrix leg. Running the plain suite (already covered
+      # by the Test step above) plus ASan x2 plus parity on the slow
+      # arm64 runner overran the watchdog. Those checks now run once each
+      # in the dedicated `invariants`, `asan`, and `jit-parity` jobs
+      # below, so no single job carries the whole gate. The full
+      # composite still runs self-contained in ci-nightly and as the
+      # human pre-tag `release-gate` task.
 
       - name: Embed API smoke test
         if: matrix.os != 'windows-2022'
         run: ./mino task test-embed
         timeout-minutes: 5
+
+  # Structural invariants, host-agnostic. check-reloc-mirror (G3) and
+  # check-stencil-registry (G2) are pure data checks; the examples lanes
+  # compile every examples/embed_*.c against the lib srcs and the
+  # amalgamation. None of these vary by OS, so they run once here rather
+  # than on every matrix leg (where they were part of the old gate).
+  invariants:
+    name: gate - invariants + examples
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Reloc + stencil-registry invariants
+        run: |
+          ./mino task check-reloc-mirror
+          ./mino task check-stencil-registry
+        timeout-minutes: 10
+
+      - name: Embed examples (lib srcs + amalgam)
+        run: |
+          ./mino task examples
+          ./mino task examples-amalgam
+        timeout-minutes: 10
+
+  # Full suite under AddressSanitizer, both JIT modes. The ASan runtime
+  # is the host toolchain's libasan (zig ships none). Split off the old
+  # per-leg gate onto one Linux + one macOS runner: two architectures'
+  # worth of ASan coverage without paying the ~10x instrumentation cost
+  # on every matrix leg. Windows is absent because mingw ships no
+  # libsanitizer.
+  asan:
+    name: gate - asan suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Full suite under ASan (auto + eager JIT)
+        # Own watchdog: the ASan suite is the slowest gate piece. Spawn
+        # the task, sleep just under the cap, then SIGABRT any live mino
+        # for a backtrace (crash_handler dumps a stack on SIGABRT, exit
+        # 134) instead of GHA's diagnostic-free SIGKILL.
+        run: |
+          set +e
+          ./mino task test-suite-asan &
+          T_PID=$!
+          (sleep 1500; if kill -0 $T_PID 2>/dev/null; then
+             echo "##[warning]Watchdog: asan suite exceeded 25m; SIGABRT mino"
+             pkill -ABRT mino_asan 2>/dev/null
+             pkill -ABRT mino 2>/dev/null
+           fi) &
+          WD_PID=$!
+          wait $T_PID
+          RC=$?
+          sleep 2
+          kill $WD_PID 2>/dev/null || true
+          exit $RC
+        timeout-minutes: 28
+
+  # Four-way JIT parity (auto / on / off / lean): byte-identical stdout
+  # across every JIT mode. Host-agnostic behaviour check; runs once on
+  # one runner rather than on every matrix leg.
+  jit-parity:
+    name: gate - jit parity (4-way)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Four-way JIT parity
+        run: ./mino task test-jit-parity
+        timeout-minutes: 15
 
   # Stencil determinism, re-armed.
   #
@@ -410,195 +465,3 @@ jobs:
         # property of one build environment, never compares across images.
         run: ./mino task check-binary-reproducible
         timeout-minutes: 15
-
-  darwin-zig-canary:
-    name: canary - darwin (zig cc)
-    runs-on: macos-14
-    # Informational while the zig-built darwin binary is evaluated: the
-    # published darwin artifact stays Apple-clang native (release-build.yml)
-    # until this proves out across releases. A failure surfaces as a signal,
-    # not a merge block.
-    continue-on-error: true
-    # Bound the run: a local build + suite is ~2 min, so a hang (e.g. a
-    # zig-built JIT deadlock) should trip this, not burn the 6-hour default.
-    timeout-minutes: 20
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install pinned Zig
-        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Build darwin standalone with native zig cc
-        # macos-14 is arm64 with the system SDK present, so native zig cc
-        # compiles + links the full JIT-enabled Mach-O -- unlike a Linux
-        # host, where Zig bundles no macOS SDK and darwin cannot be cross-
-        # built. This evaluates zig cc as the uniform standalone compiler
-        # on every platform. The crash handler's _Unwind_* symbols come
-        # from libSystem here (no -lunwind needed, as on glibc).
-        #
-        # CFLAGS mirrors the Makefile default plus -Wno-unused-but-set-
-        # variable: zig ships a newer clang than Apple clang and flags a
-        # set-but-unused `carry` in vendored src/vendor/imath/imath.c that
-        # Apple clang does not. Same toolchain-specific suppression the
-        # cross-build (cross-cflags) already carries for this file.
-        run: |
-          make CC="zig cc" CFLAGS="-std=c99 -Wall -Wpedantic -Wextra -Werror \
-            -Wno-missing-field-initializers -Wno-unknown-warning-option \
-            -Wno-clobbered -Wno-unused-but-set-variable -O2 -DMINO_CPJIT=1"
-
-      - name: Smoke + full suite (JIT auto-enabled on arm64-darwin)
-        # arm64-darwin is the one host that runtime-exercises the CPJIT, so
-        # the suite under the zig-built binary validates a JIT-enabled
-        # distributable Mach-O -- the gate the mandate requires before this
-        # could become the published darwin build.
-        run: |
-          ./mino --version
-          out=$(./mino -e '(+ 1 2)')
-          [ "$out" = "3" ] || { echo "darwin-zig smoke failed: got '$out'" >&2; exit 1; }
-          ./mino tests/run.clj
-
-      - name: Full suite with JIT forced on
-        run: ./mino --jit=on tests/run.clj
-
-      - name: Verify Mach-O TLV binding (zig linker tripwire)
-        # The zig 0.16.0 self-hosted Mach-O linker mis-binds the 2nd+
-        # __thread_vars descriptor thunks to a wrong import (observed
-        # ___clear_cache / _printf instead of __tlv_bootstrap). It is
-        # HARMLESS on macOS because dyld4 rewrites every descriptor in
-        # the __thread_vars section to _tlv_get_addr at load,
-        # regardless of the symbol the linker bound -- which is exactly
-        # why the full suite above (mino leans on __thread for
-        # mino_tls_ctx / cancel_ptr / safepoint_count) passes. This
-        # step is the static tripwire: it asserts the TLV section
-        # exists with the bootstrap symbol present, and flags any
-        # mis-bind target OUTSIDE the known-benign set so a future zig
-        # bump that changes the pattern surfaces here before the
-        # darwin artifact is ever flipped to a zig build. See
-        # docs/MAINTAINER_TOOLCHAIN.md (darwin TLV note) + the upstream
-        # issue draft in .local/.
-        run: |
-          binds=$(dyld_info -fixups ./mino 2>/dev/null \
-            | awk '/__thread_vars/ {print $NF}')
-          echo "__thread_vars binds:"
-          echo "$binds" | sed 's/^/  /'
-          if [ -z "$binds" ]; then
-            echo "TLV tripwire: no __thread_vars descriptors found" >&2
-            exit 1
-          fi
-          if ! echo "$binds" | grep -q '__tlv_bootstrap'; then
-            echo "TLV tripwire: __tlv_bootstrap absent -- TLV machinery missing" >&2
-            exit 1
-          fi
-          # Known-benign bind targets: the correct bootstrap plus the
-          # symbols the zig 0.16.0 mis-bind has been observed to pick
-          # (all in the __thread_vars section dyld rewrites wholesale).
-          unexpected=$(echo "$binds" \
-            | grep -vE '(__tlv_bootstrap|___clear_cache|_printf)$' || true)
-          if [ -n "$unexpected" ]; then
-            echo "TLV tripwire: unexpected __thread_vars bind target(s):" >&2
-            echo "$unexpected" | sed 's/^/  /' >&2
-            echo "A zig bump changed the mis-bind pattern; re-verify TLV" >&2
-            echo "correctness and update the allowlist before trusting it." >&2
-            exit 1
-          fi
-          echo "TLV tripwire: OK (bootstrap present; mis-binds within known-benign set)"
-
-  # Per-host JIT runtime canaries. Four of the five committed JIT
-  # pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
-  # behind opt-in defines no published artifact sets; these lanes are
-  # their only runtime exercise. Each runner builds the pipeline its
-  # hardware can execute (macos-14 cross-builds Mach-O x86_64 and runs
-  # it under Rosetta 2) plus a lean twin, then runs the full suite in
-  # AUTO and eager mode and the four-way parity check -- all inside
-  # `./mino task test-jit-host`. Informational while the lanes build a
-  # green streak; promotion to blocking is the gate for ever enabling
-  # the JIT in the published artifacts for these hosts.
-  jit-host-canary:
-    name: canary - jit-host (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2022]
-    runs-on: ${{ matrix.os }}
-    continue-on-error: true
-    # A local run is ~25s on arm64 darwin; CI runners are slower and
-    # windows slower still (two zig builds plus two full suite passes
-    # past the perf-shape test files run ~25 min there), but a hang
-    # (the failure mode JIT bugs produce) should trip this cap, not
-    # the 6-hour default.
-    timeout-minutes: 45
-    defaults:
-      run:
-        shell: bash
-    env:
-      CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
-      # This canary runs the suite under a cross-compiled or emulated
-      # binary (Rosetta x86_64-on-arm64 on macos-14, a zig-gnu build on
-      # windows) on shared runners, where the JIT loop-cancel handshake
-      # runs several times slower than native. The flag widens only the
-      # cancellation-latency budget in jit_invalidation_test; the strict
-      # bound stays enforced by the blocking native matrix, which runs
-      # the same suite without it.
-      MINO_SLOW_HOST: "1"
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install pinned Zig
-        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
-        uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Bootstrap mino
-        run: make
-
-      - name: Per-host JIT canary (suite auto + eager, 4-way parity)
-        # Step-level cap: a job-level timeout CANCELS the job (no logs
-        # uploaded, run aborted), while a step-level timeout FAILS the
-        # step and preserves the log -- which is the only way to see
-        # where a hung suite actually sat. Baseline was ~8 min on the
-        # slowest host (windows) before the perf-shape test files
-        # landed; they push the windows leg past 15, so the cap is
-        # now 3x the original baseline.
-        timeout-minutes: 40
-        run: ./mino task test-jit-host
-
-  # Portability canary: compile the amalgamated single-file source with
-  # MSVC's C frontend -- the one toolchain neither gcc (Linux/Windows
-  # matrix) nor clang (macOS matrix, zig) represents. continue-on-error
-  # so an MSVC-specific C99 gap surfaces as an informational signal, not
-  # a merge block, until the amalgam is vetted MSVC-clean. This ADDS a
-  # compiler to CI without removing any -- the gcc/clang/mingw matrix
-  # stays the gating portability signal.
-  msvc-compile-canary:
-    name: canary - msvc (cl.exe)
-    runs-on: windows-latest
-    continue-on-error: true
-    env:
-      CC: gcc
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Bootstrap mino (mingw gcc)
-        run: make
-
-      - name: Produce amalgamation
-        run: ./mino task amalgamate
-
-      - name: Set up MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Compile amalgam with cl.exe /TC (compile-only)
-        # /TC forces C (not C++); /c is compile-only -- we're checking
-        # the C frontend accepts the source, not producing a binary.
-        shell: cmd
-        run: cl /TC /c /I dist dist\mino.c

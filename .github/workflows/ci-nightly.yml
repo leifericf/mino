@@ -122,3 +122,166 @@ jobs:
 
       - name: Static analyzer gate (fail on new findings vs baseline)
         run: ./mino task check-analyze-zig
+
+  # Darwin standalone built with native zig cc. Off the push path: the
+  # published darwin artifact stays Apple-clang native until this proves
+  # out across releases, so it is a nightly canary, not a merge block.
+  # continue-on-error keeps it informational while the zig-built darwin
+  # binary is evaluated.
+  darwin-zig-canary:
+    needs: changes-since-last-green
+    if: needs.changes-since-last-green.outputs.should_run == 'true'
+    name: canary - darwin (zig cc)
+    runs-on: macos-14
+    continue-on-error: true
+    # Bound the run: a local build + suite is ~2 min, so a hang (e.g. a
+    # zig-built JIT deadlock) should trip this, not burn the 6-hour default.
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build darwin standalone with native zig cc
+        # macos-14 is arm64 with the system SDK present, so native zig cc
+        # compiles + links the full JIT-enabled Mach-O -- unlike a Linux
+        # host, where Zig bundles no macOS SDK and darwin cannot be cross-
+        # built. This evaluates zig cc as the uniform standalone compiler
+        # on every platform. The crash handler's _Unwind_* symbols come
+        # from libSystem here (no -lunwind needed, as on glibc).
+        #
+        # CFLAGS mirrors the Makefile default plus -Wno-unused-but-set-
+        # variable: zig ships a newer clang than Apple clang and flags a
+        # set-but-unused `carry` in vendored src/vendor/imath/imath.c that
+        # Apple clang does not. Same toolchain-specific suppression the
+        # cross-build (cross-cflags) already carries for this file.
+        run: |
+          make CC="zig cc" CFLAGS="-std=c99 -Wall -Wpedantic -Wextra -Werror \
+            -Wno-missing-field-initializers -Wno-unknown-warning-option \
+            -Wno-clobbered -Wno-unused-but-set-variable -O2 -DMINO_CPJIT=1"
+
+      - name: Smoke + full suite (JIT auto-enabled on arm64-darwin)
+        # arm64-darwin is the one host that runtime-exercises the CPJIT, so
+        # the suite under the zig-built binary validates a JIT-enabled
+        # distributable Mach-O -- the gate the mandate requires before this
+        # could become the published darwin build.
+        run: |
+          ./mino --version
+          out=$(./mino -e '(+ 1 2)')
+          [ "$out" = "3" ] || { echo "darwin-zig smoke failed: got '$out'" >&2; exit 1; }
+          ./mino tests/run.clj
+
+      - name: Full suite with JIT forced on
+        run: ./mino --jit=on tests/run.clj
+
+      - name: Verify Mach-O TLV binding (zig linker tripwire)
+        # The zig 0.16.0 self-hosted Mach-O linker mis-binds the 2nd+
+        # __thread_vars descriptor thunks to a wrong import (observed
+        # ___clear_cache / _printf instead of __tlv_bootstrap). It is
+        # HARMLESS on macOS because dyld4 rewrites every descriptor in
+        # the __thread_vars section to _tlv_get_addr at load,
+        # regardless of the symbol the linker bound -- which is exactly
+        # why the full suite above (mino leans on __thread for
+        # mino_tls_ctx / cancel_ptr / safepoint_count) passes. This
+        # step is the static tripwire: it asserts the TLV section
+        # exists with the bootstrap symbol present, and flags any
+        # mis-bind target OUTSIDE the known-benign set so a future zig
+        # bump that changes the pattern surfaces here before the
+        # darwin artifact is ever flipped to a zig build. See
+        # docs/MAINTAINER_TOOLCHAIN.md (darwin TLV note) + the upstream
+        # issue draft in .local/.
+        run: |
+          binds=$(dyld_info -fixups ./mino 2>/dev/null \
+            | awk '/__thread_vars/ {print $NF}')
+          echo "__thread_vars binds:"
+          echo "$binds" | sed 's/^/  /'
+          if [ -z "$binds" ]; then
+            echo "TLV tripwire: no __thread_vars descriptors found" >&2
+            exit 1
+          fi
+          if ! echo "$binds" | grep -q '__tlv_bootstrap'; then
+            echo "TLV tripwire: __tlv_bootstrap absent -- TLV machinery missing" >&2
+            exit 1
+          fi
+          # Known-benign bind targets: the correct bootstrap plus the
+          # symbols the zig 0.16.0 mis-bind has been observed to pick
+          # (all in the __thread_vars section dyld rewrites wholesale).
+          unexpected=$(echo "$binds" \
+            | grep -vE '(__tlv_bootstrap|___clear_cache|_printf)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "TLV tripwire: unexpected __thread_vars bind target(s):" >&2
+            echo "$unexpected" | sed 's/^/  /' >&2
+            echo "A zig bump changed the mis-bind pattern; re-verify TLV" >&2
+            echo "correctness and update the allowlist before trusting it." >&2
+            exit 1
+          fi
+          echo "TLV tripwire: OK (bootstrap present; mis-binds within known-benign set)"
+
+  # Per-host JIT runtime canaries. Four of the five committed JIT
+  # pipelines (ELF arm64/x86_64, COFF x86_64, Mach-O x86_64) sit
+  # behind opt-in defines no published artifact sets; these lanes are
+  # their only runtime exercise. Each runner builds the pipeline its
+  # hardware can execute (macos-14 cross-builds Mach-O x86_64 and runs
+  # it under Rosetta 2) plus a lean twin, then runs the full suite in
+  # AUTO and eager mode and the four-way parity check -- all inside
+  # `./mino task test-jit-host`. Informational while the lanes build a
+  # green streak; promotion to blocking is the gate for ever enabling
+  # the JIT in the published artifacts for these hosts.
+  jit-host-canary:
+    needs: changes-since-last-green
+    if: needs.changes-since-last-green.outputs.should_run == 'true'
+    name: canary - jit-host (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    # A local run is ~25s on arm64 darwin; CI runners are slower and
+    # windows slower still (two zig builds plus two full suite passes
+    # past the perf-shape test files run ~25 min there), but a hang
+    # (the failure mode JIT bugs produce) should trip this cap, not
+    # the 6-hour default.
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
+      # This canary runs the suite under a cross-compiled or emulated
+      # binary (Rosetta x86_64-on-arm64 on macos-14, a zig-gnu build on
+      # windows) on shared runners, where the JIT loop-cancel handshake
+      # runs several times slower than native. The flag widens only the
+      # cancellation-latency budget in jit_invalidation_test; the strict
+      # bound stays enforced by the blocking native matrix, which runs
+      # the same suite without it.
+      MINO_SLOW_HOST: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned Zig
+        # Must match zig-version-pin in lib/mino/tasks/builtin.clj.
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Per-host JIT canary (suite auto + eager, 4-way parity)
+        # Step-level cap: a job-level timeout CANCELS the job (no logs
+        # uploaded, run aborted), while a step-level timeout FAILS the
+        # step and preserves the log -- which is the only way to see
+        # where a hung suite actually sat. Baseline was ~8 min on the
+        # slowest host (windows) before the perf-shape test files
+        # landed; they push the windows leg past 15, so the cap is
+        # now 3x the original baseline.
+        timeout-minutes: 40
+        run: ./mino task test-jit-host
