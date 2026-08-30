@@ -92,7 +92,10 @@
                              (try (srv/serve-conn* c handler o)
                                   (catch e :engine-crash)))
                       (try (net-close c) (catch e nil)))
-                    (recur (inc i)))))
+                    ;; Count served connections, not accept attempts, so a
+                    ;; slow runner whose client lands after the accept
+                    ;; window is still served (running? bounds the retry).
+                    (recur (if c (inc i) i)))))
               (try (net-close l) (catch e nil))
               :served)
         started {:port (net-listener-port l)}]

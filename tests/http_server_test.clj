@@ -88,7 +88,13 @@
                               (try (srv/serve-conn* c handler (dissoc o :poll-ms))
                                    (catch e :engine-crash)))
                       (try (net-close c) (catch e nil)))
-                    (recur (inc i)))))
+                    ;; Count served connections, not accept attempts: an
+                    ;; accept that times out with no client (c nil) must
+                    ;; not advance i, or a slow runner whose client lands
+                    ;; after the 250ms window starves the server early
+                    ;; (nil responses). Teardown's running? flag bounds
+                    ;; the retry.
+                    (recur (if c (inc i) i)))))
               (try (net-close l) (catch e nil))
               :served)
         started {:port (net-listener-port l)}]
