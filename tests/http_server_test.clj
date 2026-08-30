@@ -972,7 +972,14 @@
   (mapv byte-array (partition-all n (vec bs))))
 
 (deftest drip-fed-headers-are-dropped-past-the-request-deadline
-  (let [_ (srv-await-capacity 5)
+  ;; The server's pool (spawner + acceptor + worker) runs concurrently
+  ;; with the client-side drip future -- four host threads. On a grant
+  ;; too small to hold them the drip future is starved of a slot
+  ;; (MTH001), so the shape is skipped there, exactly as the pool tests
+  ;; are.
+  (if-not (grant-affords? 4)
+    (skip-small-grant "drip-fed-headers-are-dropped-past-the-request-deadline" 4)
+   (let [_ (srv-await-capacity 5)
         served (atom 0)
         h (fn [req] (swap! served inc) {:status 200 :body "ok"})]
     (rs-with h {:acceptors 1 :max-conns 2
@@ -994,10 +1001,14 @@
           (is (< elapsed 6000) (str "drop took " elapsed "ms"))
           (try (deref drip 4000 :drip-timeout) (catch e nil))
           (try (net-close c) (catch e nil)))))
-    (is (zero? @served) "the drip request was never served")))
+    (is (zero? @served) "the drip request was never served"))))
 
 (deftest drip-fed-body-is-dropped-past-the-request-deadline
-  (let [_ (srv-await-capacity 5)
+  ;; Four host threads (server pool + client drip future); skipped on a
+  ;; grant that cannot hold them (see drip-fed-headers).
+  (if-not (grant-affords? 4)
+    (skip-small-grant "drip-fed-body-is-dropped-past-the-request-deadline" 4)
+   (let [_ (srv-await-capacity 5)
         h (fn [req] {:status 200 :body "never"})]
     (rs-with h {:acceptors 1 :max-conns 2
                 :idle-timeout 20000 :request-timeout 800
@@ -1016,10 +1027,14 @@
                 (str "dropped at " elapsed "ms, before the deadline"))
             (is (< elapsed 6000) (str "drop took " elapsed "ms"))
             (try (deref drip 4000 :drip-timeout) (catch e nil)))
-          (try (net-close c) (catch e nil)))))))
+          (try (net-close c) (catch e nil))))))))
 
 (deftest a-slow-request-inside-the-deadline-is-still-served
-  (let [_ (srv-await-capacity 5)
+  ;; Four host threads (server pool + client drip future); skipped on a
+  ;; grant that cannot hold them (see drip-fed-headers).
+  (if-not (grant-affords? 4)
+    (skip-small-grant "a-slow-request-inside-the-deadline-is-still-served" 4)
+   (let [_ (srv-await-capacity 5)
         h (fn [req] {:status 200 :body "slow but legal"})]
     (rs-with h {:acceptors 1 :max-conns 2
                 :idle-timeout 20000 :request-timeout 2500}
@@ -1033,7 +1048,7 @@
             (is (= 200 (:code (:resp x))))
             (is (= (srv-bb "slow but legal") (:body (:resp x)))))
           (try (deref drip 4000 :drip-timeout) (catch e nil))
-          (try (net-close c) (catch e nil)))))))
+          (try (net-close c) (catch e nil))))))))
 
 (deftest oversized-header-section-answers-400-before-the-request-completes
   (let [h (fn [req] {:status 200 :body "never"})]
