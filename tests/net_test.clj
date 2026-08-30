@@ -525,6 +525,18 @@
   (byte-array (map (fn [i] (mod (+ i round) 256))
                    (range (* k c) (* (inc k) c)))))
 
+(def ^:private worker-gc-churn
+  ;; Collections the worker future forces while main is parked. A slow
+  ;; host -- an emulated or sanitizer-instrumented CI leg, which exports
+  ;; MINO_SLOW_HOST -- pays hundreds of ms per stop-the-world collection,
+  ;; and a deep sweep there monopolizes the runner long enough to starve
+  ;; the fixture's single accept loop, so the next round's fresh
+  ;; connection is never accepted inside the client's read window. The
+  ;; hazard under test needs only a handful of collections landing in
+  ;; the park window (the sibling worker-parked face uses far fewer), so
+  ;; the slow-host count stays small while native CI keeps the deep sweep.
+  (if (getenv "MINO_SLOW_HOST") 12 150))
+
 (deftest net-parked-worker-survives-forced-gc
   ;; Face 1: the ECHO worker parks in net-read and then in net-write
   ;; of the 128 KiB payload (several send syscalls) while the test
@@ -564,7 +576,7 @@
         (let [s (net-connect "127.0.0.1" (:port srv))
               payload (gc-net-payload round)
               churn (future
-                      (dotimes [_ 150]
+                      (dotimes [_ worker-gc-churn]
                         (vec (range 64))
                         (gc!))
                       :done)]
