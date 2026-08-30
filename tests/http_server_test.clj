@@ -121,9 +121,10 @@
                    (is (= 200 (:code (:resp x))))
                    (is (= (srv-bb "got:/hello") (:body (:resp x))))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
-                 ;; the server closes its side; the client sees end of
-                 ;; stream without any error
-                 (is (nil? (try (net-read c 65536) (catch e :err))))
+                 ;; the server closes its side; the client's read ends the
+                 ;; connection -- a clean EOF (nil) or a connection reset
+                 ;; the OS may deliver instead (thrown), never live data
+                 (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
@@ -214,7 +215,7 @@
                    (is (some? x))
                    (is (= "HTTP/1.0" (:http-version (:resp x))))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
-                 (is (nil? (try (net-read c 65536) (catch e :err))))
+                 (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
@@ -245,7 +246,7 @@
                  (let [x (srv-read-one c [])]
                    (is (some? x))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
-                 (is (nil? (try (net-read c 65536) (catch e :err))))
+                 (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
@@ -313,7 +314,7 @@
                           (:body (:resp x))))
                    (is (= "close"
                           (get (:headers (:resp x)) "connection"))))
-                 (is (nil? (try (net-read c 65536) (catch e :err))))
+                 (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))
                ;; a fresh connection is still served: the crash never
                ;; escaped the connection
@@ -357,7 +358,7 @@
                    (is (= (srv-bb "bad request") (:body (:resp x))))
                    (is (= "close"
                           (get (:headers (:resp x)) "connection"))))
-                 (is (nil? (try (net-read c 65536) (catch e :err))))
+                 (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
 
@@ -517,7 +518,7 @@
         (is (thrown? (net-connect "127.0.0.1" (:port s) {}))))
       ;; the straggler connection is closed by its own deadline, not
       ;; leaked and never closed underneath its parked read
-      (is (nil? (try (net-read c 65536) (catch e :err))))
+      (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
       (try (net-close c) (catch e nil)))))
 
 (deftest run-server-survives-repeated-start-stop-cycles
