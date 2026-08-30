@@ -599,8 +599,19 @@ static int zip_write_opts(mino_state *S, mino_val *opts, int *level,
  * any writer allocation (the bomb-cap discipline inverted: caller
  * input is fully checked first). On failure the entry's own name
  * buffer is freed and -1 returned after the throw. */
+/* Capture one entry, validating as it goes. On a validation failure it
+ * does NOT throw -- it writes the classified error into the ekind,
+ * ecode, and emsg out-params and returns -1, leaving prim_zip_write to
+ * free the partially
+ * filled wentries array before it raises the throw. Throwing here would
+ * longjmp out of a surrounding try and leak that C allocation (mino has
+ * no cleanup-on-unwind). emsg must be at least ZIP_EMSG_CAP bytes. */
+#define ZIP_EMSG_CAP 144
+
 static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
-                              int def_level, zip_wentry *out)
+                              int def_level, zip_wentry *out,
+                              char *emsg, const char **ekind,
+                              const char **ecode)
 {
     mino_val *v;
     const unsigned char *bytes;
@@ -608,22 +619,22 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
     long long mtime = 0, n;
     int store = 0, level = def_level;
     int non_ascii = 0;
-    char msg[144];
 
-#define ZIP_WCONTRACT(...)                                              \
+#define ZIP_WFAIL(kind, code, ...)                                      \
     do {                                                                \
-        snprintf(msg, sizeof(msg), __VA_ARGS__);                        \
+        snprintf(emsg, ZIP_EMSG_CAP, __VA_ARGS__);                      \
+        *ekind = (kind);                                                \
+        *ecode = (code);                                                \
         free(out->name);                                                \
         out->name = NULL;                                               \
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);       \
         return -1;                                                      \
     } while (0)
+#define ZIP_WCONTRACT(...) ZIP_WFAIL("eval/contract", "MCT001", __VA_ARGS__)
 
     if (entry == NULL || mino_type_of(entry) != MINO_MAP) {
-        snprintf(msg, sizeof(msg),
-                 "zip-write: entry %lu must be a map", (unsigned long)idx);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
-        return -1;
+        out->name = NULL;
+        ZIP_WCONTRACT("zip-write: entry %lu must be a map",
+                      (unsigned long)idx);
     }
 
     /* :name -- required string, backslashes rewritten to forward
@@ -648,11 +659,8 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
         ZIP_WCONTRACT("zip-write: entry %lu :name must not contain a "
                       "NUL byte", (unsigned long)idx);
     out->name = (char *)malloc(len + 1);
-    if (out->name == NULL) {
-        snprintf(msg, sizeof(msg), "zip-write: out of memory");
-        prim_throw_classified(S, "internal", "MIN001", msg);
-        return -1;
-    }
+    if (out->name == NULL)
+        ZIP_WFAIL("internal", "MIN001", "zip-write: out of memory");
     out->name_len = len;
     out->add_flags = 0;
     for (i = 0; i < len; i++) {
@@ -697,14 +705,9 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
         } else if (v == mino_keyword(S, "store")) {
             store = 1;
         } else if (mino_type_of(v) == MINO_KEYWORD) {
-            snprintf(msg, sizeof(msg),
-                     "zip-write: entry %lu :method is not supported "
-                     "(only :deflate and :store)", (unsigned long)idx);
-            free(out->name);
-            out->name = NULL;
-            prim_throw_classified(S, "codec/unsupported",
-                                  ZIP_MGC_UNSUPPORTED, msg);
-            return -1;
+            ZIP_WFAIL("codec/unsupported", ZIP_MGC_UNSUPPORTED,
+                      "zip-write: entry %lu :method is not supported "
+                      "(only :deflate and :store)", (unsigned long)idx);
         } else {
             ZIP_WCONTRACT("zip-write: entry %lu :method must be :deflate "
                           "or :store", (unsigned long)idx);
@@ -762,6 +765,7 @@ static int zip_wentry_capture(mino_state *S, mino_val *entry, size_t idx,
     }
     return 0;
 #undef ZIP_WCONTRACT
+#undef ZIP_WFAIL
 }
 
 /* Map a vendor writer failure onto the family. After full up-front
@@ -1166,9 +1170,15 @@ static mino_val *prim_zip_write(mino_state *S, mino_val *args,
         }
     }
     for (i = 0; i < n; i++) {
+        char        emsg[ZIP_EMSG_CAP];
+        const char *ekind = NULL, *ecode = NULL;
         if (zip_wentry_capture(S, vec_nth(entries_val, i), i, level,
-                               &wentries[i]) != 0) {
+                               &wentries[i], emsg, &ekind, &ecode) != 0) {
+            /* Free the C buffers before the throw: prim_throw_classified
+             * longjmps out of any surrounding try, so cleanup cannot
+             * follow it. */
             zip_wentries_free(wentries, i);
+            prim_throw_classified(S, ekind, ecode, emsg);
             return NULL;
         }
     }
