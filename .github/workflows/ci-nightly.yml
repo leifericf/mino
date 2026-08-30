@@ -57,7 +57,7 @@ jobs:
     defaults:
       run:
         shell: bash
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
 
@@ -66,12 +66,17 @@ jobs:
 
       - name: Release gate
         # First gate -- if release-gate fails, the rest of the
-        # nightly battery is noise. Same gate as push CI; included
-        # here so nightly is self-contained. Cap mirrors ci.yml's
-        # widened watchdog: the perf-shape test files pushed the
-        # slowest runners past the old 12-minute budget.
+        # nightly battery is noise. Push CI splits this composite into
+        # lean parallel jobs (invariants / asan / jit-parity) to fit a
+        # tight per-job budget; nightly instead runs the whole gate
+        # self-contained on every host, including arm64 (which push
+        # skips for asan + parity). The gate legitimately takes ~30 min
+        # on the slowest runner -- the plain suite plus ASan x2 plus
+        # 4-way parity plus the examples lanes run in series -- so the
+        # cap is a realistic off-peak budget, not the push path's tight
+        # one.
         run: ./mino task release-gate
-        timeout-minutes: 22
+        timeout-minutes: 40
 
       - name: Embed stress
         run: ./mino task test-embed
