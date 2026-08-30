@@ -13,8 +13,12 @@
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
        " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"
        " -Isrc/vendor/miniz -Isrc/vendor/miniz/upstream"))
+;; -fno-strict-aliasing: vendored BearSSL/miniz type-pun byte buffers
+;; through wider integer pointers on their unaligned fast paths; gcc -O2
+;; miscompiles that on x86_64 (wrong MD5 output) without this flag.
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
+                                       "-fno-strict-aliasing "
                                        "-DMINO_CPJIT=1 "
                                        include-flags)) " "))
 (def ^:private windows? (some? (getenv "OS")))
@@ -395,7 +399,9 @@
    ;; libSystem); zig cross targets do not, so emit unwind tables here
    ;; and link zig's libunwind explicitly (see cross-build-one).
    "-funwind-tables"
-   "-O2" "-DMINO_CPJIT=1"])
+   ;; See the cflags note: vendored BearSSL/miniz type-pun on their
+   ;; unaligned fast paths; -fno-strict-aliasing keeps them correct at -O2.
+   "-O2" "-fno-strict-aliasing" "-DMINO_CPJIT=1"])
 
 (def ^:private cross-targets
   "Tier-2 cross-compile targets. macOS is intentionally absent: Zig
@@ -1500,7 +1506,8 @@
   []
   (check-zig-version)
   (let [args (concat stencil-cc
-                     ["-std=c99" "-O2" "-DMINO_CPJIT=1" "-funwind-tables"
+                     ["-std=c99" "-O2" "-fno-strict-aliasing"
+                      "-DMINO_CPJIT=1" "-funwind-tables"
                       "-static"]
                      (str/split include-flags " ")
                      ["-o" "mino_zig"]

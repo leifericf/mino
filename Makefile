@@ -19,7 +19,12 @@ CC      ?= cc
 # doesn't recognise the flag name, so the -Wno-unknown-warning-option
 # pair lets us pass -Wno-clobbered to both compilers without breaking
 # either.
-CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -DMINO_CPJIT=1
+# -fno-strict-aliasing: the vendored BearSSL and miniz type-pun byte
+# buffers through wider integer pointers on their unaligned-access fast
+# paths (BR_LE_UNALIGNED). gcc -O2 exploits the aliasing rule and
+# miscompiles them on x86_64 (observed: wrong MD5 output); the flag keeps
+# that third-party code correct at -O2.
+CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -fno-strict-aliasing -DMINO_CPJIT=1
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
