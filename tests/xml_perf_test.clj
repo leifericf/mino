@@ -2,19 +2,17 @@
 (require '[clojure.string :as str])
 (require '[tests.xml-fixture :as xfix])
 
-;; XML reading must stay well inside the absolute budget at feed
-;; scale (html-xml campaign p5t4, design D9). The reader is the
-;; native single-pass xml-parse prim (ADR 28, strict mode); the gate
-;; parses the fixture generator's exact output: the 1MB +/-5%
-;; pom/rss/svg mix (tests.xml-fixture/xml-fixture-doc, 1452 seeded
-;; blocks, 20813 elements by the p1 scanner). Budgets are absolute,
-;; never wall-clock ratios (CI-runner lesson), with in-suite
-;; headroom for resident-set GC pressure (the p7 toml lesson, ~3x
-;; measured; the toml/yaml/html perf-gate precedent). Standalone
-;; expectation recorded in the campaign decisions: 500ms or better
-;; (measured 98ms at land, 1.02MB, ~5x headroom). This file joins
-;; the nightly MINO_TEST_EXCLUDE list per the toml/yaml/html
-;; precedent (satellite gc-fuzz commit).
+;; XML reading over a feed-scale document (html-xml campaign p5t4,
+;; design D9). The reader is the native single-pass xml-parse prim
+;; (ADR 28, strict mode); the gate parses the fixture generator's
+;; exact output: the 1MB +/-5% pom/rss/svg mix
+;; (tests.xml-fixture/xml-fixture-doc, 1452 seeded blocks, 20813
+;; elements by the p1 scanner). The structural assertions (tag,
+;; attrs, element counts) are the gate; wall-clock is informational
+;; only, since even an absolute ms budget is unmeasurable on loaded
+;; CI runners (the regex_perf lesson). Standalone expectation
+;; recorded in the campaign decisions: 500ms or better (measured
+;; 98ms at land, 1.02MB); the timing gate proper lives in bench.
 
 (def ^:private xml-perf-doc (xfix/xml-fixture-doc))
 (def ^:private xml-perf-size (count xml-perf-doc))
@@ -34,12 +32,15 @@
                    (:content n))))]
     (walk node 0 0 0)))
 
-(deftest xml-perf-one-megabyte-mix-within-budget
+(deftest xml-perf-one-megabyte-mix-shape
   (let [t0 (nano-time)
         tree (xml-parse xml-perf-doc nil)
         ms (quot (- (nano-time) t0) 1000000)]
     (is (> xml-perf-size 1000000) "fixture must be megabyte scale")
-    (is (< ms 2000) (str "megabyte parse took " ms "ms"))
+    ;; Timing is informational only -- even an absolute ms budget is
+    ;; unmeasurable on loaded CI runners (see regex_perf_test). The
+    ;; structural spot checks are the gate; the budget lives in bench.
+    (println (str "  [perf] megabyte xml parse took " ms "ms"))
     ;; spot checks so a fast-but-wrong reader cannot pass
     (is (= :catalog (:tag tree)))
     (is (= "mix" (:kind (:attrs tree))))
