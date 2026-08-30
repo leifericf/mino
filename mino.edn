@@ -24,6 +24,8 @@
                    :task mino.tasks.builtin/build}
   build-asan      {:doc  "Build mino_asan with AddressSanitizer"
                    :task mino.tasks.builtin/build-asan}
+  test-suite-asan {:doc  "Build mino_asan and run the full suite under it in both JIT modes"
+                   :task mino.tasks.builtin/test-suite-asan}
   build-ubsan     {:doc  "Build mino_ubsan with UndefinedBehaviorSanitizer"
                    :task mino.tasks.builtin/build-ubsan}
   build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"
