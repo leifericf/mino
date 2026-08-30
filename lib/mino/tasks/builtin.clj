@@ -1577,12 +1577,19 @@
    hosted runners (see run-suite-with-test-bin)."
   []
   (build-zig)
+  ;; MINO_SLOW_HOST: the static zig binary is an unoptimized correctness
+  ;; backstop, several times slower than the host-cc build, so the
+  ;; host-scaled tests (net GC-churn depth, perf wall-clock bounds) use
+  ;; their slow-host parameters here just as the sanitizer lanes do.
+  ;; Coverage at full stress stays on the optimized host-cc lanes.
+  ;;
   ;; `sh` + full print, not `sh!`: a failing shard must show its FAIL /
   ;; ERROR lines and the run summary, not sh!'s 512-char-truncated throw
   ;; message (which hid which test failed on this lane).
   (doseq [k (range 1 (inc suite-shard-count))]
     (let [res (sh "sh" "-c"
-                  (str "MINO_TEST_SHARD=" k "/" suite-shard-count
+                  (str "MINO_SLOW_HOST=1 MINO_TEST_SHARD=" k "/"
+                       suite-shard-count
                        " ./mino_zig tests/run.clj 2>&1"))]
       (print (:out res))
       (flush)
