@@ -50,6 +50,18 @@
   (is (nil? (deps/validate-dep-spec :foo {:path "../foo"})))
   (is (nil? (deps/validate-dep-spec :bar {:git "https://example.com" :rev "abc"}))))
 
+(deftest validate-dep-spec-rejects-option-like-git-args
+  ;; A :git url or :rev beginning with '-' would be read by git as an
+  ;; option (e.g. --upload-pack=...); reject it as data before it reaches
+  ;; the git argv.
+  (is (thrown? (deps/validate-dep-spec :x {:git "--upload-pack=touch /tmp/pwn"
+                                           :rev "main"})))
+  (is (thrown? (deps/validate-dep-spec :x {:git "https://h/r.git" :rev "--foo"})))
+  (is (thrown? (deps/validate-dep-spec :x {:git 42 :rev "main"})))
+  (is (= :deps/spec
+         (try (deps/validate-dep-spec :x {:git "-bad" :rev "main"})
+              (catch e (:mino/kind e))))))
+
 (deftest resolve-paths-with-deps
   (let [m {:paths ["src" "lib"]
            :deps {:foo {:path "../foo"}
