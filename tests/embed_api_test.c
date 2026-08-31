@@ -61,6 +61,61 @@ static mino_val *prim_boom(mino_state *S, mino_val *args,
     return mino_throw(S, mino_keyword(S, "boom"));
 }
 
+/* Re-enters the evaluator from C via mino_eval while the calling script
+ * may already have the try stack at its maximum depth. Returns whatever
+ * the inner (+ 1 2) evaluates to so the caller can assert the value came
+ * back intact from the nested entry. */
+static mino_val *prim_reenter(mino_state *S, mino_val *args,
+                              mino_env *env)
+{
+    mino_val *form;
+    (void)args;
+    form = mino_read(S, "(+ 1 2)", NULL);
+    if (form == NULL) {
+        return NULL;
+    }
+    return mino_eval(S, form, env);
+}
+
+/* Re-entering mino_eval from a primitive that runs with the script's try
+ * stack filled to MAX_TRY_DEPTH must evaluate normally: the top-level
+ * entry declines to push its own frame at the boundary, so its
+ * normal-return bookkeeping must not read past the try stack. Nest one
+ * try frame short of the maximum so the innermost (reenter) call runs at
+ * exactly MAX_TRY_DEPTH, then confirm the inner value returns intact. */
+static void test_reenter_at_max_try_depth(mino_state *S, mino_env *env)
+{
+    /* MAX_TRY_DEPTH is 64. The top-level string eval and the re-entry
+     * bookkeeping consume the first two frames, and each `try` body adds
+     * one more. Nesting 62 try bodies puts the innermost (reenter) call
+     * at try_depth == 64 -- the exact value the re-entrant top-level
+     * entry declines to push a frame for, and whose normal-return
+     * bookkeeping must not read try_stack[64]. */
+    char        src[8192];
+    size_t      pos = 0;
+    int         i;
+    const int   depth = 62;
+    mino_val   *r;
+    long long   n = 0;
+
+    mino_register_fn(S, env, "reenter", prim_reenter);
+
+    for (i = 0; i < depth; i++) {
+        pos += (size_t)snprintf(src + pos, sizeof(src) - pos, "(try ");
+    }
+    pos += (size_t)snprintf(src + pos, sizeof(src) - pos, "(reenter)");
+    for (i = 0; i < depth; i++) {
+        pos += (size_t)snprintf(src + pos, sizeof(src) - pos,
+                                " (catch :default e e))");
+    }
+    REQUIRE(pos < sizeof(src), "reenter/max-depth: source fits buffer");
+
+    r = mino_eval_string(S, src, env);
+    REQUIRE(r != NULL, "reenter/max-depth: nested try returns non-NULL");
+    REQUIRE(r != NULL && mino_to_int(r, &n) && n == 3,
+            "reenter/max-depth: inner (+ 1 2) returns 3 through re-entry");
+}
+
 static void test_version(void)
 {
     const char *v = mino_version_string();
@@ -1026,6 +1081,7 @@ int main(void)
     test_pure_data_lib_gating();
     test_atom_reset_tenured();
     test_predicate_grid(S, env);
+    test_reenter_at_max_try_depth(S, env);
     test_options(S, env);
 
     /* Phase 6 -- embed-API ergonomics. */

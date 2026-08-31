@@ -842,8 +842,15 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
      * it on every exit, the same boundary invariant gc_depth already
      * keeps. */
     int           saved_gc_save;
+    int           entry_gc_depth;
     saved_try = mino_current_ctx(S)->try_depth;
     saved_gc_save = mino_current_ctx(S)->gc_save_len;
+    /* Snapshot gc_depth at entry for the normal-return tripwire below.
+     * When the top-level frame is pushed this equals the value
+     * try_frame_fill records in try_stack[saved_try], but at the
+     * try_depth == MAX_TRY_DEPTH boundary no frame is pushed and that
+     * slot is one past the array, so read the invariant from here. */
+    entry_gc_depth = mino_current_ctx(S)->gc_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     mino_current_ctx(S)->eval_steps     = 0;
@@ -944,8 +951,7 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
      * entry value. The landing pads rewind longjmp-unwound regions;
      * this assert catches balanced-pair code that leaks on a normal
      * return path, which would silently disable collection. */
-    assert(mino_current_ctx(S)->gc_depth
-           == mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth);
+    assert(mino_current_ctx(S)->gc_depth == entry_gc_depth);
     /* A normal return balances its own pins; rewind defensively so a
      * prim that leaks one on a non-throwing path still cannot accumulate
      * across evals on a reused state. */
