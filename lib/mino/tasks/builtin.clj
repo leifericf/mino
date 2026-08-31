@@ -2888,3 +2888,37 @@
    vendored UCD copy, then commit the generated diff. See ADR 31."
   []
   (println (sh! "python3" "tools/gen_unicode_case.py")))
+
+(defn conformance-edge
+  "Run the sibling tests repo's curated conformance edge differ against
+   the freshly built ./mino (ADR 40). The probe compares printed output
+   byte for byte with committed ground truth, so this needs no JVM and
+   no network; corpus refresh lives in the tests repo. The sibling
+   checkout is located via MINO_TESTS_DIR (default ../mino-tests); a
+   missing checkout is a hard failure, never a skip. POSIX-only: the
+   env-prefix invocation matches the suite runner's."
+  []
+  (when windows?
+    (throw (ex-info "conformance-edge: POSIX-only lane task" {})))
+  (let [dir   (or (getenv "MINO_TESTS_DIR") "../mino-tests")
+        probe (str dir "/tests/adv/script/diff_conformance_edge.clj")
+        cwd   (str/trim (str (:out (sh "pwd"))))
+        bin   (str cwd "/mino")]
+    (when-not (file-exists? probe)
+      (throw (ex-info (str "conformance-edge: tests repo not found at " dir
+                           " (set MINO_TESTS_DIR); expected " probe)
+                      {:dir dir})))
+    (when-not (file-exists? bin)
+      (throw (ex-info "conformance-edge: build ./mino first" {:bin bin})))
+    (let [res (sh "sh" "-c"
+                  (str "cd " dir " && MINO_BIN=" bin
+                       " " bin " tests/adv/runner.clj"
+                       " --seed 0 --mode soak"
+                       " --only script/diff_conformance_edge 2>&1"))]
+      (print (:out res))
+      (flush)
+      (when (not= 0 (:exit res))
+        (throw (ex-info (str "conformance-edge: differ exited "
+                             (:exit res))
+                        {:exit (:exit res)})))
+      (println "  conformance-edge: OK"))))

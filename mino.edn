@@ -104,6 +104,9 @@
   test            {:doc  "Build and run the test suite"
                    :deps [build]
                    :task mino.tasks.builtin/test-suite}
+  conformance-edge {:doc  "Run the sibling tests repo's conformance edge differ against ./mino (ADR 40)"
+                    :deps [build]
+                    :task mino.tasks.builtin/conformance-edge}
    test-generative {:doc  "Run JSON property tests with the JIT off (CPJIT defect workaround)"
                     :deps [build]
                     :task mino.tasks.builtin/test-generative}
