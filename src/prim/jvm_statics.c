@@ -21,6 +21,7 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
@@ -118,13 +119,47 @@ static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "Double/parseDouble: string argument required");
     }
-    d = strtod(s->as.s.data, &endp);
-    /* Same musl lone-sign guard as Long/parseLong above. */
-    if (endp == NULL ||
-        endp <= s->as.s.data +
-                    (s->as.s.data[0] == '+' || s->as.s.data[0] == '-')) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "Double/parseDouble: unparseable input");
+    {
+        /* Match java.lang.Double's grammar rather than raw strtod, which
+         * silently ignores trailing garbage. Double trims ASCII
+         * whitespace, accepts one trailing FloatTypeSuffix (f/F/d/D),
+         * and accepts a hexadecimal float only with a binary exponent
+         * 'p'/'P'. strtod must then consume exactly the cleaned core;
+         * a lone sign (the musl guard) or any unconsumed character
+         * makes the whole string unparseable. */
+        const char *str = s->as.s.data;
+        size_t len = s->as.s.len;
+        size_t start = 0, stop = len, i;
+        char c;
+        while (start < stop && isspace((unsigned char)str[start])) start++;
+        while (stop > start && isspace((unsigned char)str[stop - 1])) stop--;
+        if (start == stop) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "Double/parseDouble: unparseable input");
+        }
+        c = str[stop - 1];
+        if ((c == 'f' || c == 'F' || c == 'd' || c == 'D')
+            && stop - 1 > start)
+            stop--;
+        i = start;
+        if (i < stop && (str[i] == '+' || str[i] == '-')) i++;
+        if (i + 1 < stop && str[i] == '0'
+            && (str[i + 1] == 'x' || str[i + 1] == 'X')) {
+            int has_p = 0;
+            size_t j;
+            for (j = i + 2; j < stop; j++)
+                if (str[j] == 'p' || str[j] == 'P') { has_p = 1; break; }
+            if (!has_p) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "Double/parseDouble: unparseable input");
+            }
+        }
+        d = strtod(str + start, &endp);
+        if (endp == NULL || endp != str + stop
+            || endp <= str + start + (str[start] == '+' || str[start] == '-')) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "Double/parseDouble: unparseable input");
+        }
     }
     return mino_float(S, d);
 }

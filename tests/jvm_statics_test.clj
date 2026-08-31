@@ -62,6 +62,17 @@
   (is (thrown?    (Long/parseLong "-")))
   (is (thrown?    (Double/parseDouble "+")))
   (is (thrown?    (Double/parseDouble "-")))
+  ;; Trailing garbage after a valid float prefix must throw, not be
+  ;; silently dropped. Surrounding whitespace and a single trailing
+  ;; float type suffix stay valid, matching java.lang.Double's grammar.
+  (is (thrown?    (Double/parseDouble "1.5xyzzy")))
+  (is (thrown?    (Double/parseDouble "  1.5  extra")))
+  (is (= 3.14     (Double/parseDouble "3.14 ")))
+  (is (= 1.5      (Double/parseDouble "  1.5  ")))
+  (is (= 2.0      (Double/parseDouble "2.0d")))
+  (is (= 2.0      (Double/parseDouble "2.0f")))
+  (is (= 1000.0   (Double/parseDouble "1e3")))
+  (is (= 5.0      (Double/parseDouble "5")))
   ;; Values past the parser's numeric range must throw, not saturate to
   ;; the boundary as a real result.
   (is (thrown?    (Long/parseLong "99999999999999999999999999")))
