@@ -21,8 +21,18 @@
  * with the fake stack, so disable it for every ASan build of mino. UBSan
  * and TSan are unaffected; the rest of ASan (heap, use-after-free, real
  * stack-buffer overflow) stays on. */
-#if defined(__SANITIZE_ADDRESS__) \
-    || (defined(__has_feature) && __has_feature(address_sanitizer))
+/* __has_feature(address_sanitizer) is the clang spelling; __SANITIZE_ADDRESS__
+ * is the gcc one. Test them in separate directives: gcc has no __has_feature,
+ * and `defined(__has_feature) && __has_feature(...)` in one #if still expands
+ * the __has_feature(...) token on gcc (0(...) -> syntax error). */
+#if defined(__SANITIZE_ADDRESS__)
+#  define MINO_ASAN_BUILD 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define MINO_ASAN_BUILD 1
+#  endif
+#endif
+#ifdef MINO_ASAN_BUILD
 const char *__asan_default_options(void);
 const char *__asan_default_options(void)
 {

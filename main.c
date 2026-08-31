@@ -803,33 +803,11 @@ static void crash_handler(int sig)
     raise(sig);
 }
 
-/* Weak hook called by libasan before main() runs. Disables fake-stack
- * (use-after-return detection) so conservative stack scanning works.
- * ASan's fake-stack feature relocates each function's address-taken
- * locals into a separately allocated region; the address returned by
- * &local for one call lives in a different region than another call's
- * &local. gc_scan_stack uses &probe at scan time and gc_note_host_frame
- * recorded another &probe at state init -- under fake-stack those two
- * pointers can sit in different fake-stack regions with unmapped memory
- * between them, so walking word-by-word from one to the other SEGVs.
- * The other use-after-return-style coverage we'd lose is non-essential
- * for catching the heap-corruption / red-zone class of bugs that
- * release-gate's ASan run is actually meant to find. The detect_leaks
- * setting stays on. */
-#if defined(__has_feature)
-#  if __has_feature(address_sanitizer)
-#    define MINO_BUILT_WITH_ASAN 1
-#  endif
-#elif defined(__SANITIZE_ADDRESS__)
-#  define MINO_BUILT_WITH_ASAN 1
-#endif
-#ifdef MINO_BUILT_WITH_ASAN
-const char *__asan_default_options(void);
-const char *__asan_default_options(void)
-{
-    return "detect_stack_use_after_return=0";
-}
-#endif
+/* __asan_default_options (disable ASan's fake stack so the conservative
+ * GC stack scan works) lives in the runtime library at src/gc/roots.c,
+ * next to gc_scan_stack -- so every binary that links the collector (the
+ * mino CLI here, embedders, and the fuzz targets, which have their own
+ * main and never link this file) gets it from one place. */
 
 #ifdef _WIN32
 /* mingw / clang-windows do not deliver hardware faults (access
