@@ -61,18 +61,19 @@ mino_val *mino_int(mino_state *S, long long n)
 #endif
     /* Inline-tag every int that fits in the 61-bit signed range. The
      * fallback below handles the narrow band between MINO_INT_MAX and
-     * LLONG_MAX where the tag would lose precision. With MINO_CAP_BIGNUM
-     * installed, that overflow promotes to a MINO_BIGINT so callers can
-     * keep using the tower transparently; without it, the value is
-     * boxed as a MINO_INT carrying the full 64-bit signed integer. */
+     * LLONG_MAX where the tag would lose precision: the value is boxed
+     * as a MINO_INT carrying the full 64-bit signed integer, exactly
+     * like the reader's literals in that band. It must NOT promote to
+     * MINO_BIGINT: canonical 64-bit arithmetic stays a plain long all
+     * the way to the edge, and a bigint here would grow an N suffix on
+     * results like nanosecond-scale timestamps. Overflow past 64 bits
+     * never reaches this constructor (checked ops throw, quote ops
+     * promote explicitly). */
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
 #ifdef MINO_BC_PROFILE_COUNTS
         S->bc.bc_int_alloc_avoided++;
 #endif
         return MINO_MAKE_INT(n);
-    }
-    if (mino_capability_installed(S, MINO_CAP_BIGNUM)) {
-        return mino_bigint_from_ll(S, n);
     }
     v = alloc_val(S, MINO_INT);
     v->as.i = n;

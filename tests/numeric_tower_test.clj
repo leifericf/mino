@@ -417,3 +417,19 @@
   (is (= "2" (pr-str 4/2)))
   (is (= "3" (pr-str (/ 9 3))))
   (is (= "1/6" (pr-str (/ 1 2 3)))))
+
+;; --- 61-to-64-bit band arithmetic stays a plain int ---
+;; The inline tag covers 61 bits; results in the band up to 64 bits
+;; box as MINO_INT (like the reader's literals) instead of promoting
+;; to bigint, so canonical long arithmetic never grows an N suffix.
+;; Explicit promotion (+' on overflow) and checked overflow throws
+;; are unaffected.
+
+(deftest nt-band-arithmetic-stays-int
+  (is (= "2305843009213693951" (pr-str (+ 2305843009213693950 1))))
+  (is (= "-9223372036854775807" (pr-str (quot 9223372036854775807 -1))))
+  (is (= "4611686018427387904" (pr-str (* 2 2305843009213693952))))
+  (is (= "-9223372036854775808" (pr-str (- -9223372036854775808 0))))
+  (is (= "1" (pr-str (rem 9223372036854775807 9223372036854775806))))
+  (is (= :int (type (+ 2305843009213693950 1))))
+  (is (= "9223372036854775808N" (pr-str (+' 9223372036854775807 1)))))
