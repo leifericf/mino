@@ -134,45 +134,26 @@
     (seq? x)       (write-array (vec x))
     :else          (throw (ex-info (str "Cannot serialize " (str x) " to JSON") {}))))
 
-(defn- write-array-rest
-  "Serialize remaining vector elements after the first. Returns a
-   string fragment."
-  [v i]
-  (if (>= i (count v))
-    "]"
-    (str "," (write-json (nth v i)) (write-array-rest v (+ i 1)))))
+(defn- write-array
+  "Serialize a vector to a JSON array. Iterates over elements so a large
+   flat array does not grow the stack per element."
+  [v]
+  (str "[" (str/join "," (map write-json v)) "]"))
 
-(defn- write-array [v]
-  (if (empty? v)
-    "[]"
-    (str "[" (write-json (first v)) (write-array-rest v 1))))
+(defn- write-member
+  "Serialize one map entry to a JSON \"key\":value fragment."
+  [[k v]]
+  (let [key-str (cond
+                  (string? k)  k
+                  (keyword? k) (name k)
+                  :else        (str k))]
+    (str "\"" (write-string-chars key-str) "\"" ":" (write-json v))))
 
-(defn- write-object-rest
-  "Serialize remaining map entries after the first. Returns a string
-   fragment."
-  [entries]
-  (if (empty? entries)
-    "}"
-    (let [[k v] (first entries)
-          key-str (cond
-                    (string? k)  k
-                    (keyword? k) (name k)
-                    :else        (str k))]
-      (str "," (str "\"" (write-string-chars key-str) "\"")
-           ":" (write-json v)
-           (write-object-rest (rest entries))))))
-
-(defn- write-object [m]
-  (if (empty? m)
-    "{}"
-    (let [[k v] (first m)
-          key-str (cond
-                    (string? k)  k
-                    (keyword? k) (name k)
-                    :else        (str k))]
-      (str "{" (str "\"" (write-string-chars key-str) "\"")
-           ":" (write-json v)
-           (write-object-rest (rest m))))))
+(defn- write-object
+  "Serialize a map to a JSON object. Iterates over entries so a large
+   flat object does not grow the stack per entry."
+  [m]
+  (str "{" (str/join "," (map write-member m)) "}"))
 
 ;;;; Public API (writer)
 

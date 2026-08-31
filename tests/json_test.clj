@@ -275,4 +275,15 @@
   (is (thrown? (json/write-str {:a 1} :key-fn name)))
   (is (thrown? (json/write-str {:a 1} :escape-unicode false))))
 
+(deftest write-str-large-flat-array-no-overflow
+  ;; The writer iterates over elements rather than recursing once per
+  ;; element, so a large flat array serializes without hitting the
+  ;; recursion limit.
+  (let [v (vec (range 60000))]
+    (is (= v (json/read-str (json/write-str v))))))
+
+(deftest write-str-large-flat-object-no-overflow
+  (let [m (into {} (for [i (range 40000)] [(str "k" i) i]))]
+    (is (= m (json/read-str (json/write-str m))))))
+
 (run-tests-and-exit)
