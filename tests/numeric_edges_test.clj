@@ -264,6 +264,30 @@
   (is (thrown? (read-string "1e+M")))
   (is (thrown? (read-string "1E-M"))))
 
+(deftest bigdec-scale-magnitude-is-bounded
+  ;; A decimal literal's scale magnitude is capped. An astronomically
+  ;; large exponent would otherwise force every downstream operation to
+  ;; materialize 10^|scale| as a bignum, so a ~15-byte literal is
+  ;; rejected at read time instead of pinning a core.
+  (is (thrown? (read-string "1E-200000000M")))
+  (is (thrown? (read-string "1E200000000M")))
+  ;; Operating on such a value must also refuse rather than compute.
+  (is (thrown? (eval (read-string "(+ 1E-200000000M 1M)"))))
+  (is (thrown? (eval (read-string "(= 1E-200000000M 1M)"))))
+  (is (thrown? (eval (read-string "(+ 1E200000000M 1M)")))))
+
+(deftest bigdec-legitimate-scales-still-work
+  ;; Money- and science-scale decimals stay exact and cheap.
+  (is (= 2.75M (+ 1.5M 1.25M)))
+  (is (= 0.01M (- 0.10M 0.09M)))
+  (is (= 100.00M (* 10.0M 10.0M)))
+  (is (= 1.23456789M (bigdec "1.23456789")))
+  ;; A modest scientific exponent scales without materializing anything
+  ;; astronomical.
+  (is (= 0.00001M (bigdec "1E-5")))
+  (is (= 100000M (bigdec "1E5")))
+  (is (true? (= 1.0M 1.00M))))
+
 (deftest parse-double-matches-java-double-grammar
   ;; Parity with java.lang.Double.parseDouble (the parse-double spec).
   (testing "hexadecimal floats require a binary exponent 'p'"

@@ -22,12 +22,27 @@
 /* MINO_BIGDEC                                                                */
 /* ------------------------------------------------------------------------- */
 
+/* A bigdec's scale is stored cheaply, but scale-alignment (add, sub,
+ * cmp, equals) and negative-scale normalization materialize 10^|scale|
+ * as a bignum. An attacker-supplied literal like 1E-200000000M would
+ * otherwise force a hundreds-of-megabytes computation from a ~15-byte
+ * source. JVM Clojure never materializes the scale, so parity for real
+ * money- and science-scale values (dozens of digits) is unaffected by
+ * capping the magnitude far below INT_MAX. 10^100000 is ~41 KB and
+ * computes in microseconds, orders of magnitude above any legitimate
+ * decimal and far below the attack's 200-million-digit exponents. */
+#define MINO_BIGDEC_MAX_SCALE 100000
+
 mino_val *mino_bigdec_make(mino_state *S, mino_val *unscaled, int scale)
 {
     mino_val *v;
     if (unscaled == NULL || mino_type_of(unscaled) != MINO_BIGINT) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "bigdec: unscaled must be a bigint");
+    }
+    if (scale > MINO_BIGDEC_MAX_SCALE || scale < -MINO_BIGDEC_MAX_SCALE) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "bigdec: scale magnitude too large");
     }
     v = alloc_val(S, MINO_BIGDEC);
     v->as.bigdec.unscaled = unscaled;
@@ -76,7 +91,16 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
             if (!(*expp >= '0' && *expp <= '9')) { free(digits); return NULL; }
             e = strtol(p + 1, &end, 10);
             if (end == p + 1) { free(digits); return NULL; }
-            if (e > INT_MAX || e < INT_MIN) { free(digits); return NULL; }
+            /* The scale becomes frac_len - exp, and a scale of that
+             * magnitude is later materialized as 10^|scale|. Reject an
+             * exponent whose magnitude alone would blow the scale cap so
+             * the giant computation never begins; frac_len's own small
+             * contribution is caught by mino_bigdec_make below. */
+            if (e > MINO_BIGDEC_MAX_SCALE || e < -MINO_BIGDEC_MAX_SCALE) {
+                free(digits);
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                    "bigdec: exponent magnitude too large");
+            }
             exp = (int)e;
             p = end;
             break;
