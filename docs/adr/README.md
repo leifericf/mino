@@ -44,3 +44,7 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [33](33-var-based-namespace-env.md) | Namespace environments bind vars uniformly |
 | [34](34-c-prim-arglists.md) | C prims carry oracle arglists as var metadata |
 | [35](35-store-backend-seam.md) | Store backends are plain maps of fns behind a five-op seam |
+| [36](36-http-server-ring-maps-over-net-prims.md) | The HTTP server is Ring maps over the net prims |
+| [37](37-keyword-catch-classes-match-kind.md) | Keyword catch classes match diagnostic kind by equality |
+| [39](39-conformance-model-routing.md) | Conformance generation and triage inherit the session model |
+| [40](40-conformance-probe-lane-ownership.md) | Conformance probe stays in the tests repo; lanes reach it via MINO_BIN |
