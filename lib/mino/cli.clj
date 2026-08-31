@@ -29,7 +29,8 @@
   (cli/format-opts {:spec {:port {:alias :p :default 80
                                   :desc \"The port.\"}}})
   ;; => \"  -p, --port  The port. (default: 80)\""
-  (:require [clojure.string :as str]))
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]))
 
 ;;;; Errors
 
@@ -76,11 +77,10 @@
 
 (defn- auto-coerce [s]
   (cond
-    (= "true" s)  true
-    (= "false" s) false
-    (re-matches #"[+-]?[\d].*" s) (read-string s)
+    (= "true" s)             true
+    (= "false" s)            false
     (str/starts-with? s ":") (keyword (subs s 1))
-    :else s))
+    :else                    (or (parse-long s) (parse-double s) s)))
 
 (defn- coerce-value
   "Applies coercion f to the string s. Non-strings pass through
@@ -115,7 +115,7 @@
             :symbol  (symbol s)
             :string  s
             :edn     (try
-                       (read-string s)
+                       (edn/read-string s)
                        (catch err
                          (throw-parse (str "mino.cli: cannot read \"" s
                                            "\" for --" (name k) " as EDN")
@@ -168,14 +168,23 @@
         {k [v used]}))))
 
 (defn- parse-short-flag
-  "Short flag: the exact alias first (with optional =value), else
+  "Short flag: the exact alias first (with optional =value), then a
+  value-taking alias with an attached value (-p8080), else
   per-character boolean expansion."
   [token next-tokens aliases boolean-name-set]
   (let [[body eq-value] (split-flag-body (subs token 1))
-        direct          (get aliases (keyword body))]
-    (if direct
+        direct          (get aliases (keyword body))
+        head            (get aliases (keyword (subs body 0 1)))]
+    (cond
+      direct
       (let [[v used] (value-for eq-value direct next-tokens boolean-name-set)]
         {direct [v used]})
+
+      (and (nil? eq-value) (> (count body) 1)
+           head (not (contains? boolean-name-set head)))
+      {head [(subs body 1) 0]}
+
+      :else
       (into {}
             (map (fn [c]
                    (let [one (str c)]

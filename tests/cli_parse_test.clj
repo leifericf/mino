@@ -148,4 +148,22 @@
   (is (thrown? (cli/parse-opts ["--letter" "alpha"]
                                {:spec {:letter {:coerce (fn [_] nil)}}}))))
 
+(deftest auto-coerce-leaves-non-numbers-as-strings
+  ;; A digit-leading value that is not a valid long or double stays a
+  ;; string; auto-coercion never evaluates the reader, so no arithmetic
+  ;; or reader fault escapes for hostile input.
+  (is (= {:x "1/0"}  (cli/parse-opts ["--x" "1/0"])))
+  (is (= {:x "3abc"} (cli/parse-opts ["--x" "3abc"])))
+  (is (= {:x "bar-1"} (cli/parse-opts ["--x" "bar-1"])))
+  (is (= {:x 1339}   (cli/parse-opts ["--x" "1339"])))
+  (is (= {:x 1.5}    (cli/parse-opts ["--x" "1.5"]))))
+
+(deftest short-alias-carries-an-attached-value
+  ;; -p8080 is the getopt attached-value form for the value-taking
+  ;; alias :p, not three boolean flags.
+  (is (= {:port 8080}
+         (cli/parse-opts ["-p8080"] {:spec {:port {:alias :p :coerce :long}}})))
+  (is (= {:from :edn}
+         (cli/parse-opts ["-iedn"] {:spec cli-spec}))))
+
 (run-tests-and-exit)
