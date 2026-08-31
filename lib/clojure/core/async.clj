@@ -1075,11 +1075,17 @@
                   rest-body   (rest body-with-ctx)
                   ;; Remaining stmts after the loop
                   remaining   (subvec stmts (inc i))]
-              (if (empty? remaining)
-                ;; Loop is the last expression
-                (vec (concat (conj states pre-state first-body) rest-body))
-                ;; There are stmts after the loop - TODO
-                (vec (concat (conj states pre-state first-body) rest-body))))
+              (when (seq remaining)
+                (throw {:mino/kind :async/go-unsupported
+                        :mino/code "MASG001"
+                        :mino/message
+                        (str "go: expressions after a parking loop are not "
+                             "supported. Make the loop the go block's last "
+                             "expression, or move the trailing work into the "
+                             "loop's exit branch.")
+                        :mino/data {:trailing (vec remaining)}}))
+              ;; Loop is the last expression.
+              (vec (concat (conj states pre-state first-body) rest-body)))
 
             ;; Try with parks in body
             (go-try-park? stmt)

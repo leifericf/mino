@@ -232,6 +232,28 @@
                                 (+ (note-arg order :b 2) (a/<! ch)))))))
       (is (= [:a :b] @order)))))
 
+(deftest go-rejects-expressions-after-a-parking-loop
+  ;; A parking loop must be the go block's last expression. Trailing
+  ;; expressions were silently dropped; now the transform throws instead
+  ;; of emitting a go that loses code (works-or-throws).
+  (testing "trailing expression after a parking loop throws :async/go-unsupported"
+    (is (= :async/go-unsupported
+           (try (eval '(clojure.core.async/go
+                         (loop [i 0]
+                           (when (< i 1)
+                             (clojure.core.async/<! (clojure.core.async/chan))
+                             (recur (inc i))))
+                         42))
+                nil
+                (catch e (:mino/kind e))))))
+  (testing "a parking loop as the last expression still compiles and runs"
+    (let [ch (a/chan 1)]
+      (a/>!! ch :x)
+      (is (= :done (a/<!! (a/go (loop [i 0]
+                                  (if (< i 1)
+                                    (do (a/<! ch) (recur (inc i)))
+                                    :done)))))))))
+
 (deftest go-try-catch-binding-survives-park
   ;; Regression: the go state-machine rewrite re-emitted each try
   ;; state's catch clause as (catch <class> <handler>), dropping the
