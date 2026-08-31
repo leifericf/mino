@@ -294,9 +294,10 @@
   (is (= 5/6 (+ 1/2 1/3)))
   (is (= 3/2 (+ 1 1/2)))
   (is (= :ratio (type (+ 1 1/2))))
-  ;; Ratio result that simplifies back to int.
+  ;; Ratio result that simplifies to an integer keeps bigint identity
+  ;; (canonical tower: the ratio machinery reduces through bigints).
   (is (= 1 (+ 1/2 1/2)))
-  (is (= :int (type (+ 1/2 1/2))))
+  (is (= :bigint (type (+ 1/2 1/2))))
   ;; Float collapses everything.
   (is (= 2.5 (+ 1 1.5)))
   (is (= 2.5 (+ 1/2 2.0)))
@@ -315,7 +316,7 @@
 (deftest nt-tower-mul
   (is (= 6 (* 2 3)))
   (is (= 1 (* 1/2 2)))
-  (is (= :int (type (* 1/2 2))))
+  (is (= :bigint (type (* 1/2 2))))
   (is (= 1/6 (* 1/2 1/3)))
   ;; Bigdec scale follows operand scales: 1.5M (scale 1) * 2M (scale 0) = 3.0M.
   (is (= 3.0M (* 1.5M 2M))))
@@ -392,3 +393,27 @@
   ;; inc/dec on ratio.
   (is (= 3/2 (inc 1/2)))
   (is (= -1/2 (dec 1/2))))
+
+;; --- Integral results out of the ratio/bigdec machinery stay bigint ---
+;; Matches canonical behavior: ratio arithmetic and rationalize reduce
+;; through the bigint tier and keep it when the denominator collapses
+;; to 1; only the exact int/int division fast path (and the reader's
+;; ratio literal) narrows to a plain int.
+
+(deftest nt-ratio-collapse-keeps-bigint
+  (is (= "1N" (pr-str (+ 1/2 1/2))))
+  (is (= "1N" (pr-str (- 3/2 1/2))))
+  (is (= "2N" (pr-str (* 2/3 3))))
+  (is (= "1N" (pr-str (/ 1/2 1/2))))
+  (is (= "2N" (pr-str (* 1/2 4))))
+  (is (= "1N" (pr-str (+ 1/3 2/3))))
+  (is (= "2N" (pr-str (/ 4N 2))))
+  (is (= "0N" (pr-str (rationalize 0.0))))
+  (is (= "0N" (pr-str (rationalize -0.0))))
+  (is (= "2N" (pr-str (rationalize 2.0))))
+  (is (= "1N" (pr-str (rationalize 1.0M))))
+  (is (= "0N" (pr-str (rationalize 0.0M))))
+  ;; The narrow paths stay narrow.
+  (is (= "2" (pr-str 4/2)))
+  (is (= "3" (pr-str (/ 9 3))))
+  (is (= "1/6" (pr-str (/ 1 2 3)))))

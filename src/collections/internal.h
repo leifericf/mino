@@ -344,6 +344,8 @@ void     mino_bigint_to_bits64(const mino_val *v, uint64_t *out);
 
 /* MINO_RATIO support. */
 mino_val *mino_ratio_make(mino_state *S, mino_val *num, mino_val *denom);
+mino_val *mino_ratio_make_keepbig(mino_state *S, mino_val *num,
+                                    mino_val *denom);
 mino_val *mino_ratio_make_unchecked(mino_state *S, mino_val *num,
                                       mino_val *denom);
 void     mino_ratio_print(mino_state *S, const mino_val *v, FILE *out);

@@ -76,10 +76,14 @@ mino_val *mino_ratio_make_unchecked(mino_state *S, mino_val *num,
 }
 
 /* Build a canonical ratio from two arbitrary numeric (int or bigint)
- * values. Returns int / bigint when the result is integer, otherwise a
- * MINO_RATIO. Throws on division-by-zero. */
-mino_val *mino_ratio_make(mino_state *S, mino_val *num,
-                            mino_val *denom)
+ * values. When the denominator collapses to 1, `narrow` decides the
+ * integer result's representation: narrowed to MINO_INT when it fits
+ * (the reader's ratio literal and the exact int/int division fast
+ * path), or kept MINO_BIGINT (ratio arithmetic and rationalize, whose
+ * canonical results keep bigint identity and print with the N suffix).
+ * Throws on division-by-zero. */
+static mino_val *ratio_make_impl(mino_state *S, mino_val *num,
+                                   mino_val *denom, int narrow)
 {
     mino_val *bnum, *bdenom;
     mp_int      g;
@@ -132,14 +136,25 @@ mino_val *mino_ratio_make(mino_state *S, mino_val *num,
         mp_int_clear(&r_buf);
     }
     mp_int_clear(g);
-    /* If denominator collapsed to 1, result is integer-valued. Narrow
-     * to MINO_INT when it fits, else keep as MINO_BIGINT. */
+    /* If denominator collapsed to 1, result is integer-valued. */
     if (mp_int_compare_value((mp_int)bdenom->as.bigint.mpz, 1) == 0) {
         long long ll;
-        if (bigint_fits_ll(bnum, &ll)) return mino_int(S, ll);
+        if (narrow && bigint_fits_ll(bnum, &ll)) return mino_int(S, ll);
         return bnum;
     }
     return mino_ratio_make_unchecked(S, bnum, bdenom);
+}
+
+mino_val *mino_ratio_make(mino_state *S, mino_val *num,
+                            mino_val *denom)
+{
+    return ratio_make_impl(S, num, denom, 1);
+}
+
+mino_val *mino_ratio_make_keepbig(mino_state *S, mino_val *num,
+                                    mino_val *denom)
+{
+    return ratio_make_impl(S, num, denom, 0);
 }
 
 mino_val *mino_ratio_from_ll(mino_state *S, long long num, long long denom)
@@ -373,7 +388,7 @@ mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
             if (bd == NULL) { mp_int_clear(&pw); return NULL; }
             mp_int_copy(&pw, (mp_int)bd->as.bigint.mpz);
             mp_int_clear(&pw);
-            return mino_ratio_make(S, unscaled, bd);
+            return mino_ratio_make_keepbig(S, unscaled, bd);
         }
     }
     if (mino_type_of(x) == MINO_FLOAT) {
@@ -391,7 +406,7 @@ mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
         if (d != d) /* NaN */
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "rationalize: NaN");
-        if (d == 0.0) return mino_int(S, 0);
+        if (d == 0.0) return mino_bigint_from_ll(S, 0);
         mino_double_shortest(d, buf, sizeof(buf));
         bd = mino_bigdec_from_string(S, buf);
         if (bd == NULL) {
@@ -421,7 +436,7 @@ mino_val *prim_rationalize(mino_state *S, mino_val *args, mino_env *env)
             mp_int_copy(&pw, (mp_int)denom->as.bigint.mpz);
             gc_unpin(1);
             mp_int_clear(&pw);
-            return mino_ratio_make(S, unscaled, denom);
+            return mino_ratio_make_keepbig(S, unscaled, denom);
         }
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
@@ -473,7 +488,7 @@ mino_val *mino_ratio_add(mino_state *S, const mino_val *a,
     gc_unpin(2);
     if (new_num == NULL) return NULL;
     new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
-    return mino_ratio_make(S, new_num, new_den);
+    return mino_ratio_make_keepbig(S, new_num, new_den);
 }
 
 mino_val *mino_ratio_sub(mino_state *S, const mino_val *a,
@@ -492,7 +507,7 @@ mino_val *mino_ratio_sub(mino_state *S, const mino_val *a,
     if (cross2 == NULL) return NULL;
     new_num = mino_bigint_sub(S, cross1, cross2); if (new_num == NULL) return NULL;
     new_den = mino_bigint_mul(S, ad, bd); if (new_den == NULL) return NULL;
-    return mino_ratio_make(S, new_num, new_den);
+    return mino_ratio_make_keepbig(S, new_num, new_den);
 }
 
 mino_val *mino_ratio_mul(mino_state *S, const mino_val *a,
@@ -509,7 +524,7 @@ mino_val *mino_ratio_mul(mino_state *S, const mino_val *a,
     new_den = mino_bigint_mul(S, ad, bd);
     gc_unpin(1);
     if (new_den == NULL) return NULL;
-    return mino_ratio_make(S, new_num, new_den);
+    return mino_ratio_make_keepbig(S, new_num, new_den);
 }
 
 mino_val *mino_ratio_div(mino_state *S, const mino_val *a,
@@ -531,5 +546,5 @@ mino_val *mino_ratio_div(mino_state *S, const mino_val *a,
     new_den = mino_bigint_mul(S, ad, bn);
     gc_unpin(1);
     if (new_den == NULL) return NULL;
-    return mino_ratio_make(S, new_num, new_den);
+    return mino_ratio_make_keepbig(S, new_num, new_den);
 }
