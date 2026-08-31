@@ -2932,7 +2932,8 @@
     (if (= failures 0)
       (println "qa-arch: PASS")
       (do (println (str "qa-arch: FAIL (" failures " issue(s))"))
-          (throw (str "qa-arch failed with " failures " issue(s)"))))))
+          (throw (ex-info (str "qa-arch failed with " failures " issue(s)")
+                          {:failures failures}))))))
 
 (defn gen-unicode-case
   "Regenerate src/prim/unicode_case.h from the vendored Unicode

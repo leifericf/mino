@@ -448,7 +448,7 @@
   "Skip any text a host prints before the first EDN collection."
   [s]
   (let [idx (str/index-of s "{")]
-    (if (pos? idx) (subs s idx) s)))
+    (if idx (subs s idx) s)))
 
 (def probe-form-template
   '(do
