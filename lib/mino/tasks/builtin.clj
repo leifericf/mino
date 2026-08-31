@@ -2575,8 +2575,11 @@
   concurrent compile writes a second slot onto the same page;
   jit_retire_reclaim_test pins that a slab page is not unmapped while a
   worker is inside native JIT code, and is reclaimed only at a quiescent
-  point. Multi-state, STM, and capability embed tests live in the
-  mino-tests satellite repo (test-embed-suite there)."
+  point; jit_win_dual_view_test pins the structural dual-view invariant
+  (separate executable and writable mappings; make_rw/make_rx never
+  disturb the executable view) that holds on every threaded JIT host,
+  Windows included. Multi-state, STM, and capability embed tests live in
+  the mino-tests satellite repo (test-embed-suite there)."
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
                               "embed_api_test")
@@ -2585,7 +2588,9 @@
   (compile-and-run-embed-test "tests/jit_dual_view_test.c"
                               "jit_dual_view_test")
   (compile-and-run-embed-test "tests/jit_retire_reclaim_test.c"
-                              "jit_retire_reclaim_test"))
+                              "jit_retire_reclaim_test")
+  (compile-and-run-embed-test "tests/jit_win_dual_view_test.c"
+                              "jit_win_dual_view_test"))
 
 (defn test-crash-handler
   "Compile and run the crash-handler backtrace smoke. Exercises the

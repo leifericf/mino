@@ -105,7 +105,12 @@ struct mino_jit_slab {
     size_t                page_size;   /* host page size at slab creation */
     size_t                bump_offset; /* next free byte (16-aligned) */
     unsigned              live_slots;  /* count of bc records owning a slot here */
-    int                   backing_fd;  /* memfd/shm fd for the dual mapping, or -1 */
+    /* Backing object for the dual mapping, host-dependent: a memfd/shm
+     * file descriptor on POSIX (cast from int) or a section HANDLE on
+     * Windows (cast from HANDLE). Zero when there is no separate backing
+     * (the single-mapping MAP_JIT and page-flip fallbacks). Held as a
+     * uintptr_t so one field carries either without a type clash. */
+    uintptr_t             backing;
     struct mino_jit_slab *next;
 };
 

@@ -52,16 +52,26 @@
  *                            per-thread pthread_jit_write_protect_np.
  *                            The toggle changes only the calling
  *                            thread's view, so sibling threads keep RX.
- *   (fallback)            -- neither available (e.g. Windows): the page
- *                            is flipped with mprotect / VirtualProtect.
- *                            This retains the W^X page-flip race under
- *                            true multithreaded JIT and is only safe
- *                            where the JIT is single-mutator. See BUGS.
+ *   MINO_JIT_SLAB_DUAL_WIN -- Windows: back the page with an anonymous
+ *                            section (CreateFileMapping) and keep two
+ *                            permanent views, an execute+read view that
+ *                            is never re-protected and a write view with
+ *                            no execute. The execute view's protection
+ *                            never changes, so a sibling thread running
+ *                            the page is never disturbed. This is the
+ *                            memfd dual-mapping mirrored onto Win32.
+ *   (fallback)            -- none of the above: the page is flipped with
+ *                            mprotect / VirtualProtect. This retains the
+ *                            W^X page-flip race under true multithreaded
+ *                            JIT and is only safe where the JIT is
+ *                            single-mutator. No supported host takes it.
  */
 #if defined(__APPLE__)
 #define MINO_JIT_SLAB_MAPJIT 1
 #elif defined(__linux__)
 #define MINO_JIT_SLAB_DUAL 1
+#elif defined(_WIN32)
+#define MINO_JIT_SLAB_DUAL_WIN 1
 #endif
 
 /* Host RWX region API. POSIX uses mmap / mprotect / munmap; Windows
@@ -159,9 +169,11 @@ int region_track(mino_state *S, void *ptr, size_t size, void *aux_ptr)
 
 /* Back a slab of `page` bytes. Fills exec_out (the mapping code runs
  * and is addressed through), write_out (the mapping the compiler copies
- * through), and fd_out (the shared backing fd, or -1). Returns 0 on
- * success, -1 on failure with nothing left mapped. The exec mapping is
- * the one whose permissions are never disturbed after creation. */
+ * through), and backing_out (the shared backing object -- a memfd/shm
+ * fd on POSIX or a section HANDLE on Windows, cast to uintptr_t; zero
+ * when there is none). Returns 0 on success, -1 on failure with nothing
+ * left mapped. The exec mapping is the one whose permissions are never
+ * disturbed after creation. */
 #if defined(MINO_JIT_SLAB_DUAL)
 static int jit_slab_backing_open(size_t page)
 {
@@ -190,7 +202,7 @@ static int jit_slab_backing_open(size_t page)
 }
 
 static int jit_slab_backing_alloc(size_t page, void **exec_out,
-                                  void **write_out, int *fd_out)
+                                  void **write_out, uintptr_t *backing_out)
 {
     int   fd = jit_slab_backing_open(page);
     void *rx, *rw;
@@ -199,47 +211,83 @@ static int jit_slab_backing_alloc(size_t page, void **exec_out,
     if (rx == MAP_FAILED) { close(fd); return -1; }
     rw = mmap(NULL, page, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (rw == MAP_FAILED) { munmap(rx, page); close(fd); return -1; }
-    *exec_out  = rx;
-    *write_out = rw;
-    *fd_out    = fd;
+    *exec_out    = rx;
+    *write_out   = rw;
+    *backing_out = (uintptr_t)fd;
     return 0;
 }
 #elif defined(MINO_JIT_SLAB_MAPJIT)
 static int jit_slab_backing_alloc(size_t page, void **exec_out,
-                                  void **write_out, int *fd_out)
+                                  void **write_out, uintptr_t *backing_out)
 {
     void *p = mmap(NULL, page, PROT_READ | PROT_WRITE | PROT_EXEC,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
     if (p == MAP_FAILED) return -1;
-    *exec_out  = p;   /* one mapping; per-thread write-protect toggles it */
-    *write_out = p;
-    *fd_out    = -1;
+    *exec_out    = p;   /* one mapping; per-thread write-protect toggles it */
+    *write_out   = p;
+    *backing_out = 0;
+    return 0;
+}
+#elif defined(MINO_JIT_SLAB_DUAL_WIN)
+static int jit_slab_backing_alloc(size_t page, void **exec_out,
+                                  void **write_out, uintptr_t *backing_out)
+{
+    /* An anonymous, pagefile-backed section. PAGE_EXECUTE_READWRITE on
+     * the *section* is the maximum protection any view may request; the
+     * views below each take a narrower access. SEC_COMMIT reserves and
+     * commits the whole region up front. */
+    HANDLE  section;
+    void   *rx, *rw;
+    DWORD   size_hi = (DWORD)(((uint64_t)page >> 31) >> 1);
+    DWORD   size_lo = (DWORD)(page & 0xFFFFFFFFu);
+    section = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL,
+                                 PAGE_EXECUTE_READWRITE | SEC_COMMIT,
+                                 size_hi, size_lo, NULL);
+    if (section == NULL) return -1;
+    /* Permanent execute view: code runs and is addressed through this
+     * mapping, and its protection is never touched again. */
+    rx = MapViewOfFile(section, FILE_MAP_EXECUTE | FILE_MAP_READ,
+                       0, 0, page);
+    if (rx == NULL) { CloseHandle(section); return -1; }
+    /* Separate write view: read/write, NO execute. The compiler copies
+     * and patches new code through this alias at the same offset. */
+    rw = MapViewOfFile(section, FILE_MAP_WRITE, 0, 0, page);
+    if (rw == NULL) { UnmapViewOfFile(rx); CloseHandle(section); return -1; }
+    *exec_out    = rx;
+    *write_out   = rw;
+    *backing_out = (uintptr_t)section;
     return 0;
 }
 #else
 static int jit_slab_backing_alloc(size_t page, void **exec_out,
-                                  void **write_out, int *fd_out)
+                                  void **write_out, uintptr_t *backing_out)
 {
     void *p = jit_region_alloc(page);   /* single RW/RX-flipped mapping */
     if (p == MINO_JIT_REGION_ALLOC_FAILED) return -1;
-    *exec_out  = p;
-    *write_out = p;
-    *fd_out    = -1;
+    *exec_out    = p;
+    *write_out   = p;
+    *backing_out = 0;
     return 0;
 }
 #endif
 
 static void jit_slab_backing_free(void *exec_page, void *write_page,
-                                  size_t page, int fd)
+                                  size_t page, uintptr_t backing)
 {
 #if defined(MINO_JIT_SLAB_DUAL)
     if (write_page != NULL && write_page != exec_page)
         munmap(write_page, page);
     if (exec_page != NULL) munmap(exec_page, page);
-    if (fd >= 0) close(fd);
+    if (backing != 0) close((int)backing);
+#elif defined(MINO_JIT_SLAB_DUAL_WIN)
+    (void)page;
+    if (write_page != NULL && write_page != exec_page)
+        UnmapViewOfFile(write_page);
+    if (exec_page != NULL) UnmapViewOfFile(exec_page);
+    if (backing != 0) CloseHandle((HANDLE)backing);
 #else
     (void)write_page;
-    (void)fd;
+    (void)backing;
     if (exec_page != NULL) jit_region_free(exec_page, page);
 #endif
 }
@@ -251,7 +299,7 @@ static struct mino_jit_slab *jit_slab_alloc_new(mino_state *S, size_t need)
     size_t                page;
     void                 *exec_p = NULL;
     void                 *write_p = NULL;
-    int                   fd = -1;
+    uintptr_t             backing = 0;
     page_l = jit_region_page_size();
     if (page_l <= 0) return NULL;
     page = (size_t)page_l;
@@ -259,11 +307,11 @@ static struct mino_jit_slab *jit_slab_alloc_new(mino_state *S, size_t need)
     if (need > page) {
         page = (need + page - 1) & ~(page - 1);
     }
-    if (jit_slab_backing_alloc(page, &exec_p, &write_p, &fd) != 0)
+    if (jit_slab_backing_alloc(page, &exec_p, &write_p, &backing) != 0)
         return NULL;
     slab = (struct mino_jit_slab *)malloc(sizeof(*slab));
     if (slab == NULL) {
-        jit_slab_backing_free(exec_p, write_p, page, fd);
+        jit_slab_backing_free(exec_p, write_p, page, backing);
         return NULL;
     }
     slab->page        = exec_p;
@@ -271,7 +319,7 @@ static struct mino_jit_slab *jit_slab_alloc_new(mino_state *S, size_t need)
     slab->page_size   = page;
     slab->bump_offset = 0;
     slab->live_slots  = 0;
-    slab->backing_fd  = fd;
+    slab->backing     = backing;
     slab->next        = S->jit_slabs;
     S->jit_slabs      = slab;
     return slab;
@@ -307,9 +355,10 @@ unsigned char *mino_jit_slab_write_base(struct mino_jit_slab *slab)
 
 int jit_slab_make_rw(struct mino_jit_slab *slab)
 {
-#if defined(MINO_JIT_SLAB_DUAL)
-    /* The writable alias is a permanent, separate mapping; no
-     * permission change touches the executable mapping. */
+#if defined(MINO_JIT_SLAB_DUAL) || defined(MINO_JIT_SLAB_DUAL_WIN)
+    /* The writable alias is a permanent, separate mapping (a memfd RW
+     * mmap on POSIX, a FILE_MAP_WRITE view on Windows); no permission
+     * change touches the executable mapping. */
     (void)slab;
     return 0;
 #elif defined(MINO_JIT_SLAB_MAPJIT)
@@ -330,7 +379,11 @@ int jit_slab_make_rw(struct mino_jit_slab *slab)
 
 int jit_slab_make_rx(struct mino_jit_slab *slab)
 {
-#if defined(MINO_JIT_SLAB_DUAL)
+#if defined(MINO_JIT_SLAB_DUAL) || defined(MINO_JIT_SLAB_DUAL_WIN)
+    /* The executable view was never made writable, so nothing needs
+     * re-protecting. The I-cache flush over the freshly written slot
+     * runs in mino_jit_compile_inner against the exec view
+     * (__builtin___clear_cache / FlushInstructionCache). */
     (void)slab;
     return 0;
 #elif defined(MINO_JIT_SLAB_MAPJIT)
@@ -402,7 +455,7 @@ void mino_jit_reclaim_retired(mino_state *S)
     while (slab != NULL) {
         struct mino_jit_slab *next = slab->next;
         jit_slab_backing_free(slab->page, slab->write_page,
-                              slab->page_size, slab->backing_fd);
+                              slab->page_size, slab->backing);
         free(slab);
         slab = next;
     }
@@ -456,7 +509,7 @@ void mino_jit_free_all(mino_state *S)
         while (slab != NULL) {
             struct mino_jit_slab *next = slab->next;
             jit_slab_backing_free(slab->page, slab->write_page,
-                                  slab->page_size, slab->backing_fd);
+                                  slab->page_size, slab->backing);
             free(slab);
             slab = next;
         }
@@ -470,7 +523,7 @@ void mino_jit_free_all(mino_state *S)
         while (slab != NULL) {
             struct mino_jit_slab *next = slab->next;
             jit_slab_backing_free(slab->page, slab->write_page,
-                                  slab->page_size, slab->backing_fd);
+                                  slab->page_size, slab->backing);
             free(slab);
             slab = next;
         }
