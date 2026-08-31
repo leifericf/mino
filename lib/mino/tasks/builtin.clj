@@ -1201,6 +1201,23 @@
   (build-sanitized "asan" "mino_asan"
                    ["-fsanitize=address"]))
 
+(defn- asan-run-skipped-on-darwin?
+  "True (after printing why) when the ASan suite must not run here
+   because the host is macOS. Apple's AddressSanitizer runtime livelocks
+   at init on current Darwin (arm64): shadow-memory setup re-enters its
+   own initializer through dyld's instrumented malloc and spins forever,
+   so mino_asan never reaches main. The suite would hang, not fail. CI
+   runs every ASan lane on Linux, where this does not happen, so darwin
+   coverage loses nothing by skipping. Building mino_asan is fine (only
+   running it hangs), but there is no point building what cannot run."
+  []
+  (if (= "Darwin" (:sysname (uname)))
+    (do (println (str "  ASan suite skipped on macOS: the Apple ASan "
+                      "runtime livelocks at init (arm64/Darwin). Run it "
+                      "on Linux -- CI covers every ASan lane there."))
+        true)
+    false))
+
 (defn test-suite-asan
   "Build mino_asan and run the full suite under it in both JIT modes
    (AUTO and eager --jit=on). The JIT's C side (emit / patcher /
@@ -1210,12 +1227,14 @@
    runs with no exclusions. Used by the local pre-land release gate,
    which builds once and runs both passes serially. Push CI splits the
    two passes across parallel jobs instead -- see test-suite-asan-auto
-   and test-suite-asan-jit -- so neither overruns its watchdog."
+   and test-suite-asan-jit -- so neither overruns its watchdog.
+   Skipped on macOS (see asan-run-skipped-on-darwin?)."
   []
-  (build-asan)
-  (run-suite-with-test-bin "./mino_asan" [])
-  (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
-  (println "  test-suite-asan: OK"))
+  (when-not (asan-run-skipped-on-darwin?)
+    (build-asan)
+    (run-suite-with-test-bin "./mino_asan" [])
+    (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
+    (println "  test-suite-asan: OK")))
 
 (defn test-suite-asan-auto
   "Build mino_asan and run the full suite under it in AUTO JIT mode.
@@ -1224,21 +1243,25 @@
    single job running both passes serially overran the gate's 25-minute
    watchdog. Split, each job carries one pass and finishes well inside
    the cap while the two together preserve the exact both-modes
-   coverage the release gate runs locally."
+   coverage the release gate runs locally. Skipped on macOS (see
+   asan-run-skipped-on-darwin?)."
   []
-  (build-asan)
-  (run-suite-with-test-bin "./mino_asan" [])
-  (println "  test-suite-asan-auto: OK"))
+  (when-not (asan-run-skipped-on-darwin?)
+    (build-asan)
+    (run-suite-with-test-bin "./mino_asan" [])
+    (println "  test-suite-asan-auto: OK")))
 
 (defn test-suite-asan-jit
   "Build mino_asan and run the full suite under it in eager --jit=on
    mode, pushing every test through the native tier under ASan. The
    eager half of the split ASan gate; see test-suite-asan-auto for why
-   the two passes run as separate parallel CI jobs."
+   the two passes run as separate parallel CI jobs. Skipped on macOS
+   (see asan-run-skipped-on-darwin?)."
   []
-  (build-asan)
-  (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
-  (println "  test-suite-asan-jit: OK"))
+  (when-not (asan-run-skipped-on-darwin?)
+    (build-asan)
+    (run-suite-with-test-bin "./mino_asan" ["--jit=on"])
+    (println "  test-suite-asan-jit: OK")))
 
 (defn build-ubsan
   "Build mino_ubsan with UndefinedBehaviorSanitizer. Catches signed
