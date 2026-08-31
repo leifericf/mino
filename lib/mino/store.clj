@@ -1291,8 +1291,8 @@
   "Merges two db values into a new one. The fact logs concatenate and
   replay in instant order, so the entity view reflects last-write-wins
   by :instant. The tx counter is the max of the two. Schema, closed?,
-  indexed-attrs, and history are taken from db-a. Indexes are rebuilt
-  for the merged entity view."
+  indexed-attrs, entity-specs, and history are taken from db-a. Indexes
+  are rebuilt for the merged entity view."
   [db-a db-b]
   (let [schema (get db-a :schema {})
         indexed-attrs (get db-a :indexed-attrs #{})
@@ -1307,6 +1307,7 @@
      :closed? (get db-a :closed? false)
      :indexed-attrs indexed-attrs
      :indexes indexes
+     :entity-specs (get db-a :entity-specs)
      :history (get db-a :history)}))
 
 (defn fold
@@ -1363,6 +1364,7 @@
                             :closed? (get cur :closed? false)
                             :indexed-attrs (get cur :indexed-attrs #{})
                             :indexes (get cur :indexes {})
+                            :entity-specs (get cur :entity-specs)
                             :history (get cur :history)}
                       nil)))
   ([conn keep-spec]
@@ -1396,6 +1398,7 @@
                             :closed? (get cur :closed? false)
                             :indexed-attrs (get cur :indexed-attrs #{})
                             :indexes (get cur :indexes {})
+                            :entity-specs (get cur :entity-specs)
                             :history (get cur :history)}
                       nil))))
 

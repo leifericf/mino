@@ -1946,6 +1946,31 @@
         "ex-data carries the missing attrs")
     (is (= #{} (store/entities (store/db conn))) "no facts applied")))
 
+(deftest store-compact-preserves-entity-specs
+  ;; Compaction rebuilds the db value; it must carry :entity-specs so a
+  ;; spec-violating transact is still rejected afterward.
+  (let [conn (store/open nil {:schema store-es-schema
+                              :entity-specs {:user {:required-attrs [:name :email]}}})
+        _ (store/transact conn {1 {:db/ensure :user :name "Alice" :email "a@x.com"}})
+        _ (store/compact conn)
+        e (try (store/transact conn {2 {:db/ensure :user :name "Bob"}})
+               nil
+               (catch Throwable e e))]
+    (is (some? (get (store/db conn) :entity-specs))
+        "compact preserves :entity-specs on the db value")
+    (is (some? e) "entity-spec validation still fires after compact")
+    (is (= :store/schema (:mino/kind e)))))
+
+(deftest store-merge-preserves-entity-specs
+  ;; merge takes schema, indexes, and history from db-a; :entity-specs
+  ;; travels with them.
+  (let [conn (store/open nil {:schema store-es-schema
+                              :entity-specs {:user {:required-attrs [:name :email]}}})
+        _ (store/transact conn {1 {:name "Alice" :email "a@x.com"}})
+        db (store/db conn)]
+    (is (= (:entity-specs db) (:entity-specs (store/merge db db)))
+        "merge carries :entity-specs from db-a")))
+
 (deftest store-entity-spec-pred-passes
   (let [conn (store/open nil {:schema store-es-schema
                              :entity-specs {:user {:preds [store-spec-email-has-at]}}})
