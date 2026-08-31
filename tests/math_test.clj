@@ -13,9 +13,15 @@
   (is (= -3.0 (math-ceil -3.2))))
 
 (deftest math-round-fn
+  ;; java.lang.Math.round: round half toward positive infinity (not
+  ;; half-away-from-zero), so -2.5 -> -2 and -3.5 -> -3.
   (is (= 4 (math-round 3.5)))
   (is (= 3 (math-round 3.4)))
-  (is (= -4 (math-round -3.5))))
+  (is (= -3 (math-round -3.5)))
+  (is (= -2 (math-round -2.5)))
+  (is (= 3 (math-round 2.5)))
+  (is (= 0 (math-round -0.5)))
+  (is (= 0 (math-round 0.49999999999999994))))
 
 (deftest math-sqrt-fn
   (is (= 4.0 (math-sqrt 16)))

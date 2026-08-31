@@ -11,6 +11,7 @@
 
 #include <math.h>
 #include <float.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -63,7 +64,21 @@ mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg), "math-round expects a number");
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
-    return mino_int(S, (long long)round(x));
+    /* Match java.lang.Math.round(double): round half toward positive
+     * infinity (not C round()'s half-away-from-zero), NaN -> 0, and clamp
+     * to the long range. */
+    if (x != x) return mino_int(S, 0);
+    if (x >= (double)LLONG_MAX) return mino_int(S, LLONG_MAX);
+    if (x <= (double)LLONG_MIN) return mino_int(S, LLONG_MIN);
+    {
+        /* Add one when the fractional part is at least a half. Using the
+         * exact fractional part (x - floor(x)) rather than floor(x + 0.5)
+         * avoids the rounding that would mis-handle x = 0.49999999999999994
+         * (Math.round yields 0, not 1). */
+        double r = floor(x);
+        if (x - r >= 0.5) r += 1.0;
+        return mino_int(S, (long long)r);
+    }
 }
 
 mino_val *prim_math_sqrt(mino_state *S, mino_val *args, mino_env *env)
