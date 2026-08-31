@@ -146,3 +146,17 @@
       (is (every? (fn [r] (< r 1.0)) draws)))
     (testing "draws vary"
       (is (> (count (distinct draws)) 1)))))
+
+;; --- Math statics accept the whole mino numeric tower ---
+;; The JVM's Math methods are double-typed and reflection rejects
+;; BigInt/Ratio arguments; mino's Math statics are prims over mino
+;; numerics, so every numeric tier coerces. Surfaced when ratio
+;; arithmetic began keeping bigint identity on integral results.
+
+(deftest math-statics-numeric-tower
+  (is (= 2 (Math/round 2N)))
+  (is (= 2 (Math/round 3/2)))
+  (is (= 3 (Math/round 5/2)))
+  (is (= 1.0 (Math/floor 3/2)))
+  (is (= 2.0 (Math/ceil 3/2)))
+  (is (= 4.0 (Math/sqrt 16N))))

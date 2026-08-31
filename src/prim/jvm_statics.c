@@ -231,6 +231,18 @@ static int coerce_to_double(const mino_val *v, double *out)
         *out = v->as.f;
         return 1;
     }
+    /* The rest of the tower: bigint and ratio coerce like any other
+     * numeric argument. The JVM's double-typed Math methods reject
+     * them via reflection; mino's statics are prims over mino
+     * numerics, so the whole tower is accepted. */
+    if (mino_type_of((mino_val *)v) == MINO_BIGINT) {
+        *out = mino_bigint_to_double(v);
+        return 1;
+    }
+    if (mino_type_of((mino_val *)v) == MINO_RATIO) {
+        *out = mino_ratio_to_double(v);
+        return 1;
+    }
     if (as_long((mino_val *)v, &ll)) {
         *out = (double)ll;
         return 1;
