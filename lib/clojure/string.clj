@@ -26,6 +26,14 @@
 (defn- as-str [s]
   (if (string? s) s (str s)))
 
+(defn- whitespace?
+  "True when codepoint c is ASCII/Latin-1 whitespace per
+   Character/isWhitespace: HT, LF, VT, FF, CR (9-13), the FS/GS/RS/US
+   separators and space (28-32). A non-breaking space (0xA0) is not."
+  [c]
+  (or (and (>= c 9) (<= c 13))
+      (and (>= c 28) (<= c 32))))
+
 (defn blank? [s]
   (if (nil? s)
     true
@@ -33,10 +41,9 @@
       (loop [i 0 len (count s)]
         (if (>= i len)
           true
-          (let [c (char-at s i)]
-            (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
-              (recur (+ i 1) len)
-              false)))))))
+          (if (whitespace? (int (nth s i)))
+            (recur (+ i 1) len)
+            false))))))
 
 (defn capitalize [s]
   (let [s (as-str s)]
@@ -90,10 +97,9 @@
     (loop [i 0]
       (if (>= i len)
         ""
-        (let [c (char-at s i)]
-          (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
-            (recur (+ i 1))
-            (subs s i)))))))
+        (if (whitespace? (int (nth s i)))
+          (recur (+ i 1))
+          (subs s i))))))
 
 (defn trimr [s]
   (let [s (assert-string s)
@@ -101,10 +107,9 @@
     (loop [i len]
       (if (<= i 0)
         ""
-        (let [c (char-at s (- i 1))]
-          (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
-            (recur (- i 1))
-            (subs s 0 i)))))))
+        (if (whitespace? (int (nth s (- i 1))))
+          (recur (- i 1))
+          (subs s 0 i))))))
 
 (defn trim [s]
   (trimr (triml s)))

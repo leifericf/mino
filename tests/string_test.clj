@@ -78,6 +78,20 @@
   (is (= "hi" (trim "  hi  ")))
   (is (= "hi" (trim "hi"))))
 
+(deftest trim-and-blank-cover-all-ascii-whitespace
+  ;; Parity with Character/isWhitespace over the ASCII/Latin-1 range:
+  ;; HT, LF, VT, FF, CR, the FS/GS/RS/US separators, and space. A
+  ;; non-breaking space (0xA0) is not whitespace and must survive.
+  (let [ff (str (char 12)) vt (str (char 11)) fs (str (char 28))
+        nbsp (str (char 160))]
+    (is (= "x" (trim (str ff vt "x" vt ff))))
+    (is (= "x" (str/triml (str vt ff "x"))))
+    (is (= "x" (str/trimr (str "x" ff vt))))
+    (is (str/blank? (str ff vt fs)))
+    (is (str/blank? (str (char 9) (char 10) (char 13))))
+    (is (not (str/blank? nbsp)))
+    (is (= nbsp (trim nbsp)))))
+
 (deftest char-at-fn
   (is (= "h" (char-at "hello" 0)))
   (is (= "o" (char-at "hello" 4))))
