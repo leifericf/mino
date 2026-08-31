@@ -21,6 +21,8 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <time.h>
 #ifdef _WIN32
@@ -32,47 +34,72 @@
 /* Layer 1: parsers and predicates not already in numeric_math.c            */
 /* ------------------------------------------------------------------------- */
 
-static mino_val *prim_long_parse_long(mino_state *S, mino_val *args,
-                                       mino_env *env)
+/* Shared parse for Long/parseLong and Integer/parseInt. int32_p bounds
+ * the result to the signed 32-bit range so Integer/parseInt matches the
+ * JVM's Integer.parseInt contract; Long/parseLong uses the full long
+ * range. Out-of-range input throws NumberFormatException-style, never a
+ * saturated boundary value. */
+static mino_val *jvm_parse_integer(mino_state *S, mino_val *args,
+                                    const char *fn_name, int int32_p)
 {
     mino_val *s, *radix_v;
     long long radix = 10;
     char     *endp = NULL;
     long long n;
-    (void)env;
+    char      msg[96];
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "Long/parseLong requires a string argument");
+        snprintf(msg, sizeof(msg), "%s requires a string argument", fn_name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
     }
     s = args->as.cons.car;
     if (mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "Long/parseLong: string argument required");
+        snprintf(msg, sizeof(msg), "%s: string argument required", fn_name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
     if (mino_is_cons(args->as.cons.cdr)) {
         radix_v = args->as.cons.cdr->as.cons.car;
         if (!mino_val_int_p(radix_v)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "Long/parseLong: radix must be an integer");
+            snprintf(msg, sizeof(msg), "%s: radix must be an integer", fn_name);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
         }
         radix = mino_val_int_get(radix_v);
         if (radix < 2 || radix > 36) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "Long/parseLong: radix out of range");
+            snprintf(msg, sizeof(msg), "%s: radix out of range", fn_name);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
         }
     }
+    errno = 0;
     n = strtoll(s->as.s.data, &endp, (int)radix);
     /* No-conversion gate: musl positions endp after a lone sign
      * instead of at the start, so compare against the first possible
-     * digit rather than the raw start. */
+     * digit rather than the raw start. ERANGE catches values that
+     * saturated to LLONG_MIN/MAX. */
     if (endp == NULL ||
         endp <= s->as.s.data +
                     (s->as.s.data[0] == '+' || s->as.s.data[0] == '-') ||
-        *endp != '\0') {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "Long/parseLong: unparseable input");
+        *endp != '\0' || errno == ERANGE) {
+        snprintf(msg, sizeof(msg), "%s: unparseable input", fn_name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    if (int32_p && (n < INT_MIN || n > INT_MAX)) {
+        snprintf(msg, sizeof(msg), "%s: value out of range", fn_name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
     return mino_int(S, n);
+}
+
+static mino_val *prim_long_parse_long(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    (void)env;
+    return jvm_parse_integer(S, args, "Long/parseLong", 0);
+}
+
+static mino_val *prim_integer_parse_int(mino_state *S, mino_val *args,
+                                          mino_env *env)
+{
+    (void)env;
+    return jvm_parse_integer(S, args, "Integer/parseInt", 1);
 }
 
 static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
@@ -465,8 +492,8 @@ static const mino_prim_def k_prims_jvm_statics[] = {
     /* Layer 1 -- parsers / predicates */
     {"Long/parseLong",       prim_long_parse_long,
      "Parses an integer string. JVM Long static."},
-    {"Integer/parseInt",     prim_long_parse_long,
-     "Alias for Long/parseLong; mino has one integer tier."},
+    {"Integer/parseInt",     prim_integer_parse_int,
+     "Parses an int string, bounded to the signed 32-bit range."},
     {"Double/parseDouble",   prim_double_parse_double,
      "Parses a floating-point string. JVM Double static."},
     {"Float/parseFloat",     prim_double_parse_double,

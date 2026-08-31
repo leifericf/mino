@@ -61,7 +61,17 @@
   (is (thrown?    (Long/parseLong "+")))
   (is (thrown?    (Long/parseLong "-")))
   (is (thrown?    (Double/parseDouble "+")))
-  (is (thrown?    (Double/parseDouble "-"))))
+  (is (thrown?    (Double/parseDouble "-")))
+  ;; Values past the parser's numeric range must throw, not saturate to
+  ;; the boundary as a real result.
+  (is (thrown?    (Long/parseLong "99999999999999999999999999")))
+  (is (thrown?    (Long/parseLong "ffffffffffffffffffff" 16)))
+  ;; Integer/parseInt is bounded to the signed 32-bit range.
+  (is (= 2147483647  (Integer/parseInt "2147483647")))
+  (is (= -2147483648 (Integer/parseInt "-2147483648")))
+  (is (thrown?    (Integer/parseInt "9999999999")))
+  (is (thrown?    (Integer/parseInt "2147483648")))
+  (is (thrown?    (Integer/parseInt "-2147483649"))))
 
 (deftest jvm-statics-java-util-of
   (is (= '(1 2 3)    (java.util.List/of 1 2 3)))
