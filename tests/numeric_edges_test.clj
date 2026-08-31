@@ -75,6 +75,20 @@
   (is (or (not= (hash (float 0.5)) (hash (double 0.5)))
           (= (float 0.5) (double 0.5)))))
 
+(deftest large-float-hashes-without-overflow
+  ;; A finite double outside the long range (1e23 > 2^63) must hash via
+  ;; the raw-bytes path, not an out-of-range (long long) cast -- that
+  ;; cast is undefined behaviour (C99 6.3.1.4p1) even for finite values,
+  ;; so it must be range-guarded, not just NaN/inf-guarded. Hashing runs
+  ;; when such a float lands in a set or as a map key.
+  (is (= 1 (count #{1e23})))
+  (is (contains? #{1e23} 1e23))
+  (is (= 2 (count #{1e23 -1e23})))
+  (is (= :x (get {1e23 :x} 1e23)))
+  ;; The huge-magnitude and sub-normal extremes must hash too.
+  (is (= 1 (count #{1e300})))
+  (is (= 1 (count #{-1e300}))))
+
 (deftest long-boundary-statics-are-fixnums
   ;; Long/MAX_VALUE and Long/MIN_VALUE are the long-tier boundary
   ;; constants; they must be :int so checked-arithmetic overflow

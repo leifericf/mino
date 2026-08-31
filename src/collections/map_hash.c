@@ -202,12 +202,16 @@ uint32_t hash_val(const mino_val *v)
     case MINO_FLOAT:
     case MINO_FLOAT32: {
         double d = v->as.f;
-        /* Guard the (long long) cast: NaN and infinity have no finite
-         * long-long representation; casting them is undefined behaviour
-         * in C99 (6.3.1.4p1).  Both are non-finite so they can never
-         * round-trip through an integer comparison; fall through to the
-         * raw-bytes path instead. */
-        if (!isnan(d) && !isinf(d)) {
+        /* Guard the (long long) cast: a double with no in-range
+         * long-long representation cannot be converted -- C99 6.3.1.4p1
+         * makes the cast undefined behaviour.  This covers NaN and
+         * infinity AND finite magnitudes at or beyond 2^63 (e.g. 1e23),
+         * all of which fall through to the raw-bytes path.  The bound is
+         * `d < 2^63` because 2^63 - 1 (LLONG_MAX) is not representable as
+         * a double, so the nearest double 2^63 already overflows; the
+         * low bound -2^63 (LLONG_MIN) is exactly representable. */
+        if (!isnan(d) && !isinf(d)
+            && d >= -9223372036854775808.0 && d < 9223372036854775808.0) {
             long long ll = (long long)d;
             if ((double)ll == d) {
                 /* Same tag as MINO_INT so (= 1 1.0) matches in hash too. */
