@@ -91,7 +91,8 @@
             :follow-redirects true
             :max-redirects 10
             :decompress-body? true
-            :insecure? false}
+            :insecure? false
+            :max-bytes 16777216}
            prim))))
 
 (deftest verb-sugar-builds-method-maps
@@ -419,8 +420,20 @@
                            canned-200)]
     (is (= 4096 (:max-bytes prim))))
   (let [[_ prim] (via-mock {:method :get :uri "http://h/x"} canned-200)]
-    (is (nil? (:max-bytes prim))
-        "no :max-bytes key when the option is absent")))
+    (is (= 16777216 (:max-bytes prim))
+        "an absent :max-bytes falls back to the 16 MiB default cap")))
+
+(deftest max-bytes-default-caps-an-untrusted-response-body
+  ;; With no :max-bytes the client still bounds how much of an
+  ;; untrusted response it will accumulate: the default 16 MiB cap
+  ;; reaches the prim, which raises :overflow past it.
+  (let [[_ prim] (via-mock {:method :get :uri "http://h/x"} canned-200)]
+    (is (= 16777216 (:max-bytes prim))))
+  (let [[_ prim] (via-mock {:method :get :uri "http://h/x"
+                            :max-bytes 100000000}
+                           canned-200)]
+    (is (= 100000000 (:max-bytes prim))
+        "an explicit larger :max-bytes opts into a bigger download")))
 
 (deftest max-bytes-must-be-an-integer
   (is (str/includes? (ex-message (throw-via-mock
@@ -482,6 +495,21 @@
                                            [0xF0 0x9F 0x98 0x80])))
         [r _] (via-mock {:method :get :uri "http://h/x"} canned)]
     (is (= "héllo😀" (:body r)))))
+
+(deftest mixed-width-utf-8-body-decodes-correctly
+  ;; A body mixing all four UTF-8 widths, repeated, must decode to the
+  ;; exact string. Exercises every decode branch back to back.
+  (let [unit (vec (concat (map int "ab")            ; 1-byte
+                          [0xC3 0xA9]               ; 2-byte é
+                          [0xE2 0x82 0xAC]          ; 3-byte €
+                          [0xF0 0x9F 0x98 0x80]))   ; 4-byte 😀
+        reps 500
+        canned (assoc canned-200
+                      :body-bytes (byte-array
+                                   (apply concat (repeat reps unit))))
+        [r _] (via-mock {:method :get :uri "http://h/x"} canned)]
+    (is (= (* reps 5) (count (:body r))))
+    (is (= (apply str (repeat reps "abé€😀")) (:body r)))))
 
 (deftest async-returns-a-dereferable-future
   (let [resp (with-redefs

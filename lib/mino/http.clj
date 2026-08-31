@@ -20,6 +20,19 @@
   side (mino.http-server) needs MINO_CAP_ASYNC."
   (:require [clojure.string :as str]))
 
+;;;; Response-body cap
+
+;; A response body the client will accumulate and decode is untrusted:
+;; a hostile or broken peer could otherwise drive unbounded memory and
+;; CPU in the client (the pure-Clojure UTF-8 decode below allocates per
+;; codepoint). We bound it by default. 16 MiB matches the http-request
+;; prim's own default body cap (HTTP_DEFAULT_MAX_BODY_BYTES), so the
+;; two layers agree rather than the client silently leaning on a prim
+;; default a reader cannot see. A body past the cap fails with
+;; {:error {:kind :overflow}}. A caller expecting a larger legitimate
+;; download raises the ceiling with an explicit :max-bytes.
+(def ^:private default-max-bytes (* 16 1024 1024))
+
 ;;;; Public API
 
 (defn request
@@ -43,8 +56,10 @@
   :content-encoding string (sent as the content-encoding header,
   naming an already-applied body encoding; the layer never encodes the
   body; conflicts with an explicit content-encoding header),
-  :max-bytes (caps the response body; a body past the cap fails with
-  {:error {:kind :overflow}}), :as
+  :max-bytes (caps the response body; default 16 MiB, so an untrusted
+  peer cannot drive unbounded client allocation; a body past the cap
+  fails with {:error {:kind :overflow}}; raise it for a larger
+  legitimate download), :as
   (:string default, :bytes, :json; :json needs
   the json capability), :throw (default true: 4xx/5xx throw ex-info
   with the response as ex-data; a 4xx/5xx body that fails the :as
@@ -373,8 +388,9 @@
         target (request-target parsed m)
         user-hdrs (user-headers m)
         body (request-body m)
-        max-bytes (when (contains? m :max-bytes)
-                    (opt-long (:max-bytes m) :max-bytes nil))
+        ;; An absent or nil :max-bytes falls back to the default cap;
+        ;; an explicit integer (larger or smaller) overrides it.
+        max-bytes (opt-long (:max-bytes m) :max-bytes default-max-bytes)
         prim {:method (method-string m)
               :scheme (keyword (:scheme parsed))
               :host (:host parsed)
@@ -391,8 +407,8 @@
               :max-redirects (opt-long (:max-redirects m) :max-redirects 10)
               :decompress-body? (opt-boolean (:decompress-body? m)
                                              :decompress-body? true)
-              :insecure? (opt-boolean (:insecure? m) :insecure? false)}
-        prim (if max-bytes (assoc prim :max-bytes max-bytes) prim)]
+              :insecure? (opt-boolean (:insecure? m) :insecure? false)
+              :max-bytes max-bytes}]
     {:prim (if (nil? body) prim (assoc prim :body body))
      :echo (assoc (dissoc m :url) :uri (canonical-uri parsed target))
      :as (as-coercion m)
