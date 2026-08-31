@@ -39,7 +39,7 @@
 (def token (getenv "SATELLITE_BUMP_TOKEN"))
 
 (when (or (nil? tag) (= tag "--verify") (str/starts-with? tag "--"))
-  (println "usage: ./mino tools/bump_satellites.clj <CalVer-tag> [--verify] [--only <name>]")
+  (println "usage: ./mino tools/bump_satellites.clj <CalVer-tag> [--verify] [--only=<name>]")
   (exit 2))
 
 (def satellites-dir
@@ -81,15 +81,15 @@
     s))
 
 (defn run-ok?
-  ([dir args] (run-ok? dir args true))
-  ([dir args strict?]
-   (let [r (apply run {:dir dir} args)]
-     (when (seq (:out r)) (print (redact (:out r))))
-     (when (seq (:err r)) (print (redact (:err r))))
-     (cond
-       (not (zero? (:exit r))) (do (println "  ! exit" (:exit r)) false)
-       (not strict?)           true
-       :else                   true))))
+  "Run a command in dir, echo its (redacted) output, and return true on a
+  zero exit."
+  [dir args]
+  (let [r (apply run {:dir dir} args)]
+    (when (seq (:out r)) (print (redact (:out r))))
+    (when (seq (:err r)) (print (redact (:err r))))
+    (if (zero? (:exit r))
+      true
+      (do (println "  ! exit" (:exit r)) false))))
 
 (defn git [dir & args]
   (run-ok? dir (into ["git"] args)))
