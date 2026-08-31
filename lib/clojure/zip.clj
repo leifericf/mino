@@ -3,6 +3,13 @@
 ;; Functional zipper implementation following Huet's algorithm.
 ;; A zipper loc is a vector [node {:l left :r right :pnodes pnodes :ppath ppath :changed? changed?}]
 
+(defn- zip-fail
+  "Throws a classified clojure.zip diagnostic (ADR 37/38): :mino/kind
+  classes the error, :mino/message the specific human string."
+  [code msg]
+  (throw {:mino/kind :zip/invalid :mino/code code :mino/message msg
+          :mino/data {}}))
+
 (defn zipper [branch? children make-node root]
   (with-meta [root nil]
     {:zip/branch? branch?
@@ -17,7 +24,7 @@
 (defn children [loc]
   (if (branch? loc)
     ((:zip/children (meta loc)) (node loc))
-    (throw "called children on a leaf node")))
+    (zip-fail "MZIP001" "clojure.zip/children called on a leaf node")))
 
 (defn make-node [loc node children]
   ((:zip/make-node (meta loc)) node children))
@@ -117,7 +124,7 @@
 (defn insert-left [loc item]
   (let [p (second loc)]
     (if (nil? p)
-      (throw "insert at top")
+      (zip-fail "MZIP002" "clojure.zip/insert-left at the root has no left sibling")
       (with-meta [(first loc)
                   (assoc p
                     :l (conj (:l p) item)
@@ -127,7 +134,7 @@
 (defn insert-right [loc item]
   (let [p (second loc)]
     (if (nil? p)
-      (throw "insert at top")
+      (zip-fail "MZIP003" "clojure.zip/insert-right at the root has no right sibling")
       (with-meta [(first loc)
                   (assoc p
                     :r (cons item (:r p))
@@ -174,7 +181,7 @@
 (defn remove [loc]
   (let [p (second loc)]
     (if (nil? p)
-      (throw "remove at top")
+      (zip-fail "MZIP004" "clojure.zip/remove at the root has nothing to remove")
       (if (seq (:l p))
         (loop [loc (with-meta [(peek (:l p))
                                (assoc p

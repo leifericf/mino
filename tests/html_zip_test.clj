@@ -168,4 +168,16 @@
     (is (= ["a" "b"] (vec (zip/children loc))))
     (is (= "b" (zip/node (zip/right (zip/down loc)))))))
 
+(deftest clojure-zip-root-errors-are-classified
+  ;; Root-op faults carry :mino/kind :zip/invalid and a specific message
+  ;; (ADR 37/38), not a bare string.
+  (let [root (zip/vector-zip [1 2])]
+    (is (= :zip/invalid (try (zip/insert-left root 0) (catch e (:mino/kind e)))))
+    (is (= :zip/invalid (try (zip/insert-right root 0) (catch e (:mino/kind e)))))
+    (is (= :zip/invalid (try (zip/remove root) (catch e (:mino/kind e)))))
+    (is (= :caught (try (zip/remove root) (catch :zip/invalid _ :caught))))
+    (is (str/includes?
+          (try (zip/remove root) (catch e (:mino/message e)))
+          "remove at the root"))))
+
 (run-tests-and-exit)
