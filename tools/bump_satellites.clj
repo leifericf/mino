@@ -71,12 +71,21 @@
     :bootstrap nil
     :cheap     ["sh" "-c" "clojure -M:test"]}])
 
+(defn redact
+  "Scrub the push token wherever it appears in git output so it never
+  reaches the logs. git echoes the token-bearing push URL in its stderr
+  on a failed push. A no-op when no token is set."
+  [s]
+  (if (and token (seq token) s)
+    (str/replace s token "***")
+    s))
+
 (defn run-ok?
   ([dir args] (run-ok? dir args true))
   ([dir args strict?]
    (let [r (apply run {:dir dir} args)]
-     (when (seq (:out r)) (print (:out r)))
-     (when (seq (:err r)) (print (:err r)))
+     (when (seq (:out r)) (print (redact (:out r))))
+     (when (seq (:err r)) (print (redact (:err r))))
      (cond
        (not (zero? (:exit r))) (do (println "  ! exit" (:exit r)) false)
        (not strict?)           true
