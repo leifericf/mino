@@ -948,6 +948,21 @@
              (retract-attr entities e entity a)
              :else entities)))))))
 
+(defn- db-value
+  "Assemble a db value. The configuration fields (:schema, :closed?,
+  :indexed-attrs, :entity-specs, :history) carry from `from` unless
+  `overrides` replaces them. Centralizing the invariant key set here
+  keeps a publisher from silently dropping a field."
+  [from overrides]
+  ;; into, not merge: this namespace's own `merge` (two-db merge) shadows
+  ;; clojure.core/merge.
+  (into {:schema        (get from :schema {})
+         :closed?       (get from :closed? false)
+         :indexed-attrs (get from :indexed-attrs #{})
+         :entity-specs  (get from :entity-specs)
+         :history       (get from :history)}
+        overrides))
+
 (defn- apply-tx
   "Applies a parsed transaction to the db value, returning a new db
   value. Each op becomes a fact tagged with tx-num and instant; the
@@ -959,7 +974,6 @@
   (let [schema        (get db :schema {})
         closed?       (get db :closed? false)
         indexed-attrs (get db :indexed-attrs #{})
-        history       (get db :history)
         entity-specs  (get db :entity-specs)
         expanded      (expand-retract-entity (:entities db) schema tx-data)
         ensures       (extract-ensures tx-data)
@@ -982,16 +996,11 @@
                       facts
                       (filter #(not (contains? nh-attrs (:a %))) facts))
           tx-facts (for [f facts] {:e (:e f) :a (:a f) :v (:v f) :op (:op f)})]
-      {:entities entities
-       :log (into (:log db) log-facts)
-       :tx (inc tx-num)
-       :schema schema
-       :closed? closed?
-       :indexed-attrs indexed-attrs
-       :indexes indexes
-       :entity-specs entity-specs
-       :history history
-       :tx-data tx-facts})))
+      (db-value db {:entities entities
+                    :log (into (:log db) log-facts)
+                    :tx (inc tx-num)
+                    :indexes indexes
+                    :tx-data tx-facts}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Public transaction API
@@ -1218,11 +1227,8 @@
                                    (assoc ents e (conj cur nh-vals))))))
                            entities (:entities db-val)))
         indexes (build-indexes entities indexed-attrs)]
-    {:entities entities :log (vec ordered) :tx (:tx db-val)
-     :schema schema :closed? (get db-val :closed? false)
-     :indexed-attrs indexed-attrs :indexes indexes
-     :entity-specs (get db-val :entity-specs)
-     :history (get db-val :history)}))
+    (db-value db-val {:entities entities :log (vec ordered)
+                      :tx (:tx db-val) :indexes indexes})))
 
 (defn since
   "Returns the seq of facts asserted at or after tx N (or instant T),
@@ -1300,15 +1306,10 @@
         entities (reduce (fn [acc f] (apply-fact acc f schema))
                          {} all-facts)
         indexes (build-indexes entities indexed-attrs)]
-    {:entities entities
-     :log (vec all-facts)
-     :tx (max (:tx db-a) (:tx db-b))
-     :schema schema
-     :closed? (get db-a :closed? false)
-     :indexed-attrs indexed-attrs
-     :indexes indexes
-     :entity-specs (get db-a :entity-specs)
-     :history (get db-a :history)}))
+    (db-value db-a {:entities entities
+                    :log (vec all-facts)
+                    :tx (max (:tx db-a) (:tx db-b))
+                    :indexes indexes})))
 
 (defn fold
   "Reduces across a collection of db values. extract-fn pulls the value
@@ -1357,15 +1358,10 @@
     {:keep-since T}    keep facts at or after instant T"
    ([conn]
     (let [cur @conn]
-      (backend-commit conn {:entities (:entities cur)
-                            :log []
-                            :tx (:tx cur)
-                            :schema (get cur :schema {})
-                            :closed? (get cur :closed? false)
-                            :indexed-attrs (get cur :indexed-attrs #{})
-                            :indexes (get cur :indexes {})
-                            :entity-specs (get cur :entity-specs)
-                            :history (get cur :history)}
+      (backend-commit conn (db-value cur {:entities (:entities cur)
+                                          :log []
+                                          :tx (:tx cur)
+                                          :indexes (get cur :indexes {})})
                       nil)))
   ([conn keep-spec]
    (let [valid-last  (and (map? keep-spec)
@@ -1391,15 +1387,10 @@
                 (filter #(>= (:instant %) (:keep-since keep-spec)) log)
 
                  :else log)]
-      (backend-commit conn {:entities (:entities cur)
-                            :log (vec kept)
-                            :tx (:tx cur)
-                            :schema (get cur :schema {})
-                            :closed? (get cur :closed? false)
-                            :indexed-attrs (get cur :indexed-attrs #{})
-                            :indexes (get cur :indexes {})
-                            :entity-specs (get cur :entity-specs)
-                            :history (get cur :history)}
+      (backend-commit conn (db-value cur {:entities (:entities cur)
+                                          :log (vec kept)
+                                          :tx (:tx cur)
+                                          :indexes (get cur :indexes {})})
                       nil))))
 
 ;; ---------------------------------------------------------------------------
@@ -1459,15 +1450,12 @@
              (store-fail :store/migration "MSTM001"
                (str "Migration conflict: " (count violations) " violations")
                violations))
-         new-db {:entities entities
-                 :log (:log cur)
-                 :tx (:tx cur)
-                 :schema new-schema
-                 :closed? (:closed? cur)
-                 :indexed-attrs indexed-attrs
-                 :indexes (build-indexes entities indexed-attrs)
-                 :entity-specs (:entity-specs cur)
-                 :history (:history cur)}
+         new-db (db-value cur {:entities entities
+                               :log (:log cur)
+                               :tx (:tx cur)
+                               :schema new-schema
+                               :indexed-attrs indexed-attrs
+                               :indexes (build-indexes entities indexed-attrs)})
          new-db (if (:data opts)
                   (:db-after (with new-db ((:data opts))))
                   new-db)
