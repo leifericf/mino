@@ -55,6 +55,19 @@
           r (read-string s)]
       (is (= v r)))))
 
+(deftest pathologically-nested-input-is-bounded-not-crashed
+  ;; A form nested far past any legitimate source must raise a bounded
+  ;; reader error, never overflow the C stack. The reader's guard probes
+  ;; the live stack pointer, not a fixed nesting count, so the bound
+  ;; holds on a sanitizer build too (instrumentation inflates every
+  ;; frame, so a count calibrated for a release stack would let those
+  ;; builds overflow first).
+  (let [deep (apply str (repeat 20000 "["))
+        msg  (try (read-string deep) :no-throw
+                  (catch e (ex-message e)))]
+    (is (string? msg) "deep nesting raises a reader error, not a crash")
+    (is (re-find #"nesting too deep" (str msg)))))
+
 (deftest arity-error-names-the-callee-and-counts
   ;; A fn or macro arity mismatch must name the callee and the
   ;; received-vs-expected counts so the call site is obvious from
