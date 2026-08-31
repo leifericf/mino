@@ -144,6 +144,15 @@ void mino_jit_free_all(struct mino_state *S);
  * record gives up its native slot. */
 void mino_jit_slab_release(struct mino_state *S, struct mino_jit_slab *slab);
 
+/* Free every retired slab page that is now safe to unmap. A page is
+ * retired (unlinked but kept mapped) by mino_jit_slab_release when its
+ * last slot is released while a worker may still hold a return address
+ * into it; this reclaims those pages at a quiescent point. Safe to call
+ * only while holding the per-state lock: it frees a page only when no
+ * context is inside native JIT code (jit_invoke_depth == 0 for every
+ * ctx), which proves no C stack holds a return address into any slab. */
+void mino_jit_reclaim_retired(struct mino_state *S);
+
 /* Reverse-lookup: which bytecode pc owns the stencil whose bytes cover
  * `native_off` in bc->native? Returns -1 when the offset is out of
  * range or the fn has no offset table. Cold path; intended for stack
@@ -195,6 +204,7 @@ static inline void mino_jit_slab_release(struct mino_state *S,
                                           struct mino_jit_slab *slab) {
     (void)S; (void)slab;
 }
+static inline void mino_jit_reclaim_retired(struct mino_state *S) { (void)S; }
 static inline ptrdiff_t mino_jit_offset_to_pc(const mino_bc_fn_t *bc,
                                                unsigned off) {
     (void)bc; (void)off; return -1;

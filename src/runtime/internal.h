@@ -539,6 +539,15 @@ struct mino_state {
      * cycle. */
     struct mino_jit_slab    *jit_slabs;
 
+    /* Pending-retire list: slabs whose last slot has been released but
+     * whose executable page is not yet unmapped because a worker may
+     * still hold a C-stack return address into it. mino_jit_slab_release
+     * unlinks a spent slab from jit_slabs and pushes it here; the page
+     * is freed only at a quiescent point where no context is inside
+     * native JIT code (jit_invoke_depth == 0 for every ctx), enforced by
+     * mino_jit_reclaim_retired. Drained unconditionally at teardown. */
+    struct mino_jit_slab    *jit_slabs_retired;
+
     /* Per-tag GC dispatch tables. Tracer at gc_tracers[tag] handles
      * gc_trace_children for a header with that type_tag; finalizer at
      * gc_finalizers[tag] (NULL = no external resource) is called from

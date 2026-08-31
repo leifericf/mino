@@ -1008,6 +1008,12 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
                                                   saved_dyn_stack);
             S->jit.jit_invoke_ctx = saved_ctx;
             ctx->jit_invoke_env = saved_env;
+            /* This thread has left native JIT code; if it was the last
+             * one in, reclaim any pages retired while workers were
+             * inside native frames. */
+            if (ctx->jit_invoke_depth == 0 && S->jit_slabs_retired != NULL) {
+                mino_jit_reclaim_retired(S);
+            }
             return r;
         }
     }
@@ -1026,6 +1032,12 @@ mino_val *mino_jit_invoke(mino_state *S, mino_bc_fn_t *bc,
                                saved_dyn_stack);
     S->jit.jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
+    /* This thread has left native JIT code; if it was the last one in,
+     * reclaim any pages retired while workers were inside native
+     * frames. */
+    if (ctx->jit_invoke_depth == 0 && S->jit_slabs_retired != NULL) {
+        mino_jit_reclaim_retired(S);
+    }
     return r;
 }
 

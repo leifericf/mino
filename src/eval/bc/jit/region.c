@@ -363,10 +363,61 @@ void jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
     }
 }
 
+/* True when no context on this state is executing inside native JIT
+ * code, i.e. no C stack anywhere holds a return address into any slab
+ * page. mino_jit_invoke bumps ctx->jit_invoke_depth before the native
+ * f() call and decrements it after; the only point a worker drops the
+ * per-state lock mid-execution (the backjump safepoint auto-yield)
+ * keeps that depth non-zero. So depth == 0 for every ctx -- checked
+ * while the caller holds the per-state lock -- proves no thread can
+ * resume into a retired page. Walks main_ctx and the worker roster;
+ * the worker-list lock guards the roster against concurrent spawn. */
+static int jit_no_native_frames(mino_state *S)
+{
+    mino_thread_ctx_t *w;
+    if (S->main_ctx.jit_invoke_depth > 0) return 0;
+    mino_worker_list_lock_acquire(S);
+    for (w = S->threading.worker_ctxs_head; w != NULL; w = w->next_worker) {
+        if (w->jit_invoke_depth > 0) {
+            mino_worker_list_lock_release(S);
+            return 0;
+        }
+    }
+    mino_worker_list_lock_release(S);
+    return 1;
+}
+
+/* Free every retired slab page once the state is quiescent (no context
+ * inside native JIT code). All slab pages share the same invariant, so
+ * a single quiescence test authorises freeing the whole retired list.
+ * When any context is still in native code the list is left intact and
+ * drained on a later call. Must run under the per-state lock. */
+void mino_jit_reclaim_retired(mino_state *S)
+{
+    struct mino_jit_slab *slab;
+    if (S->jit_slabs_retired == NULL) return;
+    if (!jit_no_native_frames(S)) return;
+    slab = S->jit_slabs_retired;
+    S->jit_slabs_retired = NULL;
+    while (slab != NULL) {
+        struct mino_jit_slab *next = slab->next;
+        jit_slab_backing_free(slab->page, slab->write_page,
+                              slab->page_size, slab->backing_fd);
+        free(slab);
+        slab = next;
+    }
+}
+
 /* Per-fn slot release. Called from mino_jit_invalidate when a bc
  * record gives up its native slot (deopt, IC-gen mismatch, redef).
  * Decrements the owning slab's live_slots refcount; on the last
- * release, unlinks the slab from S->jit_slabs and munmaps the page.
+ * release, unlinks the slab from S->jit_slabs. The page is not
+ * unmapped here: a peer worker paused at the backjump safepoint (the
+ * one point the per-state lock is dropped during execution) can hold a
+ * C-stack return address into it, so freeing now would be a jump into
+ * unmapped executable memory when that worker resumes. Instead the
+ * spent slab is pushed onto the pending-retire list and its page is
+ * reclaimed by mino_jit_reclaim_retired at the next quiescent point.
  * The bump cursor inside the slab is never rewound -- slots are
  * append-only within a slab, and reclamation happens at slab
  * granularity, not slot granularity. */
@@ -382,9 +433,11 @@ void mino_jit_slab_release(mino_state *S, struct mino_jit_slab *slab)
             break;
         }
     }
-    jit_slab_backing_free(slab->page, slab->write_page, slab->page_size,
-                          slab->backing_fd);
-    free(slab);
+    slab->next           = S->jit_slabs_retired;
+    S->jit_slabs_retired = slab;
+    /* Opportunistic sweep: frees immediately in the common single-
+     * threaded / no-native-frame case, and defers otherwise. */
+    mino_jit_reclaim_retired(S);
 }
 
 void mino_jit_free_all(mino_state *S)
@@ -408,6 +461,20 @@ void mino_jit_free_all(mino_state *S)
             slab = next;
         }
         S->jit_slabs = NULL;
+    }
+    /* Drain any pages retired but not yet reclaimed. Teardown runs on
+     * the last thread with no peers executing, so unmapping is safe
+     * unconditionally here regardless of the recorded native depth. */
+    {
+        struct mino_jit_slab *slab = S->jit_slabs_retired;
+        while (slab != NULL) {
+            struct mino_jit_slab *next = slab->next;
+            jit_slab_backing_free(slab->page, slab->write_page,
+                                  slab->page_size, slab->backing_fd);
+            free(slab);
+            slab = next;
+        }
+        S->jit_slabs_retired = NULL;
     }
 }
 
