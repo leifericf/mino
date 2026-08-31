@@ -190,6 +190,7 @@
   (let [e (throw-via-mock {:method :get :uri "http://h/x"
                            :headers {:X-Dup "a" "x-dup" "b"}}
                           canned-200)]
+    (is (= :http/invalid (:mino/kind e)))
     (is (str/includes? (ex-message e) "case"))
     (is (str/includes? (ex-message e) ":X-Dup"))
     (is (str/includes? (ex-message e) "x-dup"))))

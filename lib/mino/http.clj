@@ -134,7 +134,10 @@
 
 (defn- bad
   [msg]
-  (throw (ex-info (str "mino.http: " msg) {})))
+  (throw {:mino/kind :http/invalid
+          :mino/code "MHTV001"
+          :mino/message (str "mino.http: " msg)
+          :mino/data {}}))
 
 (defn- opt-boolean
   [v k default]
@@ -172,26 +175,26 @@
   (let [hs (or (:headers m) {})]
     (when-not (map? hs)
       (bad ":headers must be a map"))
-    (reduce (fn [acc k]
-              (let [n (header-name k)]
-                (when-let [first-k (clojure.core/get acc n)]
-                  (bad (str "headers " (pr-str first-k) " and " (pr-str k)
-                            " differ only by case")))
-                (assoc acc n k)))
-            {}
-            (keys hs))
-    (reduce (fn [acc k]
-              (let [n (header-name k)
-                    v (clojure.core/get hs k)]
-                (when (owned-headers n)
-                  (bad (str "header \"" n "\" is " (owned-headers n)
-                            "; the request layer owns it")))
-                (when-not (string? v)
-                  (bad (str "header values must be strings, got "
-                            (pr-str v) " for \"" n "\"")))
-                (assoc acc n v)))
-            {}
-            (keys hs))))
+    ;; One validation pass: a case-collision is a lowercased name already
+    ;; claimed, so the accumulator carries the original key for the
+    ;; message and its value, projected to name->value at the end.
+    (let [by-name
+          (reduce (fn [acc k]
+                    (let [n (header-name k)
+                          v (clojure.core/get hs k)]
+                      (when-let [prev (clojure.core/get acc n)]
+                        (bad (str "headers " (pr-str (:key prev)) " and "
+                                  (pr-str k) " differ only by case")))
+                      (when (owned-headers n)
+                        (bad (str "header \"" n "\" is " (owned-headers n)
+                                  "; the request layer owns it")))
+                      (when-not (string? v)
+                        (bad (str "header values must be strings, got "
+                                  (pr-str v) " for \"" n "\"")))
+                      (assoc acc n {:key k :value v})))
+                  {}
+                  (keys hs))]
+      (reduce-kv (fn [m n entry] (assoc m n (:value entry))) {} by-name))))
 
 (defn- authorization-header
   [m user-hdrs]
