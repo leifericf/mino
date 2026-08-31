@@ -1917,32 +1917,42 @@
 
 ;; --- pipeline ---
 
+(defn- transduce-1
+  "Apply transducer xf to a single input, returning the vector of its
+  outputs (0, 1, or many). Runs the completion arity so a stateful
+  transducer (partition-all, dedupe) flushes its tail."
+  [xf v]
+  (let [rf (xf conj)]
+    (rf (unreduced (rf [] v)))))
+
 (defn pipeline
-  "Takes items from the from channel, applies xf to each (using n
-   parallel go blocks), and puts results on the to channel.
-   Closes to when from is exhausted (unless close? is false).
-   Preserves input ordering regardless of worker completion order.
+  "Takes items from the from channel, applies the transducer xf to each
+   (using n parallel go blocks), and puts the results on the to channel.
+   Closes to when from is exhausted (unless close? is false). Preserves
+   input ordering regardless of worker completion order.
 
-   Divergence from clojure.core.async: xf here is a plain function of
-   one value (nil result drops the item), NOT a transducer. Passing a
-   transducer such as (map inc) or (filter even?) will misbehave.
+   xf is a transducer applied independently to each input, so one input
+   may produce zero, one, or many outputs (e.g. (filter even?),
+   (mapcat range)); a stateful transducer flushes per input.
 
-   ex-handler, when supplied, is invoked with any exception thrown by
-   xf; its return value is used as the replacement output (nil drops)."
+   ex-handler, when supplied, is invoked with any exception thrown while
+   transducing an input; its return value becomes a single replacement
+   output (nil drops)."
   ([n to xf from] (pipeline n to xf from true nil))
   ([n to xf from close?] (pipeline n to xf from close? nil))
   ([n to xf from close? ex-handler]
    (let [jobs    (chan n)
          results (chan n)
          done    (atom 0)
-         apply-xf (fn [v]
-                    (if ex-handler
-                      (try (xf v)
-                           (catch e (ex-handler e)))
-                      (xf v)))]
+         outputs (fn [v]
+                   (remove nil?
+                     (if ex-handler
+                       (try (transduce-1 xf v)
+                            (catch e (let [r (ex-handler e)]
+                                       (if (nil? r) [] [r]))))
+                       (transduce-1 xf v))))]
      ;; Feed: for each input, create a result channel, send [val res-ch]
-     ;; to workers, and send res-ch to collector (in order).
-     ;; Uses callbacks to wait for puts, preventing stalls when channels fill.
+     ;; to workers, and send res-ch to the collector (in order).
      (let [feeder (fn feeder [v]
                     (if (nil? v)
                       (close! jobs)
@@ -1951,29 +1961,32 @@
                           (fn [_] (put! results res-ch
                                     (fn [_] (take! from feeder))))))))]
        (take! from feeder))
-     ;; Workers: take [val res-ch], apply xf, put result on res-ch
+     ;; Workers: take [val res-ch], transduce v into its outputs, put
+     ;; them in order on res-ch, then close it.
      (dotimes [_ n]
        (let [worker (fn worker [job]
                       (if (nil? job)
                         (when (= n (swap! done inc))
                           (close! results))
-                        (let [v      (first job)
-                              res-ch (second job)
-                              out    (apply-xf v)]
-                          (when (some? out)
-                            (put! res-ch out))
-                          (close! res-ch)
-                          (take! jobs worker))))]
+                        (let [res-ch (second job)
+                              emit   (fn emit [os]
+                                       (if (empty? os)
+                                         (do (close! res-ch)
+                                             (take! jobs worker))
+                                         (put! res-ch (first os)
+                                           (fn [_] (emit (rest os))))))]
+                          (emit (outputs (first job))))))]
          (take! jobs worker)))
-     ;; Collector: take res-chs in order, drain each to output
+     ;; Collector: take res-chs in order, drain each to output, waiting
+     ;; on each put so `to` backpressures.
      (let [collector (fn collector [res-ch]
                        (if (nil? res-ch)
                          (when close? (close! to))
                          (let [drain (fn drain [v]
                                        (if (nil? v)
                                          (take! results collector)
-                                         (do (put! to v)
-                                             (take! res-ch drain))))]
+                                         (put! to v
+                                           (fn [_] (take! res-ch drain)))))]
                            (take! res-ch drain))))]
        (take! results collector))
      to)))

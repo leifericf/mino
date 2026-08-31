@@ -254,6 +254,22 @@
                                     (do (a/<! ch) (recur (inc i)))
                                     :done)))))))))
 
+(deftest pipeline-applies-a-transducer-per-input
+  ;; xf is a transducer: one input may yield zero, one, or many outputs,
+  ;; and input ordering is preserved across parallel workers.
+  (let [collect (fn [n xf coll]
+                  (let [in (a/chan 20) out (a/chan 20)]
+                    (a/pipeline n out xf in)
+                    (a/onto-chan! in coll)
+                    (loop [acc []]
+                      (if-let [v (a/<!! out)] (recur (conj acc v)) acc))))]
+    (is (= [2 3 4] (collect 4 (map inc) [1 2 3])))
+    (is (= [2 4 6] (collect 4 (filter even?) [1 2 3 4 5 6])))
+    (is (= [0 0 1 0 1 2] (collect 4 (mapcat range) [1 2 3])))
+    (is (= (mapv #(* % 10) (range 10))
+           (collect 8 (map #(* % 10)) (range 10))))
+    (is (= [1 9 25] (collect 4 (comp (filter odd?) (map #(* % %))) [1 2 3 4 5])))))
+
 (deftest go-try-catch-binding-survives-park
   ;; Regression: the go state-machine rewrite re-emitted each try
   ;; state's catch clause as (catch <class> <handler>), dropping the
