@@ -521,9 +521,11 @@
     `(lazy-seq nil)))
 
 (defn iterate
-  "Returns a lazy sequence of x, (f x), (f (f x)), and so on."
+  "Returns a lazy sequence of x, (f x), (f (f x)), and so on. f is
+   applied only when the tail is realized: element 0 is x itself, so
+   taking n elements calls f exactly (dec n) times."
   [f x]
-  (lazy-seq (cons x (iterate f (f x)))))
+  (cons x (lazy-seq (iterate f (f x)))))
 
 (defn iteration
   "Creates a seqable via repeated calls to step, a function of some

@@ -600,3 +600,12 @@
 
 (deftest clj-into-concat
   (is (= [1 2 \a \b] (into [] (concat [1 2] "ab")))))
+
+(deftest clj-iterate-laziness
+  ;; Element 0 is x itself; f runs only when the tail is realized.
+  (is (= :seed (first (iterate (fn [_] (throw (ex-info "x" {}))) :seed))))
+  (is (= [(list 0 1 2) 2]
+         (let [calls (atom 0)]
+           [(doall (take 3 (iterate (fn [x] (swap! calls inc) (inc x)) 0)))
+            @calls]))))
+
