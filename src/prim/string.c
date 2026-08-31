@@ -7,6 +7,8 @@
 #include "prim/internal.h"
 #include "regex/re.h"
 
+#include <math.h>
+
 /* Grow `buf` so that `len + extra + 1` bytes fit. Returns the (possibly
  * realloc'd) buffer, or NULL if allocation failed (in which case an
  * MIN001 diagnostic has already been recorded on S). The caller updates
@@ -54,199 +56,483 @@ static inline char *fmt_ensure(mino_state *S, char *buf,
 }
 
 /*
- * (format fmt & args) — simple string formatting.
+ * (format fmt & args) -- printf-style string formatting matching the
+ * canonical Formatter surface for the directives mino supports.
  *
- * Deviation from JVM String.format / Clojure's format:
- *   Supported specifiers: %s, %d, %x, %o, %f, %e, %g, %%
- *   Supported flags:      -, +, ' ' (space), 0, #
- *   Supported modifiers:  width and .precision (integer digits only)
+ * Directives: %s %S %b %B %c %C %d %x %X %o %f %e %E %g %G %a %A %n %%
+ * Flags: '-' '+' ' ' '0' '#' ',' '('  plus width and .precision.
+ * Positional arguments: %N$<spec> (1-based; does not advance the
+ * sequential argument cursor, matching the Formatter).
  *
- *   NOT supported (JVM has these, mino does not):
- *     %b (boolean), %c (char), %h (hashCode), %n (newline),
- *     %a/%A (hex float), %t/%T (date/time), uppercase %E/%G/%X/%O,
- *     argument index (%1$s), width * from argument, %S (uppercase str).
- *
- *   This is a deliberate subset: mino's format covers the common
- *   printf-style cases. Code that needs the full JVM surface must use
- *   the host or a wrapper.
+ * Deviations, all accommodations of mino's numeric model and all
+ * looser than the JVM (they format where the JVM throws):
+ *   - %c accepts an integer codepoint (the JVM rejects Long).
+ *   - %d/%x/%o accept a bigint that fits 64 bits (the JVM rejects
+ *     BigInt) and coerce a float by truncation (historical subset
+ *     behavior, kept for compatibility).
+ * %g follows the Formatter's semantics (fixed significant digits,
+ * trailing zeros kept), not C's shortest-form %g. %a strips the
+ * exponent's '+' like Double/toHexString. %n is always "\n": mino
+ * output is byte-identical across hosts. %,d grouping is a fixed ','
+ * (no locale). An unknown or incomplete directive throws; nothing
+ * passes through as literal text. %t/%T (date/time) and %h/%H (JVM
+ * hashCode) stay absent by design and throw like any unknown
+ * directive.
  */
+
+static size_t utf8_encode(char *p, uint32_t cp); /* defined further down */
+
+static char *fmt_append(mino_state *S, char *buf, size_t *len,
+                         size_t *cap, const char *src, size_t n)
+{
+    buf = fmt_ensure(S, buf, *len, cap, n);
+    if (buf == NULL) return NULL;
+    memcpy(buf + *len, src, n);
+    *len += n;
+    return buf;
+}
+
+/* Append `s` (slen bytes) honoring a minimum width and the '-'
+ * (left-justify) flag; pads with spaces. */
+static char *fmt_append_padded(mino_state *S, char *buf, size_t *len,
+                                size_t *cap, const char *s, size_t slen,
+                                long width, int left)
+{
+    size_t pad = (width > 0 && (size_t)width > slen)
+                     ? (size_t)width - slen : 0;
+    size_t k;
+    if (!left) {
+        for (k = 0; k < pad; k++) {
+            buf = fmt_append(S, buf, len, cap, " ", 1);
+            if (buf == NULL) return NULL;
+        }
+    }
+    buf = fmt_append(S, buf, len, cap, s, slen);
+    if (buf == NULL) return NULL;
+    if (left) {
+        for (k = 0; k < pad; k++) {
+            buf = fmt_append(S, buf, len, cap, " ", 1);
+            if (buf == NULL) return NULL;
+        }
+    }
+    return buf;
+}
+
+/* Re-render a plain %lld decimal with ',' groups and/or the '('
+ * negative style. `in` is nul-terminated; out must hold at least
+ * strlen(in) + its comma count + 2 parens + nul (96 covers 64-bit). */
+static void fmt_regroup_decimal(const char *in, char *out, size_t outsz,
+                                 int comma, int paren)
+{
+    size_t n = strlen(in);
+    size_t di = 0, start = 0, digits, k;
+    int    neg = (n > 0 && in[0] == '-');
+    if (neg) start = 1;
+    digits = n - start;
+    if (neg && di + 1 < outsz) out[di++] = paren ? '(' : '-';
+    for (k = 0; k < digits; k++) {
+        if (comma && k > 0 && (digits - k) % 3 == 0 && di + 1 < outsz)
+            out[di++] = ',';
+        if (di + 1 < outsz) out[di++] = in[start + k];
+    }
+    if (neg && paren && di + 1 < outsz) out[di++] = ')';
+    out[di] = '\0';
+}
+
+/* The Formatter's %g: `prec` total significant digits (default 6,
+ * 0 promotes to 1), trailing zeros kept; scientific notation outside
+ * [1e-4, 10^prec). C's %g strips zeros and picks the shorter form,
+ * which prints 1.2345e-05 where the canon says 1.23450e-05. */
+static void fmt_java_g(double x, long prec, char *out, size_t outsz)
+{
+    long   p = prec < 0 ? 6 : (prec == 0 ? 1 : prec);
+    double ax = fabs(x);
+    if (x != 0.0 && (ax < 1e-4 || ax >= pow(10.0, (double)p))) {
+        snprintf(out, outsz, "%.*e", (int)(p - 1), x);
+    } else {
+        long decs = (x == 0.0) ? p - 1
+                               : p - 1 - (long)floor(log10(ax));
+        if (decs < 0) decs = 0;
+        snprintf(out, outsz, "%.*f", (int)decs, x);
+    }
+}
+
+/* Integer-directive argument: int, 64-bit-fitting bigint, or (kept
+ * from the historical subset) a float truncated toward zero. */
+static int fmt_arg_ll(const mino_val *v, long long *out)
+{
+    double d;
+    if (as_long(v, out)) return 1;
+    if (v != NULL && mino_type_of(v) == MINO_BIGINT
+        && mino_as_ll(v, out)) return 1;
+    if (as_double(v, &d)) { *out = (long long)d; return 1; }
+    return 0;
+}
+
+static void fmt_ascii_upcase(char *s)
+{
+    for (; *s; s++)
+        if (*s >= 'a' && *s <= 'z') *s = (char)(*s - 32);
+}
+
 mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 {
-    mino_val *fmt_val;
+    mino_val  *fmt_val;
     const char *fmt;
     size_t      fmt_len;
-    mino_val *arg_list;
-    char  *buf = NULL;
-    size_t len = 0;
-    size_t cap = 0;
-    size_t i;
+    mino_val  *arg_list;
+    mino_val **argv = NULL;
+    size_t      argc = 0;
+    size_t      next_arg = 0;
+    char   *buf = NULL;
+    size_t  len = 0;
+    size_t  cap = 0;
+    size_t  i;
+    const char *ekind = NULL, *ecode = NULL, *emsg = NULL;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "format requires at least a format string");
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "format requires at least a format string");
     }
     fmt_val = args->as.cons.car;
     if (fmt_val == NULL || mino_type_of(fmt_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "format: first argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "format: first argument must be a string");
     }
-    fmt     = fmt_val->as.s.data;
-    fmt_len = fmt_val->as.s.len;
+    fmt      = fmt_val->as.s.data;
+    fmt_len  = fmt_val->as.s.len;
     arg_list = args->as.cons.cdr;
+    {
+        mino_val *walk = arg_list;
+        while (mino_is_cons(walk)) { argc++; walk = walk->as.cons.cdr; }
+        if (argc > 0) {
+            size_t k = 0;
+            argv = (mino_val **)malloc(argc * sizeof(*argv));
+            if (argv == NULL) {
+                return prim_throw_classified(S, "eval/out-of-memory",
+                    "MOM001", "out of memory");
+            }
+            for (walk = arg_list; mino_is_cons(walk);
+                 walk = walk->as.cons.cdr) {
+                argv[k++] = walk->as.cons.car;
+            }
+        }
+    }
 
     for (i = 0; i < fmt_len; i++) {
-        if (fmt[i] == '%' && i + 1 < fmt_len) {
-            /* Collect the full format directive: %[flags][width][.prec]spec
-             * Flags: '-', '+', ' ', '0', '#'
-             * Width/precision: digits and '.'
-             * Spec: d, f, e, g, s, x, o, % */
-            char   directive[32];
-            size_t di = 0;
-            char   spec;
-            directive[di++] = '%';
-            i++;
-            /* Flags. */
-            while (i < fmt_len && di < sizeof(directive) - 4 &&
-                   (fmt[i] == '-' || fmt[i] == '+' || fmt[i] == ' ' ||
-                    fmt[i] == '0' || fmt[i] == '#')) {
-                directive[di++] = fmt[i++];
+        size_t j;
+        long   pos = -1, width = -1, prec = -1;
+        int    f_minus = 0, f_plus = 0, f_space = 0, f_zero = 0,
+               f_hash = 0, f_comma = 0, f_paren = 0;
+        char   spec;
+        mino_val *a = NULL;
+
+        if (fmt[i] != '%') {
+            buf = fmt_append(S, buf, &len, &cap, &fmt[i], 1);
+            if (buf == NULL) { free(argv); return NULL; }
+            continue;
+        }
+        j = i + 1;
+        /* Positional prefix: digits followed by '$'. */
+        {
+            size_t k = j;
+            long   v = 0;
+            int    have = 0;
+            while (k < fmt_len && fmt[k] >= '0' && fmt[k] <= '9'
+                   && v < 1000000) {
+                v = v * 10 + (fmt[k] - '0');
+                k++; have = 1;
             }
-            /* Width. */
-            while (i < fmt_len && di < sizeof(directive) - 4 &&
-                   fmt[i] >= '0' && fmt[i] <= '9') {
-                directive[di++] = fmt[i++];
+            if (have && k < fmt_len && fmt[k] == '$' && v >= 1) {
+                pos = v;
+                j = k + 1;
             }
-            /* Precision. */
-            if (i < fmt_len && fmt[i] == '.') {
-                directive[di++] = fmt[i++];
-                while (i < fmt_len && di < sizeof(directive) - 4 &&
-                       fmt[i] >= '0' && fmt[i] <= '9') {
-                    directive[di++] = fmt[i++];
+        }
+        for (; j < fmt_len; j++) {
+            char fc = fmt[j];
+            if      (fc == '-') f_minus = 1;
+            else if (fc == '+') f_plus  = 1;
+            else if (fc == ' ') f_space = 1;
+            else if (fc == '0') f_zero  = 1;
+            else if (fc == '#') f_hash  = 1;
+            else if (fc == ',') f_comma = 1;
+            else if (fc == '(') f_paren = 1;
+            else break;
+        }
+        if (j < fmt_len && fmt[j] >= '1' && fmt[j] <= '9') {
+            width = 0;
+            while (j < fmt_len && fmt[j] >= '0' && fmt[j] <= '9'
+                   && width < 1000000) {
+                width = width * 10 + (fmt[j] - '0');
+                j++;
+            }
+        }
+        if (j < fmt_len && fmt[j] == '.') {
+            j++;
+            prec = 0;
+            while (j < fmt_len && fmt[j] >= '0' && fmt[j] <= '9'
+                   && prec < 1000000) {
+                prec = prec * 10 + (fmt[j] - '0');
+                j++;
+            }
+        }
+        if (j >= fmt_len) {
+            ekind = "eval/type"; ecode = "MTY001";
+            emsg  = "format: incomplete directive";
+            goto fail;
+        }
+        spec = fmt[j];
+        i = j; /* the loop's i++ steps past the spec */
+
+        if (spec == '%') {
+            buf = fmt_append(S, buf, &len, &cap, "%", 1);
+            if (buf == NULL) { free(argv); return NULL; }
+            continue;
+        }
+        if (spec == 'n') {
+            buf = fmt_append(S, buf, &len, &cap, "\n", 1);
+            if (buf == NULL) { free(argv); return NULL; }
+            continue;
+        }
+        /* Every remaining directive consumes an argument. */
+        {
+            size_t idx = (pos > 0) ? (size_t)pos - 1 : next_arg++;
+            if (idx >= argc) {
+                ekind = "eval/arity"; ecode = "MAR001";
+                emsg  = "format: not enough arguments for format string";
+                goto fail;
+            }
+            a = argv[idx];
+        }
+
+        switch (spec) {
+        case 's': case 'S': case 'b': case 'B': {
+            const char *src;
+            size_t      slen;
+            char       *heap = NULL;
+            mino_val  *sv = NULL;
+            if (spec == 'b' || spec == 'B') {
+                int truthy = !(mino_is_nil(a)
+                               || (mino_type_of(a) == MINO_BOOL
+                                   && !mino_val_bool_get(a)));
+                src = truthy ? "true" : "false";
+                slen = strlen(src);
+            } else if (mino_is_nil(a)) {
+                src = "null"; slen = 4;
+            } else if (mino_type_of(a) == MINO_STRING) {
+                src = a->as.s.data; slen = a->as.s.len;
+            } else {
+                sv = print_to_string(S, a);
+                if (sv == NULL) { free(buf); free(argv); return NULL; }
+                src = sv->as.s.data; slen = sv->as.s.len;
+            }
+            if (prec >= 0 && (size_t)prec < slen) slen = (size_t)prec;
+            if (spec == 'S' || spec == 'B') {
+                heap = (char *)malloc(slen + 1);
+                if (heap == NULL) {
+                    ekind = "eval/out-of-memory"; ecode = "MOM001";
+                    emsg  = "out of memory";
+                    goto fail;
                 }
+                memcpy(heap, src, slen);
+                heap[slen] = '\0';
+                fmt_ascii_upcase(heap);
+                src = heap;
             }
-            if (i >= fmt_len) {
-                /* Incomplete directive at end of string: emit literal. */
-                buf = fmt_ensure(S, buf, len, &cap, di);
-                if (buf == NULL) return NULL;
-                memcpy(buf + len, directive, di);
-                len += di;
+            buf = fmt_append_padded(S, buf, &len, &cap, src, slen,
+                                    width, f_minus);
+            free(heap);
+            if (buf == NULL) { free(argv); return NULL; }
+            (void)sv;
+            break;
+        }
+        case 'c': case 'C': {
+            long long ll;
+            uint32_t  cp;
+            char      cb[4];
+            size_t    cn;
+            if (a != NULL && mino_type_of(a) == MINO_CHAR) {
+                cp = (uint32_t)mino_val_char_get(a);
+            } else if (as_long(a, &ll) && ll >= 0 && ll <= 0x10FFFF) {
+                cp = (uint32_t)ll;
+            } else {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: %c expects a char or codepoint";
+                goto fail;
+            }
+            if (spec == 'C' && cp >= 'a' && cp <= 'z') cp -= 32;
+            cn = utf8_encode(cb, cp);
+            buf = fmt_append_padded(S, buf, &len, &cap, cb, cn,
+                                    width, f_minus);
+            if (buf == NULL) { free(argv); return NULL; }
+            break;
+        }
+        case 'd': {
+            long long n2;
+            if (!fmt_arg_ll(a, &n2)) {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: integer directive expects a number";
+                goto fail;
+            }
+            if (f_comma || f_paren) {
+                char plain[32];
+                char grouped[96];
+                snprintf(plain, sizeof(plain), "%lld", n2);
+                fmt_regroup_decimal(plain, grouped, sizeof(grouped),
+                                    f_comma, f_paren);
+                buf = fmt_append_padded(S, buf, &len, &cap, grouped,
+                                        strlen(grouped), width, f_minus);
+                if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
-            spec = fmt[i];
-            if (spec == '%') {
-                buf = fmt_ensure(S, buf, len, &cap, 1);
-                if (buf == NULL) return NULL;
-                buf[len++] = '%';
-            } else if (spec == 's') {
-                mino_val *a;
-                if (!mino_is_cons(arg_list)) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
-                }
-                a = arg_list->as.cons.car;
-                arg_list = arg_list->as.cons.cdr;
-                if (a != NULL && mino_type_of(a) == MINO_STRING) {
-                    buf = fmt_ensure(S, buf, len, &cap, a->as.s.len);
-                    if (buf == NULL) return NULL;
-                    memcpy(buf + len, a->as.s.data, a->as.s.len);
-                    len += a->as.s.len;
-                } else {
-                    mino_val *s = print_to_string(S, a);
-                    if (s == NULL) { free(buf); return NULL; }
-                    buf = fmt_ensure(S, buf, len, &cap, s->as.s.len);
-                    if (buf == NULL) return NULL;
-                    memcpy(buf + len, s->as.s.data, s->as.s.len);
-                    len += s->as.s.len;
-                }
-            } else if (spec == 'd' || spec == 'x' || spec == 'o') {
-                long long n2;
-                char tmp[64];
-                int  tn;
-                if (!mino_is_cons(arg_list)) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
-                }
-                if (!as_long(arg_list->as.cons.car, &n2)) {
-                    double d;
-                    if (as_double(arg_list->as.cons.car, &d)) {
-                        n2 = (long long)d;
-                    } else {
-                        free(buf);
-                        return prim_throw_classified(S, "eval/type", "MTY001", "format: integer directive expects a number");
-                    }
-                }
-                arg_list = arg_list->as.cons.cdr;
-                /* Build snprintf format: replace spec with lld/llx/llo. */
-                directive[di++] = 'l';
-                directive[di++] = 'l';
-                directive[di++] = spec;
-                directive[di]   = '\0';
-                tn = snprintf(tmp, sizeof(tmp), directive, n2);
-                if (tn < 0) { free(buf); return NULL; }
-                {
-                    char *fsrc = tmp;
-                    char *fhtmp = NULL;
-                    if ((size_t)tn >= sizeof(tmp)) {
-                        fhtmp = (char *)malloc((size_t)tn + 1);
-                        if (fhtmp == NULL) { free(buf); return NULL; }
-                        snprintf(fhtmp, (size_t)tn + 1, directive, n2);
-                        fsrc = fhtmp;
-                    }
-                    buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
-                    if (buf == NULL) { free(fhtmp); return NULL; }
-                    memcpy(buf + len, fsrc, (size_t)tn);
-                    free(fhtmp);
-                    len += (size_t)tn;
-                }
-            } else if (spec == 'f' || spec == 'e' || spec == 'g') {
-                double d;
-                char tmp[128];
-                int  tn;
-                if (!mino_is_cons(arg_list)) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
-                }
-                if (!as_double(arg_list->as.cons.car, &d)) {
-                    free(buf);
-                    return prim_throw_classified(S, "eval/type", "MTY001", "format: float directive expects a number");
-                }
-                arg_list = arg_list->as.cons.cdr;
-                directive[di++] = spec;
-                directive[di]   = '\0';
-                tn = snprintf(tmp, sizeof(tmp), directive, d);
-                if (tn < 0) { free(buf); return NULL; }
-                {
-                    char *fsrc = tmp;
-                    char *fhtmp = NULL;
-                    if ((size_t)tn >= sizeof(tmp)) {
-                        fhtmp = (char *)malloc((size_t)tn + 1);
-                        if (fhtmp == NULL) { free(buf); return NULL; }
-                        snprintf(fhtmp, (size_t)tn + 1, directive, d);
-                        fsrc = fhtmp;
-                    }
-                    buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
-                    if (buf == NULL) { free(fhtmp); return NULL; }
-                    memcpy(buf + len, fsrc, (size_t)tn);
-                    free(fhtmp);
-                    len += (size_t)tn;
-                }
-            } else {
-                /* Unknown directive: emit literal. */
-                buf = fmt_ensure(S, buf, len, &cap, di + 1);
-                if (buf == NULL) return NULL;
-                memcpy(buf + len, directive, di);
-                len += di;
-                buf[len++] = spec;
+            /* fall through to the C-passthrough integer path */
+        }
+        /* fall through */
+        case 'x': case 'X': case 'o': {
+            long long n2;
+            char cdir[48];
+            char tmp[64];
+            size_t di = 0;
+            int  tn;
+            if (!fmt_arg_ll(a, &n2)) {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: integer directive expects a number";
+                goto fail;
             }
-        } else {
-            buf = fmt_ensure(S, buf, len, &cap, 1);
-            if (buf == NULL) return NULL;
-            buf[len++] = fmt[i];
+            cdir[di++] = '%';
+            if (f_minus) cdir[di++] = '-';
+            if (f_plus)  cdir[di++] = '+';
+            if (f_space) cdir[di++] = ' ';
+            if (f_zero)  cdir[di++] = '0';
+            if (f_hash)  cdir[di++] = '#';
+            if (width >= 0)
+                di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                       "%ld", width);
+            if (prec >= 0)
+                di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                       ".%ld", prec);
+            cdir[di++] = 'l';
+            cdir[di++] = 'l';
+            cdir[di++] = spec;
+            cdir[di]   = '\0';
+            tn = snprintf(tmp, sizeof(tmp), cdir, n2);
+            if (tn < 0) { free(buf); free(argv); return NULL; }
+            {
+                char *fsrc = tmp;
+                char *fhtmp = NULL;
+                if ((size_t)tn >= sizeof(tmp)) {
+                    fhtmp = (char *)malloc((size_t)tn + 1);
+                    if (fhtmp == NULL) { free(buf); free(argv); return NULL; }
+                    snprintf(fhtmp, (size_t)tn + 1, cdir, n2);
+                    fsrc = fhtmp;
+                }
+                buf = fmt_append(S, buf, &len, &cap, fsrc, (size_t)tn);
+                free(fhtmp);
+                if (buf == NULL) { free(argv); return NULL; }
+            }
+            break;
+        }
+        case 'f': case 'e': case 'E': {
+            double d;
+            char cdir[48];
+            char tmp[128];
+            size_t di = 0;
+            int  tn;
+            if (!as_double(a, &d)) {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: float directive expects a number";
+                goto fail;
+            }
+            cdir[di++] = '%';
+            if (f_minus) cdir[di++] = '-';
+            if (f_plus)  cdir[di++] = '+';
+            if (f_space) cdir[di++] = ' ';
+            if (f_zero)  cdir[di++] = '0';
+            if (f_hash)  cdir[di++] = '#';
+            if (width >= 0)
+                di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                       "%ld", width);
+            if (prec >= 0)
+                di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                       ".%ld", prec);
+            cdir[di++] = spec;
+            cdir[di]   = '\0';
+            tn = snprintf(tmp, sizeof(tmp), cdir, d);
+            if (tn < 0) { free(buf); free(argv); return NULL; }
+            {
+                char *fsrc = tmp;
+                char *fhtmp = NULL;
+                if ((size_t)tn >= sizeof(tmp)) {
+                    fhtmp = (char *)malloc((size_t)tn + 1);
+                    if (fhtmp == NULL) { free(buf); free(argv); return NULL; }
+                    snprintf(fhtmp, (size_t)tn + 1, cdir, d);
+                    fsrc = fhtmp;
+                }
+                buf = fmt_append(S, buf, &len, &cap, fsrc, (size_t)tn);
+                free(fhtmp);
+                if (buf == NULL) { free(argv); return NULL; }
+            }
+            break;
+        }
+        case 'g': case 'G': {
+            double d;
+            char  *gtmp;
+            size_t gsz;
+            if (!as_double(a, &d)) {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: float directive expects a number";
+                goto fail;
+            }
+            gsz = (size_t)(prec > 0 ? prec : 6) + 400;
+            gtmp = (char *)malloc(gsz);
+            if (gtmp == NULL) {
+                ekind = "eval/out-of-memory"; ecode = "MOM001";
+                emsg  = "out of memory";
+                goto fail;
+            }
+            fmt_java_g(d, prec, gtmp, gsz);
+            if (spec == 'G') fmt_ascii_upcase(gtmp);
+            buf = fmt_append_padded(S, buf, &len, &cap, gtmp,
+                                    strlen(gtmp), width, f_minus);
+            free(gtmp);
+            if (buf == NULL) { free(argv); return NULL; }
+            break;
+        }
+        case 'a': case 'A': {
+            double d;
+            char tmp[64];
+            char *plus;
+            if (!as_double(a, &d)) {
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: float directive expects a number";
+                goto fail;
+            }
+            snprintf(tmp, sizeof(tmp), spec == 'a' ? "%a" : "%A", d);
+            /* Double/toHexString has no '+' on a positive exponent. */
+            plus = strchr(tmp, spec == 'a' ? 'p' : 'P');
+            if (plus != NULL && plus[1] == '+')
+                memmove(plus + 1, plus + 2, strlen(plus + 2) + 1);
+            buf = fmt_append_padded(S, buf, &len, &cap, tmp,
+                                    strlen(tmp), width, f_minus);
+            if (buf == NULL) { free(argv); return NULL; }
+            break;
+        }
+        default:
+            ekind = "eval/type"; ecode = "MTY001";
+            emsg  = "format: unsupported directive";
+            goto fail;
         }
     }
     {
         mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
+        free(argv);
         return result;
     }
+fail:
+    free(buf);
+    free(argv);
+    return prim_throw_classified(S, ekind, ecode, emsg);
 }
 
 static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)

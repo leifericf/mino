@@ -244,3 +244,52 @@
 (deftest string-escapes-unknown-rejected
   (is (thrown? (read-string "\"\\q\"")))
   (is (thrown? (read-string "\"\\8\""))))
+
+;; --- format: canonical directive coverage ---
+;; Expected strings captured from the reference implementation. Two
+;; deliberate accommodations for mino's single int tier (documented at
+;; the prim): %c accepts an int codepoint and %d accepts a bigint,
+;; where the JVM's Formatter rejects Long-for-%c and BigInt-for-%d.
+
+(deftest format-directives-canon
+  (is (= "FF" (format "%X" 255)))
+  (is (= "false" (format "%b" nil)))
+  (is (= "false" (format "%b" false)))
+  (is (= "true" (format "%b" 42)))
+  (is (= "TRUE" (format "%B" "x")))
+  (is (= "a" (format "%c" \a)))
+  (is (= "a\nb" (format "a%nb")))
+  (is (= "1,234,567" (format "%,d" 1234567)))
+  (is (= "-1,234,567" (format "%,d" -1234567)))
+  (is (= "123" (format "%,d" 123)))
+  (is (= "(42)" (format "%(d" -42)))
+  (is (= "42" (format "%(d" 42)))
+  (is (= "(1,234,567)" (format "%(,d" -1234567)))
+  (is (= "b a" (format "%2$s %1$s" "a" "b")))
+  (is (= "abc" (format "%.3s" "abcdef")))
+  (is (= "ABC" (format "%S" "abc")))
+  (is (= "null" (format "%s" nil)))
+  (is (= "   ab" (format "%5s" "ab")))
+  (is (= "ab   |" (format "%-5s|" "ab")))
+  (is (= "       abc|" (format "%10.3s|" "abcdef"))))
+
+(deftest format-float-directives-canon
+  (is (= "0x1.8p0" (format "%a" 1.5)))
+  (is (= "0X1.8P0" (format "%A" 1.5)))
+  (is (= "0x1.999999999999ap-4" (format "%a" 0.1)))
+  (is (= "1.23450e-05" (format "%g" 1.2345E-5)))
+  (is (= "123.450" (format "%g" 123.45)))
+  (is (= "0.00000" (format "%g" 0.0)))
+  (is (= "1.23e+03" (format "%.3g" 1234.5)))
+  (is (= "1.23450E-05" (format "%G" 1.2345E-5)))
+  (is (= "0.000000e+00" (format "%e" 0.0)))
+  (is (= "    3.14" (format "%8.2f" 3.14159)))
+  (is (= "-0000042" (format "%08d" -42))))
+
+(deftest format-accommodations-and-teeth
+  ;; Single int tier: int codepoint for %c, bigint for %d.
+  (is (= "a" (format "%c" 97)))
+  (is (= "10" (format "%d" 10N)))
+  ;; An unknown directive throws instead of leaking literal text.
+  (is (thrown? Exception (format "%q" 1)))
+  (is (thrown? Exception (format "%"))))
