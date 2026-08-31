@@ -698,25 +698,33 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
         v->as.host_array.element_kind = (unsigned char)kind;
         return v;
     }
-    /* Generic seq path: walk the seq into a temp dynamic buffer.
-     * vals[] is malloc-owned and not a GC root; suppress collection
-     * across the entire loop and the final alloc_val so the GC cannot
-     * sweep elements that are stored only in vals[].
+    /* Generic seq path: realize the seq into a GC-managed accumulator
+     * vector, then hand the fully-realized vector to the vector fast
+     * path above for the raw-buffer copy.
      *
-     * snapshot / restore gc_depth: all early-return error paths restore
-     * from the saved value rather than blind-decrement, so a re-entrant
-     * or already-elevated depth is not underflowed. The longjmp path
-     * (lazy_force throwing an exception) would leave gc_depth elevated
-     * until the try_frame saves/restores it; that is a known limitation
-     * that requires a try_frame-level fix outside this module. */
+     * lazy_force runs arbitrary user code that can throw (longjmp). A
+     * raw malloc buffer held across it would leak on the throw -- mino
+     * has no cleanup-on-unwind -- and a gc_depth raised across it would
+     * stay elevated. Accumulate into a persistent vector instead: it is
+     * a GC-traced value, so a mid-realization collection cannot sweep
+     * the elements already stored, and a throw simply abandons the
+     * vector for the collector to reclaim. The accumulator is pinned so
+     * an allocation inside the loop (vec_conj1, lazy_force) cannot
+     * reclaim it; the pin is rewound at the top-level eval boundary on a
+     * throw, the same invariant gc_depth and the pin stack already keep.
+     *
+     * No user code runs while a raw C buffer is live: the malloc + copy
+     * happen only after realization completes, inside the vector fast
+     * path where gc_depth is bracketed with nothing that can throw. */
     {
-        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
-        size_t cap = 0;
-        mino_val *s = coll;
-        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+        mino_val *acc = mino_vector(S, NULL, 0);
+        mino_val *s   = coll;
+        if (acc == NULL) return NULL;
+        gc_pin(acc);
         while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
         while (mino_is_cons(s) || (s != NULL && mino_type_of(s) == MINO_CHUNKED_CONS)) {
             mino_val *head;
+            mino_val *nacc;
             if (mino_is_cons(s)) {
                 head = s->as.cons.car;
                 s    = s->as.cons.cdr;
@@ -725,29 +733,24 @@ mino_val *mino_host_array_from_coll(mino_state *S, mino_val *coll,
                           ->as.chunk.vals[s->as.chunked_cons.off];
                 s    = mino_chunked_cons_advance(S, s);
             }
+            /* Pin head across the conj: advancing s above can drop the
+             * only reference to the cell that held it, and vec_conj1
+             * allocates trie nodes (a collection can fire before the
+             * element lands in the vector). */
+            gc_pin(head);
+            nacc = vec_conj1(S, acc, head);
+            gc_unpin(1);
+            if (nacc == NULL) { gc_unpin(1); return NULL; }
+            /* Re-pin the new persistent vector: vec_conj1 returns a fresh
+             * value each step and the old one is now unreachable. */
+            mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len - 1] = nacc;
+            acc = nacc;
             while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
-            if (len >= cap) {
-                size_t ncap;
-                mino_val **nvals;
-                if (cap == 0) {
-                    ncap = 8;
-                } else {
-                    if (cap > SIZE_MAX / (2u * sizeof(*nvals))) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
-                    ncap = cap * 2;
-                }
-                nvals = (mino_val **)realloc(vals, ncap * sizeof(*nvals));
-                if (nvals == NULL) { mino_current_ctx(S)->gc_depth = saved_gc_depth; free(vals); return NULL; }
-                vals = nvals;
-                cap  = ncap;
-            }
-            vals[len++] = head;
         }
-        v = alloc_val(S, MINO_HOST_ARRAY);
-        mino_current_ctx(S)->gc_depth = saved_gc_depth;
-        if (v == NULL) { free(vals); return NULL; }
-        v->as.host_array.vals = vals;
-        v->as.host_array.len  = len;
-        v->as.host_array.element_kind = (unsigned char)kind;
+        /* Keep acc pinned across the recursive build so its elements
+         * stay rooted until the fast path copies them into vals[]. */
+        v = mino_host_array_from_coll(S, acc, kind);
+        gc_unpin(1);
         return v;
     }
 }

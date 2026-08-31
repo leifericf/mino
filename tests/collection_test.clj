@@ -614,3 +614,28 @@
   (testing "guard rails"
     (is (thrown? (char-array -1 \a)))
     (is (thrown? (char-array "ab" \a)))))
+
+(defn bomb-seq__ha [n limit]
+  ;; An unchunked lazy seq whose realization throws at `limit`, forcing
+  ;; the generic-seq accumulation path in to-array to hold partial
+  ;; elements when the throw fires.
+  (lazy-seq
+    (if (= n limit)
+      (throw (ex-info "bomb" {:n n}))
+      (cons n (bomb-seq__ha (inc n) limit)))))
+
+(deftest to-array-throwing-lazy-seq-unwinds
+  ;; A lazy seq that throws mid-realization must propagate the throw out
+  ;; of to-array and leave the runtime healthy: no elevated GC state, no
+  ;; abandoned buffer. The accumulation buffer must not survive the
+  ;; unwind, and later allocation and array building must still work.
+  (is (thrown? (to-array (bomb-seq__ha 0 5))))
+  (is (thrown? (object-array (bomb-seq__ha 0 20))))
+  (testing "repeated throws keep GC and later builds working"
+    (dotimes [_ 200]
+      (is (thrown? (to-array (bomb-seq__ha 0 12)))))
+    ;; Churn allocations so a suppressed collector would surface.
+    (dotimes [_ 50] (vec (range 500)))
+    (is (= [0 1 2 3] (vec (to-array (range 4))))))
+  (testing "a throw before any element still unwinds"
+    (is (thrown? (to-array (bomb-seq__ha 0 0))))))
