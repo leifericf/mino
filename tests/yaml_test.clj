@@ -602,6 +602,17 @@
   (is (= "scalar" (yaml/parse-string "---\tscalar\n")))
   (is (= 42 (yaml/parse-string "--- 42\n"))))
 
+(deftest yaml-two-dash-or-dot-prefix-on-final-line-is-content
+  ;; A final line that opens with "--" or ".." but is not a full "---"
+  ;; or "..." marker stays plain content: it must not split into an
+  ;; extra document.
+  (is (= ["--x"] (yaml/parse-string-all "--x")))
+  (is (= ["..x"] (yaml/parse-string-all "..x")))
+  (is (= [["--"]] (yaml/parse-string-all "- --")))
+  (is (= [[".."]] (yaml/parse-string-all "- ..")))
+  (is (= [{:foo "--"}] (yaml/parse-string-all "foo: --")))
+  (is (= [{:foo ".."}] (yaml/parse-string-all "foo: .."))))
+
 ;;; Scalar resolution: YAML 1.2 core schema
 
 (deftest yaml-resolves-booleans
