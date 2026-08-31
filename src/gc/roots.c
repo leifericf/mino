@@ -9,6 +9,27 @@
 #include "async/scheduler.h"
 #include "async/timer.h"
 
+/* AddressSanitizer's stack-use-after-return detection moves a function's
+ * locals to a heap "fake stack", so &local no longer reflects the real
+ * machine stack. gc_scan_stack (below) is a CONSERVATIVE scan: it walks
+ * from a probe frame to the recorded stack bottom (gc_note_host_frame),
+ * both of which must be real machine-stack addresses. Under a fake
+ * stack the anchor becomes a heap address while the scan probe (this
+ * unit is compiled no_sanitize_address at gc_scan_stack) stays on the
+ * real stack, so the range spans unrelated regions and the scan walks
+ * off into unmapped memory. A conservative collector cannot coexist
+ * with the fake stack, so disable it for every ASan build of mino. UBSan
+ * and TSan are unaffected; the rest of ASan (heap, use-after-free, real
+ * stack-buffer overflow) stays on. */
+#if defined(__SANITIZE_ADDRESS__) \
+    || (defined(__has_feature) && __has_feature(address_sanitizer))
+const char *__asan_default_options(void);
+const char *__asan_default_options(void)
+{
+    return "detect_stack_use_after_return=0";
+}
+#endif
+
 /* Helpers with file-local linkage. */
 static void gc_mark_intern_table(mino_state *S, const intern_table_t *tbl);
 
