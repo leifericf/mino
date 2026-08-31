@@ -3538,8 +3538,9 @@
   ([n step coll] (map vec (partition-all n step coll))))
 
 (defn splitv-at
-  "Returns a vector [(vec (take n coll)) (vec (drop n coll))]."
-  [n coll] [(vec (take n coll)) (vec (drop n coll))])
+  "Returns a vector [(vec (take n coll)) (drop n coll)]: the head is a
+   vector, the tail stays a lazy seq."
+  [n coll] [(vec (take n coll)) (drop n coll)])
 
 (defn replicate
   "Returns a lazy seq of n copies of x. Deprecated alias for

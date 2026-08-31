@@ -609,3 +609,9 @@
            [(doall (take 3 (iterate (fn [x] (swap! calls inc) (inc x)) 0)))
             @calls]))))
 
+(deftest clj-splitv-at-tail-is-seq
+  ;; First half is a vector; the tail stays a lazy (drop n coll).
+  (is (= "[[1 2] (3 4)]" (pr-str (splitv-at 2 [1 2 3 4]))))
+  (is (= "[[] (1 2)]" (pr-str (splitv-at 0 [1 2]))))
+  (is (= "[[1 2] ()]" (pr-str (splitv-at 5 [1 2]))))
+  (is (= "[[] ()]" (pr-str (splitv-at 2 nil)))))
