@@ -1923,6 +1923,10 @@
    Closes to when from is exhausted (unless close? is false).
    Preserves input ordering regardless of worker completion order.
 
+   Divergence from clojure.core.async: xf here is a plain function of
+   one value (nil result drops the item), NOT a transducer. Passing a
+   transducer such as (map inc) or (filter even?) will misbehave.
+
    ex-handler, when supplied, is invoked with any exception thrown by
    xf; its return value is used as the replacement output (nil drops)."
   ([n to xf from] (pipeline n to xf from true nil))
