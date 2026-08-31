@@ -143,7 +143,7 @@
         nlen (count s)
         slen (count sub)]
     (cond
-      (zero? slen)        from
+      (zero? slen)        (min nlen (max 0 from))
       (> (+ from slen) nlen) nil
       (not (prim-includes? (subs s from) sub)) nil
       :else

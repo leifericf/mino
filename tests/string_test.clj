@@ -92,6 +92,15 @@
     (is (not (str/blank? nbsp)))
     (is (= nbsp (trim nbsp)))))
 
+(deftest index-of-empty-needle-clamps-like-jvm
+  ;; An empty needle returns the clamped from-index [0, len], matching
+  ;; java.lang.String/indexOf.
+  (is (= 2 (str/index-of "ab" "" 5)))
+  (is (= 1 (str/index-of "ab" "" 1)))
+  (is (= 0 (str/index-of "ab" "" 0)))
+  (is (= 0 (str/index-of "ab" "")))
+  (is (= 2 (str/last-index-of "ab" "" 5))))
+
 (deftest char-at-fn
   (is (= "h" (char-at "hello" 0)))
   (is (= "o" (char-at "hello" 4))))
