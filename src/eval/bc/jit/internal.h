@@ -242,6 +242,15 @@ long   jit_region_page_size(void);
 struct mino_jit_slab *jit_slab_acquire(mino_state *S, size_t need);
 int    jit_slab_make_rw(struct mino_jit_slab *slab);
 int    jit_slab_make_rx(struct mino_jit_slab *slab);
+
+/* Dual-view accessors (defined in region.c). The exec base is the
+ * address a slot's code executes at and is baked into relocations and
+ * bc->native; the write base is where the compiler copies and patches
+ * bytes. On the dual-mapped path the two differ (an executable mapping
+ * that is never made writable, and a separate writable alias of the
+ * same memory); elsewhere they coincide. */
+unsigned char *mino_jit_slab_exec_base(struct mino_jit_slab *slab);
+unsigned char *mino_jit_slab_write_base(struct mino_jit_slab *slab);
 void   jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
                             size_t total_size);
 

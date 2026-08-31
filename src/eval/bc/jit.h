@@ -100,10 +100,12 @@ struct mino_jit_region {
  * the page. The bump cursor never reuses freed slot bytes within a
  * slab -- new compiles always extend forward. */
 struct mino_jit_slab {
-    void                 *page;        /* mmap'd page, RX-sealed between compiles */
+    void                 *page;        /* executable mapping; addressed + run */
+    void                 *write_page;  /* writable alias of the same memory */
     size_t                page_size;   /* host page size at slab creation */
     size_t                bump_offset; /* next free byte (16-aligned) */
     unsigned              live_slots;  /* count of bc records owning a slot here */
+    int                   backing_fd;  /* memfd/shm fd for the dual mapping, or -1 */
     struct mino_jit_slab *next;
 };
 

@@ -2570,14 +2570,18 @@
   "Compile and run the embed smoke tests. embed_api_test covers the
   basic embedder API; embed_jit_guard_test pins the JIT slow-helper
   state validation (a corrupt state pointer at the stencil boundary
-  must be refused as data, never dereferenced). Multi-state, STM,
-  and capability embed tests live in the mino-tests satellite repo
-  (test-embed-suite there)."
+  must be refused as data, never dereferenced); jit_dual_view_test
+  pins that a JIT slab's executable mapping stays executable while a
+  concurrent compile writes a second slot onto the same page. Multi-
+  state, STM, and capability embed tests live in the mino-tests
+  satellite repo (test-embed-suite there)."
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
                               "embed_api_test")
   (compile-and-run-embed-test "tests/embed_jit_guard_test.c"
-                              "embed_jit_guard_test"))
+                              "embed_jit_guard_test")
+  (compile-and-run-embed-test "tests/jit_dual_view_test.c"
+                              "jit_dual_view_test"))
 
 (defn test-crash-handler
   "Compile and run the crash-handler backtrace smoke. Exercises the

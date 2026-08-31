@@ -348,7 +348,8 @@ typedef struct {
     struct mino_jit_slab *slab;
     size_t                slot_offset;
     size_t                slot_size;
-    void                 *region;
+    void                 *region;      /* writable buffer the passes fill */
+    void                 *exec_region; /* address the code runs / is baked at */
     size_t                total_size;
     size_t                need_bytes;
     unsigned             *pc_offsets;
@@ -463,7 +464,8 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
     struct mino_jit_slab *slab        = NULL;
     size_t                slot_offset = 0;
     size_t                slot_size   = 0;
-    void                 *region;
+    void                 *region;       /* writable buffer the passes fill */
+    void                 *exec_region;  /* address the code runs / is baked at */
     if (need_bytes <= MINO_JIT_SLAB_CUTOFF) {
         slab = jit_slab_acquire(S, need_bytes);
         if (slab == NULL) return -1;
@@ -478,10 +480,19 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
         slot_offset = slab->bump_offset;
         slot_size   = (need_bytes + MINO_JIT_SLAB_SLOT_ALIGN - 1)
                       & ~(MINO_JIT_SLAB_SLOT_ALIGN - 1);
-        region      = (unsigned char *)slab->page + slot_offset;
+        /* The compiler writes and patches through the writable view; the
+         * relocations and bc->native address the executable view. On the
+         * dual-mapped path these are distinct mappings of the same bytes,
+         * so the executing mapping is never made writable. */
+        region      = mino_jit_slab_write_base(slab) + slot_offset;
+        exec_region = mino_jit_slab_exec_base(slab)  + slot_offset;
     } else {
+        /* Legacy per-fn page: one mapping, sealed RX exactly once at the
+         * end of this compile and never re-flipped, so write and exec
+         * views coincide with no W^X hazard. */
         region = jit_region_alloc(total_size);
         if (region == MINO_JIT_REGION_ALLOC_FAILED) return -1;
+        exec_region = region;
     }
 
     if (bc->code_len > SIZE_MAX / sizeof(unsigned)) {
@@ -509,14 +520,20 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
         return -1;
     }
 
+    /* Write pointers address the writable buffer; the base values are
+     * the executable addresses that relocations and bc->native must
+     * bake in. The two agree on the legacy path and differ on the
+     * dual-mapped slab path. */
     unsigned char *code      = (unsigned char *)region;
     unsigned char *tramp_buf = code + tramp_offset;
     uint64_t      *pool      = (uint64_t *)(code + pool_offset);
+    uintptr_t      exec_code = (uintptr_t)exec_region;
 
     ctx->slab         = slab;
     ctx->slot_offset  = slot_offset;
     ctx->slot_size    = slot_size;
     ctx->region       = region;
+    ctx->exec_region  = exec_region;
     ctx->total_size   = total_size;
     ctx->need_bytes   = need_bytes;
     ctx->pc_offsets   = pc_offsets;
@@ -525,9 +542,9 @@ static int jit_layout(mino_state *S, jit_compile_ctx_t *ctx)
     ctx->code         = code;
     ctx->tramp_buf    = tramp_buf;
     ctx->pool         = pool;
-    ctx->code_base    = (uintptr_t)code;
-    ctx->tramp_base   = (uintptr_t)tramp_buf;
-    ctx->pool_base    = (uintptr_t)pool;
+    ctx->code_base    = exec_code;
+    ctx->tramp_base   = exec_code + tramp_offset;
+    ctx->pool_base    = exec_code + pool_offset;
     ctx->tramp_offset = tramp_offset;
     ctx->pool_offset  = pool_offset;
     ctx->tramp_bytes  = tramp_bytes;
@@ -800,16 +817,21 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
     if (jit_direct_emit_pass(&ctx) != 0) { JIT_FAIL; }
     free(ctx.insts);
 
-    /* Flush the I-cache so the CPU sees the freshly written instructions. */
+    /* Flush the I-cache so the CPU sees the freshly written instructions.
+     * The flush must name the executable addresses, which on the
+     * dual-mapped slab path are the exec view rather than the writable
+     * view the passes wrote through. On Apple the authoritative flush is
+     * sys_icache_invalidate inside jit_slab_make_rx below; this call is
+     * still correct there because exec and write views coincide. */
     {
         size_t flush_bytes = (ctx.slab != NULL) ? ctx.slot_size : ctx.total_size;
 #if defined(__GNUC__) || defined(__clang__)
-        __builtin___clear_cache((char *)ctx.region,
-                                (char *)ctx.region + flush_bytes);
+        __builtin___clear_cache((char *)ctx.exec_region,
+                                (char *)ctx.exec_region + flush_bytes);
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-        FlushInstructionCache(GetCurrentProcess(), ctx.region, flush_bytes);
+        FlushInstructionCache(GetCurrentProcess(), ctx.exec_region, flush_bytes);
 #else
 #error "MINO_CPJIT_HOST requires an I-cache flush primitive; add one for this compiler"
 #endif
@@ -852,7 +874,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
         ctx.slab->bump_offset = ctx.slot_offset + ctx.slot_size;
         ctx.slab->live_slots++;
     }
-    bc->native            = ctx.region;
+    bc->native            = ctx.exec_region;
     bc->native_size       = (ctx.slab != NULL) ? ctx.slot_size : ctx.total_size;
     bc->native_gen        = S->ns_vars.ic_gen;
     bc->native_slab       = ctx.slab;
@@ -874,7 +896,7 @@ int mino_jit_compile_inner(mino_state *S, mino_val *fn_val,
                     "[cpjit] compiled bc (code_len=%zu, region=%p, "
                     "total_size=%zu, code_used=%zu, tramp_used=%zu, "
                     "pool_used=%zu)\n",
-                    bc->code_len, ctx.region, ctx.total_size, ctx.pos,
+                    bc->code_len, ctx.exec_region, ctx.total_size, ctx.pos,
                     ctx.tramp_pos, ctx.pool_pos);
             if (trace[0] == '2') {
                 for (size_t i = 0; i < ctx.pos; i += 4) {
