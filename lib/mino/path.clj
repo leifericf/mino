@@ -174,11 +174,8 @@
                     segs)))
         b (strip base)
         t (strip target)
-        common (loop [n 0 bs b ts t]
-                 (if (and (seq bs) (seq ts)
-                          (= (first bs) (first ts)))
-                   (recur (inc n) (rest bs) (rest ts))
-                   n))
+        common (count (take-while (fn [[x y]] (= x y))
+                                  (map vector b t)))
         up (repeat (- (count b) common) "..")
         down (drop common t)
         parts (concat up down)]

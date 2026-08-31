@@ -190,14 +190,13 @@
   [s]
   (when-not (string? s)
     (throw-opts "parse-dotenv requires a string" s))
-  (loop [lines (seq (str/split-lines (strip-bom s)))
-         line  1
-         acc   (transient {})]
-    (if-let [t (first lines)]
-      (if-let [kv (parse-line (str/trim t) line)]
-        (recur (next lines) (inc line) (assoc! acc (nth kv 0) (nth kv 1)))
-        (recur (next lines) (inc line) acc))
-      (persistent! acc))))
+  (persistent!
+    (reduce (fn [acc [i t]]
+              (if-let [kv (parse-line (str/trim t) (inc i))]
+                (assoc! acc (nth kv 0) (nth kv 1))
+                acc))
+            (transient {})
+            (map-indexed vector (str/split-lines (strip-bom s))))))
 
 ;;;; The getenv overlay
 
