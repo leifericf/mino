@@ -312,13 +312,39 @@ mino_val *prim_parse_double(mino_state *S, mino_val *args, mino_env *env)
     if (v == NULL || mino_type_of(v) != MINO_STRING)
         return prim_throw_classified(S, "eval/type", "MTY001", "parse-double: argument must be a string");
     s = v->as.s.data;
-    if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
-        return mino_nil(S);
-    errno = 0;
-    result = strtod(s, &end);
-    /* Same musl lone-sign guard as parse-long above. */
-    if (end <= s + (s[0] == '+' || s[0] == '-') || *end != '\0')
-        return mino_nil(S);
-    return mino_float(S, result);
+    {
+        /* Match java.lang.Double's grammar rather than raw strtod, which
+         * is more lenient. Double trims ASCII whitespace, accepts one
+         * trailing FloatTypeSuffix (f/F/d/D), and accepts a hexadecimal
+         * float only with a binary exponent 'p'/'P' (so "0xff" is not a
+         * double, but "0x1.8p1" is). */
+        size_t len = v->as.s.len;
+        size_t start = 0, stop = len, i;
+        char c;
+        while (start < stop && isspace((unsigned char)s[start])) start++;
+        while (stop > start && isspace((unsigned char)s[stop - 1])) stop--;
+        if (start == stop) return mino_nil(S);
+        c = s[stop - 1];
+        if ((c == 'f' || c == 'F' || c == 'd' || c == 'D')
+            && stop - 1 > start)
+            stop--;
+        i = start;
+        if (i < stop && (s[i] == '+' || s[i] == '-')) i++;
+        if (i + 1 < stop && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+            int has_p = 0;
+            size_t j;
+            for (j = i + 2; j < stop; j++)
+                if (s[j] == 'p' || s[j] == 'P') { has_p = 1; break; }
+            if (!has_p) return mino_nil(S);
+        }
+        errno = 0;
+        result = strtod(s + start, &end);
+        /* strtod must consume exactly the cleaned core; reject a lone sign
+         * (the musl guard) and any unconsumed characters. */
+        if (end != s + stop
+            || end <= s + start + (s[start] == '+' || s[start] == '-'))
+            return mino_nil(S);
+        return mino_float(S, result);
+    }
 }
 

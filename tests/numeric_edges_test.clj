@@ -263,3 +263,21 @@
   ;; sign for the literal to be a number.
   (is (thrown? (read-string "1e+M")))
   (is (thrown? (read-string "1E-M"))))
+
+(deftest parse-double-matches-java-double-grammar
+  ;; Parity with java.lang.Double.parseDouble (the parse-double spec).
+  (testing "hexadecimal floats require a binary exponent 'p'"
+    (is (nil? (parse-double "0xff")))
+    (is (nil? (parse-double "0x10")))
+    (is (= 3.0 (parse-double "0x1.8p1"))))
+  (testing "surrounding whitespace is trimmed"
+    (is (= 1.5 (parse-double "  1.5  ")))
+    (is (nil? (parse-double "   "))))
+  (testing "a trailing float-type suffix (f/F/d/D) is accepted"
+    (is (= 1.5 (parse-double "1.5f")))
+    (is (= 1.5 (parse-double "1.5D")))
+    (is (nil? (parse-double "1.5ff"))))
+  (testing "ordinary decimal and special values still parse"
+    (is (= 1000.0 (parse-double "1e3")))
+    (is (nil? (parse-double "abc")))
+    (is (= ##Inf (parse-double "Infinity")))))
