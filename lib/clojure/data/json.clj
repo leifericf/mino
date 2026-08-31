@@ -91,21 +91,13 @@
 
 ;;;; Number formatting (writer)
 (defn- format-double
-  "Format a double at the shortest %g precision that reads back as
-  the same value, so doubles round-trip exactly through write-str and
-  read-str. Integral results keep a .0 suffix so they read back as
-  doubles, not integers."
-  ([x]
-   (format-double x 15))
-  ([x prec]
-   (let [f (format (str "%." prec "g") x)]
-     (cond
-     (= x (read-string f)) (if (or (str/includes? f ".")
-                                  (str/includes? f "e"))
-                            f
-                            (str f ".0"))
-       (< prec 17)        (format-double x (inc prec))
-       :else              f))))
+  "Format a double for JSON. The native printer already emits the
+  shortest decimal that reads back as the same value, with a .0 suffix
+  on integral doubles and E notation where shorter; both shapes are
+  valid JSON numbers and round-trip exactly through write-str and
+  read-str."
+  [x]
+  (str x))
 
 ;;;; Type dispatch (writer)
 
