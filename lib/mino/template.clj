@@ -486,7 +486,9 @@
 
 (defn render-file
   "Reads the template with slurp and renders it; a missing file
-  propagates the slurp error."
+  propagates the slurp error. path must be a trusted, non-user-derived
+  value: it is read directly, so a caller that derives path from request
+  data must confine it to a template directory itself."
   ([path ctx] (render-file path ctx nil))
   ([path ctx opts]
    (render (slurp path) ctx opts)))
