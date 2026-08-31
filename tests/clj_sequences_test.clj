@@ -478,6 +478,16 @@
   (is (= (reductions + [1 2 3 4 5]) '(1 3 6 10 15)))
   (is (= (reductions + 10 [1 2 3 4 5]) '(10 11 13 16 20 25))))
 
+(deftest clj-reductions-reduced
+  (is (= (reductions (fn [acc x] (if (= x 3) (reduced acc) (+ acc x)))
+                     0 [1 2 3 4 5])
+         '(0 1 3 3)))
+  (is (= (reductions (fn [a b] (reduced (+ a b))) [1 2 3]) '(1 3)))
+  (is (= (reductions + (reduced 7) [1 2 3]) '(7)))
+  (is (= (take 4 (reductions (fn [acc x] (if (= x 2) (reduced :stop) acc))
+                             (range)))
+         '(0 0 :stop))))
+
 ;; --- every? ---
 
 (deftest clj-every?

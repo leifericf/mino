@@ -1426,19 +1426,21 @@
      (pa-impl n step coll))))
 
 (defn reductions
-  "Returns a lazy sequence of the intermediate values of a reduction."
+  "Returns a lazy sequence of the intermediate values of a reduction.
+   A reduced value from f (or as init) short-circuits: its dereferenced
+   value becomes the final element."
   ([f coll]
    (lazy-seq
      (if-let [s (seq coll)]
        (reductions f (first s) (rest s))
        (list (f)))))
   ([f init coll]
-   (let [step (fn step [acc s]
-                (lazy-seq
-                  (when (seq s)
-                    (let [v (f acc (first s))]
-                      (cons v (step v (rest s)))))))]
-     (cons init (step init coll)))))
+   (if (reduced? init)
+     (list @init)
+     (cons init
+           (lazy-seq
+             (when-let [s (seq coll)]
+               (reductions f (f init (first s)) (rest s))))))))
 
 (defn dedupe
   "Returns a lazy sequence removing consecutive duplicates. When
