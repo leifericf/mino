@@ -76,3 +76,63 @@
   (is (thrown? (clojure.instant/read-instant-date "abcd")))
   (is (thrown? (clojure.instant/read-instant-date "2026-1")))      ; truncated month
   (is (thrown? (clojure.instant/read-instant-date "2026-01-01T10:30:45.")))) ; empty fractional
+
+;; --- clojure.instant leap-second normalization ---
+
+(deftest instant-leap-second-year-crossing
+  ;; A :60 leap second carries through minute/hour/day/month/year to
+  ;; the following midnight, matching the JVM's normalized instant.
+  (let [m (clojure.instant/read-instant-date "2016-12-31T23:59:60Z")]
+    (is (= 2017 (:years m)))
+    (is (= 1 (:months m)))
+    (is (= 1 (:days m)))
+    (is (= 0 (:hours m)))
+    (is (= 0 (:minutes m)))
+    (is (= 0 (:seconds m))))
+  (is (= (clojure.instant/read-instant-date "2017-01-01T00:00:00Z")
+         (clojure.instant/read-instant-date "2016-12-31T23:59:60Z"))))
+
+(deftest instant-leap-second-mid-year
+  (let [m (clojure.instant/read-instant-date "2015-06-30T23:59:60Z")]
+    (is (= 2015 (:years m)))
+    (is (= 7 (:months m)))
+    (is (= 1 (:days m)))
+    (is (= 0 (:hours m)))
+    (is (= 0 (:minutes m)))
+    (is (= 0 (:seconds m)))))
+
+(deftest instant-leap-second-inst-ms-parity
+  (is (= (inst-ms (clojure.instant/read-instant-date "2017-01-01T00:00:00Z"))
+         (inst-ms (clojure.instant/read-instant-date "2016-12-31T23:59:60Z"))))
+  (is (= (inst-ms (clojure.instant/read-instant-date "2015-07-01T00:00:00Z"))
+         (inst-ms (clojure.instant/read-instant-date "2015-06-30T23:59:60Z")))))
+
+(deftest instant-leap-second-with-offset
+  ;; Normalization composes with a non-Z offset: the leap second still
+  ;; carries, and inst-ms reaches UTC by subtracting the offset.
+  (is (= (inst-ms (clojure.instant/read-instant-date "2016-12-31T23:59:60+00:00"))
+         (inst-ms (clojure.instant/read-instant-date "2017-01-01T00:00:00Z"))))
+  (is (= (inst-ms (clojure.instant/read-instant-date "2016-12-31T23:59:60-01:00"))
+         (inst-ms (clojure.instant/read-instant-date "2017-01-01T00:00:00-01:00")))))
+
+(deftest instant-leap-second-inst-literal
+  (is (= (inst-ms #inst "2017-01-01T00:00:00Z")
+         (inst-ms #inst "2016-12-31T23:59:60Z")))
+  (let [m #inst "2016-12-31T23:59:60Z"]
+    (is (= 2017 (:years m)))
+    (is (= 0 (:seconds m)))))
+
+(deftest instant-leap-second-only-at-minute-59
+  ;; Canon permits :60 only when minutes is 59; :60 elsewhere is rejected.
+  (is (thrown? (clojure.instant/read-instant-date "2016-12-31T23:58:60Z")))
+  (is (thrown? (clojure.instant/read-instant-date "2016-12-31T23:59:61Z"))))
+
+(deftest instant-ordinary-unchanged
+  ;; A non-leap instant keeps its exact fields.
+  (let [m (clojure.instant/read-instant-date "2026-04-27T10:30:45Z")]
+    (is (= 2026 (:years m)))
+    (is (= 4 (:months m)))
+    (is (= 27 (:days m)))
+    (is (= 10 (:hours m)))
+    (is (= 30 (:minutes m)))
+    (is (= 45 (:seconds m)))))

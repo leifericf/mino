@@ -102,10 +102,16 @@
   ;; nanoseconds truncate
   (is (= 250 (rem (t/from-inst #inst "2026-01-15T10:30:00.2505Z")
                   1000)))
-  ;; strict: the reader accepts Feb 30 (range check only); from-inst
-  ;; rejects it through the strict converter
+  ;; strict: from-inst rejects an impossible date. The reader itself
+  ;; rejects Feb 30 (matching canon), so feed a hand-built inst map to
+  ;; reach the converter's day check.
   (is (thrown-with-msg? #"day 30 invalid"
-                        (t/from-inst #inst "2023-02-30T00:00:00Z")))
+                        (t/from-inst
+                          (with-meta {:years 2023 :months 2 :days 30
+                                      :hours 0 :minutes 0 :seconds 0
+                                      :nanoseconds 0 :offset-sign 1
+                                      :offset-hours 0 :offset-minutes 0}
+                                     {:mino/instant true}))))
   ;; a plain map without the instant marker is not an inst
   (is (thrown-with-msg? #"not an inst"
                         (t/from-inst {:years 2026 :months 1 :days 1})))

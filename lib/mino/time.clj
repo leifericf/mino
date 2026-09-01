@@ -274,8 +274,10 @@
 (defn from-inst
   "Converts an inst value (a #inst literal or read-instant-date map)
   to epoch-ms. Strict: the date must be possible (February 30th
-  rejects) and the offset fields are honored; seconds 60 (leap
-  second) folds to 59 and nanoseconds truncate to milliseconds."
+  rejects) and the offset fields are honored; nanoseconds truncate to
+  milliseconds. read-instant-date already normalizes a :60 leap second
+  into the next minute, so a :60 second only reaches here from a
+  hand-built map, where it folds to 59."
   [v]
   (when-not (inst? v)
     (time-fail :eval/type "MTY001"
