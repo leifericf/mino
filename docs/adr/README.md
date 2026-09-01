@@ -46,5 +46,6 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [35](35-store-backend-seam.md) | Store backends are plain maps of fns behind a five-op seam |
 | [36](36-http-server-ring-maps-over-net-prims.md) | The HTTP server is Ring maps over the net prims |
 | [37](37-keyword-catch-classes-match-kind.md) | Keyword catch classes match diagnostic kind by equality |
+| [38](38-errors-as-values-and-message-quality.md) | Errors as values, and best-in-class messages |
 | [39](39-conformance-model-routing.md) | Conformance generation and triage inherit the session model |
 | [40](40-conformance-probe-lane-ownership.md) | Conformance probe stays in the tests repo; lanes reach it via MINO_BIN |
