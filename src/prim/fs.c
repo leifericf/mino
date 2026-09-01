@@ -546,6 +546,121 @@ static mino_val *prim_copy_tree(mino_state *S, mino_val *args, mino_env *env)
 #endif
 }
 
+/* ---- mkdtemp / mkstemp ---- */
+
+#if !defined(_WIN32)
+/* Build "<tmpdir>/<prefix>XXXXXX" into out. tmpdir comes from $TMPDIR,
+ * falling back to /tmp. prefix may be NULL. Returns 0, or -1 when the
+ * assembled template would overflow the buffer. */
+static int temp_template(char *out, size_t cap, const char *prefix)
+{
+    const char *tmp = getenv("TMPDIR");
+    size_t      base_len;
+    int         wr;
+    if (tmp == NULL || tmp[0] == '\0') tmp = "/tmp";
+    base_len = strlen(tmp);
+    /* Drop a trailing slash so the join never doubles it. */
+    while (base_len > 1 && tmp[base_len - 1] == '/') base_len--;
+    wr = snprintf(out, cap, "%.*s/%sXXXXXX",
+                  (int)base_len, tmp, prefix ? prefix : "mino");
+    if (wr < 0 || (size_t)wr >= cap) return -1;
+    return 0;
+}
+
+/* Read an optional single string prefix argument. Returns 0 with *prefix
+ * pointing at the string data (or NULL when absent); -1 on a type error
+ * (the throw is already fired). */
+static int temp_prefix_arg(mino_state *S, mino_val *args, const char **prefix)
+{
+    *prefix = NULL;
+    if (!mino_is_cons(args)) return 0;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        prim_throw_classified(S, "eval/arity", "MAR001",
+                              "temp: takes at most one prefix argument");
+        return -1;
+    }
+    {
+        mino_val *p = args->as.cons.car;
+        if (p == NULL || mino_type_of(p) != MINO_STRING) {
+            prim_throw_classified(S, "eval/type", "MTY001",
+                                  "temp: prefix must be a string");
+            return -1;
+        }
+        *prefix = p->as.s.data;
+    }
+    return 0;
+}
+#endif
+
+/* (mkdtemp) / (mkdtemp prefix) -- create a private (0700) directory with
+ * a unique name under the system temp dir; return its path. */
+static mino_val *prim_mkdtemp(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+#if defined(_WIN32)
+    (void)args;
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "mkdtemp: not supported on this platform");
+#else
+    {
+        char        tmpl[PATH_BUF_CAP];
+        const char *prefix;
+        if (temp_prefix_arg(S, args, &prefix) != 0) return NULL;
+        if (temp_template(tmpl, sizeof(tmpl), prefix) != 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkdtemp: temp path too long");
+        }
+        if (mkdtemp(tmpl) == NULL) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkdtemp: cannot create temp directory");
+        }
+        /* mkdtemp already creates the directory 0700; make it explicit so
+         * the mode is independent of any implementation drift. */
+        if (chmod(tmpl, 0700) != 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkdtemp: cannot set private mode");
+        }
+        return mino_string(S, tmpl);
+    }
+#endif
+}
+
+/* (mkstemp) / (mkstemp prefix) -- create a private (0600) empty file with
+ * a unique name under the system temp dir; return its path. */
+static mino_val *prim_mkstemp(mino_state *S, mino_val *args, mino_env *env)
+{
+    (void)env;
+#if defined(_WIN32)
+    (void)args;
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "mkstemp: not supported on this platform");
+#else
+    {
+        char        tmpl[PATH_BUF_CAP];
+        const char *prefix;
+        int         fd;
+        if (temp_prefix_arg(S, args, &prefix) != 0) return NULL;
+        if (temp_template(tmpl, sizeof(tmpl), prefix) != 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkstemp: temp path too long");
+        }
+        fd = mkstemp(tmpl);
+        if (fd < 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkstemp: cannot create temp file");
+        }
+        /* POSIX mkstemp creates 0600 already; pin it explicitly. */
+        if (fchmod(fd, 0600) != 0) {
+            close(fd);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "mkstemp: cannot set private mode");
+        }
+        close(fd);
+        return mino_string(S, tmpl);
+    }
+#endif
+}
+
 /* (file-exists? path) -- return true if path exists (file or directory). */
 static mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
                                mino_env *env)
@@ -949,6 +1064,12 @@ const mino_prim_def k_prims_fs[] = {
     {"copy-tree",    prim_copy_tree,
      "Recursively copies a directory tree, keeping symlink entries as "
      "symlinks rather than following them."},
+    {"mkdtemp",      prim_mkdtemp,
+     "Creates a uniquely-named private (0700) directory under the system "
+     "temp dir and returns its path. Optional string prefix."},
+    {"mkstemp",      prim_mkstemp,
+     "Creates a uniquely-named private (0600) empty file under the system "
+     "temp dir and returns its path. Optional string prefix."},
 #if !defined(_WIN32)
     {"symlink",      prim_symlink,
      "Creates a symlink at the link path pointing at the target. Returns nil."},

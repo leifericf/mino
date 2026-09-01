@@ -2996,6 +2996,30 @@
            (with-open ~(into [] rest-bindings) ~@body)
            (finally (~'close ~name)))))))
 
+(defmacro with-temp-dir
+  "Binds name to a fresh private temp directory, evaluates body, and
+   removes the directory (and its contents) on every exit, including a
+   throwing one. An optional prefix string names the directory."
+  [bindings & body]
+  (let [name   (first bindings)
+        prefix (nth bindings 1 nil)]
+    `(let [~name (if ~prefix (mkdtemp ~prefix) (mkdtemp))]
+       (try
+         ~@body
+         (finally (rm-rf ~name))))))
+
+(defmacro with-temp-file
+  "Binds name to a fresh private temp file, evaluates body, and removes
+   the file on every exit, including a throwing one. An optional prefix
+   string names the file."
+  [bindings & body]
+  (let [name   (first bindings)
+        prefix (nth bindings 1 nil)]
+    `(let [~name (if ~prefix (mkstemp ~prefix) (mkstemp))]
+       (try
+         ~@body
+         (finally (rm-rf ~name))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Transducers: composable algorithmic transformations. Gated on
 ;; :transducers -- when off, the C-level `into` primitive handles
