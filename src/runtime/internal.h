@@ -56,6 +56,17 @@
 #endif
 #include <time.h>
 
+/* Portable fall-through marker for intentional switch fall-through. A
+ * plain comment satisfies GCC but not clang's -Wimplicit-fallthrough
+ * (clang ignores the comment), which the pinned-zig lint lane enables.
+ * The statement attribute is understood by clang and GCC >= 7; it
+ * degrades to a no-op elsewhere. Use as a statement: `MINO_FALLTHROUGH;` */
+#if defined(__clang__) || (defined(__GNUC__) && __GNUC__ >= 7)
+#  define MINO_FALLTHROUGH __attribute__((fallthrough))
+#else
+#  define MINO_FALLTHROUGH ((void)0)
+#endif
+
 #include "runtime/value_assert.h"
 
 #include "runtime/runtime_types.h"

@@ -385,9 +385,9 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
-            /* fall through to the C-passthrough integer path */
+            /* not grouped: fall through to the C-passthrough integer path */
         }
-        /* fall through */
+        MINO_FALLTHROUGH; /* into the x/X/o integer path */
         case 'x': case 'X': case 'o': {
             long long n2;
             char cdir[48];
