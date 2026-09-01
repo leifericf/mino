@@ -767,6 +767,8 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
                                     mino_val *arity_list,
                                     const char *diag_code,
                                     const char *label);
+/* eval/fn.c -- :pre/:post arity-body rewrite shared by fn and defn. */
+mino_val *fn_rewrite_prepost_body(mino_state *S, mino_val *body);
 
 /* eval/control.c -- exception normaliser and throw-site recorder used by
  * vm.c's OP_PUSHCATCH / OP_THROW paths. */

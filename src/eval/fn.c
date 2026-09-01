@@ -7,10 +7,13 @@
  */
 
 #include <limits.h>
+#include <stdarg.h>
 
 #include "eval/special_internal.h"
 #include "eval/bc/internal.h"
 #include "eval/bc/jit.h"
+
+mino_val *fn_rewrite_prepost_body(mino_state *S, mino_val *body);
 
 /* Build the clause list for a multi-arity fn or defmacro.
  * `arity_list` is the cons list of arity clauses: (([p] b...) ([p q] b...) ...).
@@ -47,6 +50,8 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
             set_eval_diag(S, form, "syntax", diag_code, msg);
             return NULL;
         }
+        cbody = fn_rewrite_prepost_body(S, cbody);
+        if (cbody == NULL) return NULL;
         cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
         if (clause_tail == NULL) {
             clauses = cell;
@@ -57,6 +62,219 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
         rest = rest->as.cons.cdr;
     }
     return clauses;
+}
+
+/* Build (op a b c ...) from a NULL-terminated argument list, pinning
+ * each partial cons so a GC between allocations cannot free it. Returns
+ * the list on success, NULL on OOM. The caller owns no pins on return. */
+static mino_val *build_list(mino_state *S, mino_val *op, ...)
+{
+    va_list  ap;
+    mino_val *items[16];
+    int        n = 0;
+    va_start(ap, op);
+    items[n++] = op;
+    for (;;) {
+        mino_val *it = va_arg(ap, mino_val *);
+        if (it == NULL) break;
+        if (n >= (int)(sizeof(items) / sizeof(items[0]))) { va_end(ap); return NULL; }
+        items[n++] = it;
+    }
+    va_end(ap);
+    {
+        mino_val *lst = mino_nil(S);
+        int        i;
+        for (i = n - 1; i >= 0; i--) {
+            gc_pin(lst);
+            lst = mino_cons(S, items[i], lst);
+            gc_unpin(1);
+            if (lst == NULL) return NULL;
+        }
+        return lst;
+    }
+}
+
+/* Build the (when-not pred (throw (ex-info (str MSG (pr-str 'pred))
+ * {KEY 'pred}))) guard form for one :pre/:post predicate. KEY is :pre
+ * or :post; msg is the "Pre-condition failed: " / "Post-condition
+ * failed: " prefix. The message and the data map carry the quoted
+ * predicate form so the runtime str/pr-str yields the same text
+ * defn's rewrite produces. Returns NULL on OOM. */
+static mino_val *prepost_guard(mino_state *S, mino_val *pred,
+                               const char *key, const char *msg)
+{
+    mino_val *quote_sym;
+    mino_val *quoted;
+    mino_val *pr_form;
+    mino_val *str_form;
+    mino_val *map_form;
+    mino_val *exinfo_form;
+    mino_val *throw_form;
+    mino_val *guard;
+    quote_sym = mino_symbol(S, "quote");
+    if (quote_sym == NULL) return NULL;
+    gc_pin(quote_sym);
+    gc_pin(pred);
+    quoted = build_list(S, quote_sym, pred, NULL);
+    gc_unpin(2);
+    if (quoted == NULL) return NULL;
+    gc_pin(quoted);
+    pr_form = build_list(S, mino_symbol(S, "pr-str"), quoted, NULL);
+    gc_unpin(1);
+    if (pr_form == NULL) return NULL;
+    gc_pin(pr_form);
+    str_form = build_list(S, mino_symbol(S, "str"),
+                          mino_string(S, msg), pr_form, NULL);
+    gc_unpin(1);
+    if (str_form == NULL) return NULL;
+    {
+        mino_val *k = mino_keyword(S, key);
+        mino_val *keys[1];
+        mino_val *vals[1];
+        if (k == NULL) return NULL;
+        gc_pin(str_form);
+        gc_pin(quoted);
+        keys[0] = k;
+        /* Re-quote the predicate for the data map so the caught value's
+         * :pre/:post key holds the form, not its evaluation. */
+        vals[0] = build_list(S, quote_sym, pred, NULL);
+        if (vals[0] == NULL) { gc_unpin(2); return NULL; }
+        gc_pin(vals[0]);
+        map_form = mino_map(S, keys, vals, 1);
+        gc_unpin(3);
+        if (map_form == NULL) return NULL;
+    }
+    gc_pin(str_form);
+    gc_pin(map_form);
+    exinfo_form = build_list(S, mino_symbol(S, "ex-info"),
+                             str_form, map_form, NULL);
+    gc_unpin(2);
+    if (exinfo_form == NULL) return NULL;
+    gc_pin(exinfo_form);
+    throw_form = build_list(S, mino_symbol(S, "throw"), exinfo_form, NULL);
+    gc_unpin(1);
+    if (throw_form == NULL) return NULL;
+    gc_pin(pred);
+    gc_pin(throw_form);
+    guard = build_list(S, mino_symbol(S, "when-not"), pred, throw_form, NULL);
+    gc_unpin(2);
+    return guard;
+}
+
+/* If body's first form is a {:pre [...] :post [...]} map AND body has
+ * more than one form (a lone map is the return value, never a condition
+ * map), rewrite body to run the :pre asserts, bind % to (do rest...),
+ * run the :post asserts, and return %. Shares defn's exact rewrite
+ * shape and error text. Returns the rewritten body cons, or the
+ * original body when no condition map applies. NULL on OOM. */
+mino_val *fn_rewrite_prepost_body(mino_state *S, mino_val *body)
+{
+    mino_val *head;
+    mino_val *rest_body;
+    mino_val *pre;
+    mino_val *post;
+    if (!mino_is_cons(body)) return body;
+    head      = body->as.cons.car;
+    rest_body = body->as.cons.cdr;
+    /* A lone map (single body form) is the return value, not a
+     * condition map -- require at least one more form after it. */
+    if (!mino_is_cons(rest_body)) return body;
+    if (head == NULL || !mino_is_map(head)) return body;
+    pre  = mino_map_lookup(head, mino_keyword(S, "pre"));
+    post = mino_map_lookup(head, mino_keyword(S, "post"));
+    if (pre == NULL && post == NULL) return body;
+    {
+        /* Build (do rest-body...) for the % binding. */
+        mino_val *do_sym = mino_symbol(S, "do");
+        mino_val *pct    = mino_symbol(S, "%");
+        mino_val *inner_do;
+        mino_val *let_bindings;
+        mino_val *let_form;
+        mino_val *post_do;   /* (do post-guards... %) */
+        mino_val *out;
+        mino_val *out_tail = NULL;
+        if (do_sym == NULL || pct == NULL) return NULL;
+        gc_pin(do_sym);
+        gc_pin(rest_body);
+        inner_do = mino_cons(S, do_sym, rest_body);
+        gc_unpin(2);
+        if (inner_do == NULL) return NULL;
+
+        /* Assemble the (do post-guards... %) tail, built back to front. */
+        gc_pin(pct);
+        post_do = mino_cons(S, pct, mino_nil(S));  /* (%) */
+        gc_unpin(1);
+        if (post_do == NULL) return NULL;
+        if (post != NULL && mino_type_of(post) == MINO_VECTOR) {
+            size_t i;
+            for (i = post->as.vec.len; i > 0; i--) {
+                mino_val *p = vec_nth(post, i - 1);
+                mino_val *g;
+                gc_pin(post_do);
+                g = prepost_guard(S, p, "post", "Post-condition failed: ");
+                gc_unpin(1);
+                if (g == NULL) return NULL;
+                gc_pin(g);
+                gc_pin(post_do);
+                post_do = mino_cons(S, g, post_do);
+                gc_unpin(2);
+                if (post_do == NULL) return NULL;
+            }
+        }
+        gc_pin(post_do);
+        post_do = mino_cons(S, mino_symbol(S, "do"), post_do);
+        gc_unpin(1);
+        if (post_do == NULL) return NULL;
+
+        /* (let [% inner-do] post-do) */
+        gc_pin(post_do);
+        gc_pin(inner_do);
+        {
+            mino_val *bvals[2];
+            bvals[0] = mino_symbol(S, "%");
+            bvals[1] = inner_do;
+            if (bvals[0] == NULL) { gc_unpin(2); return NULL; }
+            gc_pin(bvals[0]);
+            let_bindings = mino_vector(S, bvals, 2);
+            gc_unpin(1);
+        }
+        gc_unpin(2);
+        if (let_bindings == NULL) return NULL;
+        gc_pin(let_bindings);
+        gc_pin(post_do);
+        let_form = build_list(S, mino_symbol(S, "let"),
+                              let_bindings, post_do, NULL);
+        gc_unpin(2);
+        if (let_form == NULL) return NULL;
+
+        /* Prepend the :pre guards, then the let form: build the body
+         * list front to back with an explicit tail pointer. */
+        gc_pin(let_form);
+        out = mino_cons(S, let_form, mino_nil(S));
+        gc_unpin(1);
+        if (out == NULL) return NULL;
+        out_tail = out;
+        if (pre != NULL && mino_type_of(pre) == MINO_VECTOR) {
+            size_t i;
+            for (i = pre->as.vec.len; i > 0; i--) {
+                mino_val *p = vec_nth(pre, i - 1);
+                mino_val *g;
+                mino_val *cell;
+                gc_pin(out);
+                g = prepost_guard(S, p, "pre", "Pre-condition failed: ");
+                gc_unpin(1);
+                if (g == NULL) return NULL;
+                gc_pin(g);
+                gc_pin(out);
+                cell = mino_cons(S, g, out);
+                gc_unpin(2);
+                if (cell == NULL) return NULL;
+                out = cell;
+            }
+        }
+        (void)out_tail;
+        return out;
+    }
 }
 
 mino_val *eval_fn(mino_state *S, mino_val *form,
@@ -124,6 +342,8 @@ mino_val *eval_fn(mino_state *S, mino_val *form,
                 }
             }
         }
+        body = fn_rewrite_prepost_body(S, body);
+        if (body == NULL) return NULL;
     }
     if (fn_name != NULL) {
         char nbuf[256];

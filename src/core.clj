@@ -89,48 +89,10 @@
 ;; Anything that depends only on special forms, primitives, and the
 ;; macros defined above (when, cond, and, or, ->, ->>) is fair game.
 
-;; Walk a single fn arity (params-vec body...) and, if the first body
-;; form is a {:pre [...] :post [...]} map, rewrite the arity so the
-;; conditions run around the body. % in :post bodies refers to the
-;; return value, matching Clojure.
-(def ^:private fn-arity-with-prepost
-  (fn [arity]
-    (let [params (first arity)
-          body   (rest arity)
-          head   (first body)]
-      (if (and (map? head)
-               (or (contains? head :pre) (contains? head :post)))
-        (let [pre   (get head :pre [])
-              post  (get head :post [])
-              rest-body (rest body)
-              assert-pre
-              (map (fn [p]
-                     (list 'when-not p
-                           (list 'throw
-                                 (list 'ex-info
-                                       (str "Pre-condition failed: "
-                                            (pr-str p))
-                                       {:pre (list 'quote p)}))))
-                   pre)
-              assert-post
-              (map (fn [p]
-                     (list 'when-not p
-                           (list 'throw
-                                 (list 'ex-info
-                                       (str "Post-condition failed: "
-                                            (pr-str p))
-                                       {:post (list 'quote p)}))))
-                   post)
-              wrapped
-              (apply list
-                     (concat assert-pre
-                             [(apply list 'let
-                                     ['% (apply list 'do rest-body)]
-                                     [(apply list 'do
-                                             (concat assert-post
-                                                     ['%]))])]))]
-          (cons params wrapped))
-        arity))))
+;; The :pre/:post condition rewrite lives in the fn special form (C
+;; core, eval/fn.c fn_rewrite_prepost_body), so defn, plain fn, and
+;; named fn all enforce conditions through one shared mechanism. defn
+;; therefore hands its raw arities straight to fn.
 
 (defmacro defn
   "Defines a named function. Supports docstrings, multi-arity, and
@@ -143,14 +105,11 @@
         fdecl    (if has-attr (rest fdecl) fdecl)
         ;; If the first remaining form is a vector, this is single-arity
         ;; (params-vec body...). Otherwise it's a sequence of arity
-        ;; lists (params-vec body...) (params-vec body...). Handle the
-        ;; :pre/:post map either way.
-        rewritten (if (vector? (first fdecl))
-                    (fn-arity-with-prepost fdecl)
-                    (mapv fn-arity-with-prepost fdecl))
+        ;; lists (params-vec body...) (params-vec body...). fn applies
+        ;; the :pre/:post rewrite for both shapes.
         form     (if (vector? (first fdecl))
-                   (cons 'fn rewritten)
-                   (apply list 'fn rewritten))
+                   (cons 'fn fdecl)
+                   (apply list 'fn fdecl))
         ;; The declared parameter vectors in declaration order, stored
         ;; under :arglists on the var the way JVM defn does. The value
         ;; is quoted so def's metadata evaluation yields the raw forms.

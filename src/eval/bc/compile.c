@@ -3319,6 +3319,11 @@ static int compile_fn_literal(compiler_t *c, mino_val *form, int dst, int tail)
         if (clauses == NULL) { c->ok = 0; return -1; }
         params = NULL;
         body   = clauses;
+    } else {
+        /* Single arity: apply the shared :pre/:post rewrite so the fn
+         * special form enforces conditions exactly as defn does. */
+        body = fn_rewrite_prepost_body(c->S, body);
+        if (body == NULL) { c->ok = 0; return -1; }
     }
 
     /* Build a template MINO_FN. The env field gets nil here; OP_CLOSURE

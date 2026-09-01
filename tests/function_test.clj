@@ -112,3 +112,51 @@
       (is (some? (re-find #"no matching arity" msg3)))
       (is (some? (re-find #"3 args" msg3)))
       (is (some? (re-find #"s__am" msg3))))))
+
+;; :pre/:post conditions apply to the fn special form, not only defn.
+;; The condition map is the first body form when the body has more than
+;; one form; a lone map is the return value, never a condition map.
+
+(deftest fn-pre-condition
+  (let [f__ft (fn [x] {:pre [(pos? x)]} x)]
+    (is (= 5 (f__ft 5)))
+    (is (thrown? Exception (f__ft -5)))))
+
+(deftest fn-pre-condition-message
+  (let [f__ft (fn [x] {:pre [(pos? x)]} x)
+        msg   (try (f__ft -5) (catch e (ex-message e)))]
+    (is (some? (re-find #"Pre-condition failed" msg)))
+    (is (some? (re-find #"pos\?" msg)))))
+
+(deftest fn-post-condition
+  (let [f__ft (fn [x] {:post [(pos? %)]} x)]
+    (is (= 5 (f__ft 5)))
+    (is (thrown? Exception (f__ft -5)))))
+
+(deftest fn-post-condition-percent-is-return
+  (let [f__ft (fn [x] {:post [(= % (* 2 x))]} (* 2 x))]
+    (is (= 8 (f__ft 4)))))
+
+(deftest fn-lone-map-is-return-value
+  ;; A single-form body that is a map literal returns the map; it is
+  ;; not treated as a :pre/:post condition map.
+  (let [f__ft (fn [x] {:pre [(pos? x)]})]
+    (is (= {:pre [true]} (f__ft 5)))
+    (is (= {:pre [false]} (f__ft -5)))))
+
+(deftest fn-multi-arity-pre-condition
+  (let [f__ft (fn ([x] {:pre [(pos? x)]} x)
+                  ([x y] (+ x y)))]
+    (is (= 5 (f__ft 5)))
+    (is (thrown? Exception (f__ft -5)))
+    (is (= 7 (f__ft 3 4)))))
+
+(deftest fn-named-pre-condition
+  (let [f__ft (fn named__ft [x] {:pre [(pos? x)]} x)]
+    (is (= 5 (f__ft 5)))
+    (is (thrown? Exception (f__ft -5)))))
+
+(deftest defn-pre-still-enforced
+  (defn dfn__ft [x] {:pre [(pos? x)]} x)
+  (is (= 5 (dfn__ft 5)))
+  (is (thrown? Exception (dfn__ft -5))))

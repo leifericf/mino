@@ -115,6 +115,11 @@ mino_val *build_multi_arity_clauses(mino_state *S, mino_val *form,
                                       mino_val *arity_list,
                                       const char *diag_code,
                                       const char *label);
+/* Rewrite a single arity body so a leading {:pre [...] :post [...]} map
+ * (only when the body has more than one form) enforces its conditions,
+ * sharing defn's exact rewrite shape. Returns body unchanged when no
+ * condition map applies; NULL on OOM. */
+mino_val *fn_rewrite_prepost_body(mino_state *S, mino_val *body);
 
 /* eval/special_registry.c */
 int eval_try_special_form(mino_state *S, mino_val *form,
