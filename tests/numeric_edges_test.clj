@@ -305,3 +305,25 @@
     (is (= 1000.0 (parse-double "1e3")))
     (is (nil? (parse-double "abc")))
     (is (= ##Inf (parse-double "Infinity")))))
+
+(require '[clojure.data.json :as json])
+
+(deftest small-magnitude-doubles-round-trip
+  ;; The float printer searched for the shortest %f that re-parses to
+  ;; the same double but capped the fractional-digit count at 17. A
+  ;; magnitude below 1 spends fractional positions on leading zeros, so
+  ;; a full-mantissa value like 1/333 (0.003003003003003003, 18
+  ;; fractional digits) or 1/700 (19) ran out of significant digits and
+  ;; re-parsed to a different double. pr-str and clojure.data.json share
+  ;; this formatter, so the JSON round-trip lane surfaced it.
+  (testing "computed full-mantissa small doubles survive pr-str"
+    (doseq [x [(/ 1.0 333.0) (/ 1.0 700.0) (/ 1.0 900.0) (/ 1.0 777.0)
+               (* Math/PI 1e-3) (* Math/PI 1e-2) (/ 1.0 7.0) (/ 1.0 3.0)]]
+      (is (= x (read-string (pr-str x))))))
+  (testing "a sweep across [1e-3, 1) round-trips"
+    (dotimes [n 900]
+      (let [x (/ 1.0 (double (+ n 101)))]
+        (is (= x (read-string (pr-str x)))))))
+  (testing "the same values round-trip through clojure.data.json"
+    (doseq [x [(/ 1.0 333.0) (/ 1.0 700.0) (* Math/PI 1e-3)]]
+      (is (= x (json/read-str (json/write-str x)))))))

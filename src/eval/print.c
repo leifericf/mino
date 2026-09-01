@@ -6,6 +6,8 @@
  * transitively via runtime/internal.h).
  */
 
+#include <math.h>
+
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"
 
@@ -153,8 +155,17 @@ static int format_float_typed(char *buf, size_t bufsz, double x,
                 }
             }
         } else {
-            /* Fixed: %f precision is fractional-digit count. */
-            for (p = 0; p <= maxp; p++) {
+            /* Fixed: %f precision is a fractional-digit count, not a
+             * significant-digit count. A magnitude below 1 carries
+             * leading zeros right after the decimal point, so it needs
+             * that many extra fractional digits to still express maxp
+             * significant digits and round-trip. Capping at maxp alone
+             * loses precision for values like 0.003..., which then
+             * re-parse to a different double. */
+            int fmaxp = maxp;
+            if (absx > 0.0 && absx < 1.0)
+                fmaxp += -(int)floor(log10(absx));
+            for (p = 0; p <= fmaxp; p++) {
                 n = snprintf(buf, bufsz, "%.*f", p, x);
                 if (n < 0 || n >= (int)bufsz) { n = -1; break; }
                 if (is_float32) {
