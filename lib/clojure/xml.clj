@@ -1,15 +1,16 @@
 (ns clojure.xml
-  "Read XML into the JVM clojure.xml node shape (ADR 28).
+  "Read and emit XML in the JVM clojure.xml node shape (ADR 28).
 
-  Reader only, one-way. This namespace reads XML into the element-tree
-  data via parse; it provides no emitter, so there is no round-trip
-  back to XML text from here. (An element tree of the shared
-  :tag/:attrs/:content shape can be serialized as HTML through
-  mino.html/to-html, but that is an HTML writer, not an XML emitter.)
+  parse reads XML text into the element tree; emit and emit-element
+  print an element tree back to *out* in the reference shape, with
+  entity escaping so emitted documents always reparse (the one
+  recorded divergence from the reference body, which prints raw).
 
   (require '[clojure.xml :as xml])
   (xml/parse \"<a k=\\\"1\\\">t &amp; more</a>\")
   => {:tag :a :attrs {:k \"1\"} :content [\"t & more\"]}
+  (with-out-str (xml/emit-element {:tag :a :attrs {} :content nil}))
+  => \"<a/>\\n\"
 
   Elements are plain maps {:tag keyword :attrs {keyword string}
   :content [string|node]}, the exact JVM shape: :attrs {} and
@@ -68,8 +69,7 @@
   "Parses s, a string of XML 1.0, into the root element map
   {:tag keyword :attrs {keyword string} :content [string|node]}
   (the JVM clojure.xml shape; see the namespace docstring for the
-  full contract). Reading is one-way: this namespace has no emitter
-  back to XML.
+  full contract). emit is the companion printer back to XML text.
 
   (xml/parse \"<rss version=\\\"2.0\\\"/>\")
   => {:tag :rss :attrs {:version \"2.0\"} :content []}
@@ -95,3 +95,70 @@
                              :col (nth r 3)}
                   :text (nth r 4)})
        r))))
+
+;;;; Emitter
+
+(defn- emit-fail
+  [msg data]
+  (xml-fail :xml/emit "MXE001" (str "clojure.xml: " msg) data))
+
+(defn- elem-name
+  [k]
+  (cond (keyword? k) (if (namespace k)
+                       (str (namespace k) ":" (name k))
+                       (name k))
+        (string? k) k
+        :else (emit-fail "a tag or attribute name must be a keyword or string"
+                         {:name k})))
+
+(defn- escape-content
+  [s]
+  (-> s
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")))
+
+;; Attribute whitespace rides character references: a literal tab or
+;; newline would normalize to a space on reparse (XML 1.0 3.3.3).
+(defn- escape-attr
+  [s]
+  (-> s
+      (str/replace "&" "&amp;")
+      (str/replace "<" "&lt;")
+      (str/replace ">" "&gt;")
+      (str/replace "'" "&apos;")
+      (str/replace "\"" "&quot;")
+      (str/replace "\r" "&#13;")
+      (str/replace "\n" "&#10;")
+      (str/replace "\t" "&#9;")))
+
+(defn emit-element
+  "Prints node e to *out* in the reference shape: a string on its own
+  line, an element as its tag line, contents, and closing line, with
+  nil content self-closing. Entity escaping of & < > (and quotes in
+  attribute values) is the recorded divergence from the reference
+  body, so emitted documents always reparse. Throws :mino/kind
+  :xml/emit for a value that is neither element map nor string."
+  [e]
+  (cond
+    (string? e) (println (escape-content e))
+    (and (map? e) (:tag e))
+    (do (print (str "<" (elem-name (:tag e))))
+        (doseq [attr (:attrs e)]
+          (print (str " " (elem-name (key attr)) "='"
+                      (escape-attr (str (val attr))) "'")))
+        (if (:content e)
+          (do (println ">")
+              (doseq [c (:content e)]
+                (emit-element c))
+              (println (str "</" (elem-name (:tag e)) ">")))
+          (println "/>")))
+    :else (emit-fail "emit-element requires an element map or a string"
+                     {:node e})))
+
+(defn emit
+  "Prints the element tree x to *out* as an XML document: the
+  declaration line, then emit-element."
+  [x]
+  (println "<?xml version='1.0' encoding='UTF-8'?>")
+  (emit-element x))
