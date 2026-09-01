@@ -41,6 +41,249 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/* Read a boolean opts key from a (possibly nil/absent) opts map. Absent
+ * or nil is `def`; a present non-boolean is a contract error. */
+static int fs_opt_bool(mino_state *S, const mino_val *opts, const char *key,
+                       int def, int *out)
+{
+    const mino_val *v;
+    *out = def;
+    if (opts == NULL || mino_type_of(opts) != MINO_MAP) return 0;
+    v = map_get_val(opts, mino_keyword(S, key));
+    if (v == NULL || mino_type_of(v) == MINO_NIL) return 0;
+    if (mino_type_of(v) != MINO_BOOL) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "fs: opts key :%s must be a boolean", key);
+        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return -1;
+    }
+    *out = mino_val_bool_get(v);
+    return 0;
+}
+
+/* Modification time of a stat buffer in milliseconds. Mirrors
+ * file-mtime's cross-platform sub-second handling. */
+static long long stat_mtime_ms(const struct stat *st)
+{
+#if defined(__APPLE__)
+    return (long long)st->st_mtimespec.tv_sec  * 1000LL
+         + (long long)st->st_mtimespec.tv_nsec / 1000000LL;
+#elif defined(_POSIX_C_SOURCE) && _POSIX_C_SOURCE >= 200809L && !defined(_WIN32)
+    return (long long)st->st_mtim.tv_sec  * 1000LL
+         + (long long)st->st_mtim.tv_nsec / 1000000LL;
+#else
+    return (long long)st->st_mtime * 1000LL;
+#endif
+}
+
+/* Build the {:type :size :mode :mtime :symlink?} map. link_st is the
+ * lstat of the path (used only for :symlink?); info_st is the buffer the
+ * :type/:size/:mode/:mtime come from (the target's when following). */
+static mino_val *stat_to_map(mino_state *S, const struct stat *info_st,
+                             int is_symlink)
+{
+    mino_val *keys[5];
+    mino_val *vals[5];
+    const char *type;
+
+    if (S_ISDIR(info_st->st_mode))       type = "dir";
+    else if (S_ISREG(info_st->st_mode))  type = "file";
+#if !defined(_WIN32)
+    else if (S_ISLNK(info_st->st_mode))  type = "symlink";
+#endif
+    else                                 type = "other";
+
+    keys[0] = mino_keyword(S, "type");
+    vals[0] = mino_keyword(S, type);
+    keys[1] = mino_keyword(S, "size");
+    vals[1] = mino_int(S, (long long)info_st->st_size);
+    keys[2] = mino_keyword(S, "mode");
+    vals[2] = mino_int(S, (long long)(info_st->st_mode & 07777));
+    keys[3] = mino_keyword(S, "mtime");
+    vals[3] = mino_int(S, stat_mtime_ms(info_st));
+    keys[4] = mino_keyword(S, "symlink?");
+    vals[4] = is_symlink ? mino_true(S) : mino_false(S);
+    return mino_map(S, keys, vals, 5);
+}
+
+/* (stat path) / (stat path {:follow-links? bool}) -- return a metadata
+ * map, or nil when the path does not exist. Default lstat semantics
+ * (:follow-links? false): the map's :type is :symlink for a symlink and
+ * :symlink? reflects the path itself. With :follow-links? true the
+ * type/size/mode/mtime come from the target while :symlink? still names
+ * the path. */
+static mino_val *prim_stat(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *path_val;
+    mino_val *opts = NULL;
+    struct stat link_st;
+    struct stat info_st;
+    int follow = 0;
+    int is_symlink;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "stat requires a path argument");
+    }
+    path_val = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        opts = args->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "stat takes a path and optional opts");
+        }
+    }
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "stat: path must be a string");
+    }
+    if (fs_opt_bool(S, opts, "follow-links?", 0, &follow) != 0)
+        return NULL;
+
+#if !defined(_WIN32)
+    if (lstat(path_val->as.s.data, &link_st) != 0)
+        return mino_nil(S);
+    is_symlink = S_ISLNK(link_st.st_mode) ? 1 : 0;
+    if (follow && is_symlink) {
+        if (stat(path_val->as.s.data, &info_st) != 0)
+            return mino_nil(S);
+    } else {
+        info_st = link_st;
+    }
+#else
+    /* Windows has no lstat; reparse-point handling differs from POSIX
+     * symlinks and the POSIX-only test tier does not exercise it, so a
+     * plain stat serves both modes and :symlink? is always false. */
+    (void)follow;
+    if (stat(path_val->as.s.data, &link_st) != 0)
+        return mino_nil(S);
+    info_st = link_st;
+    is_symlink = 0;
+#endif
+    return stat_to_map(S, &info_st, is_symlink);
+}
+
+/* (file-size path) -- byte count of the file at path, or nil when the
+ * path does not exist (file-mtime's shape). */
+static mino_val *prim_file_size(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *path_val;
+    struct stat st;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "file-size requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "file-size: argument must be a string");
+    }
+    if (stat(path_val->as.s.data, &st) != 0)
+        return mino_nil(S);
+    return mino_int(S, (long long)st.st_size);
+}
+
+/* (chmod path mode) -- set permission bits (an int); returns nil. */
+static mino_val *prim_chmod(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *path_val;
+    mino_val *mode_val;
+    long long mode;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chmod requires a path and a mode");
+    }
+    path_val = args->as.cons.car;
+    mode_val = args->as.cons.cdr->as.cons.car;
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "chmod: path must be a string");
+    }
+    if (!as_long(mode_val, &mode) || mode < 0 || mode > 07777) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+                                     "chmod: mode must be an int in 0..07777");
+    }
+#if defined(_MSC_VER)
+    /* MSVC's CRT spells it _chmod and honours only the write bit. */
+    if (_chmod(path_val->as.s.data, (int)mode) != 0) {
+#else
+    if (chmod(path_val->as.s.data, (mode_t)mode) != 0) {
+#endif
+        char msg[300];
+        snprintf(msg, sizeof(msg), "chmod: cannot set mode on: %.200s",
+                 path_val->as.s.data);
+        return prim_throw_classified(S, "io", "MIO001", msg);
+    }
+    return mino_nil(S);
+}
+
+#if !defined(_WIN32)
+/* (symlink target link-path) -- create a symlink at link-path pointing at
+ * target; returns nil. */
+static mino_val *prim_symlink(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *target_val;
+    mino_val *link_val;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "symlink requires a target and a link");
+    }
+    target_val = args->as.cons.car;
+    link_val = args->as.cons.cdr->as.cons.car;
+    if (target_val == NULL || mino_type_of(target_val) != MINO_STRING ||
+        link_val == NULL || mino_type_of(link_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "symlink: target and link must be strings");
+    }
+    if (symlink(target_val->as.s.data, link_val->as.s.data) != 0) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "symlink: cannot create link: %.180s",
+                 link_val->as.s.data);
+        return prim_throw_classified(S, "io", "MIO001", msg);
+    }
+    return mino_nil(S);
+}
+
+/* (read-symlink path) -- return the target string a symlink points at. */
+static mino_val *prim_read_symlink(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *path_val;
+    char buf[PATH_BUF_CAP];
+    ssize_t n;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "read-symlink requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "read-symlink: argument must be a string");
+    }
+    /* readlink does not NUL-terminate; a full buffer means the target
+     * was too long to represent, which is an error rather than a
+     * silently truncated path. */
+    n = readlink(path_val->as.s.data, buf, sizeof(buf));
+    if (n < 0) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "read-symlink: cannot read link: %.180s",
+                 path_val->as.s.data);
+        return prim_throw_classified(S, "io", "MIO001", msg);
+    }
+    if ((size_t)n >= sizeof(buf)) {
+        return prim_throw_classified(S, "io", "MIO001",
+                                     "read-symlink: link target too long");
+    }
+    return mino_string_n(S, buf, (size_t)n);
+}
+#endif /* !_WIN32 */
+
 /* (file-exists? path) -- return true if path exists (file or directory). */
 static mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
                                mino_env *env)
@@ -430,6 +673,20 @@ const mino_prim_def k_prims_fs[] = {
      "Resolves a path to its canonical absolute form, or nil."},
     {"which",        prim_which,
      "Searches PATH for an executable, returns its absolute path or nil."},
+    {"stat",         prim_stat,
+     "Returns a {:type :size :mode :mtime :symlink?} map, or nil when "
+     "the path is missing. Default lstat semantics; pass {:follow-links? "
+     "true} to report the symlink target."},
+    {"file-size",    prim_file_size,
+     "Returns the file size in bytes, or nil when the path is missing."},
+    {"chmod",        prim_chmod,
+     "Sets the permission bits (an int) on a path. Returns nil."},
+#if !defined(_WIN32)
+    {"symlink",      prim_symlink,
+     "Creates a symlink at the link path pointing at the target. Returns nil."},
+    {"read-symlink", prim_read_symlink,
+     "Returns the target path a symlink points at."},
+#endif
 };
 
 const size_t k_prims_fs_count =
