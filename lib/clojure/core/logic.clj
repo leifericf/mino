@@ -779,11 +779,14 @@
 ;; Tabling: tabled memoizes a relation's answers so that recursion over a
 ;; cyclic relation (transitive closure, reachability) terminates and is
 ;; not recomputed.  A tabled relation keeps a per-call-key answer table;
-;; the first (driver) call solves the table to a fixpoint -- repeatedly
-;; evaluating the body, cutting cycles by yielding the answers found so
-;; far, until a full pass discovers nothing new -- and then yields the
-;; collected answers.  Re-entrant calls during the solve contribute and
-;; read through the same table.
+;; the call key is the *reified* argument vector, so two calls that
+;; differ only by variable identity (the same subgoal reached again,
+;; including a left-recursive call whose argument is still fresh) share
+;; one key.  The first (driver) call solves the table to a fixpoint --
+;; repeatedly evaluating the body, cutting cycles by yielding the answers
+;; found so far, until a full pass discovers nothing new -- and then
+;; yields the collected answers.  Re-entrant calls during the solve
+;; contribute and read through the same table.
 ;; --------------------------------------------------------------------
 
 (defn- refresh-term
@@ -841,7 +844,14 @@
     (fn [& args]
       (let [argv (vec args)]
         (fn [a]
-          (let [key (walk* argv (:s a))]
+          ;; The table key is the *reified* call: logic variables are
+          ;; canonicalised to _0, _1, ... in first-appearance order. A
+          ;; re-entrant call whose arguments are still fresh (left
+          ;; recursion) then reifies to the same key as the driver, so
+          ;; it is recognised as the same subgoal variant and the cycle
+          ;; is cut. Keying by the raw walk would leave each re-entrant
+          ;; call a distinct fresh variable and never terminate.
+          (let [key (reify-out argv a)]
             (if @driving
               (tabled-pass table inprog changed key argv (apply body-fn args) a)
               (do

@@ -226,4 +226,41 @@
   ;; From :b the cycle reaches everything too.
   (is (= '(:a :b :c :d) (sort (run* [q] (patho :b q))))))
 
+;; Left-recursion: the recursive tabled call is the FIRST goal, so its
+;; argument is still an unbound fresh variable.  Tabling must key the
+;; solving stack by the reified call so the re-entrant subgoal is
+;; recognised as the same variant and the cycle is cut; otherwise each
+;; re-entrant call carries a distinct fresh variable and never
+;; terminates.  This is the case tabling exists to make terminate.
+(def path-lefto
+  (tabled [x y]
+    (conde
+      [(arco x y)]
+      [(fresh [z] (path-lefto x z) (arco z y))])))
+
+(deftest tabled-left-recursion-terminates
+  (is (= '(:a :b :c :d) (sort (run* [q] (path-lefto :a q)))))
+  (is (= '(:a :b :c :d) (sort (run* [q] (path-lefto :b q))))))
+
+;; Two goals over the SAME tabled relation, both live in one run, with
+;; distinct call keys.  The shared driving/answer-cache state must stay
+;; correct per subgoal.
+(deftest tabled-same-relation-two-goals
+  (is (= '([:a :a] [:a :b] [:a :c] [:a :d]
+          [:b :a] [:b :b] [:b :c] [:b :d]
+          [:c :a] [:c :b] [:c :c] [:c :d]
+          [:d :a] [:d :b] [:d :c] [:d :d])
+         (sort-by str
+           (run* [q]
+             (fresh [a b]
+               (path-lefto :a a)
+               (path-lefto :c b)
+               (l/== q [a b]))))))
+  (is (= '(:a :a :b :b :c :c :d :d)
+         (sort-by str
+           (run* [q]
+             (conde
+               [(path-lefto :a q)]
+               [(path-lefto :b q)]))))))
+
 (run-tests-and-exit)
