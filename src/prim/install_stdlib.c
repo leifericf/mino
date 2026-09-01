@@ -83,6 +83,7 @@
 #include "lib_mino_retry.h"
 #include "lib_mino_wait.h"
 #include "lib_mino_jsonl.h"
+#include "lib_mino_mime.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -495,6 +496,7 @@ void mino_install_mino_util(mino_state *S, mino_env *env)
     mino_register_bundled_lib(S, "mino.shell", lib_mino_shell_src);
     mino_register_bundled_lib(S, "mino.retry", lib_mino_retry_src);
     mino_register_bundled_lib(S, "mino.wait",  lib_mino_wait_src);
+    mino_register_bundled_lib(S, "mino.mime",  lib_mino_mime_src);
     S->caps_installed |= MINO_CAP_UTIL;
 }
 

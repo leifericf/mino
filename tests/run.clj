@@ -252,14 +252,15 @@
                 "tests/shell_test"
                 "tests/retry_test"
                 "tests/wait_test"
-                "tests/jsonl_test"])
+                "tests/jsonl_test"
+                "tests/mime_test"])
 
 (def ^:private shard-cuts
    "File-count prefix boundaries for MINO_TEST_SHARD partitions:
     shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
     glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
     tail grows past ~5GB. The final entry must equal the file count."
-    [0 103 129 206])
+    [0 103 129 207])
 
 (let [wired (set (map #(last (str/split % #"/")) suite-files))
       unwired (sort (set/difference disk-basenames wired other-lane-files))]
