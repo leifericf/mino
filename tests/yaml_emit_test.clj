@@ -17,20 +17,20 @@
 ;; Unrepresentable values (functions, collection keys) throw a
 ;; classified :yaml/emit diagnostic, never a silent coercion.
 
-(defn- emit-kind
+(defn- yaml-emit-kind
   ":mino/kind of the diagnostic generate-string throws, or :no-throw."
   [x]
   (let [r (try (do (yaml/generate-string x) :no-throw)
                (catch Throwable e (:mino/kind e)))]
     r))
 
-(defn- emit-opts-kind
+(defn- yaml-emit-opts-kind
   [x opts]
   (let [r (try (do (yaml/generate-string x opts) :no-throw)
                (catch Throwable e (:mino/kind e)))]
     r))
 
-(defn- round-trips?
+(defn- yaml-round-trips?
   "parse-string(generate-string(x)) equals x."
   [x]
   (= x (yaml/parse-string (yaml/generate-string x))))
@@ -209,33 +209,33 @@
 ;;;; Errors: unrepresentable values and bad opts
 
 (deftest yaml-emit-rejects-function-values
-  (is (= :yaml/emit (emit-kind (fn [x] x)))))
+  (is (= :yaml/emit (yaml-emit-kind (fn [x] x)))))
 
 (deftest yaml-emit-rejects-collection-keys
   ;; Complex keys are out of the reader's subset; emitting one would
   ;; write a document the reader rejects.
-  (is (= :yaml/emit (emit-kind {{:a 1} 2})))
-  (is (= :yaml/emit (emit-kind {[1 2] "x"}))))
+  (is (= :yaml/emit (yaml-emit-kind {{:a 1} 2})))
+  (is (= :yaml/emit (yaml-emit-kind {[1 2] "x"}))))
 
 (deftest yaml-emit-rejects-non-map-opts
-  (is (= :yaml/opts (emit-opts-kind {:a 1} 5))))
+  (is (= :yaml/opts (yaml-emit-opts-kind {:a 1} 5))))
 
 (deftest yaml-emit-rejects-non-boolean-flow
-  (is (= :yaml/opts (emit-opts-kind {:a 1} {:flow "yes"}))))
+  (is (= :yaml/opts (yaml-emit-opts-kind {:a 1} {:flow "yes"}))))
 
 ;;;; Round-trip goldens
 
 (deftest yaml-emit-round-trip-goldens
-  (is (round-trips? {:a 1 :b "x" :c nil :d true}))
-  (is (round-trips? {:a {:b [1 2 {:c "d"}]}}))
-  (is (round-trips? [{:name "a" :vals [1.5 -2.5E-8]} {:name "b"}]))
-  (is (round-trips? {:msg "it's\na \"quoted\" line\n"}))
-  (is (round-trips? {:no "no" :on "off" :n "017"}))
-  (is (round-trips? {(keyword "true") "x" (keyword "a b") "y"}))
-  (is (round-trips? {23 "x" 1.5 "y" true "z" nil "w"}))
-  (is (round-trips? {:inf ##Inf :ninf ##-Inf}))
-  (is (round-trips? {:deep {:er {:most [[1] [] {}]}}}))
-  (is (round-trips? "  mixed \t controls")))
+  (is (yaml-round-trips? {:a 1 :b "x" :c nil :d true}))
+  (is (yaml-round-trips? {:a {:b [1 2 {:c "d"}]}}))
+  (is (yaml-round-trips? [{:name "a" :vals [1.5 -2.5E-8]} {:name "b"}]))
+  (is (yaml-round-trips? {:msg "it's\na \"quoted\" line\n"}))
+  (is (yaml-round-trips? {:no "no" :on "off" :n "017"}))
+  (is (yaml-round-trips? {(keyword "true") "x" (keyword "a b") "y"}))
+  (is (yaml-round-trips? {23 "x" 1.5 "y" true "z" nil "w"}))
+  (is (yaml-round-trips? {:inf ##Inf :ninf ##-Inf}))
+  (is (yaml-round-trips? {:deep {:er {:most [[1] [] {}]}}}))
+  (is (yaml-round-trips? "  mixed \t controls")))
 
 (deftest yaml-emit-string-keys-round-trip-without-keywordizing
   (let [x {"a b" 1 "true" "x"}]
@@ -244,9 +244,9 @@
 
 ;;;; Round-trip property over json-shaped data
 
-(def ^:private trials 60)
+(def ^:private yaml-trials 60)
 
-(defn- one-of* [gens]
+(defn- yaml-one-of* [gens]
   (gen/bind (gen/elements gens) identity))
 
 ;; NaN never compares equal to itself, so the equality property draws
@@ -255,7 +255,7 @@
   (gen/such-that (fn [d] (not (NaN? d))) gen/double))
 
 (def ^:private yaml-leaf-gen
-  (one-of* [(gen/return nil)
+  (yaml-one-of* [(gen/return nil)
             gen/boolean
             gen/int
             yaml-double-gen
@@ -264,29 +264,29 @@
 (def ^:private yaml-key-gen
   (gen/fmap keyword (gen/not-empty gen/string-alphanumeric)))
 
-(defn- small-map-gen [key-gen val-gen]
+(defn- yaml-small-map-gen [key-gen val-gen]
   (gen/fmap (fn [pairs] (into {} pairs))
             (gen/vector (gen/tuple key-gen val-gen) 0 4)))
 
 (defn- yaml-value-gen [depth]
   (if (zero? depth)
     yaml-leaf-gen
-    (one-of* [yaml-leaf-gen
+    (yaml-one-of* [yaml-leaf-gen
               (gen/vector (yaml-value-gen (dec depth)) 0 4)
-              (small-map-gen yaml-key-gen
+              (yaml-small-map-gen yaml-key-gen
                              (yaml-value-gen (dec depth)))])))
 
 (deftest yaml-emit-round-trip-property
   (let [p (prop/for-all [x (yaml-value-gen 2)]
             (= x (yaml/parse-string (yaml/generate-string x))))
-        r (tc/quick-check trials p :seed 92026)]
+        r (tc/quick-check yaml-trials p :seed 92026)]
     (is (true? (:result r)) (pr-str r))))
 
 (deftest yaml-emit-flow-round-trip-property
   (let [p (prop/for-all [x (yaml-value-gen 2)]
             (= x (yaml/parse-string
                   (yaml/generate-string x {:flow true}))))
-        r (tc/quick-check trials p :seed 92027)]
+        r (tc/quick-check yaml-trials p :seed 92027)]
     (is (true? (:result r)) (pr-str r))))
 
 (run-tests-and-exit)
