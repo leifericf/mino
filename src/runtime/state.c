@@ -851,6 +851,7 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
      * try_depth == MAX_TRY_DEPTH boundary no frame is pushed and that
      * slot is one past the array, so read the invariant from here. */
     entry_gc_depth = mino_current_ctx(S)->gc_depth;
+    (void)entry_gc_depth; /* read only by the tripwire assert, which NDEBUG drops */
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     mino_current_ctx(S)->eval_steps     = 0;
