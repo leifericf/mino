@@ -50,6 +50,52 @@
       (finally
         (swap! CollReduce--coll-reduce dissoc :vector)))))
 
+(deftest coll-reduce-no-init-uses-original-coll
+  (testing "2-arg reduce hands the original coll to a custom coll-reduce"
+    (let [seen (atom nil)]
+      (extend-protocol p/CollReduce
+        :vector
+        (coll-reduce [coll f init]
+          (reset! seen {:coll coll :init init})
+          [::via (clojure.core/internal-reduce f init coll)]))
+      (try
+        (testing "many-element coll reduces through the impl over itself"
+          (reset! seen nil)
+          (is (= [::via 6] (reduce + [1 2 3])))
+          (is (= [1 2 3] (:coll @seen))))
+        (testing "single-element coll yields that element, f never applied"
+          (reset! seen nil)
+          (is (= [::via 42] (reduce (fn [_ _] (throw "must not call f"))
+                                    [42])))
+          (is (= [42] (:coll @seen))))
+        (testing "empty coll returns (f) without consulting the impl"
+          (reset! seen nil)
+          (is (= 0 (reduce + [])))
+          (is (nil? @seen)))
+        (finally
+          (swap! CollReduce--coll-reduce dissoc :vector))))))
+
+(deftest coll-reduce-no-init-honors-reduced
+  (testing "reduced short-circuits 2-arg reduce through a custom impl"
+    (extend-protocol p/CollReduce
+      :vector
+      (coll-reduce [coll f init]
+        (clojure.core/internal-reduce f init coll)))
+    (try
+      (is (= 3 (reduce (fn [a x] (if (> a 1) (reduced a) (+ a x)))
+                       [1 2 3 4 5])))
+      (finally
+        (swap! CollReduce--coll-reduce dissoc :vector)))))
+
+(deftest coll-reduce-no-init-builtins-unchanged
+  (testing "2-arg reduce over built-ins is identical with no custom impl"
+    (is (= 6 (reduce + [1 2 3])))
+    (is (= 6 (reduce + (list 1 2 3))))
+    (is (= 45 (reduce + (range 10))))
+    (is (= 42 (reduce + [42])))
+    (is (= 0 (reduce + [])))
+    (is (= [1 2 3] (reduce conj [1] [2 3])))))
+
 ;; --- User extends IKVReduce ---
 
 (deftest kv-reduce-map-override

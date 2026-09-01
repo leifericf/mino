@@ -2533,6 +2533,14 @@
 
 (extend-type :default Navigable (nav [_coll _k v] v))
 
+;; Unique marker for the no-init reduce path. A custom coll-reduce is
+;; 3-arg (coll f init), so the 2-arg reduce emulates "first element is
+;; the init" by handing the impl this sentinel and a wrapper f that
+;; adopts the first element rather than combining it. The sentinel is
+;; module-private and never escapes: the empty coll is handled before
+;; the impl runs, so no reduction ever returns it.
+(def ^:private reduce-no-init-sentinel (atom :reduce-no-init))
+
 (defn reduce "Reduces coll using f. With 2 args, uses the first element as init.
   With 3 args, uses val explicitly. Consults CollReduce: a user
   type or :default override on coll-reduce takes precedence over the
@@ -2542,16 +2550,22 @@
      ;; no user override exists, hand the coll through to the C
      ;; primitive as-is -- it has its own 2-arg fast paths (int
      ;; range, persistent vec/map/set) that rely on coll being
-     ;; the unforced source value. Only seq-decompose when a
+     ;; the unforced source value. Only route through the impl when a
      ;; user-extended CollReduce impl is taking over.
      (let [table @CollReduce--coll-reduce
            impl  (or (get table (type coll))
                      (get table :default))]
        (if impl
-         (let [s (seq coll)]
-           (if (nil? s)
-             (f)
-             (impl (rest s) f (first s))))
+         ;; Dispatch to the impl over the ORIGINAL coll (like the 3-arg
+         ;; arm), reproducing the no-init contract: empty -> (f); a
+         ;; non-empty coll uses its first element as init and reduces
+         ;; the rest through the coll's own coll-reduce.
+         (if (nil? (seq coll))
+           (f)
+           (let [sentinel reduce-no-init-sentinel]
+             (impl coll
+                   (fn [acc x] (if (identical? acc sentinel) x (f acc x)))
+                   sentinel)))
          (internal-reduce f coll))))
      ([f val coll]
       (let [table @CollReduce--coll-reduce
