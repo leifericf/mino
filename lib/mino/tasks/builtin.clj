@@ -111,7 +111,7 @@
    "src/prim/bits.c"
    "src/prim/sequences.c" "src/prim/sequences_seq.c"
    "src/prim/lazy.c"
-       "src/prim/string.c" "src/prim/io.c" "src/prim/url.c" "src/prim/codec.c" "src/prim/json.c"
+       "src/prim/string.c" "src/prim/io.c" "src/prim/url.c" "src/prim/codec.c" "src/prim/random.c" "src/prim/json.c"
         "src/prim/csv.c"
         "src/prim/toml.c"
         "src/prim/yaml.c"

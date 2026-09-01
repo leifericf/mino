@@ -43,6 +43,13 @@ mino_val  *prim_throw_dangling_key(mino_state *S, const mino_val *key);
 int          as_double(const mino_val *v, double *out);   /* pure extraction */
 int          as_long(const mino_val *v, long long *out);  /* pure extraction */
 double       tower_to_double(const mino_val *v);           /* full numeric tower */
+
+/* OS entropy edge (defined in random.c). Fills buf with len bytes from
+ * the OS CSPRNG, chunking past the getentropy 256-byte ceiling. Returns
+ * 0 on success, -1 when the OS source fails; there is no PRNG fallback,
+ * so a caller that sees -1 must fail closed, never emit weak bytes. */
+int          prim_os_entropy(unsigned char *buf, size_t len);
+
 size_t       list_length(mino_state *S, mino_val *list); /* pure traversal */
 int          arg_count(mino_state *S, mino_val *args, size_t *out); /* pure */
 int          args_nth_forced(mino_state *S, mino_val *args, size_t i,
@@ -574,6 +581,9 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args, mino_env *env);
 /* codec.c -- all prims are file-local static; no extern declarations needed. */
 extern const mino_prim_def k_prims_codec[];
 extern const size_t        k_prims_codec_count;
+/* random.c -- secure random prims; the table gates under MINO_CAP_RANDOM. */
+extern const mino_prim_def k_prims_random[];
+extern const size_t        k_prims_random_count;
 extern const mino_prim_def k_prims_json[];
 extern const size_t        k_prims_json_count;
 extern const mino_prim_def k_prims_csv[];

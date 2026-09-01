@@ -350,6 +350,8 @@ static const mino_capability_info k_capability_info[] = {
       "mino.path + the pure path-algebra prims (path-join / path-normalize / ...)." },
     { "codec",        MINO_CAP_CODEC,
       "percent-encode / percent-decode / parse-url / base64 / hex." },
+    { "random",       MINO_CAP_RANDOM,
+      "secure-rand-bytes / rand-hex / rand-token over the OS CSPRNG." },
     { NULL,           0u,                                                NULL },
 };
 
@@ -475,6 +477,7 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_PATH,     k_prims_path,     &k_prims_path_count     },
     { MINO_CAP_CODEC,    k_prims_url,      &k_prims_url_count      },
     { MINO_CAP_CODEC,    k_prims_codec,    &k_prims_codec_count    },
+    { MINO_CAP_RANDOM,   k_prims_random,   &k_prims_random_count   },
 };
 
 #define K_CAP_PRIM_TABLE_COUNT \
