@@ -237,6 +237,12 @@
   ;; child takes it and signals readiness through a marker file; the
   ;; contender child then tries a non-blocking acquire and must lose;
   ;; once the holder releases, a fresh child must win.
+  ;;
+  ;; The holder runs as a shell-backgrounded sibling process, not a
+  ;; future-driven child: a future worker running `sh` while this parent
+  ;; later forks its own `sh` disturbs the backgrounded child, so the
+  ;; two-child contention is orchestrated through a single detaching
+  ;; `sh -c "... &"` and marker files instead.
   ;; POSIX-only: the orchestration shells POSIX-shaped children.
   (when-not windows?
     (reset-root!)
@@ -245,22 +251,23 @@
           release (str root "/holder-release")
           probe   (str "(println (if (flock \"" lock "\" {:block false})"
                        " \"ACQUIRED\" \"LOCKED\"))")
-          holder  (future
-                    (sh "./mino" "-e"
-                        (str "(let [h (flock \"" lock "\")]"
-                             " (spit \"" ready "\" \"held\")"
-                             " ((fn wait [n]"
-                             "    (when (and (pos? n)"
-                             "               (not (file-exists? \"" release "\")))"
-                             "      (thread-sleep 50)"
-                             "      (wait (dec n)))) 200)"
-                             " (funlock h))")))]
+          holder  (str "./mino -e \"(let [h (flock \\\"" lock "\\\")]"
+                       " (spit \\\"" ready "\\\" \\\"held\\\")"
+                       " ((fn wait [n]"
+                       "    (when (and (pos? n)"
+                       "               (not (file-exists? \\\"" release "\\\")))"
+                       "      (thread-sleep 50)"
+                       "      (wait (dec n)))) 200)"
+                       " (funlock h))\" >/dev/null 2>&1 &")]
+      (sh "sh" "-c" holder)
       (is (await-file ready) "holder child signalled it holds the lock")
       (let [r (sh "./mino" "-e" probe)]
         (is (re-find #"LOCKED" (:out r))
             "contender loses while the holder is alive"))
       (spit release "go")
-      @holder
+      ;; The holder polls the release marker every 50ms; give it time to
+      ;; observe the marker, funlock, and exit before the retake probe.
+      (thread-sleep 300)
       (let [r (sh "./mino" "-e" probe)]
         (is (re-find #"ACQUIRED" (:out r))
             "lock is free once the holder releases")))))

@@ -34,7 +34,11 @@
 #  include <sys/stat.h>
 #  include <unistd.h>
 #  include <fcntl.h>      /* openat, O_NOFOLLOW, AT_SYMLINK_NOFOLLOW, unlinkat */
-#else
+#endif
+#if !defined(_WIN32)
+#  include <sys/file.h>   /* flock(2), LOCK_EX/LOCK_SH/LOCK_NB */
+#endif
+#if defined(_MSC_VER)
 #  include "win_dirent.h"
 #endif
 #include <errno.h>
@@ -1033,6 +1037,144 @@ static mino_val *prim_which(mino_state *S, mino_val *args, mino_env *env)
     return mino_nil(S);
 }
 
+/* ---- flock: advisory file locks ---- */
+
+#define FLOCK_TAG "mino/file-lock"
+
+#if !defined(_WIN32)
+typedef struct {
+    int fd;
+    int closed;
+} fs_lock_t;
+
+static void fs_lock_finalize(void *ptr, const char *tag)
+{
+    fs_lock_t *lk = (fs_lock_t *)ptr;
+    (void)tag;
+    if (lk == NULL) return;
+    /* Closing the descriptor releases the advisory lock. */
+    if (!lk->closed) close(lk->fd);
+    free(lk);
+}
+#endif
+
+/* (flock path) / (flock path {:shared bool :block bool}) -- acquire an
+ * advisory lock on a lockfile, returning an opaque handle. Exclusive and
+ * blocking by default. With {:block false} a lock held elsewhere yields
+ * nil (contention is an expected outcome, not an error), rather than
+ * throwing. The single-instance cron guard: acquire a non-blocking lock
+ * at startup and exit quietly when it returns nil. */
+static mino_val *prim_flock(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *path_val, *opts = NULL;
+    int shared = 0, block = 1;
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "flock requires a lockfile path");
+    }
+    path_val = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        opts = args->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "flock takes a path and optional opts");
+        }
+    }
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "flock: path must be a string");
+    }
+    if (fs_opt_bool(S, opts, "shared", 0, &shared) != 0) return NULL;
+    if (fs_opt_bool(S, opts, "block", 1, &block) != 0) return NULL;
+#if defined(_WIN32)
+    (void)shared; (void)block;
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "flock: not supported on this platform");
+#else
+    {
+        mino_val  *hv;
+        fs_lock_t *lk;
+        int        fd;
+        int        op;
+        int        rc;
+
+        fd = open(path_val->as.s.data, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+        if (fd < 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "flock: cannot open lockfile");
+        }
+        /* Pre-flight the handle: its allocation can throw for OOM, which
+         * from here would strand the open descriptor. */
+        hv = mino_handle_ex(S, NULL, FLOCK_TAG, fs_lock_finalize);
+        gc_pin(hv);
+
+        op = shared ? LOCK_SH : LOCK_EX;
+        if (!block) op |= LOCK_NB;
+        {
+            /* A blocking flock parks the calling thread; release the
+             * runtime lock so a collection can run concurrently, matching
+             * the net.c GC-safety pattern. */
+            int depth = mino_yield_lock(S);
+            do {
+                rc = flock(fd, op);
+            } while (rc < 0 && errno == EINTR);
+            mino_resume_lock(S, depth);
+        }
+        if (rc < 0) {
+            gc_unpin(1);
+            close(fd);
+            if (!block && (errno == EWOULDBLOCK || errno == EAGAIN))
+                return mino_nil(S);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "flock: cannot acquire lock");
+        }
+        lk = (fs_lock_t *)malloc(sizeof(*lk));
+        if (lk == NULL) {
+            gc_unpin(1);
+            close(fd);
+            return prim_throw_classified(S, "internal", "MIN001",
+                                         "flock: out of memory");
+        }
+        lk->fd = fd;
+        lk->closed = 0;
+        hv->as.handle.ptr = lk;
+        gc_unpin(1);
+        return hv;
+    }
+#endif
+}
+
+/* (funlock handle) -- release a lock acquired by flock. Idempotent.
+ * Returns nil. */
+static mino_val *prim_funlock(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *h;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "funlock requires one argument");
+    }
+    h = args->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_HANDLE ||
+        h->as.handle.tag == NULL ||
+        strcmp(h->as.handle.tag, FLOCK_TAG) != 0) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "funlock: argument must be a lock handle");
+    }
+#if !defined(_WIN32)
+    {
+        fs_lock_t *lk = (fs_lock_t *)h->as.handle.ptr;
+        if (lk != NULL && !lk->closed) {
+            close(lk->fd);
+            lk->closed = 1;
+        }
+    }
+#endif
+    return mino_nil(S);
+}
+
 /* ---- install ---- */
 
 const mino_prim_def k_prims_fs[] = {
@@ -1070,6 +1212,12 @@ const mino_prim_def k_prims_fs[] = {
     {"mkstemp",      prim_mkstemp,
      "Creates a uniquely-named private (0600) empty file under the system "
      "temp dir and returns its path. Optional string prefix."},
+    {"flock",        prim_flock,
+     "Acquires an advisory lock on a lockfile and returns a handle. "
+     "Exclusive and blocking by default; {:shared true} for a shared "
+     "lock, {:block false} yields nil when the lock is held elsewhere."},
+    {"funlock",      prim_funlock,
+     "Releases a lock acquired by flock. Idempotent. Returns nil."},
 #if !defined(_WIN32)
     {"symlink",      prim_symlink,
      "Creates a symlink at the link path pointing at the target. Returns nil."},

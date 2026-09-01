@@ -3020,6 +3020,19 @@
          ~@body
          (finally (rm-rf ~name))))))
 
+(defmacro with-file-lock
+  "Acquires an advisory lock on the lockfile, binds name to the lock
+   handle, evaluates body, and releases the lock on every exit, including
+   a throwing one. An optional opts map is passed to flock."
+  [bindings & body]
+  (let [name (first bindings)
+        lock (nth bindings 1)
+        opts (nth bindings 2 nil)]
+    `(let [~name (if ~opts (flock ~lock ~opts) (flock ~lock))]
+       (try
+         ~@body
+         (finally (funlock ~name))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Transducers: composable algorithmic transformations. Gated on
 ;; :transducers -- when off, the C-level `into` primitive handles
