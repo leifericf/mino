@@ -1,5 +1,6 @@
 /*
- * fs.c -- filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
+ * fs.c -- filesystem primitives: file-exists?, directory?, mkdir-p,
+ *         rm-rf, stat, file-size, chmod, symlink, copy, and copy-tree.
  *
  * These are in C rather than mino sh! wrappers for two reasons:
  *   - file-exists? and directory? are called on every module resolution
@@ -283,6 +284,267 @@ static mino_val *prim_read_symlink(mino_state *S, mino_val *args, mino_env *env)
     return mino_string_n(S, buf, (size_t)n);
 }
 #endif /* !_WIN32 */
+
+/* ---- copy / copy-tree ---- */
+
+#if !defined(_WIN32)
+/* Copy the bytes of an already-open source descriptor into a freshly
+ * created destination, preserving the source mode. src_fd is positioned
+ * at offset 0 and stat'd by the caller. Returns 0, or -1 with errno set.
+ * excl selects O_EXCL (refuse an existing dst) vs O_TRUNC (replace). */
+static int copy_fd_to_path(int src_fd, const struct stat *src_st,
+                           const char *dst, int excl)
+{
+    int   flags = O_WRONLY | O_CREAT | O_NOFOLLOW | (excl ? O_EXCL : O_TRUNC);
+    int   dst_fd = open(dst, flags, src_st->st_mode & 07777);
+    char  buf[65536];
+    if (dst_fd < 0) return -1;
+    for (;;) {
+        ssize_t r = read(src_fd, buf, sizeof(buf));
+        ssize_t off = 0;
+        if (r < 0) {
+            if (errno == EINTR) continue;
+            close(dst_fd);
+            return -1;
+        }
+        if (r == 0) break;
+        while (off < r) {
+            ssize_t w = write(dst_fd, buf + off, (size_t)(r - off));
+            if (w < 0) {
+                if (errno == EINTR) continue;
+                close(dst_fd);
+                return -1;
+            }
+            off += w;
+        }
+    }
+    /* Mode is set from the open() creation mask above, but a restrictive
+     * umask can clear bits; fchmod pins the source mode exactly. */
+    if (fchmod(dst_fd, src_st->st_mode & 07777) != 0) {
+        close(dst_fd);
+        return -1;
+    }
+    return close(dst_fd);
+}
+
+/* Copy the regular file at src to dst. Refuses a symlink source: the
+ * source is opened O_NOFOLLOW and its type checked, so a symlink planted
+ * at src cannot redirect the read into an unintended target (CWE-59). */
+static int copy_file(const char *src, const char *dst, int replace,
+                     int *was_symlink, int *dst_existed)
+{
+    struct stat src_st;
+    int         src_fd;
+    int         rc;
+    *was_symlink = 0;
+    *dst_existed = 0;
+    src_fd = open(src, O_RDONLY | O_NOFOLLOW);
+    if (src_fd < 0) {
+        /* ELOOP is the O_NOFOLLOW refusal of a symlink source. */
+        if (errno == ELOOP) *was_symlink = 1;
+        return -1;
+    }
+    if (fstat(src_fd, &src_st) != 0) { close(src_fd); return -1; }
+    if (!S_ISREG(src_st.st_mode)) {
+        close(src_fd);
+        errno = EINVAL;
+        return -1;
+    }
+    rc = copy_fd_to_path(src_fd, &src_st, dst, !replace);
+    if (rc != 0 && errno == EEXIST) *dst_existed = 1;
+    close(src_fd);
+    return rc;
+}
+
+/* Recursively copy the directory tree rooted at src_fd/name (a real
+ * subdirectory) into dst. Mirrors rmrf_at: each level is pinned by its
+ * open descriptor and every child is stat'd with AT_SYMLINK_NOFOLLOW, so
+ * a symlink swapped in mid-walk cannot redirect the descent (CWE-59). A
+ * symlink entry is recreated as a symlink to the same target, never
+ * dereferenced into a file copy. */
+static int copytree_dir(int src_dfd, const char *dst);
+
+static int copytree_entry(int src_dfd, const char *name, const char *dst_child)
+{
+    struct stat st;
+    if (fstatat(src_dfd, name, &st, AT_SYMLINK_NOFOLLOW) != 0)
+        return -1;
+    if (S_ISLNK(st.st_mode)) {
+        char    target[PATH_BUF_CAP];
+        ssize_t n = readlinkat(src_dfd, name, target, sizeof(target));
+        if (n < 0 || (size_t)n >= sizeof(target)) return -1;
+        target[n] = '\0';
+        return symlink(target, dst_child);
+    }
+    if (S_ISDIR(st.st_mode)) {
+        int cfd;
+        if (mkdir(dst_child, st.st_mode & 07777) != 0 && errno != EEXIST)
+            return -1;
+        cfd = openat(src_dfd, name, O_RDONLY | O_NOFOLLOW | O_DIRECTORY);
+        if (cfd < 0) return -1;
+        if (copytree_dir(cfd, dst_child) != 0) { close(cfd); return -1; }
+        close(cfd);
+        return chmod(dst_child, st.st_mode & 07777);
+    }
+    if (S_ISREG(st.st_mode)) {
+        int src_fd = openat(src_dfd, name, O_RDONLY | O_NOFOLLOW);
+        int rc;
+        if (src_fd < 0) return -1;
+        rc = copy_fd_to_path(src_fd, &st, dst_child, 0);
+        close(src_fd);
+        return rc;
+    }
+    /* Sockets, fifos, devices: skip rather than fail the whole tree. */
+    return 0;
+}
+
+static int copytree_dir(int src_dfd, const char *dst)
+{
+    DIR           *d;
+    struct dirent *ent;
+    char         **names = NULL;
+    size_t          n = 0, cap = 0, i;
+    int             rc = 0;
+    int dfd2 = dup(src_dfd);
+    if (dfd2 < 0) return -1;
+    d = fdopendir(src_dfd);
+    if (d == NULL) { close(dfd2); return -1; }
+    while ((ent = readdir(d)) != NULL) {
+        char **nn;
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 16;
+            nn = (char **)realloc(names, cap * sizeof(*names));
+            if (nn == NULL) { rc = -1; break; }
+            names = nn;
+        }
+        names[n] = strdup(ent->d_name);
+        if (names[n] == NULL) { rc = -1; break; }
+        n++;
+    }
+    closedir(d);
+    for (i = 0; i < n && rc == 0; i++) {
+        char child[PATH_BUF_CAP];
+        int  wr = snprintf(child, sizeof(child), "%s/%s", dst, names[i]);
+        if (wr < 0 || (size_t)wr >= sizeof(child)) { rc = -1; break; }
+        rc = copytree_entry(dfd2, names[i], child);
+    }
+    for (i = 0; i < n; i++) free(names[i]);
+    free(names);
+    close(dfd2);
+    return rc;
+}
+#endif /* !_WIN32 */
+
+/* (copy src dst) / (copy src dst {:replace true}) -- copy a regular file,
+ * preserving its mode. A symlink source is refused (O_NOFOLLOW); an
+ * existing destination without :replace is an error. */
+static mino_val *prim_copy(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *src_val, *dst_val, *opts = NULL;
+    int replace = 0;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "copy requires a source and a destination");
+    }
+    src_val = args->as.cons.car;
+    dst_val = args->as.cons.cdr->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        opts = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "copy takes src, dst, and optional opts");
+        }
+    }
+    if (src_val == NULL || mino_type_of(src_val) != MINO_STRING ||
+        dst_val == NULL || mino_type_of(dst_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "copy: src and dst must be strings");
+    }
+    if (fs_opt_bool(S, opts, "replace", 0, &replace) != 0)
+        return NULL;
+#if defined(_WIN32)
+    (void)replace;
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "copy: not supported on this platform");
+#else
+    {
+        int was_symlink = 0, dst_existed = 0;
+        if (copy_file(src_val->as.s.data, dst_val->as.s.data, replace,
+                      &was_symlink, &dst_existed) != 0) {
+            char msg[300];
+            if (was_symlink) {
+                return prim_throw_classified(S, "io", "MIO001",
+                    "copy: refusing to copy a symlink source; use copy-tree");
+            }
+            if (dst_existed) {
+                snprintf(msg, sizeof(msg),
+                         "copy: destination exists (pass {:replace true}): %.160s",
+                         dst_val->as.s.data);
+                return prim_throw_classified(S, "io", "MIO001", msg);
+            }
+            snprintf(msg, sizeof(msg), "copy: cannot copy %.120s to %.120s",
+                     src_val->as.s.data, dst_val->as.s.data);
+            return prim_throw_classified(S, "io", "MIO001", msg);
+        }
+        return mino_nil(S);
+    }
+#endif
+}
+
+/* (copy-tree src dst) -- recursively copy a directory tree, recreating
+ * symlink entries as symlinks (never dereferencing them). */
+static mino_val *prim_copy_tree(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *src_val, *dst_val;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "copy-tree requires a source and a destination");
+    }
+    src_val = args->as.cons.car;
+    dst_val = args->as.cons.cdr->as.cons.car;
+    if (src_val == NULL || mino_type_of(src_val) != MINO_STRING ||
+        dst_val == NULL || mino_type_of(dst_val) != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "copy-tree: src and dst must be strings");
+    }
+#if defined(_WIN32)
+    return prim_throw_classified(S, "io", "MIO001",
+                                 "copy-tree: not supported on this platform");
+#else
+    {
+        struct stat src_st;
+        int src_fd;
+        if (lstat(src_val->as.s.data, &src_st) != 0 ||
+            !S_ISDIR(src_st.st_mode)) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "copy-tree: source is not a directory");
+        }
+        if (mkdir(dst_val->as.s.data, src_st.st_mode & 07777) != 0 &&
+            errno != EEXIST) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "copy-tree: cannot create destination");
+        }
+        src_fd = open(src_val->as.s.data,
+                      O_RDONLY | O_NOFOLLOW | O_DIRECTORY);
+        if (src_fd < 0) {
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "copy-tree: cannot open source");
+        }
+        if (copytree_dir(src_fd, dst_val->as.s.data) != 0) {
+            close(src_fd);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "copy-tree: copy failed");
+        }
+        close(src_fd);
+        return mino_nil(S);
+    }
+#endif
+}
 
 /* (file-exists? path) -- return true if path exists (file or directory). */
 static mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
@@ -681,6 +943,12 @@ const mino_prim_def k_prims_fs[] = {
      "Returns the file size in bytes, or nil when the path is missing."},
     {"chmod",        prim_chmod,
      "Sets the permission bits (an int) on a path. Returns nil."},
+    {"copy",         prim_copy,
+     "Copies a regular file, preserving its mode. Refuses a symlink "
+     "source; pass {:replace true} to overwrite an existing destination."},
+    {"copy-tree",    prim_copy_tree,
+     "Recursively copies a directory tree, keeping symlink entries as "
+     "symlinks rather than following them."},
 #if !defined(_WIN32)
     {"symlink",      prim_symlink,
      "Creates a symlink at the link path pointing at the target. Returns nil."},
