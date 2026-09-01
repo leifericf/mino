@@ -1642,6 +1642,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
 #define MINO_CAP_RANDOM        (1ull << 51) /* secure-rand-bytes / rand-hex / rand-token */
 #define MINO_CAP_SIGNAL        (1ull << 52) /* on-signal / at-exit */
+#define MINO_CAP_UTIL          (1ull << 56) /* mino.shell / mino.retry / mino.wait / mino.mime */
 
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
@@ -1659,7 +1660,10 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * process reach. signal traps this process's own job-control signals and
  * registers exit hooks; it reaches no external resource, and a script
  * that wants no signal surface simply never installs a trap, so it rides
- * the default set with the other scripting-convenience capabilities. */
+ * the default set with the other scripting-convenience capabilities.
+ * util bundles the pure scripting helpers (mino.shell, mino.retry,
+ * mino.wait, mino.mime) with no OS reach beyond the net prim that
+ * wait-for-port uses (MINO_CAP_NET is a separate gate). */
 #define MINO_CAP_DEFAULT (MINO_CAP_FLOOR | MINO_CAP_REGEX | MINO_CAP_BIGNUM | \
                           MINO_CAP_MULTIMETHODS | MINO_CAP_PROTOCOLS | \
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
@@ -1673,7 +1677,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
                           MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
                           MINO_CAP_CODEC | MINO_CAP_RANDOM | \
-                          MINO_CAP_SIGNAL)
+                          MINO_CAP_SIGNAL | MINO_CAP_UTIL)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull

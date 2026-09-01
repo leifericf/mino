@@ -303,7 +303,12 @@
      ["lib/mino/html/select.clj"       "mino.html.select"       "lib_mino_html_select"]
      ["lib/clojure/xml.clj"            "clojure.xml"            "lib_clojure_xml"]
      ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]
-     ["lib/mino/zip.clj"               "mino.zip"               "lib_mino_zip"]])
+     ["lib/mino/zip.clj"               "mino.zip"               "lib_mino_zip"]
+     ["lib/mino/shell.clj"             "mino.shell"             "lib_mino_shell"]
+     ["lib/mino/retry.clj"             "mino.retry"             "lib_mino_retry"]
+     ["lib/mino/wait.clj"              "mino.wait"              "lib_mino_wait"]
+     ["lib/mino/mime.clj"              "mino.mime"              "lib_mino_mime"]
+     ["lib/mino/jsonl.clj"             "mino.jsonl"             "lib_mino_jsonl"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

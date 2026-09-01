@@ -126,7 +126,12 @@ BUNDLED = \
                     lib_mino_html:lib/mino/html.clj \
                     lib_mino_html_select:lib/mino/html/select.clj \
                     lib_mino_template:lib/mino/template.clj \
-                    lib_mino_zip:lib/mino/zip.clj
+                    lib_mino_zip:lib/mino/zip.clj \
+                    lib_mino_shell:lib/mino/shell.clj \
+                    lib_mino_retry:lib/mino/retry.clj \
+                    lib_mino_wait:lib/mino/wait.clj \
+                    lib_mino_mime:lib/mino/mime.clj \
+                    lib_mino_jsonl:lib/mino/jsonl.clj
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 

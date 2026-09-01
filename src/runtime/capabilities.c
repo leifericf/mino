@@ -99,6 +99,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_LOG,         mino_install_mino_log        },
     { MINO_CAP_CLI,         mino_install_mino_cli        },
     { MINO_CAP_PATH,        mino_install_mino_path       },
+    { MINO_CAP_UTIL,        mino_install_mino_util       },
     { MINO_CAP_STORE,       mino_install_store           },
     { MINO_CAP_JSON,        mino_install_clojure_data_json },
     { MINO_CAP_CSV,         mino_install_clojure_data_csv  },

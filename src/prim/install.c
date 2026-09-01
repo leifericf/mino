@@ -354,6 +354,8 @@ static const mino_capability_info k_capability_info[] = {
       "secure-rand-bytes / rand-hex / rand-token over the OS CSPRNG." },
     { "signal",       MINO_CAP_SIGNAL,
       "on-signal / at-exit (signal traps and process exit hooks)." },
+    { "util",         MINO_CAP_UTIL,
+      "mino.shell / mino.retry / mino.wait / mino.mime / mino.jsonl." },
     { NULL,           0u,                                                NULL },
 };
 

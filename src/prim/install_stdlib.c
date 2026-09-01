@@ -79,6 +79,7 @@
 #include "lib_mino_html_select.h"
 #include "lib_mino_template.h"
 #include "lib_mino_zip.h"
+#include "lib_mino_shell.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -478,6 +479,15 @@ void mino_install_compress(mino_state *S, mino_env *env)
                                        k_prims_compress, k_prims_compress_count,
                                        "compress");
     S->caps_installed |= MINO_CAP_COMPRESS;
+}
+
+/* Pure scripting helpers: mino.shell, mino.retry, mino.wait, mino.mime.
+ * No C prims; the namespaces are bundled mino-side source only. */
+void mino_install_mino_util(mino_state *S, mino_env *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.shell", lib_mino_shell_src);
+    S->caps_installed |= MINO_CAP_UTIL;
 }
 
 void mino_install_all(mino_state *S, mino_env *env)
