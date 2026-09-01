@@ -25,12 +25,18 @@
   [gens]
   (gen/bind (gen/elements gens) identity))
 
+;; JSON has no NaN or Infinity, and the writer correctly rejects them
+;; the way clojure.data.json does, so a round-trip property must draw
+;; only the finite doubles JSON can represent.
+(def ^:private json-double-gen
+  (gen/such-that (fn [d] (and (not (NaN? d)) (not (infinite? d)))) gen/double))
+
 (defn- json-leaf-gen []
   (one-of [(gen/return nil)
            (gen/return true)
            (gen/return false)
            gen/int
-           gen/double
+           json-double-gen
            gen/string]))
 
 (defn json-gen
