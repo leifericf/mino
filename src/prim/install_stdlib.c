@@ -82,6 +82,7 @@
 #include "lib_mino_shell.h"
 #include "lib_mino_retry.h"
 #include "lib_mino_wait.h"
+#include "lib_mino_jsonl.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -163,6 +164,9 @@ void mino_install_clojure_data_json(mino_state *S, mino_env *env)
                                        "json");
     mino_register_bundled_lib(S, "clojure.data.json",
                               lib_clojure_data_json_src);
+    /* mino.jsonl rides the JSON capability: JSONL is lazy JSON Lines
+     * over the same json-parse prim, so no separate bit is needed. */
+    mino_register_bundled_lib(S, "mino.jsonl", lib_mino_jsonl_src);
     S->caps_installed |= MINO_CAP_JSON;
 }
 
