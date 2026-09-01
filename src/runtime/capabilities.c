@@ -82,6 +82,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
      * net, time before log, zip (above) before html. */
     { MINO_CAP_CODEC,       mino_install_codec           },
     { MINO_CAP_RANDOM,      mino_install_random          },
+    { MINO_CAP_SIGNAL,      mino_install_signal          },
     { MINO_CAP_TIME,        mino_install_mino_time       },
     { MINO_CAP_DIGEST,      mino_install_mino_digest     },
     { MINO_CAP_HTML,        mino_install_mino_html       },

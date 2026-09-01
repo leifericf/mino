@@ -624,16 +624,30 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
     {
         int depth = mino_yield_lock(S);
 #ifdef _WIN32
-        /* Windows has no nanosleep; Sleep() takes milliseconds. */
+        /* Windows has no nanosleep; Sleep() takes milliseconds. A trapped
+         * console signal is delivered at the next safepoint after the
+         * sleep ends, not during it. */
         Sleep((DWORD)(ms < 0 ? 0 : ms));
 #else
         ts.tv_sec  = (time_t)(ms / 1000);
         ts.tv_nsec = (long)((ms % 1000) * 1000000L);
-        while (nanosleep(&ts, &ts) == -1) {
-            /* Restart on EINTR using the residual time written into ts. */
+        /* Skip the sleep when a trapped signal is already pending, and
+         * cut it short when one interrupts it (EINTR): a blocked script
+         * would otherwise not run its handler until the sleep ended. A
+         * signal landing between this check and the syscall entry still
+         * sleeps the full duration; the safepoint delivers it after. */
+        while (!mino_signal_any && nanosleep(&ts, &ts) == -1) {
+            /* EINTR: restart with the residual time written into ts. */
         }
 #endif
         mino_resume_lock(S, depth);
+        /* Deliver here as well as at the eval safepoints: a script
+         * sleeping in a slow poll loop crosses too few back-edges to
+         * reach the batched poll promptly. This frame holds no pinned
+         * values or partial state, so running the handler is safe. */
+        if (mino_signal_any) {
+            mino_signal_deliver_pending(S);
+        }
     }
     return mino_nil(S);
 }

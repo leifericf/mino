@@ -1641,6 +1641,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_PATH          (1ull << 49) /* mino.path + path algebra prims */
 #define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
 #define MINO_CAP_RANDOM        (1ull << 51) /* secure-rand-bytes / rand-hex / rand-token */
+#define MINO_CAP_SIGNAL        (1ull << 52) /* on-signal / at-exit */
 
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain
@@ -1651,11 +1652,14 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * surface (string, set, walk, edn, data, test, datafy, the json / csv
  * codecs, and the pure-data / info-only family: time, digest, html,
  * xml, yaml, toml, compress, archive, template, term, env, log, cli,
- * path, codec, random). Excludes IO, FS, PROC, HOST, STM, AGENT, ASYNC,
- * NET, STORE. The pure-data family lived in the floor before it gated, so
- * its membership here keeps the sandbox surface unchanged. random reads
- * the OS CSPRNG but exposes no filesystem, network, or process reach, so
- * it belongs with the info-only family, not the effectful capabilities. */
+ * path, codec, random, signal). Excludes IO, FS, PROC, HOST, STM, AGENT,
+ * ASYNC, NET, STORE. The pure-data family lived in the floor before it
+ * gated, so its membership here keeps the sandbox surface unchanged.
+ * random reads the OS CSPRNG but exposes no filesystem, network, or
+ * process reach. signal traps this process's own job-control signals and
+ * registers exit hooks; it reaches no external resource, and a script
+ * that wants no signal surface simply never installs a trap, so it rides
+ * the default set with the other scripting-convenience capabilities. */
 #define MINO_CAP_DEFAULT (MINO_CAP_FLOOR | MINO_CAP_REGEX | MINO_CAP_BIGNUM | \
                           MINO_CAP_MULTIMETHODS | MINO_CAP_PROTOCOLS | \
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
@@ -1668,7 +1672,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_COMPRESS | MINO_CAP_ARCHIVE | \
                           MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
                           MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
-                          MINO_CAP_CODEC | MINO_CAP_RANDOM)
+                          MINO_CAP_CODEC | MINO_CAP_RANDOM | \
+                          MINO_CAP_SIGNAL)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull

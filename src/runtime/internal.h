@@ -408,6 +408,19 @@ struct mino_state {
     mino_val     *sort_comp_fn;
     mino_env     *sort_comp_env;
 
+    /* Signal traps and process-exit hooks (src/prim/signal.c). The five
+     * trappable-signal handler fns sit in fixed slots indexed by
+     * enum sig_slot; the at-exit thunks grow in a malloc'd array. Both
+     * are GC roots (gc_mark_runtime_globals) so a registered fn survives
+     * every collection between registration and delivery. atexit_running
+     * guards the LIFO run so it fires exactly once per teardown even if a
+     * hook itself calls (exit n). */
+    mino_val     *signal_handlers[5];
+    mino_val    **atexit_hooks;
+    size_t          atexit_len;
+    size_t          atexit_cap;
+    int             atexit_running;
+
     /* Pre-allocated OOM exception map.  Populated once in mino_state_new
      * after GC is ready.  Stored here so gc_oom_throw can assign it as the
      * catch-frame exception without any allocation at throw time.  Marked
@@ -652,6 +665,20 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state *S)
  * the catchable MLM004 limit diagnostic. Returns 0 when the caller
  * must bail with NULL. */
 int mino_eval_stack_guard(mino_state *S);
+
+/* Signal delivery at the interpreter safepoint (src/prim/signal.c). The
+ * eval safepoint reads mino_signal_any (a single volatile flag, set by
+ * the async-signal-safe trap) on its hot path and calls
+ * mino_signal_deliver_pending only when it is set. The delivery runs any
+ * pending trapped-signal handler as ordinary mino code. */
+#include <signal.h>
+extern volatile sig_atomic_t mino_signal_any;
+void mino_signal_deliver_pending(mino_state *S);
+
+/* Run the registered at-exit hooks last-registered-first, exactly once.
+ * Called from mino_state_free so every process-exit route runs it. */
+void mino_signal_run_atexit(mino_state *S);
+
 static inline int mino_eval_stack_guard_fast(mino_state *S)
 {
     char probe;

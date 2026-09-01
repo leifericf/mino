@@ -352,6 +352,8 @@ static const mino_capability_info k_capability_info[] = {
       "percent-encode / percent-decode / parse-url / base64 / hex." },
     { "random",       MINO_CAP_RANDOM,
       "secure-rand-bytes / rand-hex / rand-token over the OS CSPRNG." },
+    { "signal",       MINO_CAP_SIGNAL,
+      "on-signal / at-exit (signal traps and process exit hooks)." },
     { NULL,           0u,                                                NULL },
 };
 

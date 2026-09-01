@@ -643,6 +643,13 @@ void mino_state_free(mino_state *S)
     if (S == NULL) {
         return;
     }
+    /* Run at-exit hooks first, while the heap and eval machinery are
+     * fully live and workers are still running: a hook is ordinary mino
+     * code that may touch any of them. This is the single seam every
+     * process-exit route funnels through (a plain return from main, the
+     * end of a script, and prim_exit's drained path), so hooks run
+     * exactly once regardless of how the process leaves. */
+    mino_signal_run_atexit(S);
     /* Join every outstanding worker before tearing down any heap
      * state. Workers depend on S being live; freeing under them
      * would crash. */
@@ -1822,6 +1829,13 @@ int mino_bc_safepoint_batch(mino_state *S, unsigned jumps)
         (void)prim_throw_classified(S, "mino/cancelled", "MTH002",
                                     "future was cancelled");
         return 0;
+    }
+    /* Deliver a trapped signal at the bytecode/JIT back-edge too: a tight
+     * loop runs in the VM and never re-enters eval_impl's safepoint, so
+     * without this a handler would not fire until the loop ended. The
+     * aggregate flag keeps the untrapped path to one branch. */
+    if (mino_signal_any) {
+        mino_signal_deliver_pending(S);
     }
     /* Auto-yield once per ~64K backward jumps. `jumps` is the number
      * of backward jumps this poll accounts for: 1 from the

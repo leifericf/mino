@@ -887,6 +887,13 @@ static int eval_check_limits(mino_state *S)
                       "heap limit exceeded");
         return 0;
     }
+    /* Deliver any trapped signal as ordinary mino code. The aggregate
+     * flag keeps the untrapped fast path to one predictably-not-taken
+     * branch; delivery recurses into eval_impl exactly as a normal call
+     * would. */
+    if (mino_signal_any) {
+        mino_signal_deliver_pending(S);
+    }
     return 1;
 }
 

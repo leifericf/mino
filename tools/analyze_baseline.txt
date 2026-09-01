@@ -53,6 +53,7 @@
 
 
 
+
 main.c: warning: Value stored to 'awaiting_continuation' is never read [deadcode.DeadStores]
 src/collections/map_owned.c: warning: Array access (from variable 'slots') results in a null pointer dereference [core.NullDereference]
 src/eval/bc/compile.c: warning: Dereference of null pointer [core.NullDereference]
@@ -90,5 +91,4 @@ src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_
 src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_types' [unix.Malloc]
 src/runtime/image_load.c: warning: Potential leak of memory pointed to by 'r.id_vals' [unix.Malloc]
 src/runtime/state.c: warning: Address of stack memory associated with local variable 'sp_anchor' is still referred to by the caller variable 'S' upon returning to the caller.  This will be a dangling reference [core.StackAddressEscape]
-src/runtime/state.c: warning: Address of stack memory associated with local variable 'sp_anchor' is still referred to by the global variable 'mino_tls_ctx' upon returning to the caller.  This will be a dangling reference [core.StackAddressEscape]
 src/values/val.c: warning: Dereference of null pointer [core.NullDereference]

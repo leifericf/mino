@@ -372,6 +372,18 @@ static void gc_mark_runtime_globals(mino_state *S)
     gc_mark_interior(S, S->sort_comp_fn);
     gc_mark_interior(S, S->print_method_fn);
     gc_mark_interior(S, S->oom_exception);
+    /* Signal handlers and at-exit hooks live only in these C-side slots
+     * between registration and delivery; without this walk a trapped fn
+     * could be collected before its signal ever arrives. */
+    {
+        size_t si;
+        for (si = 0; si < 5; si++) {
+            gc_mark_interior(S, S->signal_handlers[si]);
+        }
+        for (si = 0; si < S->atexit_len; si++) {
+            gc_mark_interior(S, S->atexit_hooks[si]);
+        }
+    }
     gc_mark_interior(S, S->recur_sentinel.as.recur.args);
     gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
     gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);

@@ -584,6 +584,9 @@ extern const size_t        k_prims_codec_count;
 /* random.c -- secure random prims; the table gates under MINO_CAP_RANDOM. */
 extern const mino_prim_def k_prims_random[];
 extern const size_t        k_prims_random_count;
+/* signal.c -- signal traps + exit hooks; gates under MINO_CAP_SIGNAL. */
+extern const mino_prim_def k_prims_signal[];
+extern const size_t        k_prims_signal_count;
 extern const mino_prim_def k_prims_json[];
 extern const size_t        k_prims_json_count;
 extern const mino_prim_def k_prims_csv[];

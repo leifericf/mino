@@ -148,11 +148,13 @@ void mino_install_mino_html_select  (mino_state *S, mino_env *env);
 void mino_install_mino_template     (mino_state *S, mino_env *env);
 void mino_install_mino_zip          (mino_state *S, mino_env *env);
 /* Prim-only capabilities with no bundled namespace: the codec prims
- * (url + base64 / hex), the compression stream prims, and the secure
- * random prims (secure-rand-bytes / rand-hex / rand-token). */
+ * (url + base64 / hex), the compression stream prims, the secure random
+ * prims (secure-rand-bytes / rand-hex / rand-token), and the signal /
+ * exit-hook prims (on-signal / at-exit). */
 void mino_install_codec             (mino_state *S, mino_env *env);
 void mino_install_compress          (mino_state *S, mino_env *env);
 void mino_install_random            (mino_state *S, mino_env *env);
+void mino_install_signal            (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install
  * after capability bits are set; idempotent. */
