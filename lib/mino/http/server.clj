@@ -238,7 +238,14 @@
   listener, drains unserved connections from the mailbox, and joins
   the pool within a bounded grace; a connection that outlives the
   grace is left to its own deadline, never closed underneath a
-  parked read."
+  parked read.
+
+  For a clean shutdown on SIGTERM, trap the signal and stop from the
+  handler; stop drains live connections inside the grace, so an
+  in-flight request finishes before exit runs:
+
+    (let [s (run-server handler {:port 8080})]
+      (on-signal :term (fn [] ((:stop s)) (exit 0))))"
   [handler opts]
   (when-not (map? opts)
     (bad "the server opts must be a map"))
