@@ -1,0 +1,43 @@
+;; Oracle-derived tar fixture manifest -- do not edit by hand.
+;;
+;; Each listable section's :entries vector is python3 tarfile's own
+;; getmembers read of the archive (names verbatim, sizes and modes
+;; from the headers, :mtime the stored epoch seconds with the zero
+;; field as nil, :linkname nil off link entries); :contents pins the
+;; SHA-256 of each regular member's bytes. The size-field fixtures
+;; (:sizebomb :size256) carry only the archive sha: python parses
+;; their headers (asserted at generation) but their declared sizes
+;; run past EOF by design.
+{
+ :basic {:sha256 "a1281ee522e68bb8ebadf175302415c242a2c87819f0014395504674aa1e254b"
+  :contents {"hello.txt" "16f327271803793cce5ef0259c17bb8ba4d8c2add159ce9e256579614d6d105e"
+             "epoch.txt" "f7ee36ded30ece2ec356ee54f61b6bc917d6b079052b09b720ff431ea0afae4b"
+             "dir/nested.txt" "4e7267fd5c54130fe83e69920d63e38117957e56f9172965b8db27c75a3c1a96"}
+  :entries [{:name "hello.txt" :size 19 :mode 420 :mtime 1700000000 :type :file :linkname nil}
+            {:name "epoch.txt" :size 6 :mode 420 :mtime nil :type :file :linkname nil}
+            {:name "dir/" :size 0 :mode 493 :mtime 1700000001 :type :dir :linkname nil}
+            {:name "dir/nested.txt" :size 15 :mode 384 :mtime 1700000002 :type :file :linkname nil}
+            {:name "link" :size 0 :mode 511 :mtime 1700000003 :type :symlink :linkname "hello.txt"}
+            {:name "hard.txt" :size 0 :mode 420 :mtime 1700000000 :type :hardlink :linkname "hello.txt"}]}
+ :longname {:sha256 "2acf1e8e31c6b41f1124bf255f197a5faa9852e4932323d9271e7a57ee2856c1"
+  :contents {"pax-longname/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.txt" "445e3b9daabe086ed18195aebdfa29ebbf819775923cbb6c8dcbb8e0212545e3"}
+  :entries [{:name "pax-longname/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.txt" :size 18 :mode 420 :mtime 1700000009 :type :file :linkname nil}]}
+ :traversal {:sha256 "b97c039cc0e7885a0c2e4c41c62f6e1da63a37ea80de57652c944affca639675"
+  :contents {"../escaped.txt" "e38bc4e42ea5803c4c1ff4122b9726778d9e91fb25bf9622c66a59a51fa89cc3"}
+  :entries [{:name "../escaped.txt" :size 15 :mode 420 :mtime 1700000000 :type :file :linkname nil}]}
+ :absolute {:sha256 "3b37724fed6177212b756afadec8dde0be7f71aeccb67b83366e1f846be29339"
+  :contents {"/tmp/mino-tar-abs-evil.txt" "b8308994266f20529269e52ea4383bba44c7d83e3560575d53e39adee4668dbb"}
+  :entries [{:name "/tmp/mino-tar-abs-evil.txt" :size 14 :mode 420 :mtime 1700000000 :type :file :linkname nil}]}
+ :linktarget {:sha256 "f5be7ca560ef7508cc7e725451100f79f9d5c2f15e3e8829e25b8048189db00c"
+  :contents {}
+  :entries [{:name "out" :size 0 :mode 511 :mtime 1700000000 :type :symlink :linkname "../../mino-tar-link-evil"}]}
+ :linkwrite {:sha256 "2b8980baa4b1c92433d9df8bfd5fb9a165ef615168870e1f8142536cdb1c1978"
+  :contents {"sub/evil.txt" "3a5b81914a618ad73e706cfdb561b0921aac7dbfe30a15a1d6d299b92a84da8b"}
+  :entries [{:name "sub" :size 0 :mode 511 :mtime 1700000000 :type :symlink :linkname ".."}
+            {:name "sub/evil.txt" :size 17 :mode 420 :mtime 1700000000 :type :file :linkname nil}]}
+ :hardlink {:sha256 "a959553b6573ad478eb42e79c9ed544247988d524b14b9eabe6642e6ea117c4f"
+  :contents {}
+  :entries [{:name "hl.txt" :size 0 :mode 420 :mtime 1700000000 :type :hardlink :linkname "../../mino-tar-hard-evil"}]}
+ :sizebomb {:sha256 "2e941cbae861026b834f94494d162ed6f4ce30a0a1bd487bd6c6ca27852c15da"}
+ :size256 {:sha256 "d6c457c0a4262cf350d474cc956046cd8871f8b23b4cc775e66da7fc2ec54da2"}
+}
