@@ -54,3 +54,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [43](43-file-watching-polls-stat.md) | File watching is a polling fn over stat, no native watchers |
 | [44](44-unicode-normalization-generated-tables.md) | Unicode normalization and case folding via generated tables |
 | [45](45-did-you-mean-in-runtime-errors.md) | Did-you-mean lives in the runtime's own errors, not a library |
+| [46](46-defer-password-hashing.md) | Defer password hashing primitives |
