@@ -134,6 +134,8 @@ static const cap_requires_t k_cap_requires[] = {
     { MINO_CAP_TIME, MINO_CAP_INSTANT }, /* mino.time: #inst reader in its source */
     { MINO_CAP_TAR,  MINO_CAP_COMPRESS }, /* mino.tar: gzip-compress for .tar.gz */
     { MINO_CAP_TAR,  MINO_CAP_PATH    }, /* mino.tar: mino.path/glob in the dir walk */
+    { MINO_CAP_WEBSOCKET, MINO_CAP_CODEC  }, /* mino.ws: base64-encode / parse-url */
+    { MINO_CAP_WEBSOCKET, MINO_CAP_RANDOM }, /* mino.ws: nonce + every frame mask */
 };
 
 #define K_CAP_REQUIRES_COUNT \

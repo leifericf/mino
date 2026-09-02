@@ -26,6 +26,7 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+#include "lib_mino_ws.h"
 
 /* bearssl's public headers probe BR_DOXYGEN_IGNORE with #if; scoped
  * silence, the treatment digest.c and tls.c give the same headers. */
@@ -964,5 +965,6 @@ void mino_install_websocket(mino_state *S, mino_env *env)
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_ws, k_prims_ws_count,
                                        "websocket");
+    mino_register_bundled_lib(S, "mino.ws", lib_mino_ws_src);
     S->caps_installed |= MINO_CAP_WEBSOCKET;
 }

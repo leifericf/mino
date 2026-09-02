@@ -104,6 +104,7 @@ struct mino_http_parser {
     int            is_request;
     int            info_count;
     int            bodiless;  /* caller knows the method has no body */
+    int            informational; /* surface a 1xx head instead of skipping */
     size_t         max_header_bytes;
     size_t         max_headers;
     long long      max_body_bytes;
@@ -580,10 +581,12 @@ static void http_decide_framing(mino_http_parser_t *p)
         p->content_length  = -1;
         return;
     }
-    if (p->code == 204 || p->code == 304 || p->bodiless) {
-        /* bodiless by definition: 204/304 by status, or the caller
-         * flagged HEAD (RFC 7230 3.3.3: a HEAD response ends at the
-         * blank line regardless of framing headers). */
+    if ((p->code >= 100 && p->code < 200) || p->code == 204
+        || p->code == 304 || p->bodiless) {
+        /* bodiless by definition: 1xx (reachable only under
+         * :informational) and 204/304 by status, or the caller flagged
+         * HEAD (RFC 7230 3.3.3: these end at the blank line regardless
+         * of framing headers). */
         p->framing = HTTP_FR_NONE;
         return;
     }
@@ -630,7 +633,7 @@ static int http_run(mino_http_parser_t *p)
                 if (p->status == HTTP_ERR) return p->status;
                 continue;
             }
-            if (p->code >= 100 && p->code < 200) {
+            if (p->code >= 100 && p->code < 200 && !p->informational) {
                 p->info_count++;
                 if (p->info_count > HTTP_MAX_INFO_RESPONSES) {
                     http_fail(p, "http: more than %d informational responses",
@@ -1585,6 +1588,7 @@ typedef struct {
     long long max_body_bytes;
     int       eof;
     int       bodiless;  /* caller sent HEAD: complete at the blank line */
+    int       informational; /* deliver a 1xx head (Upgrade handshakes) */
 } http_parse_opts_t;
 
 static int http_read_parse_opts(mino_state *S, const mino_val *opts,
@@ -1596,6 +1600,7 @@ static int http_read_parse_opts(mino_state *S, const mino_val *opts,
     out->max_body_bytes   = HTTP_DEFAULT_MAX_BODY_BYTES;
     out->eof              = 0;
     out->bodiless         = 0;
+    out->informational    = 0;
     if (opts == NULL || mino_type_of(opts) == MINO_NIL) return 0;
     if (mino_type_of(opts) != MINO_MAP) {
         prim_throw_classified(S, "eval/type", "MTY001",
@@ -1616,6 +1621,8 @@ static int http_read_parse_opts(mino_state *S, const mino_val *opts,
     out->max_body_bytes = v;
     if (http_opt_bool(S, opts, "eof", &out->eof) != 0) return -1;
     if (http_opt_bool(S, opts, "bodiless", &out->bodiless) != 0) return -1;
+    if (http_opt_bool(S, opts, "informational", &out->informational) != 0)
+        return -1;
     return 0;
 }
 
@@ -1890,6 +1897,7 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
                                      "http: out of memory");
     }
     p->bodiless = o.bodiless;
+    p->informational = o.informational;
     http_parser_feed(p, data, len);
     return http_parse_drive(S, &o, p);
 }
@@ -1935,6 +1943,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
                                      "http: out of memory");
     }
     p->bodiless = o.bodiless;
+    p->informational = o.informational;
     for (i = 0; i < vec->as.vec.len; i++) {
         const unsigned char *data;
         size_t len;
@@ -4003,7 +4012,10 @@ const mino_prim_def k_prims_http[] = {
      "Opts: :eof true ends a close-delimited body, :bodiless true "
      "completes at the blank line whatever the framing headers claim "
      "(set it when the request was HEAD, whose headers describe the "
-     "entity not the wire), :max-header-bytes (default 65536), "
+     "entity not the wire), :informational true delivers a 1xx head "
+     "as a bodiless :done message instead of skipping it (an Upgrade "
+     "handshake reads its 101 this way), :max-header-bytes (default "
+     "65536), "
      ":max-headers (default 100), :max-body-bytes (default 16777216). "
      "Each call parses its whole input fresh."},
     {"http-parse-response-chunks", prim_http_parse_response_chunks,

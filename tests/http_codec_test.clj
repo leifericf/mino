@@ -144,6 +144,23 @@
     (is (= "" (:reason r)))
     (is (= (http-bb "") (:body r)))))
 
+(deftest informational-opt-surfaces-a-101-head
+  ;; The Upgrade handshake needs the 101 itself: :informational true
+  ;; delivers the 1xx head as a bodiless :done message instead of
+  ;; skipping it as interim traffic.
+  (let [b (http-bb "HTTP/1.1 101 Switching Protocols\r\n"
+                   "Upgrade: websocket\r\n"
+                   "Sec-WebSocket-Accept: xyz\r\n\r\n")]
+    (is (= :need-more (:status (http-parse b)))
+        "without the opt a 1xx is still skipped")
+    (let [r (http-parse-response b {:informational true})]
+      (is (= :done (:status r)))
+      (is (= 101 (:code r)))
+      (is (= "Switching Protocols" (:reason r)))
+      (is (= "websocket" (get (:headers r) "upgrade")))
+      (is (= "xyz" (get (:headers r) "sec-websocket-accept")))
+      (is (= (http-bb "") (:body r)) "a 1xx head is bodiless"))))
+
 (deftest parse-bare-lf-line-endings-leniently
   ;; HTTP requires CRLF; real servers emit bare LF often enough that a
   ;; client must take both (documented parser leniency).

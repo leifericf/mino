@@ -309,7 +309,8 @@
      ["lib/mino/retry.clj"             "mino.retry"             "lib_mino_retry"]
      ["lib/mino/wait.clj"              "mino.wait"              "lib_mino_wait"]
      ["lib/mino/mime.clj"              "mino.mime"              "lib_mino_mime"]
-     ["lib/mino/jsonl.clj"             "mino.jsonl"             "lib_mino_jsonl"]])
+     ["lib/mino/jsonl.clj"             "mino.jsonl"             "lib_mino_jsonl"]
+     ["lib/mino/ws.clj"                "mino.ws"                "lib_mino_ws"]])
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.
