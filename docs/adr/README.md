@@ -49,3 +49,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [38](38-errors-as-values-and-message-quality.md) | Errors as values, and best-in-class messages |
 | [39](39-conformance-model-routing.md) | Conformance generation and triage inherit the session model |
 | [40](40-conformance-probe-lane-ownership.md) | Conformance probe stays in the tests repo; lanes reach it via MINO_BIN |
+| [41](41-websocket-native-codec-over-net-prims.md) | One websocket surface, mino.ws over the net prims, codec native |
