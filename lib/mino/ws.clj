@@ -19,6 +19,13 @@
   was refused or forged), :ws/closed (a finished handle),
   :ws/timeout (a ws-recv deadline).
 
+  The server half of the same vocabulary: mino.http.server hands a
+  handler's :ws entry a ws-accept handle, and the same ws-send,
+  ws-recv, and ws-close drive it under the mirrored role rules
+  (frames go out unmasked, inbound frames must arrive masked).
+  ws-shutdown asks the loop that owns a connection to close it
+  gracefully from another thread.
+
   Capabilities: the frame codec and this namespace ride
   MINO_CAP_WEBSOCKET. The connect/read/write path needs MINO_CAP_NET
   (it is not in the default capability set, so an embedder must
@@ -94,11 +101,17 @@
        (catch e nil)))
 
 (defn- write-frame!
-  "Encodes and sends one frame. Every client frame is masked with four
-  fresh secure-random bytes; never rand: a predictable mask defeats the
-  cache-poisoning defense masking exists for (ADR 41)."
+  "Encodes and sends one frame at the handle's role. A client frame is
+  masked with four fresh secure-random bytes; never rand: a
+  predictable mask defeats the cache-poisoning defense masking exists
+  for (ADR 41). A server frame goes out unmasked, as RFC 6455
+  requires."
   [handle frame]
-  (sock-write! handle (ws-encode-frame (assoc frame :mask (secure-rand-bytes 4)))))
+  (sock-write! handle
+               (ws-encode-frame
+                (if (= :server (:role handle))
+                  frame
+                  (assoc frame :mask (secure-rand-bytes 4))))))
 
 ;;;; Connect
 
@@ -248,8 +261,19 @@
 (defn- decode-opts
   [handle]
   (if-let [mp (:max-payload handle)]
-    {:role :client :max-payload mp}
-    {:role :client}))
+    {:role (:role handle) :max-payload mp}
+    {:role (:role handle)}))
+
+(defn- fail-close!
+  "RFC 6455's fail-the-connection: best-effort close frame carrying
+  code, then drop the socket, on either role."
+  [handle code]
+  (let [st (:state handle)]
+    (when (= :open (:status @st))
+      (try (write-frame! handle {:opcode :close :code code})
+           (catch e nil))
+      (close-socket! handle)
+      (swap! st assoc :status :closed))))
 
 (defn- pop-pending!
   [handle]
@@ -261,10 +285,19 @@
 
 (defn- decode-buffer!
   "Runs the accumulated buffer through the decoder and queues any
-  complete messages. Returns true when at least one frame landed."
+  complete messages. Returns true when at least one frame landed. A
+  corrupt or over-cap peer fails the connection (a 1002 or 1009 close
+  before the drop) and the decode error still reaches the caller."
   [handle more]
   (let [st (:state handle)
-        r (ws-decode-frames (bconcat (:rest @st) more) (decode-opts handle))]
+        r (try (ws-decode-frames (bconcat (:rest @st) more)
+                                 (decode-opts handle))
+               (catch e
+                 (do (case (:mino/kind e)
+                       :codec/corrupt (fail-close! handle 1002)
+                       :codec/limit (fail-close! handle 1009)
+                       nil)
+                     (throw e))))]
     (swap! st assoc :rest (:rest r))
     (swap! st update :pending #(into % (:frames r)))
     (boolean (seq (:frames r)))))
@@ -279,9 +312,13 @@
   (when (and deadline (>= (time-ms) deadline))
     (timeout-fail ms))
   (when-not (decode-buffer! handle (byte-array []))
+    ;; a read-window expiry is a tick, never an error, under a caller
+    ;; deadline and always on a server handle: an accepted socket's
+    ;; read window is the engine's poll interval, not a peer signal.
     (let [b (try (sock-read! handle 65536)
                  (catch e
-                   (if (and deadline (= :net/timeout (:mino/kind e)))
+                   (if (and (= :net/timeout (:mino/kind e))
+                            (or deadline (= :server (:role handle))))
                      (byte-array [])
                      (throw e))))]
       (if (nil? b)
@@ -293,18 +330,35 @@
         (decode-buffer! handle b))))
   nil)
 
+(defn- send-shutdown-close!
+  "The owning loop's half of ws-shutdown: send the flagged close frame
+  once, then keep reading toward the peer's echo or the EOF."
+  [handle]
+  (let [st (:state handle)
+        m @st
+        sd (:shutdown m)]
+    (when (and sd (= :open (:status m)) (not (:close-sent? m)))
+      (try (write-frame! handle
+                         (if (:reason sd)
+                           {:opcode :close :code (:code sd)
+                            :reason (:reason sd)}
+                           {:opcode :close :code (:code sd)}))
+           (catch e nil))
+      (swap! st assoc :close-sent? true))))
+
 (defn- finish-close!
   "The receive side of the close handshake: echo one close frame back
   (best effort; the peer may already be gone) and drop the socket. A
   synthetic 1006 arrives with the socket already closed and is never
-  echoed."
+  echoed; neither is a close this side already sent via ws-shutdown."
   [handle f]
   (let [st (:state handle)]
     (when (= :open (:status @st))
-      (try (write-frame! handle (if (:code f)
-                                  {:opcode :close :code (:code f)}
-                                  {:opcode :close}))
-           (catch e nil))
+      (when-not (:close-sent? @st)
+        (try (write-frame! handle (if (:code f)
+                                    {:opcode :close :code (:code f)}
+                                    {:opcode :close}))
+             (catch e nil)))
       (close-socket! handle)
       (swap! st assoc :status :closed))))
 
@@ -317,7 +371,10 @@
   after it, ws-recv throws :ws/closed. Opts: :timeout ms, a deadline
   over the whole wait, checked between socket reads (each read blocks
   at most the connection's :read-timeout); expiry throws :ws/timeout.
-  Without :timeout a socket read timeout surfaces as :net/timeout."
+  Without :timeout a socket read timeout surfaces as :net/timeout on
+  a client handle; on a server handle it is a tick and the wait
+  continues (see ws-accept). A pending ws-shutdown flag is honored
+  between reads."
   ([handle] (ws-recv handle {}))
   ([handle opts]
    (when-not (map? opts)
@@ -336,16 +393,17 @@
            {:opcode (:opcode f) :payload (:payload f)})
          (if (= :closed (:status @(:state handle)))
            (closed-fail)
-           (do (read-frames! handle deadline ms)
+           (do (send-shutdown-close! handle)
+               (read-frames! handle deadline ms)
                (recur))))))))
 
 ;;;; Close
 
 (defn ws-close
-  "The client side of the close handshake: sends a masked close frame
-  (:code default 1000, optional :reason) and closes the socket.
-  Idempotent; if the peer's close already finished the connection (via
-  ws-recv) this is a no-op. Returns nil."
+  "This side of the close handshake: sends a close frame (:code
+  default 1000, optional :reason; masked on a client handle) and
+  closes the socket. Idempotent; if the peer's close already finished
+  the connection (via ws-recv) this is a no-op. Returns nil."
   ([handle] (ws-close handle {}))
   ([handle opts]
    (when-not (map? opts)
@@ -362,3 +420,52 @@
        (close-socket! handle)
        (swap! st assoc :status :closed))
      nil)))
+
+;;;; Server side
+
+(def ^:private accept-keys #{:leftover :max-payload :url})
+
+(defn ws-accept
+  "Adopts a server-side connection whose 101 upgrade head is already
+  written and returns the plain handle map for ws-send / ws-recv /
+  ws-close (mino.http.server builds one for a handler's :ws entry).
+  opts: :leftover (bytes read past the upgrade request head),
+  :max-payload (caps each received message, default 16 MiB), :url
+  (the request target, informational). The role mirror of
+  ws-connect: frames go out unmasked, inbound frames must arrive
+  masked, and a socket read timeout is a tick rather than an error
+  (an accepted socket's read window is the engine's poll interval),
+  so a bare ws-recv parks until traffic, a close, or a ws-shutdown
+  flag."
+  ([conn] (ws-accept conn {}))
+  ([conn opts]
+   (when-not (map? opts)
+     (bad "opts must be a map"))
+   (let [unknown (filter #(not (contains? accept-keys %)) (keys opts))]
+     (when (seq unknown)
+       (bad (str "unknown ws-accept key(s): " (pr-str (vec unknown))))))
+   (let [lo (:leftover opts)]
+     {:socket conn
+      :secure? false
+      :role :server
+      :url (:url opts)
+      :max-payload (:max-payload opts)
+      :state (atom {:rest (if (bytes? lo) lo (byte-array (vec (or lo []))))
+                    :pending []
+                    :status :open})})))
+
+(defn ws-shutdown
+  "Asks a connection to close from another thread: flags the handle so
+  the ws-recv loop that owns it sends a close frame (:code default
+  1001, optional :reason) at its next wake-up and finishes through
+  the normal close handshake. Never writes or closes anything itself,
+  so it cannot race the owning loop's frames. Idempotent; returns
+  nil."
+  ([handle] (ws-shutdown handle {}))
+  ([handle opts]
+   (when-not (map? opts)
+     (bad "opts must be a map"))
+   (swap! (:state handle) assoc :shutdown
+          {:code (opt-long (:code opts) :code 1001)
+           :reason (:reason opts)})
+   nil))

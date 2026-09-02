@@ -16,9 +16,18 @@
   tail-recursive function per connection with its state in loop
   locals, parked in a blocking read between iterations; a throwing
   handler yields a 500 text/plain response and a close, never
-  propagation."
+  propagation.
+
+  Websocket upgrade (ADR 41): a handler answers an upgrade request
+  with {:ws f} and the server validates the RFC 6455 handshake (a
+  malformed upgrade gets a plain 400), writes the 101 head, and
+  hands f a server-role mino.ws handle; the connection leaves
+  keep-alive for the frame loop and closes when f returns. stop asks
+  every live websocket connection to close with a going-away 1001
+  frame inside the same drain grace."
   (:require [clojure.string :as str]
-            [clojure.core.async :as a]))
+            [clojure.core.async :as a]
+            [mino.ws :as ws]))
 
 ;;;; pure decisions
 
@@ -149,6 +158,40 @@
   [now-ms since-ms budget-ms]
   (>= (- now-ms since-ms) budget-ms))
 
+(defn- ws-response?
+  "Is this handler response the websocket entry point?"
+  [resp]
+  (and (map? resp) (fn? (:ws resp))))
+
+(defn- upgrade-key
+  "The Sec-WebSocket-Key when the request map is a well-formed RFC
+  6455 upgrade (a GET on HTTP/1.1 carrying the upgrade and connection
+  tokens, version 13, and a key that decodes to 16 bytes), else nil;
+  nil is answered with a plain 400."
+  [req]
+  (let [hdrs (:headers req)
+        key (get hdrs "sec-websocket-key")]
+    (when (and (= :get (:request-method req))
+               (= "HTTP/1.1" (:http-version req))
+               (contains? (connection-tokens (get hdrs "upgrade"))
+                          "websocket")
+               (contains? (connection-tokens (get hdrs "connection"))
+                          "upgrade")
+               (= "13" (get hdrs "sec-websocket-version"))
+               (string? key)
+               (= 16 (try (alength (base64-decode key)) (catch e -1))))
+      key)))
+
+(defn- upgrade-head
+  "The engine-owned 101 head, hand-built: http-encode-response owns
+  Connection and speaks only close and keep-alive, and the accept
+  value is sha1-plus-base64 output, safe in a header verbatim."
+  [accept]
+  (str "HTTP/1.1 101 Switching Protocols\r\n"
+       "Upgrade: websocket\r\n"
+       "Connection: Upgrade\r\n"
+       "Sec-WebSocket-Accept: " accept "\r\n\r\n"))
+
 ;;;; the run-server lifecycle
 
 (def ^:private allowed-server-keys
@@ -211,6 +254,24 @@
   (try (net-close c) (catch e nil))
   (try (a/>!! permits :p) (catch e nil)))
 
+(defn- wrap-ws-registry
+  "Handler middleware for run-server: registers each live websocket
+  handle around its :ws fn so stop can flag a going-away close on
+  every open connection. Registration is keyed by a counter, never by
+  the handle, so nothing hashes the handle's state atom."
+  [handler live-ws next-id]
+  (fn [req]
+    (let [resp (handler req)]
+      (if (ws-response? resp)
+        (let [wsf (:ws resp)]
+          (assoc resp :ws
+                 (fn [wsc]
+                   (let [id (swap! next-id inc)]
+                     (swap! live-ws assoc id wsc)
+                     (try (wsf wsc)
+                          (finally (swap! live-ws dissoc id)))))))
+        resp))))
+
 (defn- sweep-mailbox!
   "Close every connection still waiting in the mailbox and return its
   permit. A swept connection has no worker, so nothing is parked on
@@ -239,6 +300,14 @@
   the pool within a bounded grace; a connection that outlives the
   grace is left to its own deadline, never closed underneath a
   parked read.
+
+  A handler answers a websocket upgrade request with {:ws f}: the
+  server validates the handshake (a malformed upgrade gets a plain
+  400 and f never runs), writes the 101 head, and calls f with a
+  server-role mino.ws handle for ws-send / ws-recv / ws-close; the
+  connection leaves keep-alive and closes when f returns. stop flags
+  every live websocket connection to close with a going-away 1001
+  frame, sent by its own worker inside the drain grace.
 
   For a clean shutdown on SIGTERM, trap the signal and stop from the
   handler; stop drains live connections inside the grace, so an
@@ -272,6 +341,9 @@
                                       :max-headers])
          poll-ms (socket-poll-ms idle-timeout)
          l (net-listen host port {:backlog 16})
+        live-ws (atom {})
+        ws-next-id (atom 0)
+        handler (wrap-ws-registry handler live-ws ws-next-id)
         running? (atom true)
         permits (a/chan max-conns)
         mailbox (a/chan max-conns)
@@ -354,6 +426,11 @@
                (reset! running? false)
                (a/close! stop-sig)
                (try (net-close l) (catch e nil))
+               ;; ask, never cut: the owning loop sends the close on
+               ;; its next wake-up, so no write races its frames and
+               ;; no socket closes under a parked read
+               (doseq [h (vals @live-ws)]
+                 (try (ws/ws-shutdown h) (catch e nil)))
                (let [t0 (time-ms)
                      left (fn []
                             (max 0 (- (+ t0 stop-grace-ms) (time-ms))))]
@@ -441,13 +518,16 @@
     (catch e nil)))
 
 (defn- serve-request
-  "Run the handler and write its response. The try boundary is the
-  isolation: a throwing handler or an unencodable response map yields
-  a 500 text/plain close instead of propagation."
-  [c handler req alive?]
+  "Write one handler response. The try boundary is the isolation: a
+  handler that threw (already collapsed to ::handler-threw by the
+  caller) or an unencodable response map yields a 500 text/plain
+  close instead of propagation."
+  [c resp req alive?]
   (try
+    (when (= ::handler-threw resp)
+      (bad "the handler threw"))
     (net-write c (http-encode-response
-                   (merge (response-spec (handler req))
+                   (merge (response-spec resp)
                           (response-flags (:http-version req) alive?)
                           {:date (format-time (now) :rfc1123)}
                           ;; RFC 9110: a HEAD response keeps the same
@@ -458,6 +538,23 @@
     (catch e
       (send-error-response c 500 error-body))))
 
+(defn- serve-upgrade!
+  "The websocket half of a connection: validate the upgrade (a miss
+  answers a plain 400 close and the ws fn never runs), write the 101
+  head, and hand the handler's :ws fn a server-role mino.ws handle
+  seeded with the bytes past the request head. The try boundary
+  mirrors serve-request: a throwing ws fn closes 1011 instead of
+  propagating; a clean return closes 1000 if the fn left the
+  connection open. The connection never returns to keep-alive."
+  [c req leftover ws-fn]
+  (if-let [key (upgrade-key req)]
+    (do (net-write c (upgrade-head (ws-accept-key key)))
+        (let [h (ws/ws-accept c {:leftover leftover :url (:uri req)})
+              r (try (do (ws-fn h) ::ok) (catch e ::threw))]
+          (try (ws/ws-close h (if (= ::threw r) {:code 1011} {}))
+               (catch e nil))))
+    (send-error-response c 400 bad-request-body)))
+
 (defn serve-conn*
   "Serve one accepted connection as keep-alive Ring traffic until the
   peer asks to close, goes quiet past :idle-timeout, drips a request
@@ -466,7 +563,9 @@
   and embedding seam over the private loop, not part of the request
   vocabulary. opts: :idle-timeout :request-timeout :max-header-bytes
   :max-body-bytes :max-headers, plus :seed (already-read socket
-  bytes, embedding use); unknown keys are an error naming them."
+  bytes, embedding use); unknown keys are an error naming them. A
+  handler response of {:ws f} takes the websocket upgrade path (see
+  run-server); on this seam it works without the stop registry."
   [c handler opts]
   (let [opts (normalize-opts opts)]
     (loop [seed (or (:seed opts) [])
@@ -474,9 +573,15 @@
       (let [r (read-request c seed opts idle-since-ms)]
         (case (:kind r)
           :request (let [parsed (:parsed r)
-                         alive? (keep-alive? parsed)]
-                     (serve-request c handler (request-map c parsed) alive?)
-                     (when alive?
-                       (recur (vec (:leftover parsed)) (time-ms))))
+                         alive? (keep-alive? parsed)
+                         req (request-map c parsed)
+                         resp (try (handler req)
+                                   (catch e ::handler-threw))]
+                     (if (ws-response? resp)
+                       (serve-upgrade! c req (:leftover parsed) (:ws resp))
+                       (do (serve-request c resp req alive?)
+                           (when alive?
+                             (recur (vec (:leftover parsed))
+                                    (time-ms))))))
           :bad-request (send-error-response c 400 bad-request-body)
           nil)))))
