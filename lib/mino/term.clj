@@ -48,11 +48,16 @@
   (term/terminal-height)   ; rows (ioctl, else ROWS, else 24)
   (term/size)              ; => {:cols 80 :rows 24}
   (term/read-password)     ; a no-echo line read from the terminal
+  (term/prompt msg opts)   ; read a line, re-prompt until valid
+  (term/confirm msg opts)  ; read y/n, re-prompt until valid
 
   tty?, terminal-width, and terminal-height re-export the floor prims
   of the same name so callers of this namespace never reach back into
   clojure.core for the --color=auto gate. size bundles the two getters
-  into one {:cols :rows} map."
+  into one {:cols :rows} map. prompt reads a line with optional
+  :default, :validate, and :password support; confirm reads a y/n
+  answer; both re-prompt on invalid input up to :max-tries (default 3)
+  and throw :mino/kind :term/prompt on cap-exhaustion."
   (:require [clojure.string :as str]))
 
 (def ^:private esc "\033")
@@ -306,3 +311,112 @@
      (if (color-on? opts)
        (render-progress bar width)
        (str (label-prefix label) (pad3 (pct-of ratio)) "%")))))
+
+;;;; prompt and confirm
+
+(defn parse-yes-no
+  "Pure fn: maps a raw input string to true (y/yes), false (n/no), or nil
+  (blank or unrecognized). Case-insensitive. Blank input signals that the
+  caller should apply the :default; nil for unrecognized triggers a re-prompt."
+  [s]
+  (let [low (str/lower-case (str/trim (or s "")))]
+    (cond
+      (= "" low)                nil
+      (or (= "y" low)
+          (= "yes" low))        true
+      (or (= "n" low)
+          (= "no" low))         false
+      :else                     nil)))
+
+(defn prompt-result
+  "Pure fn: given a raw input string and opts, return the accepted value
+  or nil to signal a re-prompt.
+
+  - blank input (after trim) uses :default when supplied, else nil.
+  - non-blank input is passed to :validate when supplied; falsy means re-prompt.
+  - :default short-circuits before :validate, so a valid default is never
+    rejected by the validator."
+  [raw opts]
+  (let [trimmed (str/trim (or raw ""))
+        blank?  (= "" trimmed)]
+    (if blank?
+      (get opts :default)
+      (let [validate (get opts :validate)]
+        (if (and validate (not (validate trimmed)))
+          nil
+          trimmed)))))
+
+(defn- throw-prompt-cap
+  [msg tries]
+  (term-fail :term/prompt "MTP001" (str "mino.term: " msg)
+             {:max-tries tries}))
+
+(defn- default-read-fn
+  "The default 0-arg reader: read-line from stdin."
+  []
+  clojure.core/read-line)
+
+(defn prompt
+  "Read a line from the terminal, re-prompting until a valid answer is
+  entered or :max-tries (default 3) attempts are exhausted, at which
+  point it throws :mino/kind :term/prompt.
+
+  opts map:
+    :default   value returned on blank input (skips :validate)
+    :validate  1-arg predicate; falsy return re-prompts
+    :password  when true, read without echo (or via :read-fn if injected)
+    :max-tries attempt cap, default 3
+    :read-fn   0-arg fn returning the next line; defaults to read-line
+               (inject for deterministic tests)"
+  ([msg] (prompt msg {}))
+  ([msg opts]
+   (check-opts opts)
+   (let [max-tries (or (get opts :max-tries) 3)
+         read-fn   (or (get opts :read-fn)
+                       (if (get opts :password)
+                         read-password
+                         clojure.core/read-line))]
+     (loop [tries 0]
+       (when (>= tries max-tries)
+         (throw-prompt-cap "too many invalid attempts" max-tries))
+       (print (str msg " "))
+       (flush)
+       (let [raw (read-fn)
+             val (prompt-result raw opts)]
+         (if (some? val)
+           val
+           (recur (inc tries))))))))
+
+(defn confirm
+  "Read a y/n answer from the terminal, re-prompting until a recognized
+  answer is entered or :max-tries (default 3) attempts are exhausted, at
+  which point it throws :mino/kind :term/prompt.
+
+  opts map:
+    :default   boolean (or nil) returned on blank input; default false
+    :max-tries attempt cap, default 3
+    :read-fn   0-arg fn returning the next line (inject for tests)"
+  ([msg] (confirm msg {}))
+  ([msg opts]
+   (check-opts opts)
+   (let [max-tries (or (get opts :max-tries) 3)
+         ;; :default must be a boolean or nil; false is the safe no-op side
+         dflt      (get opts :default false)
+         read-fn   (or (get opts :read-fn) clojure.core/read-line)]
+     (loop [tries 0]
+       (when (>= tries max-tries)
+         (throw-prompt-cap "too many invalid attempts" max-tries))
+       (print (str msg " "))
+       (flush)
+       (let [raw    (read-fn)
+             parsed (parse-yes-no raw)]
+         (cond
+           ;; blank: apply the default
+           (and (nil? parsed) (= "" (str/trim (or raw ""))))
+           dflt
+           ;; recognized y/n answer
+           (some? parsed)
+           parsed
+           ;; unrecognized: re-prompt
+           :else
+           (recur (inc tries))))))))
