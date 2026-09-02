@@ -151,12 +151,15 @@ void mino_install_mino_tar          (mino_state *S, mino_env *env);
 void mino_install_mino_util         (mino_state *S, mino_env *env);
 /* Prim-only capabilities with no bundled namespace: the codec prims
  * (url + base64 / hex), the compression stream prims, the secure random
- * prims (secure-rand-bytes / rand-hex / rand-token), and the signal /
- * exit-hook prims (on-signal / at-exit). */
+ * prims (secure-rand-bytes / rand-hex / rand-token), the signal /
+ * exit-hook prims (on-signal / at-exit), and the websocket frame codec
+ * and handshake prims (ws-encode-frame / ws-decode-frames /
+ * ws-accept-key). */
 void mino_install_codec             (mino_state *S, mino_env *env);
 void mino_install_compress          (mino_state *S, mino_env *env);
 void mino_install_random            (mino_state *S, mino_env *env);
 void mino_install_signal            (mino_state *S, mino_env *env);
+void mino_install_websocket         (mino_state *S, mino_env *env);
 void mino_install_udp               (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install

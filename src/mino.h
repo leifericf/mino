@@ -1642,6 +1642,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
 #define MINO_CAP_RANDOM        (1ull << 51) /* secure-rand-bytes / rand-hex / rand-token */
 #define MINO_CAP_SIGNAL        (1ull << 52) /* on-signal / at-exit */
+#define MINO_CAP_WEBSOCKET     (1ull << 53) /* ws frame codec + handshake prims */
 #define MINO_CAP_TAR           (1ull << 54) /* mino.tar + tar container prims */
 #define MINO_CAP_UDP           (1ull << 55) /* udp-socket / udp-send / udp-recv / dns-lookup */
 #define MINO_CAP_UTIL          (1ull << 56) /* mino.shell / mino.retry / mino.wait / mino.mime */
@@ -1663,6 +1664,10 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * registers exit hooks; it reaches no external resource, and a script
  * that wants no signal surface simply never installs a trap, so it rides
  * the default set with the other scripting-convenience capabilities.
+ * websocket exposes only the RFC 6455 frame codec and the handshake
+ * accept-key over in-memory bytes (mino.ws layers the net / TLS reach on
+ * top through the separate MINO_CAP_NET gate), so it rides the default
+ * set with the other pure-data codec families.
  * util bundles the pure scripting helpers (mino.shell, mino.retry,
  * mino.wait, mino.mime) with no OS reach beyond the net prim that
  * wait-for-port uses (MINO_CAP_NET is a separate gate). tar reads and
@@ -1692,7 +1697,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
                           MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
                           MINO_CAP_CODEC | MINO_CAP_RANDOM | \
-                          MINO_CAP_SIGNAL | MINO_CAP_TAR | \
+                          MINO_CAP_SIGNAL | MINO_CAP_WEBSOCKET | \
+                          MINO_CAP_TAR | \
                           MINO_CAP_UDP | MINO_CAP_UTIL)
 
 /* Every defined capability bit. */

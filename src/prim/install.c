@@ -354,6 +354,8 @@ static const mino_capability_info k_capability_info[] = {
       "secure-rand-bytes / rand-hex / rand-token over the OS CSPRNG." },
     { "signal",       MINO_CAP_SIGNAL,
       "on-signal / at-exit (signal traps and process exit hooks)." },
+    { "websocket",    MINO_CAP_WEBSOCKET,
+      "ws-encode-frame / ws-decode-frames / ws-accept-key (RFC 6455 codec)." },
     { "tar",          MINO_CAP_TAR,
       "mino.tar + tar-entries / tar-read / tar-extract / tar-create." },
     { "udp",          MINO_CAP_UDP,
@@ -487,6 +489,7 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_CODEC,    k_prims_url,      &k_prims_url_count      },
     { MINO_CAP_CODEC,    k_prims_codec,    &k_prims_codec_count    },
     { MINO_CAP_RANDOM,   k_prims_random,   &k_prims_random_count   },
+    { MINO_CAP_WEBSOCKET,k_prims_ws,       &k_prims_ws_count       },
     { MINO_CAP_UDP,      k_prims_udp,      &k_prims_udp_count      },
 };
 
