@@ -123,17 +123,17 @@
 
 (defn- dq-escape
   [s]
-  (apply str
-         (map (fn [c]
-                (let [i (int c)]
-                  (cond (= c \\) "\\\\"
-                        (= c \") "\\\""
-                        (= c \newline) "\\n"
-                        (= c \tab) "\\t"
-                        (= c \return) "\\r"
-                        (or (< i 32) (= i 127)) (format "\\u%04x" i)
-                        :else c)))
-              s)))
+  (str/join ""
+            (map (fn [c]
+                   (let [i (int c)]
+                     (cond (= c \\) "\\\\"
+                           (= c \") "\\\""
+                           (= c \newline) "\\n"
+                           (= c \tab) "\\t"
+                           (= c \return) "\\r"
+                           (or (< i 32) (= i 127)) (format "\\u%04x" i)
+                           :else c)))
+                 s)))
 
 (defn- quote-scalar
   [s]
@@ -212,30 +212,36 @@
             (str "[" (str/join ", " (map flow-str x)) "]")
             :else (emit-fail "unrepresentable value" {:value x}))))
 
+;; Line vectors build eagerly (reduce + into, mapv): a lazy mapcat
+;; over a large document nests one concat frame per entry and
+;; overflows the interpreter stack on realization.
 (defn- indent-lines
   [lines]
-  (map (fn [line] (if (= line "") "" (str "  " line))) lines))
+  (mapv (fn [line] (if (= line "") "" (str "  " line))) lines))
 
 (declare block-render)
 
 (defn- map-lines
   [m]
-  (mapcat (fn [[k v]]
+  (reduce (fn [acc [k v]]
             (let [ks (key-str k)
                   [tag a b] (block-render v)]
               (case tag
-                :inline [(str ks ": " a)]
-                :literal (cons (str ks ": " a) (indent-lines b))
-                :block (cons (str ks ":") (indent-lines a)))))
-          m))
+                :inline (conj acc (str ks ": " a))
+                :literal (into (conj acc (str ks ": " a))
+                               (indent-lines b))
+                :block (into (conj acc (str ks ":"))
+                             (indent-lines a)))))
+          [] m))
 
 (defn- vec-lines
   [v]
-  (mapcat (fn [x]
+  (reduce (fn [acc x]
             (let [[tag a b] (block-render x)]
               (case tag
-                :inline [(str "- " a)]
-                :literal (cons (str "- " a) (indent-lines b))
+                :inline (conj acc (str "- " a))
+                :literal (into (conj acc (str "- " a))
+                               (indent-lines b))
                 ;; The reader takes a quoted scalar right after "- " as
                 ;; a sequence item, not a mapping key (tracked in
                 ;; .local/BUGS.md), so a map opening with a quoted key
@@ -243,26 +249,31 @@
                 :block (let [f (first a)]
                          (if (or (str/starts-with? f "'")
                                  (str/starts-with? f "\""))
-                           (cons "-" (indent-lines a))
-                           (cons (str "- " f)
+                           (into (conj acc "-") (indent-lines a))
+                           (into (conj acc (str "- " f))
                                  (indent-lines (rest a))))))))
-          v))
+          [] v))
 
 (defn- block-render
   "[:inline s], [:literal head lines], or [:block lines] for x in
-  block context."
+  block context. Binds the scalar with let, not if-let: an if-let and
+  a cond in one body fall off the interpreter fast path (tracked in
+  .local/BUGS.md), and this fn runs once per node."
   [x]
-  (if-let [s (scalar-inline x)]
-    [:inline s]
-    (cond (string? x) (if (literal-eligible? x)
-                        (let [[head lines] (literal-lines x)]
-                          [:literal head lines])
-                        [:inline (quote-scalar x)])
-          (map? x) (if (empty? x) [:inline "{}"] [:block (map-lines x)])
-          (sequential? x) (if (empty? x)
-                            [:inline "[]"]
-                            [:block (vec-lines x)])
-          :else (emit-fail "unrepresentable value" {:value x}))))
+  (let [s (scalar-inline x)]
+    (if s
+      [:inline s]
+      (cond (string? x) (if (literal-eligible? x)
+                          (let [[head lines] (literal-lines x)]
+                            [:literal head lines])
+                          [:inline (quote-scalar x)])
+            (map? x) (if (empty? x)
+                       [:inline "{}"]
+                       [:block (map-lines x)])
+            (sequential? x) (if (empty? x)
+                              [:inline "[]"]
+                              [:block (vec-lines x)])
+            :else (emit-fail "unrepresentable value" {:value x})))))
 
 (defn generate-string
   "Emits x as one YAML document, block style by default, such that

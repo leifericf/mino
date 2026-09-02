@@ -100,9 +100,22 @@
           (or (< i 32) (= i 127)) (format "\\u%04x" i)
           :else c)))
 
+;; Escape-worthy characters: quote, backslash, C0 controls, DEL. The
+;; class starts at (char 1); the regex engine rejects a NUL bound, so
+;; NUL gets its own native scan.
+(def ^:private escape-needed-re
+  (re-pattern (str "[\"\\\\" (char 1) "-" (char 31) (char 127) "]")))
+
+(def ^:private nul-str (str (char 0)))
+
 (defn- string-repr
+  "Basic-string form of s. The common escape-free string passes
+  through on two native scans; the per-character walk runs only when
+  something needs escaping."
   [s]
-  (str "\"" (apply str (map esc-char s)) "\""))
+  (if (or (re-find escape-needed-re s) (str/includes? s nul-str))
+    (str "\"" (str/join "" (map esc-char s)) "\"")
+    (str "\"" s "\"")))
 
 (defn- key-repr
   [k]
