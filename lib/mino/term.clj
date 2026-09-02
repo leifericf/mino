@@ -47,6 +47,7 @@
   (term/terminal-width)    ; columns (ioctl, else COLUMNS, else 80)
   (term/terminal-height)   ; rows (ioctl, else ROWS, else 24)
   (term/size)              ; => {:cols 80 :rows 24}
+  (term/read-password)     ; a no-echo line read from the terminal
 
   tty?, terminal-width, and terminal-height re-export the floor prims
   of the same name so callers of this namespace never reach back into
@@ -86,6 +87,15 @@
   map always carries positive integers."
   []
   {:cols (terminal-width) :rows (terminal-height)})
+
+(defn read-password
+  "Reads one line from stdin with terminal echo turned off, so a typed
+  secret is not shown, and returns it without the trailing newline. The
+  terminal mode is restored on every exit path. When stdin is not a
+  terminal this throws :mino/kind :term/not-a-tty; pass {:allow-pipe
+  true} to read a piped secret with a plain line read instead."
+  ([] (clojure.core/read-password))
+  ([opts] (clojure.core/read-password opts)))
 
 (def ^:private fg-codes
   {:black 30 :red 31 :green 32 :yellow 33 :blue 34 :magenta 35

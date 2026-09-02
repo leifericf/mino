@@ -1,6 +1,6 @@
 /*
- * term.c -- terminal info primitives: tty?, terminal-width,
- * terminal-height.
+ * term.c -- terminal primitives: tty?, terminal-width,
+ * terminal-height, read-password.
  *
  * tty? answers whether one of the standard streams is attached to a
  * terminal. terminal-width / terminal-height answer the size of the
@@ -9,6 +9,16 @@
  * terminal, the COLUMNS / ROWS environment variables when set and
  * numeric; else the 80x24 default. Width and height fall back
  * independently, matching python's shutil.
+ *
+ * read-password reads one line from stdin with terminal echo turned
+ * off, so a typed secret never reaches the terminal transcript. The
+ * saved terminal mode is restored on every exit path: the normal
+ * return restores inline, and a saved-state global plus an atexit
+ * restore covers a mid-read exit (a trapped signal's handler calling
+ * exit while echo is off). When stdin is not a terminal read-password
+ * throws :term/not-a-tty, unless {:allow-pipe true} opts into a plain
+ * line read (scripts pipe secrets on purpose). The prim rides
+ * MINO_CAP_TERM alongside the other terminal prims.
  *
  * Env parsing is bounded and total (check-security stance): a value
  * counts only when it is 1..6 plain ASCII digits in 1..10000. No
@@ -36,13 +46,18 @@
 
 #ifdef _WIN32
 #  include <io.h> /* _isatty */
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
 #else
 #  include <unistd.h>
 #  include <sys/ioctl.h>
+#  include <termios.h>
 #endif
 
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <signal.h>
 
 /* ---- fd selection ------------------------------------------------ */
 
@@ -217,6 +232,261 @@ static mino_val *prim_terminal_height(mino_state *S, mino_val *args,
     return mino_int(S, (int64_t)term_height());
 }
 
+/* ---- read-password ------------------------------------------------ */
+
+/* Saved terminal state for the echo-off window. armed is set while
+ * stdin's echo is disabled and cleared once it is restored, so the
+ * atexit restore below is a no-op except on a mid-read exit (a trapped
+ * signal's handler calling exit while echo is off). Process-global
+ * because the restore must run without a mino_state in hand. */
+#ifndef _WIN32
+static struct termios g_term_saved;
+static volatile sig_atomic_t g_term_echo_armed = 0;
+
+/* Restore the saved terminal mode if the echo-off window is still open.
+ * Registered with atexit so a process exit mid-read (a signal handler
+ * calling exit before read-password returns) never leaves the terminal
+ * wedged with echo disabled. */
+static void term_restore_echo(void)
+{
+    if (g_term_echo_armed) {
+        g_term_echo_armed = 0;
+        (void)tcsetattr(0, TCSAFLUSH, &g_term_saved);
+    }
+}
+#endif
+
+/* Read status for the non-throwing raw line read below. */
+typedef enum {
+    TERM_LINE_OK = 0,   /* a line was read (possibly empty); *buf/*len set */
+    TERM_LINE_EOF,      /* EOF with no bytes; caller returns nil */
+    TERM_LINE_OOM       /* allocation or size-overflow; caller throws */
+} term_line_status;
+
+/* Read one line from stdin into a growing caller-owned buffer, dropping a
+ * single trailing newline. Never throws: it returns a status so a tty
+ * caller can restore terminal echo before raising any error, since a
+ * longjmp through this function would leave echo disabled. On OK the
+ * caller owns *buf and must free it; on EOF/OOM the buffer is already
+ * freed. */
+static term_line_status term_read_raw_line(char **buf_out, size_t *len_out)
+{
+    char  *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    char   chunk[256];
+    int    saw_any = 0;
+    *buf_out = NULL;
+    *len_out = 0;
+    while (fgets(chunk, sizeof(chunk), stdin) != NULL) {
+        size_t cl     = strlen(chunk);
+        int    has_nl = cl > 0 && chunk[cl - 1] == '\n';
+        saw_any = 1;
+        if (has_nl) cl -= 1;
+        if (len > SIZE_MAX - cl - 1) {
+            free(buf);
+            return TERM_LINE_OOM;
+        }
+        if (len + cl + 1 > cap) {
+            size_t nc = cap == 0 ? 256 : cap;
+            char  *nb;
+            while (nc < len + cl + 1) {
+                if (nc > SIZE_MAX / 2) {
+                    free(buf);
+                    return TERM_LINE_OOM;
+                }
+                nc *= 2;
+            }
+            nb = (char *)realloc(buf, nc);
+            if (nb == NULL) {
+                free(buf);
+                return TERM_LINE_OOM;
+            }
+            buf = nb;
+            cap = nc;
+        }
+        if (cl > 0) memcpy(buf + len, chunk, cl);
+        len += cl;
+        if (has_nl) break;
+    }
+    if (!saw_any) {
+        free(buf);
+        return TERM_LINE_EOF;
+    }
+    *buf_out = buf;
+    *len_out = len;
+    return TERM_LINE_OK;
+}
+
+/* Read one line from stdin as a GC-owned string, or nil on EOF. Used on
+ * the non-tty path, where a throw is safe (no terminal mode to restore). */
+static mino_val *term_read_stdin_line(mino_state *S)
+{
+    char            *buf;
+    size_t           len;
+    term_line_status st = term_read_raw_line(&buf, &len);
+    if (st == TERM_LINE_OOM) {
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "read-password: line too long or out "
+                                     "of memory");
+    }
+    if (st == TERM_LINE_EOF) {
+        return mino_nil(S);
+    }
+    {
+        mino_val *result = mino_string_n(S, buf, len);
+        free(buf);
+        return result;
+    }
+}
+
+/* Read a boolean opts key from a (possibly nil/absent) opts map. Absent
+ * or nil is def; a present non-boolean is a contract error (returns -1
+ * with the throw already raised). */
+static int term_opt_bool(mino_state *S, const mino_val *opts, const char *key,
+                         int def, int *out)
+{
+    const mino_val *v;
+    *out = def;
+    if (opts == NULL || mino_type_of(opts) != MINO_MAP) return 0;
+    v = map_get_val(opts, mino_keyword(S, key));
+    if (v == NULL || mino_type_of(v) == MINO_NIL) return 0;
+    if (mino_type_of(v) != MINO_BOOL) {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "read-password: opts key :%s must be a boolean", key);
+        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return -1;
+    }
+    *out = mino_val_bool_get(v);
+    return 0;
+}
+
+/* (read-password) / (read-password {:allow-pipe bool}) -- read one line
+ * from stdin with terminal echo off, returning it without the trailing
+ * newline. Throws :term/not-a-tty when stdin is not a terminal unless
+ * {:allow-pipe true} opts into a plain line read. */
+static mino_val *prim_read_password(mino_state *S, mino_val *args,
+                                    mino_env *env)
+{
+    mino_val *opts = NULL;
+    int       allow_pipe = 0;
+    int       is_tty;
+    (void)env;
+
+    if (mino_is_cons(args)) {
+        opts = args->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "read-password takes at most one "
+                                         "argument: an opts map");
+        }
+    }
+    if (term_opt_bool(S, opts, "allow-pipe", 0, &allow_pipe) != 0) return NULL;
+
+#ifdef _WIN32
+    is_tty = _isatty(0) != 0;
+#else
+    is_tty = isatty(0) != 0;
+#endif
+
+    if (!is_tty) {
+        if (!allow_pipe) {
+            return prim_throw_classified(S, "term/not-a-tty", "MTT001",
+                                         "read-password: stdin is not a "
+                                         "terminal; pass {:allow-pipe true} "
+                                         "to read a secret from a pipe");
+        }
+        return term_read_stdin_line(S);
+    }
+
+#ifdef _WIN32
+    {
+        /* Windows console: clear ENABLE_ECHO_INPUT for the read window,
+         * restore the prior mode before returning or throwing. The raw
+         * read never throws, so the console mode is always restored
+         * before any error propagates. */
+        HANDLE           h = GetStdHandle(STD_INPUT_HANDLE);
+        DWORD            mode = 0;
+        char            *buf;
+        size_t           len;
+        term_line_status st;
+        int have_mode = (h != INVALID_HANDLE_VALUE) && GetConsoleMode(h, &mode);
+        if (have_mode) {
+            SetConsoleMode(h, mode & ~(DWORD)ENABLE_ECHO_INPUT);
+        }
+        st = term_read_raw_line(&buf, &len);
+        if (have_mode) {
+            SetConsoleMode(h, mode);
+        }
+        if (st == TERM_LINE_OOM) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                                         "read-password: line too long or "
+                                         "out of memory");
+        }
+        if (st == TERM_LINE_EOF) {
+            return mino_nil(S);
+        }
+        {
+            mino_val *line = mino_string_n(S, buf, len);
+            free(buf);
+            return line;
+        }
+    }
+#else
+    {
+        struct termios   raw;
+        char            *buf;
+        size_t           len;
+        term_line_status st;
+        static int       atexit_registered = 0;
+        if (tcgetattr(0, &g_term_saved) != 0) {
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "read-password: cannot read the "
+                                         "terminal mode");
+        }
+        if (!atexit_registered) {
+            atexit(term_restore_echo);
+            atexit_registered = 1;
+        }
+        raw = g_term_saved;
+        raw.c_lflag &= ~(tcflag_t)ECHO;
+        /* Arm the saved-state restore before the read: a signal handler
+         * that exits mid-read runs atexit with echo still off. */
+        g_term_echo_armed = 1;
+        if (tcsetattr(0, TCSAFLUSH, &raw) != 0) {
+            g_term_echo_armed = 0;
+            return prim_throw_classified(S, "host", "MHO001",
+                                         "read-password: cannot disable "
+                                         "terminal echo");
+        }
+        /* The raw read never throws, so echo is always restored below
+         * before any error propagates; a longjmp through the read would
+         * leave the terminal wedged with echo off. */
+        st = term_read_raw_line(&buf, &len);
+        /* Restore before returning or throwing; the newline the user's
+         * Enter did not echo is printed so the cursor leaves the prompt
+         * line. */
+        tcsetattr(0, TCSAFLUSH, &g_term_saved);
+        g_term_echo_armed = 0;
+        fputc('\n', stderr);
+        if (st == TERM_LINE_OOM) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                                         "read-password: line too long or "
+                                         "out of memory");
+        }
+        if (st == TERM_LINE_EOF) {
+            return mino_nil(S);
+        }
+        {
+            mino_val *line = mino_string_n(S, buf, len);
+            free(buf);
+            return line;
+        }
+    }
+#endif
+}
+
 const mino_prim_def k_prims_term[] = {
     {"tty?", prim_tty_p,
      "Returns true when the given standard stream (:stdout, :stderr, "
@@ -232,6 +502,13 @@ const mino_prim_def k_prims_term[] = {
      "standard stream is a terminal (stdout first), else the ROWS "
      "environment variable when set to a plain numeric value, else "
      "24."},
+    {"read-password", prim_read_password,
+     "Reads one line from stdin with terminal echo turned off, so a "
+     "typed secret is not shown, and returns it without the trailing "
+     "newline. The terminal mode is restored on every exit path. When "
+     "stdin is not a terminal, throws :mino/kind :term/not-a-tty unless "
+     "{:allow-pipe true} opts into a plain line read for a piped secret. "
+     "Rides the term capability."},
 };
 
 const size_t k_prims_term_count =
