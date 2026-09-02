@@ -304,6 +304,7 @@
      ["lib/clojure/xml.clj"            "clojure.xml"            "lib_clojure_xml"]
      ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]
      ["lib/mino/zip.clj"               "mino.zip"               "lib_mino_zip"]
+     ["lib/mino/tar.clj"               "mino.tar"               "lib_mino_tar"]
      ["lib/mino/shell.clj"             "mino.shell"             "lib_mino_shell"]
      ["lib/mino/retry.clj"             "mino.retry"             "lib_mino_retry"]
      ["lib/mino/wait.clj"              "mino.wait"              "lib_mino_wait"]

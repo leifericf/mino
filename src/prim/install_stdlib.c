@@ -79,6 +79,7 @@
 #include "lib_mino_html_select.h"
 #include "lib_mino_template.h"
 #include "lib_mino_zip.h"
+#include "lib_mino_tar.h"
 #include "lib_mino_shell.h"
 #include "lib_mino_retry.h"
 #include "lib_mino_wait.h"
@@ -467,6 +468,7 @@ void mino_install_mino_tar(mino_state *S, mino_env *env)
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_tar, k_prims_tar_count,
                                        "tar");
+    mino_register_bundled_lib(S, "mino.tar", lib_mino_tar_src);
     S->caps_installed |= MINO_CAP_TAR;
 }
 
