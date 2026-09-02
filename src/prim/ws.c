@@ -26,7 +26,22 @@
 
 #include "prim/internal.h"
 #include "mino.h"
+/* The generated bundled-source header is one string literal whose
+ * concatenated length exceeds ANSI-C's guaranteed 4095, the same as the
+ * headers install_stdlib.c includes under this pragma. */
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Woverlength-strings"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Woverlength-strings"
+#endif
 #include "lib_mino_ws.h"
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
 
 /* bearssl's public headers probe BR_DOXYGEN_IGNORE with #if; scoped
  * silence, the treatment digest.c and tls.c give the same headers. */
