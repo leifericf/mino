@@ -51,3 +51,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [40](40-conformance-probe-lane-ownership.md) | Conformance probe stays in the tests repo; lanes reach it via MINO_BIN |
 | [41](41-websocket-native-codec-over-net-prims.md) | One websocket surface, mino.ws over the net prims, codec native |
 | [42](42-sqlite-behind-the-store-seam.md) | mino.store is the in-box database; sqlite waits behind the seam |
+| [43](43-file-watching-polls-stat.md) | File watching is a polling fn over stat, no native watchers |
