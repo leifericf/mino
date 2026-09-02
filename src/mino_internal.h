@@ -156,6 +156,7 @@ void mino_install_codec             (mino_state *S, mino_env *env);
 void mino_install_compress          (mino_state *S, mino_env *env);
 void mino_install_random            (mino_state *S, mino_env *env);
 void mino_install_signal            (mino_state *S, mino_env *env);
+void mino_install_udp               (mino_state *S, mino_env *env);
 
 /* Internal: evaluate core.clj on the floor env. Used by mino_install
  * after capability bits are set; idempotent. */

@@ -354,6 +354,8 @@ static const mino_capability_info k_capability_info[] = {
       "secure-rand-bytes / rand-hex / rand-token over the OS CSPRNG." },
     { "signal",       MINO_CAP_SIGNAL,
       "on-signal / at-exit (signal traps and process exit hooks)." },
+    { "udp",          MINO_CAP_UDP,
+      "udp-socket / udp-send / udp-recv / udp-close / dns-lookup." },
     { "util",         MINO_CAP_UTIL,
       "mino.shell / mino.retry / mino.wait / mino.mime / mino.jsonl." },
     { NULL,           0u,                                                NULL },
@@ -482,6 +484,7 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_CODEC,    k_prims_url,      &k_prims_url_count      },
     { MINO_CAP_CODEC,    k_prims_codec,    &k_prims_codec_count    },
     { MINO_CAP_RANDOM,   k_prims_random,   &k_prims_random_count   },
+    { MINO_CAP_UDP,      k_prims_udp,      &k_prims_udp_count      },
 };
 
 #define K_CAP_PRIM_TABLE_COUNT \

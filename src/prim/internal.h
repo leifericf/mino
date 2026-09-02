@@ -587,6 +587,9 @@ extern const size_t        k_prims_random_count;
 /* signal.c -- signal traps + exit hooks; gates under MINO_CAP_SIGNAL. */
 extern const mino_prim_def k_prims_signal[];
 extern const size_t        k_prims_signal_count;
+/* udp.c -- datagram sockets + dns-lookup; gates under MINO_CAP_UDP. */
+extern const mino_prim_def k_prims_udp[];
+extern const size_t        k_prims_udp_count;
 extern const mino_prim_def k_prims_json[];
 extern const size_t        k_prims_json_count;
 extern const mino_prim_def k_prims_csv[];

@@ -1642,6 +1642,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
 #define MINO_CAP_RANDOM        (1ull << 51) /* secure-rand-bytes / rand-hex / rand-token */
 #define MINO_CAP_SIGNAL        (1ull << 52) /* on-signal / at-exit */
+#define MINO_CAP_UDP           (1ull << 55) /* udp-socket / udp-send / udp-recv / dns-lookup */
 #define MINO_CAP_UTIL          (1ull << 56) /* mino.shell / mino.retry / mino.wait / mino.mime */
 
 /* The capability field is uint64_t, accommodating capabilities at bits
@@ -1663,7 +1664,15 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * the default set with the other scripting-convenience capabilities.
  * util bundles the pure scripting helpers (mino.shell, mino.retry,
  * mino.wait, mino.mime) with no OS reach beyond the net prim that
- * wait-for-port uses (MINO_CAP_NET is a separate gate). */
+ * wait-for-port uses (MINO_CAP_NET is a separate gate). udp is the one
+ * member of the default set with genuine network egress: udp-send /
+ * udp-recv open a datagram socket and dns-lookup resolves a host.
+ * Unlike the TCP MINO_CAP_NET gate (excluded from the sandbox), it
+ * rides the default set because the campaign's scripting surface treats
+ * datagram send/recv and name resolution as a core convenience; an
+ * embed that must deny outbound network reach installs an explicit
+ * capability set that omits MINO_CAP_UDP (and MINO_CAP_NET) rather than
+ * the default preset. */
 #define MINO_CAP_DEFAULT (MINO_CAP_FLOOR | MINO_CAP_REGEX | MINO_CAP_BIGNUM | \
                           MINO_CAP_MULTIMETHODS | MINO_CAP_PROTOCOLS | \
                           MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
@@ -1677,7 +1686,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
                           MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
                           MINO_CAP_CODEC | MINO_CAP_RANDOM | \
-                          MINO_CAP_SIGNAL | MINO_CAP_UTIL)
+                          MINO_CAP_SIGNAL | MINO_CAP_UDP | MINO_CAP_UTIL)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull
