@@ -147,6 +147,7 @@ void mino_install_mino_html         (mino_state *S, mino_env *env);
 void mino_install_mino_html_select  (mino_state *S, mino_env *env);
 void mino_install_mino_template     (mino_state *S, mino_env *env);
 void mino_install_mino_zip          (mino_state *S, mino_env *env);
+void mino_install_mino_tar          (mino_state *S, mino_env *env);
 void mino_install_mino_util         (mino_state *S, mino_env *env);
 /* Prim-only capabilities with no bundled namespace: the codec prims
  * (url + base64 / hex), the compression stream prims, the secure random

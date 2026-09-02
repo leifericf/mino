@@ -94,6 +94,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_TOML,        mino_install_mino_toml       },
     { MINO_CAP_COMPRESS,    mino_install_compress        },
     { MINO_CAP_ARCHIVE,     mino_install_mino_zip        },
+    { MINO_CAP_TAR,         mino_install_mino_tar        },
     { MINO_CAP_TEMPLATE,    mino_install_mino_template   },
     { MINO_CAP_TERM,        mino_install_mino_term       },
     { MINO_CAP_ENV,         mino_install_mino_env        },
@@ -130,6 +131,8 @@ static const cap_requires_t k_cap_requires[] = {
     { MINO_CAP_LOG,  MINO_CAP_TIME    }, /* mino.log: format-time on every line */
     { MINO_CAP_HTML, MINO_CAP_ZIP     }, /* mino.html.select: clojure.zip navigation */
     { MINO_CAP_TIME, MINO_CAP_INSTANT }, /* mino.time: #inst reader in its source */
+    { MINO_CAP_TAR,  MINO_CAP_COMPRESS }, /* mino.tar: gzip-compress for .tar.gz */
+    { MINO_CAP_TAR,  MINO_CAP_PATH    }, /* mino.tar: mino.path/glob in the dir walk */
 };
 
 #define K_CAP_REQUIRES_COUNT \

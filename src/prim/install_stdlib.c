@@ -460,6 +460,16 @@ void mino_install_mino_zip(mino_state *S, mino_env *env)
     S->caps_installed |= MINO_CAP_ARCHIVE;
 }
 
+void mino_install_mino_tar(mino_state *S, mino_env *env)
+{
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_tar, k_prims_tar_count,
+                                       "tar");
+    S->caps_installed |= MINO_CAP_TAR;
+}
+
 /* Prim-only capabilities: no bundled namespace, just the C prims tagged
  * with their group so (mino-capability 'sym) and the MNS002 diagnostic
  * report them. */

@@ -1642,6 +1642,7 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
 #define MINO_CAP_CODEC         (1ull << 50) /* url + base64 / hex prims */
 #define MINO_CAP_RANDOM        (1ull << 51) /* secure-rand-bytes / rand-hex / rand-token */
 #define MINO_CAP_SIGNAL        (1ull << 52) /* on-signal / at-exit */
+#define MINO_CAP_TAR           (1ull << 54) /* mino.tar + tar container prims */
 #define MINO_CAP_UDP           (1ull << 55) /* udp-socket / udp-send / udp-recv / dns-lookup */
 #define MINO_CAP_UTIL          (1ull << 56) /* mino.shell / mino.retry / mino.wait / mino.mime */
 
@@ -1653,8 +1654,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * transducers, regex, bignum) + the bundled libraries that have no I/O
  * surface (string, set, walk, edn, data, test, datafy, the json / csv
  * codecs, and the pure-data / info-only family: time, digest, html,
- * xml, yaml, toml, compress, archive, template, term, env, log, cli,
- * path, codec, random, signal). Excludes IO, FS, PROC, HOST, STM, AGENT,
+ * xml, yaml, toml, compress, archive, tar, template, term, env, log,
+ * cli, path, codec, random, signal). Excludes IO, FS, PROC, HOST, STM, AGENT,
  * ASYNC, NET, STORE. The pure-data family lived in the floor before it
  * gated, so its membership here keeps the sandbox surface unchanged.
  * random reads the OS CSPRNG but exposes no filesystem, network, or
@@ -1664,7 +1665,12 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
  * the default set with the other scripting-convenience capabilities.
  * util bundles the pure scripting helpers (mino.shell, mino.retry,
  * mino.wait, mino.mime) with no OS reach beyond the net prim that
- * wait-for-port uses (MINO_CAP_NET is a separate gate). udp is the one
+ * wait-for-port uses (MINO_CAP_NET is a separate gate). tar reads and
+ * writes archive bytes in memory (the tar-* prims touch no filesystem
+ * on the listing and write sides), and only tar-extract writes to
+ * disk, hardened against traversal and symlink escape; it rides the
+ * default set with the other pure-data / container families (archive,
+ * compress). udp is the one
  * member of the default set with genuine network egress: udp-send /
  * udp-recv open a datagram socket and dns-lookup resolves a host.
  * Unlike the TCP MINO_CAP_NET gate (excluded from the sandbox), it
@@ -1686,7 +1692,8 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                           MINO_CAP_TEMPLATE | MINO_CAP_TERM | MINO_CAP_ENV | \
                           MINO_CAP_LOG | MINO_CAP_CLI | MINO_CAP_PATH | \
                           MINO_CAP_CODEC | MINO_CAP_RANDOM | \
-                          MINO_CAP_SIGNAL | MINO_CAP_UDP | MINO_CAP_UTIL)
+                          MINO_CAP_SIGNAL | MINO_CAP_TAR | \
+                          MINO_CAP_UDP | MINO_CAP_UTIL)
 
 /* Every defined capability bit. */
 #define MINO_CAP_ALL     0xFFFFFFFFFFFFFFFFull

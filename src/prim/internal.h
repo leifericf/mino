@@ -646,6 +646,13 @@ extern const size_t        k_prims_compress_count;
  * UTC compensation are file-local too (no cross-TU consumers). */
 extern const mino_prim_def k_prims_archive[];
 extern const size_t        k_prims_archive_count;
+/* tar.c -- k_prims_tar registers the tar container prims
+ * (tar-entries, tar-read, tar-extract, tar-create) under the "tar"
+ * domain key. All prims and the single-pass block walker, pax and
+ * GNU long-name resolution, and the hardened extract descent are
+ * file-local static (no cross-TU consumers). */
+extern const mino_prim_def k_prims_tar[];
+extern const size_t        k_prims_tar_count;
 extern const mino_prim_def k_prims_gzip[];
 extern const size_t        k_prims_gzip_count;
 mino_val *prim_gzip_decompress(mino_state *S, mino_val *args,
