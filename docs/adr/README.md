@@ -53,3 +53,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [42](42-sqlite-behind-the-store-seam.md) | mino.store is the in-box database; sqlite waits behind the seam |
 | [43](43-file-watching-polls-stat.md) | File watching is a polling fn over stat, no native watchers |
 | [44](44-unicode-normalization-generated-tables.md) | Unicode normalization and case folding via generated tables |
+| [45](45-did-you-mean-in-runtime-errors.md) | Did-you-mean lives in the runtime's own errors, not a library |
