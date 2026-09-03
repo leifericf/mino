@@ -462,7 +462,15 @@ static int matchcharclass(char c, const char* str)
     {
       if (c == '-')
       {
-        return ((str[-1] == '\0') || (str[1] == '\0'));
+        /* A '-' in the buffer is a literal dash only at class start or
+         * end (str[-1] is the leading sentinel or a prior class's
+         * terminator; str[1] is this class's terminator). Otherwise it
+         * is a range separator, so keep scanning for a later literal
+         * dash instead of concluding no match here. */
+        if ((str[-1] == '\0') || (str[1] == '\0'))
+        {
+          return 1;
+        }
       }
       else
       {

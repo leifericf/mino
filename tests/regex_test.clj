@@ -305,6 +305,27 @@
   ;; The range [A-Z] still works (all-ASCII, no change to behaviour).
   (is (= "H" (re-find "[A-Z]" "Hello"))))
 
+(deftest class-trailing-literal-dash
+  ;; Regression: a '-' in final class position, after a range, is a
+  ;; literal dash.  matchcharclass used to hit the range hyphen of an
+  ;; earlier range (e.g. the '-' of "0-9") first, conclude the dash was
+  ;; neither at class start nor end, and return no-match outright,
+  ;; swallowing the genuinely-literal trailing dash.
+  ;; The natural token-alphabet spelling now matches a literal dash:
+  (is (= "a-b" (re-matches #"[A-Za-z0-9_-]*" "a-b")))
+  (is (= "-"   (re-matches #"[A-Za-z0-9_-]" "-")))
+  (is (= "-"   (re-matches #"[0-9_-]" "-")))
+  ;; and still rejects chars outside the class:
+  (is (nil? (re-matches #"[A-Za-z0-9_-]" "+")))
+  (is (nil? (re-matches #"[A-Za-z0-9_-]" "/")))
+  ;; The range members of the same class keep matching:
+  (is (= "aB9-_" (re-matches #"[A-Za-z0-9_-]*" "aB9-_")))
+  ;; The dash-first spelling still parses the dash as a literal:
+  (is (= "a-b" (re-matches #"[-A-Za-z0-9_]*" "a-b")))
+  (is (nil? (re-matches #"[-A-Za-z0-9_]" "+")))
+  ;; A dash between two ranges stays a range separator, not a literal:
+  (is (nil? (re-matches #"[A-Z0-9]" "-"))))
+
 (deftest matchgroup-depth-limit
   ;; Regression: matchgroup_loop recursed once per consumed input byte,
   ;; enabling stack exhaustion on long inputs.  A hard depth limit
