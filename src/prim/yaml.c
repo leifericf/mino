@@ -1904,12 +1904,24 @@ static mino_val *yp_block_seq(yp_t *t, size_t p, long I, size_t *resume)
                 return NULL;
             }
             v = yp_inline_value(t, after_dash, I, &rv);
+        } else if (yp_is(t, after_dash, '"') ||
+                   yp_is(t, after_dash, '\'')) {
+            /* A quoted scalar after "- " opens a compact mapping when a
+             * key colon follows the closing quote; otherwise it is the
+             * whole sequence item. */
+            size_t qe;
+            mino_val *scalar = yp_quoted(t, after_dash, I, 0, &qe);
+            if (scalar == NULL) { t->depth--; return NULL; }
+            if (yp_flow_key_colon(t, yp_skip_ws(t, qe), 1)) {
+                v = yp_block_map(t, after_dash, yp_col(t, after_dash), &rv);
+            } else {
+                v = scalar;
+                rv = qe;
+            }
         } else if (t->data[after_dash] == '[' || t->data[after_dash] == '{' ||
                    t->data[after_dash] == '|' || t->data[after_dash] == '>' ||
                    t->data[after_dash] == '&' || t->data[after_dash] == '*' ||
-                   t->data[after_dash] == '!' ||
-                   t->data[after_dash] == '"' ||
-                   t->data[after_dash] == '\'') {
+                   t->data[after_dash] == '!') {
             v = yp_inline_value(t, after_dash, I, &rv);
         } else {
             size_t stop;

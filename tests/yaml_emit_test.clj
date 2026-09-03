@@ -289,4 +289,22 @@
         r (tc/quick-check yaml-trials p :seed 92027)]
     (is (true? (:result r)) (pr-str r))))
 
+;; The emitter sidesteps a compact map whose first key renders quoted by
+;; dropping the dash onto its own line, so its own round-trips never
+;; exercise the "- 'key': v" reader path. This property hand-shapes that
+;; document directly: a compact mapping opened by a quoted key parses
+;; back to the same map the plain spelling would yield.
+(def ^:private yaml-quoted-keyname-gen
+  (gen/fmap (fn [[a b]] (str a ":" b))
+            (gen/tuple (gen/not-empty gen/string-alphanumeric)
+                       (gen/not-empty gen/string-alphanumeric))))
+
+(deftest yaml-compact-quoted-key-round-trip-property
+  (let [p (prop/for-all [name yaml-quoted-keyname-gen
+                         v gen/int]
+            (let [doc (str "- '" name "': " v "\n")]
+              (= [{(keyword name) v}] (yaml/parse-string doc))))
+        r (tc/quick-check yaml-trials p :seed 92028)]
+    (is (true? (:result r)) (pr-str r))))
+
 (run-tests-and-exit)

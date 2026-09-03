@@ -167,6 +167,29 @@
           {:item "Big Shoes" :quantity 1}]
          (yaml/parse-string "---\n# Products purchased\n- item    : Super Hoop\n  quantity: 1\n- item    : Basketball\n  quantity: 4\n- item    : Big Shoes\n  quantity: 1\n"))))
 
+(deftest yaml-compact-quoted-key-after-dash
+  ;; A quoted scalar right after "- " opening a compact mapping is a
+  ;; mapping key, not a completed sequence item: single and double
+  ;; quotes both keywordize like a plain key does.
+  (is (= [{:k 1}] (yaml/parse-string "- 'k': 1\n")))
+  (is (= [{:k 1}] (yaml/parse-string "- \"k\": 1\n")))
+  ;; the quoted key keeps a colon and spaces the plain form cannot
+  (is (= [{(keyword "a:b") 1}] (yaml/parse-string "- 'a:b': 1\n")))
+  (is (= [{(keyword "a b") 1}] (yaml/parse-string "- \"a b\": 1\n")))
+  ;; more than one pair in the compact map, first key quoted
+  (is (= [{:k 1 :j 2}] (yaml/parse-string "- 'k': 1\n  j: 2\n")))
+  ;; later pairs may be quoted after a quoted first key
+  (is (= [{:k 1 (keyword "x y") 2}]
+         (yaml/parse-string "- \"k\": 1\n  \"x y\": 2\n"))))
+
+(deftest yaml-dash-quoted-scalar-item-still-scalar
+  ;; negative space: a quoted scalar with no following colon stays a
+  ;; plain sequence item, and a scalar with a colon inside its quotes
+  ;; is a string item, not a mapping.
+  (is (= ["k"] (yaml/parse-string "- 'k'\n")))
+  (is (= ["a: b"] (yaml/parse-string "- 'a: b'\n")))
+  (is (= ["k" {:j 2}] (yaml/parse-string "- \"k\"\n- j: 2\n"))))
+
 ;;; Plain scalars and folding
 
 (deftest yaml-plain-multiline-value
