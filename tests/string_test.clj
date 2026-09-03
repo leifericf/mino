@@ -294,6 +294,16 @@
   (is (thrown? Exception (format "%q" 1)))
   (is (thrown? Exception (format "%"))))
 
+(deftest format-date-and-hash-directives-stay-absent
+  ;; ADR 53: %t/%T and %h/%H throw as unknown directives, loudly, as
+  ;; classified data; nothing passes through as literal text.
+  (doseq [f ["%tY" "%TY" "%h" "%H"]]
+    (is (= [:eval/type "MTY001"]
+           (try (format f 0)
+                (catch :eval/type e [(:mino/kind e) (:mino/code e)])))
+        f)
+    (is (thrown-with-msg? #"unsupported directive" (format f 0)) f)))
+
 (deftest format-uppercase-char-directive-unicode
   ;; %C uppercases through the generated case tables, not ASCII-only.
   (is (= "A" (format "%C" \a)))

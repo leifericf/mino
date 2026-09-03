@@ -61,3 +61,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [50](50-subnormal-double-print-stays-shortest.md) | Subnormal double print keeps the shortest round-trip form |
 | [51](51-format-char-directive-takes-a-codepoint.md) | The format char directive takes an int codepoint |
 | [52](52-format-grouping-separator-is-a-fixed-comma.md) | The format grouping separator is a fixed comma |
+| [53](53-format-date-and-hash-directives-stay-absent.md) | The format date and hash directives stay absent |
