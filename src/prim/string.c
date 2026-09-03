@@ -80,7 +80,8 @@ static inline char *fmt_ensure(mino_state *S, char *buf,
  * directive.
  */
 
-static size_t utf8_encode(char *p, uint32_t cp); /* defined further down */
+static size_t utf8_encode(char *p, uint32_t cp);        /* defined further down */
+static uint32_t mino_unicode_to_upper(uint32_t cp);     /* generated tables    */
 
 static char *fmt_append(mino_state *S, char *buf, size_t *len,
                          size_t *cap, const char *src, size_t n)
@@ -118,6 +119,34 @@ static char *fmt_append_padded(mino_state *S, char *buf, size_t *len,
     return buf;
 }
 
+/* Numeric pad path: like fmt_append_padded, but with the '0' flag a
+ * right-justified numeric string zero-fills after its sign and hex
+ * prefix ("-000003.14", "0x000000001.8p0"). A non-numeric rendering
+ * (nan, inf) falls back to space padding, and '-' wins over '0'. */
+static char *fmt_append_num_padded(mino_state *S, char *buf, size_t *len,
+                                    size_t *cap, const char *s, size_t slen,
+                                    long width, int left, int zero)
+{
+    size_t pad = (width > 0 && (size_t)width > slen)
+                     ? (size_t)width - slen : 0;
+    size_t head = 0, k;
+    if (left || !zero || pad == 0)
+        return fmt_append_padded(S, buf, len, cap, s, slen, width, left);
+    if (head < slen && (s[head] == '-' || s[head] == '+'
+                        || s[head] == ' ')) head++;
+    if (head + 1 < slen && s[head] == '0'
+        && (s[head + 1] == 'x' || s[head + 1] == 'X')) head += 2;
+    if (head >= slen || s[head] < '0' || s[head] > '9')
+        return fmt_append_padded(S, buf, len, cap, s, slen, width, left);
+    buf = fmt_append(S, buf, len, cap, s, head);
+    if (buf == NULL) return NULL;
+    for (k = 0; k < pad; k++) {
+        buf = fmt_append(S, buf, len, cap, "0", 1);
+        if (buf == NULL) return NULL;
+    }
+    return fmt_append(S, buf, len, cap, s + head, slen - head);
+}
+
 /* Re-render a plain %lld decimal with ',' groups and/or the '('
  * negative style. `in` is nul-terminated; out must hold at least
  * strlen(in) + its comma count + 2 parens + nul (96 covers 64-bit). */
@@ -147,6 +176,12 @@ static void fmt_java_g(double x, long prec, char *out, size_t outsz)
 {
     long   p = prec < 0 ? 6 : (prec == 0 ? 1 : prec);
     double ax = fabs(x);
+    if (!isfinite(x)) {
+        /* nan/inf render as-is; the log10/floor digit math below is
+         * undefined on them (a NaN-to-long cast). */
+        snprintf(out, outsz, "%f", x);
+        return;
+    }
     if (x != 0.0 && (ax < 1e-4 || ax >= pow(10.0, (double)p))) {
         snprintf(out, outsz, "%.*e", (int)(p - 1), x);
     } else {
@@ -359,7 +394,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 emsg  = "format: %c expects a char or codepoint";
                 goto fail;
             }
-            if (spec == 'C' && cp >= 'a' && cp <= 'z') cp -= 32;
+            if (spec == 'C') cp = mino_unicode_to_upper(cp);
             cn = utf8_encode(cb, cp);
             buf = fmt_append_padded(S, buf, &len, &cap, cb, cn,
                                     width, f_minus);
@@ -491,8 +526,9 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             }
             fmt_java_g(d, prec, gtmp, gsz);
             if (spec == 'G') fmt_ascii_upcase(gtmp);
-            buf = fmt_append_padded(S, buf, &len, &cap, gtmp,
-                                    strlen(gtmp), width, f_minus);
+            buf = fmt_append_num_padded(S, buf, &len, &cap, gtmp,
+                                        strlen(gtmp), width, f_minus,
+                                        f_zero);
             free(gtmp);
             if (buf == NULL) { free(argv); return NULL; }
             break;
@@ -511,8 +547,9 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             plus = strchr(tmp, spec == 'a' ? 'p' : 'P');
             if (plus != NULL && plus[1] == '+')
                 memmove(plus + 1, plus + 2, strlen(plus + 2) + 1);
-            buf = fmt_append_padded(S, buf, &len, &cap, tmp,
-                                    strlen(tmp), width, f_minus);
+            buf = fmt_append_num_padded(S, buf, &len, &cap, tmp,
+                                        strlen(tmp), width, f_minus,
+                                        f_zero);
             if (buf == NULL) { free(argv); return NULL; }
             break;
         }

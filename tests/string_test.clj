@@ -294,6 +294,37 @@
   (is (thrown? Exception (format "%q" 1)))
   (is (thrown? Exception (format "%"))))
 
+(deftest format-uppercase-char-directive-unicode
+  ;; %C uppercases through the generated case tables, not ASCII-only.
+  (is (= "A" (format "%C" \a)))
+  (is (= "É" (format "%C" (char 233))))
+  (is (= "Σ" (format "%C" (char 963))))
+  (is (= "А" (format "%C" (char 1072))))
+  (is (= "Ა" (format "%C" (char 4304))))
+  ;; A codepoint with no uppercase mapping passes through.
+  (is (= "5" (format "%C" \5))))
+
+(deftest format-zero-pad-and-width-on-g-and-a
+  ;; The 0 flag zero-fills after the sign and hex prefix; width on
+  ;; %a/%g runs through the shared numeric pad path.
+  (is (= "0000003.14" (format "%010.3g" 3.14)))
+  (is (= "-000003.14" (format "%010.3g" -3.14)))
+  (is (= "000123.450" (format "%010g" 123.45)))
+  (is (= "-0000123.450" (format "%012g" -123.45)))
+  (is (= "01.2e+03" (format "%08.2g" 1234.5)))
+  (is (= "00001.23e+03" (format "%012.3g" 1234.5)))
+  (is (= "01.23450E-05" (format "%012G" 1.2345E-5)))
+  (is (= "0x000000001.8p0" (format "%015a" 1.5)))
+  (is (= "-0x00000001.8p0" (format "%015a" -1.5)))
+  (is (= "0X000000001.8P0" (format "%015A" 1.5)))
+  (is (= "        0x1.8p0" (format "%15a" 1.5)))
+  (is (= "0x1.8p0        |" (str (format "%-15a" 1.5) "|")))
+  (is (= "     123.450" (format "%12g" 123.45)))
+  (is (= "123.450     |" (str (format "%-12g" 123.45) "|")))
+  ;; A non-numeric rendering (NaN) pads with spaces, never zeros.
+  (is (not (str/includes? (format "%010g" ##NaN) "0")))
+  (is (= 10 (count (format "%010g" ##NaN)))))
+
 (deftest format-grouping-separator-fixed-comma
   ;; ADR 52: the , flag groups with a hardcoded comma on every host;
   ;; mino output is byte-identical across hosts, so no locale lookup.
