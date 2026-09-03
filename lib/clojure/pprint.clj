@@ -430,13 +430,16 @@
 (defn fresh-line
   "Emit a newline only when output is not already at the start of a line.
   Inside the engine the column is known exactly; otherwise, when *out* is
-  a string-collecting atom, inspect the buffer; failing that, emit a
-  newline."
+  a capture sink (a with-out-str buffer or a string-collecting atom),
+  inspect the buffer; failing that, emit a newline."
   []
   (cond
     (pp-engine?)
     (when (pos? (:col @*pp-state*))
       (pp-emit "\n"))
+    (out-buffer? *out*)
+    (when-not (out-buffer-line-start? *out*)
+      (newline))
     (atom? *out*)
     (let [s @*out*]
       (when (and (string? s) (pos? (count s)) (not (str/ends-with? s "\n")))
@@ -486,12 +489,12 @@
                                                *print-suppress-namespaces*)
               *print-pprint-dispatch* (get opts :dispatch *print-pprint-dispatch*)]
       (if (nil? stream)
-        (let [sink (atom "")]
+        (let [sink (out-buffer)]
           (binding [*out* sink]
             (if *print-pretty*
               (run-engine 0 #(pp-write-top object))
               (pr object)))
-          @sink)
+          (out-buffer-str sink))
         (if (= stream true)
           ;; Write to the ambient *out*.
           (do (if *print-pretty*
@@ -508,13 +511,15 @@
 (defn- out-mid-line?
   "True when the current engine column is non-zero, or -- for output a
   custom dispatch wrote with raw print/pr that the engine did not track
-  -- when the *out* atom's buffer does not already end in a newline."
+  -- when the *out* capture sink does not already end in a newline."
   []
   (or (pos? (:col @*pp-state*))
-      (and (atom? *out*)
-           (let [s @*out*]
-             (and (string? s) (pos? (count s))
-                  (not (str/ends-with? s "\n")))))))
+      (if (out-buffer? *out*)
+        (not (out-buffer-line-start? *out*))
+        (and (atom? *out*)
+             (let [s @*out*]
+               (and (string? s) (pos? (count s))
+                    (not (str/ends-with? s "\n"))))))))
 
 (defn- pprint-body
   "Run the engine for object on the ambient *out*, finishing with a

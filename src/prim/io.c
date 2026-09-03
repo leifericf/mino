@@ -98,8 +98,110 @@ static int try_capture_to_atom(mino_state *S, mino_val *sink,
     return 1;
 }
 
+/* Growable capture buffer behind with-out-str: appends are O(1)
+ * amortized (capacity doubles on growth), so n prints into one
+ * capture cost O(total bytes), not O(n * buffer). The buffer lives
+ * in host memory behind an opaque handle; the string materializes
+ * once, on out-buffer-str. */
+#define OUT_BUF_TAG "mino/out-buffer"
+
+typedef struct {
+    char  *data;  /* host-owned bytes; NULL until the first append */
+    size_t len;   /* bytes written */
+    size_t cap;   /* bytes allocated */
+} out_buf_t;
+
+static void out_buf_finalize(void *ptr, const char *tag)
+{
+    out_buf_t *b = (out_buf_t *)ptr;
+    (void)tag;
+    if (b != NULL) {
+        free(b->data);
+        free(b);
+    }
+}
+
+static int is_out_buf(const mino_val *v)
+{
+    return v != NULL && mino_type_of(v) == MINO_HANDLE
+        && v->as.handle.tag != NULL
+        && strcmp(v->as.handle.tag, OUT_BUF_TAG) == 0
+        && v->as.handle.ptr != NULL;
+}
+
+/* Allocate a fresh out-buffer handle. Returns NULL with a pending
+ * throw on OOM. */
+static mino_val *out_buf_make(mino_state *S)
+{
+    mino_val *hv;
+    out_buf_t  *b;
+    hv = mino_handle_ex(S, NULL, OUT_BUF_TAG, out_buf_finalize);
+    if (hv == NULL) return NULL;
+    b = (out_buf_t *)calloc(1, sizeof(*b));
+    if (b == NULL) {
+        prim_throw_classified(S, "internal", "MIN001",
+            "out-buffer: out of memory");
+        return NULL;
+    }
+    hv->as.handle.ptr = b;
+    return hv;
+}
+
+/* Append len bytes with amortized doubling. Returns 0 on success,
+ * -1 with a pending throw on OOM or size overflow. */
+static int out_buf_append(mino_state *S, out_buf_t *b,
+                          const char *buf, size_t len)
+{
+    size_t need;
+    if (len == 0) return 0;
+    if (!checked_add_sz(b->len, len, &need)) goto oom;
+    if (need > b->cap) {
+        size_t nc = b->cap == 0 ? 256 : b->cap;
+        char  *nd;
+        while (nc < need) {
+            if (!checked_double_sz(nc, &nc)) goto oom;
+        }
+        nd = (char *)realloc(b->data, nc);
+        if (nd == NULL) goto oom;
+        b->data = nd;
+        b->cap  = nc;
+    }
+    memcpy(b->data + b->len, buf, len);
+    b->len = need;
+    return 0;
+oom:
+    prim_throw_classified(S, "internal", "MIN001",
+        "*out*: out of memory");
+    return -1;
+}
+
+/* Materialize the buffer's current contents as a mino string. The
+ * handle must stay rooted by the caller across this call: the string
+ * allocation can collect, and an unreachable handle's finalizer
+ * would free the bytes mid-copy. */
+static mino_val *out_buf_to_string(mino_state *S, mino_val *hv)
+{
+    out_buf_t *b = (out_buf_t *)hv->as.handle.ptr;
+    if (b == NULL || b->len == 0) return mino_string_n(S, "", 0);
+    return mino_string_n(S, b->data, b->len);
+}
+
+/* Append `buf` to the out-buffer handle `sink`. Returns 1 on capture,
+ * 0 if sink is not an out-buffer, and -1 on OOM. */
+static int try_capture_to_out_buf(mino_state *S, mino_val *sink,
+                                  const char *buf, size_t len)
+{
+    if (!is_out_buf(sink)) return 0;
+    if (out_buf_append(S, (out_buf_t *)sink->as.handle.ptr,
+                       buf, len) < 0) {
+        return -1;
+    }
+    return 1;
+}
+
 /* Emit `buf` to the sink named by `out_var_name` (`*out*` or `*err*`).
  * Routing:
+ *   out-buffer handle    → amortized append (the with-out-str sink)
  *   atom holding string  → append to atom
  *   :mino/stdout         → write to stdout
  *   :mino/stderr         → write to stderr
@@ -115,7 +217,10 @@ static int io_emit(mino_state *S, const char *out_var_name,
     int         captured;
     FILE       *fallback;
     sink     = resolve_io_sink(S, out_var_name);
-    captured = try_capture_to_atom(S, sink, buf, len);
+    captured = try_capture_to_out_buf(S, sink, buf, len);
+    if (captured == 0) {
+        captured = try_capture_to_atom(S, sink, buf, len);
+    }
     if (captured < 0) return -1;
     if (captured == 1) return 0;
     fallback = (strcmp(out_var_name, "*err*") == 0) ? stderr : stdout;
@@ -263,20 +368,22 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
     if (S->print_method_fn != NULL) {
         /* The hook calls pr-builtin (now routed through *out*) or
          * the user-supplied method. Capture its output by binding
-         * *out* to a temporary string-atom for the duration of the
-         * hook call, then return the captured string. */
-        mino_val   *atom_str = mino_string_n(S, "", 0);
-        mino_val   *atom_val;
+         * *out* to a temporary out-buffer for the duration of the
+         * hook call, then return the captured string. The pin keeps
+         * the handle rooted through the extraction below: the string
+         * allocation can collect, and an unreachable handle's
+         * finalizer frees the bytes. */
+        mino_val   *sink_buf;
+        mino_val   *result;
         mino_val   *call_args;
         dyn_frame_t  *frame;
         dyn_binding_t *binding;
-        if (atom_str == NULL) return NULL;
-        gc_pin(atom_str); /* keep atom_str alive across mino_atom alloc */
-        atom_val = mino_atom(S, atom_str);
-        gc_unpin(1);
-        if (atom_val == NULL) return NULL;
+        sink_buf = out_buf_make(S);
+        if (sink_buf == NULL) return NULL;
+        gc_pin(sink_buf);
         binding = (dyn_binding_t *)malloc(sizeof(*binding));
         if (binding == NULL) {
+            gc_unpin(1);
             prim_throw_classified(S, "internal", "MIN001",
                 "print: out of memory");
             return NULL;
@@ -287,11 +394,12 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         binding->name = (binding->var != NULL)
                         ? binding->var->as.var.sym
                         : "*out*";
-        binding->val  = atom_val;
+        binding->val  = sink_buf;
         binding->next = NULL;
         frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
         if (frame == NULL) {
             free(binding);
+            gc_unpin(1);
             prim_throw_classified(S, "internal", "MIN001",
                 "print: out of memory");
             return NULL;
@@ -305,8 +413,13 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         mino_current_ctx(S)->dyn_stack = frame->prev;
         free(binding);
         free(frame);
-        if (mino_last_error(S) != NULL) return NULL;
-        return atom_val->as.atom.val;
+        if (mino_last_error(S) != NULL) {
+            gc_unpin(1);
+            return NULL;
+        }
+        result = out_buf_to_string(S, sink_buf);
+        gc_unpin(1);
+        return result;
     }
     return print_to_string(S, v);
 }
@@ -436,8 +549,8 @@ static mino_val *prim_pr(mino_state *S, mino_val *args, mino_env *env)
 /* (pr-builtin x) writes one value via the built-in C formatter, bypassing
  * the print-method hook. Used by print-method's :default method so the
  * default path does not recurse into itself. Routes through *out* so a
- * binding to a string-atom captures, and falls through to stdout
- * otherwise. */
+ * binding to a capture sink (out-buffer or string-atom) captures, and
+ * falls through to stdout otherwise. */
 static mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *formatted;
@@ -453,6 +566,78 @@ static mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
         return NULL;
     }
     return mino_nil(S);
+}
+
+/* (out-buffer) — a fresh growable output sink for *out* / *err*.
+ * with-out-str binds one, prints append O(1) amortized, and
+ * out-buffer-str materializes the accumulated string once. */
+static mino_val *prim_out_buffer(mino_state *S, mino_val *args,
+                                   mino_env *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "out-buffer takes no arguments");
+    }
+    return out_buf_make(S);
+}
+
+static mino_val *prim_out_buffer_p(mino_state *S, mino_val *args,
+                                     mino_env *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "out-buffer? requires one argument");
+    }
+    return is_out_buf(args->as.cons.car) ? mino_true(S)
+                                         : mino_false(S);
+}
+
+/* Shared argument check for the out-buffer accessors. */
+static out_buf_t *out_buf_arg(mino_state *S, mino_val *args,
+                              const char *who)
+{
+    char msg[80];
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires one argument", who);
+        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return NULL;
+    }
+    if (!is_out_buf(args->as.cons.car)) {
+        snprintf(msg, sizeof(msg), "%s: argument must be an out-buffer",
+                 who);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return NULL;
+    }
+    return (out_buf_t *)args->as.cons.car->as.handle.ptr;
+}
+
+static mino_val *prim_out_buffer_str(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    (void)env;
+    if (out_buf_arg(S, args, "out-buffer-str") == NULL) return NULL;
+    /* args stays rooted by the caller, so the handle cannot be
+     * finalized during the string allocation. */
+    return out_buf_to_string(S, args->as.cons.car);
+}
+
+/* (out-buffer-line-start? b) — true when the next byte written would
+ * start a line: the buffer is empty or ends with a newline. Lets
+ * fresh-line stay O(1) over a capture sink. */
+static mino_val *prim_out_buffer_line_start_p(mino_state *S,
+                                                mino_val *args,
+                                                mino_env *env)
+{
+    out_buf_t *b;
+    (void)env;
+    b = out_buf_arg(S, args, "out-buffer-line-start?");
+    if (b == NULL) return NULL;
+    if (b->len == 0 || b->data[b->len - 1] == '\n') {
+        return mino_true(S);
+    }
+    return mino_false(S);
 }
 
 /* (set-print-method! fn) — install a late-binding hook for pr / prn.
@@ -1195,8 +1380,16 @@ const mino_prim_def k_prims_io_core[] = {
      "Prints the arguments readably to *out*, without a trailing newline."},
     {"newline",           prim_newline,
      "Writes a line separator to *out*."},
+    {"out-buffer",        prim_out_buffer,
+     "Returns a fresh growable output sink for *out*; prints into it append in amortized constant time."},
+    {"out-buffer?",       prim_out_buffer_p,
+     "Returns true if x is an out-buffer sink."},
+    {"out-buffer-str",    prim_out_buffer_str,
+     "Returns the accumulated contents of an out-buffer as a string."},
+    {"out-buffer-line-start?", prim_out_buffer_line_start_p,
+     "Returns true when an out-buffer is empty or ends with a newline."},
     {"flush",             prim_flush,
-     "Flushes pending output on *out* and *err*. No-op for string-atom bindings."},
+     "Flushes pending output on *out* and *err*. No-op for capture sinks (out-buffers and string atoms)."},
     {"read-line",         prim_read_line,
      "Reads one line from *in*. Returns the line without trailing newline, or nil at EOF."},
     {"read*",             prim_read,

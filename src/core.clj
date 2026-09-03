@@ -2919,13 +2919,13 @@
 ) ;; end (when (mino-installed? :multimethods) ...)
 
 (defmacro with-out-str
-  "Evaluates body with *out* bound to a fresh string-collecting atom,
+  "Evaluates body with *out* bound to a fresh growable output buffer,
   and returns the accumulated string."
   [& body]
-  `(let [a# (atom "")]
-     (binding [*out* a#]
+  `(let [b# (out-buffer)]
+     (binding [*out* b#]
        ~@body)
-     (deref a#)))
+     (out-buffer-str b#)))
 
 (defmacro with-in-str
   "Evaluates body with *in* bound to a string-cursor atom holding
@@ -2953,8 +2953,9 @@
 
 (defn print-simple
   "Writes the plain text form of o (its str form, bypassing the
-   print-method dispatch) to w, a string-collecting atom like the one
-   *out* is bound to inside with-out-str. Returns nil."
+   print-method dispatch) to w, an output sink such as the buffer
+   *out* is bound to inside with-out-str or a string-collecting
+   atom. Returns nil."
   [o w]
   (binding [*out* w]
     (print (str o)))
