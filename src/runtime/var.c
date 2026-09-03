@@ -304,6 +304,12 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     mino_val *validator = var->as.var.validator;
     mino_val *watches   = var->as.var.watches;
     mino_env *env;
+    /* A macro binding changes when either side of the swap is a
+     * macro; only then do baked compile-time expansions go stale.
+     * See macro_def_gen in runtime/internal.h. */
+    int touches_macro =
+        (val != NULL && mino_type_of(val) == MINO_MACRO)
+        || (old_val != NULL && mino_type_of(old_val) == MINO_MACRO);
 
     /* Fast path: no watches, no validator, no env lookup. Early-bound
      * install paths (state init, runtime/install_stdlib bootstrap)
@@ -316,6 +322,7 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
         var->as.var.bound = 1;
         var->as.var.version++;
         S->ns_vars.ic_gen++;
+        if (touches_macro) S->macro_def_gen++;
         return;
     }
 
@@ -353,6 +360,7 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     /* Same invalidation as the fast path: a root swap through the
      * watched/validated path must also retire cached call slots. */
     S->ns_vars.ic_gen++;
+    if (touches_macro) S->macro_def_gen++;
     /* Watches: dispatch after the publish. JVM Clojure's Var watches
      * fire on (alter-var-root v f) and on def with rebind. The
      * callback signature is (fn key var old new). A watch that throws
@@ -403,8 +411,12 @@ void var_unintern(mino_state *S, const char *ns, const char *name)
             var_hash_rebuild(S);
             /* Same rationale as env_unbind: removing a var changes how
              * its symbol resolves, and the inline call cache must
-             * notice. Bumping ic_gen invalidates every slot. */
+             * notice. Bumping ic_gen invalidates every slot. The
+             * removed root may have been a macro, so the macro
+             * generation bumps too (rare op; precision not worth a
+             * type probe on a value already unlinked). */
             S->ns_vars.ic_gen++;
+            S->macro_def_gen++;
             return;
         }
     }

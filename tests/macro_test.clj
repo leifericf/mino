@@ -180,4 +180,43 @@
   (is (= '([x] [x y] [x y & more])
          (:arglists (meta (resolve 'not=))))))
 
+;; --- &env stops at namespace roots ---
+;; A macro invoked while another macro's body evaluates sees an env
+;; chain rooted in the outer macro's defining-ns env, not the
+;; caller's. The &env locals walk must stop at the first namespace
+;; root it meets; otherwise every var of that ns (and of clojure.core
+;; above it) shows up in &env as a "local". Regression: expanding a
+;; core macro whose body calls another macro (if-let calls when-not)
+;; built that thousand-entry map on every expansion.
+
+(in-ns 'mt.envwalk.home)
+(defmacro mt-ew-inner-sees-core? [] (contains? &env 'map))
+(defmacro mt-ew-inner-sees-x? [] (contains? &env 'x))
+(defmacro mt-ew-outer-sees-core? [] (let [r (mt-ew-inner-sees-core?)] r))
+(defmacro mt-ew-outer-sees-x? [] (let [x 1] (mt-ew-inner-sees-x?)))
+(in-ns 'user)
+
+(deftest env-walk-stops-at-ns-root
+  (testing "nested expansion does not see namespace vars as locals"
+    (is (false? (mt.envwalk.home/mt-ew-outer-sees-core?))))
+  (testing "nested expansion still sees true lexical locals"
+    (is (true? (mt.envwalk.home/mt-ew-outer-sees-x?)))))
+
+(deftest boot-macro-expansion-allocation-bounded
+  ;; Boot-defined macros capture the clojure.core root env, so their
+  ;; nested macro calls (if-let's body calls when-not) walk a chain
+  ;; whose root is not the caller's ns root. The broken walk built the
+  ;; every-core-var &env map on each expansion (~8000 allocations per
+  ;; if-let expansion); the fixed walk stays in the low hundreds. The
+  ;; budget is an allocation count, not wall clock, so slow hosts
+  ;; cannot flake it.
+  (let [total #(let [g (gc-stats)]
+                 (+ (:alloc-bump-hits g) (:alloc-freelist-hits g)
+                    (:alloc-calloc-class-miss g) (:alloc-calloc-no-class g)))
+        form '(if-let [s 1] s :x)]
+    (macroexpand-1 form)
+    (let [before (total)]
+      (macroexpand-1 form)
+      (is (< (- (total) before) 2000)))))
+
 (run-tests-and-exit)

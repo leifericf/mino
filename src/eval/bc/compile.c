@@ -686,9 +686,11 @@ static int is_special_form_name(const char *name)
     if (strcmp(name, "throw") == 0) return 1;
     if (strcmp(name, "set!") == 0) return 1;
     /* Other forms mino dispatches at eval time. defrecord/deftype/
-     * defprotocol/reify/case/cond/new/. are macros expanded before
-     * reaching here, but match the eye -- exclude defensively in case
-     * a future reader inserts them as raw forms. */
+     * defprotocol/reify/case/cond are core macros (see
+     * is_core_macro_name); they land here so a raw occurrence whose
+     * head fails to resolve still declines instead of emitting a
+     * bogus regular call. new/. are host syntax handled only on the
+     * tree-walker path. */
     if (strcmp(name, "defrecord") == 0) return 1;
     if (strcmp(name, "deftype") == 0) return 1;
     if (strcmp(name, "defprotocol") == 0) return 1;
@@ -717,6 +719,24 @@ static int is_special_form_name(const char *name)
     return 0;
 }
 
+/* The subset of is_special_form_name that mino actually defines as
+ * core macros: the tree-walker dispatches these through ordinary
+ * macro application, so when the head resolves to a macro the
+ * compiler bakes the one-step expansion (compile_macro_call) instead
+ * of declining the whole fn. A head that fails to resolve (early
+ * boot, ns games) still declines, keeping the tree-walker's
+ * error-shape ownership. set! also carries a macro-typed var but is
+ * a true special form; it stays out of this list. */
+static int is_core_macro_name(const char *name)
+{
+    return strcmp(name, "cond") == 0
+        || strcmp(name, "case") == 0
+        || strcmp(name, "defrecord") == 0
+        || strcmp(name, "deftype") == 0
+        || strcmp(name, "defprotocol") == 0
+        || strcmp(name, "reify") == 0;
+}
+
 /* Forward declarations. `tail` is 1 when the result of this expression
  * is the fn's return value; control forms (if/do/let) propagate it to
  * their inner tail position so a nested call there emits OP_TAILCALL
@@ -735,6 +755,48 @@ static int          try_fold_arg(compiler_t *c, mino_val *v,
                                  mino_val **out);
 static int          fold_result_constable(mino_val *v);
 static const pure_prim_t *should_fold_call(compiler_t *c, mino_val *head);
+
+/* One compile-time macroexpansion step, try-state suppressed so a
+ * throwing macro body returns NULL through the diag path instead of
+ * longjmp-ing out of the compiler. Shared by compile_macro_call and
+ * the contains_env_capture pre-scan so both see the identical
+ * expansion.
+ *
+ * macroexpand1 keys its env walk on the full symbol text, so a
+ * clojure.core/-qualified macro head (syntax-quoted expansions nest
+ * them: cond's own expansion carries `(clojure.core/cond ...)`)
+ * misses even though runtime dispatch resolves it. Mirror the
+ * dispatch through probe_head_value for clojure.core heads only:
+ * core macro expansions are expansion-context-free (defrecord and
+ * reify read *ns*, but both tiers expand under the fn's defining ns,
+ * so they agree), while a macro from any other ns may read &env or
+ * expansion-time state and must expand where it runs, not where it
+ * compiles -- those keep the decline. */
+static mino_val *probe_head_value(compiler_t *c, mino_val *head);
+
+static mino_val *bc_macroexpand_step(compiler_t *c, mino_val *form,
+                                       int *expanded)
+{
+    mino_state *S = c->S;
+    int saved_td = mino_current_ctx(S)->try_depth;
+    mino_current_ctx(S)->try_depth = 0;
+    mino_val *e = macroexpand1(S, form, c->env, expanded);
+    mino_current_ctx(S)->try_depth = saved_td;
+    if (e != NULL && !*expanded) {
+        mino_val *qhead = form->as.cons.car;
+        if (qhead != NULL && mino_type_of(qhead) == MINO_SYMBOL
+            && strncmp(qhead->as.s.data, "clojure.core/", 13) == 0) {
+            mino_val *qmac = probe_head_value(c, qhead);
+            if (qmac != NULL && mino_type_of(qmac) == MINO_MACRO) {
+                mino_current_ctx(S)->try_depth = 0;
+                e = apply_callable(S, qmac, form->as.cons.cdr, c->env);
+                mino_current_ctx(S)->try_depth = saved_td;
+                *expanded = (e != NULL);
+            }
+        }
+    }
+    return e;
+}
 
 /* Pre-scan: does the form tree contain a form that captures the
  * current lexical env -- an inner (fn ...) literal or a (lazy-seq ...)
@@ -815,10 +877,7 @@ static int contains_env_capture(compiler_t *c, mino_val *form,
             mino_state *S = c->S; /* needed for gc_pin / gc_unpin macros */
             int expanded = 0;
             (*macro_budget)--;
-            int saved_td = mino_current_ctx(S)->try_depth;
-            mino_current_ctx(S)->try_depth = 0;
-            mino_val *e = macroexpand1(S, form, c->env, &expanded);
-            mino_current_ctx(S)->try_depth = saved_td;
+            mino_val *e = bc_macroexpand_step(c, form, &expanded);
             if (e == NULL || !expanded) {
                 /* Expansion raised (or no longer a macro): clear any diag
                  * and assume capture -- compile_macro_call will likewise
@@ -3632,17 +3691,14 @@ static int compile_macro_call(compiler_t *c, mino_val *form, int dst, int tail)
     }
     c->macro_budget--;
 
-    /* Expand one step with try-state suppressed so a throwing macro body
-     * returns NULL (via the diag path) instead of longjmp-ing out of the
-     * compiler -- the same speculative-eval discipline as try_fold_call.
-     * Compile happens under the fn's defining ns (set by the caller), so
-     * macroexpand1 resolves the macro and qualifies syntax-quoted symbols
-     * exactly as the tree-walker would at dispatch time. */
+    /* Expand one step through the shared bc_macroexpand_step (try-state
+     * suppressed, plus the gated qualified-core-macro fallback) -- the
+     * same speculative-eval discipline as try_fold_call. Compile happens
+     * under the fn's defining ns (set by the caller), so the expansion
+     * resolves the macro and qualifies syntax-quoted symbols exactly as
+     * the tree-walker would at dispatch time. */
     int expanded = 0;
-    int saved_td = mino_current_ctx(S)->try_depth;
-    mino_current_ctx(S)->try_depth = 0;
-    mino_val *e = macroexpand1(S, form, c->env, &expanded);
-    mino_current_ctx(S)->try_depth = saved_td;
+    mino_val *e = bc_macroexpand_step(c, form, &expanded);
 
     if (e == NULL || !expanded) {
         /* Expansion raised at compile time (e == NULL), or -- defensively
@@ -4799,8 +4855,16 @@ static int compile_expr_dispatch(compiler_t *c, mino_val *form,
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a
-         * regular call that would fail at runtime. */
+         * regular call that would fail at runtime. The core-macro
+         * subset (cond, case, record/protocol forms) expands at
+         * compile time instead when its head resolves: declining
+         * those sends the whole fn to the tree-walker, which
+         * re-expands every macro on every call. */
         if (is_special_form_name(name)) {
+            if (is_core_macro_name(name)
+                && head_resolves_to_macro(c, form->as.cons.car)) {
+                return compile_macro_call(c, form, dst, tail);
+            }
             c->S->bc_declines[BC_DECLINE_SPECIAL_FORM]++;
             c->ok = 0;
             return -1;
@@ -5257,6 +5321,7 @@ int mino_bc_compile_fn(mino_state *S, mino_val *fn)
     bc->has_try        = c.has_try;
     bc->has_macros     = c.has_macros;
     bc->compile_ic_gen = S->ns_vars.ic_gen;
+    bc->compile_macro_gen = S->macro_def_gen;
     /* Tighten the source-map length: keep only the slots that match
      * actual emitted instructions. Over-allocated tail entries are
      * harmless but the len field is the only signal a lookup uses to

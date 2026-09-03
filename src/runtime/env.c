@@ -283,8 +283,11 @@ int env_unbind(mino_state *S, mino_env *env, const char *name)
             /* Invalidate the eval-side inline call cache. Removing a
              * binding can change how a previously-cached call form
              * resolves, and the cache only checks gen_at_fill against
-             * S->ns_vars.ic_gen. ns-unmap and similar paths reach here. */
+             * S->ns_vars.ic_gen. ns-unmap and similar paths reach here.
+             * The removed binding may have named a macro, so the
+             * macro generation bumps too (rare op). */
             S->ns_vars.ic_gen++;
+            S->macro_def_gen++;
             return 1;
         }
     }

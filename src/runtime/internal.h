@@ -647,6 +647,14 @@ struct mino_state {
      * sockets die with their state. Past the stencil-ABI anchor
      * blocks, like everything after jit_invoke_ctx's block. */
     struct mino_net_pools  *net_pools;
+
+    /* Macro-binding generation. Bumped only when a macro binding can
+     * have changed: a var root swap where either side is a MACRO
+     * (defmacro, alter-var-root), var_unintern, env_unbind. The bc
+     * tier keys has_macros staleness on this instead of the
+     * every-def ns_vars.ic_gen, so plain defs never force macro-baked
+     * fns to recompile. Past the stencil-ABI anchor blocks. */
+    unsigned                 macro_def_gen;
 };
 
 /* Resolve the active per-thread ctx for state S.

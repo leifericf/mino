@@ -57,8 +57,10 @@ static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
     }
     if (fn->as.fn.bc != NULL
         && fn->as.fn.bc != &mino_bc_declined
-        && fn->as.fn.bc->has_folds
-        && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
+        && ((fn->as.fn.bc->has_folds
+             && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen)
+            || (fn->as.fn.bc->has_macros
+                && fn->as.fn.bc->compile_macro_gen != S->macro_def_gen))) {
         /* Template-aware recompile: closures share their template's
          * bc, so the recompile fires once on the template and every
          * sibling closure inherits the fresh bc through the back-

@@ -882,15 +882,17 @@ static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
         if (mino_current_ctx(S)->eval_current_form != NULL) {
             form_for_env = (mino_val *)mino_current_ctx(S)->eval_current_form;
         }
-        /* Walk lexical frames; stop at the namespace root env so
-         * we don't enumerate the (large) set of Vars. The ns root
-         * lives in current_ns_env(S). */
-        {
-            mino_env *ns_root = current_ns_env(S);
-            for (e = env; e != NULL && e != ns_root; e = e->parent) {
-                size_t i;
-                for (i = 0; i < e->len; i++) n_locals++;
-            }
+        /* Walk lexical frames; stop at the first namespace root so
+         * we don't enumerate the (large) set of Vars. The stop must
+         * key on is_ns_root, not pointer-equality with the caller's
+         * current_ns_env: a macro body evaluating under its defining
+         * ns (a nested macro call inside another macro's body) walks
+         * a chain rooted in THAT ns's env, and a pointer check
+         * against the caller's root would sail past it into every
+         * var of the defining ns and clojure.core above it. */
+        for (e = env; e != NULL && !e->is_ns_root; e = e->parent) {
+            size_t i;
+            for (i = 0; i < e->len; i++) n_locals++;
         }
         {
             mino_val **keys = NULL;
@@ -901,9 +903,8 @@ static mino_val *apply_fn_tree_walk(mino_state *S, mino_val *fn,
                 vals = (mino_val **)gc_alloc_typed(
                     S, GC_T_VALARR, n_locals * sizeof(*vals));
                 if (keys != NULL && vals != NULL) {
-                    mino_env *ns_root = current_ns_env(S);
                     size_t out = 0;
-                    for (e = env; e != NULL && e != ns_root; e = e->parent) {
+                    for (e = env; e != NULL && !e->is_ns_root; e = e->parent) {
                         size_t i;
                         for (i = 0; i < e->len; i++) {
                             if (out < n_locals) {
@@ -1152,19 +1153,23 @@ mino_val *apply_callable(mino_state *S, mino_val *fn, mino_val *args,
          *     const pool (depends on the folded var's binding).
          *   - has_macros: a macro call was expanded into the body (depends
          *     on the macro's current definition).
-         * If either fired AND the global IC generation has bumped since
-         * the compile (a `def` / `defmacro` / `ns-unmap` / `set!` of SOME
-         * var has fired in between), a dep may now resolve differently --
-         * a redefined macro most notably. Drop the bc back to NULL so the
-         * next compile re-folds and re-expands against the current
-         * bindings, matching what the tree-walker would do. The recompile
-         * fires lazily on the very next call, so unreached fns pay
-         * nothing. */
+         * Each keys on its own generation: folds on the every-def
+         * ns_vars.ic_gen (any redefinition can invalidate a folded
+         * value), baked macros on the macro-only macro_def_gen (a
+         * plain defn cannot redefine a macro, and keying macros on
+         * ic_gen recompiled every macro-baked fn per call through
+         * defn-heavy phases). On a stale generation a dep may resolve
+         * differently, so drop the bc back to NULL and recompile
+         * against the current bindings, matching what the tree-walker
+         * would do. The recompile fires lazily on the very next call,
+         * so unreached fns pay nothing. */
         if (mino_type_of(fn) == MINO_FN
             && fn->as.fn.bc != NULL
             && fn->as.fn.bc != &mino_bc_declined
-            && (fn->as.fn.bc->has_folds || fn->as.fn.bc->has_macros)
-            && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen) {
+            && ((fn->as.fn.bc->has_folds
+                 && fn->as.fn.bc->compile_ic_gen != S->ns_vars.ic_gen)
+                || (fn->as.fn.bc->has_macros
+                    && fn->as.fn.bc->compile_macro_gen != S->macro_def_gen))) {
             fn->as.fn.bc = NULL;
             (void)mino_bc_compile_fn(S, fn);
         }

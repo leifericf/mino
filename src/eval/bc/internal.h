@@ -555,8 +555,8 @@ typedef struct mino_bc_fn {
     /* 1 iff the compile macroexpanded any call head and baked the
      * expansion into the body. Soundness tracker (mirrors has_folds): a
      * redefined macro must affect compiled callers identically to tree-
-     * walked ones, so this -- like has_folds -- forces the compile_ic_gen
-     * recompile on any ns_vars.ic_gen bump, preserving tier transparency.
+     * walked ones, so a compile_macro_gen mismatch below forces the
+     * recompile, preserving tier transparency.
      *
      * Placed at the struct tail on purpose: the copy-and-patch JIT bakes
      * the byte offset of ic_slots (MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS) into
@@ -566,6 +566,13 @@ typedef struct mino_bc_fn {
      * leaves every JIT-observed offset untouched. The field is read only
      * on the C dispatch path (apply_callable), never by a stencil. */
     int              has_macros;
+    /* S->macro_def_gen at end of compile. Baked macro expansions go
+     * stale only when a macro binding changes, so has_macros staleness
+     * keys on this macro-only generation instead of ns_vars.ic_gen:
+     * keying on ic_gen recompiled every macro-baked fn after every
+     * plain def (a defn-heavy load or test phase recompiled hot fns on
+     * each call). Same tail-append ABI rationale as has_macros. */
+    unsigned         compile_macro_gen;
 } mino_bc_fn_t;
 
 typedef struct mino_bc_ic_stat {
