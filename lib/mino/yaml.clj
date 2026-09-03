@@ -242,10 +242,11 @@
                 :inline (conj acc (str "- " a))
                 :literal (into (conj acc (str "- " a))
                                (indent-lines b))
-                ;; The reader takes a quoted scalar right after "- " as
-                ;; a sequence item, not a mapping key (tracked in
-                ;; .local/BUGS.md), so a map opening with a quoted key
-                ;; gets the dash on its own line.
+                ;; A map opening with a quoted key gets the dash on
+                ;; its own line: readers predating the compact
+                ;; quoted-key fix took a quoted scalar right after
+                ;; "- " as a sequence item, and the own-line form is
+                ;; equally valid output either way.
                 :block (let [f (first a)]
                          (if (or (str/starts-with? f "'")
                                  (str/starts-with? f "\""))
@@ -256,24 +257,21 @@
 
 (defn- block-render
   "[:inline s], [:literal head lines], or [:block lines] for x in
-  block context. Binds the scalar with let, not if-let: an if-let and
-  a cond in one body fall off the interpreter fast path (tracked in
-  .local/BUGS.md), and this fn runs once per node."
+  block context."
   [x]
-  (let [s (scalar-inline x)]
-    (if s
-      [:inline s]
-      (cond (string? x) (if (literal-eligible? x)
-                          (let [[head lines] (literal-lines x)]
-                            [:literal head lines])
-                          [:inline (quote-scalar x)])
-            (map? x) (if (empty? x)
-                       [:inline "{}"]
-                       [:block (map-lines x)])
-            (sequential? x) (if (empty? x)
-                              [:inline "[]"]
-                              [:block (vec-lines x)])
-            :else (emit-fail "unrepresentable value" {:value x})))))
+  (if-let [s (scalar-inline x)]
+    [:inline s]
+    (cond (string? x) (if (literal-eligible? x)
+                        (let [[head lines] (literal-lines x)]
+                          [:literal head lines])
+                        [:inline (quote-scalar x)])
+          (map? x) (if (empty? x)
+                     [:inline "{}"]
+                     [:block (map-lines x)])
+          (sequential? x) (if (empty? x)
+                            [:inline "[]"]
+                            [:block (vec-lines x)])
+          :else (emit-fail "unrepresentable value" {:value x}))))
 
 (defn generate-string
   "Emits x as one YAML document, block style by default, such that
