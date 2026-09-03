@@ -293,3 +293,23 @@
   ;; An unknown directive throws instead of leaking literal text.
   (is (thrown? Exception (format "%q" 1)))
   (is (thrown? Exception (format "%"))))
+
+(deftest format-integer-directives-reject-floats
+  ;; Reference semantics: a float argument to an integer directive is
+  ;; an illegal conversion and throws; truncating toward zero was a
+  ;; silent wrong answer.
+  (is (thrown-with-msg? #"integer" (format "%d" 3.99)))
+  (is (thrown-with-msg? #"integer" (format "%x" 3.99)))
+  (is (thrown-with-msg? #"integer" (format "%o" 3.99)))
+  (is (thrown-with-msg? #"integer" (format "%d" -0.5)))
+  (is (thrown-with-msg? #"integer" (format "%,d" 1234.5)))
+  (is (thrown-with-msg? #"integer" (format "%d" ##NaN)))
+  (is (thrown-with-msg? #"integer" (format "%d" ##Inf)))
+  (is (thrown-with-msg? #"integer" (format "%d" 1/2)))
+  ;; The error is classified data, catchable by kind.
+  (is (= :eval/type
+         (try (format "%d" 3.99) (catch :eval/type e (:mino/kind e)))))
+  ;; The single-int-tier bigint accommodation stays: within 64 bits
+  ;; formats, beyond 64 bits throws.
+  (is (= "ff" (format "%x" 255N)))
+  (is (thrown? Exception (format "%d" 123456789012345678901234N))))

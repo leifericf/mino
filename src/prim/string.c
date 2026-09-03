@@ -65,11 +65,11 @@ static inline char *fmt_ensure(mino_state *S, char *buf,
  * sequential argument cursor, matching the Formatter).
  *
  * Deviations, all accommodations of mino's numeric model and all
- * looser than the JVM (they format where the JVM throws):
- *   - %c accepts an integer codepoint (the JVM rejects Long).
- *   - %d/%x/%o accept a bigint that fits 64 bits (the JVM rejects
- *     BigInt) and coerce a float by truncation (historical subset
- *     behavior, kept for compatibility).
+ * looser than canon (they format where canon throws):
+ *   - %c accepts an integer codepoint (canon rejects a long).
+ *   - %d/%x/%o accept a bigint that fits 64 bits (canon rejects big
+ *     integers outright). A float is an illegal conversion and
+ *     throws, matching canon.
  * %g follows the Formatter's semantics (fixed significant digits,
  * trailing zeros kept), not C's shortest-form %g. %a strips the
  * exponent's '+' like Double/toHexString. %n is always "\n": mino
@@ -157,15 +157,14 @@ static void fmt_java_g(double x, long prec, char *out, size_t outsz)
     }
 }
 
-/* Integer-directive argument: int, 64-bit-fitting bigint, or (kept
- * from the historical subset) a float truncated toward zero. */
+/* Integer-directive argument: int or 64-bit-fitting bigint. A float
+ * is an illegal conversion (canon throws; truncating was a silent
+ * wrong answer), so anything else fails. */
 static int fmt_arg_ll(const mino_val *v, long long *out)
 {
-    double d;
     if (as_long(v, out)) return 1;
     if (v != NULL && mino_type_of(v) == MINO_BIGINT
         && mino_as_ll(v, out)) return 1;
-    if (as_double(v, &d)) { *out = (long long)d; return 1; }
     return 0;
 }
 
@@ -371,7 +370,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             long long n2;
             if (!fmt_arg_ll(a, &n2)) {
                 ekind = "eval/type"; ecode = "MTY001";
-                emsg  = "format: integer directive expects a number";
+                emsg  = "format: integer directive expects an integer";
                 goto fail;
             }
             if (f_comma || f_paren) {
@@ -396,7 +395,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             int  tn;
             if (!fmt_arg_ll(a, &n2)) {
                 ekind = "eval/type"; ecode = "MTY001";
-                emsg  = "format: integer directive expects a number";
+                emsg  = "format: integer directive expects an integer";
                 goto fail;
             }
             cdir[di++] = '%';
