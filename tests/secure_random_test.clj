@@ -41,14 +41,14 @@
 (deftest rand-token-length-and-alphabet
   ;; n counts random bytes, encoded base64url without padding: each
   ;; 3-byte group yields 4 chars; a 1- or 2-byte tail yields 2 or 3.
-  ;; The alphabet is URL-safe only: dash, underscore, and alphanumerics.
-  ;; The dash leads the class so it reads as a literal, not a range.
+  ;; The alphabet is URL-safe only: alphanumerics, underscore, and dash.
+  ;; The dash sits in final class position, where it reads as a literal.
   (doseq [n [0 1 2 3 16 32]]
     (let [s (rand-token n)]
       (is (string? s))
       (is (= (+ (* 4 (quot n 3)) (nth [0 2 3] (rem n 3)))
              (count s)))
-      (is (some? (re-matches #"[-A-Za-z0-9_]*" s))))))
+      (is (some? (re-matches #"[A-Za-z0-9_-]*" s))))))
 
 (deftest rand-token-non-empty-for-positive-n
   (is (pos? (count (rand-token 1))))
