@@ -294,6 +294,17 @@
   (is (thrown? Exception (format "%q" 1)))
   (is (thrown? Exception (format "%"))))
 
+(deftest format-char-codepoint-accommodation
+  ;; ADR 51: %c and %C take an int codepoint in mino's single int
+  ;; tier, bounded to the Unicode scalar range.
+  (is (= "a" (format "%c" 97)))
+  (is (= "λ" (format "%c" 955)))
+  (is (= "A" (format "%C" 97)))
+  (is (= (str (char 128169)) (format "%c" 128169)))
+  (is (thrown-with-msg? #"char" (format "%c" -1)))
+  (is (thrown-with-msg? #"char" (format "%c" 1114112)))
+  (is (thrown-with-msg? #"char" (format "%c" "a"))))
+
 (deftest format-integer-directives-reject-floats
   ;; Reference semantics: a float argument to an integer directive is
   ;; an illegal conversion and throws; truncating toward zero was a
