@@ -61,4 +61,32 @@
       (is (= 127 (:exit result)))
       (is (pstr/includes? (:err result) "chdir")))))
 
+(deftest sh-in-future-does-not-starve-main-thread
+  ;; A worker running a blocking (sh ...) must not hold the state lock
+  ;; across its child IO. If it did, the main thread could not run the
+  ;; very IO the child waits on, and the two would deadlock. Here a
+  ;; future's sh spins until a release file appears; the main thread
+  ;; creates that file with a pure IO prim (spit). Pre-fix the future's
+  ;; deref times out (deadlock); post-fix it resolves promptly.
+  ;; Needs a worker thread; skip cleanly where threads are not granted.
+  (when (> (mino-thread-limit) 1)
+    (let [stamp   (str (System/currentTimeMillis) "-" (rand-int 1000000))
+          startf  (str "/tmp/mino-p8-start-" stamp)
+          relf    (str "/tmp/mino-p8-rel-" stamp)]
+      (sh "rm" "-f" startf relf)
+      (let [f (future
+                (sh "sh" "-c"
+                    (str "touch " startf
+                         "; while [ ! -e " relf
+                         " ]; do sleep 0.02; done; echo go"))
+                :done)]
+        ;; Bounded wait (~5s) for the worker's sh to be running.
+        (loop [n 0]
+          (when (and (< n 250) (not (file-exists? startf)))
+            (thread-sleep 20)
+            (recur (inc n))))
+        (spit relf "x")
+        (is (= :done (deref f 8000 :TIMEOUT)))
+        (sh "rm" "-f" startf relf)))))
+
 (run-tests-and-exit)

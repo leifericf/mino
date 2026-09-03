@@ -209,23 +209,37 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
         memcpy(cmd + clen, " 2>&1", 6);
     }
 
+    /* Yield state_lock across the blocking popen/read/pclose span so a
+     * worker running this sh does not starve every other thread while it
+     * waits on child IO. Without it, a `(future (sh ...))` that blocks in
+     * read holds state_lock, and the main thread deadlocks the moment it
+     * needs the lock (e.g. to run the very IO the child is waiting on).
+     * Only malloc-owned C buffers and plain ints are live across the
+     * window; no GC value crosses it, so no pin is required. Every path
+     * out of the window resumes the lock before any GC allocation or
+     * throw. */
+    {
+        int depth = mino_yield_lock(S);
 #ifdef _WIN32
-    fp = _popen(cmd, "r");
+        fp = _popen(cmd, "r");
 #else
-    fp = popen(cmd, "r");
+        fp = popen(cmd, "r");
 #endif
-    free(cmd);
-    if (fp == NULL) {
-        return prim_throw_classified(S, "io", "MIO001",
-                                     "sh: failed to execute command");
-    }
+        free(cmd);
+        if (fp == NULL) {
+            mino_resume_lock(S, depth);
+            return prim_throw_classified(S, "io", "MIO001",
+                                         "sh: failed to execute command");
+        }
 
-    out = read_all(fp, &out_len);
+        out = read_all(fp, &out_len);
 #ifdef _WIN32
-    status = _pclose(fp);
+        status = _pclose(fp);
 #else
-    status = pclose(fp);
+        status = pclose(fp);
 #endif
+        mino_resume_lock(S, depth);
+    }
     /* -1 means pclose / _pclose itself failed (e.g. wait was interrupted
      * or the child was reaped elsewhere). The value is not a wait
      * status, so WIFEXITED on it is undefined and would silently route
@@ -511,6 +525,14 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         close(out_pipe[1]);
         close(err_pipe[1]);
 
+        /* Yield state_lock across the blocking poll/read/waitpid drain so
+         * a worker running this run does not starve every other thread
+         * while it waits on the child. Only malloc-owned C buffers, pipe
+         * fds, and plain ints are live across the window; no GC value
+         * crosses it, so no pin is required. The lock is resumed before
+         * the capture_oom throw and the result-map construction below. */
+        {
+        int drain_depth = mino_yield_lock(S);
         while (!out_done || !err_done) {
             struct pollfd pfds[2];
             int nfds = 0;
@@ -557,6 +579,8 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         close(out_pipe[0]);
         close(err_pipe[0]);
         waitpid(pid, &status, 0);
+        mino_resume_lock(S, drain_depth);
+        }
         free_argv(argv);
 
         if (capture_oom) {
