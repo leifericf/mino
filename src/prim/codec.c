@@ -304,6 +304,128 @@ static mino_val *prim_hex_decode(mino_state *S, mino_val *args,
     return result;
 }
 
+/* ---- utf-8 ---- */
+
+/* Validate a UTF-8 byte range in place. On success returns 1; on
+ * malformed input returns 0 and sets *bad_off to the offending byte
+ * offset. STRICT: rejects overlong forms, UTF-16 surrogates, code
+ * points past U+10FFFF, bad continuations, and truncated tails. This
+ * matches the mino.http decode-utf8 contract exactly. */
+static int codec_utf8_validate(const unsigned char *src, size_t len,
+                               size_t *bad_off)
+{
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c0 = src[i];
+        size_t        width;
+        unsigned char lo, hi; /* accepted range of the first continuation */
+        if (c0 < 0x80) {
+            i++;
+            continue;
+        }
+        if (c0 >= 0xC2 && c0 <= 0xDF) {
+            width = 2; lo = 0x80; hi = 0xBF;
+        } else if (c0 == 0xE0) {
+            width = 3; lo = 0xA0; hi = 0xBF;
+        } else if (c0 >= 0xE1 && c0 <= 0xEC) {
+            width = 3; lo = 0x80; hi = 0xBF;
+        } else if (c0 == 0xED) {
+            width = 3; lo = 0x80; hi = 0x9F;
+        } else if (c0 >= 0xEE && c0 <= 0xEF) {
+            width = 3; lo = 0x80; hi = 0xBF;
+        } else if (c0 == 0xF0) {
+            width = 4; lo = 0x90; hi = 0xBF;
+        } else if (c0 >= 0xF1 && c0 <= 0xF3) {
+            width = 4; lo = 0x80; hi = 0xBF;
+        } else if (c0 == 0xF4) {
+            width = 4; lo = 0x80; hi = 0x8F;
+        } else {
+            *bad_off = i; /* 0xC0/0xC1, 0xF5-0xFF, and lone continuations */
+            return 0;
+        }
+        if (i + width > len) {
+            *bad_off = i; /* truncated multibyte tail */
+            return 0;
+        }
+        {
+            unsigned char c1 = src[i + 1];
+            size_t        j;
+            if (c1 < lo || c1 > hi) {
+                *bad_off = i + 1;
+                return 0;
+            }
+            for (j = 2; j < width; j++) {
+                unsigned char cj = src[i + j];
+                if (cj < 0x80 || cj > 0xBF) {
+                    *bad_off = i + j;
+                    return 0;
+                }
+            }
+        }
+        i += width;
+    }
+    return 1;
+}
+
+/* (bytes->string v) / (bytes->string v max-bytes) -- decode a string or
+ * bytes value as strict UTF-8. With max-bytes, an input longer than the
+ * cap is rejected before any decode work. */
+static mino_val *prim_bytes_to_string(mino_state *S, mino_val *args,
+                                      mino_env *env)
+{
+    mino_val            *v, *cap_arg;
+    const unsigned char *src;
+    size_t              len, bad_off = 0;
+    int                 is_string, have_cap = 0;
+    long long           cap = 0;
+    char                msg[96];
+    (void)env;
+
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "bytes->string requires one or two "
+                                     "arguments");
+    }
+    v = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val *rest = args->as.cons.cdr;
+        cap_arg  = rest->as.cons.car;
+        have_cap = 1;
+        if (mino_is_cons(rest->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "bytes->string requires one or two "
+                                         "arguments");
+        }
+    }
+    if (!codec_text_arg(v, &src, &len, &is_string)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "bytes->string: argument must be a "
+                                     "string or bytes value");
+    }
+    if (have_cap) {
+        if (!as_long(cap_arg, &cap) || cap < 0) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                                         "bytes->string: max-bytes must be a "
+                                         "non-negative integer");
+        }
+        if (len > (unsigned long long)cap) {
+            snprintf(msg, sizeof(msg),
+                     "bytes->string: input length %lu exceeds max-bytes %lld",
+                     (unsigned long)len, cap);
+            return prim_throw_classified(S, "eval/bounds", "MBD001", msg);
+        }
+    }
+    if (!codec_utf8_validate(src, len, &bad_off)) {
+        snprintf(msg, sizeof(msg),
+                 "bytes->string: invalid UTF-8 at byte %lu",
+                 (unsigned long)bad_off);
+        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+    }
+    /* Validated bytes are already a well-formed UTF-8 string, so a
+     * straight copy preserves byte identity with one allocation. */
+    return mino_string_n(S, (const char *)src, len);
+}
+
 const mino_prim_def k_prims_codec[] = {
     {"base64-encode", prim_base64_encode,
      "Encodes a string or bytes value as base64 (RFC 4648) with "
@@ -320,8 +442,14 @@ const mino_prim_def k_prims_codec[] = {
     {"hex-decode", prim_hex_decode,
      "Decodes hex from a string or bytes value; hex digits are "
      "case-insensitive and odd-length or non-hex input throws. Always "
-     "returns a bytes value; there is no bytes-to-string coercion at "
-     "this layer."},
+     "returns a bytes value; use bytes->string to coerce bytes to a "
+     "string as UTF-8."},
+    {"bytes->string", prim_bytes_to_string,
+     "Decodes a string or bytes value as strict UTF-8 into a string. "
+     "Overlong forms, UTF-16 surrogates, code points past U+10FFFF, "
+     "bad continuations, and truncated tails throw. With a second "
+     "max-bytes argument (a non-negative integer), an input longer "
+     "than the cap is rejected before any decode work."},
 };
 
 const size_t k_prims_codec_count =
