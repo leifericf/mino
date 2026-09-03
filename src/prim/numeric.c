@@ -1665,7 +1665,7 @@ static mino_val *prim_div_argv(mino_state *S, mino_val **argv, int argc,
  *   BIGDEC -- align scales, integer-divide unscaled bigints, wrap back
  *   RATIO  -- cross-multiply num/denom into bigints, integer-divide
  *   BIGINT -- mp_int_div via mino_bigint_quot/rem/mod
- *   INT    -- C / and %, with LLONG_MIN / -1 overflow promoted to bigint
+ *   INT    -- C / and %, with LLONG_MIN / -1 wrapping in the long tier
  *
  * RATIO meeting BIGDEC collapses to FLOAT (mirrors `+` / `-` etc.).
  */
@@ -1956,17 +1956,11 @@ static mino_val *prim_mqr(mino_state *S, mino_val *args, mqr_op_t op)
             return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
         if (a == LLONG_MIN && b == -1) {
-            /* Overflow: promote to bigint. */
-            mino_val *ba = mino_bigint_from_ll(S, a);
-            mino_val *bb;
-            if (ba == NULL) return NULL;
-            gc_pin(ba);
-            bb = mino_bigint_from_ll(S, b);
-            gc_unpin(1);
-            if (bb == NULL) return NULL;
-            if (op == MQR_QUOT) return mino_bigint_quot(S, ba, bb);
-            if (op == MQR_REM)  return mino_bigint_rem(S, ba, bb);
-            return mino_bigint_mod(S, ba, bb);
+            /* Long division wraps at this one corner (canon reference
+             * semantics): the quotient stays LLONG_MIN, the remainder
+             * is zero. Dividing in C would be UB, so answer directly. */
+            if (op == MQR_QUOT) return mino_int(S, LLONG_MIN);
+            return mino_int(S, 0);
         }
         if (op == MQR_QUOT) return mino_int(S, a / b);
         {

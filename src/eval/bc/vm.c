@@ -610,8 +610,8 @@ mino_val *binop_int_fast(mino_state *S, mino_val *lhs,
     case BINOP_REM:
         /* Bail on b==0 (prim throws division-by-zero) or on the
          * MINO_INT_MIN / -1 corner where the quotient escapes the
-         * tagged range and the prim's bigint-promote path is the
-         * Clojure-correct answer. */
+         * tagged range; the prim boxes it. (The long-minimum wrap
+         * corner never reaches this lane: that operand is boxed.) */
         if (b == 0) return NULL;
         if (a == MINO_INT_MIN && b == -1) return NULL;
         if (subop == BINOP_QUOT) return tag_or_box_int(S, a / b);

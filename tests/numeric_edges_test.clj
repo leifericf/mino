@@ -89,6 +89,25 @@
   (is (= 1 (count #{1e300})))
   (is (= 1 (count #{-1e300}))))
 
+(deftest quot-rem-wrap-at-long-min
+  ;; Long division wraps at the one overflowing corner: the long
+  ;; minimum divided by -1 stays the long minimum (canon reference
+  ;; semantics), and the remainder is zero. Promoting to bigint here
+  ;; was a silent value divergence in the long tier.
+  (is (= -9223372036854775808 (quot -9223372036854775808 -1)))
+  (is (= :int (type (quot Long/MIN_VALUE -1))))
+  (is (= 0 (rem -9223372036854775808 -1)))
+  (is (= :int (type (rem Long/MIN_VALUE -1))))
+  (is (= 0 (mod -9223372036854775808 -1)))
+  (is (= :int (type (mod Long/MIN_VALUE -1))))
+  ;; The bigint tier is exempt from wrapping: arbitrary precision
+  ;; divides truthfully, as in canon.
+  (is (= 9223372036854775808N (quot -9223372036854775808N -1)))
+  (is (= 0N (rem -9223372036854775808N -1)))
+  ;; Neighboring corners keep their exact quotients.
+  (is (= -9223372036854775807 (quot 9223372036854775807 -1)))
+  (is (= -9223372036854775808 (quot -9223372036854775808 1))))
+
 (deftest long-boundary-statics-are-fixnums
   ;; Long/MAX_VALUE and Long/MIN_VALUE are the long-tier boundary
   ;; constants; they must be :int so checked-arithmetic overflow

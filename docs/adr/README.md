@@ -57,3 +57,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [46](46-defer-password-hashing.md) | Defer password hashing primitives |
 | [47](47-defer-markdown.md) | Defer markdown; no reader in the standard distribution |
 | [48](48-core-bootstrap-bare-string-throws.md) | The core bootstrap keeps its bare-string throws |
+| [49](49-long-division-wraps-at-the-minimum.md) | Long division wraps at the minimum over divisor -1 |
