@@ -258,7 +258,7 @@ static void term_restore_echo(void)
 
 /* Read status for the non-throwing raw line read below. */
 typedef enum {
-    TERM_LINE_OK = 0,   /* a line was read (possibly empty); *buf/*len set */
+    TERM_LINE_OK = 0,   /* a line was read (possibly empty); buf and len set */
     TERM_LINE_EOF,      /* EOF with no bytes; caller returns nil */
     TERM_LINE_OOM       /* allocation or size-overflow; caller throws */
 } term_line_status;
