@@ -294,6 +294,16 @@
   (is (thrown? Exception (format "%q" 1)))
   (is (thrown? Exception (format "%"))))
 
+(deftest format-grouping-separator-fixed-comma
+  ;; ADR 52: the , flag groups with a hardcoded comma on every host;
+  ;; mino output is byte-identical across hosts, so no locale lookup.
+  (is (= "1,234,567" (format "%,d" 1234567)))
+  (is (= "-1,234" (format "%,d" -1234)))
+  (is (= "999" (format "%,d" 999)))
+  (is (= "1,000" (format "%,d" 1000)))
+  (is (= "(12,345)" (format "%(,d" -12345)))
+  (is (= "-9,223,372,036,854,775,808" (format "%,d" -9223372036854775808))))
+
 (deftest format-char-codepoint-accommodation
   ;; ADR 51: %c and %C take an int codepoint in mino's single int
   ;; tier, bounded to the Unicode scalar range.
