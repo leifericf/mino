@@ -24,11 +24,10 @@
 
 ;; A response body the client will accumulate and decode is untrusted:
 ;; a hostile or broken peer could otherwise drive unbounded memory and
-;; CPU in the client (the pure-Clojure UTF-8 decode below allocates per
-;; codepoint). We bound it by default. 16 MiB matches the http-request
-;; prim's own default body cap (HTTP_DEFAULT_MAX_BODY_BYTES), so the
-;; two layers agree rather than the client silently leaning on a prim
-;; default a reader cannot see. A body past the cap fails with
+;; CPU without a size bound. We bound it by default. 16 MiB matches the
+;; http-request prim's own default body cap (HTTP_DEFAULT_MAX_BODY_BYTES),
+;; so the two layers agree rather than the client silently leaning on a
+;; prim default a reader cannot see. A body past the cap fails with
 ;; {:error {:kind :overflow}}. A caller expecting a larger legitimate
 ;; download raises the ceiling with an explicit :max-bytes.
 (def ^:private default-max-bytes (* 16 1024 1024))
@@ -481,38 +480,18 @@
 ;;;; UTF-8 decoding
 
 (defn- decode-utf8
+  ;; Delegates to the bytes->string prim (strict UTF-8, one allocation,
+  ;; O(n)). The prim throws {:mino/kind "eval/contract" ...} on a bad
+  ;; sequence; we catch and re-throw as an http-domain error so callers
+  ;; catching :http/invalid still see the expected shape.
   [b]
-  (let [bs (vec b)
-        n (count bs)
-        invalid (fn [i] (bad (str "body is not valid UTF-8 at byte " i)))]
-    (loop [i 0, cps (transient [])]
-      (if (= i n)
-        (apply str (map char (persistent! cps)))
-        (let [c0 (nth bs i)
-              spec (cond
-                     (< c0 0x80) [1 0x7F 0 0]
-                     (and (>= c0 0xC2) (<= c0 0xDF)) [2 0x1F 0x80 0xBF]
-                     (= c0 0xE0) [3 0x0F 0xA0 0xBF]
-                     (and (>= c0 0xE1) (<= c0 0xEC)) [3 0x0F 0x80 0xBF]
-                     (= c0 0xED) [3 0x0F 0x80 0x9F]
-                     (and (>= c0 0xEE) (<= c0 0xEF)) [3 0x0F 0x80 0xBF]
-                     (= c0 0xF0) [4 0x07 0x90 0xBF]
-                     (and (>= c0 0xF1) (<= c0 0xF3)) [4 0x07 0x80 0xBF]
-                     (= c0 0xF4) [4 0x07 0x80 0x8F])]
-          (if (nil? spec)
-            (invalid i)
-            ;; spec is [width lead-mask first-cont-lo first-cont-hi];
-            ;; the lead bounds exclude overlong forms, surrogates, and
-            ;; anything past 10FFFF.
-            (let [[w mask lo hi] spec
-                  _ (when (> (+ i w) n) (invalid i))
-                  cp (reduce (fn [acc j]
-                               (let [cj (nth bs (+ i j))]
-                                 (when (and (= j 1) (or (< cj lo) (> cj hi)))
-                                   (invalid (+ i j)))
-                                 (when (or (< cj 0x80) (> cj 0xBF))
-                                   (invalid (+ i j)))
-                                 (bit-or (bit-shift-left acc 6) (- cj 0x80))))
-                             (bit-and c0 mask)
-                             (range 1 w))]
-              (recur (+ i w) (conj! cps cp)))))))))
+  (try
+    (bytes->string b)
+    (catch e
+      (let [msg (:mino/message e "bytes->string: invalid UTF-8")]
+        ;; Extract the byte offset from the prim message when present
+        ;; ("bytes->string: invalid UTF-8 at byte N") so the http error
+        ;; carries the same location information as the old path.
+        (bad (if (string? msg)
+               (str/replace msg #"^bytes->string: " "body is not valid ")
+               "body is not valid UTF-8"))))))

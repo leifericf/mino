@@ -2,6 +2,7 @@
 (require '[clojure.test.check :as tc])
 (require '[clojure.test.check.properties :as prop])
 (require '[clojure.test.check.generators :as gen])
+(require '[mino.http :as http-cl])
 
 ;; HTTP message codec: request serialization (http-encode-request,
 ;; http-encode-chunk) and response parsing (http-parse-response,
@@ -537,5 +538,93 @@
                                                      [(str "Content-Length: "
                                                            (count body) "\r\n\r\n" body)]))))]
                       (= expected (http-encode-request req)))))))))
+
+;;; bytes->string prim: UTF-8 decode via the native codec
+
+;; A mock executor for the http client surface, local to this file.
+(defn- hct-mock-exec [response]
+  (fn [_prim] response))
+
+(defn- hct-via-mock [m response]
+  (with-redefs [mino.http/execute-request* (hct-mock-exec response)]
+    (try
+      (http-cl/request m)
+      (catch Throwable e e))))
+
+(def ^:private hct-base
+  {:status 200
+   :headers {"content-type" "text/plain; charset=utf-8"}
+   :body-bytes (byte-array [])
+   :http-version "1.1"
+   :from-pool? false
+   :request-time-ms 1
+   :request {}
+   :trace-redirects []})
+
+(deftest bytes->string-decodes-ascii
+  (is (= "hello" (bytes->string (byte-array (map int "hello"))))))
+
+(deftest bytes->string-decodes-mixed-width-utf-8
+  ;; 1-byte (a), 2-byte (é U+00E9), 3-byte (€ U+20AC), 4-byte (😀 U+1F600)
+  (let [bs (byte-array (concat (map int "a")
+                               [0xC3 0xA9]
+                               [0xE2 0x82 0xAC]
+                               [0xF0 0x9F 0x98 0x80]))]
+    (is (= "aé€😀" (bytes->string bs)))))
+
+(deftest bytes->string-rejects-invalid-utf-8
+  ;; 0xFF is never valid in UTF-8; prim must throw.
+  (is (thrown? (bytes->string (byte-array [0x41 0xFF 0x42])))))
+
+(deftest bytes->string-rejects-truncated-multibyte
+  ;; A 2-byte lead with no continuation tail is truncated.
+  (is (thrown? (bytes->string (byte-array [0xC3])))))
+
+(deftest bytes->string-rejects-surrogate-range
+  ;; U+D800–U+DFFF are surrogate pairs; strict UTF-8 forbids them.
+  (is (thrown? (bytes->string (byte-array [0xED 0xA0 0x80])))))
+
+(deftest bytes->string-on-string-input-returns-it-unchanged
+  ;; bytes->string accepts strings too (passthrough).
+  (is (= "hello" (bytes->string "hello"))))
+
+(deftest invalid-utf-8-body-produces-http-invalid-error
+  ;; decode-utf8 must wrap codec errors as :http/invalid / MHTV001
+  ;; so callers catching that kind still see the http domain shape.
+  (let [canned (assoc hct-base :body-bytes (byte-array [0x41 0xFF 0x42]))
+        e (hct-via-mock {:method :get :uri "http://h/x"} canned)]
+    (is (= :http/invalid (:mino/kind e))
+        "codec error must surface as :http/invalid")
+    (is (= "MHTV001" (:mino/code e))
+        "error code must be MHTV001")))
+
+(deftest valid-utf-8-body-decodes-through-http-surface
+  ;; Mixed 2/3/4-byte codepoints round-trip through the http path.
+  (let [unit (vec (concat (map int "ab")
+                          [0xC3 0xA9]          ; é
+                          [0xE2 0x82 0xAC]     ; €
+                          [0xF0 0x9F 0x98 0x80])) ; 😀
+        canned (assoc hct-base :body-bytes (byte-array unit))
+        r (hct-via-mock {:method :get :uri "http://h/x"} canned)]
+    (is (= 200 (:status r)))
+    (is (= "abé€😀" (:body r)))))
+
+(deftest large-utf-8-body-decodes-correctly
+  ;; 192 KiB of valid UTF-8. The correctness assertion on a body this
+  ;; large would have taken the old codepoint-loop many seconds; the
+  ;; native prim does it in well under a millisecond. We assert the
+  ;; decoded string length and a spot-check, not wall-clock time, so
+  ;; CI timing variance cannot flake this test.
+  (let [unit (vec (concat (map int "ab")
+                          [0xC3 0xA9]          ; é  (2 bytes -> 1 char)
+                          [0xE2 0x82 0xAC]     ; €  (3 bytes -> 1 char)
+                          [0xF0 0x9F 0x98 0x80])) ; 😀 (4 bytes -> 1 char)
+        ;; unit is 10 bytes, 5 chars; repeat to fill ~192 KiB
+        reps (quot (* 192 1024) (count unit))
+        body (byte-array (apply concat (repeat reps unit)))
+        s (bytes->string body)]
+    (is (= (* reps 5) (count s)) "char count must match repeated unit")
+    (is (= \é (nth s 2)) "spot-check: third char is é")
+    (is (= \😀 (nth s 4)) "spot-check: fifth char is 😀")))
 
 (run-tests-and-exit)
