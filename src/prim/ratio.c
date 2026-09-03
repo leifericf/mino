@@ -242,8 +242,9 @@ double mino_ratio_to_double(const mino_val *v)
     return n / d;
 }
 
-/* (numerator r) — accepts ratio (returns its numerator) or integer
- * (returns the integer; integers act as r/1). */
+/* (numerator r) — the ratio's numerator, with bigint identity kept
+ * even when the value fits a long (canon accessors return the bignum
+ * tier, matching the ratio arithmetic collapse rule). */
 mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *x;
@@ -256,12 +257,8 @@ mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "numerator: nil");
-    if (mino_type_of(x) == MINO_RATIO) {
-        long long ll;
-        if (mino_as_ll(x->as.ratio.num, &ll)) return mino_int(S, ll);
-        return x->as.ratio.num;
-    }
-    /* Per Clojure, numerator/denominator are defined only for Ratio.
+    if (mino_type_of(x) == MINO_RATIO) return x->as.ratio.num;
+    /* Per canon, numerator/denominator are defined only for a ratio.
      * Plain integers throw rather than silently returning the value. */
     return prim_throw_classified(S, "eval/type", "MTY001",
                                  "numerator: argument must be a ratio");
@@ -279,11 +276,7 @@ mino_val *prim_denominator(mino_state *S, mino_val *args, mino_env *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "denominator: nil");
-    if (mino_type_of(x) == MINO_RATIO) {
-        long long ll;
-        if (mino_as_ll(x->as.ratio.denom, &ll)) return mino_int(S, ll);
-        return x->as.ratio.denom;
-    }
+    if (mino_type_of(x) == MINO_RATIO) return x->as.ratio.denom;
     return prim_throw_classified(S, "eval/type", "MTY001",
                                  "denominator: argument must be a ratio");
 }
