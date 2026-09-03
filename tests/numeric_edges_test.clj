@@ -325,6 +325,20 @@
     (is (nil? (parse-double "abc")))
     (is (= ##Inf (parse-double "Infinity")))))
 
+(deftest subnormal-doubles-print-shortest-round-trip
+  ;; ADR 50: the printer emits the true shortest decimal that re-reads
+  ;; to the same bits, across the whole double range including the
+  ;; subnormal extremes. The legacy reference printer emits "4.9E-324"
+  ;; and "9.9E-324" for the same two values; both spellings re-read to
+  ;; identical bits, and mino keeps the shortest form.
+  (is (= "5.0E-324" (pr-str 5.0E-324)))
+  (is (= "5.0E-324" (pr-str (read-string "4.9E-324"))))
+  (is (= "1.0E-323" (pr-str 1.0E-323)))
+  (is (= "1.0E-323" (pr-str (read-string "9.9E-324"))))
+  ;; Round-trip identity at the smallest positive double.
+  (is (= 5.0E-324 (read-string (pr-str 5.0E-324))))
+  (is (= 5.0E-324 (read-string "4.9E-324"))))
+
 (require '[clojure.data.json :as json])
 
 (deftest small-magnitude-doubles-round-trip
