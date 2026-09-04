@@ -401,14 +401,22 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
         }
         for (; j < fmt_len; j++) {
             char fc = fmt[j];
-            if      (fc == '-') f_minus = 1;
-            else if (fc == '+') f_plus  = 1;
-            else if (fc == ' ') f_space = 1;
-            else if (fc == '0') f_zero  = 1;
-            else if (fc == '#') f_hash  = 1;
-            else if (fc == ',') f_comma = 1;
-            else if (fc == '(') f_paren = 1;
+            int *fp;
+            if      (fc == '-') fp = &f_minus;
+            else if (fc == '+') fp = &f_plus;
+            else if (fc == ' ') fp = &f_space;
+            else if (fc == '0') fp = &f_zero;
+            else if (fc == '#') fp = &f_hash;
+            else if (fc == ',') fp = &f_comma;
+            else if (fc == '(') fp = &f_paren;
             else break;
+            if (*fp) {
+                snprintf(emsgbuf, sizeof(emsgbuf),
+                         "format: duplicate flag '%c'", fc);
+                ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
+                goto fail;
+            }
+            *fp = 1;
         }
         if (j < fmt_len && fmt[j] >= '1' && fmt[j] <= '9') {
             width = 0;
@@ -439,6 +447,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
          * else; canon rejects an illegal pair ahead of the argument
          * list and argument conversion. */
         {
+            unsigned allowed = fmt_allowed_flags(spec);
             unsigned have =
                   (f_minus ? FMT_F_MINUS : 0u)
                 | (f_plus  ? FMT_F_PLUS  : 0u)
@@ -447,7 +456,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 | (f_hash  ? FMT_F_HASH  : 0u)
                 | (f_comma ? FMT_F_COMMA : 0u)
                 | (f_paren ? FMT_F_PAREN : 0u);
-            unsigned bad = have & ~fmt_allowed_flags(spec);
+            unsigned bad = have & ~allowed;
             if (bad != 0u) {
                 const char *flag_chars = "-+ 0#,(";
                 int b = 0;
@@ -457,6 +466,27 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                          flag_chars[b], spec);
                 ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
                 goto fail;
+            }
+            /* The flag syntax rules apply to known directives; an
+             * unknown spec falls through to the unsupported throw. */
+            if (allowed != ~0u) {
+                if (f_plus && f_space) {
+                    ekind = "eval/type"; ecode = "MTY001";
+                    emsg  = "format: the + and space flags are exclusive";
+                    goto fail;
+                }
+                if (f_minus && f_zero) {
+                    ekind = "eval/type"; ecode = "MTY001";
+                    emsg  = "format: the - and 0 flags are exclusive";
+                    goto fail;
+                }
+                if ((f_minus || f_zero) && width < 0) {
+                    snprintf(emsgbuf, sizeof(emsgbuf),
+                             "format: flag '%c' requires a width",
+                             f_minus ? '-' : '0');
+                    ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
+                    goto fail;
+                }
             }
         }
 

@@ -569,6 +569,22 @@
   ;; An unknown directive still reports itself, flags or not.
   (is (thrown-with-msg? #"unsupported directive" (format "%,q" 1))))
 
+(deftest format-flag-syntax-rules-validated
+  ;; Canon-probed: a repeated flag, the exclusive sign and justify
+  ;; pairs, and the justify or zero flags without a width all throw
+  ;; as classified data instead of being silently ignored.
+  (doseq [f ["%++d" "%,,d" "%--5d" "%((d" "%  f"]]
+    (is (thrown-with-msg? #"duplicate flag" (format f 5)) f))
+  (doseq [f ["%+ d" "% +e" "%-05d" "%0-5f"]]
+    (is (thrown-with-msg? #"exclusive" (format f 5)) f))
+  (doseq [f ["%-d" "%-s" "%0d" "%0f"]]
+    (is (thrown-with-msg? #"requires a width" (format f 5)) f))
+  (is (= [:eval/type "MTY001"]
+         (try (format "%++d" 5)
+              (catch :eval/type e [(:mino/kind e) (:mino/code e)]))))
+  ;; The + and - flags still compose when a width is present.
+  (is (= "+5   |" (format "%+-5d|" 5))))
+
 (deftest format-char-codepoint-accommodation
   ;; ADR 51: %c and %C take an int codepoint in mino's single int
   ;; tier, bounded to the Unicode scalar range.
