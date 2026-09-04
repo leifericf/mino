@@ -371,6 +371,37 @@
         (is (wsrv-await #(zero? (mino-thread-count)))
             "the worker grant drained after stop")))))
 
+;;; a peer that never answers the going-away close cannot pin a worker
+
+(deftest stop-bounds-the-close-handshake-when-the-peer-never-answers
+  ;; A raw client completes the upgrade and a warm echo, then goes
+  ;; silent: it neither echoes the 1001 close nor closes its socket.
+  ;; The owning loop's wait for the echo must be deadline-bounded;
+  ;; unbounded, the worker outlives every stop and pins its thread
+  ;; until the peer process dies.
+  (let [done (promise)
+        s (srv/run-server (wsrv-echo-handler done) {})
+        c (wsrv-connect (:port s))]
+    (try
+      (net-write c (wsrv-upgrade-req {}))
+      (let [[head leftover] (wsrv-read-head c)]
+        (is (= 101 (:code (http-parse-response head {:informational true}))))
+        ;; the warm echo proves the ws loop entered and registered
+        (net-write c (wsrv-masked {:opcode :text :payload "warm"}))
+        (let [r (wsrv-read-msgs c leftover 1)]
+          (is (= "warm" (:payload (first (:frames r)))))))
+      ((:stop s))
+      ;; with no echo and no EOF the handshake is abandoned through
+      ;; the abnormal-closure path inside a bounded grace
+      (is (= {:opcode :close :code 1006 :reason ""}
+             (deref done 15000 ::timeout))
+          "the unanswered close finished as an abnormal closure")
+      (is (wsrv-await #(zero? (mino-thread-count)))
+          "the worker grant drained after stop")
+      (finally
+        (try (net-close c) (catch e nil))
+        ((:stop s))))))
+
 ;;; the server-side handle vocabulary validates like the client's
 
 (deftest ws-accept-and-ws-shutdown-validate-their-arguments

@@ -330,9 +330,16 @@
         (decode-buffer! handle b))))
   nil)
 
+;; The close handshake's grace after a ws-shutdown close went out: a
+;; live peer echoes within a round trip, so the wait only runs long
+;; against a peer that never answers and never closes. Sized inside a
+;; stopping mino.http.server's drain grace so even that worker joins.
+(def ^:private shutdown-close-grace-ms 4000)
+
 (defn- send-shutdown-close!
   "The owning loop's half of ws-shutdown: send the flagged close frame
-  once, then keep reading toward the peer's echo or the EOF."
+  once, then keep reading toward the peer's echo or the EOF, for at
+  most shutdown-close-grace-ms (see abandon-late-shutdown!)."
   [handle]
   (let [st (:state handle)
         m @st
@@ -344,7 +351,27 @@
                             :reason (:reason sd)}
                            {:opcode :close :code (:code sd)}))
            (catch e nil))
-      (swap! st assoc :close-sent? true))))
+      (swap! st assoc :close-sent? true :close-sent-ms (time-ms)))))
+
+(defn- abandon-late-shutdown!
+  "The bound on the ws-shutdown handshake: a peer that has neither
+  echoed the close nor reached EOF within shutdown-close-grace-ms is
+  finished through RFC 6455's abnormal-closure path, exactly as a
+  dropped connection would be: the socket closes and a synthetic 1006
+  close queues for the owning loop. True when it fired."
+  [handle]
+  (let [st (:state handle)
+        m @st]
+    (when (and (= :open (:status m))
+               (:close-sent? m)
+               (:close-sent-ms m)
+               (>= (time-ms) (+ (:close-sent-ms m)
+                                shutdown-close-grace-ms)))
+      (close-socket! handle)
+      (swap! st assoc :status :closed)
+      (swap! st update :pending conj
+             {:opcode :close :fin? true :code 1006 :reason ""})
+      true)))
 
 (defn- finish-close!
   "The receive side of the close handshake: echo one close frame back
@@ -394,7 +421,8 @@
          (if (= :closed (:status @(:state handle)))
            (closed-fail)
            (do (send-shutdown-close! handle)
-               (read-frames! handle deadline ms)
+               (when-not (abandon-late-shutdown! handle)
+                 (read-frames! handle deadline ms))
                (recur))))))))
 
 ;;;; Close
@@ -458,9 +486,11 @@
   "Asks a connection to close from another thread: flags the handle so
   the ws-recv loop that owns it sends a close frame (:code default
   1001, optional :reason) at its next wake-up and finishes through
-  the normal close handshake. Never writes or closes anything itself,
-  so it cannot race the owning loop's frames. Idempotent; returns
-  nil."
+  the normal close handshake; a peer that neither echoes nor closes
+  within a short grace is finished through the abnormal-closure
+  (1006) path, so the owning loop never waits unbounded. Never
+  writes or closes anything itself, so it cannot race the owning
+  loop's frames. Idempotent; returns nil."
   ([handle] (ws-shutdown handle {}))
   ([handle opts]
    (when-not (map? opts)
