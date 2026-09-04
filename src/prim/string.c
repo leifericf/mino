@@ -595,7 +595,15 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
-            snprintf(tmp, sizeof(tmp), spec == 'a' ? "%a" : "%A", d);
+            if (d == 0.0) {
+                /* C's %a of zero omits the fraction; canon always
+                 * keeps one fractional digit ("0x0.0p0"). */
+                snprintf(tmp, sizeof(tmp), "%s",
+                         signbit(d) ? "-0x0.0p0" : "0x0.0p0");
+                if (spec == 'A') fmt_ascii_upcase(tmp);
+            } else {
+                snprintf(tmp, sizeof(tmp), spec == 'a' ? "%a" : "%A", d);
+            }
             /* Double/toHexString has no '+' on a positive exponent. */
             plus = strchr(tmp, spec == 'a' ? 'p' : 'P');
             if (plus != NULL && plus[1] == '+')

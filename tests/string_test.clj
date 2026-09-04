@@ -335,6 +335,17 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-hex-float-zero-keeps-mantissa-point
+  ;; C's %a of zero omits the fraction; canon always keeps one
+  ;; fractional digit, and the zero fill lands after the 0x prefix.
+  (is (= "0x0.0p0" (format "%a" 0.0)))
+  (is (= "-0x0.0p0" (format "%a" -0.0)))
+  (is (= "0X0.0P0" (format "%A" 0.0)))
+  (is (= "0x000000.0p0" (format "%012a" 0.0)))
+  (is (= "-0x00000.0p0" (format "%012a" -0.0)))
+  (is (= " 0x0.0p0" (format "%8a" 0.0)))
+  (is (= "0x0.0p0  |" (str (format "%-9a" 0.0) "|"))))
+
 (deftest format-nonfinite-floats-canon-spelling
   ;; Non-finite doubles spell the canon way across the float
   ;; directives, not C's lowercase forms.
