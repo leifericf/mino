@@ -14,6 +14,12 @@ permissions:
   contents: read
   actions: read
 
+# Same grant as ci.yml: the suites' concurrency need is a property
+# of the tests, not of the 2-4 core hosted runner (main.c documents
+# the override).
+env:
+  MINO_THREAD_LIMIT: "16"
+
 jobs:
   changes-since-last-green:
     name: Skip if main unchanged since last green nightly

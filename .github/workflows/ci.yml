@@ -4,6 +4,15 @@ on:
   push:
     branches: [main]
 
+# Hosted runners have 2-4 cores, and standalone mino grants
+# thread_limit = cpu_count at startup, so the server suites (2
+# acceptors + spawner + workers + client futures) hit MTH001 on the
+# runner while passing on any dev machine. The suite's concurrency
+# need is a property of the tests, not of the runner, so grant it
+# explicitly (the documented override in main.c).
+env:
+  MINO_THREAD_LIMIT: "16"
+
 jobs:
   build:
     name: build - ${{ matrix.os }}
