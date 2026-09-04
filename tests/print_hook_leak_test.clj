@@ -58,9 +58,12 @@
 
 (defn- rss-kb
   "Resident set size of this process in KiB. run forks the probe
-  directly, so $PPID inside the child shell is this process."
+  directly, so $PPID inside the child shell is this process. Qualified
+  because the suite shares one namespace and the core.logic test file
+  refers its own run macro into it."
   []
-  (parse-long (str/trim (:out (run "sh" "-c" "ps -o rss= -p $PPID")))))
+  (parse-long
+   (str/trim (:out (clojure.core/run "sh" "-c" "ps -o rss= -p $PPID")))))
 
 (def ^:private payload
   ;; 256 KiB of random printable ASCII, built in 1 KiB pieces so the
@@ -128,8 +131,9 @@
                       " (throw {:mino/kind :t/d}))\n"
                       "(pr (with-meta {} {:type :d}))\n"
                       "(println :alive)\n")
-          out (:out (run "sh" "-c"
-                         (str "printf '%s' '" script "' | ./mino 2>&1")))]
+          out (:out (clojure.core/run
+                     "sh" "-c"
+                     (str "printf '%s' '" script "' | ./mino 2>&1")))]
       (is (str/includes? out ":alive")
           (str "top-level print after a caught-at-top hook throw"
                " produced: " (pr-str out))))))
