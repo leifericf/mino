@@ -544,6 +544,47 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
+            if (f_paren) {
+                /* Canon renders a finite negative inside parens.
+                 * Render without width, swap the leading '-' for the
+                 * paren pair, and let the numeric pad helper apply
+                 * width and zero fill after '('. */
+                char  *src = tmp;
+                char  *heap = NULL;
+                size_t sl;
+                cdir[di++] = '%';
+                if (f_plus)  cdir[di++] = '+';
+                if (f_space) cdir[di++] = ' ';
+                if (f_hash)  cdir[di++] = '#';
+                if (prec >= 0)
+                    di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                           ".%ld", prec);
+                cdir[di++] = spec;
+                cdir[di]   = '\0';
+                tn = snprintf(tmp, sizeof(tmp), cdir, d);
+                if (tn < 0) { free(buf); free(argv); return NULL; }
+                if ((size_t)tn + 2 > sizeof(tmp)) {
+                    heap = (char *)malloc((size_t)tn + 3);
+                    if (heap == NULL) {
+                        ekind = "eval/out-of-memory"; ecode = "MOM001";
+                        emsg  = "out of memory";
+                        goto fail;
+                    }
+                    snprintf(heap, (size_t)tn + 1, cdir, d);
+                    src = heap;
+                }
+                sl = (size_t)tn;
+                if (src[0] == '-') {
+                    src[0] = '(';
+                    src[sl++] = ')';
+                    src[sl] = '\0';
+                }
+                buf = fmt_append_num_padded(S, buf, &len, &cap, src, sl,
+                                            width, f_minus, f_zero);
+                free(heap);
+                if (buf == NULL) { free(argv); return NULL; }
+                break;
+            }
             cdir[di++] = '%';
             if (f_minus) cdir[di++] = '-';
             if (f_plus)  cdir[di++] = '+';
@@ -602,6 +643,15 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             }
             fmt_java_g(d, prec, gtmp, gsz);
             if (spec == 'G') fmt_ascii_upcase(gtmp);
+            if (f_paren && gtmp[0] == '-') {
+                /* Canon renders a finite negative inside parens; the
+                 * pad helper zero-fills after '('. gsz leaves well
+                 * over two bytes of slack past the longest render. */
+                size_t gl = strlen(gtmp);
+                gtmp[0] = '(';
+                gtmp[gl] = ')';
+                gtmp[gl + 1] = '\0';
+            }
             buf = fmt_append_num_padded(S, buf, &len, &cap, gtmp,
                                         strlen(gtmp), width, f_minus,
                                         f_zero);
@@ -611,8 +661,11 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
         }
         case 'a': case 'A': {
             double d;
-            char tmp[64];
+            char  tmp[64];
+            char *src = tmp;
+            char *heap = NULL;
             char *plus;
+            long  ap = (prec == 0) ? 1 : prec;
             if (!as_double(a, &d)) {
                 ekind = "eval/type"; ecode = "MTY001";
                 emsg  = "format: float directive expects a number";
@@ -627,22 +680,51 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
-            if (d == 0.0) {
+            if (d == 0.0 && ap < 0) {
                 /* C's %a of zero omits the fraction; canon always
-                 * keeps one fractional digit ("0x0.0p0"). */
-                snprintf(tmp, sizeof(tmp), "%s",
-                         signbit(d) ? "-0x0.0p0" : "0x0.0p0");
+                 * keeps one fractional digit ("0x0.0p0"). With an
+                 * explicit precision C keeps the fraction itself. */
+                snprintf(tmp, sizeof(tmp), "%s%s",
+                         signbit(d) ? "-"
+                                    : (f_plus ? "+" : (f_space ? " " : "")),
+                         "0x0.0p0");
                 if (spec == 'A') fmt_ascii_upcase(tmp);
             } else {
-                snprintf(tmp, sizeof(tmp), spec == 'a' ? "%a" : "%A", d);
+                /* Thread the sign flags and the precision through;
+                 * canon keeps precision 0 at one fractional digit.
+                 * Width and zero fill stay with the pad helper. */
+                char cdir[32];
+                size_t di = 0;
+                int  tn;
+                cdir[di++] = '%';
+                if (f_plus)  cdir[di++] = '+';
+                if (f_space) cdir[di++] = ' ';
+                if (ap >= 0)
+                    di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
+                                           ".%ld", ap);
+                cdir[di++] = spec;
+                cdir[di]   = '\0';
+                tn = snprintf(tmp, sizeof(tmp), cdir, d);
+                if (tn < 0) { free(buf); free(argv); return NULL; }
+                if ((size_t)tn >= sizeof(tmp)) {
+                    heap = (char *)malloc((size_t)tn + 1);
+                    if (heap == NULL) {
+                        ekind = "eval/out-of-memory"; ecode = "MOM001";
+                        emsg  = "out of memory";
+                        goto fail;
+                    }
+                    snprintf(heap, (size_t)tn + 1, cdir, d);
+                    src = heap;
+                }
             }
             /* Double/toHexString has no '+' on a positive exponent. */
-            plus = strchr(tmp, spec == 'a' ? 'p' : 'P');
+            plus = strchr(src, spec == 'a' ? 'p' : 'P');
             if (plus != NULL && plus[1] == '+')
                 memmove(plus + 1, plus + 2, strlen(plus + 2) + 1);
-            buf = fmt_append_num_padded(S, buf, &len, &cap, tmp,
-                                        strlen(tmp), width, f_minus,
+            buf = fmt_append_num_padded(S, buf, &len, &cap, src,
+                                        strlen(src), width, f_minus,
                                         f_zero);
+            free(heap);
             if (buf == NULL) { free(argv); return NULL; }
             break;
         }

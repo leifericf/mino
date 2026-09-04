@@ -385,6 +385,60 @@
   (is (= " 0x0.0p0" (format "%8a" 0.0)))
   (is (= "0x0.0p0  |" (str (format "%-9a" 0.0) "|"))))
 
+(deftest format-hex-float-sign-and-precision
+  ;; The + and space flags and the precision thread into the hex
+  ;; float directive; canon keeps precision 0 at one digit.
+  (is (= "+0x1.8p0" (format "%+a" 1.5)))
+  (is (= " 0x1.8p0" (format "% a" 1.5)))
+  (is (= "-0x1.8p0" (format "%+a" -1.5)))
+  (is (= "0x1.800p0" (format "%.3a" 1.5)))
+  (is (= "+0x1.800p0" (format "%+.3a" 1.5)))
+  (is (= "0x1.99ap-4" (format "%.3a" 0.1)))
+  (is (= "0x1.ap-4" (format "%.1a" 0.1)))
+  (is (= "0x1.8p0" (format "%.0a" 1.5)))
+  (is (= "0x1.ap-4" (format "%.0a" 0.1)))
+  (is (= "0X1.800P0" (format "%.3A" 1.5)))
+  ;; Precision past the mantissa zero-extends.
+  (is (= "0x1.999999999999a0000000p-4" (format "%.20a" 0.1)))
+  (is (= (str "0x1.8" (apply str (repeat 199 "0")) "p0")
+         (format "%.200a" 1.5)))
+  ;; Zero keeps the mantissa point at any precision, signs included.
+  (is (= "+0x0.0p0" (format "%+a" 0.0)))
+  (is (= " 0x0.0p0" (format "% a" 0.0)))
+  (is (= "-0x0.0p0" (format "%+a" -0.0)))
+  (is (= "0x0.000p0" (format "%.3a" 0.0)))
+  (is (= "0x0.0p0" (format "%.1a" 0.0)))
+  ;; Width composes: spaces by default, zero fill after the prefix.
+  ;; (Canon's zero fill overshoots its own width on a precisioned
+  ;; hex float; mino honors the width.)
+  (is (= "      0x1.800p0" (format "%15.3a" 1.5)))
+  (is (= "0x0000001.800p0" (format "%015.3a" 1.5))))
+
+(deftest format-paren-flag-on-finite-floats
+  ;; The ( flag renders a finite negative inside parens on f/e/g,
+  ;; matching canon; positives are untouched.
+  (is (= "(1.500000)" (format "%(f" -1.5)))
+  (is (= "1.500000" (format "%(f" 1.5)))
+  (is (= "(1.500000e+00)" (format "%(e" -1.5)))
+  (is (= "(1.23e+03)" (format "%(.2e" -1234.5)))
+  (is (= "(1.50000)" (format "%(g" -1.5)))
+  (is (= "(1.23e+03)" (format "%(10.3g" -1234.5)))
+  ;; Negative zero is negative to the paren style.
+  (is (= "(0.000000)" (format "%(f" -0.0)))
+  ;; Width pads with spaces; the 0 flag zero-fills after the paren.
+  (is (= "    (3.14)" (format "%(10.2f" -3.14)))
+  (is (= "(00003.14)" (format "%(010.2f" -3.14)))
+  (is (= "0000003.14" (format "%(010.2f" 3.14)))
+  (is (= "(3.14)    |" (format "%(-10.2f|" -3.14)))
+  (is (= "(001.23e+03)" (format "%(012.3g" -1234.5)))
+  ;; The + flag composes; parens still win on a negative.
+  (is (= "(1.500000)" (format "%+(f" -1.5)))
+  ;; A rendering past the stack buffer keeps its parens.
+  (let [s (format "%(f" -1.0E300)]
+    (is (= 310 (count s)))
+    (is (str/starts-with? s "(1"))
+    (is (str/ends-with? s ".000000)"))))
+
 (deftest format-nonfinite-floats-canon-spelling
   ;; Non-finite doubles spell the canon way across the float
   ;; directives, not C's lowercase forms.
