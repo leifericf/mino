@@ -1154,6 +1154,7 @@ static mino_val *tx_outer_run(mino_state *S,
     frame->saved_gc_depth     = ctx_v->gc_depth;
     frame->saved_gc_save      = ctx_v->gc_save_len;
     frame->saved_dyn          = ctx_v->dyn_stack;
+    frame->saved_jit_env      = ctx_v->jit_invoke_env;
     if (setjmp(frame->buf) != 0) {
         /* Body threw. Use the volatile ctx_v captured before setjmp so
          * we don't re-enter the inlined mino_current_ctx (whose locals
@@ -1169,6 +1170,9 @@ static mino_val *tx_outer_run(mino_state *S,
         /* Rewind pins the throw longjmp'd past (see saved_gc_save in
          * try_frame_t); the enclosing pads rewind further as needed. */
         c->gc_save_len   = c->try_stack[saved_try].saved_gc_save;
+        /* Restore the JIT-invoke env publish a torn invoke frame
+         * skipped (see saved_jit_env in try_frame_t). */
+        c->jit_invoke_env = c->try_stack[saved_try].saved_jit_env;
         /* Free the dyn frames the throw tore through inside the
          * transaction body, down to the frame-entry anchor; an
          * enclosing pad unwinds further to its own anchor. */

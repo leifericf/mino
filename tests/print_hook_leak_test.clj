@@ -5,12 +5,12 @@
 ;; straight to the enclosing catch, skipping every C frame in the
 ;; print path. These tests pin what that unwind must not leak.
 ;;
-;; The caught-throw loops run inline at the top level, not inside
-;; deftest bodies or helper fns: the eager JIT lane today miscompiles
-;; a caught print-method throw inside a compiled fn (an
-;; unbound-gensym failure, tracked as its own bug), and keeping the
-;; loops here keeps this file's assertions independent of that
-;; defect.
+;; The caught-throw loops live inside their deftest bodies on
+;; purpose: the suite runner's fixture-wrap closure is JIT-compiled
+;; under the eager lane, so this shape also pins the catch landing
+;; pads' jit_invoke_env restore (a torn hook-frame invoke once left
+;; the published env stale and a later native env read failed with
+;; an unbound gensym).
 
 (defmethod print-method :pin-leak-probe
   [v]
@@ -18,27 +18,20 @@
 
 (def ^:private pin-bomb (with-meta {:x 2} {:type :pin-leak-probe}))
 
-(def ^:private first-round-result
-  (try
-    (with-out-str (pr "x" pin-bomb))
-    :not-thrown
-    (catch :test/pin-leak-probe e :caught)))
-
 ;; Each caught throw tears through the hook's C frame, which holds a
 ;; pinned capture sink. The catch landing pad must rewind the pin
 ;; watermark; before it did, this loop overflowed the fixed pin stack
 ;; (a loud abort under the sanitizer lanes, silent pin-array soft-loss
 ;; and a stale-root hazard otherwise).
-(def ^:private pin-rounds-result
-  (do (dotimes [_ 800]
-        (try
-          (with-out-str (pr "x" pin-bomb))
-          (catch :test/pin-leak-probe e nil)))
-      :completed))
-
 (deftest pin-stack-rewound-per-caught-throw
-  (is (= :caught first-round-result))
-  (is (= :completed pin-rounds-result))
+  (is (= :caught (try
+                   (with-out-str (pr "x" pin-bomb))
+                   :not-thrown
+                   (catch :test/pin-leak-probe e :caught))))
+  (dotimes [_ 800]
+    (try
+      (with-out-str (pr "x" pin-bomb))
+      (catch :test/pin-leak-probe e nil)))
   (is (= "\"ok\"" (with-out-str (pr "ok")))))
 
 ;; The pr/prn output chunk must be reclaimed when the hook throws.
@@ -72,7 +65,7 @@
                               (apply str (repeatedly 1024
                                                      #(char (+ 33 (rand-int 94)))))))))
 
-(def ^:private chunk-growth-kb
+(deftest print-chunk-reclaimed-when-hook-throws
   (when-not windows?
     (dotimes [_ 200]
       (try
@@ -85,13 +78,10 @@
           (with-out-str (pr payload pin-bomb))
           (catch :test/pin-leak-probe e nil))
         (gc!))
-      (- (rss-kb) before))))
-
-(deftest print-chunk-reclaimed-when-hook-throws
-  (when-not windows?
-    (is (< chunk-growth-kb (* 48 1024))
-        (str "RSS grew " chunk-growth-kb
-             " KiB across 300 caught print-method throws"))))
+      (let [growth (- (rss-kb) before)]
+        (is (< growth (* 48 1024))
+            (str "RSS grew " growth
+                 " KiB across 300 caught print-method throws"))))))
 
 (deftest print-usable-after-hook-throw
   (is (= "[1 2]" (with-out-str (pr [1 2]))))

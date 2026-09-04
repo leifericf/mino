@@ -834,6 +834,7 @@ static void try_frame_fill(mino_state *S, mino_thread_ctx_t *ctx, int depth)
     ctx->try_stack[depth].saved_gc_depth    = ctx->gc_depth;
     ctx->try_stack[depth].saved_gc_save     = ctx->gc_save_len;
     ctx->try_stack[depth].saved_dyn         = ctx->dyn_stack;
+    ctx->try_stack[depth].saved_jit_env     = ctx->jit_invoke_env;
 }
 
 /* Walk the dyn stack down to the frame-entry anchor, restoring *ns*
@@ -909,6 +910,9 @@ static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
             mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth = saved_try;
             mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
+            /* Restore the JIT-invoke env publish a torn invoke frame
+             * skipped (see saved_jit_env in try_frame_t). */
+            mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[saved_try].saved_jit_env;
             dyn_stack_unwind_to(S, mino_current_ctx(S),
                 mino_current_ctx(S)->try_stack[saved_try].saved_dyn);
             if (mino_last_error(S) == NULL) {
@@ -1066,6 +1070,9 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
             /* Rewind pins the throw longjmp'd past (see saved_gc_save
              * in try_frame_t); mirrors mino_eval_inner's rewind. */
             mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
+            /* Restore the JIT-invoke env publish a torn invoke frame
+             * skipped (see saved_jit_env in try_frame_t). */
+            mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[saved_try].saved_jit_env;
             dyn_stack_unwind_to(S, mino_current_ctx(S),
                 mino_current_ctx(S)->try_stack[saved_try].saved_dyn);
             S->reader.reader_file = saved_file;
@@ -1390,6 +1397,9 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
         /* Rewind pins the throw longjmp'd past (see saved_gc_save in
          * try_frame_t); mirrors mino_eval_inner's rewind. */
         mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
+        /* Restore the JIT-invoke env publish a torn invoke frame
+         * skipped (see saved_jit_env in try_frame_t). */
+        mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[saved_try].saved_jit_env;
         dyn_stack_unwind_to(S, mino_current_ctx(S),
             mino_current_ctx(S)->try_stack[saved_try].saved_dyn);
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
@@ -1521,6 +1531,9 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         /* Rewind pins the throw longjmp'd past (see saved_gc_save in
          * try_frame_t); mirrors mino_eval_inner's rewind. */
         mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
+        /* Restore the JIT-invoke env publish a torn invoke frame
+         * skipped (see saved_jit_env in try_frame_t). */
+        mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[saved_try].saved_jit_env;
         dyn_stack_unwind_to(S, mino_current_ctx(S),
             mino_current_ctx(S)->try_stack[saved_try].saved_dyn);
         while (mino_current_ctx(S)->lock_depth > saved_lock) {

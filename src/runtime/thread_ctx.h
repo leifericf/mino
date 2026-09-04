@@ -84,6 +84,16 @@ typedef struct {
      * leave a stale binding (a dead capture sink swallowing all
      * later output, for instance) visible after the catch. */
     dyn_frame_t *saved_dyn;
+    /* jit_invoke_env at frame entry. mino_jit_invoke publishes the
+     * running fn's env here for its slow helpers and restores the
+     * caller's value on its normal exits, but a throw longjmps past
+     * that restore: a hook fn raising from under a C frame leaves its
+     * own env published. Callee invokes save and faithfully restore
+     * the stale value, so it survives until control returns into a
+     * still-live native region above the catch, whose env-published
+     * local reads then walk the wrong chain and fail as unbound
+     * gensyms. Each landing pad restores the frame-entry value. */
+    struct mino_env *saved_jit_env;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live

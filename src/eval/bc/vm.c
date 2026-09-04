@@ -2492,6 +2492,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_gc_depth     = ctx->gc_depth;
             ctx->try_stack[td].saved_gc_save      = ctx->gc_save_len;
             ctx->try_stack[td].saved_dyn          = ctx->dyn_stack;
+            ctx->try_stack[td].saved_jit_env      = ctx->jit_invoke_env;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
@@ -2538,6 +2539,13 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                  * caught throw ratchets gc_save_len toward overflow.
                  * The exception is rooted via try_stack[].exception. */
                 ctx->gc_save_len = ctx->try_stack[my_td].saved_gc_save;
+                /* Restore the JIT-invoke env publish likewise: a hook
+                 * fn's invoke torn by the throw never ran its restore,
+                 * and the stale env survives every callee's faithful
+                 * save/restore pair until a still-live native region
+                 * above this catch reads an env-published local
+                 * through it (an unbound-gensym failure). */
+                ctx->jit_invoke_env = ctx->try_stack[my_td].saved_jit_env;
                 ctx->try_depth = my_td;
                 /* Pop the register-window stack back down to this fn's
                  * own window. A throw from a deeper bc_run frame

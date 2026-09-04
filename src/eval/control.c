@@ -451,6 +451,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_gc_depth = mino_current_ctx(S)->gc_depth;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_gc_save = saved_gc_save;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_dyn = saved_dyn;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_jit_env = mino_current_ctx(S)->jit_invoke_env;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val *r;
         mino_current_ctx(S)->try_depth++;
@@ -492,6 +493,9 @@ mino_val *eval_try(mino_state *S, mino_val *form,
          * transient pins don't leak (the exception is rooted separately
          * via try_stack[].exception). */
         mino_current_ctx(S)->gc_save_len = saved_gc_save;
+        /* Restore the JIT-invoke env publish a torn invoke frame
+         * skipped (see saved_jit_env in try_frame_t). */
+        mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[saved_try].saved_jit_env;
         while (mino_current_ctx(S)->dyn_stack != saved_dyn) {
             dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
             mino_current_ctx(S)->dyn_stack = f->prev;
@@ -567,6 +571,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_current_ctx(S)->try_stack[is].saved_gc_depth = mino_current_ctx(S)->gc_depth;
             mino_current_ctx(S)->try_stack[is].saved_gc_save = mino_current_ctx(S)->gc_save_len;
             mino_current_ctx(S)->try_stack[is].saved_dyn = id;
+            mino_current_ctx(S)->try_stack[is].saved_jit_env = mino_current_ctx(S)->jit_invoke_env;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
@@ -597,6 +602,9 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 /* Rewind pins the re-throw longjmp'd past, mirroring
                  * the body pad's saved_gc_save restore above. */
                 mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[is].saved_gc_save;
+                /* Restore the JIT-invoke env publish a torn invoke
+                 * frame skipped (see saved_jit_env in try_frame_t). */
+                mino_current_ctx(S)->jit_invoke_env = mino_current_ctx(S)->try_stack[is].saved_jit_env;
                 mino_current_ctx(S)->try_depth   = is;
                 mino_current_ctx(S)->call_depth  = ic;
                 mino_current_ctx(S)->trace_added = it;
