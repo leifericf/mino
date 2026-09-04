@@ -759,8 +759,12 @@ static int tar_extract_member(int root_fd, const tar_member *m,
             if (mkdirat(pfd, leaf, (mode_t)(m->mode & 07777)) != 0
                 && errno != EEXIST) { close(pfd); return -1; }
             /* Set the mode explicitly (umask/EEXIST may have shifted it)
-             * and the mtime. */
-            fchmodat(pfd, leaf, (mode_t)(m->mode & 07777), 0);
+             * and the mtime. A mode the archive asked for but the
+             * filesystem refused is a failed write, not a shrug. */
+            if (fchmodat(pfd, leaf, (mode_t)(m->mode & 07777), 0) != 0) {
+                close(pfd);
+                return -1;
+            }
             if (m->mtime >= 0) {
                 struct timespec ts[2];
                 ts[0].tv_sec = (time_t)m->mtime; ts[0].tv_nsec = 0;
@@ -778,7 +782,8 @@ static int tar_extract_member(int root_fd, const tar_member *m,
     if (m->typeflag == '5') {
         if (mkdirat(parent_fd, leaf, (mode_t)(m->mode & 07777)) != 0
             && errno != EEXIST) rc = -1;
-        else fchmodat(parent_fd, leaf, (mode_t)(m->mode & 07777), 0);
+        else if (fchmodat(parent_fd, leaf,
+                          (mode_t)(m->mode & 07777), 0) != 0) rc = -1;
     } else if (m->typeflag == '2') {
         /* Symlink entry: recreate the link itself, never follow it. */
         unlinkat(parent_fd, leaf, 0);
