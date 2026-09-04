@@ -335,6 +335,18 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-pad-width-counts-codepoints
+  ;; Width measures the rendered argument in codepoints, matching
+  ;; count, not UTF-8 bytes.
+  (is (= "  É" (format "%3s" "É")))
+  (is (= "  É" (format "%3c" (char 201))))
+  (is (= "  É" (format "%3C" (char 233))))
+  (is (= "   ÉA" (format "%5S" "éa")))
+  (is (= "Éx  |" (format "%-4s|" "Éx")))
+  ;; An astral char is one codepoint wide, like count; canon counts
+  ;; its surrogate halves as two.
+  (is (= (str "  " (char 128169)) (format "%3s" (str (char 128169))))))
+
 (deftest format-grouped-decimal-zero-pad
   ;; The 0 flag zero-fills inside the parens and after the sign; the
   ;; fill zeros are plain, never grouped.

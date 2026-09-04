@@ -95,13 +95,15 @@ static char *fmt_append(mino_state *S, char *buf, size_t *len,
 }
 
 /* Append `s` (slen bytes) honoring a minimum width and the '-'
- * (left-justify) flag; pads with spaces. */
+ * (left-justify) flag; pads with spaces. Width measures the rendered
+ * argument in codepoints, matching count, not UTF-8 bytes. */
 static char *fmt_append_padded(mino_state *S, char *buf, size_t *len,
                                 size_t *cap, const char *s, size_t slen,
                                 long width, int left)
 {
-    size_t pad = (width > 0 && (size_t)width > slen)
-                     ? (size_t)width - slen : 0;
+    size_t disp = (size_t)utf8_codepoint_count(s, slen);
+    size_t pad = (width > 0 && (size_t)width > disp)
+                     ? (size_t)width - disp : 0;
     size_t k;
     if (!left) {
         for (k = 0; k < pad; k++) {
@@ -129,8 +131,9 @@ static char *fmt_append_num_padded(mino_state *S, char *buf, size_t *len,
                                     size_t *cap, const char *s, size_t slen,
                                     long width, int left, int zero)
 {
-    size_t pad = (width > 0 && (size_t)width > slen)
-                     ? (size_t)width - slen : 0;
+    size_t disp = (size_t)utf8_codepoint_count(s, slen);
+    size_t pad = (width > 0 && (size_t)width > disp)
+                     ? (size_t)width - disp : 0;
     size_t head = 0, k;
     if (left || !zero || pad == 0)
         return fmt_append_padded(S, buf, len, cap, s, slen, width, left);
