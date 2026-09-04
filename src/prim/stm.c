@@ -1153,6 +1153,7 @@ static mino_val *tx_outer_run(mino_state *S,
     frame->saved_bc_cursor_pc = ctx_v->bc_current_pc;
     frame->saved_gc_depth     = ctx_v->gc_depth;
     frame->saved_gc_save      = ctx_v->gc_save_len;
+    frame->saved_dyn          = ctx_v->dyn_stack;
     if (setjmp(frame->buf) != 0) {
         /* Body threw. Use the volatile ctx_v captured before setjmp so
          * we don't re-enter the inlined mino_current_ctx (whose locals
@@ -1168,6 +1169,17 @@ static mino_val *tx_outer_run(mino_state *S,
         /* Rewind pins the throw longjmp'd past (see saved_gc_save in
          * try_frame_t); the enclosing pads rewind further as needed. */
         c->gc_save_len   = c->try_stack[saved_try].saved_gc_save;
+        /* Free the dyn frames the throw tore through inside the
+         * transaction body, down to the frame-entry anchor; an
+         * enclosing pad unwinds further to its own anchor. */
+        while (c->dyn_stack != c->try_stack[saved_try].saved_dyn) {
+            dyn_frame_t *f = c->dyn_stack;
+            if (f == NULL) break;
+            c->dyn_stack = f->prev;
+            dyn_frame_restore_ns(S, f);
+            dyn_binding_list_free(f->bindings);
+            free(f);
+        }
         c->try_depth     = saved_try;
         S->ns_vars.current_ns    = c->try_stack[saved_try].saved_ns;
         S->ns_vars.fn_ambient_ns = c->try_stack[saved_try].saved_ambient;

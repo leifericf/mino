@@ -2491,6 +2491,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_jit_invoke_depth = ctx->jit_invoke_depth;
             ctx->try_stack[td].saved_gc_depth     = ctx->gc_depth;
             ctx->try_stack[td].saved_gc_save      = ctx->gc_save_len;
+            ctx->try_stack[td].saved_dyn          = ctx->dyn_stack;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */

@@ -94,4 +94,22 @@
   (is (= "[1 2]" (with-out-str (pr [1 2]))))
   (is (= "1 2\n" (with-out-str (println 1 2)))))
 
+;; With no script-side try at all, the throw lands on the top-level
+;; eval pad. That pad must unwind the dyn frames the longjmp tore
+;; through, or *out* stays bound to the hook's dead capture sink and
+;; every later print on the session vanishes into it (and the frames
+;; leak). Driven in a subprocess because the throw must reach the
+;; top level uncaught, which would abort the shared suite process.
+(deftest top-level-pad-unwinds-dyn-frames
+  (when-not windows?
+    (let [script (str "(defmethod print-method :d [v]"
+                      " (throw {:mino/kind :t/d}))\n"
+                      "(pr (with-meta {} {:type :d}))\n"
+                      "(println :alive)\n")
+          out (:out (run "sh" "-c"
+                         (str "printf '%s' '" script "' | ./mino 2>&1")))]
+      (is (str/includes? out ":alive")
+          (str "top-level print after a caught-at-top hook throw"
+               " produced: " (pr-str out))))))
+
 (run-tests-and-exit)

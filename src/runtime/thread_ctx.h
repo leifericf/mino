@@ -76,6 +76,14 @@ typedef struct {
      * the depth to its frame-entry value; the thrown value itself is
      * rooted separately via `exception`. */
     int         saved_gc_save;
+    /* dyn_stack at frame entry. A throw tears through dyn frames
+     * (binding forms, the print hook's *out* capture frame) without
+     * their normal pop-and-free; each landing pad walks the stack
+     * down to this anchor, restoring *ns* and freeing the
+     * malloc-owned frames, so a torn frame can neither leak nor
+     * leave a stale binding (a dead capture sink swallowing all
+     * later output, for instance) visible after the catch. */
+    dyn_frame_t *saved_dyn;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live
