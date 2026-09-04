@@ -28,13 +28,17 @@
   (try (do (thunk) :ok) (catch e (:mino/kind e))))
 
 (defn- wsrv-await
-  "Poll pred every 20ms for up to 10s; true once it holds."
+  "Poll pred every 20ms for up to 30s; true once it holds. The ceiling
+  is sized for loaded CI runners, where a worker can sit out its own
+  read deadline before it exits and the drain still has to converge;
+  locally the pred holds within a few polls. A pred that never holds
+  still fails the teardown assertion, just slowly."
   [pred]
   ((fn wait [n]
      (cond (pred)    true
            (zero? n) false
            :else     (do (thread-sleep 20) (wait (dec n)))))
-   500))
+   1500))
 
 (defn- wsrv-with-server
   "run-server around body-fn with the stop and worker-grant drain in
