@@ -251,25 +251,20 @@ static int io_emit(mino_state *S, const char *out_var_name,
     return 0;
 }
 
-/* Build a print-formatted chunk for one argument and append it to a
- * growing buffer. `readably` is non-zero for pr/prn (strings quoted,
- * chars escaped) and zero for print/println. Returns 0 on success,
- * -1 on error (caller frees buf). */
-static int append_print_chunk(mino_state *S, mino_val *v,
-                              char **buf, size_t *len, size_t *cap,
-                              int readably)
+/* Format one value in print (non-readable) style as a mino string:
+ * strings pass through unchanged, chars emit the bare codepoint as
+ * UTF-8 (not the \name escape form), and everything else takes the
+ * standard printer, which honors the cleared *print-readably* flag
+ * for the nested walk. Returns NULL on error. */
+static mino_val *print_plain_string(mino_state *S, mino_val *v)
 {
-    const char *src;
-    size_t      slen;
-    mino_val *formatted = NULL;
-    char        char_buf[4];
-    if (!readably && v != NULL && mino_type_of(v) == MINO_STRING) {
-        src  = v->as.s.data;
-        slen = v->as.s.len;
-    } else if (!readably && v != NULL && mino_type_of(v) == MINO_CHAR) {
-        /* Non-readable print emits the character itself, not the
-         * \name escape form. Encode the codepoint as UTF-8. */
-        int cp = mino_val_char_get(v);
+    if (v != NULL && mino_type_of(v) == MINO_STRING) {
+        return v;
+    }
+    if (v != NULL && mino_type_of(v) == MINO_CHAR) {
+        char   char_buf[4];
+        size_t slen;
+        int    cp = mino_val_char_get(v);
         if (cp < 0x80) {
             char_buf[0] = (char)cp;
             slen = 1;
@@ -289,73 +284,9 @@ static int append_print_chunk(mino_state *S, mino_val *v,
             char_buf[3] = (char)(0x80u | ((unsigned)cp & 0x3Fu));
             slen = 4;
         }
-        src = char_buf;
-    } else {
-        formatted = print_to_string(S, v);
-        if (formatted == NULL) return -1;
-        src  = formatted->as.s.data;
-        slen = formatted->as.s.len;
+        return mino_string_n(S, char_buf, slen);
     }
-    /* A zero-length chunk never grows the buffer, so *buf can still
-     * be NULL; null-base pointer arithmetic is UB even at offset 0. */
-    if (slen == 0) return 0;
-    {
-        size_t need;
-        if (!checked_add_sz(*len, slen, &need)) {
-            prim_throw_classified(S, "internal", "MIN001",
-                "print: buffer size overflow");
-            return -1;
-        }
-        if (need > *cap) {
-            size_t nc = *cap == 0 ? 64 : *cap;
-            char  *nb;
-            while (nc < need) {
-                if (!checked_double_sz(nc, &nc)) {
-                    prim_throw_classified(S, "internal", "MIN001",
-                        "print: buffer size overflow");
-                    return -1;
-                }
-            }
-            nb = (char *)realloc(*buf, nc);
-            if (nb == NULL) {
-                prim_throw_classified(S, "internal", "MIN001",
-                    "print: out of memory");
-                return -1;
-            }
-            *buf = nb;
-            *cap = nc;
-        }
-    }
-    memcpy(*buf + *len, src, slen);
-    *len += slen;
-    return 0;
-}
-
-/* Append a single byte to a growing buffer. */
-static int append_byte(mino_state *S, char **buf, size_t *len,
-                       size_t *cap, char c)
-{
-    if (*len + 1 > *cap) {
-        size_t nc;
-        char  *nb;
-        if (*cap == 0) {
-            nc = 64;
-        } else if (!checked_double_sz(*cap, &nc)) {
-            prim_throw_classified(S, "internal", "MIN001",
-                "print: buffer size overflow");
-            return -1;
-        }
-        nb = (char *)realloc(*buf, nc);
-        if (nb == NULL) {
-            prim_throw_classified(S, "internal", "MIN001",
-                "print: out of memory");
-            return -1;
-        }
-        *buf = nb;
-        *cap = nc;
-    }
-    (*buf)[(*len)++] = c;
-    return 0;
+    return print_to_string(S, v);
 }
 
 /* Format one value through the print-method hook (if installed) or
@@ -424,104 +355,106 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
     return print_to_string(S, v);
 }
 
-/* Build a space-separated chunk of formatted args, optionally with a
- * trailing newline, and emit through *out*. `readably` selects the
- * pr/prn family (strings quoted, chars escaped, print-method hook
- * consulted) versus the print/println family. */
-static mino_val *print_args_to_out(mino_state *S, mino_val *args,
-                                     mino_env *env,
-                                     int readably, int newline)
+/* Join the formatted args, space-separated with an optional trailing
+ * newline, into one GC-owned string. `readably` selects the pr/prn
+ * family (strings quoted, chars escaped, print-method hook consulted)
+ * versus the print/println family. Two rules keep a throwing
+ * print-method (its longjmp lands on the enclosing try pad, skipping
+ * every C frame here) from leaking: user code runs only from this
+ * loop, and every byte accumulated lives in GC-owned storage (the
+ * sink handle's finalizer frees its buffer), so an unwind leaves the
+ * collector holding everything. Returns NULL on error. */
+static mino_val *print_args_join(mino_state *S, mino_val *args,
+                                 mino_env *env,
+                                 int readably, int newline)
 {
-    char   *buf   = NULL;
-    size_t  len   = 0;
-    size_t  cap   = 0;
-    int     first = 1;
-    print_dynvars_saved_t saved_dynvars;
-    print_dynvars_resolve(S, env, &saved_dynvars);
+    mino_val *sink;
+    int         first = 1;
     /* *print-readably* is a binding-time override of the entry-point's
      * choice: when the user binds *print-readably* to false, pr/prn
-     * fall through to the print/println chunk path. The reverse (a
+     * fall through to the print/println path. The reverse (a
      * print/println call inside (binding [*print-readably* true] ...))
-     * still emits print-style chunks per JVM Clojure (only readable
-     * forms set the flag). */
+     * still prints unreadably per canon (only readable forms set the
+     * flag). */
     if (readably && !S->print_readably_flag) readably = 0;
     /* print/println bind unreadable printing for the WHOLE value walk,
      * not just top-level strings/chars: nested strings inside
-     * collections emit raw content too. The cached flag is restored
-     * by print_dynvars_restore on every exit path. */
+     * collections emit raw content too. The caller's
+     * print_dynvars_restore puts the cached flag back. */
     if (!readably) S->print_readably_flag = 0;
+    /* One value, no newline: its formatted form is the result. */
+    if (mino_is_cons(args) && !mino_is_cons(args->as.cons.cdr)
+        && !newline) {
+        return readably
+            ? format_via_hook_or_builtin(S, args->as.cons.car, env)
+            : print_plain_string(S, args->as.cons.car);
+    }
+    sink = out_buf_make(S);
+    if (sink == NULL) return NULL;
+    gc_pin(sink);
     while (mino_is_cons(args)) {
         mino_val *v = args->as.cons.car;
-        if (!first) {
-            if (append_byte(S, &buf, &len, &cap, ' ') < 0) {
-                free(buf);
-                return NULL;
-            }
+        mino_val *formatted = readably
+            ? format_via_hook_or_builtin(S, v, env)
+            : print_plain_string(S, v);
+        if (formatted == NULL) {
+            gc_unpin(1);
+            return NULL;
         }
-        if (readably) {
-            mino_val *formatted = format_via_hook_or_builtin(S, v, env);
-            if (formatted == NULL) {
-                free(buf);
-                return NULL;
-            }
-            {
-                size_t need;
-                if (!checked_add_sz(len, formatted->as.s.len, &need)) {
-                    free(buf);
-                    prim_throw_classified(S, "internal", "MIN001",
-                        "print: out of memory");
-                    return NULL;
-                }
-                if (need > cap) {
-                    size_t nc = cap == 0 ? 64 : cap;
-                    char  *nb;
-                    while (nc < need) {
-                        if (!checked_double_sz(nc, &nc)) {
-                            free(buf);
-                            prim_throw_classified(S, "internal", "MIN001",
-                                "print: out of memory");
-                            return NULL;
-                        }
-                    }
-                    nb = (char *)realloc(buf, nc);
-                    if (nb == NULL) {
-                        free(buf);
-                        prim_throw_classified(S, "internal", "MIN001",
-                            "print: out of memory");
-                        return NULL;
-                    }
-                    buf = nb;
-                    cap = nc;
-                }
-            }
-            /* Empty form: buf can be NULL and null+0 is UB. */
-            if (formatted->as.s.len > 0) {
-                memcpy(buf + len, formatted->as.s.data,
-                       formatted->as.s.len);
-            }
-            len += formatted->as.s.len;
-        } else {
-            if (append_print_chunk(S, v, &buf, &len, &cap, 0) < 0) {
-                free(buf);
-                return NULL;
-            }
+        if (!first
+            && out_buf_append(S, (out_buf_t *)sink->as.handle.ptr,
+                              " ", 1) < 0) {
+            gc_unpin(1);
+            return NULL;
+        }
+        if (out_buf_append(S, (out_buf_t *)sink->as.handle.ptr,
+                           formatted->as.s.data,
+                           formatted->as.s.len) < 0) {
+            gc_unpin(1);
+            return NULL;
         }
         first = 0;
         args  = args->as.cons.cdr;
     }
-    if (newline) {
-        if (append_byte(S, &buf, &len, &cap, '\n') < 0) {
-            free(buf);
-            print_dynvars_restore(S, &saved_dynvars);
-            return NULL;
-        }
+    if (newline
+        && out_buf_append(S, (out_buf_t *)sink->as.handle.ptr,
+                          "\n", 1) < 0) {
+        gc_unpin(1);
+        return NULL;
     }
-    if (io_emit(S, "*out*", buf == NULL ? "" : buf, len) < 0) {
-        free(buf);
+    {
+        mino_val *result = out_buf_to_string(S, sink);
+        gc_unpin(1);
+        return result;
+    }
+}
+
+/* Format args as one chunk and emit through *out*; the single io_emit
+ * keeps each pr/println call atomic with respect to sink routing. */
+static mino_val *print_args_to_out(mino_state *S, mino_val *args,
+                                     mino_env *env,
+                                     int readably, int newline)
+{
+    mino_val *joined;
+    print_dynvars_saved_t saved_dynvars;
+    print_dynvars_resolve(S, env, &saved_dynvars);
+    joined = print_args_join(S, args, env, readably, newline);
+    if (joined == NULL) {
         print_dynvars_restore(S, &saved_dynvars);
         return NULL;
     }
-    free(buf);
+    /* Pin across io_emit: a string-atom sink appends by allocating a
+     * fresh string, and a collection there must not reclaim the
+     * bytes mid-write. Empty joined: null+0 pointer math is UB. */
+    gc_pin(joined);
+    if (io_emit(S, "*out*",
+                joined->as.s.len > 0 ? joined->as.s.data : "",
+                joined->as.s.len) < 0) {
+        gc_unpin(1);
+        print_dynvars_restore(S, &saved_dynvars);
+        return NULL;
+    }
+    gc_unpin(1);
     print_dynvars_restore(S, &saved_dynvars);
     return mino_nil(S);
 }
