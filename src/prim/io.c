@@ -341,6 +341,17 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         mino_current_ctx(S)->dyn_stack    = frame;
         call_args = mino_cons(S, v, mino_nil(S));
         (void)mino_call(S, S->print_method_fn, call_args, env);
+        /* Unwind anchored on our frame, not a blind single-step pop:
+         * a hook that pushed thread bindings and never popped them
+         * would otherwise leave those frames unlinked and unfreed. */
+        while (mino_current_ctx(S)->dyn_stack != frame) {
+            dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
+            if (f == NULL) break;
+            mino_current_ctx(S)->dyn_stack = f->prev;
+            dyn_frame_restore_ns(S, f);
+            dyn_binding_list_free(f->bindings);
+            free(f);
+        }
         mino_current_ctx(S)->dyn_stack = frame->prev;
         free(binding);
         free(frame);
@@ -496,10 +507,16 @@ static mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
     }
     formatted = print_to_string(S, args->as.cons.car);
     if (formatted == NULL) return NULL;
+    /* Pin across io_emit: a string-atom sink appends by allocating a
+     * fresh string, and a collection there must not reclaim the
+     * bytes mid-write. */
+    gc_pin(formatted);
     if (io_emit(S, "*out*", formatted->as.s.data,
                 formatted->as.s.len) < 0) {
+        gc_unpin(1);
         return NULL;
     }
+    gc_unpin(1);
     return mino_nil(S);
 }
 
@@ -778,10 +795,16 @@ static mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "printf: format did not produce a string");
     }
+    /* Pin across io_emit: a string-atom sink appends by allocating a
+     * fresh string, and a collection there must not reclaim the
+     * bytes mid-write. */
+    gc_pin(formatted);
     if (io_emit(S, "*out*", formatted->as.s.data,
                 formatted->as.s.len) < 0) {
+        gc_unpin(1);
         return NULL;
     }
+    gc_unpin(1);
     return mino_nil(S);
 }
 

@@ -94,6 +94,28 @@
   (is (= "[1 2]" (with-out-str (pr [1 2]))))
   (is (= "1 2\n" (with-out-str (println 1 2)))))
 
+;; A hook that pushes a thread-binding frame and never pops it must
+;; not corrupt the dyn stack: the post-hook unwind is anchored on the
+;; print path's own frame, freeing anything the hook left above it,
+;; so the stray binding neither survives the call nor upsets later
+;; binding forms.
+(defmethod print-method :push-no-pop-probe
+  [v]
+  (push-thread-bindings {'*print-length* 1})
+  (pr-builtin (:payload v)))
+
+(def ^:private push-no-pop-obj
+  (with-meta {:payload [1 2 3]} {:type :push-no-pop-probe}))
+
+(deftest hook-pushed-bindings-are-unwound
+  (is (= "[1 2 3]" (with-out-str (pr push-no-pop-obj))))
+  ;; The stray *print-length* binding did not leak out of the call.
+  (is (= "[1 2 3]" (pr-str [1 2 3])))
+  (dotimes [_ 50]
+    (with-out-str (pr push-no-pop-obj)))
+  (is (= "[9 8]" (binding [*print-length* nil] (pr-str [9 8]))))
+  (is (= "(0 1 ...)" (binding [*print-length* 2] (pr-str (range 5))))))
+
 ;; With no script-side try at all, the throw lands on the top-level
 ;; eval pad. That pad must unwind the dyn frames the longjmp tore
 ;; through, or *out* stays bound to the hook's dead capture sink and
