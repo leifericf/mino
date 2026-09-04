@@ -534,8 +534,12 @@
   ;; connection is never accepted inside the client's read window. The
   ;; hazard under test needs only a handful of collections landing in
   ;; the park window (the sibling worker-parked face uses far fewer), so
-  ;; the slow-host count stays small while native CI keeps the deep sweep.
-  (if (getenv "MINO_SLOW_HOST") 12 150))
+  ;; the slow-host count stays small. The native count is sized so that
+  ;; even a two-core hosted runner paying ~300ms per collection finishes
+  ;; the churn well inside the client's 30s read window; the old deep
+  ;; sweep of 150 starved exactly that runner while proving nothing the
+  ;; smaller sweep does not.
+  (if (getenv "MINO_SLOW_HOST") 12 48))
 
 (deftest net-parked-worker-survives-forced-gc
   ;; Face 1: the ECHO worker parks in net-read and then in net-write
