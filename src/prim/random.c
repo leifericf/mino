@@ -136,7 +136,7 @@ static mino_val *prim_secure_rand_bytes(mino_state *S, mino_val *args,
     return result;
 }
 
-static const char k_hex_lower[] = "0123456789abcdef";
+static const char k_rand_hex_lower[] = "0123456789abcdef";
 
 /* (rand-hex n) -- n random bytes as a lowercase hex string of length 2n. */
 static mino_val *prim_rand_hex(mino_state *S, mino_val *args, mino_env *env)
@@ -172,8 +172,8 @@ static mino_val *prim_rand_hex(mino_state *S, mino_val *args, mino_env *env)
                                      "rand-hex: out of memory");
     }
     for (i = 0; i < (size_t)n; i++) {
-        out[2 * i]     = k_hex_lower[buf[i] >> 4];
-        out[2 * i + 1] = k_hex_lower[buf[i] & 0x0f];
+        out[2 * i]     = k_rand_hex_lower[buf[i] >> 4];
+        out[2 * i + 1] = k_rand_hex_lower[buf[i] & 0x0f];
     }
     result = mino_string_n(S, out, (size_t)n * 2);
     memset(buf, 0, (size_t)n);
