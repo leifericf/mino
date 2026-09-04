@@ -133,14 +133,30 @@ static int net_winsock_init(void)
 
 static void net_close_fd(mino_net_fd_t fd)
 {
-    /* shutdown before close: on Linux, close() only drops this fd's
-     * reference, and the socket stays live (accepting handshakes,
-     * holding parked reads) while another thread is still blocked in
-     * accept()/read() on it. shutdown() tears the socket down for
-     * every referencing thread at once, so a stopped listener refuses
-     * connects the moment net-close returns, matching the BSD/macOS
-     * behavior. Fails ENOTCONN on unconnected sockets on some hosts;
-     * harmless, the close still runs. */
+    /* Plain close for connection sockets: a shutdown here would turn
+     * the graceful FIN into a reset and cancel queued outbound bytes
+     * (a websocket close frame, a final response) that the peer is
+     * still owed. Blocked readers on the data path wake on their own
+     * read windows. */
+#ifdef _WIN32
+    closesocket(fd);
+#else
+    close(fd);
+#endif
+}
+
+static void net_close_listener_fd(mino_net_fd_t fd)
+{
+    /* shutdown before close, listeners only: on Linux, close() just
+     * drops this fd's reference, and the listening socket stays live
+     * (completing handshakes into the backlog) while another thread
+     * is still blocked in accept() on it. shutdown() tears it down
+     * for every referencing thread at once, so a stopped listener
+     * refuses connects the moment net-close returns, matching the
+     * BSD/macOS behavior. A listener owes the peer no data, so the
+     * reset semantics that make shutdown wrong for connection
+     * sockets cannot apply. Fails ENOTCONN on some hosts; harmless,
+     * the close still runs. */
 #ifdef _WIN32
     shutdown(fd, SD_BOTH);
     closesocket(fd);
@@ -174,7 +190,7 @@ static void net_listener_finalize(void *ptr, const char *tag)
     mino_net_listener_t *l = (mino_net_listener_t *)ptr;
     (void)tag;
     if (l == NULL) return;
-    if (!l->closed) net_close_fd(l->fd);
+    if (!l->closed) net_close_listener_fd(l->fd);
     free(l);
 }
 
@@ -1408,7 +1424,7 @@ static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
             mino_net_listener_t *l;
             l = (mino_net_listener_t *)v->as.handle.ptr;
             if (!l->closed) {
-                net_close_fd(l->fd);
+                net_close_listener_fd(l->fd);
                 l->closed = 1;
             }
             return mino_nil(S);
