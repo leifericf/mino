@@ -335,6 +335,36 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-nonfinite-floats-canon-spelling
+  ;; Non-finite doubles spell the canon way across the float
+  ;; directives, not C's lowercase forms.
+  (is (= "NaN" (format "%f" ##NaN)))
+  (is (= "NaN" (format "%e" ##NaN)))
+  (is (= "NaN" (format "%g" ##NaN)))
+  (is (= "NaN" (format "%a" ##NaN)))
+  (is (= "Infinity" (format "%f" ##Inf)))
+  (is (= "Infinity" (format "%g" ##Inf)))
+  (is (= "Infinity" (format "%a" ##Inf)))
+  (is (= "-Infinity" (format "%f" ##-Inf)))
+  (is (= "-Infinity" (format "%e" ##-Inf)))
+  (is (= "-Infinity" (format "%a" ##-Inf)))
+  (is (= "NAN" (format "%E" ##NaN)))
+  (is (= "INFINITY" (format "%G" ##Inf)))
+  (is (= "-INFINITY" (format "%A" ##-Inf)))
+  ;; Sign flags apply to infinities, never to NaN.
+  (is (= "+Infinity" (format "%+f" ##Inf)))
+  (is (= "-Infinity" (format "%+f" ##-Inf)))
+  (is (= "NaN" (format "%+f" ##NaN)))
+  (is (= " Infinity" (format "% f" ##Inf)))
+  (is (= "(Infinity)" (format "%(f" ##-Inf)))
+  (is (= "Infinity" (format "%(f" ##Inf)))
+  ;; Precision is ignored; width pads with spaces even under 0.
+  (is (= "NaN" (format "%.2f" ##NaN)))
+  (is (= "       NaN" (format "%10f" ##NaN)))
+  (is (= "Infinity  |" (format "%-10f|" ##Inf)))
+  (is (= " -Infinity" (format "%010f" ##-Inf)))
+  (is (= "   -Infinity" (format "%12g" ##-Inf))))
+
 (deftest format-grouping-separator-fixed-comma
   ;; ADR 52: the , flag groups with a hardcoded comma on every host;
   ;; mino output is byte-identical across hosts, so no locale lookup.

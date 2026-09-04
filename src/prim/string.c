@@ -122,7 +122,8 @@ static char *fmt_append_padded(mino_state *S, char *buf, size_t *len,
 /* Numeric pad path: like fmt_append_padded, but with the '0' flag a
  * right-justified numeric string zero-fills after its sign and hex
  * prefix ("-000003.14", "0x000000001.8p0"). A non-numeric rendering
- * (nan, inf) falls back to space padding, and '-' wins over '0'. */
+ * ("NaN", "Infinity") falls back to space padding, and '-' wins
+ * over '0'. */
 static char *fmt_append_num_padded(mino_state *S, char *buf, size_t *len,
                                     size_t *cap, const char *s, size_t slen,
                                     long width, int left, int zero)
@@ -177,8 +178,10 @@ static void fmt_java_g(double x, long prec, char *out, size_t outsz)
     long   p = prec < 0 ? 6 : (prec == 0 ? 1 : prec);
     double ax = fabs(x);
     if (!isfinite(x)) {
-        /* nan/inf render as-is; the log10/floor digit math below is
-         * undefined on them (a NaN-to-long cast). */
+        /* Defensive: format's %g early-outs non-finite values with
+         * the canon spelling before calling here. The log10/floor
+         * digit math below is undefined on them (a NaN-to-long
+         * cast), so bail to C's rendering rather than reach it. */
         snprintf(out, outsz, "%f", x);
         return;
     }
@@ -207,6 +210,29 @@ static void fmt_ascii_upcase(char *s)
 {
     for (; *s; s++)
         if (*s >= 'a' && *s <= 'z') *s = (char)(*s - 32);
+}
+
+/* Canon spelling for a non-finite double: "NaN" (never signed) or
+ * "Infinity" honoring the '+', ' ', and '(' flags. Writes into `out`
+ * (at least 16 bytes) and returns the length. Padding stays with the
+ * caller: spaces only, never zeros. */
+static size_t fmt_nonfinite(double d, int upper, int f_plus,
+                            int f_space, int f_paren, char *out)
+{
+    if (isnan(d)) {
+        strcpy(out, "NaN");
+    } else if (d > 0.0) {
+        out[0] = '\0';
+        if (f_plus)       strcpy(out, "+");
+        else if (f_space) strcpy(out, " ");
+        strcat(out, "Infinity");
+    } else if (f_paren) {
+        strcpy(out, "(Infinity)");
+    } else {
+        strcpy(out, "-Infinity");
+    }
+    if (upper) fmt_ascii_upcase(out);
+    return strlen(out);
 }
 
 mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
@@ -477,6 +503,15 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 emsg  = "format: float directive expects a number";
                 goto fail;
             }
+            if (!isfinite(d)) {
+                char nf[16];
+                size_t nn = fmt_nonfinite(d, spec == 'E', f_plus,
+                                          f_space, f_paren, nf);
+                buf = fmt_append_padded(S, buf, &len, &cap, nf, nn,
+                                        width, f_minus);
+                if (buf == NULL) { free(argv); return NULL; }
+                break;
+            }
             cdir[di++] = '%';
             if (f_minus) cdir[di++] = '-';
             if (f_plus)  cdir[di++] = '+';
@@ -517,6 +552,15 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 emsg  = "format: float directive expects a number";
                 goto fail;
             }
+            if (!isfinite(d)) {
+                char nf[16];
+                size_t nn = fmt_nonfinite(d, spec == 'G', f_plus,
+                                          f_space, f_paren, nf);
+                buf = fmt_append_padded(S, buf, &len, &cap, nf, nn,
+                                        width, f_minus);
+                if (buf == NULL) { free(argv); return NULL; }
+                break;
+            }
             gsz = (size_t)(prec > 0 ? prec : 6) + 400;
             gtmp = (char *)malloc(gsz);
             if (gtmp == NULL) {
@@ -541,6 +585,15 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 ekind = "eval/type"; ecode = "MTY001";
                 emsg  = "format: float directive expects a number";
                 goto fail;
+            }
+            if (!isfinite(d)) {
+                char nf[16];
+                size_t nn = fmt_nonfinite(d, spec == 'A', f_plus,
+                                          f_space, f_paren, nf);
+                buf = fmt_append_padded(S, buf, &len, &cap, nf, nn,
+                                        width, f_minus);
+                if (buf == NULL) { free(argv); return NULL; }
+                break;
             }
             snprintf(tmp, sizeof(tmp), spec == 'a' ? "%a" : "%A", d);
             /* Double/toHexString has no '+' on a positive exponent. */
