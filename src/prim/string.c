@@ -412,7 +412,12 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (sv == NULL) { free(buf); free(argv); return NULL; }
                 src = sv->as.s.data; slen = sv->as.s.len;
             }
-            if (prec >= 0 && (size_t)prec < slen) slen = (size_t)prec;
+            if (prec >= 0) {
+                /* Precision counts codepoints, matching count; cut at
+                 * the boundary, never mid-sequence. */
+                size_t cut = utf8_skip_codepoints(src, slen, 0, prec);
+                if (cut < slen) slen = cut;
+            }
             if (spec == 'S' || spec == 'B') {
                 heap = (char *)malloc(slen + 1);
                 if (heap == NULL) {

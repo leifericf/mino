@@ -335,6 +335,14 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-precision-counts-codepoints
+  ;; Precision truncates the rendered string at a codepoint boundary,
+  ;; never mid-sequence.
+  (is (= "É" (format "%.1s" "Éx")))
+  (is (= "Éx" (format "%.2s" "Éxy")))
+  (is (= "    É" (format "%5.1s" "Éx")))
+  (is (= "    ÉC" (format "%6.2S" "école"))))
+
 (deftest format-pad-width-counts-codepoints
   ;; Width measures the rendered argument in codepoints, matching
   ;; count, not UTF-8 bytes.
