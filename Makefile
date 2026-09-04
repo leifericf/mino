@@ -132,7 +132,8 @@ BUNDLED = \
                     lib_mino_retry:lib/mino/retry.clj \
                     lib_mino_wait:lib/mino/wait.clj \
                     lib_mino_mime:lib/mino/mime.clj \
-                    lib_mino_jsonl:lib/mino/jsonl.clj
+                    lib_mino_jsonl:lib/mino/jsonl.clj \
+                    lib_mino_ws:lib/mino/ws.clj
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 
