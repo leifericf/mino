@@ -492,6 +492,56 @@
   (is (= "(12,345)" (format "%(,d" -12345)))
   (is (= "-9,223,372,036,854,775,808" (format "%,d" -9223372036854775808))))
 
+(deftest format-grouping-flag-on-floats
+  ;; The , flag groups the integer part of f and of g's decimal
+  ;; form, matching canon; the fraction is never grouped.
+  (is (= "1,234.500000" (format "%,f" 1234.5)))
+  (is (= "1,234,567.500000" (format "%,f" 1234567.5)))
+  (is (= "-1,234,567.500000" (format "%,f" -1234567.5)))
+  (is (= "1,234,567.89" (format "%,.2f" 1234567.891)))
+  (is (= "1,234,568" (format "%,.0f" 1234567.891)))
+  (is (= "1,000" (format "%,.0f" 999.9)))
+  (is (= "123.500000" (format "%,f" 123.5)))
+  (is (= "0.500000" (format "%,f" 0.5)))
+  (is (= "0.000000" (format "%,f" 0.0)))
+  (is (= "10,000,000.000000" (format "%,f" 1.0E7)))
+  ;; The sign flags sit ahead of the groups.
+  (is (= "+1,234.500000" (format "%+,f" 1234.5)))
+  (is (= " 1,234.500000" (format "% ,f" 1234.5)))
+  ;; The ( flag composes: parens outside the groups.
+  (is (= "(1,234,567.500000)" (format "%(,f" -1234567.5)))
+  (is (= "(123.500000)" (format "%(,f" -123.5)))
+  (is (= "(0.1)" (format "%(,.1f" -0.05)))
+  ;; Width pads with spaces; the 0 flag fills with plain zeros after
+  ;; the sign or paren, never grouped ones.
+  (is (= "        1,234,567.50" (format "%,20.2f" 1234567.5)))
+  (is (= "    1,234.50" (format "%,12.2f" 1234.5)))
+  (is (= "1,234,567.50        |" (format "%-,20.2f|" 1234567.5)))
+  (is (= "-00000001,234,567.50" (format "%0,20.2f" -1234567.5)))
+  (is (= "(0000001,234,567.50)" (format "%(,020.2f" -1234567.5)))
+  ;; g groups only its decimal form; scientific stays ungrouped.
+  (is (= "12,345.6" (format "%,g" 12345.6)))
+  (is (= "12,345.6" (format "%,G" 12345.6)))
+  (is (= "1,000.00" (format "%,g" 1000.0)))
+  (is (= "1,234,567.500" (format "%,.10g" 1234567.5)))
+  (is (= "1.23457e+06" (format "%,g" 1234567.5)))
+  (is (= "0.000123000" (format "%,g" 1.23E-4)))
+  (is (= "  (12,345.6)" (format "%(,12g" -12345.6)))
+  ;; Non-finite keeps the canon spelling under the flag.
+  (is (= "Infinity" (format "%,f" ##Inf)))
+  (is (= "NaN" (format "%,f" ##NaN)))
+  ;; A rendering past the stack buffer keeps its groups and parens
+  ;; (301 integer digits and 100 commas; the digit tail stays
+  ;; unpinned, as the exact-expansion rendering owns it).
+  (let [s (format "%,f" 1.0E300)]
+    (is (= 408 (count s)))
+    (is (str/starts-with? s "1,000,000,00"))
+    (is (str/ends-with? s ".000000")))
+  (let [s (format "%(,f" -1.0E300)]
+    (is (= 410 (count s)))
+    (is (str/starts-with? s "(1,000,000,0"))
+    (is (str/ends-with? s ".000000)"))))
+
 (deftest format-char-codepoint-accommodation
   ;; ADR 51: %c and %C take an int codepoint in mino's single int
   ;; tier, bounded to the Unicode scalar range.

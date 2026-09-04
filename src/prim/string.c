@@ -173,6 +173,24 @@ static void fmt_regroup_decimal(const char *in, char *out, size_t outsz,
     out[di] = '\0';
 }
 
+/* Insert ',' groups into the leading integer-digit span of a
+ * rendered decimal number ("-1234567.50" becomes "-1,234,567.50").
+ * Digits before the '.' (or the end) group in threes; the sign and
+ * everything from the '.' on copy through untouched. out must hold
+ * strlen(in) + strlen(in)/3 + 1 bytes. */
+static void fmt_group_thousands(const char *in, char *out)
+{
+    size_t di = 0, k, s0 = 0, digits = 0;
+    if (in[0] == '-' || in[0] == '+' || in[0] == ' ')
+        out[di++] = in[s0++];
+    while (in[s0 + digits] >= '0' && in[s0 + digits] <= '9') digits++;
+    for (k = 0; k < digits; k++) {
+        if (k > 0 && (digits - k) % 3 == 0) out[di++] = ',';
+        out[di++] = in[s0 + k];
+    }
+    strcpy(out + di, in + s0 + digits);
+}
+
 /* The Formatter's %g: `prec` total significant digits (default 6,
  * 0 promotes to 1), trailing zeros kept; scientific notation outside
  * [1e-4, 10^prec). C's %g strips zeros and picks the shorter form,
@@ -544,11 +562,12 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
-            if (f_paren) {
-                /* Canon renders a finite negative inside parens.
-                 * Render without width, swap the leading '-' for the
-                 * paren pair, and let the numeric pad helper apply
-                 * width and zero fill after '('. */
+            if (f_paren || f_comma) {
+                /* Canon groups the integer digits under ',' and
+                 * renders a finite negative inside parens under '('.
+                 * Render without width, post-process, and let the
+                 * numeric pad helper apply width and zero fill after
+                 * the sign or '('. */
                 char  *src = tmp;
                 char  *heap = NULL;
                 size_t sl;
@@ -574,7 +593,22 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                     src = heap;
                 }
                 sl = (size_t)tn;
-                if (src[0] == '-') {
+                if (f_comma) {
+                    /* Sized for every comma plus the paren pair. */
+                    char *g2 = (char *)malloc(sl + sl / 3 + 4);
+                    if (g2 == NULL) {
+                        free(heap);
+                        ekind = "eval/out-of-memory"; ecode = "MOM001";
+                        emsg  = "out of memory";
+                        goto fail;
+                    }
+                    fmt_group_thousands(src, g2);
+                    free(heap);
+                    heap = g2;
+                    src  = g2;
+                    sl   = strlen(g2);
+                }
+                if (f_paren && src[0] == '-') {
                     src[0] = '(';
                     src[sl++] = ')';
                     src[sl] = '\0';
@@ -643,10 +677,27 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             }
             fmt_java_g(d, prec, gtmp, gsz);
             if (spec == 'G') fmt_ascii_upcase(gtmp);
+            if (f_comma && strchr(gtmp, 'e') == NULL
+                && strchr(gtmp, 'E') == NULL) {
+                /* Canon groups only the decimal form; the scientific
+                 * form stays ungrouped. Sized for every comma plus
+                 * the paren pair. */
+                size_t gl2 = strlen(gtmp);
+                char  *g2 = (char *)malloc(gl2 + gl2 / 3 + 4);
+                if (g2 == NULL) {
+                    free(gtmp);
+                    ekind = "eval/out-of-memory"; ecode = "MOM001";
+                    emsg  = "out of memory";
+                    goto fail;
+                }
+                fmt_group_thousands(gtmp, g2);
+                free(gtmp);
+                gtmp = g2;
+            }
             if (f_paren && gtmp[0] == '-') {
                 /* Canon renders a finite negative inside parens; the
-                 * pad helper zero-fills after '('. gsz leaves well
-                 * over two bytes of slack past the longest render. */
+                 * buffer leaves well over two bytes of slack past the
+                 * longest render, so the ')' fits in place. */
                 size_t gl = strlen(gtmp);
                 gtmp[0] = '(';
                 gtmp[gl] = ')';
