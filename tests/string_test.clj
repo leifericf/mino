@@ -542,6 +542,33 @@
     (is (str/starts-with? s "(1,000,000,0"))
     (is (str/ends-with? s ".000000)"))))
 
+(deftest format-flag-directive-matrix-validated
+  ;; Canon-probed matrix: every illegal flag and directive pair
+  ;; throws the classified illegal-flag error instead of silently
+  ;; dropping the flag.
+  (doseq [f ["%+s" "% s" "%0s" "%#s" "%,s" "%(s" "%0S" "%,b" "%(B"
+             "%+c" "% c" "%0c" "%#c" "%,c" "%(C"
+             "%#d"
+             "%+x" "% x" "%,x" "%(x" "%,X" "%(o" "% o"
+             "%,e" "%,E" "%#g" "%#G" "%,a" "%(a" "%,A" "%(A"
+             "%-n" "%+n" "%,n" "%0%" "%(%"]]
+    (is (thrown-with-msg? #"illegal flag" (format f 0)) f))
+  ;; The check precedes the argument list and argument conversion.
+  (is (thrown-with-msg? #"illegal flag" (format "%#d")))
+  (is (thrown-with-msg? #"illegal flag" (format "%,e" ##Inf)))
+  ;; The error is classified data, catchable by kind.
+  (is (= [:eval/type "MTY001"]
+         (try (format "%(s" "x")
+              (catch :eval/type e [(:mino/kind e) (:mino/code e)]))))
+  ;; Legal pairs keep working, including the C alternate forms.
+  (is (= "0xff" (format "%#x" 255)))
+  (is (= "010" (format "%#o" 8)))
+  (is (= "1235." (format "%#.0f" 1234.6)))
+  (is (= "1.e+03" (format "%#.0e" 1234.5)))
+  (is (= "0x1.34ap10" (format "%#a" 1234.5)))
+  ;; An unknown directive still reports itself, flags or not.
+  (is (thrown-with-msg? #"unsupported directive" (format "%,q" 1))))
+
 (deftest format-char-codepoint-accommodation
   ;; ADR 51: %c and %C take an int codepoint in mino's single int
   ;; tier, bounded to the Unicode scalar range.

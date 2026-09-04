@@ -279,6 +279,52 @@ static size_t fmt_nonfinite(double d, int upper, int f_plus,
     return strlen(out);
 }
 
+/* Flag bits for the per-directive validation mask. */
+enum {
+    FMT_F_MINUS = 1u << 0, FMT_F_PLUS  = 1u << 1,
+    FMT_F_SPACE = 1u << 2, FMT_F_ZERO  = 1u << 3,
+    FMT_F_HASH  = 1u << 4, FMT_F_COMMA = 1u << 5,
+    FMT_F_PAREN = 1u << 6
+};
+
+/* Per-directive allowed-flags mask, canon-probed pair by pair. The
+ * general and char directives take only '-' ('#' would need an
+ * extension hook mino does not have); the single-int-tier long
+ * contract governs d/x/X/o, so the arbitrary-precision-only '+',
+ * ' ', '(' forms stay illegal on x/X/o; ',' pairs only with the
+ * decimal forms; '(' never pairs with the hex float directive. An
+ * unknown spec allows everything and defers to the
+ * unsupported-directive throw at dispatch. */
+static unsigned fmt_allowed_flags(char spec)
+{
+    switch (spec) {
+    case 's': case 'S': case 'b': case 'B':
+    case 'c': case 'C': case '%':
+        return FMT_F_MINUS;
+    case 'd':
+        return FMT_F_MINUS | FMT_F_PLUS | FMT_F_SPACE | FMT_F_ZERO
+             | FMT_F_COMMA | FMT_F_PAREN;
+    case 'x': case 'X': case 'o':
+        return FMT_F_MINUS | FMT_F_ZERO | FMT_F_HASH;
+    case 'e': case 'E':
+        return FMT_F_MINUS | FMT_F_PLUS | FMT_F_SPACE | FMT_F_ZERO
+             | FMT_F_HASH | FMT_F_PAREN;
+    case 'f':
+        return FMT_F_MINUS | FMT_F_PLUS | FMT_F_SPACE | FMT_F_ZERO
+             | FMT_F_HASH | FMT_F_COMMA | FMT_F_PAREN;
+    case 'g': case 'G':
+        return FMT_F_MINUS | FMT_F_PLUS | FMT_F_SPACE | FMT_F_ZERO
+             | FMT_F_COMMA | FMT_F_PAREN;
+    case 'a': case 'A':
+        return FMT_F_MINUS | FMT_F_PLUS | FMT_F_SPACE | FMT_F_ZERO
+             | FMT_F_HASH;
+    case 'n':
+        return 0;
+    default:
+        return ~0u;
+    }
+}
+
 mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *fmt_val;
@@ -293,6 +339,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
     size_t  cap = 0;
     size_t  i;
     const char *ekind = NULL, *ecode = NULL, *emsg = NULL;
+    char        emsgbuf[64];
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -387,6 +434,31 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
         }
         spec = fmt[j];
         i = j; /* the loop's i++ steps past the spec */
+
+        /* Validate the flags against the directive before anything
+         * else; canon rejects an illegal pair ahead of the argument
+         * list and argument conversion. */
+        {
+            unsigned have =
+                  (f_minus ? FMT_F_MINUS : 0u)
+                | (f_plus  ? FMT_F_PLUS  : 0u)
+                | (f_space ? FMT_F_SPACE : 0u)
+                | (f_zero  ? FMT_F_ZERO  : 0u)
+                | (f_hash  ? FMT_F_HASH  : 0u)
+                | (f_comma ? FMT_F_COMMA : 0u)
+                | (f_paren ? FMT_F_PAREN : 0u);
+            unsigned bad = have & ~fmt_allowed_flags(spec);
+            if (bad != 0u) {
+                const char *flag_chars = "-+ 0#,(";
+                int b = 0;
+                while ((bad & (1u << b)) == 0u) b++;
+                snprintf(emsgbuf, sizeof(emsgbuf),
+                         "format: illegal flag '%c' for directive '%c'",
+                         flag_chars[b], spec);
+                ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
+                goto fail;
+            }
+        }
 
         if (spec == '%') {
             buf = fmt_append(S, buf, &len, &cap, "%", 1);
@@ -717,13 +789,6 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             char *heap = NULL;
             char *plus;
             long  ap = (prec == 0) ? 1 : prec;
-            if (f_paren) {
-                /* Canon rejects '(' paired with the hex float
-                 * directive; ignoring it was a silent divergence. */
-                ekind = "eval/type"; ecode = "MTY001";
-                emsg  = "format: illegal flag ( for the hex float directive";
-                goto fail;
-            }
             if (!as_double(a, &d)) {
                 ekind = "eval/type"; ecode = "MTY001";
                 emsg  = "format: float directive expects a number";
