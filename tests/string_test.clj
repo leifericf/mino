@@ -439,6 +439,19 @@
     (is (str/starts-with? s "(1"))
     (is (str/ends-with? s ".000000)"))))
 
+(deftest format-paren-flag-rejected-on-hex-float
+  ;; Canon: the ( flag is an illegal pair with the hex float
+  ;; directive; ignoring it silently was a divergence. The check
+  ;; precedes the argument, so non-finite values throw too.
+  (is (thrown-with-msg? #"illegal flag" (format "%(a" -1.5)))
+  (is (thrown-with-msg? #"illegal flag" (format "%(a" 1.5)))
+  (is (thrown-with-msg? #"illegal flag" (format "%(A" 1.5)))
+  (is (thrown-with-msg? #"illegal flag" (format "%(a" ##-Inf)))
+  ;; The error is classified data, catchable by kind.
+  (is (= [:eval/type "MTY001"]
+         (try (format "%(a" 1.5)
+              (catch :eval/type e [(:mino/kind e) (:mino/code e)])))))
+
 (deftest format-nonfinite-floats-canon-spelling
   ;; Non-finite doubles spell the canon way across the float
   ;; directives, not C's lowercase forms.

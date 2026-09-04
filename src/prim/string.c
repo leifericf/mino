@@ -666,6 +666,13 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             char *heap = NULL;
             char *plus;
             long  ap = (prec == 0) ? 1 : prec;
+            if (f_paren) {
+                /* Canon rejects '(' paired with the hex float
+                 * directive; ignoring it was a silent divergence. */
+                ekind = "eval/type"; ecode = "MTY001";
+                emsg  = "format: illegal flag ( for the hex float directive";
+                goto fail;
+            }
             if (!as_double(a, &d)) {
                 ekind = "eval/type"; ecode = "MTY001";
                 emsg  = "format: float directive expects a number";
