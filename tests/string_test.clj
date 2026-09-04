@@ -585,6 +585,15 @@
   ;; The + and - flags still compose when a width is present.
   (is (= "+5   |" (format "%+-5d|" 5))))
 
+(deftest format-literal-percent-honors-width
+  ;; Canon-probed: width pads the literal percent like any string.
+  (is (= "    %" (format "%5%")))
+  (is (= "%    " (format "%-5%")))
+  (is (= "%" (format "%1%")))
+  (is (= "%" (format "%-1%")))
+  (is (= "         %" (format "%10%")))
+  (is (= "100%" (format "100%%"))))
+
 (deftest format-char-codepoint-accommodation
   ;; ADR 51: %c and %C take an int codepoint in mino's single int
   ;; tier, bounded to the Unicode scalar range.

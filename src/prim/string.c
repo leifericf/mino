@@ -491,7 +491,9 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
         }
 
         if (spec == '%') {
-            buf = fmt_append(S, buf, &len, &cap, "%", 1);
+            /* Canon pads the literal percent like any string. */
+            buf = fmt_append_padded(S, buf, &len, &cap, "%", 1,
+                                    width, f_minus);
             if (buf == NULL) { free(argv); return NULL; }
             continue;
         }
