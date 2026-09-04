@@ -118,14 +118,15 @@
     (if-let [b (:body resp)] (assoc base :body b) base)))
 
 (def ^:private allowed-conn-keys
-  #{:idle-timeout :request-timeout :seed
+  #{:idle-timeout :request-timeout :seed :stopping?
     :max-header-bytes :max-body-bytes :max-headers})
 
 (defn- normalize-opts
   "Public opts into engine opts; every deadline carries its unit and
   is type-checked here, the single normalization pass. Unknown keys
   are an error naming them. :seed is already-read socket bytes (any
-  byte seq) handed to the engine by an embedder."
+  byte seq) handed to the engine by an embedder. :stopping? is the
+  wind-down probe (see serve-conn*), defaulted to never."
   [opts]
   (when-not (map? opts)
     (bad "the connection opts must be a map"))
@@ -134,15 +135,19 @@
     (when (seq unknown)
       (bad (str "unknown connection key(s): "
                 (str/join ", " (map pr-str unknown))))))
-  (let [m {:idle-timeout-ms (opt-long (:idle-timeout opts)
-                                      :idle-timeout default-idle-timeout-ms)
-           :request-timeout-ms (opt-long (:request-timeout opts)
-                                         :request-timeout
-                                         default-request-timeout-ms)
-           :max-header-bytes (:max-header-bytes opts)
-           :max-body-bytes (:max-body-bytes opts)
-           :max-headers (:max-headers opts)}]
-    (if-let [s (:seed opts)] (assoc m :seed (vec s)) m)))
+  (let [stopping? (:stopping? opts)]
+    (when-not (or (nil? stopping?) (fn? stopping?))
+      (bad "key :stopping? must be a function"))
+    (let [m {:idle-timeout-ms (opt-long (:idle-timeout opts)
+                                        :idle-timeout default-idle-timeout-ms)
+             :request-timeout-ms (opt-long (:request-timeout opts)
+                                           :request-timeout
+                                           default-request-timeout-ms)
+             :max-header-bytes (:max-header-bytes opts)
+             :max-body-bytes (:max-body-bytes opts)
+             :max-headers (:max-headers opts)
+             :stopping? (or stopping? (fn [] false))}]
+      (if-let [s (:seed opts)] (assoc m :seed (vec s)) m))))
 
 (defn- parse-caps
   "Engine opts into http-parse-request caps; absent caps stay absent
@@ -297,9 +302,11 @@
   its own worker future, which serves it to completion and returns
   the permit at close. stop wakes every acceptor, closes the
   listener, drains unserved connections from the mailbox, and joins
-  the pool within a bounded grace; a connection that outlives the
-  grace is left to its own deadline, never closed underneath a
-  parked read.
+  the pool within a bounded grace; a parked worker winds down at its
+  next read tick (an idle connection closes, an in-flight exchange
+  finishes and then closes without keep-alive), so the pool converges
+  within about one poll interval and no socket is ever closed
+  underneath a parked read.
 
   A handler answers a websocket upgrade request with {:ws f}: the
   server validates the handshake (a malformed upgrade gets a plain
@@ -345,6 +352,10 @@
         ws-next-id (atom 0)
         handler (wrap-ws-registry handler live-ws ws-next-id)
         running? (atom true)
+        ;; the wind-down probe: every worker consults it at its read
+        ;; ticks and keep-alive decisions, so a stopped server's
+        ;; workers exit at their next wake, not their idle deadline
+        conn-opts (assoc conn-opts :stopping? (fn [] (not @running?)))
         permits (a/chan max-conns)
         mailbox (a/chan max-conns)
         stop-sig (a/chan)
@@ -464,9 +475,12 @@
   {:kind :eof} (the peer left before any byte of this request), or a
   budget drop ({:kind :idle-timeout} while still waiting for the
   first byte, {:kind :request-timeout} once a partial request has
-  the wall clock against it). A peer that closes mid-request gets its
-  partial bytes reparsed under :eof: a request that completed just
-  before the close is still served."
+  the wall clock against it), or {:kind :stopping} when a read tick
+  finds the :stopping? probe true before any byte of a next request
+  arrived. A partial request is never abandoned to the probe: it
+  keeps its own budgets and finishes or expires on them. A peer that
+  closes mid-request gets its partial bytes reparsed under :eof: a
+  request that completed just before the close is still served."
   [c seed opts idle-since-ms]
   (let [caps (parse-caps opts)]
     (loop [buf seed
@@ -489,11 +503,16 @@
                      (or first-byte-ms (time-ms)))
 
               (= :tick chunk)
-              (if (and (nil? first-byte-ms)
-                       (expired? (time-ms) idle-since-ms
-                                 (:idle-timeout-ms opts)))
+              (cond
+                (and (nil? first-byte-ms) ((:stopping? opts)))
+                {:kind :stopping}
+
+                (and (nil? first-byte-ms)
+                     (expired? (time-ms) idle-since-ms
+                               (:idle-timeout-ms opts)))
                 {:kind :idle-timeout}
-                (recur buf first-byte-ms))
+
+                :else (recur buf first-byte-ms))
 
               :else
               (if (empty? buf)
@@ -563,17 +582,24 @@
   and embedding seam over the private loop, not part of the request
   vocabulary. opts: :idle-timeout :request-timeout :max-header-bytes
   :max-body-bytes :max-headers, plus :seed (already-read socket
-  bytes, embedding use); unknown keys are an error naming them. A
-  handler response of {:ws f} takes the websocket upgrade path (see
+  bytes, embedding use) and :stopping? (a zero-argument wind-down
+  probe polled at each read tick and keep-alive decision: true winds
+  the connection down, closing an idle connection at its next wake
+  and letting an in-flight exchange finish, answer with Connection
+  close, and exit instead of continuing keep-alive; run-server wires
+  it to its stop). Unknown keys are an error naming them. A handler
+  response of {:ws f} takes the websocket upgrade path (see
   run-server); on this seam it works without the stop registry."
   [c handler opts]
-  (let [opts (normalize-opts opts)]
+  (let [opts (normalize-opts opts)
+        stopping? (:stopping? opts)]
     (loop [seed (or (:seed opts) [])
            idle-since-ms (time-ms)]
       (let [r (read-request c seed opts idle-since-ms)]
         (case (:kind r)
           :request (let [parsed (:parsed r)
-                         alive? (keep-alive? parsed)
+                         alive? (and (keep-alive? parsed)
+                                     (not (stopping?)))
                          req (request-map c parsed)
                          resp (try (handler req)
                                    (catch e ::handler-threw))]

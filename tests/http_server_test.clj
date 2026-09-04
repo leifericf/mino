@@ -1149,4 +1149,69 @@
             (is (= (srv-bb "still here") (:body (:resp x)))))
           (try (net-close c) (catch e nil)))))))
 
+;;;; stop convergence: workers wind down at their next read tick
+
+(deftest stop-winds-down-a-parked-keep-alive-worker-at-its-next-tick
+  ;; A keep-alive connection whose worker is parked between requests
+  ;; against a long idle budget: stop must reach it at its next read
+  ;; tick (the socket poll interval), never at the idle deadline. On
+  ;; a loaded 2-core CI runner the old behaviour let each stopped
+  ;; server leak its parked workers for the full 30s idle budget,
+  ;; overlapping across consecutive tests until the process thread
+  ;; limit saturated.
+  (srv-wait-for #(zero? (mino-thread-count)) 10000)
+  (let [h (fn [req] {:status 200 :body "ok"})
+        s (srv/run-server h {:acceptors 1
+                             :idle-timeout 30000 :request-timeout 30000})
+        c (srv-connect (:port s))]
+    (try
+      (srv-send c (srv-req "GET" "/warm"))
+      (let [x (srv-read-one c [])]
+        (is (= 200 (:code (:resp x)))))
+      ;; the worker is now parked waiting for a next request
+      ((:stop s))
+      ;; the worker closed the connection at its wake, not at the idle
+      ;; deadline: a :held outcome means the socket is still open
+      (is (contains? #{:eof :reset} (srv-drop-outcome c))
+          "the parked worker closed its connection after stop")
+      (is (srv-wait-for #(zero? (mino-thread-count)) 8000)
+          "the worker grant drained within the poll interval, not the idle budget")
+      (finally
+        (try (net-close c) (catch e nil))
+        ((:stop s))))))
+
+(deftest stop-lets-a-mid-request-exchange-finish-then-closes
+  ;; A worker holding a partial request when stop lands must finish
+  ;; that one exchange (its read is never cut) and then close instead
+  ;; of continuing keep-alive; the response announces the close.
+  (if-not (grant-affords? 4)
+    (skip-small-grant "stop-lets-a-mid-request-exchange-finish-then-closes" 4)
+   (let [_ (srv-await-capacity 4)
+        h (fn [req] {:status 200 :body (str "late:" (:uri req))})
+        s (srv/run-server h {:acceptors 1
+                             :idle-timeout 30000 :request-timeout 30000})
+        c (srv-connect (:port s))]
+    (try
+      (srv-send c "GET /mid HTTP/1.1\r\nHost: t.example\r\n")
+      ;; give the engine a moment to park on the partial request
+      (thread-sleep 300)
+      (let [completer (future (thread-sleep 400)
+                              (try (net-write c (srv-bb "\r\n"))
+                                   (catch e nil)))]
+        ((:stop s))
+        (let [x (srv-read-one c [])]
+          (is (some? x) "the in-flight exchange was served, not cut")
+          (is (= 200 (:code (:resp x))))
+          (is (= (srv-bb "late:/mid") (:body (:resp x))))
+          (is (= "close" (get (:headers (:resp x)) "connection"))
+              "no keep-alive continuation after stop"))
+        (is (contains? #{:eof :reset} (srv-drop-outcome c))
+            "the connection closed once its exchange finished")
+        (is (srv-wait-for #(zero? (mino-thread-count)) 8000)
+            "the worker grant drained once the exchange finished")
+        (try (deref completer 4000 nil) (catch e nil)))
+      (finally
+        (try (net-close c) (catch e nil))
+        ((:stop s)))))))
+
 (run-tests-and-exit)
