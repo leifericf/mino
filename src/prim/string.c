@@ -325,6 +325,22 @@ static unsigned fmt_allowed_flags(char spec)
     }
 }
 
+/* Per-directive precision rule, the sibling axis to the flag table,
+ * canon-probed spec by spec: precision cuts the general string forms
+ * and sizes the float family; everywhere else it is illegal. Width
+ * is legal on every directive except 'n'. */
+static int fmt_precision_ok(char spec)
+{
+    switch (spec) {
+    case 's': case 'S': case 'b': case 'B':
+    case 'e': case 'E': case 'f': case 'g': case 'G':
+    case 'a': case 'A':
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val  *fmt_val;
@@ -467,9 +483,22 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
                 goto fail;
             }
-            /* The flag syntax rules apply to known directives; an
-             * unknown spec falls through to the unsupported throw. */
+            /* The flag syntax and width/precision rules apply to
+             * known directives; an unknown spec falls through to the
+             * unsupported throw. */
             if (allowed != ~0u) {
+                if (prec >= 0 && !fmt_precision_ok(spec)) {
+                    snprintf(emsgbuf, sizeof(emsgbuf),
+                             "format: illegal precision for directive '%c'",
+                             spec);
+                    ekind = "eval/type"; ecode = "MTY001"; emsg = emsgbuf;
+                    goto fail;
+                }
+                if (width >= 0 && spec == 'n') {
+                    ekind = "eval/type"; ecode = "MTY001";
+                    emsg  = "format: illegal width for directive 'n'";
+                    goto fail;
+                }
                 if (f_plus && f_space) {
                     ekind = "eval/type"; ecode = "MTY001";
                     emsg  = "format: the + and space flags are exclusive";
@@ -622,9 +651,6 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             if (width >= 0)
                 di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
                                        "%ld", width);
-            if (prec >= 0)
-                di += (size_t)snprintf(cdir + di, sizeof(cdir) - di,
-                                       ".%ld", prec);
             cdir[di++] = 'l';
             cdir[di++] = 'l';
             cdir[di++] = spec;

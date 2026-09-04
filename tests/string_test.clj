@@ -585,6 +585,33 @@
   ;; The + and - flags still compose when a width is present.
   (is (= "+5   |" (format "%+-5d|" 5))))
 
+(deftest format-width-precision-rules-validated
+  ;; Canon-probed sibling axis to the flag table: width is illegal on
+  ;; the newline directive only; precision belongs to the general
+  ;; string forms and the float family only.
+  (is (thrown-with-msg? #"illegal width" (format "%5n")))
+  (doseq [f ["%.2c" "%.0C" "%.2d" "%.0d" "%.2x" "%.2X" "%.2o"
+             "%.2n" "%.2%" "%.0%" "%5.2%"]]
+    (is (thrown-with-msg? #"illegal precision" (format f 97)) f))
+  ;; The check precedes the argument list and argument conversion.
+  (is (thrown-with-msg? #"illegal precision" (format "%.2d")))
+  (is (thrown-with-msg? #"illegal width" (format "%5n" ##Inf)))
+  ;; The error is classified data, catchable by kind.
+  (is (= [:eval/type "MTY001"]
+         (try (format "%.2d" 42)
+              (catch :eval/type e [(:mino/kind e) (:mino/code e)]))))
+  ;; Legal pairs keep working across the axis.
+  (is (= "   ab" (format "%5s" "ab")))
+  (is (= "    a" (format "%5c" 97)))
+  (is (= "   42" (format "%5d" 42)))
+  (is (= "ab" (format "%.2s" "abcdef")))
+  (is (= "tr" (format "%.2b" true)))
+  (is (= "1.50" (format "%.2f" 1.5)))
+  (is (= "1.50e+00" (format "%.2e" 1.5)))
+  (is (= "0x1.80p0" (format "%.2a" 1.5)))
+  ;; An unknown directive still reports itself, precision or not.
+  (is (thrown-with-msg? #"unsupported directive" (format "%.2q" 1))))
+
 (deftest format-literal-percent-honors-width
   ;; Canon-probed: width pads the literal percent like any string.
   (is (= "    %" (format "%5%")))
