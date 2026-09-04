@@ -335,6 +335,16 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-grouped-decimal-zero-pad
+  ;; The 0 flag zero-fills inside the parens and after the sign; the
+  ;; fill zeros are plain, never grouped.
+  (is (= "(0000012345)" (format "%(012d" -12345)))
+  (is (= "(0012345)" (format "%(09d" -12345)))
+  (is (= "00000012,345" (format "%,012d" 12345)))
+  (is (= "-0000012,345" (format "%,012d" -12345)))
+  (is (= "(000000012,345)" (format "%(,015d" -12345)))
+  (is (= "1,234,567" (format "%,08d" 1234567))))
+
 (deftest format-uppercase-string-directive-unicode
   ;; %S/%B uppercase through the generated case tables, matching
   ;; upper-case, not byte-wise ASCII.

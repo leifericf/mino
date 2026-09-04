@@ -121,10 +121,10 @@ static char *fmt_append_padded(mino_state *S, char *buf, size_t *len,
 }
 
 /* Numeric pad path: like fmt_append_padded, but with the '0' flag a
- * right-justified numeric string zero-fills after its sign and hex
- * prefix ("-000003.14", "0x000000001.8p0"). A non-numeric rendering
- * ("NaN", "Infinity") falls back to space padding, and '-' wins
- * over '0'. */
+ * right-justified numeric string zero-fills after its sign, opening
+ * paren, and hex prefix ("-000003.14", "(0000012345)",
+ * "0x000000001.8p0"). A non-numeric rendering ("NaN", "Infinity")
+ * falls back to space padding, and '-' wins over '0'. */
 static char *fmt_append_num_padded(mino_state *S, char *buf, size_t *len,
                                     size_t *cap, const char *s, size_t slen,
                                     long width, int left, int zero)
@@ -135,7 +135,7 @@ static char *fmt_append_num_padded(mino_state *S, char *buf, size_t *len,
     if (left || !zero || pad == 0)
         return fmt_append_padded(S, buf, len, cap, s, slen, width, left);
     if (head < slen && (s[head] == '-' || s[head] == '+'
-                        || s[head] == ' ')) head++;
+                        || s[head] == ' ' || s[head] == '(')) head++;
     if (head + 1 < slen && s[head] == '0'
         && (s[head + 1] == 'x' || s[head + 1] == 'X')) head += 2;
     if (head >= slen || s[head] < '0' || s[head] > '9')
@@ -463,8 +463,9 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 snprintf(plain, sizeof(plain), "%lld", n2);
                 fmt_regroup_decimal(plain, grouped, sizeof(grouped),
                                     f_comma, f_paren);
-                buf = fmt_append_padded(S, buf, &len, &cap, grouped,
-                                        strlen(grouped), width, f_minus);
+                buf = fmt_append_num_padded(S, buf, &len, &cap, grouped,
+                                            strlen(grouped), width,
+                                            f_minus, f_zero);
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
