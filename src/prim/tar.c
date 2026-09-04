@@ -37,6 +37,14 @@
  * extract name or link target) -- plus :internal only for OOM.
  */
 
+/* The openat family (mkdirat, fchmodat, utimensat, ...) and the
+ * O_NOFOLLOW/O_DIRECTORY flags are POSIX.1-2008; glibc hides them
+ * under -std=c99 unless asked. On macOS the strict macro alone would
+ * hide the BSD extensions the system headers rely on, so keep
+ * _DARWIN_C_SOURCE alongside it (the fs.c discipline). */
+#define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1
+
 #include "prim/internal.h"
 #include "mino.h"
 
@@ -608,6 +616,10 @@ static mino_val *prim_tar_read(mino_state *S, mino_val *args, mino_env *env)
 
 /* ---- tar-extract, the hardened filesystem path ---- */
 
+#if !defined(_WIN32)
+/* The whole extract path is POSIX-only: on Windows prim_tar_extract
+ * throws host/unsupported before any of it would run. */
+
 /* A member name is unsafe if it is empty, absolute, or carries a
  * ".." path component (CWE-22). Checked BEFORE any filesystem touch.
  * Returns 1 for unsafe, 0 for safe. */
@@ -670,8 +682,6 @@ static int tar_name_dir_depth(const char *name)
     /* components above the file = number of slashes before the last */
     return depth;
 }
-
-#if !defined(_WIN32)
 
 /* Open (creating as needed) the parent directory of a relative member
  * name under root_fd, descending one component at a time with
@@ -828,6 +838,9 @@ typedef struct {
     mino_vec_builder *names;
 } tar_extract_ctx;
 
+#if !defined(_WIN32)
+/* POSIX-only: on Windows prim_tar_extract throws host/unsupported
+ * before the walk starts, so the visitor never compiles there. */
 static int tar_extract_visit(mino_state *S, void *ctx, const tar_member *m,
                              const unsigned char *content, size_t content_len,
                              const char **ekind, const char **ecode,
@@ -853,20 +866,6 @@ static int tar_extract_visit(mino_state *S, void *ctx, const tar_member *m,
         return -1;
     }
 
-#if defined(_WIN32)
-    (void)content; (void)content_len; (void)S;
-    if (m->has_link) {
-        *ekind = "host/unsupported";
-        *ecode = "MHO002";
-        snprintf(emsg, emsg_cap, "tar-extract: link entries are not "
-                 "supported on this platform");
-        return -1;
-    }
-    *ekind = "host/unsupported";
-    *ecode = "MHO002";
-    snprintf(emsg, emsg_cap, "tar-extract: not supported on this platform");
-    return -1;
-#else
     {
         int escaped = 0;
         if (tar_extract_member(c->root_fd, m, content, content_len,
@@ -889,8 +888,8 @@ static int tar_extract_visit(mino_state *S, void *ctx, const tar_member *m,
                                  mino_string_n(S, m->name, strlen(m->name)));
         return 0;
     }
-#endif
 }
+#endif /* !_WIN32 */
 
 /* (tar-extract data dest opts?) -- materialize the archive under the
  * destination directory, returning the vector of extracted member
@@ -932,7 +931,7 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
     }
 
 #if defined(_WIN32)
-    (void)ctx; (void)result;
+    (void)ctx; (void)result; (void)ekind; (void)ecode; (void)emsg;
     return prim_throw_classified(S, "host/unsupported", "MHO002",
                                  "tar-extract: not supported on this "
                                  "platform");
