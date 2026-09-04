@@ -133,9 +133,19 @@ static int net_winsock_init(void)
 
 static void net_close_fd(mino_net_fd_t fd)
 {
+    /* shutdown before close: on Linux, close() only drops this fd's
+     * reference, and the socket stays live (accepting handshakes,
+     * holding parked reads) while another thread is still blocked in
+     * accept()/read() on it. shutdown() tears the socket down for
+     * every referencing thread at once, so a stopped listener refuses
+     * connects the moment net-close returns, matching the BSD/macOS
+     * behavior. Fails ENOTCONN on unconnected sockets on some hosts;
+     * harmless, the close still runs. */
 #ifdef _WIN32
+    shutdown(fd, SD_BOTH);
     closesocket(fd);
 #else
+    shutdown(fd, SHUT_RDWR);
     close(fd);
 #endif
 }
