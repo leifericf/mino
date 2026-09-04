@@ -832,6 +832,7 @@ static void try_frame_fill(mino_state *S, mino_thread_ctx_t *ctx, int depth)
     ctx->try_stack[depth].saved_bc_cursor   = ctx->bc_current_bc;
     ctx->try_stack[depth].saved_bc_cursor_pc = ctx->bc_current_pc;
     ctx->try_stack[depth].saved_gc_depth    = ctx->gc_depth;
+    ctx->try_stack[depth].saved_gc_save     = ctx->gc_save_len;
 }
 
 static mino_val *mino_eval_inner(mino_state *S, mino_val *form, mino_env *env)
@@ -1041,6 +1042,9 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
             mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
             mino_current_ctx(S)->try_depth   = saved_try;
             mino_current_ctx(S)->gc_depth    = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
+            /* Rewind pins the throw longjmp'd past (see saved_gc_save
+             * in try_frame_t); mirrors mino_eval_inner's rewind. */
+            mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
             S->reader.reader_file = saved_file;
             S->reader.reader_line = saved_line;
             S->reader.reader_col  = saved_col;
@@ -1360,6 +1364,9 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
         mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
         mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
+        /* Rewind pins the throw longjmp'd past (see saved_gc_save in
+         * try_frame_t); mirrors mino_eval_inner's rewind. */
+        mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
         }
@@ -1486,6 +1493,9 @@ int mino_pcall(mino_state *S, mino_val *fn, mino_val *args, mino_env *env,
         mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[saved_try].saved_bc_cursor_pc;
         mino_current_ctx(S)->try_depth = saved_try;
         mino_current_ctx(S)->gc_depth  = mino_current_ctx(S)->try_stack[saved_try].saved_gc_depth;
+        /* Rewind pins the throw longjmp'd past (see saved_gc_save in
+         * try_frame_t); mirrors mino_eval_inner's rewind. */
+        mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[saved_try].saved_gc_save;
         while (mino_current_ctx(S)->lock_depth > saved_lock) {
             mino_unlock(S);
         }

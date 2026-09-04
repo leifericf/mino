@@ -449,6 +449,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_bc_cursor_pc =     mino_current_ctx(S)->bc_current_pc;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_jit_invoke_depth = mino_current_ctx(S)->jit_invoke_depth;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_gc_depth = mino_current_ctx(S)->gc_depth;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_gc_save = saved_gc_save;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val *r;
         mino_current_ctx(S)->try_depth++;
@@ -563,6 +564,7 @@ mino_val *eval_try(mino_state *S, mino_val *form,
             mino_current_ctx(S)->try_stack[is].saved_bc_cursor    = mino_current_ctx(S)->bc_current_bc;
             mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc = mino_current_ctx(S)->bc_current_pc;
             mino_current_ctx(S)->try_stack[is].saved_gc_depth = mino_current_ctx(S)->gc_depth;
+            mino_current_ctx(S)->try_stack[is].saved_gc_save = mino_current_ctx(S)->gc_save_len;
             if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val *r;
                 mino_current_ctx(S)->try_depth++;
@@ -590,6 +592,9 @@ mino_val *eval_try(mino_state *S, mino_val *form,
                 mino_current_ctx(S)->bc_current_bc = mino_current_ctx(S)->try_stack[is].saved_bc_cursor;
                 mino_current_ctx(S)->bc_current_pc = mino_current_ctx(S)->try_stack[is].saved_bc_cursor_pc;
                 mino_current_ctx(S)->gc_depth = mino_current_ctx(S)->try_stack[is].saved_gc_depth;
+                /* Rewind pins the re-throw longjmp'd past, mirroring
+                 * the body pad's saved_gc_save restore above. */
+                mino_current_ctx(S)->gc_save_len = mino_current_ctx(S)->try_stack[is].saved_gc_save;
                 mino_current_ctx(S)->try_depth   = is;
                 mino_current_ctx(S)->call_depth  = ic;
                 mino_current_ctx(S)->trace_added = it;

@@ -2490,6 +2490,7 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             ctx->try_stack[td].saved_bc_cursor_pc =             ctx->bc_current_pc;
             ctx->try_stack[td].saved_jit_invoke_depth = ctx->jit_invoke_depth;
             ctx->try_stack[td].saved_gc_depth     = ctx->gc_depth;
+            ctx->try_stack[td].saved_gc_save      = ctx->gc_save_len;
 
             if (setjmp(ctx->try_stack[td].buf) == 0) {
                 /* Normal entry: arm the try frame and run the body. */
@@ -2530,6 +2531,12 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
                  * raised it around unrooted-val regions were torn
                  * through without their matching decrements. */
                 ctx->gc_depth = ctx->try_stack[my_td].saved_gc_depth;
+                /* Rewind the pin stack likewise: torn-through C frames
+                 * (a print-method hook call, for instance) left their
+                 * gc_pin entries behind, and without this rewind every
+                 * caught throw ratchets gc_save_len toward overflow.
+                 * The exception is rooted via try_stack[].exception. */
+                ctx->gc_save_len = ctx->try_stack[my_td].saved_gc_save;
                 ctx->try_depth = my_td;
                 /* Pop the register-window stack back down to this fn's
                  * own window. A throw from a deeper bc_run frame

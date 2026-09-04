@@ -66,6 +66,16 @@ typedef struct {
      * the counter to its frame-entry value so an abandoned region can
      * never leave it elevated. */
     int         saved_gc_depth;
+    /* gc_save_len (the gc_pin stack depth) at frame entry. A C frame
+     * that pins values and then runs script code which throws is torn
+     * through by the longjmp, skipping its gc_unpin, and mino has no
+     * cleanup-on-unwind. Left unrewound the leaked pins accumulate
+     * across caught throws until the fixed pin array overflows: a
+     * loud assert under sanitizer builds, silent soft-loss (and a
+     * stale-root liveness hazard) otherwise. Each landing pad rewinds
+     * the depth to its frame-entry value; the thrown value itself is
+     * rooted separately via `exception`. */
+    int         saved_gc_save;
 } try_frame_t;
 
 /* Script-call stack limiting. Call-frame entries compare the live
