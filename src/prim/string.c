@@ -81,6 +81,7 @@ static inline char *fmt_ensure(mino_state *S, char *buf,
  */
 
 static size_t utf8_encode(char *p, uint32_t cp);        /* defined further down */
+static uint32_t utf8_decode(const char *p, size_t len); /* defined further down */
 static uint32_t mino_unicode_to_upper(uint32_t cp);     /* generated tables    */
 
 static char *fmt_append(mino_state *S, char *buf, size_t *len,
@@ -210,6 +211,28 @@ static void fmt_ascii_upcase(char *s)
 {
     for (; *s; s++)
         if (*s >= 'a' && *s <= 'z') *s = (char)(*s - 32);
+}
+
+/* Uppercase a UTF-8 buffer in place through the generated case
+ * tables, matching upper-case. The tables preserve each codepoint's
+ * byte length (asserted by the generator); a mapping that would
+ * change length is left as-is, as are malformed lead bytes. */
+static void fmt_utf8_upcase(char *s, size_t n)
+{
+    size_t pos = 0;
+    while (pos < n) {
+        size_t step = utf8_codepoint_step(s, n, pos);
+        if (step == 1) {
+            if (s[pos] >= 'a' && s[pos] <= 'z')
+                s[pos] = (char)(s[pos] - 32);
+        } else {
+            char     enc[4];
+            uint32_t up = mino_unicode_to_upper(utf8_decode(s + pos, step));
+            if (utf8_encode(enc, up) == step)
+                memcpy(s + pos, enc, step);
+        }
+        pos += step;
+    }
 }
 
 /* Canon spelling for a non-finite double: "NaN" (never signed) or
@@ -396,7 +419,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                 }
                 memcpy(heap, src, slen);
                 heap[slen] = '\0';
-                fmt_ascii_upcase(heap);
+                fmt_utf8_upcase(heap, slen);
                 src = heap;
             }
             buf = fmt_append_padded(S, buf, &len, &cap, src, slen,

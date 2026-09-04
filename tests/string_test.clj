@@ -335,6 +335,15 @@
   (is (not (str/includes? (format "%010g" ##NaN) "0")))
   (is (= 10 (count (format "%010g" ##NaN)))))
 
+(deftest format-uppercase-string-directive-unicode
+  ;; %S/%B uppercase through the generated case tables, matching
+  ;; upper-case, not byte-wise ASCII.
+  (is (= "ÉCOLE" (format "%S" "école")))
+  (is (= "ΛX" (format "%S" "λx")))
+  (is (= "ДА" (format "%S" "да")))
+  (is (= "MIXÉD 5" (format "%S" "mixÉd 5")))
+  (is (= "TRUE" (format "%B" 1))))
+
 (deftest format-hex-float-zero-keeps-mantissa-point
   ;; C's %a of zero omits the fraction; canon always keeps one
   ;; fractional digit, and the zero fill lands after the 0x prefix.
