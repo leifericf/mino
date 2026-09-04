@@ -57,6 +57,16 @@ int          args_nth_forced(mino_state *S, mino_val *args, size_t i,
 int          seqable_p(const mino_val *v);              /* pure, shared */
 mino_val  *print_to_string(mino_state *S, const mino_val *v); /* GC-owned */
 
+/* Join the formatted args, space-separated with an optional trailing
+ * newline, into one GC-owned string. `readably` selects the pr/prn
+ * family (strings quoted, chars escaped, print-method hook consulted,
+ * subject to the *print-readably* downgrade) versus the print/println
+ * family. Callers resolve and restore the print dynvars around the
+ * call. Implemented in io.c beside the hook dispatch; shared with
+ * pr-str so the string form matches routed pr output byte for byte. */
+mino_val  *print_args_join(mino_state *S, mino_val *args, mino_env *env,
+                           int readably, int newline); /* GC-owned */
+
 /* print_dynvars_saved_t, print_dynvars_resolve, print_dynvars_restore:
  * Declared in eval/internal.h (implementations live in eval/print_dynvars.c).
  * Visible here through the transitive include chain:

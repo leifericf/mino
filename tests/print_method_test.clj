@@ -42,6 +42,33 @@
     ;; Here we just assert the method is now registered and dispatchable.
     (is (some? (get-method print-method :my-print-test-type)))))
 
+;; --- pr-str routes through the print-method hook ---
+
+(deftest print-method-routes-pr-str
+  (defmethod print-method :pr-str-probe
+    [v]
+    (print "<probe:")
+    (pr-builtin (:payload v))
+    (print ">"))
+  (let [obj (with-meta {:payload 7} {:type :pr-str-probe})]
+    ;; pr routes through the hook: the pinned baseline.
+    (is (= "<probe:7>" (with-out-str (pr obj))))
+    ;; pr-str must match the routed pr output, not the builtin form.
+    (is (= "<probe:7>" (pr-str obj)))
+    (is (= (with-out-str (pr obj)) (pr-str obj)))
+    ;; Multiple args keep the space separator between routed forms.
+    (is (= "<probe:7> <probe:7>" (pr-str obj obj)))
+    ;; prn-str (a with-out-str wrapper over prn) is routed the same.
+    (is (= "<probe:7>\n" (prn-str obj)))
+    ;; str stays unrouted: it is not readable printing.
+    (is (= "{:payload 7}" (str obj)))
+    ;; Binding *print-readably* to false sends pr-str down the
+    ;; print/println path, past the hook, exactly like pr.
+    (is (= "{:payload 7}"
+           (binding [*print-readably* false] (pr-str obj))))
+    (is (= (binding [*print-readably* false] (with-out-str (pr obj)))
+           (binding [*print-readably* false] (pr-str obj))))))
+
 ;; --- removing a user method falls back to :default ---
 
 (deftest print-method-remove-falls-back

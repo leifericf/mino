@@ -734,55 +734,15 @@ static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
 
 static mino_val *prim_pr_str(mino_state *S, mino_val *args, mino_env *env)
 {
-    char  *buf = NULL;
-    size_t len = 0;
-    size_t cap = 0;
-    int    first = 1;
+    /* The readable join consults the print-method hook exactly the
+     * way pr does, so (pr-str x) always equals (with-out-str (pr x)),
+     * custom methods included. */
+    mino_val *result;
     print_dynvars_saved_t saved_dynvars;
     print_dynvars_resolve(S, env, &saved_dynvars);
-    while (mino_is_cons(args)) {
-        mino_val *printed = print_to_string(S, args->as.cons.car);
-        size_t      need;
-        if (printed == NULL) {
-            free(buf);
-            print_dynvars_restore(S, &saved_dynvars);
-            return NULL;
-        }
-        need = len + (!first ? 1 : 0) + printed->as.s.len + 1;
-        if (need > cap) {
-            char *newbuf;
-            cap = cap == 0 ? 128 : cap;
-            while (cap < need) {
-                if (cap > SIZE_MAX / 2) {
-                    free(buf);
-                    print_dynvars_restore(S, &saved_dynvars);
-                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "pr-str: result size overflow");
-                    return NULL;
-                }
-                cap *= 2;
-            }
-            newbuf = (char *)realloc(buf, cap);
-            if (newbuf == NULL) {
-                free(buf);
-                print_dynvars_restore(S, &saved_dynvars);
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                              "internal", "MIN001", "out of memory");
-                return NULL;
-            }
-            buf = newbuf;
-        }
-        if (!first) buf[len++] = ' ';
-        memcpy(buf + len, printed->as.s.data, printed->as.s.len);
-        len += printed->as.s.len;
-        first = 0;
-        args = args->as.cons.cdr;
-    }
-    {
-        mino_val *result = mino_string_n(S, buf != NULL ? buf : "", len);
-        free(buf);
-        print_dynvars_restore(S, &saved_dynvars);
-        return result;
-    }
+    result = print_args_join(S, args, env, 1, 0);
+    print_dynvars_restore(S, &saved_dynvars);
+    return result;
 }
 
 static mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env)

@@ -363,10 +363,12 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
  * every C frame here) from leaking: user code runs only from this
  * loop, and every byte accumulated lives in GC-owned storage (the
  * sink handle's finalizer frees its buffer), so an unwind leaves the
- * collector holding everything. Returns NULL on error. */
-static mino_val *print_args_join(mino_state *S, mino_val *args,
-                                 mino_env *env,
-                                 int readably, int newline)
+ * collector holding everything. Shared with pr-str (declared in
+ * prim/internal.h) so the string form matches routed pr output byte
+ * for byte. Returns NULL on error. */
+mino_val *print_args_join(mino_state *S, mino_val *args,
+                          mino_env *env,
+                          int readably, int newline)
 {
     mino_val *sink;
     int         first = 1;
