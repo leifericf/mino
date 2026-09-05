@@ -111,12 +111,14 @@ static void intern_str_hash_insert(mino_state *S, const char *s)
 }
 
 /* Intern a string into the state's var-string table. Returns a pointer
- * that is stable for the life of the state. Strings are malloc-owned. */
+ * that is stable for the life of the state. Strings are malloc-owned.
+ * NULL interns to NULL (public lookups like var_find land here). */
 const char *intern_var_str(mino_state *S, const char *s)
 {
     const char *existing;
     size_t      n;
     char       *d;
+    if (s == NULL) return NULL;
     existing = intern_str_hash_lookup(S, s);
     if (existing != NULL) return existing;
     n = strlen(s);
