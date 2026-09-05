@@ -1815,8 +1815,12 @@
     {:triple "x86_64-windows-gnu" :define "MINO_CPJIT_X86_64_WINDOWS"
      :static? false :unwind? true :exe ".exe"
      ;; ws2_32 + bcrypt: the net and TLS layers' Windows link set,
-     ;; same libs as the windows-amd64 cross target.
-     :libs ["-lws2_32" "-lbcrypt"]}
+     ;; same libs as the windows-amd64 cross target. The stack
+     ;; reserve matches the Makefile's Windows link (and
+     ;; MINO_WORKER_STACK_DEFAULT): the 1 MiB default overflows
+     ;; under the suite's deep-recursion tests with
+     ;; STATUS_STACK_OVERFLOW.
+     :libs ["-lws2_32" "-lbcrypt" "-Wl,--stack,8388608"]}
     (let [os   (:sysname (uname))
           arch (:machine (uname))]
       (cond
