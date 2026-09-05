@@ -1478,6 +1478,12 @@ static mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
             part_len = str->as.s.len;
         }
         need = buf_len + (first ? 0 : sep_len) + part_len + 1;
+        if (need <= part_len) {
+            /* size_t wraparound: the joined length no longer fits. */
+            free(buf);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "join: result size overflow");
+            return NULL;
+        }
         if (need > buf_cap) {
             char *newbuf;
             buf_cap = buf_cap == 0 ? 128 : buf_cap;
@@ -2126,11 +2132,20 @@ static int str_buf_grow(mino_state *S, char **buf, size_t *cap, size_t need)
 }
 
 /* Append nbytes bytes from src to the dynamic buffer (buf, len, cap).
- * Returns 1 on success, 0 on OOM (frees *buf and sets it to NULL). */
+ * Returns 1 on success, 0 on OOM or size wraparound (frees *buf and
+ * sets it to NULL). */
 static int str_buf_append(mino_state *S, char **buf, size_t *len, size_t *cap,
                           const char *src, size_t nbytes)
 {
     size_t need = *len + nbytes + 1;
+    if (need <= nbytes) {
+        /* size_t wraparound: the appended length no longer fits. */
+        free(*buf);
+        *buf = NULL;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", "string size overflow");
+        return 0;
+    }
     if (need > *cap && !str_buf_grow(S, buf, cap, need)) return 0;
     memcpy(*buf + *len, src, nbytes);
     *len += nbytes;
