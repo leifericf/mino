@@ -55,19 +55,34 @@
 
 (defn- srv-read-one
   "Read one complete response off c given any pending bytes from an
-  earlier read; returns {:resp r :pending rest-bytes}, or nil when the
-  peer closed before a full response arrived."
+  earlier read; returns {:resp r :pending rest-bytes}. When no full
+  response arrives, :resp is nil and the map says which way the read
+  ended: :why is :eof for a clean peer close, else the caught read
+  error's :mino/kind (:net/timeout when the read gave up waiting),
+  with :waited-ms the time spent and :got the bytes accumulated."
   [c pending]
-  (loop [acc pending]
-    (let [r (http-parse-response (byte-array acc))]
-      (if (= :done (:status r))
-        {:resp r :pending (vec (drop (srv-response-end acc r) acc))}
-        (let [b (try (net-read c 65536) (catch e nil))]
-          (if b
-            (recur (into acc (vec b)))
-            (let [fin (http-parse-response (byte-array acc) {:eof true})]
-              (when (= :done (:status fin))
-                {:resp fin :pending []}))))))))
+  (let [t0 (time-ms)]
+    (loop [acc pending]
+      (let [r (http-parse-response (byte-array acc))]
+        (if (= :done (:status r))
+          {:resp r :pending (vec (drop (srv-response-end acc r) acc))}
+          (let [b (try (or (net-read c 65536) :eof)
+                       (catch e (or (:mino/kind e) :net/error)))]
+            (if (bytes? b)
+              (recur (into acc (vec b)))
+              (let [fin (http-parse-response (byte-array acc) {:eof true})]
+                (if (= :done (:status fin))
+                  {:resp fin :pending []}
+                  {:resp nil :pending []
+                   :why b
+                   :waited-ms (- (time-ms) t0)
+                   :got (count acc)})))))))))
+
+(defn- srv-nil-why
+  "Failure-message string for a srv-read-one outcome: the :why,
+  :waited-ms, and :got of an empty read, {} for a served one."
+  [x]
+  (pr-str (select-keys x [:why :waited-ms :got])))
 
 (def ^:private srv-default-opts
   (let [budget (if srv-slow-host? 12000 4000)]
@@ -133,7 +148,7 @@
                (let [c (srv-connect (:port s))]
                  (srv-send c (srv-close-req "GET" "/hello"))
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= 200 (:code (:resp x))))
                    (is (= (srv-bb "got:/hello") (:body (:resp x))))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
@@ -198,7 +213,7 @@
                    (is (= (srv-bb "") (:body (:resp x1))))
                    ;; the pipelined GET frames cleanly: no desync
                    (let [x2 (srv-read-one c (:pending x1))]
-                     (is (some? x2))
+                     (is (some? (:resp x2)) (srv-nil-why x2))
                      (is (= (srv-bb "hello:/page") (:body (:resp x2))))))
                  (try (net-close c) (catch e nil)))))]
     (srv-was-clean r)))
@@ -214,7 +229,7 @@
                  (let [x1 (srv-read-one c [])
                        x2 (srv-read-one c (:pending x1))
                        x3 (srv-read-one c (:pending x2))]
-                   (is (some? x3))
+                   (is (some? (:resp x3)) (srv-nil-why x3))
                    (is (= (srv-bb "get") (:body (:resp x1))))
                    (is (= (srv-bb "post") (:body (:resp x2))))
                    (is (= (srv-bb "get") (:body (:resp x3)))))
@@ -228,7 +243,7 @@
                (let [c (srv-connect (:port s))]
                  (srv-send c "GET / HTTP/1.0\r\nHost: t.example\r\n\r\n")
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= "HTTP/1.0" (:http-version (:resp x))))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
                  (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
@@ -260,7 +275,7 @@
                  (srv-send c "GET / HTTP/1.1\r\nHost: t.example\r\n"
                            "Connection: ClOsE\r\n\r\n")
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= "close" (get (:headers (:resp x)) "connection"))))
                  (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err))))
                  (try (net-close c) (catch e nil)))))]
@@ -322,7 +337,7 @@
                (let [c (srv-connect (:port s))]
                  (srv-send c (srv-req "GET" "/boom"))
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= 500 (:code (:resp x))))
                    (is (= "text/plain"
                           (get (:headers (:resp x)) "content-type")))
@@ -352,7 +367,8 @@
                  (let [c (srv-connect (:port s))]
                    (srv-send c (srv-close-req "GET" "/"))
                    (let [x (srv-read-one c [])]
-                     (is (some? x) (pr-str resp))
+                     (is (some? (:resp x))
+                         (str (pr-str resp) " " (srv-nil-why x)))
                      (is (= 500 (:code (:resp x))) (pr-str resp))
                      (is (= "close"
                             (get (:headers (:resp x)) "connection"))
@@ -369,7 +385,7 @@
                (let [c (srv-connect (:port s))]
                  (srv-send c "garbage\r\n\r\n")
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= 400 (:code (:resp x))))
                    (is (= (srv-bb "bad request") (:body (:resp x))))
                    (is (= "close"
@@ -404,7 +420,7 @@
                            "Content-Length: 16\r\n\r\n"
                            "aaaaaaaaaaaaaaaa")
                  (let [x (srv-read-one c [])]
-                   (is (some? x))
+                   (is (some? (:resp x)) (srv-nil-why x))
                    (is (= 400 (:code (:resp x))))
                    (is (= "close"
                           (get (:headers (:resp x)) "connection"))))
@@ -558,7 +574,8 @@
           (let [c (srv-connect (:port s))]
             (srv-send c (srv-close-req "GET" "/"))
             (let [x (srv-read-one c [])]
-              (is (= 200 (:code (:resp x))) (str "cycle " i))
+              (is (= 200 (:code (:resp x)))
+                  (str "cycle " i " " (srv-nil-why x)))
               (is (= (srv-bb "cycle") (:body (:resp x))) (str "cycle " i)))
             (try (net-close c) (catch e nil))))))))
 
@@ -632,7 +649,7 @@
           (doseq [p releases] (deliver p :go))
           (doseq [c conns]
             (let [x (srv-read-one c [])]
-              (is (some? x))
+              (is (some? (:resp x)) (srv-nil-why x))
               (is (= 200 (:code (:resp x))))
               (is (= (srv-bb "c") (:body (:resp x)))))
             (try (net-close c) (catch e nil))))))))
@@ -763,7 +780,7 @@
           (doseq [p releases] (deliver p :go))
           (doseq [c conns]
             (let [x (srv-read-one c [])]
-              (is (some? x))
+              (is (some? (:resp x)) (srv-nil-why x))
               (is (= 200 (:code (:resp x)))))
             (is (contains? #{nil :err} (try (net-read c 65536) (catch e :err)))
                 "connection did not close after stop and release")
@@ -784,7 +801,8 @@
                  (let [c (srv-connect (:port s))]
                    (srv-send c (srv-close-req "GET" path))
                    (let [x (srv-read-one c [])]
-                     (is (some? x) path)
+                     (is (some? (:resp x))
+                         (str path " " (srv-nil-why x)))
                      (is (= code (:code (:resp x))) path))
                    (try (net-close c) (catch e nil))))]
     (rs-with h {:acceptors 2 :max-conns 1
@@ -896,7 +914,7 @@
           (net-write c (http-encode-chunk (srv-bb "world")))
           (net-write c (http-encode-chunk (srv-bb "")))
           (let [x (srv-read-one c [])]
-            (is (some? x))
+            (is (some? (:resp x)) (srv-nil-why x))
             (is (= 200 (:code (:resp x))))
             (is (= (srv-bb "hello world") (:body (:resp x)))))
           (try (net-close c) (catch e nil)))))))
@@ -1054,7 +1072,9 @@
                           "X-One: 1\r\nX-Two: 2\r\nX-Three: 3\r\n\r\n")
               drip (srv-drip! c (srv-parts req 10) 80)]
           (let [x (srv-read-one c [])]
-            (is (some? x) "a request completing inside the deadline is served")
+            (is (some? (:resp x))
+                (str "a request completing inside the deadline is served "
+                     (srv-nil-why x)))
             (is (= 200 (:code (:resp x))))
             (is (= (srv-bb "slow but legal") (:body (:resp x)))))
           (try (deref drip 4000 :drip-timeout) (catch e nil))
@@ -1076,7 +1096,9 @@
             (srv-send c "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             (thread-sleep 60))
           (let [x (srv-read-one c [])]
-            (is (some? x) "the cap answers without the request completing")
+            (is (some? (:resp x))
+                (str "the cap answers without the request completing "
+                     (srv-nil-why x)))
             (is (= 400 (:code (:resp x))))
             (is (= "close" (get (:headers (:resp x)) "connection"))))
           (try (net-close c) (catch e nil)))))))
@@ -1093,7 +1115,7 @@
           (srv-send c "GET /many HTTP/1.1\r\nHost: t.example\r\n"
                     "A: 1\r\nB: 2\r\nC: 3\r\nD: 4\r\n")
           (let [x (srv-read-one c [])]
-            (is (some? x))
+            (is (some? (:resp x)) (srv-nil-why x))
             (is (= 400 (:code (:resp x))))
             (is (= "close" (get (:headers (:resp x)) "connection"))))
           (try (net-close c) (catch e nil)))))))
@@ -1108,7 +1130,9 @@
           (srv-send c "POST /hoard HTTP/1.1\r\nHost: t.example\r\n"
                     "Content-Length: 999999999\r\n\r\n")
           (let [x (srv-read-one c [])]
-            (is (some? x) "the declared length is rejected at the header")
+            (is (some? (:resp x))
+                (str "the declared length is rejected at the header "
+                     (srv-nil-why x)))
             (is (= 400 (:code (:resp x))))
             (is (= "close" (get (:headers (:resp x)) "connection"))))
           (try (net-close c) (catch e nil)))))))
@@ -1154,7 +1178,9 @@
         (let [c (srv-connect (:port s))]
           (srv-send c (srv-close-req "GET" "/probe"))
           (let [x (srv-read-one c [])]
-            (is (some? x) "the server serves after the hoard is reaped")
+            (is (some? (:resp x))
+                (str "the server serves after the hoard is reaped "
+                     (srv-nil-why x)))
             (is (= 200 (:code (:resp x))))
             (is (= (srv-bb "still here") (:body (:resp x)))))
           (try (net-close c) (catch e nil)))))))
@@ -1210,7 +1236,9 @@
                                    (catch e nil)))]
         ((:stop s))
         (let [x (srv-read-one c [])]
-          (is (some? x) "the in-flight exchange was served, not cut")
+          (is (some? (:resp x))
+              (str "the in-flight exchange was served, not cut "
+                   (srv-nil-why x)))
           (is (= 200 (:code (:resp x))))
           (is (= (srv-bb "late:/mid") (:body (:resp x))))
           (is (= "close" (get (:headers (:resp x)) "connection"))
