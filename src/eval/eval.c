@@ -210,11 +210,13 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym)
             /* When the binding is a var, the var carries its source ns
              * and original name -- use those so refer'd entries are
              * qualified back to where they live, matching the Clojure
-             * syntax-quote contract. */
-            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
+             * syntax-quote contract. A var without a name keeps the
+             * binding's own spelling. */
+            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR
+                && b->val->as.var.sym != NULL) {
                 nsn   = b->val->as.var.ns;
                 bname = b->val->as.var.sym;
-                bnlen = bname != NULL ? strlen(bname) : 0;
+                bnlen = strlen(bname);
             }
             if (nsn == NULL) {
                 for (i = 0; i < S->ns_vars.ns_env_len; i++) {
