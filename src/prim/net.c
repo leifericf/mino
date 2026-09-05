@@ -104,6 +104,13 @@ typedef struct {
 typedef struct {
     mino_net_fd_t fd;
     int           closed;
+    /* In-flight net-accept calls. net-close defers the close(2) while
+     * any are live (poisoning the socket instead), and the last accept
+     * out runs it: the descriptor number stays reserved until no
+     * accept can touch it, so a fresh listener can never inherit the
+     * number while a parked accept could still reach it. Guarded by
+     * the state lock like every other field here. */
+    int           accepting;
 } mino_net_listener_t;
 
 /* ---- platform shims ---- */
@@ -145,25 +152,45 @@ static void net_close_fd(mino_net_fd_t fd)
 #endif
 }
 
-static void net_close_listener_fd(mino_net_fd_t fd)
+static void net_poison_listener_fd(mino_net_fd_t fd)
 {
-    /* shutdown before close, listeners only: on Linux, close() just
-     * drops this fd's reference, and the listening socket stays live
-     * (completing handshakes into the backlog) while another thread
-     * is still blocked in accept() on it. shutdown() tears it down
-     * for every referencing thread at once, so a stopped listener
-     * refuses connects the moment net-close returns, matching the
-     * BSD/macOS behavior. A listener owes the peer no data, so the
-     * reset semantics that make shutdown wrong for connection
-     * sockets cannot apply. Fails ENOTCONN on some hosts; harmless,
-     * the close still runs. */
+    /* Stop the listening socket now without releasing its
+     * descriptor number; when accepts are in flight the close(2) is
+     * deferred to the last of them (net_accept_end), and the number
+     * must stay both reserved and dead until then. shutdown() tears
+     * the listening state down for every referencing thread on
+     * Linux, waking parked acceptors, but fails ENOTCONN on
+     * BSD/macOS, where the socket would keep completing handshakes
+     * into the backlog; there, dup2() of a fresh unbound socket over
+     * the same number destroys the listening description (refusing
+     * further connects, waking pollers with close semantics) while
+     * the number stays occupied by the dead placeholder. A listener
+     * owes the peer no data, so the reset semantics that make
+     * shutdown wrong for connection sockets cannot apply. Windows
+     * has no dup2 for sockets; a parked acceptor there notices the
+     * close at its own accept-timeout tick. */
 #ifdef _WIN32
     shutdown(fd, SD_BOTH);
-    closesocket(fd);
 #else
     shutdown(fd, SHUT_RDWR);
-    close(fd);
+    {
+        int dummy = socket(AF_INET, SOCK_STREAM, 0);
+        if (dummy != -1) {
+            dup2(dummy, fd);
+            close(dummy);
+        }
+    }
 #endif
+}
+
+static void net_close_listener_fd(mino_net_fd_t fd)
+{
+    /* Poison before close: close() alone just drops this fd's
+     * reference on Linux, leaving the listening socket live
+     * (completing handshakes into the backlog) for any thread still
+     * blocked in accept() on it. */
+    net_poison_listener_fd(fd);
+    net_close_fd(fd);
 }
 
 /* OS detail string for diagnostics. buf must be >= 96 bytes. */
@@ -839,11 +866,22 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
         return prim_throw_classified(S, "internal", "MIN001",
                                      "net-listen: out of memory");
     }
-    rec->fd     = fd;
-    rec->closed = 0;
+    rec->fd        = fd;
+    rec->closed    = 0;
+    rec->accepting = 0;
     hv->as.handle.ptr = rec;
     gc_unpin(1);
     return hv;
+}
+
+/* Leave a listener's accept scope. The last accept out runs the
+ * close(2) that net-close deferred while accepts were in flight (the
+ * poison already ran there), releasing the reserved descriptor
+ * number. Runs under the state lock at every call site. */
+static void net_accept_end(mino_net_listener_t *l)
+{
+    l->accepting--;
+    if (l->closed && l->accepting == 0) net_close_fd(l->fd);
 }
 
 /* (net-accept listener [opts]) -> net-socket handle for one accepted
@@ -904,6 +942,11 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
     gc_pin(hv);
     gc_pin(l_val);
 
+    /* Enter the listener's accept scope (see mino_net_listener_t):
+     * no yield sits between the closed check above and here, so the
+     * listener is still open when the count rises. */
+    listener->accepting++;
+
     if (accept_ms > NET_MAX_TIMEOUT_MS) accept_ms = NET_MAX_TIMEOUT_MS;
     deadline = mino_monotonic_ns() + accept_ms * 1000000LL;
     for (;;) {
@@ -912,8 +955,20 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
         int rc;
         if (remaining_ms < 0) remaining_ms = 0;
         rc = net_wait_readable(S, listener->fd, remaining_ms);
+        /* The state lock was yielded across the wait: the listener
+         * may have closed meanwhile. Land on the closed
+         * classification before touching the descriptor again; until
+         * net_accept_end below, the deferred close keeps the number
+         * reserved, so it cannot belong to anyone else. */
+        if (listener->closed) {
+            net_accept_end(listener);
+            gc_unpin(2);
+            return prim_throw_classified(S, "net", "MNE004",
+                                         "net-accept: listener is closed");
+        }
         if (rc == 1) {
             char msg[160];
+            net_accept_end(listener);
             gc_unpin(2);
             snprintf(msg, sizeof(msg),
                      "net-accept: accept timed out after %lld ms",
@@ -923,6 +978,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
         if (rc < 0) {
             char msg[200];
             net_os_error(detail, sizeof(detail));
+            net_accept_end(listener);
             gc_unpin(2);
             snprintf(msg, sizeof(msg), "net-accept: accept failed: %.100s",
                      detail);
@@ -946,6 +1002,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
             {
                 char msg[200];
                 net_os_error(detail, sizeof(detail));
+                net_accept_end(listener);
                 gc_unpin(2);
                 snprintf(msg, sizeof(msg),
                          "net-accept: accept failed: %.100s", detail);
@@ -955,6 +1012,9 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
         }
         break;
     }
+    /* Accepted: no yield since the closed re-check above, so this
+     * connection is legitimately ours; leave the accept scope. */
+    net_accept_end(listener);
     /* Accepted sockets inherit the listener's non-blocking mode on
      * Windows; POSIX never inherits. Force blocking either way. */
     if (net_set_nonblocking(cfd, 0) != 0) {
@@ -1424,8 +1484,18 @@ static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
             mino_net_listener_t *l;
             l = (mino_net_listener_t *)v->as.handle.ptr;
             if (!l->closed) {
-                net_close_listener_fd(l->fd);
                 l->closed = 1;
+                /* Two-phase teardown under in-flight accepts: poison
+                 * now so every waiter fails fast, but leave the
+                 * close(2) to the last accept out (net_accept_end).
+                 * Closing here would free the descriptor number for
+                 * reuse while a parked accept can still reach it,
+                 * letting it accept a connection belonging to a
+                 * fresh listener that inherited the number. */
+                if (l->accepting > 0)
+                    net_poison_listener_fd(l->fd);
+                else
+                    net_close_listener_fd(l->fd);
             }
             return mino_nil(S);
         }
@@ -1570,14 +1640,17 @@ const mino_prim_def k_prims_net[] = {    {"net-connect",  prim_net_connect,
      ":read-timeout / :write-timeout preset on the accepted socket "
      "(defaults 30000 / 30000, matching net-connect). Accepted "
      "sockets set TCP_NODELAY. Throws :net/timeout when the accept "
-     "deadline passes, :net/connect when accept itself fails."},
+     "deadline passes, :net when the listener is closed (before or "
+     "during the wait), :net/connect when accept itself fails."},
     {"net-listener-port", prim_net_listener_port,
      "Returns the port a listener is bound to; how a caller learns "
      "the kernel-chosen port after net-listen with port 0. Throws "
      ":net on a closed listener."},
     {"net-close",    prim_net_close,
      "Closes a socket or listener. Returns nil. Idempotent; dropped "
-     "handles are also closed by the garbage collector."},
+     "handles are also closed by the garbage collector. Closing a "
+     "listener fails net-accept calls in flight on it; the descriptor "
+     "is released once the last of them has returned."},
 };
 
 const size_t k_prims_net_count =

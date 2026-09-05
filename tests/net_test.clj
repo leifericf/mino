@@ -446,6 +446,37 @@
     (is (= :net
            (try (net-accept l) (catch e (:mino/kind e)))))))
 
+(deftest close-under-a-parked-accept-classifies-and-spares-successors
+  ;; A worker parks in net-accept while the listener closes. The
+  ;; parked accept must land in the closed-listener classification
+  ;; (:net), never an OS-level accept error and never a connection
+  ;; that belongs to another listener opened right after the close:
+  ;; the closing listener's descriptor number stays reserved until
+  ;; the parked accept has let go, so a fresh listener can never
+  ;; inherit it while the old accept can still reach it.
+  (dotimes [_ 3]
+    (let [l1 (net-listen "127.0.0.1" 0 {})
+          r-p (promise)]
+      (future
+        (deliver r-p (try (net-accept l1 {:accept-timeout 900})
+                          (catch e (:mino/kind e)))))
+      (thread-sleep 50)
+      (net-close l1)
+      (let [l2 (net-listen "127.0.0.1" 0 {})
+            s (net-connect "127.0.0.1" (net-listener-port l2)
+                           {:read-timeout 2000 :write-timeout 2000})]
+        (try
+          ;; the successor listener owns its own client
+          (let [c (net-accept l2 {:accept-timeout 2000})]
+            (is (= 4 (net-write s "ping")))
+            (is (= "70696e67" (hex-encode (read-n c 4))))
+            (try (net-close c) (catch e nil)))
+          (finally
+            (try (net-close s) (catch e nil))
+            (try (net-close l2) (catch e nil)))))
+      (let [r (deref r-p 6000 ::no-answer)]
+        (is (= :net r) (pr-str r))))))
+
 (deftest net-listener-finalizer-closes-dropped-listeners
   ;; Drop an open listener and force a full collection; the handle
   ;; finalizer must close the descriptor without disturbing the
