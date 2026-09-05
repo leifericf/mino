@@ -44,9 +44,15 @@
 #     (map.c / val.c bucket arrays, read.c num_len, stateful.c)
 #     and the image.c cleanup finding shifted from 'Potential leak'
 #     to 'Attempt to free released memory' on the same
-#     img_idt_free double-cleanup path. The new eval.c / proc.c
-#     NonNullParamChecker hits are the cross-block argv/env FP
-#     class already represented by var.c / string.c / io.c.
+#     img_idt_free double-cleanup path.
+#   Triage (2026-09-05): the core.NonNullParamChecker hits that fire
+#     only against glibc (whose string.h/unistd.h prototypes carry
+#     nonnull attributes, unlike the macOS SDK) were resolved in code
+#     rather than baselined: eval.c syntax-quote no longer feeds a
+#     NULL var name to memcpy, string.c guards size_t wraparound in
+#     its buffer-need math, var.c interns NULL to NULL, and proc.c
+#     guards argv[0] before execvp. The proc.c guard also retired
+#     the old unix.StdCLibraryFunctions execvp entry, removed below.
 #
 # Regenerate after an intentional change with:
 #   ./mino task gen-analyze-baseline
@@ -74,7 +80,6 @@ src/prim/collections.c: warning: Dereference of null pointer [core.NullDereferen
 src/prim/fs.c: warning: An undefined value may be read from 'errno' [unix.Errno]
 src/prim/io.c: warning: Array access results in a null pointer dereference [core.NullDereference]
 src/prim/prim.c: warning: Value of 'errno' was not checked and may be overwritten by function 'malloc' [unix.Errno]
-src/prim/proc.c: warning: The 1st argument to 'execvp' is NULL but should not be NULL [unix.StdCLibraryFunctions]
 src/prim/sequences.c: warning: Dereference of null pointer [core.NullDereference]
 src/prim/stm.c: warning: Dereference of null pointer [core.NullDereference]
 src/prim/string.c: warning: Value stored to 'cap' is never read [deadcode.DeadStores]
