@@ -11,7 +11,7 @@ on:
 # need is a property of the tests, not of the runner, so grant it
 # explicitly (the documented override in main.c).
 env:
-  MINO_THREAD_LIMIT: "16"
+  MINO_THREAD_LIMIT: "8"
 
 jobs:
   build:
