@@ -244,25 +244,30 @@
   (is (= :int (type 6/3)))
   ;; Sign normalisation: denom always positive after construction.
   (is (= -1/2 (rationalize -0.5)))
-  ;; Numerator / denominator keep bigint identity even when the value
-  ;; fits in long, matching the canon accessors and the ratio
-  ;; arithmetic collapse rule.
+  ;; Numerator / denominator narrow to int when the component fits a
+  ;; long, so the printed result matches canon's plain digits (ADR 54);
+  ;; only components past 64 bits keep bigint identity.
   (is (= 1 (numerator 1/2)))
   (is (= 2 (denominator 1/2)))
   (is (= -3 (numerator -3/4)))
   (is (= 4 (denominator -3/4)))
-  (is (= :bigint (type (numerator 1/2))))
-  (is (= :bigint (type (denominator 1/2))))
-  (is (= :bigint (type (numerator -3/4))))
-  (is (= :bigint (type (denominator -3/4))))
-  (is (= "1N" (pr-str (numerator 1/2))))
-  (is (= "2N" (pr-str (denominator 1/2))))
+  (is (= :int (type (numerator 1/2))))
+  (is (= :int (type (denominator 1/2))))
+  (is (= :int (type (numerator -3/4))))
+  (is (= :int (type (denominator -3/4))))
+  (is (= "1" (pr-str (numerator 1/2))))
+  (is (= "2" (pr-str (denominator 1/2))))
   ;; Arbitrary-magnitude ratio.
   (is (= 99999999999999999999999/3 33333333333333333333333N))
   (is (= 1 (numerator 1/3)))
   (is (= 3 (denominator 1/3)))
   (is (= :bigint (type (numerator 99999999999999999999999/7))))
-  (is (= :bigint (type (denominator 99999999999999999999999/7)))))
+  (is (= :int (type (denominator 99999999999999999999999/7))))
+  (is (= 99999999999999999999999N (numerator 99999999999999999999999/7)))
+  (is (= :int (type (numerator 7/99999999999999999999999))))
+  (is (= :bigint (type (denominator 7/99999999999999999999999))))
+  (is (= 99999999999999999999999N
+         (denominator 7/99999999999999999999999))))
 
 (deftest nt-ratio-predicates
   (is (ratio? 1/2))

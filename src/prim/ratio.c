@@ -242,9 +242,19 @@ double mino_ratio_to_double(const mino_val *v)
     return n / d;
 }
 
-/* (numerator r) — the ratio's numerator, with bigint identity kept
- * even when the value fits a long (canon accessors return the bignum
- * tier, matching the ratio arithmetic collapse rule). */
+/* Narrow a ratio component for the accessors: MINO_INT when the
+ * value fits a long (prints as plain digits, matching canon's
+ * suffix-free big-integer print), the stored bigint only past 64
+ * bits. Same collapse rule as ratio_make_impl's narrow path. */
+static mino_val *ratio_component(mino_state *S, mino_val *big)
+{
+    long long ll;
+    if (bigint_fits_ll(big, &ll)) return mino_int(S, ll);
+    return big;
+}
+
+/* (numerator r) — the ratio's numerator, narrowed to int when it
+ * fits a long so the printed result matches canon (ADR 54). */
 mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *x;
@@ -257,7 +267,8 @@ mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "numerator: nil");
-    if (mino_type_of(x) == MINO_RATIO) return x->as.ratio.num;
+    if (mino_type_of(x) == MINO_RATIO)
+        return ratio_component(S, x->as.ratio.num);
     /* Per canon, numerator/denominator are defined only for a ratio.
      * Plain integers throw rather than silently returning the value. */
     return prim_throw_classified(S, "eval/type", "MTY001",
@@ -276,7 +287,8 @@ mino_val *prim_denominator(mino_state *S, mino_val *args, mino_env *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "denominator: nil");
-    if (mino_type_of(x) == MINO_RATIO) return x->as.ratio.denom;
+    if (mino_type_of(x) == MINO_RATIO)
+        return ratio_component(S, x->as.ratio.denom);
     return prim_throw_classified(S, "eval/type", "MTY001",
                                  "denominator: argument must be a ratio");
 }
