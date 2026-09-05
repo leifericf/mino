@@ -20,8 +20,17 @@
                                 :host "t.example"}
                                extra))))
 
+(def ^:private srv-slow-host?
+  ;; Sanitizer-instrumented CI legs export MINO_SLOW_HOST and run the
+  ;; engine several times slower; the fixture windows scale so a
+  ;; starved worker still answers inside them (the net_test churn
+  ;; discipline). The budgets stay assertions: a wedged server fails
+  ;; them, just later.
+  (some? (getenv "MINO_SLOW_HOST")))
+
 (defn- srv-connect [port]
-  (net-connect "127.0.0.1" port {:read-timeout 8000 :write-timeout 8000}))
+  (let [ms (if srv-slow-host? 24000 8000)]
+    (net-connect "127.0.0.1" port {:read-timeout ms :write-timeout ms})))
 
 (defn- srv-close-req
   "A request that asks the connection to close, written raw: the
@@ -61,7 +70,8 @@
                 {:resp fin :pending []}))))))))
 
 (def ^:private srv-default-opts
-  {:idle-timeout 4000 :request-timeout 4000 :poll-ms 50})
+  (let [budget (if srv-slow-host? 12000 4000)]
+    {:idle-timeout budget :request-timeout budget :poll-ms 50}))
 
 (defn- srv-with
   "Run (body started) against a fresh listener serving n connections
