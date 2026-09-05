@@ -542,8 +542,12 @@ static mino_val *prim_tar_entries(mino_state *S, mino_val *args,
 
     ctx.out = mino_vector_builder_new(S);
     if (tar_walk(S, data, len, tar_entries_visit, &ctx,
-                 &ekind, &ecode, emsg, sizeof(emsg)) != 0)
+                 &ekind, &ecode, emsg, sizeof(emsg)) != 0) {
+        /* Finish-and-discard: releases the builder's malloc and its
+         * GC ref; the half-built vector becomes ordinary garbage. */
+        (void)mino_vector_builder_finish(ctx.out);
         return prim_throw_classified(S, ekind, ecode, emsg);
+    }
     return mino_vector_builder_finish(ctx.out);
 }
 
@@ -953,6 +957,8 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
     if (tar_walk(S, data, len, tar_extract_visit, &ctx,
                  &ekind, &ecode, emsg, sizeof(emsg)) != 0) {
         close(ctx.root_fd);
+        /* Finish-and-discard releases the builder (see tar-entries). */
+        (void)mino_vector_builder_finish(ctx.names);
         return prim_throw_classified(S, ekind, ecode, emsg);
     }
     close(ctx.root_fd);
