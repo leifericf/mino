@@ -2109,6 +2109,20 @@ void mino_resume_lock(mino_state *S, int saved_depth)
         S->ns_vars.current_ns    = ctx->ns_snapshot_current;
         S->ns_vars.fn_ambient_ns = ctx->ns_snapshot_ambient;
     }
+    /* Republish this thread's ctx as the JIT stencil anchor. A thread
+     * that yields inside a native region (the backjump-safepoint
+     * auto-yield, or a blocking prim reached through a nested call)
+     * shares S->jit.jit_invoke_ctx with every peer's own publish and
+     * restore, and those interleave non-LIFO across threads: a peer
+     * entering and leaving its region during the yield window can
+     * leave the anchor naming its ctx, a dead one, or NULL. Stencil
+     * guards read the anchor as soon as native code resumes, so it
+     * must name this thread again before that. Threads outside any
+     * native region skip the store; their next mino_jit_invoke
+     * publishes fresh. */
+    if (ctx->jit_invoke_depth > 0) {
+        S->jit.jit_invoke_ctx = ctx;
+    }
     /* This thread is the mutator again: its stack-guard threshold
      * replaces whichever peer's was live during the yield window. */
     mino_eval_stack_limit_refresh(S, ctx);

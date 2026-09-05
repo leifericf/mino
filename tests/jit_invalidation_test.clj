@@ -194,6 +194,42 @@
     (when check-cancel-latency?
       (is (< (- (time-ms) start) 500)))))
 
+;; ---- concurrent workers and dynamic bindings --------------------------
+
+(deftest concurrent-workers-see-their-own-dynamic-bindings
+  ;; Two workers hot on the native tier: one reads a dynvar under an
+  ;; active binding, the other reads the same dynvar with no binding
+  ;; at all. Each read's dyn-shadowing decision must be made against
+  ;; the reading thread's own dyn stack across every safepoint yield
+  ;; and every peer's native entry and exit, so the bound worker never
+  ;; observes the root value and neither guard ever chases a peer's
+  ;; ctx. The var read keeps both bodies out of the fused-loop
+  ;; matcher, so each carries the generic backward-jump safepoint
+  ;; where the state lock yields under contention. Subprocess for a
+  ;; pristine JIT-invoke state (the interleave needs the workers to be
+  ;; the first native entries); --jit=on puts both bodies on the
+  ;; native tier immediately. MINO_TEST_BIN selects the binary on the
+  ;; canary / sanitizer lanes; otherwise ./mino.
+  (let [bin (or (System/getenv "MINO_TEST_BIN")
+                (when (file-exists? "./mino") "./mino"))]
+    (when bin
+      (let [r (sh "sh" "-c"
+                  (str bin " --jit=on -e '"
+                       "(def ^:dynamic *p* :root) "
+                       "(defn rd [n] (binding [*p* :bound] "
+                       "(loop [i 0 bad 0] (if (< i n) (recur (inc i) "
+                       "(if (identical? *p* :bound) bad (inc bad))) bad)))) "
+                       "(defn sp [n] (loop [i 0 acc 0] (if (< i n) "
+                       "(recur (inc i) (+ acc (if *p* 1 0))) acc))) "
+                       "(rd 1000) (sp 1000) "
+                       "(let [a (future (rd 12000000)) b (future (sp 12000000))] "
+                       "(println (deref a 120000 :timeout) (deref b 120000 :timeout)))' "
+                       "2>/dev/null"))]
+        ;; Exit 0 (no crash) plus zero root-value sightings on the
+        ;; bound worker and a full count on the plain worker.
+        (is (= 0 (:exit r)))
+        (is (= "0 12000000\n" (:out r)))))))
+
 ;; ---- stats dump survives state teardown -------------------------------
 
 (deftest jit-stats-dump-after-teardown
