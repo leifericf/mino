@@ -425,6 +425,13 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
 
     argv = build_argv(S, args, &argc);
     if (argv == NULL) return NULL; /* error already thrown or OOM */
+    if (argv[0] == NULL) {
+        /* Cannot happen (build_argv rejects an empty list), but keeps
+         * the exec'd command provably non-NULL. */
+        free_argv(argv);
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "run requires a command");
+    }
 
 #ifdef _WIN32
     free_argv(argv);
