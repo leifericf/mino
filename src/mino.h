@@ -273,7 +273,14 @@ typedef enum {
                       * Watches fire on every transact. Constructed via
                       * (mino.store/open ...) after installing
                       * MINO_CAP_STORE. Equality is identity. Print
-                      * form is #store[ID db-val]. */
+                      * form is #store[ID db-val]. */,
+    MINO_DELAY      /* once-only deferred computation: a zero-arg
+                      * thunk forced on first deref. The value (or the
+                      * thrown exception) is cached; every later force
+                      * replays it without re-running the thunk.
+                      * Constructed via the `delay` macro. Equality is
+                      * identity. Print form is
+                      * #<delay:pending|realized|failed>. */
 } mino_type;
 
 typedef struct mino_val    mino_val;   /* opaque */

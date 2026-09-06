@@ -240,6 +240,7 @@ const char *type_tag_str(const mino_val *v)
     case MINO_HANDLE:  return "handle";
     case MINO_ATOM:    return "atom";
     case MINO_VOLATILE: return "volatile";
+    case MINO_DELAY:   return "delay";
     case MINO_LAZY:    return "lazy-seq";
     case MINO_CHUNK:   return "chunk";
     case MINO_CHUNKED_CONS: return "list";

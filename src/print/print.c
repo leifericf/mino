@@ -940,6 +940,18 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         S->print_depth--;
         fputc(']', out);
         return;
+    case MINO_DELAY: {
+        /* State only, no payload: printing must not force, and the
+         * cached payload of a failed delay is an exception value, not
+         * the delay's content. Mirrors the future printer. */
+        const char *st = "pending";
+        if (v->as.delay.state == DELAY_REALIZED) st = "realized";
+        else if (v->as.delay.state == DELAY_FAILED) st = "failed";
+        fputs("#<delay:", out);
+        fputs(st, out);
+        fputc('>', out);
+        return;
+    }
     case MINO_LAZY: {
         /* Force the lazy seq and print the realized value. A lazy seq
          * that resolves to nil is the canonical empty seq — print as

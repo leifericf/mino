@@ -204,6 +204,7 @@ static mino_val *bc_protocol_type_disc(mino_state *S, mino_val *v)
     case MINO_HANDLE:     return mino_keyword(S, "handle");
     case MINO_ATOM:       return mino_keyword(S, "atom");
     case MINO_VOLATILE:   return mino_keyword(S, "volatile");
+    case MINO_DELAY:      return mino_keyword(S, "delay");
     case MINO_LAZY:       return mino_keyword(S, "lazy-seq");
     case MINO_CHUNK:      return mino_keyword(S, "chunk");
     case MINO_CHUNKED_CONS: return mino_keyword(S, "list");

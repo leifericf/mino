@@ -308,6 +308,7 @@ uint32_t hash_val(const mino_val *v)
         return hash_pointer_bytes(h, (uintptr_t)v->as.handle.ptr);
     case MINO_ATOM:
     case MINO_VOLATILE:
+    case MINO_DELAY:
         h = fnv_mix(h, 0x0e);
         return hash_pointer_bytes(h, (uintptr_t)v);
     case MINO_CHUNK:

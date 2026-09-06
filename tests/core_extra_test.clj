@@ -383,3 +383,35 @@
     (is (= 1 (:n (ex-data (try @d (catch Throwable e e))))))
     (is (= 1 @evals))
     (is (true? (realized? d)))))
+
+(deftest delay-is-its-own-type-not-a-map
+  (let [d (delay 42)]
+    (is (delay? d))
+    (is (not (map? d)))
+    (is (= :delay (type d)))))
+
+(deftest delay-forces-once-and-caches
+  (let [evals (atom 0)
+        d     (delay (swap! evals inc) :v)]
+    (is (false? (realized? d)))
+    (is (= :v @d))
+    (is (= :v @d))
+    (is (= 1 @evals))
+    (is (true? (realized? d)))))
+
+(deftest delay-equality-is-identity
+  (let [d (delay 1)]
+    (is (= d d)))
+  (is (not= (delay 1) (delay 1))))
+
+(deftest force-forces-delays-and-passes-other-values-through
+  (is (= 3 (force (delay 3))))
+  (is (= 3 (force 3)))
+  (is (nil? (force nil))))
+
+(deftest map-carrying-delay-keys-is-inert-data
+  ;; A plain map with a :delay/fn entry is data, not a delay: deref
+  ;; throws instead of invoking the entry as a thunk.
+  (let [m {:delay/fn (fn [] 42)}]
+    (is (not (delay? m)))
+    (is (thrown? Throwable (deref m)))))

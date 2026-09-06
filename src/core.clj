@@ -798,37 +798,16 @@
 
 (defn delay?
   "Returns true if x is a delay."
-  [x] (and (map? x) (contains? x :delay/fn)))
+  [x] (= :delay (type x)))
 (defmacro delay
   "Creates a delay that evaluates body on first deref. The body runs
   at most once: a failure is recorded and rethrown on every later
   force."
   [& body]
-  `(let [state# (atom {:status :pending})]
-     {:delay/fn  (fn []
-                   (let [s# @state#]
-                     (cond
-                       (= (:status s#) :done)
-                       (:value s#)
-
-                       (= (:status s#) :failed)
-                       (throw (:error s#))
-
-                       :else
-                       (try
-                         (let [v# (do ~@body)]
-                           (reset! state# {:status :done :value v#})
-                           v#)
-                         (catch e#
-                           (reset! state# {:status :failed :error e#})
-                           (throw e#))))))
-      :delay/state state#}))
-(defn deref-delay
-  "Forces evaluation of a delay and returns its value."
-  [d] ((:delay/fn d)))
+  `(delay* (fn [] ~@body)))
 (defn force
   "Forces evaluation of a delay. If x is not a delay, returns x."
-  [x] (if (delay? x) (deref-delay x) x))
+  [x] (if (delay? x) (deref x) x))
 
 ;; --- Monitors (locking) ---
 
@@ -903,27 +882,6 @@
        (do ~@body)
        (finally
          (monitor-exit mon# owner#)))))
-;; Delay realisation is folded into the C prim_deref hot path
-;; (see src/prim/core/stateful.c): when (deref m) is called on a map
-;; carrying :delay/fn, the prim invokes the thunk directly. The
-;; Clojure-side `deref` shadow that used to wrap every call with
-;; a (delay? x) check is no longer needed; the 3-arg form
-;; (deref ref ms timeout-val) is supported natively by the same
-;; prim for blocking refs (futures/promises).
-;; Override C realized? to also handle delays and futures. defn form
-;; so the override carries its own :arglists (a def-with-docstring
-;; replaces var meta wholesale, which would drop the prim's).
-(let [c-realized? realized?]
-  (defn realized?
-    "Returns true if a delay, lazy sequence, future, or promise has
-     been realized."
-    [x]
-    (cond
-      (nil? x)    (throw "realized? requires a non-nil argument")
-      (delay? x)  (not= :pending (:status @(:delay/state x)))
-      (future? x) (future-done? x)
-      :else       (c-realized? x))))
-
 ;; --- Sequence navigation ---
 
 (defn next

@@ -924,6 +924,7 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
     case MINO_HANDLE:
     case MINO_ATOM:
     case MINO_VOLATILE:
+    case MINO_DELAY:
     case MINO_CHUNK:
     case MINO_RECUR:
     case MINO_TAIL_CALL:

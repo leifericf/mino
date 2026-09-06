@@ -207,6 +207,7 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
     case MINO_HANDLE:
     case MINO_ATOM:
     case MINO_VOLATILE:
+    case MINO_DELAY:
     case MINO_LAZY:
     case MINO_CHUNK:
     case MINO_CHUNKED_CONS:
@@ -307,6 +308,7 @@ static const char *non_transferable_name(mino_type t)
     case MINO_HANDLE:       return "handle";
     case MINO_ATOM:         return "atom";
     case MINO_VOLATILE:     return "volatile";
+    case MINO_DELAY:        return "delay";
     case MINO_LAZY:         return "lazy-seq";
     case MINO_CHUNK:        return "chunk";
     case MINO_CHUNKED_CONS: return "chunked-cons";

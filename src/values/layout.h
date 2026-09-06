@@ -119,6 +119,19 @@ struct mino_bc_fn;            /* compiled-fn record */
 #define LAZY_REALIZING  2
 
 /* ------------------------------------------------------------------------- */
+/* Delay realization states                                                  */
+/* ------------------------------------------------------------------------- */
+
+/* delay.state values. PENDING: fn holds the unforced thunk and val is
+ * NULL. REALIZED: val holds the cached result. FAILED: val holds the
+ * cached thrown payload, replayed by every later force. The single-
+ * mutator scheduling model makes the force's read-run-publish sequence
+ * a critical section on its own; no claim sentinel is needed. */
+#define DELAY_PENDING  0
+#define DELAY_REALIZED 1
+#define DELAY_FAILED   2
+
+/* ------------------------------------------------------------------------- */
 /* Value struct body                                                         */
 /* ------------------------------------------------------------------------- */
 
@@ -238,6 +251,13 @@ struct mino_val {
         struct {          /* MINO_VOLATILE: single-slot mutable cell */
             mino_val *val;
         } volatile_;
+        struct {          /* MINO_DELAY: once-only deferred computation */
+            mino_val *fn;   /* zero-arg thunk; cleared after the run so
+                             * the closure can be collected */
+            mino_val *val;  /* REALIZED: cached result; FAILED: cached
+                             * thrown payload; PENDING: NULL */
+            unsigned char state; /* DELAY_PENDING / _REALIZED / _FAILED */
+        } delay;
         struct {          /* MINO_LAZY: deferred sequence */
             mino_val *body;
             mino_env *env;

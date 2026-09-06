@@ -79,6 +79,10 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
     case MINO_VOLATILE:
         PUSH(v->as.volatile_.val);
         break;
+    case MINO_DELAY:
+        PUSH(v->as.delay.fn);
+        PUSH(v->as.delay.val);
+        break;
     case MINO_CHUNK: {
         unsigned k;
         for (k = 0; k < v->as.chunk.len; k++) {

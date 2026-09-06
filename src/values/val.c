@@ -1933,6 +1933,7 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
     case MINO_MACRO:
     case MINO_ATOM:
     case MINO_VOLATILE:
+    case MINO_DELAY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
     case MINO_REDUCED:

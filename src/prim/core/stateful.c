@@ -1,8 +1,9 @@
 /*
  * stateful.c -- atom primitives and watch/validator support.
  *
- * Primitives: atom, deref, reset!, swap!, atom?, add-watch, remove-watch,
- *             set-validator!, get-validator, swap-vals!, reset-vals!.
+ * Primitives: atom, deref, reset!, swap!, atom?, delay*, add-watch,
+ *             remove-watch, set-validator!, get-validator, swap-vals!,
+ *             reset-vals!.
  */
 
 #include "prim/internal.h"
@@ -197,6 +198,62 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
     return atom;
 }
 
+/* ---- delay ------------------------------------------------------------- */
+
+/* Force a delay: run the thunk at most once, cache the result or the
+ * thrown payload, and replay the cached outcome on every later force.
+ * A fatal engine error (no thrown payload) propagates without being
+ * cached; the delay stays pending. */
+static mino_val *delay_force(mino_state *S, mino_val *d, mino_env *env)
+{
+    mino_val *result = NULL;
+    mino_val *thrown = NULL;
+    if (d->as.delay.state == DELAY_REALIZED) return d->as.delay.val;
+    if (d->as.delay.state == DELAY_FAILED)
+        return mino_throw(S, d->as.delay.val);
+    gc_pin(d);
+    if (mino_pcall(S, d->as.delay.fn, mino_nil(S), env,
+                   &result, &thrown) != 0) {
+        if (thrown == NULL) {
+            gc_unpin(1);
+            return NULL;
+        }
+        gc_write_barrier(S, d, d->as.delay.val, thrown);
+        d->as.delay.val   = thrown;
+        d->as.delay.fn    = NULL;
+        d->as.delay.state = DELAY_FAILED;
+        gc_unpin(1);
+        return mino_throw(S, thrown);
+    }
+    gc_write_barrier(S, d, d->as.delay.val, result);
+    d->as.delay.val   = result != NULL ? result : mino_nil(S);
+    d->as.delay.fn    = NULL;
+    d->as.delay.state = DELAY_REALIZED;
+    gc_unpin(1);
+    return d->as.delay.val;
+}
+
+static mino_val *prim_delay_star(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *fn, *d;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "delay* requires one argument");
+    }
+    fn = args->as.cons.car;
+    if (fn == NULL || (mino_type_of(fn) != MINO_FN
+                       && mino_type_of(fn) != MINO_PRIM)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "delay*: argument must be a fn of no arguments");
+    }
+    d = alloc_val(S, MINO_DELAY);
+    d->as.delay.fn    = fn;
+    d->as.delay.val   = NULL;
+    d->as.delay.state = DELAY_PENDING;
+    return d;
+}
+
 static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a;
@@ -221,24 +278,10 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         argc = 3;
     }
 
-    /* Delay realization on the hot path. A delay in mino is a
-     * map carrying a `:delay/fn` thunk (built by the `delay`
-     * macro in core.clj). Realising the delay is just invoking
-     * that thunk; the thunk's own body handles the once-only
-     * cache via :delay/state. Folding this into the C prim
-     * removes the Clojure-side `deref` shadow that wrapped
-     * every `(deref ...)` call with a per-call (delay? x)
-     * check, saving ~300ns/call on hot atom/var derefs that
-     * never touch a delay. */
-    if (a != NULL && mino_type_of(a) == MINO_MAP) {
-        mino_val *delay_fn_kw = mino_keyword(S, "delay/fn");
-        mino_val *delay_fn    = map_get_val(a, delay_fn_kw);
-        if (delay_fn != NULL) {
-            /* Same semantics whether argc is 1 or 3: the 3-arg
-             * timeout form on a delay was a no-op in the previous
-             * Clojure wrapper too -- delays don't block. */
-            return apply_callable_argv(S, delay_fn, NULL, 0, env);
-        }
+    if (a != NULL && mino_type_of(a) == MINO_DELAY) {
+        /* Same semantics whether argc is 1 or 3: delays don't
+         * block, so the timeout form forces immediately. */
+        return delay_force(S, a, env);
     }
 
     if (argc == 3) {
@@ -989,6 +1032,8 @@ const mino_prim_def k_prims_stateful[] = {
      "Creates a volatile cell with the given initial value. A volatile is a single-slot mutable reference with no watches, validators, or atomic publish — intended for transducer state where the reducing fn already implies single-thread access."},
     {"volatile?",      prim_volatile_p,
      "Returns true if x is a volatile."},
+    {"delay*",         prim_delay_star,
+     "Creates a delay from a fn of no arguments. The fn runs at most once, on first deref; its result (or thrown failure) is cached and replayed on every later force. Used by the delay macro."},
     {"vreset!",        prim_vreset_bang,
      "Sets the value of a volatile to newval and returns newval. No watches, no validators, no atomicity."},
     {"add-watch",      prim_add_watch,

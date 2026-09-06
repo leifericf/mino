@@ -287,8 +287,8 @@ mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
 {
     /* Per Clojure, realized? accepts only "pending" values
      * (lazy seqs, delays, promises, futures) and throws on any
-     * other input. mino's pending types are MINO_LAZY (lazy seqs
-     * and delays share this representation) and MINO_FUTURE. */
+     * other input. mino's pending types are MINO_LAZY,
+     * MINO_DELAY, and MINO_FUTURE (promises are futures). */
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -297,6 +297,12 @@ mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
     v = args->as.cons.car;
     if (v != NULL && mino_type_of(v) == MINO_LAZY) {
         return v->as.lazy.realized == LAZY_REALIZED
+               ? mino_true(S) : mino_false(S);
+    }
+    if (v != NULL && mino_type_of(v) == MINO_DELAY) {
+        /* A failed delay counts as realized: its outcome is decided
+         * and every later force replays the cached failure. */
+        return v->as.delay.state != DELAY_PENDING
                ? mino_true(S) : mino_false(S);
     }
     if (v != NULL && mino_type_of(v) == MINO_FUTURE) {
