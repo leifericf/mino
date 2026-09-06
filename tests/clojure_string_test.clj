@@ -172,6 +172,15 @@
   (is (= "1a-2b"     (str/replace "a1-b2" #"(\w)(\d)"
                                   (fn [[_ g1 g2]] (str g2 g1))))))
 
+(deftest str-replace-regex-fn-char
+  ;; A fn replacement may return a single char; Clojure encodes it as
+  ;; its codepoint. A char is an inline-tagged value, so the replace
+  ;; path must read it through the char accessor, not the union.
+  (is (= "aXc"   (str/replace "abc" #"b" (fn [m] \X))))
+  (is (= "ABC"   (str/replace "abc" #"\w" (fn [m] (first (str/upper-case m))))))
+  (is (= "aéc" (str/replace "abc" #"b" (fn [m] \é))))
+  (is (= "heXlo" (str/replace-first "hello" #"l" (fn [m] \X)))))
+
 (deftest str-resolves-without-require
   ;; A fresh JVM 1.12 process resolves the full clojure.string surface
   ;; with no require; mino must too. Spawned as a fresh process because

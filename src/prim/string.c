@@ -1824,7 +1824,7 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
                      * correctly rather than truncated to one byte. */
                     char utf8_tmp[4];
                     int  utf8_n;
-                    unsigned cp = (unsigned)call_res->as.ch;
+                    unsigned cp = (unsigned)mino_val_char_get(call_res);
                     if (cp <= 0x7F) {
                         utf8_tmp[0] = (char)cp; utf8_n = 1;
                     } else if (cp <= 0x7FF) {
