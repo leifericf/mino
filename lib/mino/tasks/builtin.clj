@@ -184,11 +184,18 @@
                          "with a reason")
                     {:unwired unwired}))))
 
+;; Object and dependency files mirror the source tree under build/ so no
+;; artifact lands beside a source. src/foo/bar.c compiles to
+;; build/src/foo/bar.o with its build/src/foo/bar.d depfile; main.c maps
+;; to build/main.o. The build/ tree is gitignored.
+(defn- src->build [src ext]
+  (str "build/" (subs src 0 (- (count src) 2)) ext))
+
 (defn- src->obj [src]
-  (str (subs src 0 (- (count src) 2)) ".o"))
+  (src->build src ".o"))
 
 (defn- src->dep [src]
-  (str (subs src 0 (- (count src) 2)) ".d"))
+  (src->build src ".d"))
 
 (defn- stale?
   "True if output does not exist or any input is newer."
@@ -317,16 +324,29 @@
     (when (> updated 0)
       (println (str "gen-stdlib-headers: " updated " header(s) updated")))))
 
+(defn- ensure-parent-dir
+  "Create the parent directory of `path` if it is missing, so a compiler
+   -o into a fresh build/ subtree does not fail on a missing directory."
+  [path]
+  (let [slash (str/last-index-of path "/")]
+    (when slash
+      (let [dir (subs path 0 slash)]
+        (when-not (file-exists? dir)
+          (sh! "mkdir" "-p" dir))))))
+
 (defn build
-  "Compile all .c sources and link the mino binary."
+  "Compile all .c sources and link the mino binary. Objects and depfiles
+   mirror the source tree under build/ (see src->build); nothing lands
+   beside a source."
   []
   (let [compiled (atom 0)]
-    ;; Compile stale .c -> .o (uses .d depfiles for header tracking)
+    ;; Compile stale .c -> build/**/*.o (uses .d depfiles for header tracking)
     (doseq [src all-srcs]
       (let [obj  (src->obj src)
             dep  (src->dep src)
             deps (or (read-depfile dep) [src])]
         (when (stale? deps obj)
+          (ensure-parent-dir obj)
           (let [args (into [cc] (concat cflags ["-MMD" "-c" "-o" obj src]))]
             (println (str "  " (str/join " " args)))
             (apply sh! args)
@@ -926,13 +946,9 @@
   (println "  cleaned dist/"))
 
 (defn clean
-  "Remove object files, dep files, binary, and generated header."
+  "Remove the build/ object tree, the binary, and generated headers."
   []
-  (doseq [src all-srcs]
-    (let [obj (src->obj src)
-          dep (src->dep src)]
-      (when (file-exists? obj) (rm-rf obj))
-      (when (file-exists? dep) (rm-rf dep))))
+  (when (file-exists? "build") (rm-rf "build"))
   (when (file-exists? "mino") (rm-rf "mino"))
   (when (file-exists? "mino.exe") (rm-rf "mino.exe"))
   (when (file-exists? "mino_asan")  (rm-rf "mino_asan"))
