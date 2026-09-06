@@ -36,7 +36,7 @@ Documentation: [mino-lang.org](https://mino-lang.org)
 
 ## Versioning
 
-mino uses calendar versioning ([CalVer](https://calver.org)): `YYYY.MM.DD[-prerelease]`, e.g. `2026.08.08-alpha1`. A release on the same day bumps the prerelease suffix (`-alpha2`, `-alpha3`, ...; `-betaN`, then the unqualified date for a stable release).
+mino uses calendar versioning ([CalVer](https://calver.org)): `YYYY.MM.DD[-prerelease]`, e.g. `2026.09.06-alpha1`. A release on the same day bumps the prerelease suffix (`-alpha2`, `-alpha3`, ...; `-betaN`, then the unqualified date for a stable release).
 
 Stable releases (`YYYY.MM.DD` with no suffix) aim to be backward compatible within the language and the embedding API. Anything labelled `-alphaN` or `-betaN` is a preview and may change or break before the stable release on that date.
 
