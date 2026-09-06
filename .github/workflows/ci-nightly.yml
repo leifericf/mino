@@ -153,9 +153,11 @@ jobs:
     name: canary - darwin (zig cc)
     runs-on: macos-14
     continue-on-error: true
-    # Bound the run: a local build + suite is ~2 min, so a hang (e.g. a
-    # zig-built JIT deadlock) should trip this, not burn the 6-hour default.
-    timeout-minutes: 20
+    # Bound the run: locally the build + suite is minutes, but the
+    # suite has grown and a slow hosted mac runs it in ~20; the cap
+    # exists to trip a hang (e.g. a zig-built JIT deadlock), not to
+    # race the honest runtime, so it sits well above it.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
