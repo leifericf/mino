@@ -143,3 +143,14 @@
       (is (pos? (compare v3 v1))))
     (testing "sorted collections accept deeply nested keys"
       (is (= 2 (count (sorted-set v1 v3)))))))
+
+(deftest chunked-tail-equality-respects-chunk-offset
+  ;; A chunked cell entered mid-walk (a cons or lazy tail holding the
+  ;; rest of a chunked vector seq) starts comparing at its offset, not
+  ;; at slot zero. The hash walker already honors the offset; equality
+  ;; must agree or the equal-implies-equal-hash contract inverts.
+  (let [big (vec (range 40))]
+    (is (= (cons 0 (rest (seq big))) (range 0 40)))
+    (is (= (cons 0 (lazy-seq (rest (seq big)))) (range 0 40)))
+    (is (not= (cons 1 (rest (seq big))) (range 0 40)))
+    (is (= (cons 0 (rest (seq (vec (range 5))))) (range 0 5)))))

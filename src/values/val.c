@@ -1461,10 +1461,11 @@ typedef struct {
     size_t     cap;
 } eq_stack_t;
 
-static int eq_step(const mino_val *a, const mino_val *b,
-                   eq_stack_t *st);
-static int eq_step_force(mino_state *S, const mino_val *a,
-                         const mino_val *b, eq_stack_t *st);
+/* The one equality walker. S selects the forcing policy: NULL walks
+ * without running user code (unrealized lazies read as end-of-seq),
+ * non-NULL forces lazies through the evaluator as it walks. */
+static int eq_step(mino_state *S, const mino_val *a,
+                   const mino_val *b, eq_stack_t *st);
 
 static void eq_stack_init(eq_stack_t *st)
 {
@@ -1511,17 +1512,17 @@ static int eq_child(mino_state *S, eq_stack_t *st,
 {
     if (a == b) return 1;
     if (st != NULL && eq_stack_push(st, a, b)) return 1;
-    return S != NULL ? eq_step_force(S, a, b, st) : eq_step(a, b, st);
+    return eq_step(S, a, b, st);
 }
 
 /* Extract the current element from a sequential cursor (c, i).
  * Precondition: caller has verified the cursor is not at end-of-seq.
- * Shared between eq_seq_like and eq_seq_like_force so the extraction
+ * Shared by the sequential walkers so the extraction
  * logic is maintained in one place. */
 static const mino_val *seq_elem_at(const mino_val *c, size_t i)
 {
     if (mino_type_of(c) == MINO_CONS)         return c->as.cons.car;
-    if (mino_type_of(c) == MINO_CHUNKED_CONS) return c->as.chunked_cons.chunk->as.chunk.vals[i];
+    if (mino_type_of(c) == MINO_CHUNKED_CONS) return c->as.chunked_cons.chunk->as.chunk.vals[c->as.chunked_cons.off + i];
     if (mino_type_of(c) == MINO_MAP_ENTRY)    return i == 0 ? c->as.map_entry.k : c->as.map_entry.v;
     if (mino_type_of(c) == MINO_QUEUE)        return mino_queue_nth(c, i);
     return vec_nth(c, i);
@@ -1533,14 +1534,20 @@ static void eq_seq_step(const mino_val **cur, size_t *idx)
     if (c == NULL) return;
     if (mino_type_of(c) == MINO_CONS) { *cur = c->as.cons.cdr; return; }
     if (mino_type_of(c) == MINO_CHUNKED_CONS) {
+        /* idx is RELATIVE to the cell's chunk offset, so every entry
+         * into a chunked cell (cons tail, lazy tail, chunk-to-chunk
+         * transition, walk start) is correct at idx 0 -- a chunked
+         * cell entered past its start (the rest of a chunked vector
+         * seq) never replays consumed slots, and the hot cons walk
+         * carries no entry bookkeeping. */
         const mino_val *ch = c->as.chunked_cons.chunk;
         size_t next = (*idx) + 1;
-        if (next < ch->as.chunk.len) { *idx = next; return; }
+        if (c->as.chunked_cons.off + next < ch->as.chunk.len) {
+            *idx = next;
+            return;
+        }
         *cur = c->as.chunked_cons.more;
         *idx = 0;
-        if (*cur != NULL && mino_type_of(*cur) == MINO_CHUNKED_CONS) {
-            *idx = (*cur)->as.chunked_cons.off;
-        }
         return;
     }
     /* MINO_VECTOR or MINO_MAP_ENTRY (treated as 2-element vector). */
@@ -1548,21 +1555,21 @@ static void eq_seq_step(const mino_val **cur, size_t *idx)
 }
 
 /*
- * Compare two sequential values element-by-element (non-forcing version).
- * Handles cons lists, vectors, nil, and realized lazy seqs.
+ * Compare two sequential values element-by-element. Handles cons
+ * lists, vectors, nil, chunked seqs, and lazy seqs; S selects the
+ * forcing policy (NULL treats an unrealized lazy as end-of-seq, a
+ * state forces it through the evaluator before the end test).
  * Returns 1 if they contain the same elements in the same order.
- * Per-side step state: ia/ib is the offset within the current chunked-cons
- * chunk; transitions to .more once ia == chunk.len.
+ * Per-side step state: ia/ib indexes the current cell -- for chunked
+ * cells it is RELATIVE to the cell's chunk offset (see eq_seq_step),
+ * so every fresh entry starts at 0.
  */
-static int eq_seq_like(const mino_val *a, const mino_val *b,
-                       eq_stack_t *st)
+static int eq_seq_like(mino_state *S, const mino_val *a,
+                       const mino_val *b, eq_stack_t *st)
 {
-    const mino_val *ca = resolve_lazy(a);
-    const mino_val *cb = resolve_lazy(b);
-    size_t ia = (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
-                    ? ca->as.chunked_cons.off : 0;
-    size_t ib = (cb != NULL && mino_type_of(cb) == MINO_CHUNKED_CONS)
-                    ? cb->as.chunked_cons.off : 0;
+    const mino_val *ca = a;
+    const mino_val *cb = b;
+    size_t ia = 0, ib = 0;
 
     for (;;) {
         const mino_val *ea;
@@ -1570,21 +1577,33 @@ static int eq_seq_like(const mino_val *a, const mino_val *b,
         int a_end;
         int b_end;
 
-        ca = resolve_lazy(ca);
-        cb = resolve_lazy(cb);
+        /* Resolve lazies before the end-of-seq test (forcing when a
+         * state is present: an unrealized lazy that would produce
+         * elements must not be mistaken for end-of-seq). idx stays 0
+         * across the resolution; the chunked index is offset-relative,
+         * so a lazy tail resolving to a mid-entered chunked cell is
+         * correct at 0. */
+        if (ca != NULL && mino_type_of(ca) == MINO_LAZY) {
+            ca = (S != NULL) ? lazy_force(S, (mino_val *)ca)
+                             : resolve_lazy(ca);
+        }
+        if (cb != NULL && mino_type_of(cb) == MINO_LAZY) {
+            cb = (S != NULL) ? lazy_force(S, (mino_val *)cb)
+                             : resolve_lazy(cb);
+        }
 
         a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
                  || mino_type_of(ca) == MINO_EMPTY_LIST
                  || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
                  || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2)
                  || (mino_type_of(ca) == MINO_QUEUE && ia >= ca->as.queue.len)
-                 || mino_type_of(ca) == MINO_LAZY /* unrealized */);
+                 || (S == NULL && mino_type_of(ca) == MINO_LAZY) /* unrealized */);
         b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
                  || mino_type_of(cb) == MINO_EMPTY_LIST
                  || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
                  || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2)
                  || (mino_type_of(cb) == MINO_QUEUE && ib >= cb->as.queue.len)
-                 || mino_type_of(cb) == MINO_LAZY /* unrealized */);
+                 || (S == NULL && mino_type_of(cb) == MINO_LAZY) /* unrealized */);
 
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
@@ -1592,7 +1611,9 @@ static int eq_seq_like(const mino_val *a, const mino_val *b,
         ea = seq_elem_at(ca, ia);
         eb = seq_elem_at(cb, ib);
 
-        if (!eq_child(NULL, st, ea, eb)) return 0;
+        /* Identical pointers (covering inline-tagged scalars) skip the
+         * dispatch call; the common all-scalars walk stays call-free. */
+        if (ea != eb && !eq_child(S, st, ea, eb)) return 0;
 
         eq_seq_step(&ca, &ia);
         eq_seq_step(&cb, &ib);
@@ -1689,8 +1710,8 @@ static int eq_set_like_cross(const mino_val *a, const mino_val *b)
  * cons/vector/etc compare as seqs; map/sorted-map compare by entry
  * pairs; set/sorted-set compare by element membership). Everything
  * else with mismatched tags is unequal. */
-static int eq_cross_type(const mino_val *a, const mino_val *b,
-                         eq_stack_t *st)
+static int eq_cross_type(mino_state *S, const mino_val *a,
+                         const mino_val *b, eq_stack_t *st)
 {
     /* Cross-tier integer equality: int and bigint represent the same
      * arbitrary-precision integer kind, and Clojure treats them as
@@ -1719,7 +1740,7 @@ static int eq_cross_type(const mino_val *a, const mino_val *b,
      * map-entry, nil all compare element-wise. Matches Clojure where
      * (= '(1 2) [1 2]) is true. */
     if (is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
-        return eq_seq_like(a, b, st);
+        return eq_seq_like(S, a, b, st);
     }
     /* Cross-type map equality: sorted-map and map compare by entries. */
     {
@@ -1740,24 +1761,33 @@ static int eq_cross_type(const mino_val *a, const mino_val *b,
     return 0;
 }
 
-int mino_eq(const mino_val *a, const mino_val *b)
+/* Drive the walker: seed with the top pair, then drain the deferred
+ * element pairs. S selects the forcing policy for the whole walk. */
+static int eq_run(mino_state *S, const mino_val *a, const mino_val *b)
 {
     eq_stack_t st;
     int        ok;
     eq_stack_init(&st);
-    ok = eq_step(a, b, &st);
+    ok = eq_step(S, a, b, &st);
     while (ok && st.len > 0) {
         eq_pair_t p = st.buf[--st.len];
-        ok = eq_step(p.a, p.b, &st);
+        ok = eq_step(S, p.a, p.b, &st);
     }
     eq_stack_free(&st);
     return ok;
 }
 
+int mino_eq(const mino_val *a, const mino_val *b)
+{
+    return eq_run(NULL, a, b);
+}
+
 /* Same-type HAMT map equality: same length, every key in a maps to an
- * equal value in b (key_order gives a stable traversal). */
-static int eq_map_same_type(const mino_val *a, const mino_val *b,
-                            eq_stack_t *st)
+ * equal value in b (key_order gives a stable traversal). Values can
+ * hold lazy seqs; the S policy flows through eq_child so the forcing
+ * walk reaches into each entry. */
+static int eq_map_same_type(mino_state *S, const mino_val *a,
+                            const mino_val *b, eq_stack_t *st)
 {
     size_t i;
     if (a->as.map.len != b->as.map.len) return 0;
@@ -1766,21 +1796,30 @@ static int eq_map_same_type(const mino_val *a, const mino_val *b,
         mino_val *bv  = map_get_val(b, key);
         mino_val *av  = map_get_val(a, key);
         if (bv == NULL) return 0;
-        if (!eq_child(NULL, st, av, bv)) return 0;
+        if (!eq_child(S, st, av, bv)) return 0;
     }
     return 1;
 }
 
 /* Same-type HAMT set equality: same length, every element in a is
- * present in b (key_order gives a stable traversal). */
-static int eq_set_same_type(const mino_val *a, const mino_val *b)
+ * present in b (key_order gives a stable traversal). Set membership
+ * is keyed by mino_eq (=> hashed); under the forcing policy a lazy
+ * element is forced before the lookup so the structural compare in
+ * hamt_get sees the forced shape. */
+static int eq_set_same_type(mino_state *S, const mino_val *a,
+                            const mino_val *b)
 {
     size_t i;
     if (a->as.set.len != b->as.set.len) return 0;
     for (i = 0; i < a->as.set.len; i++) {
         mino_val *elem = vec_nth(a->as.set.key_order, i);
-        uint32_t  h    = hash_val(elem);
-        if (hamt_get(b->as.set.root, elem, h, 0u) == NULL) return 0;
+        if (S != NULL && elem != NULL && mino_type_of(elem) == MINO_LAZY) {
+            mino_val *f = lazy_force(S, elem);
+            if (f != NULL) elem = f;
+        }
+        if (hamt_get(b->as.set.root, elem, hash_val(elem), 0u) == NULL) {
+            return 0;
+        }
     }
     return 1;
 }
@@ -1789,32 +1828,66 @@ static int eq_set_same_type(const mino_val *a, const mino_val *b)
  * Every case shares the lazy-unwrap preamble and the same worklist (st);
  * splitting by type would duplicate that preamble or require a second
  * dispatch layer with no gain in readability. */
-static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
+static int eq_step(mino_state *S, const mino_val *a, const mino_val *b,
+                   eq_stack_t *st)
 {
     if (a == b) {
         return 1;
     }
-    if (a == NULL || b == NULL) {
+    if (S == NULL && (a == NULL || b == NULL)) {
         return 0;
     }
-    /* Force lazy seqs before comparison (use cached value if realized).
-     * A realized lazy whose cache is nil/empty-list is still semantically
-     * an empty seq; preserve the LAZY tag so cross-type seq equality
-     * routes through eq_seq_like instead of degenerating to nil. */
-    if (mino_type_of(a) == MINO_LAZY
-        && a->as.lazy.realized == LAZY_REALIZED) {
-        mino_val *cached = a->as.lazy.cached;
-        if (cached != NULL && mino_type_of(cached) != MINO_NIL
-            && mino_type_of(cached) != MINO_EMPTY_LIST) {
-            a = cached;
+    /* Unwrap lazy seqs before comparison: without a state, use the
+     * cached value of a realized lazy; with one, force through the
+     * evaluator. Either way, a lazy whose result is nil/empty-list is
+     * still semantically an empty seq; preserve the LAZY tag so
+     * cross-type seq equality routes through eq_seq_like instead of
+     * degenerating to nil.
+     *
+     * Forcing snapshots / restores gc_depth from the saved value so a
+     * re-entrant or already-elevated depth is not underflowed on the
+     * normal path. The longjmp path (lazy_force throwing) would leave
+     * gc_depth elevated; fixing that requires a try_frame-level save
+     * outside this module. */
+    if (S == NULL) {
+        if (mino_type_of(a) == MINO_LAZY
+            && a->as.lazy.realized == LAZY_REALIZED) {
+            mino_val *cached = a->as.lazy.cached;
+            if (cached != NULL && mino_type_of(cached) != MINO_NIL
+                && mino_type_of(cached) != MINO_EMPTY_LIST) {
+                a = cached;
+            }
         }
-    }
-    if (mino_type_of(b) == MINO_LAZY
-        && b->as.lazy.realized == LAZY_REALIZED) {
-        mino_val *cached = b->as.lazy.cached;
-        if (cached != NULL && mino_type_of(cached) != MINO_NIL
-            && mino_type_of(cached) != MINO_EMPTY_LIST) {
-            b = cached;
+        if (mino_type_of(b) == MINO_LAZY
+            && b->as.lazy.realized == LAZY_REALIZED) {
+            mino_val *cached = b->as.lazy.cached;
+            if (cached != NULL && mino_type_of(cached) != MINO_NIL
+                && mino_type_of(cached) != MINO_EMPTY_LIST) {
+                b = cached;
+            }
+        }
+    } else {
+        if (a != NULL && mino_type_of(a) == MINO_LAZY) {
+            mino_val *forced;
+            int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+            mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+            forced = lazy_force(S, (mino_val *)a);
+            mino_current_ctx(S)->gc_depth = saved_gc_depth;
+            if (forced != NULL && mino_type_of(forced) != MINO_NIL
+                && mino_type_of(forced) != MINO_EMPTY_LIST) {
+                a = forced;
+            }
+        }
+        if (b != NULL && mino_type_of(b) == MINO_LAZY) {
+            mino_val *forced;
+            int saved_gc_depth = mino_current_ctx(S)->gc_depth;
+            mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
+            forced = lazy_force(S, (mino_val *)b);
+            mino_current_ctx(S)->gc_depth = saved_gc_depth;
+            if (forced != NULL && mino_type_of(forced) != MINO_NIL
+                && mino_type_of(forced) != MINO_EMPTY_LIST) {
+                b = forced;
+            }
         }
     }
     if (a == NULL || b == NULL) {
@@ -1827,8 +1900,11 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
      * cannot be `=` (the equal-implies-equal-hash invariant) -- skip
      * the structural compare. We only consult cached hashes that are
      * ALREADY populated; computing the hash on-demand here would
-     * cost as much as the structural compare for first-time pairs. */
-    if (mino_type_of(a) == mino_type_of(b)) {
+     * cost as much as the structural compare for first-time pairs.
+     * Non-forcing walks only: hash_val identity-hashes an unrealized
+     * lazy, so under the forcing policy two structurally equal
+     * collections can carry different cached hashes. */
+    if (S == NULL && mino_type_of(a) == mino_type_of(b)) {
         switch (mino_type_of(a)) {
         case MINO_VECTOR: {
             uint32_t ha = a->as.vec.cached_hash;
@@ -1852,7 +1928,7 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
         }
     }
     if (mino_type_of(a) != mino_type_of(b)) {
-        return eq_cross_type(a, b, st);
+        return eq_cross_type(S, a, b, st);
     }
     switch (mino_type_of(a)) {
     case MINO_NIL:
@@ -1880,6 +1956,14 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
             && a->as.s.ns_len == b->as.s.ns_len
             && memcmp(a->as.s.data, b->as.s.data, a->as.s.len) == 0;
     case MINO_CONS:
+        /* Under the forcing policy, walk both chains side-by-side via
+         * the sequential helper so its end-of-seq predicate (which
+         * recognises NIL, EMPTY_LIST, and lazy-empty all as "end")
+         * also applies to nested cdr positions; recursing through the
+         * spine loop would expose the cross-type asymmetry (nil and a
+         * lazy-realized-to-nil are equivalent at end-of-seq but
+         * is_sequential(NIL) is false at top level). */
+        if (S != NULL) return eq_seq_like(S, a, b, st);
         /* Iterate the spine in place (worklist stays O(1) for list
          * length); defer each car. The first non-cons tail on either
          * side re-enters the full dispatch so improper, lazy, and
@@ -1905,7 +1989,11 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
             return 0;
         }
         for (i = 0; i < a->as.vec.len; i++) {
-            if (!eq_child(NULL, st, vec_nth(a, i), vec_nth(b, i))) {
+            /* Identical pointers (inline-tagged scalars) skip the
+             * dispatch call; the all-scalars walk stays call-free. */
+            mino_val *ea = vec_nth(a, i);
+            mino_val *eb = vec_nth(b, i);
+            if (ea != eb && !eq_child(S, st, ea, eb)) {
                 return 0;
             }
         }
@@ -1914,10 +2002,10 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
     case MINO_MAP:
         /* Map equality ignores iteration order: same key set with the same
          * values, regardless of when each was inserted. */
-        return eq_map_same_type(a, b, st);
+        return eq_map_same_type(S, a, b, st);
     case MINO_SET:
         /* Set equality: same elements regardless of insertion order. */
-        return eq_set_same_type(a, b);
+        return eq_set_same_type(S, a, b);
     /* Identity-equality kinds: callables, mutable cells, opaque values,
      * and internal sentinels. For these, two distinct allocations are
      * never `=`. Each primitive is allocated once per state by
@@ -1960,15 +2048,16 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
          * arm fires for the empty-empty case. eq_seq_like handles
          * any pair of seq-shaped values uniformly, including two
          * empty lazies (both walks immediately terminate). */
-        return eq_seq_like(a, b, st);
+        return eq_seq_like(S, a, b, st);
     case MINO_CHUNK:
         /* Internal seq leaf; identity equality (chunk-buffer state
          * is mutable and not meaningfully comparable across instances). */
         return a == b;
     case MINO_CHUNKED_CONS:
-        /* Should not reach here — handled by the cross-type sequential
-         * path via is_sequential. */
-        return eq_seq_like(a, b, st);
+        /* Same-tag chunked spines can hold a lazy seq in their `more`
+         * field (the typical shape filter / range produce); the S
+         * policy decides whether that tail forces or reads as end. */
+        return eq_seq_like(S, a, b, st);
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET:
         /* Same length is necessary either way. When the comparators are
@@ -2021,179 +2110,7 @@ static int eq_step(const mino_val *a, const mino_val *b, eq_stack_t *st)
     return 0;
 }
 
-/*
- * Compare two sequential values element-by-element, forcing lazy seqs.
- */
-static int eq_seq_like_force(mino_state *S, const mino_val *a,
-                           const mino_val *b, eq_stack_t *st)
-{
-    const mino_val *ca = a;
-    const mino_val *cb = b;
-    size_t ia = 0, ib = 0;
-
-    if (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
-        ia = ca->as.chunked_cons.off;
-    if (cb != NULL && mino_type_of(cb) == MINO_CHUNKED_CONS)
-        ib = cb->as.chunked_cons.off;
-
-    for (;;) {
-        const mino_val *ea;
-        const mino_val *eb;
-        int a_end;
-        int b_end;
-
-        /* Force before the end-of-seq test: an unrealized lazy that would
-         * produce elements must not be mistaken for end-of-seq (unlike
-         * eq_step_force, which preserves the LAZY tag on nil/empty results). */
-        if (ca != NULL && mino_type_of(ca) == MINO_LAZY)
-            ca = lazy_force(S, (mino_val *)ca);
-        if (cb != NULL && mino_type_of(cb) == MINO_LAZY)
-            cb = lazy_force(S, (mino_val *)cb);
-
-        a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
-                 || mino_type_of(ca) == MINO_EMPTY_LIST
-                 || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
-                 || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2)
-                 || (mino_type_of(ca) == MINO_QUEUE && ia >= ca->as.queue.len));
-        b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
-                 || mino_type_of(cb) == MINO_EMPTY_LIST
-                 || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
-                 || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2)
-                 || (mino_type_of(cb) == MINO_QUEUE && ib >= cb->as.queue.len));
-
-        if (a_end && b_end) return 1;
-        if (a_end || b_end) return 0;
-
-        ea = seq_elem_at(ca, ia);
-        eb = seq_elem_at(cb, ib);
-
-        if (!eq_child(S, st, ea, eb)) return 0;
-
-        eq_seq_step(&ca, &ia);
-        eq_seq_step(&cb, &ib);
-    }
-}
-
 int mino_eq_force(mino_state *S, const mino_val *a, const mino_val *b)
 {
-    eq_stack_t st;
-    int        ok;
-    eq_stack_init(&st);
-    ok = eq_step_force(S, a, b, &st);
-    while (ok && st.len > 0) {
-        eq_pair_t p = st.buf[--st.len];
-        ok = eq_step_force(S, p.a, p.b, &st);
-    }
-    eq_stack_free(&st);
-    return ok;
-}
-
-static int eq_step_force(mino_state *S, const mino_val *a,
-                         const mino_val *b, eq_stack_t *st)
-{
-    /* Force lazy seqs, but preserve the LAZY tag when the forced
-     * result is nil/empty-list. A lazy seq that resolves to nothing is
-     * still semantically an empty seq; collapsing it to nil here would
-     * make `(= [] (lazy-seq nil))` false, contradicting canon.
-     *
-     * snapshot / restore gc_depth: restore from the saved value so a
-     * re-entrant or already-elevated depth is not underflowed on the
-     * normal path.  The longjmp path (lazy_force throwing) would leave
-     * gc_depth elevated; fixing that requires a try_frame-level save
-     * outside this module. */
-    if (a != NULL && mino_type_of(a) == MINO_LAZY) {
-        mino_val *forced;
-        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
-        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
-        forced = lazy_force(S, (mino_val *)a);
-        mino_current_ctx(S)->gc_depth = saved_gc_depth;
-        if (forced != NULL && mino_type_of(forced) != MINO_NIL
-            && mino_type_of(forced) != MINO_EMPTY_LIST) {
-            a = forced;
-        }
-    }
-    if (b != NULL && mino_type_of(b) == MINO_LAZY) {
-        mino_val *forced;
-        int saved_gc_depth = mino_current_ctx(S)->gc_depth;
-        mino_current_ctx(S)->gc_depth = saved_gc_depth + 1;
-        forced = lazy_force(S, (mino_val *)b);
-        mino_current_ctx(S)->gc_depth = saved_gc_depth;
-        if (forced != NULL && mino_type_of(forced) != MINO_NIL
-            && mino_type_of(forced) != MINO_EMPTY_LIST) {
-            b = forced;
-        }
-    }
-    if (a == b) return 1;
-    if (a == NULL || b == NULL) return mino_is_nil(a) && mino_is_nil(b);
-    /* For cons-vs-cons, walk both chains side-by-side via the
-     * sequential helper so the loop's terminator predicate (which
-     * recognises NIL, EMPTY_LIST, and lazy-empty all as "end") also
-     * applies to nested cdr positions. Recursing through this function
-     * via cdr would expose the cross-type asymmetry: nil and a
-     * lazy-realized-to-nil are equivalent at end-of-seq but
-     * is_sequential(NIL) is false at top level. */
-    if (mino_type_of(a) == MINO_CONS && mino_type_of(b) == MINO_CONS) {
-        return eq_seq_like_force(S, a, b, st);
-    }
-    /* Same-tag chunked sequential: a chunked-cons spine can have a
-     * lazy seq in its `more` field (the typical shape filter/range
-     * produce). The non-forcing eq_seq_like would see that unrealized
-     * lazy as end-of-seq and short-circuit incorrectly. Force on both
-     * sides instead. */
-    if (mino_type_of(a) == MINO_CHUNKED_CONS && mino_type_of(b) == MINO_CHUNKED_CONS) {
-        return eq_seq_like_force(S, a, b, st);
-    }
-    /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
-    if (mino_type_of(a) != mino_type_of(b) && is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
-        /* Force any remaining lazy seqs in elements during comparison. */
-        return eq_seq_like_force(S, a, b, st);
-    }
-    /* Vectors: compare elements with forcing. */
-    if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
-        size_t i;
-        if (a->as.vec.len != b->as.vec.len) return 0;
-        for (i = 0; i < a->as.vec.len; i++) {
-            if (!eq_child(S, st, vec_nth(a, i), vec_nth(b, i))) return 0;
-        }
-        return 1;
-    }
-    /* Maps and sets can hold lazy seqs as values / elements (e.g. the
-     * `& rest` binding from a bc-compiled fn lands as a chunked /
-     * lazy seq, which a literal-quoted cons would equal under
-     * `=`). Forcing has to walk into each entry; delegating to the
-     * non-forcing mino_eq would short-circuit on the lazy-cdr-end
-     * heuristic and incorrectly answer false. */
-    if (mino_type_of(a) == MINO_MAP && mino_type_of(b) == MINO_MAP) {
-        size_t i;
-        if (a->as.map.len != b->as.map.len) return 0;
-        for (i = 0; i < a->as.map.len; i++) {
-            mino_val *key = vec_nth(a->as.map.key_order, i);
-            mino_val *av  = map_get_val(a, key);
-            mino_val *bv  = map_get_val(b, key);
-            if (bv == NULL) return 0;
-            if (!eq_child(S, st, av, bv)) return 0;
-        }
-        return 1;
-    }
-    if (mino_type_of(a) == MINO_SET && mino_type_of(b) == MINO_SET) {
-        size_t i;
-        if (a->as.set.len != b->as.set.len) return 0;
-        for (i = 0; i < a->as.set.len; i++) {
-            mino_val *elem = vec_nth(a->as.set.key_order, i);
-            /* Set membership is keyed by mino_eq (=> hashed). For
-             * lazy elements, force before looking up so the
-             * structural compare in hamt_get sees the forced shape. */
-            mino_val *e_forced = elem;
-            if (e_forced != NULL && mino_type_of(e_forced) == MINO_LAZY) {
-                mino_val *f = lazy_force(S, (mino_val *)e_forced);
-                if (f != NULL) e_forced = f;
-            }
-            if (hamt_get(b->as.set.root, e_forced,
-                         hash_val(e_forced), 0u) == NULL) {
-                return 0;
-            }
-        }
-        return 1;
-    }
-    return eq_step(a, b, st);
+    return eq_run(S, a, b);
 }
