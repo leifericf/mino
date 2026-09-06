@@ -603,6 +603,12 @@
           ns-list (mapv (fn [t] (get t :ns)) tests)
           ns-order (vec (distinct ns-list))
           trace? (some? (getenv "MINO_TEST_TRACE"))
+          ;; With MINO_TEST_TRACE_FILE the trace appends straight to
+          ;; that file, unbuffered by any capturing parent process:
+          ;; the CI lanes that run the suite through a captured
+          ;; subprocess (output held until exit) still get a live
+          ;; last-test-entered line when the suite hangs.
+          trace-file (getenv "MINO_TEST_TRACE_FILE")
           run-one (fn [t]
                     (let [tname (get t :name)
                           tfn   (get t :fn)
@@ -610,9 +616,13 @@
                           fxs   (get @fixtures-registry tns)
                           each-wrap (join-fixtures (get fxs :each))]
                       (when trace?
-                        (binding [*out* *err*]
-                          (println (str "[trace] " tns "/" tname))
-                          (flush)))
+                        (if trace-file
+                          (spit trace-file
+                                (str "[trace] " tns "/" tname "\n")
+                                :append true)
+                          (binding [*out* *err*]
+                            (println (str "[trace] " tns "/" tname))
+                            (flush))))
                       (binding [*current-test*     tname
                                 *testing-contexts* ()]
                         (try
