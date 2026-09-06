@@ -1197,41 +1197,34 @@ found_ns:
         return var != NULL ? var : mino_nil(S);
     }
 
-    /* Unqualified: walk current ns env chain (which terminates at
-     * clojure.core) and return a var for whatever's bound. The wide
-     * "scan every ns for any var with this name" fallback is gone --
-     * it picked up unrelated names from sibling namespaces. */
+    /* Unqualified: ask the shared ownership resolver (the same walk
+     * syntax-quote qualification uses) which ns owns the name, then
+     * report the var living there. The wide "scan every ns for any
+     * var with this name" fallback is gone -- it picked up unrelated
+     * names from sibling namespaces. */
     {
         const char *cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
-        mino_val *var = var_find(S, cur, buf);
-        mino_env *e;
+        mino_val *var    = var_find(S, cur, buf);
+        const char *src_ns = NULL;
+        mino_val *bval   = NULL;
         if (var != NULL) return var;
-        e = ns_env_lookup(S, cur);
-        for (; e != NULL; e = e->parent) {
-            env_binding_t *b = env_find_here(e, buf);
-            if (b != NULL) {
-                size_t k;
-                /* A refer'd name binds the source var directly (see
-                 * prim_refer and the ns :refer-clojure handler). Return
-                 * that var so resolve reports the home namespace and deref
-                 * yields the value, not a var wrapping a var. */
-                if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
-                    return b->val;
+        if (ns_owner_for_name(S, ns_env_lookup(S, cur), buf, n,
+                              &src_ns, NULL, NULL, &bval)) {
+            /* A refer'd name binds the source var directly (see
+             * prim_refer and the ns :refer-clojure handler). Return
+             * that var so resolve reports the home namespace and deref
+             * yields the value, not a var wrapping a var. */
+            if (bval != NULL && mino_type_of(bval) == MINO_VAR) {
+                return bval;
+            }
+            if (src_ns != NULL) {
+                mino_val *v = var_find(S, src_ns, buf);
+                if (v != NULL) return v;
+                v = var_intern(S, src_ns, buf);
+                if (v != NULL) {
+                    var_set_root(S, v, bval);
+                    return v;
                 }
-                for (k = 0; k < S->ns_vars.ns_env_len; k++) {
-                    if (S->ns_vars.ns_env_table[k].env == e) {
-                        const char *src_ns = S->ns_vars.ns_env_table[k].name;
-                        mino_val *v = var_find(S, src_ns, buf);
-                        if (v != NULL) return v;
-                        v = var_intern(S, src_ns, buf);
-                        if (v != NULL) {
-                            var_set_root(S, v, b->val);
-                            return v;
-                        }
-                        break;
-                    }
-                }
-                break;
             }
         }
         return mino_nil(S);

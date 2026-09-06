@@ -48,3 +48,18 @@
   (is (= 'abc/def (symbol "abc" "def")))
   (is (= 'abc (symbol nil "abc")))
   (is (nil? (namespace (symbol nil "abc")))))
+
+;; --- syntax-quote namespace qualification ---
+
+(deftest syntax-quote-qualifies-through-the-resolver
+  ;; A bare core name qualifies to its owning namespace, an unbound
+  ;; name to the quoting namespace, a local exactly like the JVM
+  ;; reader (which never consults the local frame), and an aliased
+  ;; name expands the alias to the full namespace.
+  (is (= 'clojure.core/atom `atom))
+  (is (= (symbol (str *ns*) "d4-undefined-name") `d4-undefined-name))
+  (is (= (symbol (str *ns*) "d4-local") (let [d4-local 1] `d4-local)))
+  (require '[clojure.string :as d4str])
+  (is (= 'clojure.string/join `d4str/join))
+  (is (= 'clojure.string/join `clojure.string/join)))
+

@@ -160,3 +160,47 @@ void mino_publish_current_ns(mino_state *S)
     if (var == NULL) return;
     var_set_root(S, var, ns_symbol_with_meta(S, S->ns_vars.current_ns));
 }
+
+/* Answer "which namespace owns this bare name" against the env chain
+ * rooted at start_env: walk to the first frame binding name; a var
+ * binding names its source ns and original spelling (so referred
+ * entries resolve back to where they live), any other binding names
+ * the ns owning that frame. Shared by syntax-quote qualification and
+ * `resolve`, so the two can never drift on ownership. Returns 1 when
+ * a frame binds name (with *ns_out possibly NULL for an env that is
+ * in no ns table entry), 0 when nothing in the chain binds it. */
+int ns_owner_for_name(mino_state *S, mino_env *start_env,
+                      const char *name, size_t nlen,
+                      const char **ns_out, const char **name_out,
+                      size_t *name_len_out, mino_val **val_out)
+{
+    mino_env *e;
+    for (e = start_env; e != NULL; e = e->parent) {
+        env_binding_t *b = env_find_here_n(e, name, nlen);
+        size_t         i;
+        const char    *nsn   = NULL;
+        const char    *bname = name;
+        size_t         bnlen = nlen;
+        if (b == NULL) continue;
+        if (b->val != NULL && mino_type_of(b->val) == MINO_VAR
+            && b->val->as.var.sym != NULL) {
+            nsn   = b->val->as.var.ns;
+            bname = b->val->as.var.sym;
+            bnlen = strlen(bname);
+        }
+        if (nsn == NULL) {
+            for (i = 0; i < S->ns_vars.ns_env_len; i++) {
+                if (S->ns_vars.ns_env_table[i].env == e) {
+                    nsn = S->ns_vars.ns_env_table[i].name;
+                    break;
+                }
+            }
+        }
+        if (ns_out != NULL)       *ns_out       = nsn;
+        if (name_out != NULL)     *name_out     = bname;
+        if (name_len_out != NULL) *name_len_out = bnlen;
+        if (val_out != NULL)      *val_out      = b->val;
+        return 1;
+    }
+    return 0;
+}

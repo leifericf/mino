@@ -148,7 +148,6 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym)
 {
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
-    mino_env *e;
     const char *slash;
     const char *qns_name;
     mino_env *qns_env;
@@ -200,32 +199,15 @@ static mino_val *qq_qualify_symbol(mino_state *S, mino_val *sym)
      * and the ctor form); the reader keeps them bare. */
     if (qq_is_bare_special(name, nlen)) return sym;
     if (qns_name == NULL) return sym;
-    for (e = qns_env; e != NULL; e = e->parent) {
-        env_binding_t *b = env_find_here(e, name);
-        if (b != NULL) {
-            size_t      i;
-            const char *nsn  = NULL;
-            const char *bname = name;
-            size_t      bnlen = nlen;
-            /* When the binding is a var, the var carries its source ns
-             * and original name -- use those so refer'd entries are
-             * qualified back to where they live, matching the Clojure
-             * syntax-quote contract. A var without a name keeps the
-             * binding's own spelling. */
-            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR
-                && b->val->as.var.sym != NULL) {
-                nsn   = b->val->as.var.ns;
-                bname = b->val->as.var.sym;
-                bnlen = strlen(bname);
-            }
-            if (nsn == NULL) {
-                for (i = 0; i < S->ns_vars.ns_env_len; i++) {
-                    if (S->ns_vars.ns_env_table[i].env == e) {
-                        nsn = S->ns_vars.ns_env_table[i].name;
-                        break;
-                    }
-                }
-            }
+    /* The ownership question is the resolver's: the ns that owns the
+     * binding (a var's source ns for refer'd entries) is where the
+     * symbol qualifies to, matching the Clojure syntax-quote contract. */
+    {
+        const char *nsn   = NULL;
+        const char *bname = NULL;
+        size_t      bnlen = 0;
+        if (ns_owner_for_name(S, qns_env, name, nlen,
+                              &nsn, &bname, &bnlen, NULL)) {
             if (nsn != NULL) {
                 size_t cnlen = strlen(nsn);
                 char   buf[512];

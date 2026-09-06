@@ -32,6 +32,17 @@ void        mino_publish_current_ns(mino_state *S);
 mino_val *ns_env_get_meta(mino_state *S, const char *name);
 void        ns_env_set_meta(mino_state *S, const char *name, mino_val *meta);
 mino_env *current_ns_env(mino_state *S);                    /* GC-owned, rooted */
+/* The one "which namespace owns this bare name" answer, shared by
+ * syntax-quote qualification and `resolve`: walk the env chain from
+ * start_env to the first frame binding name; a var binding names its
+ * source ns and original spelling, any other binding names the ns
+ * owning the frame. Returns 1 on a hit (*ns_out may be NULL for a
+ * frame in no ns table entry; *val_out gets the bound value), 0 when
+ * nothing in the chain binds it. Out params may be NULL. */
+int ns_owner_for_name(mino_state *S, mino_env *start_env,
+                      const char *name, size_t nlen,
+                      const char **ns_out, const char **name_out,
+                      size_t *name_len_out, mino_val **val_out);
 
 /* var.c: var registry helpers. */
 mino_val    *var_intern(mino_state *S, const char *ns, const char *name);
