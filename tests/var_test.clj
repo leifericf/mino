@@ -213,4 +213,25 @@
   (is (true? ((fn [] (var? (def vr-bc-1 33))))))
   (is (true? (var? ((fn [] (def vr-bc-2 44) (def vr-bc-3 vr-bc-2)))))))
 
+;; --- the shared var read path ---
+
+(declare d3-unbound-var)
+(deftest unbound-var-reads-fail-loud-on-every-path
+  ;; Symbol access, qualified-symbol access, and deref of the var all
+  ;; read through the same path: thread binding first, then the bound
+  ;; root, else the loud unbound error.
+  (let [msg (fn [thunk] (try (thunk) nil (catch Throwable e (str e))))]
+    (is (re-find #"unbound" (or (msg (fn [] d3-unbound-var)) "")))
+    (is (re-find #"unbound"
+                 (or (msg (fn [] (eval (symbol (str *ns*) "d3-unbound-var")))) "")))
+    (is (re-find #"unbound" (or (msg (fn [] @(var d3-unbound-var))) "")))))
+
+(def ^:dynamic *d3-dyn* :root)
+(deftest dynamic-binding-shadows-on-every-read-path
+  (binding [*d3-dyn* :shadow]
+    (is (= :shadow *d3-dyn*))
+    (is (= :shadow (eval (symbol (str *ns*) "*d3-dyn*"))))
+    (is (= :shadow @(var *d3-dyn*))))
+  (is (= :root *d3-dyn*)))
+
 (run-tests-and-exit)

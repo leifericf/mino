@@ -44,6 +44,12 @@ const char *intern_var_str(mino_state *S, const char *s);
 int            var_registry_add(mino_state *S, const char *ns,
                                 const char *name, mino_val *var);
 void           var_set_root(mino_state *S, mino_val *var, mino_val *val);
+/* The one var read path shared by symbol access, qualified-symbol
+ * access, and deref: thread-binding stack first (a thread binding
+ * satisfies the read even when the root is unbound, per canon), then
+ * the bound root, else the loud unbound throw (name/MNS003, NULL
+ * return with the diagnostic set). */
+mino_val    *var_read(mino_state *S, mino_val *var);
 mino_val    *var_find(mino_state *S, const char *ns, const char *name);
 void           var_unintern(mino_state *S, const char *ns, const char *name);
 

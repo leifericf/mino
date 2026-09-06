@@ -59,12 +59,7 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
         /* A var cell here is an ns binding reached through the parent
          * chain; read it like any other var access. */
         if (mino_type_of(v) == MINO_VAR) {
-            if (mino_current_ctx(S)->dyn_stack != NULL) {
-                mino_val *bv = dyn_lookup_var_or_name(S, v, v->as.var.sym);
-                if (bv != NULL) return bv;
-            }
-            if (!v->as.var.bound) return NULL;
-            return v->as.var.root;
+            return var_read(S, v);
         }
         return v;
     }
@@ -81,8 +76,7 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
             env_binding_t *b = env_find_here(core_env, data);
             if (b != NULL && b->val != NULL) {
                 if (mino_type_of(b->val) == MINO_VAR) {
-                    if (!b->val->as.var.bound) return NULL;
-                    return b->val->as.var.root;
+                    return var_read(S, b->val);
                 }
                 return b->val;
             }
@@ -116,39 +110,24 @@ static mino_val *eval_qualified_symbol(mino_state *S, mino_env *env,
             return NULL;
         }
         /* A qualified read names the same var as any other spelling:
-         * consult the thread-binding stack (keyed by var identity,
-         * with the var-less text criterion for referred spellings)
-         * before falling back to the root. */
-        if (mino_current_ctx(S)->dyn_stack != NULL) {
-            mino_val *bv = dyn_lookup_var_or_name(S, var,
-                                                  var->as.var.sym);
-            if (bv != NULL) return bv;
-        }
-        return var->as.var.root;
+         * thread-binding stack, then the bound root, else the loud
+         * unbound throw. */
+        return var_read(S, var);
     }
 
     /* Primitives live in the ns env but aren't interned as vars, so a
      * var_find miss falls back to the ns env's own bindings. A cell
      * that holds a var (a referred or def'd mapping whose var is
-     * registered under another ns) reads through the same deref as
-     * the fast path: dyn-stack consult, then the root. An unbound
-     * var falls through to the diagnostics below. */
+     * registered under another ns) reads through the same path as
+     * every other spelling. */
     target_env = ns_env_lookup(S, resolved_ns);
     if (target_env != NULL) {
         env_binding_t *b = env_find_here(target_env, sym_name);
         if (b != NULL) {
             if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
-                if (b->val->as.var.bound) {
-                    if (mino_current_ctx(S)->dyn_stack != NULL) {
-                        mino_val *bv = dyn_lookup_var_or_name(
-                            S, b->val, b->val->as.var.sym);
-                        if (bv != NULL) return bv;
-                    }
-                    return b->val->as.var.root;
-                }
-            } else {
-                return b->val;
+                return var_read(S, b->val);
             }
+            return b->val;
         }
     }
 
@@ -263,25 +242,7 @@ static mino_val *eval_symbol(mino_state *S, mino_val *form, mino_env *env)
      * def'd) throws "Var is unbound" so a reference-before-def bug
      * fails at the use site rather than propagating a silent nil. */
     if (from_ns_env && v != NULL && mino_type_of(v) == MINO_VAR) {
-        /* A var bound into the ns env (refer / declare) reads through
-         * the thread-binding stack like any other access of that var.
-         * Checked before the unbound test: a thread binding satisfies
-         * a read even when the root is unbound, per canon. */
-        if (mino_current_ctx(S)->dyn_stack != NULL) {
-            mino_val *bv = dyn_lookup_var_or_name(S, v, v->as.var.sym);
-            if (bv != NULL) return bv;
-        }
-        if (!v->as.var.bound) {
-            char msg[300];
-            snprintf(msg, sizeof(msg),
-                "Var is unbound: %s/%s",
-                v->as.var.ns != NULL ? v->as.var.ns : "?",
-                v->as.var.sym != NULL ? v->as.var.sym : data);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                "name", "MNS003", msg);
-            return NULL;
-        }
-        v = v->as.var.root;
+        return var_read(S, v);
     }
     if (v == NULL) {
         const mino_capability_info *cap = mino_capability_for_symbol(data);

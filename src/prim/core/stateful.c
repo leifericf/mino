@@ -269,17 +269,7 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         return a->as.reduced.val;
     }
     if (a != NULL && mino_type_of(a) == MINO_VAR) {
-        /* Thread binding wins over the root, per canon -- and it
-         * satisfies the deref even when the root is unbound. */
-        if (mino_current_ctx(S)->dyn_stack != NULL) {
-            mino_val *bv = dyn_lookup_var_or_name(S, a, a->as.var.sym);
-            if (bv != NULL) return bv;
-        }
-        if (!a->as.var.bound) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                "deref: var is unbound");
-        }
-        return a->as.var.root != NULL ? a->as.var.root : mino_nil(S);
+        return var_read(S, a);
     }
     if (a != NULL && mino_type_of(a) == MINO_FUTURE) {
         return mino_future_deref(S, a);

@@ -298,6 +298,26 @@ mino_val *var_intern(mino_state *S, const char *ns, const char *name)
     return v;
 }
 
+mino_val *var_read(mino_state *S, mino_val *var)
+{
+    /* Thread binding wins over the root, per canon -- and it satisfies
+     * the read even when the root is unbound. */
+    if (mino_current_ctx(S)->dyn_stack != NULL) {
+        mino_val *bv = dyn_lookup_var_or_name(S, var, var->as.var.sym);
+        if (bv != NULL) return bv;
+    }
+    if (!var->as.var.bound) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "Var is unbound: %s/%s",
+                 var->as.var.ns != NULL ? var->as.var.ns : "?",
+                 var->as.var.sym != NULL ? var->as.var.sym : "?");
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "name", "MNS003", msg);
+        return NULL;
+    }
+    return var->as.var.root != NULL ? var->as.var.root : mino_nil(S);
+}
+
 void var_set_root(mino_state *S, mino_val *var, mino_val *val)
 {
     mino_val *old_val   = var->as.var.root;
