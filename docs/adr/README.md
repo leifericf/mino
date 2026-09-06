@@ -65,3 +65,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [54](54-ratio-accessors-narrow-to-int.md) | Ratio accessors narrow to int when the component fits |
 | [55](55-runtime-splits-into-names-and-state.md) | The runtime directory splits into names and state, shared headers stay |
 | [56](56-maintainer-generators-stay-off-the-c-and-mino-rule.md) | The maintainer-only generators stay exempt from the C-and-mino rule for now |
+| [57](57-lazy-forcing-stays-owned-by-eval.md) | Lazy forcing stays owned by eval, declared at the value layer |
