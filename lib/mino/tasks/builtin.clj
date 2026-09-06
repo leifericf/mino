@@ -242,75 +242,34 @@
     (println "gen-core-header: src/core_mino.h updated")))
 
 ;; The bundled-stdlib namespace set baked into the binary alongside
-;; src/core.clj. Each entry is [src-path ns-name c-symbol], where
-;; c-symbol is the basis for the generated header file name and the
-;; static-source variable.  Test-fixture .clj files under lib/clojure/
-;; (e.g. lib/clojure/test_clojure/, lib/clojure/core_test/) are not
-;; bundled -- they exist on disk so the require/resolve test surface
-;; can verify file-loading behaviour.
+;; src/core.clj, parsed from src/bundled.list -- the single source of
+;; truth the bootstrap Makefile reads too. Each entry is derived as
+;; [src-path ns-name c-symbol], where c-symbol is the basis for the
+;; generated header file name and the static-source variable.
+;; Test-fixture .clj files under lib/clojure/ (e.g.
+;; lib/clojure/test_clojure/, lib/clojure/core_test/) are not bundled
+;; -- they exist on disk so the require/resolve test surface can verify
+;; file-loading behaviour, and they never appear in the manifest.
+(defn- bundled-list-entry
+  "Derive [src-path ns-name c-symbol] from one manifest source path.
+   ns-name drops lib/ and .clj and turns slashes into dots; c-symbol
+   drops .clj and turns every non-alphanumeric character into _."
+  [src-path]
+  (let [ns-name (-> src-path
+                    (str/replace #"^lib/" "")
+                    (str/replace #"\.clj$" "")
+                    (str/replace "/" "."))
+        c-symbol (-> src-path
+                     (str/replace #"\.clj$" "")
+                     (str/replace #"[^A-Za-z0-9]" "_"))]
+    [src-path ns-name c-symbol]))
+
 (def ^:private bundled-stdlib
-  [["lib/clojure/string.clj"          "clojure.string"          "lib_clojure_string"]
-   ["lib/clojure/set.clj"             "clojure.set"             "lib_clojure_set"]
-   ["lib/clojure/math.clj"            "clojure.math"            "lib_clojure_math"]
-   ["lib/clojure/walk.clj"            "clojure.walk"            "lib_clojure_walk"]
-   ["lib/clojure/edn.clj"             "clojure.edn"             "lib_clojure_edn"]
-   ["lib/clojure/pprint.clj"          "clojure.pprint"          "lib_clojure_pprint"]
-   ["lib/clojure/zip.clj"             "clojure.zip"             "lib_clojure_zip"]
-   ["lib/clojure/data.clj"            "clojure.data"            "lib_clojure_data"]
-   ["lib/clojure/data/json.clj"       "clojure.data.json"       "lib_clojure_data_json"]
-   ["lib/clojure/data/csv.clj"        "clojure.data.csv"        "lib_clojure_data_csv"]
-   ["lib/clojure/test.clj"            "clojure.test"            "lib_clojure_test"]
-   ["lib/clojure/template.clj"        "clojure.template"        "lib_clojure_template"]
-   ["lib/clojure/repl.clj"            "clojure.repl"            "lib_clojure_repl"]
-   ["lib/clojure/stacktrace.clj"      "clojure.stacktrace"      "lib_clojure_stacktrace"]
-   ["lib/clojure/datafy.clj"          "clojure.datafy"          "lib_clojure_datafy"]
-   ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]
-   ["lib/clojure/core/async.clj"      "clojure.core.async"      "lib_clojure_core_async"]
-   ["lib/clojure/core/reducers.clj"   "clojure.core.reducers"   "lib_clojure_core_reducers"]
-   ["lib/clojure/instant.clj"         "clojure.instant"         "lib_clojure_instant"]
-   ["lib/clojure/spec/alpha.clj"      "clojure.spec.alpha"      "lib_clojure_spec_alpha"]
-   ["lib/clojure/spec/gen/alpha.clj"  "clojure.spec.gen.alpha"  "lib_clojure_spec_gen_alpha"]
-   ["lib/clojure/spec/test/alpha.clj" "clojure.spec.test.alpha" "lib_clojure_spec_test_alpha"]
-   ["lib/clojure/core/specs/alpha.clj" "clojure.core.specs.alpha" "lib_clojure_core_specs_alpha"]
-   ["lib/clojure/core/unify.clj"      "clojure.core.unify"      "lib_clojure_core_unify"]
-   ["lib/clojure/core/cache.clj"      "clojure.core.cache"      "lib_clojure_core_cache"]
-   ["lib/clojure/core/memoize.clj"    "clojure.core.memoize"    "lib_clojure_core_memoize"]
-   ["lib/clojure/core/match.clj"      "clojure.core.match"      "lib_clojure_core_match"]
-   ["lib/clojure/core/logic.clj"      "clojure.core.logic"      "lib_clojure_core_logic"]
-   ["lib/clojure/core/logic/fd.clj"   "clojure.core.logic.fd"   "lib_clojure_core_logic_fd"]
-   ["lib/clojure/core/logic/nominal.clj" "clojure.core.logic.nominal" "lib_clojure_core_logic_nominal"]
-   ["lib/clojure/test/tap.clj"        "clojure.test.tap"        "lib_clojure_test_tap"]
-   ["lib/clojure/test/junit.clj"      "clojure.test.junit"      "lib_clojure_test_junit"]
-   ["lib/clojure/test/check/generators.clj" "clojure.test.check.generators" "lib_clojure_test_check_generators"]
-   ["lib/clojure/test/check/properties.clj" "clojure.test.check.properties" "lib_clojure_test_check_properties"]
-   ["lib/clojure/test/check.clj"      "clojure.test.check"      "lib_clojure_test_check"]
-   ["lib/mino/deps.clj"               "mino.deps"               "lib_mino_deps"]
-   ["lib/mino/tasks.clj"              "mino.tasks"              "lib_mino_tasks"]
-   ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]
-   ["lib/mino/store.clj"              "mino.store"              "lib_mino_store"]
-     ["lib/mino/http.clj"               "mino.http"               "lib_mino_http"]
-     ["lib/mino/http/server.clj"        "mino.http.server"        "lib_mino_http_server"]
-    ["lib/mino/time.clj"               "mino.time"               "lib_mino_time"]
-    ["lib/mino/path.clj"               "mino.path"               "lib_mino_path"]
-    ["lib/mino/cli.clj"                "mino.cli"                "lib_mino_cli"]
-    ["lib/mino/digest.clj"             "mino.digest"             "lib_mino_digest"]
-     ["lib/mino/env.clj"                "mino.env"                "lib_mino_env"]
-     ["lib/mino/term.clj"               "mino.term"               "lib_mino_term"]
-     ["lib/mino/log.clj"                "mino.log"                "lib_mino_log"]
-     ["lib/mino/toml.clj"               "mino.toml"               "lib_mino_toml"]
-     ["lib/mino/yaml.clj"              "mino.yaml"              "lib_mino_yaml"]
-     ["lib/mino/html.clj"              "mino.html"              "lib_mino_html"]
-     ["lib/mino/html/select.clj"       "mino.html.select"       "lib_mino_html_select"]
-     ["lib/clojure/xml.clj"            "clojure.xml"            "lib_clojure_xml"]
-     ["lib/mino/template.clj"          "mino.template"          "lib_mino_template"]
-     ["lib/mino/zip.clj"               "mino.zip"               "lib_mino_zip"]
-     ["lib/mino/tar.clj"               "mino.tar"               "lib_mino_tar"]
-     ["lib/mino/shell.clj"             "mino.shell"             "lib_mino_shell"]
-     ["lib/mino/retry.clj"             "mino.retry"             "lib_mino_retry"]
-     ["lib/mino/wait.clj"              "mino.wait"              "lib_mino_wait"]
-     ["lib/mino/mime.clj"              "mino.mime"              "lib_mino_mime"]
-     ["lib/mino/jsonl.clj"             "mino.jsonl"             "lib_mino_jsonl"]
-     ["lib/mino/ws.clj"                "mino.ws"                "lib_mino_ws"]])
+  (->> (str/split-lines (slurp "src/bundled.list"))
+       (map str/trim)
+       (remove #(or (str/blank? %) (str/starts-with? % "#")))
+       (map #(first (str/split % #"\s+")))
+       (mapv bundled-list-entry)))
 
 (defn- regen-stdlib-header
   "Regenerates one bundled-stdlib header if its source is newer.

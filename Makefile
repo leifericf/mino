@@ -68,73 +68,18 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/<symbol>.h with a single static const char *<symbol>_src
-# C string literal. Keep this list in sync with `bundled-stdlib` in
-# lib/mino/tasks/builtin.clj; that one drives the incremental rebuilds
-# under `./mino task build`, this one drives the from-scratch bootstrap.
-BUNDLED = \
-    core_mino:src/core.clj \
-    lib_clojure_string:lib/clojure/string.clj \
-    lib_clojure_set:lib/clojure/set.clj \
-    lib_clojure_math:lib/clojure/math.clj \
-    lib_clojure_walk:lib/clojure/walk.clj \
-    lib_clojure_edn:lib/clojure/edn.clj \
-    lib_clojure_pprint:lib/clojure/pprint.clj \
-    lib_clojure_zip:lib/clojure/zip.clj \
-    lib_clojure_xml:lib/clojure/xml.clj \
-    lib_clojure_data:lib/clojure/data.clj \
-    lib_clojure_data_json:lib/clojure/data/json.clj \
-    lib_clojure_data_csv:lib/clojure/data/csv.clj \
-    lib_clojure_test:lib/clojure/test.clj \
-    lib_clojure_template:lib/clojure/template.clj \
-    lib_clojure_repl:lib/clojure/repl.clj \
-    lib_clojure_stacktrace:lib/clojure/stacktrace.clj \
-    lib_clojure_datafy:lib/clojure/datafy.clj \
-    lib_clojure_core_protocols:lib/clojure/core/protocols.clj \
-    lib_clojure_core_async:lib/clojure/core/async.clj \
-    lib_clojure_core_reducers:lib/clojure/core/reducers.clj \
-    lib_clojure_instant:lib/clojure/instant.clj \
-    lib_clojure_spec_alpha:lib/clojure/spec/alpha.clj \
-    lib_clojure_spec_gen_alpha:lib/clojure/spec/gen/alpha.clj \
-    lib_clojure_spec_test_alpha:lib/clojure/spec/test/alpha.clj \
-    lib_clojure_core_specs_alpha:lib/clojure/core/specs/alpha.clj \
-    lib_clojure_core_unify:lib/clojure/core/unify.clj \
-    lib_clojure_core_cache:lib/clojure/core/cache.clj \
-    lib_clojure_core_memoize:lib/clojure/core/memoize.clj \
-    lib_clojure_core_match:lib/clojure/core/match.clj \
-    lib_clojure_core_logic:lib/clojure/core/logic.clj \
-    lib_clojure_core_logic_fd:lib/clojure/core/logic/fd.clj \
-    lib_clojure_core_logic_nominal:lib/clojure/core/logic/nominal.clj \
-    lib_clojure_test_tap:lib/clojure/test/tap.clj \
-    lib_clojure_test_junit:lib/clojure/test/junit.clj \
-    lib_clojure_test_check_generators:lib/clojure/test/check/generators.clj \
-    lib_clojure_test_check_properties:lib/clojure/test/check/properties.clj \
-    lib_clojure_test_check:lib/clojure/test/check.clj \
-    lib_mino_deps:lib/mino/deps.clj \
-    lib_mino_tasks:lib/mino/tasks.clj \
-    lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj \
-    lib_mino_store:lib/mino/store.clj \
-    lib_mino_http:lib/mino/http.clj \
-    lib_mino_http_server:lib/mino/http/server.clj \
-    lib_mino_time:lib/mino/time.clj \
-                    lib_mino_path:lib/mino/path.clj \
-                    lib_mino_cli:lib/mino/cli.clj \
-                    lib_mino_digest:lib/mino/digest.clj \
-                    lib_mino_env:lib/mino/env.clj \
-                    lib_mino_term:lib/mino/term.clj \
-                    lib_mino_log:lib/mino/log.clj \
-                    lib_mino_toml:lib/mino/toml.clj \
-                    lib_mino_yaml:lib/mino/yaml.clj \
-                    lib_mino_html:lib/mino/html.clj \
-                    lib_mino_html_select:lib/mino/html/select.clj \
-                    lib_mino_template:lib/mino/template.clj \
-                    lib_mino_zip:lib/mino/zip.clj \
-                    lib_mino_tar:lib/mino/tar.clj \
-                    lib_mino_shell:lib/mino/shell.clj \
-                    lib_mino_retry:lib/mino/retry.clj \
-                    lib_mino_wait:lib/mino/wait.clj \
-                    lib_mino_mime:lib/mino/mime.clj \
-                    lib_mino_jsonl:lib/mino/jsonl.clj \
-                    lib_mino_ws:lib/mino/ws.clj
+# C string literal. src/bundled.list is the single source of truth for
+# which namespaces are bundled; builtin.clj's `bundled-stdlib` parses
+# the same file for incremental `./mino task build` rebuilds. This
+# bootstrap path reads it here so there is exactly one list to edit.
+#
+# For each source path the c-symbol is derived by dropping the .clj
+# suffix and turning every non-alphanumeric character into _
+# (lib/clojure/core/async.clj -> lib_clojure_core_async), matching the
+# namespace-to-symbol rule both bundlers already share. core.clj is
+# bundled separately as core_mino (it is the runtime core, not a lib).
+BUNDLED_LIBS = $(shell awk '$$1 ~ /\.clj$$/ { sym = $$1; sub(/\.clj$$/, "", sym); gsub(/[^A-Za-z0-9]/, "_", sym); print sym ":" $$1 }' src/bundled.list)
+BUNDLED = core_mino:src/core.clj $(BUNDLED_LIBS)
 
 HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 
@@ -157,7 +102,7 @@ $(BIN): $(HEADERS)
 # file path, which path translation handles correctly. bundle.awk
 # writes the whole header, banner included, so its bytes match what
 # `gen-core-header` / `gen-stdlib-headers` emit for every entry.
-$(HEADERS): src/bundle.awk Makefile
+$(HEADERS): src/bundle.awk src/bundled.list Makefile
 	@for pair in $(BUNDLED); do \
 	    sym=$${pair%%:*}; \
 	    src=$${pair##*:}; \

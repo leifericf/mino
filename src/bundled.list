@@ -1,0 +1,91 @@
+# Bundled stdlib manifest -- the single source of truth for which
+# namespaces are baked into the binary as C string literals.
+#
+# One line per bundled namespace. Columns are whitespace-separated:
+#
+#   1. source path, relative to the repo root (lib/.../<name>.clj)
+#   2. capability group the namespace belongs to (documentation only;
+#      the authoritative capability gating lives in the hand-written
+#      src/prim/install_stdlib.c, which is the public embedder API)
+#
+# Both bundlers derive everything else from column 1:
+#
+#   namespace  lib/clojure/core/async.clj -> clojure.core.async
+#              (drop lib/, drop .clj, slashes become dots)
+#   c-symbol   lib/clojure/core/async.clj -> lib_clojure_core_async
+#              (drop .clj, non-alphanumerics become underscores)
+#
+# The Makefile reads this file via $(shell) for the from-scratch
+# bootstrap build; builtin.clj's bundled-stdlib parses the same file
+# for the incremental `./mino task build`. src/core.clj is bundled
+# too, but as core_mino by gen-core-header, not through this list.
+#
+# To add a bundled namespace: drop the .clj under lib/, add one line
+# here, and add its deliberate mino_register_bundled_lib call in
+# src/prim/install_stdlib.c. The cheap-lane parity test fails if the
+# manifest and the C registration ever disagree.
+#
+# Lines beginning with # and blank lines are ignored.
+
+lib/clojure/string.clj                  default
+lib/clojure/set.clj                     default
+lib/clojure/math.clj                    default
+lib/clojure/walk.clj                    default
+lib/clojure/edn.clj                     default
+lib/clojure/pprint.clj                  default
+lib/clojure/zip.clj                     default
+lib/clojure/xml.clj                     xml
+lib/clojure/data.clj                    default
+lib/clojure/data/json.clj               json
+lib/clojure/data/csv.clj                csv
+lib/clojure/test.clj                    test
+lib/clojure/template.clj                default
+lib/clojure/repl.clj                    default
+lib/clojure/stacktrace.clj              default
+lib/clojure/datafy.clj                  default
+lib/clojure/core/protocols.clj          default
+lib/clojure/core/async.clj              async
+lib/clojure/core/reducers.clj           default
+lib/clojure/instant.clj                 default
+lib/clojure/spec/alpha.clj              default
+lib/clojure/spec/gen/alpha.clj          default
+lib/clojure/spec/test/alpha.clj         default
+lib/clojure/core/specs/alpha.clj        default
+lib/clojure/core/unify.clj              default
+lib/clojure/core/cache.clj              default
+lib/clojure/core/memoize.clj            default
+lib/clojure/core/match.clj              default
+lib/clojure/core/logic.clj              default
+lib/clojure/core/logic/fd.clj           default
+lib/clojure/core/logic/nominal.clj      default
+lib/clojure/test/tap.clj                test
+lib/clojure/test/junit.clj              test
+lib/clojure/test/check/generators.clj   test
+lib/clojure/test/check/properties.clj   test
+lib/clojure/test/check.clj              test
+lib/mino/deps.clj                       default
+lib/mino/tasks.clj                      default
+lib/mino/tasks/builtin.clj              default
+lib/mino/store.clj                      store
+lib/mino/http.clj                       net
+lib/mino/http/server.clj                net
+lib/mino/time.clj                       time
+lib/mino/path.clj                       path
+lib/mino/cli.clj                        cli
+lib/mino/digest.clj                     digest
+lib/mino/env.clj                        env
+lib/mino/term.clj                       term
+lib/mino/log.clj                        log
+lib/mino/toml.clj                       toml
+lib/mino/yaml.clj                       yaml
+lib/mino/html.clj                       html
+lib/mino/html/select.clj                html
+lib/mino/template.clj                   default
+lib/mino/zip.clj                        default
+lib/mino/tar.clj                        default
+lib/mino/shell.clj                      shell
+lib/mino/retry.clj                      default
+lib/mino/wait.clj                       default
+lib/mino/mime.clj                       default
+lib/mino/jsonl.clj                      json
+lib/mino/ws.clj                         net
