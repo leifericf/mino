@@ -540,7 +540,6 @@ static int producer_writes_to_A_dst(unsigned op)
     case OP_INC_I:   case OP_DEC_I:   case OP_ZERO_INT_P:
     case OP_POS_P_I: case OP_NEG_P_I:
     case OP_EVEN_P_I: case OP_ODD_P_I: case OP_BNOT_I:
-    case OP_BINOP_INT:
         return 1;
     default:
         return 0;

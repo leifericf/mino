@@ -243,7 +243,6 @@ const char *mino_bc_op_name(unsigned op)
     case OP_TAILCALL: return "OP_TAILCALL";
     case OP_RETURN: return "OP_RETURN";
     case OP_CLOSURE: return "OP_CLOSURE";
-    case OP_BINOP_INT: return "OP_BINOP_INT";
     case OP_PUSHCATCH: return "OP_PUSHCATCH";
     case OP_POPCATCH: return "OP_POPCATCH";
     case OP_THROW: return "OP_THROW";
@@ -532,13 +531,10 @@ mino_val *unop_int_fast(mino_state *S, mino_val *v,
     }
 }
 
-/* Integer fast-lane for OP_BINOP_INT. Same tag-extract shape as
- * unop_int_fast: a single MINO_IS_INT check per operand replaces
- * mino_val_int_p's NULL + tag + type chain, and MINO_INT_VAL decodes
- * inline without the boxed-fallback branch. Overflow stays on the
- * __builtin_*_overflow intrinsics; the encoded result rides through
- * tag_or_box_int. Returns NULL on a tag miss or overflow so the
- * dispatcher bails to the cons-spine prim. */
+/* Fast-lane for the OP_ADD_II / OP_SUB_II / ... family. Checks both
+ * operands are tagged ints, dispatches on subop, and returns NULL on a
+ * tag miss or arithmetic overflow so the caller bails to the cons-spine
+ * prim. tag_or_box_int encodes the result. */
 mino_val *binop_int_fast(mino_state *S, mino_val *lhs,
                            mino_val *rhs, unsigned subop)
 {
@@ -919,7 +915,7 @@ mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
 /* Cold-op handler. The op-count profile shows 18 of 63 opcodes
  * carry ~99% of dispatches; the long tail (NOP, GETGLOBAL non-cached,
  * CALL non-cached, closure build, env push/pop/bind, try/throw/dyn
- * frames, BINOP_INT, infrequent vec ops) accounts for the
+ * frames, infrequent vec ops) accounts for the
  * remaining <1%. Splitting those out of the main dispatch switch
  * keeps the hot dispatch's case ladder small enough for clang to lay
  * out a tight jump table and keep the hot-op locals in registers
@@ -1064,17 +1060,6 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
             *ok = 0; return 0;
         }
         env_bind_sym(S, env, sym, regs[a]);
-        return 1;
-    }
-
-    case OP_BINOP_INT: {
-        unsigned a = A_OF(ins);
-        unsigned b = B_OF(ins);
-        unsigned c = C_OF(ins);
-        unsigned subop = BINOP_OF(ins);
-        mino_val *r = binop_int_fast(S, regs[b], regs[c], subop);
-        if (r == NULL) { *ok = 0; return 0; }
-        regs[a] = r;
         return 1;
     }
 

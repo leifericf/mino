@@ -37,7 +37,6 @@ typedef enum {
     OP_TAILCALL,       /* A=fn, B=argc                                    */
     OP_RETURN,         /* A=src                                           */
     OP_CLOSURE,        /* A=dst, Bx=child fn const index                  */
-    OP_BINOP_INT,      /* A=dst, B=lhs, C=rhs; op nibble in instr top byte */
     /* Opcode IDs reserved for forms the compiler doesn't yet emit:
      * try/catch/throw, dynamic binding push/pop. Handlers land alongside
      * compile-time emission in a later release; reserving the IDs now
@@ -225,10 +224,9 @@ typedef enum {
     OP__COUNT
 } mino_bc_op_t;
 
-/* Sub-op enum for the generic OP_BINOP_INT opcode. The compiler emits
- * the per-op OP_*_II variants directly today; this enum is retained
- * so the dispatch helpers in vm.c can share one switch across both
- * the generic and specialized lanes. */
+/* Sub-op enum shared by binop_int_fast and the OP_ADD_II family dispatcher
+ * in vm.c. Each OP_*_II opcode decodes its sub-op from the high nibble of
+ * the instruction word (BINOP_OF) and passes it here. */
 typedef enum {
     BINOP_ADD = 0,
     BINOP_SUB,
@@ -263,7 +261,7 @@ typedef enum {
 } mino_bc_unop_t;
 
 /* Encoding helpers. The base ABC form occupies 24 bits; the high 8 bits
- * are zero for ABC ops and used for the BINOP sub-op when OP_BINOP_INT.
+ * carry the BINOP sub-op for the OP_*_II specialized lanes.
  * Bx is unsigned 16-bit, sBx is signed via 0x8000 bias. */
 #define MK_ABC(op, a, b, c)                                                 \
     ((mino_bc_insn_t)((mino_bc_op_t)(op) & 0xFFu)                           \
@@ -277,10 +275,6 @@ typedef enum {
      | ((mino_bc_insn_t)((bx) & 0xFFFFu) << 16))
 
 #define MK_AsBx(op, a, sbx)  MK_ABx((op), (a), (unsigned)((sbx) + 0x8000))
-
-#define MK_BINOP_INT(a, b, c, subop)                                        \
-    (MK_ABC(OP_BINOP_INT, (a), (b), (c))                                    \
-     | ((mino_bc_insn_t)((subop) & 0xFu) << 4))
 
 #define OP_OF(i)    ((unsigned)((i) & 0xFFu))
 #define A_OF(i)     ((unsigned)(((i) >> 8) & 0xFFu))
