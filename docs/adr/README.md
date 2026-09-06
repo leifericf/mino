@@ -63,3 +63,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [52](52-format-grouping-separator-is-a-fixed-comma.md) | The format grouping separator is a fixed comma |
 | [53](53-format-date-and-hash-directives-stay-absent.md) | The format date and hash directives stay absent |
 | [54](54-ratio-accessors-narrow-to-int.md) | Ratio accessors narrow to int when the component fits |
+| [55](55-runtime-splits-into-names-and-state.md) | The runtime directory splits into names and state, shared headers stay |

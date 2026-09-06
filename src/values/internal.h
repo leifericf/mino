@@ -129,4 +129,11 @@ void mino_store_gc_finalize(mino_val *v);
 }
 #endif
 
+/* The arbitrary-precision numeric tower's value-model interface
+ * (MINO_BIGINT / MINO_RATIO / MINO_BIGDEC). Pulled in here so every
+ * value-layer consumer that already includes values/internal.h -- the
+ * finalizer, the printer, the equality and hash paths -- sees the
+ * declarations without an upward include into prim/. */
+#include "values/bignum.h"
+
 #endif /* VALUES_INTERNAL_H */

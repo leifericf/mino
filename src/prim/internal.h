@@ -335,7 +335,7 @@ long long mino_string_cp_count(mino_val *s);
  * prim_rationalize) and bigdec.c prims (prim_bigdec/prim_decimal_p) are
  * cross-TU: bignum.c's k_prims_bignum table references them.
  * Internal bignum/ratio/bigdec helpers (mino_bigint_*, mino_ratio_*,
- * mino_bigdec_*) are declared in collections_internal.h because val.c
+ * mino_bigdec_*) are declared in values/bignum.h because val.c
  * equality, the printer, and the GC sweep hook all need them. */
 mino_val *prim_numerator(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_denominator(mino_state *S, mino_val *args, mino_env *env);
