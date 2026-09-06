@@ -19,13 +19,29 @@
 #include "values/internal.h"         /* forward decls: mino_bc_trace_fn_bc, mino_future_*, mino_chan_* */
 #include "gc/internal.h"
 #include "runtime/value_assert.h"   /* mino_type_of */
-#include "collections/internal.h"    /* mino_bigint_free (collections-adjacent bignum) */
+#include "collections/internal.h"
+#include "imath.h"                   /* mp_int_clear for the bigint teardown */
 
 #include <stdlib.h>                  /* free() for malloc-owned slot arrays */
 
 void gc_mark_child_push_exported(mino_state *S, const void *p);
 
 #define PUSH(p) gc_mark_child_push_exported(S, (p))
+
+/* Free the mpz_t owned by a MINO_BIGINT cell. Declared in
+ * values/bignum.h; lives beside the sweep finalizer that consumes it
+ * so the value model owns its own teardown. Safe to call with NULL
+ * mpz (defensive). */
+void mino_bigint_free(mino_val *v)
+{
+    mp_int z;
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT) return;
+    z = (mp_int)v->as.bigint.mpz;
+    if (z == NULL) return;
+    mp_int_clear(z);
+    free(z);
+    v->as.bigint.mpz = NULL;
+}
 
 static void trace_val(mino_state *S, gc_hdr_t *h)
 {

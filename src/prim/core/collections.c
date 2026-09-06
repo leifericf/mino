@@ -2175,73 +2175,9 @@ mino_val *set_conj1(mino_state *S, const mino_val *s, mino_val *elem)
     return v;
 }
 
-/* Owner-tagged set conj. Mirrors set_conj1 but routes the HAMT
- * walk and the key_order conj through the owned variants so a
- * transient batch reuses spine nodes and tail-chunk slots in place
- * after the first touch. */
-mino_val *set_conj1_owned(mino_state *S, mino_val *s, mino_val *elem,
-                             uintptr_t owner)
-{
-    mino_val       *v;
-    mino_val       *sentinel;
-    hamt_entry_t     *e;
-    uint32_t          h;
-    int               replaced = 0;
-    mino_hamt_node_t *root;
-    if (s->as.set.len > 0
-        && hamt_get(s->as.set.root, elem, hash_val(elem), 0u) != NULL) {
-        return s;
-    }
-    v        = alloc_val(S, MINO_SET);
-    gc_pin(v);
-    sentinel = mino_true(S);
-    e        = hamt_entry_new(S, elem, sentinel);
-    if (e == NULL) { gc_unpin(1); return NULL; }
-    h        = hash_val(elem);
-    root     = hamt_assoc_owned(S, s->as.set.root, e, h, 0u, &replaced, owner);
-    if (root == NULL) { gc_unpin(1); return NULL; }
-    v->as.set.root      = root;
-    v->meta             = s->meta;
-    if (replaced) {
-        v->as.set.key_order = s->as.set.key_order;
-        v->as.set.len       = s->as.set.len;
-    } else {
-        v->as.set.key_order = vec_conj1_owned(S, s->as.set.key_order, elem,
-                                                owner);
-        v->as.set.len       = s->as.set.len + 1;
-    }
-    gc_unpin(1);
-    return v;
-}
-
-/* Owner-tagged set disj. */
-mino_val *set_disj1_owned(mino_state *S, mino_val *s,
-                             const mino_val *elem, uintptr_t owner)
-{
-    mino_val       *v;
-    mino_hamt_node_t *root;
-    mino_val       *order;
-    int               removed = 0;
-    size_t            i;
-    if (s->as.set.len == 0) return s;
-    root = hamt_dissoc_owned(S, s->as.set.root, elem, hash_val(elem), 0u,
-                              &removed, owner);
-    if (!removed) return s;
-    gc_pin((mino_val *)root);
-    order = mino_vector(S, NULL, 0);
-    for (i = 0; i < s->as.set.len; i++) {
-        mino_val *cur = vec_nth(s->as.set.key_order, i);
-        if (mino_eq(cur, elem)) continue;
-        order = vec_conj1_owned(S, order, cur, owner);
-    }
-    gc_unpin(1);
-    v = alloc_val(S, MINO_SET);
-    v->as.set.root      = root;
-    v->as.set.key_order = order;
-    v->as.set.len       = s->as.set.len - 1;
-    v->meta             = s->meta;
-    return v;
-}
+/* The owner-tagged set edits (set_conj1_owned / set_disj1_owned) live
+ * in collections/map_owned.c beside the other owned walks, where
+ * collections/transient.c consumes them. */
 
 mino_val *prim_hash_set(mino_state *S, mino_val *args, mino_env *env)
 {

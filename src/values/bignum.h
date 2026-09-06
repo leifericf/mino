@@ -2,12 +2,13 @@
  * bignum.h -- value-model interface for the arbitrary-precision numeric
  * tower (MINO_BIGINT, MINO_RATIO, MINO_BIGDEC).
  *
- * The operations are implemented in prim/bignum.c, prim/ratio.c and
- * prim/bigdec.c, but the interface lives at the value layer because the
- * consumers are value-layer paths: the finalizer in values/gc_handlers.c
- * frees a dying bigint cell, the printer prints one, and the equality /
- * hash paths in values/val.c and collections/map_hash.c compare and hash
- * them. Declaring the interface here keeps those callers off an upward
+ * The arithmetic operations are implemented in prim/bignum/, but the
+ * interface lives at the value layer because the consumers are
+ * value-layer paths: the sweep finalizer frees a dying bigint cell
+ * (mino_bigint_free is defined beside it in values/gc_handlers.c),
+ * the printer prints one, and the equality / hash paths in
+ * values/val.c and collections/map_hash.c compare and hash them.
+ * Declaring the interface here keeps those callers off an upward
  * include into prim/.
  *
  * Internal to the runtime; embedders should only use mino.h.

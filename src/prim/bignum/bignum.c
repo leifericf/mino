@@ -72,18 +72,8 @@ mino_val *bigint_wrap(mino_state *S, mp_int z)
     return v;
 }
 
-/* Public: free the mpz_t owned by a MINO_BIGINT cell. Called from the
- * GC sweep paths. Safe to call with NULL mpz (defensive). */
-void mino_bigint_free(mino_val *v)
-{
-    mp_int z;
-    if (v == NULL || mino_type_of(v) != MINO_BIGINT) return;
-    z = (mp_int)v->as.bigint.mpz;
-    if (z == NULL) return;
-    mp_int_clear(z);
-    free(z);
-    v->as.bigint.mpz = NULL;
-}
+/* Bigint teardown (mino_bigint_free) lives beside the value model in
+ * values/gc_handlers.c, where the sweep finalizer consumes it. */
 
 /* ------------------------------------------------------------------------- */
 /* Public constructors (mino.h)                                              */

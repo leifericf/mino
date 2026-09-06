@@ -198,11 +198,12 @@ mino_val *mino_map_dissoc1_owned(mino_state *S, mino_val *m,
                                     mino_val *key,
                                     uintptr_t owner);                  /* GC-owned */
 
-/* Persistent set conj/disj helpers (defined in prim/collections.c).
- * Declared here so transient.c (collections/) can use them without
- * pulling in prim/internal.h. Owner-tagged variants accept the editing
- * transient's monotonic ID; pass 0 for a persistent (path-copy) op.
- * The persistent set_conj1 uses owner = 0 semantics internally. */
+/* Set conj/disj helpers. The persistent set_conj1 is defined in
+ * prim/core/collections.c beside the set prims; the owner-tagged
+ * variants live in collections/map_owned.c beside the other owned
+ * walks, where transient.c consumes them. Owner-tagged variants
+ * accept the editing transient's monotonic ID; pass 0 for a
+ * persistent (path-copy) op. */
 mino_val *set_conj1(mino_state *S, const mino_val *s,
                     mino_val *elem);                                   /* GC-owned */
 mino_val *set_conj1_owned(mino_state *S, mino_val *s,
