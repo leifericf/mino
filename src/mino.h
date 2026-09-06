@@ -51,7 +51,7 @@
 #define MINO_VERSION_MAJOR 2026
 #define MINO_VERSION_MINOR 9
 #define MINO_VERSION_PATCH 6
-#define MINO_VERSION       "2026.09.06-alpha3"
+#define MINO_VERSION       "2026.09.06-alpha4"
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "2026.09.06".
