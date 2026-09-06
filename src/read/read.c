@@ -2,7 +2,7 @@
  * read.c -- tokenizer and reader.
  */
 
-#include "eval/read_internal.h"
+#include "read/read_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */

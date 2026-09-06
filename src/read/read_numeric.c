@@ -12,7 +12,7 @@
  * 1100-line style limit.  Entry point: try_parse_numeric.
  */
 
-#include "eval/read_internal.h"
+#include "read/read_internal.h"
 #include <string.h>
 
 mino_val *try_parse_numeric(mino_state *S, const char *start,

@@ -9,6 +9,7 @@
 (def ^:private cc      (or (getenv "CC") "cc"))
 (def ^:private include-flags
   (str "-Isrc -Isrc/generated -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
+       " -Isrc/read -Isrc/print"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
        " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"
@@ -101,8 +102,8 @@
    "src/collections/rbtree.c"
    "src/collections/builders.c"
    "src/collections/gc_handlers.c"
-   "src/collections/iter.c" "src/eval/read.c" "src/eval/read_numeric.c" "src/eval/print.c"
-   "src/eval/print_dynvars.c" "src/eval/special_host.c"
+   "src/collections/iter.c" "src/read/read.c" "src/read/read_numeric.c" "src/print/print.c"
+   "src/print/print_dynvars.c" "src/eval/special_host.c"
    "src/prim/prim.c" "src/prim/install.c" "src/prim/install_stdlib.c"
    "src/prim/numeric.c" "src/prim/numeric_math.c"
    "src/prim/numeric_bit.c" "src/prim/numeric_coerce.c"
@@ -636,7 +637,8 @@
 ;; ---- Amalgamation ----
 
 (def ^:private amalgam-search-paths
-  ["src" "src/generated" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
+  ["src" "src/generated" "src/public" "src/runtime" "src/gc" "src/eval"
+   "src/read" "src/print" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
    "src/vendor/imath" "src/vendor/bearssl" "src/vendor/bearssl/inc"
    "src/vendor/miniz" "src/vendor/miniz/upstream"

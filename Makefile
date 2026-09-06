@@ -26,6 +26,7 @@ CC      ?= cc
 # that third-party code correct at -O2.
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -fno-strict-aliasing -DMINO_CPJIT=1
 INCDIRS  = -Isrc -Isrc/generated -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+           -Isrc/read -Isrc/print \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
            -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc \
@@ -58,6 +59,7 @@ endif
 BIN = mino$(EXE)
 
 SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
+                  src/read/*.c src/print/*.c \
                   src/diag/*.c \
                   src/runtime/*.c src/gc/*.c src/public/*.c \
                   src/values/*.c src/collections/*.c src/prim/*.c \
