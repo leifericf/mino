@@ -290,10 +290,11 @@ void rb_bounded_seq(mino_state *S, const mino_rb_node_t *n, int is_map,
 /* ------------------------------------------------------------------------- */
 /* prim/bignum.c: bignum / ratio / bigdec value support                      */
 /*                                                                           */
-/* Declared here (not prim/internal.h) because the GC sweep paths call       */
-/* mino_bigint_free when a bigint cell dies, the printer calls               */
-/* mino_bigint_print, and val.c equality calls                               */
-/* mino_bigint_equals / mino_bigint_hash.                                    */
+/* Declared here (not prim/internal.h) because callers outside prim/ need    */
+/* them: the value finalizer in values/gc_handlers.c calls mino_bigint_free  */
+/* when a bigint cell dies, the printer in eval/print.c calls                */
+/* mino_bigint_print, and the equality / hash paths in values/val.c and      */
+/* collections/map_hash.c call mino_bigint_equals / mino_bigint_hash.        */
 /* ------------------------------------------------------------------------- */
 
 void     mino_bigint_free(mino_val *v);

@@ -37,10 +37,11 @@ typedef enum {
     OP_TAILCALL,       /* A=fn, B=argc                                    */
     OP_RETURN,         /* A=src                                           */
     OP_CLOSURE,        /* A=dst, Bx=child fn const index                  */
-    /* Opcode IDs reserved for forms the compiler doesn't yet emit:
-     * try/catch/throw, dynamic binding push/pop. Handlers land alongside
-     * compile-time emission in a later release; reserving the IDs now
-     * keeps the encoding stable. */
+    /* Exception handling and dynamic binding. The compiler emits all
+     * five: OP_PUSHCATCH / OP_POPCATCH / OP_THROW wrap try/catch/finally
+     * and (throw ...) (compile.c compile_try / compile_throw), and
+     * OP_PUSHDYN / OP_POPDYN bracket a (binding ...) body
+     * (compile_binding). The VM handlers live in vm.c. */
     OP_PUSHCATCH,      /* A=handler_pc_offset (sBx packed in Bx), B=reg_top_save */
     OP_POPCATCH,       /*                                                  */
     OP_THROW,          /* A=err                                            */

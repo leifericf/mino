@@ -381,12 +381,14 @@ static mino_vec_node_t *pop_tail(mino_state *S,
 }
 
 /* Owned-edit helpers used by the transient `*_bang` mutators. Each
- * accepts an `owner` pointer (the transient's mino_val address);
- * nodes whose owner field matches are mutated in place, others are
- * cloned with the owner stamped. On first mutation through a fresh
- * transient, the inner nodes are owner=NULL (the persistent default)
- * so the first walk clones them; subsequent walks against the same
- * transient hit the in-place path.
+ * accepts an `owner` id (a monotonic uintptr_t minted per transient in
+ * transient.c, never zero for a live transient); nodes whose owner
+ * field matches are mutated in place, others are cloned with the owner
+ * stamped. Persistent nodes carry owner=0, so the first walk through a
+ * fresh transient clones them and stamps the transient's id; subsequent
+ * walks against the same transient match and hit the in-place path.
+ * Passing owner=0 degrades every walk to path-copy (persistent)
+ * behaviour, since no node ever carries owner=0 through a mutation.
  *
  * GC barrier discipline: in-place mutation may write a YOUNG slot
  * value into an OLD owner-tagged node (the node has aged across a

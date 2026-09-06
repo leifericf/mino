@@ -12,6 +12,10 @@
  *   - (loop [b v ...] body...) + (recur ...) with plain-symbol bindings
  *   - (quote x)
  *   - (lazy-seq body...) -- body realised on the tree-walker
+ *   - (try ... catch ... finally ...) and (throw expr) via
+ *     OP_PUSHCATCH / OP_POPCATCH / OP_THROW
+ *   - (binding [v e ...] body...) via OP_PUSHDYN / OP_POPDYN
+ *   - (when c body...), (and ...), (or ...) with dedicated handlers
  *   - function application: multi-arity, optional & rest, no destructure
  *   - inner (fn ...) / (fn* ...) literals via OP_CLOSURE
  *   - (def name) / (def name expr) without metadata
@@ -24,11 +28,12 @@
  * Decline conditions (any of these -> MINO_BC_UNSUPPORTED, fn falls back
  * to the tree-walker):
  *   - params with destructuring / :as / map shape (& rest is accepted)
- *   - body uses (try/catch/finally), (throw), (binding), (set!)
- *   - body uses other not-yet-handled special forms (when, and, or,
- *     quasiquote, case, cond, defrecord, ...): they're typically
- *     macroexpanded before the compiler sees them, but raw occurrences
- *     decline so the tree-walker handles them rather than emitting a
+ *   - body uses (set!)
+ *   - body uses a special form with no compile-time handler
+ *     (quasiquote and other registry forms; the core macros case,
+ *     cond, defrecord, ... expand at compile time when their head
+ *     resolves, else decline). Raw occurrences decline so the
+ *     tree-walker handles them rather than the compiler emitting a
  *     bogus regular call
  *   - call head resolves to a MINO_MACRO (macros expand on the eval
  *     path before reaching the compiler when applicable; a residual
