@@ -634,44 +634,27 @@ static int is_core_macro_form(const char *name)
         || strcmp(name, "or") == 0;
 }
 
-/* Names of every special form mino's eval recognizes, plus the syntactic
- * sub-forms that only appear as heads inside their parent (catch,
- * finally) but would otherwise look like regular calls. Kept in sync
- * with k_special_forms in src/eval/special_registry.c.
+/* True for any head the bytecode compiler must decline to emit as a
+ * regular call. This is a SUPERSET of the eval special-form registry:
+ * the registry's names (quote, def, if, fn, try, ...) plus a
+ * compiler-local extension of forms the compiler steers to the
+ * tree-walker but that the registry does not own -- the internal
+ * quote* spelling, the try sub-heads (catch, finally), throw and set!,
+ * the core macros that must decline rather than mis-emit, and the host
+ * interop sugar (new, ., .method, TypeName/staticMethod).
  *
- * DUPLICATION NOTE (factoring-eval-bc-r2-002): this table duplicates the
- * canonical special-form name list in src/eval/special_registry.c
- * (k_special_forms). The registry is the authority; update BOTH when
- * adding or removing a special form name. Deduplication is blocked because
- * the registry's lookup interface requires a cons-form argument (not a
- * const char *), so a direct call from here would require touching an
- * out-of-scope module. */
+ * The registry membership is asked directly through
+ * eval_is_special_form_name (special_registry.c), so the canonical
+ * name list lives in exactly one place; only the local extension is
+ * enumerated here. Adding or removing a true special form now touches
+ * only the registry. */
 static int is_special_form_name(const char *name)
 {
-    /* Recognized by the registry (eval_try_special_form). */
-    if (strcmp(name, "quote") == 0) return 1;
+    /* Registry-owned special forms (eval_try_special_form). */
+    if (eval_is_special_form_name(name, strlen(name))) return 1;
+    /* Compiler-local extension: forms steered to the tree-walker that
+     * the registry does not enumerate. */
     if (strcmp(name, "quote*") == 0) return 1;
-    if (strcmp(name, "quasiquote") == 0) return 1;
-    if (strcmp(name, "unquote") == 0) return 1;
-    if (strcmp(name, "unquote-splicing") == 0) return 1;
-    if (strcmp(name, "defmacro") == 0) return 1;
-    if (strcmp(name, "declare") == 0) return 1;
-    if (strcmp(name, "ns") == 0) return 1;
-    if (strcmp(name, "var") == 0) return 1;
-    if (strcmp(name, "def") == 0) return 1;
-    if (strcmp(name, "if") == 0) return 1;
-    if (strcmp(name, "do") == 0) return 1;
-    if (strcmp(name, "let") == 0 || strcmp(name, "let*") == 0) return 1;
-    if (strcmp(name, "letfn*") == 0) return 1;
-    if (strcmp(name, "fn") == 0 || strcmp(name, "fn*") == 0) return 1;
-    if (strcmp(name, "recur") == 0) return 1;
-    if (strcmp(name, "loop") == 0 || strcmp(name, "loop*") == 0) return 1;
-    if (strcmp(name, "try") == 0) return 1;
-    if (strcmp(name, "binding") == 0) return 1;
-    if (strcmp(name, "lazy-seq") == 0) return 1;
-    if (strcmp(name, "when") == 0) return 1;
-    if (strcmp(name, "and") == 0) return 1;
-    if (strcmp(name, "or") == 0) return 1;
     /* Sub-forms (only valid inside try) but still not regular calls. */
     if (strcmp(name, "catch") == 0) return 1;
     if (strcmp(name, "finally") == 0) return 1;
