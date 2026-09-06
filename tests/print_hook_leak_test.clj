@@ -78,8 +78,13 @@
           (with-out-str (pr payload pin-bomb))
           (catch :test/pin-leak-probe e nil))
         (gc!))
+      ;; Budget: the leak this pins cost ~82-100 MiB across the
+      ;; window; healthy growth is ~15 MiB native and up to ~55 MiB
+      ;; on the static zig JIT builds, whose allocator arenas and JIT
+      ;; slabs drift higher. 80 MiB keeps decisive teeth against the
+      ;; leak with headroom over every healthy build's noise.
       (let [growth (- (rss-kb) before)]
-        (is (< growth (* 48 1024))
+        (is (< growth (* 80 1024))
             (str "RSS grew " growth
                  " KiB across 300 caught print-method throws"))))))
 
