@@ -23,6 +23,23 @@
 #include "async/timer.h"
 #include "async/chan.h"
 
+/* The generated bundled source is one string literal past ANSI-C's
+ * guaranteed 4095; scope the diagnostic the same way install_stdlib.c
+ * does for its header set. */
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Woverlength-strings"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Woverlength-strings"
+#endif
+#include "lib_clojure_core_async.h"
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif
+
 static mino_val *prim_sched_enqueue(mino_state *S, mino_val *args,
                                       mino_env *env)
 {
@@ -488,5 +505,6 @@ void mino_install_async(mino_state *S, mino_env *env)
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_async, k_prims_async_count,
                                        "async");
+    mino_register_bundled_lib(S, "clojure.core.async", lib_clojure_core_async_src);
     S->caps_installed |= MINO_CAP_ASYNC;
 }

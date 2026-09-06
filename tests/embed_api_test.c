@@ -511,6 +511,28 @@ static void test_pure_data_lib_gating(void)
         mino_env_free(S, env);
         mino_state_free(S);
     }
+
+    /* (e) The bundled http server namespace resolves from the registry
+     * with no lib/ on disk -- the standalone-binary scenario. The
+     * server source requires clojure.core.async and mino.ws and runs
+     * over the net stack, so its full closure is the default set plus
+     * net and async. Once those are installed, requiring
+     * mino.http.server must succeed against the bundled source alone. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        mino_install(S, env,
+                     MINO_CAP_DEFAULT | MINO_CAP_NET | MINO_CAP_ASYNC);
+        r = mino_eval_string(S,
+            "(do (require '[mino.http.server :as srv]) "
+            "(fn? srv/run-server))", env);
+        REQUIRE(r == mino_true(S),
+                "puredata/gate: mino.http.server loads from the bundled "
+                "registry under the net + async caps");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
 }
 
 #if defined(__GNUC__)

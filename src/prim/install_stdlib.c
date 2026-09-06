@@ -66,6 +66,7 @@
 #include "lib_mino_tasks_builtin.h"
 #include "lib_mino_store.h"
 #include "lib_mino_http.h"
+#include "lib_mino_http_server.h"
 #include "lib_mino_time.h"
 #include "lib_mino_path.h"
 #include "lib_mino_cli.h"
@@ -332,6 +333,7 @@ void mino_install_mino_http(mino_state *S, mino_env *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "mino.http", lib_mino_http_src);
+    mino_register_bundled_lib(S, "mino.http.server", lib_mino_http_server_src);
 }
 
 /* Each of the pure-data / info-only namespaces below installs its C
