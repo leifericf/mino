@@ -29,10 +29,6 @@ typedef struct bc_vm_state {
     size_t          bc_regs_cap;
     size_t          bc_top;
 
-    /* Pointer-tagged int counters. Only maintained when
-     * MINO_BC_PROFILE_COUNTS is defined. */
-    size_t          bc_int_make_count;
-    size_t          bc_int_alloc_avoided;
 } bc_vm_state_t;
 
 #endif /* EVAL_BC_STATE_H */

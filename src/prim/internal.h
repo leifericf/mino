@@ -163,9 +163,7 @@ mino_val *prim_lte(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_gt(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_gte(mino_state *S, mino_val *args, mino_env *env);
 
-/* prim_addp/subp/mulp: called by vm.c inside #ifdef MINO_CALL_SITE_SHAPES
- * (pointer comparison only; not a fallback call) AND by intra-numeric.c
- * helpers. Keep extern with this note to prevent silent #ifdef mis-grep. */
+/* prim_addp/subp/mulp: used by intra-numeric.c helpers. */
 mino_val *prim_addp(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_subp(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_mulp(mino_state *S, mino_val *args, mino_env *env);

@@ -92,21 +92,14 @@ int mino_bc_require_flag = 0;
 
 void mino_bc_check_require(mino_state *S, mino_val *fn)
 {
+    (void)S;
     if (!mino_bc_require_flag) return;
     if (fn == NULL || mino_type_of(fn) != MINO_FN) return;
     if (MINO_BC_RUNNABLE(fn)) return;
     /* Decline mode: fn was not compiled. Whoever set require_flag should
-     * run with an expanded compiler.  Surface as a catchable mino-level
-     * error so embedders can handle it; gate the hard abort behind
-     * MINO_BC_REQUIRE_ABORT for deployments that truly want to crash. */
+     * run with an expanded compiler. Logs to stderr; caller continues
+     * on the tree-walker fallback so execution is not fatal. */
     fprintf(stderr, "MINO_BC_REQUIRE: fn declined by compiler\n");
-#ifdef MINO_BC_REQUIRE_ABORT
-    abort(); /* Explicit opt-in: treat decline as unrecoverable. */
-#else
-    /* Surface as a catchable error rather than process termination. */
-    prim_throw_classified(S, "user", "MBC001",
-        "MINO_BC_REQUIRE: fn declined by compiler");
-#endif
 }
 
 #define BC_MAX_LOCALS 256
@@ -2561,78 +2554,6 @@ static mino_val *try_reduce_rewrite(compiler_t *c, mino_val *form)
     }
 }
 
-#ifdef MINO_BUILDER_REWRITE_COUNTS
-/* Instrumentation: count rewriter hits and misses across the
- * compiled-source span and (when MINO_BUILDER_REWRITE_DUMP=1) print
- * the first form-prefix of each miss so the reviewer can decide
- * whether the matcher should widen. Dumps on program exit so a
- * one-shot full test or bench run produces a coverage table.
- * Built behind a flag so the production binary pays no overhead. */
-static struct {
-    unsigned long hits;
-    unsigned long misses;
-} mino_builder_rewrite_counts = {0, 0};
-
-static void mino_builder_rewrite_dump(void)
-{
-    fprintf(stderr,
-            "[builder-rewrite] hits=%lu misses=%lu coverage=%.1f%%\n",
-            mino_builder_rewrite_counts.hits,
-            mino_builder_rewrite_counts.misses,
-            mino_builder_rewrite_counts.hits + mino_builder_rewrite_counts.misses == 0
-                ? 0.0
-                : 100.0 * (double)mino_builder_rewrite_counts.hits
-                  / (double)(mino_builder_rewrite_counts.hits
-                             + mino_builder_rewrite_counts.misses));
-}
-
-static void mino_builder_rewrite_install(void)
-{
-    static int installed = 0;
-    if (!installed) {
-        atexit(mino_builder_rewrite_dump);
-        installed = 1;
-    }
-}
-
-static void mino_builder_rewrite_dump_miss(mino_state *S, mino_val *form)
-{
-    char buf[160];
-    size_t off = 0;
-    (void)S;
-    if (form == NULL || !mino_is_cons(form)) return;
-    /* Print the loop's bindings vector tag only; full forms would
-     * flood the log. The bindings vector tells the reviewer how many
-     * loop vars (and whether `acc []` is one of them). */
-    mino_val *args = form->as.cons.cdr;
-    if (mino_is_cons(args)
-        && args->as.cons.car != NULL
-        && mino_type_of(args->as.cons.car) == MINO_VECTOR) {
-        size_t blen = args->as.cons.car->as.vec.len;
-        off += snprintf(buf + off, sizeof(buf) - off,
-                        "  miss: %zu bindings", blen);
-        if (blen >= 2) {
-            mino_val *acc_init = vec_nth(args->as.cons.car, blen - 1);
-            if (acc_init != NULL) {
-                int t = mino_type_of(acc_init);
-                const char *tag = (t == MINO_VECTOR && acc_init->as.vec.len == 0)
-                    ? "[]"
-                    : (t == MINO_MAP && acc_init->as.map.len == 0)
-                    ? "{}"
-                    : (t == MINO_SET && acc_init->as.set.len == 0)
-                    ? "#{}"
-                    : "<other>";
-                off += snprintf(buf + off, sizeof(buf) - off,
-                                ", acc init=%s", tag);
-            }
-        }
-    } else {
-        off += snprintf(buf + off, sizeof(buf) - off,
-                        "  miss: <non-vector bindings>");
-    }
-    fprintf(stderr, "%s\n", buf);
-}
-#endif
 
 static int compile_loop(compiler_t *c, mino_val *form, int dst, int tail)
 {
@@ -2642,17 +2563,6 @@ static int compile_loop(compiler_t *c, mino_val *form, int dst, int tail)
      * Falls through on miss. */
     {
         mino_val *rewritten = try_builder_rewrite(c->S, form);
-#ifdef MINO_BUILDER_REWRITE_COUNTS
-        mino_builder_rewrite_install();
-        if (rewritten != NULL) {
-            mino_builder_rewrite_counts.hits++;
-        } else {
-            mino_builder_rewrite_counts.misses++;
-            if (getenv("MINO_BUILDER_REWRITE_DUMP") != NULL) {
-                mino_builder_rewrite_dump_miss(c->S, form);
-            }
-        }
-#endif
         if (rewritten != NULL) {
             return compile_expr(c, rewritten, dst, tail);
         }

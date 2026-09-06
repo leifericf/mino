@@ -30,204 +30,7 @@
 
 extern mino_val *mino_nil(mino_state *S);
 
-#ifdef MINO_CALL_SITE_SHAPES
-/* Per-site tally of OP_CALL_CACHED hits keyed by (slot pointer, arg-
- * type-pair). Populated when the binary is built with
- * -DMINO_CALL_SITE_SHAPES=1. Dumped to stderr at exit. Used to gate
- * the type-feedback IC item: counts sites that hit a canonical arith
- * callee with stable monomorphic-int operand types. Not for production. */
-#define CALL_SHAPE_SITES_MAX 8192
-typedef struct {
-    const void *slot;          /* mino_bc_ic_slot_t * -- unique site key */
-    mino_prim_fn callee_fn;    /* resolved callee prim (NULL = not a prim) */
-    size_t       total;
-    size_t       monomorphic_int_pair;  /* both args tagged-int */
-    size_t       other_shapes;
-} call_shape_row_t;
-static call_shape_row_t g_call_shapes[CALL_SHAPE_SITES_MAX];
-static int              g_call_shapes_used;
-static int              g_call_shapes_atexit_done;
-static const char *call_shape_prim_name(mino_prim_fn fn);
-static void call_shapes_dump(void)
-{
-    int i, hot = 0, mono_hot = 0;
-    size_t hot_hits = 0, mono_hits = 0;
-    fprintf(stderr, "call-site-shapes: sites tracked = %d (cap=%d)\n",
-            g_call_shapes_used, CALL_SHAPE_SITES_MAX);
-    for (i = 0; i < g_call_shapes_used; i++) {
-        if (g_call_shapes[i].total >= 10000) {
-            hot++;
-            hot_hits += g_call_shapes[i].total;
-            if (g_call_shapes[i].callee_fn != NULL
-                && g_call_shapes[i].monomorphic_int_pair * 10
-                       >= g_call_shapes[i].total * 9) {
-                mono_hot++;
-                mono_hits += g_call_shapes[i].monomorphic_int_pair;
-            }
-        }
-    }
-    fprintf(stderr, "  hot sites (>=10k calls): %d, hits=%zu\n",
-            hot, hot_hits);
-    fprintf(stderr, "  hot+monomorphic-int-prim (>=90%% int pair) sites:"
-                    " %d, hits=%zu\n",
-            mono_hot, mono_hits);
-    /* Detail of top monomorphic-int sites */
-    if (mono_hot > 0) {
-        int printed = 0;
-        fprintf(stderr, "  top monomorphic-int sites:\n");
-        for (i = 0; i < g_call_shapes_used && printed < 20; i++) {
-            if (g_call_shapes[i].total >= 10000
-                && g_call_shapes[i].callee_fn != NULL
-                && g_call_shapes[i].monomorphic_int_pair * 10
-                       >= g_call_shapes[i].total * 9) {
-                fprintf(stderr,
-                        "    %p %-16s total=%zu mono=%zu (%.1f%%)\n",
-                        g_call_shapes[i].slot,
-                        call_shape_prim_name(g_call_shapes[i].callee_fn),
-                        g_call_shapes[i].total,
-                        g_call_shapes[i].monomorphic_int_pair,
-                        100.0
-                            * (double)g_call_shapes[i].monomorphic_int_pair
-                            / (double)g_call_shapes[i].total);
-                printed++;
-            }
-        }
-    }
-}
-static void call_shape_record(const void *slot_ptr, mino_val *callee,
-                              mino_val **argv, int argc)
-{
-    int i;
-    int idx = -1;
-    if (!g_call_shapes_atexit_done) {
-        atexit(call_shapes_dump);
-        g_call_shapes_atexit_done = 1;
-    }
-    for (i = 0; i < g_call_shapes_used; i++) {
-        if (g_call_shapes[i].slot == slot_ptr) { idx = i; break; }
-    }
-    if (idx < 0) {
-        if (g_call_shapes_used >= CALL_SHAPE_SITES_MAX) return;
-        idx = g_call_shapes_used++;
-        g_call_shapes[idx].slot = slot_ptr;
-        g_call_shapes[idx].callee_fn =
-            (callee != NULL && mino_type_of(callee) == MINO_PRIM)
-                ? callee->as.prim.fn
-                : NULL;
-        g_call_shapes[idx].total = 0;
-        g_call_shapes[idx].monomorphic_int_pair = 0;
-        g_call_shapes[idx].other_shapes = 0;
-    }
-    g_call_shapes[idx].total++;
-    if (argc == 2 && argv[0] != NULL && argv[1] != NULL
-        && mino_val_int_p(argv[0]) && mino_val_int_p(argv[1])) {
-        g_call_shapes[idx].monomorphic_int_pair++;
-    } else {
-        g_call_shapes[idx].other_shapes++;
-    }
-}
-static const char *call_shape_prim_name(mino_prim_fn fn)
-{
-    if (fn == NULL) return "(non-prim)";
-    if (fn == prim_add) return "prim_add";
-    if (fn == prim_sub) return "prim_sub";
-    if (fn == prim_mul) return "prim_mul";
-    if (fn == prim_addp) return "prim_addp";
-    if (fn == prim_subp) return "prim_subp";
-    if (fn == prim_mulp) return "prim_mulp";
-    if (fn == prim_bit_and) return "prim_bit_and";
-    if (fn == prim_bit_or)  return "prim_bit_or";
-    if (fn == prim_bit_xor) return "prim_bit_xor";
-    return "(other-prim)";
-}
-#endif
 
-#ifdef MINO_BC_OP_COUNTS
-/* Per-opcode dispatch counter, populated when the binary is built with
- * -DMINO_BC_OP_COUNTS=1. Dumped to stderr at process exit. Used during
- * VM design experiments to identify which opcodes dominate the
- * dispatch loop (hot/cold partition decisions). Not for production. */
-static size_t g_op_counts[OP__COUNT];
-/* Adjacent-pair (bigram) counts in the dispatch loop. g_op_bigrams[a][b]
- * is incremented when op b dispatches immediately after op a within the
- * same dispatch session (one mino_bc_run frame); cross-frame transitions
- * are NOT counted because they don't correspond to a fusable pair in
- * the same bytecode stream. Used to rank candidate superinstructions
- * for stencil fusion. */
-static size_t g_op_bigrams[OP__COUNT][OP__COUNT];
-static int    g_op_counts_atexit_registered;
-
-static void op_counts_dump(void)
-{
-    size_t total = 0;
-    int    i;
-    /* Pack (idx, count) pairs so the sort preserves opcode identity. */
-    typedef struct { unsigned op; size_t count; } row_t;
-    row_t  rows[OP__COUNT];
-    for (i = 0; i < OP__COUNT; i++) {
-        rows[i].op = (unsigned)i;
-        rows[i].count = g_op_counts[i];
-        total += rows[i].count;
-    }
-    /* Sort by count descending. N is small (~63); bubble-sort fine. */
-    for (i = 0; i < OP__COUNT; i++) {
-        int j;
-        for (j = i + 1; j < OP__COUNT; j++) {
-            if (rows[j].count > rows[i].count) {
-                row_t t = rows[i]; rows[i] = rows[j]; rows[j] = t;
-            }
-        }
-    }
-    fprintf(stderr, "bc-op-counts: total dispatches = %zu\n", total);
-    if (total == 0) return;
-    size_t cumulative = 0;
-    for (i = 0; i < OP__COUNT; i++) {
-        if (rows[i].count == 0) break;
-        cumulative += rows[i].count;
-        fprintf(stderr, "  %-25s %12zu  %6.2f%%  cum=%6.2f%%\n",
-                mino_bc_op_name(rows[i].op), rows[i].count,
-                100.0 * (double)rows[i].count / (double)total,
-                100.0 * (double)cumulative / (double)total);
-    }
-    /* Top-30 bigrams ranked by absolute frequency. A bigram is one
-     * "if I fuse these two ops into one stencil, this many dispatches
-     * collapse to one". */
-    typedef struct { unsigned a; unsigned b; size_t count; } pair_t;
-    enum { TOP_N = 30 };
-    pair_t top[TOP_N];
-    int    top_n = 0;
-    size_t total_pairs = 0;
-    for (int a = 0; a < OP__COUNT; a++) {
-        for (int b = 0; b < OP__COUNT; b++) {
-            size_t c = g_op_bigrams[a][b];
-            if (c == 0) continue;
-            total_pairs += c;
-            int insert = top_n;
-            for (int k = 0; k < top_n; k++) {
-                if (c > top[k].count) { insert = k; break; }
-            }
-            if (insert < TOP_N) {
-                int end = top_n < TOP_N ? top_n : TOP_N - 1;
-                for (int j = end; j > insert; j--) top[j] = top[j - 1];
-                top[insert].a = (unsigned)a;
-                top[insert].b = (unsigned)b;
-                top[insert].count = c;
-                if (top_n < TOP_N) top_n++;
-            }
-        }
-    }
-    fprintf(stderr, "bc-op-bigrams: total pairs = %zu\n", total_pairs);
-    if (total_pairs == 0) return;
-    for (i = 0; i < top_n; i++) {
-        fprintf(stderr, "  %-25s -> %-25s %12zu  %6.2f%%\n",
-                mino_bc_op_name(top[i].a),
-                mino_bc_op_name(top[i].b),
-                top[i].count,
-                100.0 * (double)top[i].count / (double)total_pairs);
-    }
-}
-
-#endif
 
 const char *mino_bc_op_name(unsigned op)
 {
@@ -465,13 +268,7 @@ static mino_val *args_from_regs(mino_state *S, mino_val **regs,
  * overflow check prior to encoding caught LLONG_MAX-class wraps). */
 mino_val *tag_or_box_int(mino_state *S, long long r)
 {
-#ifdef MINO_BC_PROFILE_COUNTS
-    S->bc.bc_int_make_count++;
-#endif
     if (r >= MINO_INT_MIN && r <= MINO_INT_MAX) {
-#ifdef MINO_BC_PROFILE_COUNTS
-        S->bc.bc_int_alloc_avoided++;
-#endif
         return MINO_MAKE_INT(r);
     }
     return mino_int(S, r);
@@ -1373,11 +1170,6 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
      * by MINO_BC_SAFEPOINT_BATCH backward jumps instead of 1 -- the same
      * bound the JIT path has always accepted. */
     unsigned bj_acc = 0;
-#ifdef MINO_BC_OP_COUNTS
-    /* Per-frame previous-op tracker so bigram counts only span adjacent
-     * dispatches within the same bytecode stream. Sentinel = OP__COUNT. */
-    unsigned prev_op = OP__COUNT;
-#endif
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can
@@ -1396,17 +1188,6 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
         ctx->bc_current_pc = pc;
         mino_bc_insn_t ins = code[pc++];
         unsigned op = OP_OF(ins);
-#ifdef MINO_BC_OP_COUNTS
-        if (!g_op_counts_atexit_registered) {
-            atexit(op_counts_dump);
-            g_op_counts_atexit_registered = 1;
-        }
-        if (op < OP__COUNT) {
-            g_op_counts[op]++;
-            if (prev_op < OP__COUNT) g_op_bigrams[prev_op][op]++;
-            prev_op = op;
-        }
-#endif
         switch (op) {
         case OP_MOVE: {
             unsigned a = A_OF(ins);
@@ -1519,9 +1300,6 @@ static int bc_run_dispatch_from(mino_state *S, const mino_bc_fn_t *bc,
             mino_val *callee = ic_resolve_global(S, bc, slot, env,
                                                     dyn_active);
             if (callee == NULL) { ok = 0; goto dispatch_done; }
-#ifdef MINO_CALL_SITE_SHAPES
-            call_shape_record(slot, callee, regs + a, (int)argn);
-#endif
             mino_val *r = apply_callable_argv(S, callee, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }

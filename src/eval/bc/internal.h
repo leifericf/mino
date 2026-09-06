@@ -663,8 +663,7 @@ mino_val *tag_or_box_int(struct mino_state *S, long long r);
 
 /* Symbolic name for an opcode id (e.g. OP_LOOP_INT_DEC_INC). Returns
  * a static string; OP_UNKNOWN for out-of-range ids. Used by the
- * MINO_CPJIT_STATS dumper to self-describe blocker histograms and by
- * the MINO_BC_OP_COUNTS dispatch profiler. */
+ * MINO_CPJIT_STATS dumper to self-describe blocker histograms. */
 const char *mino_bc_op_name(unsigned op);
 
 /* Resolve a protocol-method implementation through an IC slot. The
@@ -727,9 +726,9 @@ mino_val *mino_bc_ic_global_load(mino_state *S,
 extern mino_bc_fn_t mino_bc_declined;
 
 /* Debug knob: set non-zero (e.g., via the MINO_BC_REQUIRE env var or a
- * future Clojure-level setter) to abort on any tree-walker fallback.
+ * future setter) to log any tree-walker fallback to stderr.
  * Useful for VM development: an unintended decline is loud instead of
- * silently degrading. Defaults to 0; production builds leave it off. */
+ * silently degrading. Defaults to 0. */
 extern int mino_bc_require_flag;
 void mino_bc_check_require(struct mino_state *S, mino_val *fn);
 

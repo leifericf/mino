@@ -56,9 +56,6 @@ mino_val *mino_empty_list(mino_state *S)
 mino_val *mino_int(mino_state *S, long long n)
 {
     mino_val *v;
-#ifdef MINO_BC_PROFILE_COUNTS
-    S->bc.bc_int_make_count++;
-#endif
     /* Inline-tag every int that fits in the 61-bit signed range. The
      * fallback below handles the narrow band between MINO_INT_MAX and
      * LLONG_MAX where the tag would lose precision: the value is boxed
@@ -70,9 +67,6 @@ mino_val *mino_int(mino_state *S, long long n)
      * never reaches this constructor (checked ops throw, quote ops
      * promote explicitly). */
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
-#ifdef MINO_BC_PROFILE_COUNTS
-        S->bc.bc_int_alloc_avoided++;
-#endif
         return MINO_MAKE_INT(n);
     }
     v = alloc_val(S, MINO_INT);
@@ -82,13 +76,7 @@ mino_val *mino_int(mino_state *S, long long n)
 
 mino_val *mino_int_wrap(mino_state *S, long long n)
 {
-#ifdef MINO_BC_PROFILE_COUNTS
-    S->bc.bc_int_make_count++;
-#endif
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
-#ifdef MINO_BC_PROFILE_COUNTS
-        S->bc.bc_int_alloc_avoided++;
-#endif
         return MINO_MAKE_INT(n);
     }
     {

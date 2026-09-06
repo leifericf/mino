@@ -173,9 +173,9 @@ typedef struct mino_bc_ic_slot {
  * compile error before a stencil could mis-read. Change a number
  * here only together with the struct layout, then re-run
  * gen-stencils-all. */
-#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)152)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)136)
 #define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)0)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)192)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)176)
 #define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK        ((size_t)0)
 #define MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS          ((size_t)72)
 
