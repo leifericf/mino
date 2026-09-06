@@ -1466,10 +1466,21 @@ mino_val *mino_throw(mino_state *S, mino_val *ex);
  *   "c"  int *              -- MINO_CHAR codepoint (0..0x10FFFF)
  *   "v"  mino_val **      -- any value (no type check)
  *   "V"  mino_val **      -- MINO_VECTOR
- *   "M"  mino_val **      -- MINO_MAP
+ *   "M"  mino_val **      -- MINO_MAP or MINO_SORTED_MAP
  *   "L"  mino_val **      -- MINO_CONS or MINO_NIL (a list)
  *   "H"  mino_val **      -- MINO_HANDLE
  *   "A"  mino_val **      -- MINO_ATOM
+ *   "B"  mino_val **      -- MINO_BIGINT
+ *   "r"  mino_val **      -- MINO_RATIO
+ *   "d"  mino_val **      -- MINO_BIGDEC
+ *   "R"  mino_val **      -- MINO_RECORD
+ *   "X"  mino_val **      -- MINO_SET or MINO_SORTED_SET
+ *   "F"  mino_val **      -- callable: MINO_FN, MINO_PRIM, or MINO_MACRO
+ *
+ * Every directive that yields a `mino_val **` writes the argument value
+ * itself (borrowed, mino-owned) after checking its type; only "S" and
+ * the scalar directives ("i" "f" "s" "k" "y" "b" "c") decode into a
+ * plain C value.
  *
  * Returns 0 on success, -1 on arity or type error. On failure the current
  * error is set via mino_last_error with kind "eval/arity" or "eval/type"
