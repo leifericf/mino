@@ -222,10 +222,6 @@ static void state_init(mino_state *S)
         S->gc_budget_slices_since_adjust = 0;
     }
     S->gc.stress               = -1;
-    S->nil_singleton.type  = MINO_NIL;
-    S->true_singleton.type = MINO_BOOL;
-    S->true_singleton.as.b = 1;
-    S->false_singleton.type = MINO_BOOL;
     S->empty_list_singleton.type = MINO_EMPTY_LIST;
     S->recur_sentinel.type     = MINO_RECUR;
     S->tail_call_sentinel.type = MINO_TAIL_CALL;

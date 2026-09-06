@@ -156,10 +156,8 @@ struct mino_state {
 
     /* === Value caches: singletons, sentinels, interns, special forms === */
 
-    /* Singletons */
-    mino_val      nil_singleton;
-    mino_val      true_singleton;
-    mino_val      false_singleton;
+    /* Singletons: nil/true/false come from inline tag macros (no field
+     * needed). empty_list is returned by address, so it needs a field. */
     mino_val      empty_list_singleton;
     /* Trampoline sentinels reused across recur/tail-call to avoid
      * per-iteration allocation. Their args/fn fields are replaced in-place
