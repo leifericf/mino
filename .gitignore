@@ -110,6 +110,10 @@ examples/embed_proc_amalgam
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test
+embed_jit_guard_test
+jit_dual_view_test
+jit_retire_reclaim_test
+jit_win_dual_view_test
 embed_hpp_test
 crash_handler_test
 dist/
