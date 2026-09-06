@@ -8,7 +8,7 @@
 
 (def ^:private cc      (or (getenv "CC") "cc"))
 (def ^:private include-flags
-  (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
+  (str "-Isrc -Isrc/generated -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
        " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"
@@ -222,11 +222,12 @@
     (str/replace escaped "\n" "\\n\"\n    \"")))
 
 (defn gen-core-header
-  "Escape src/core.clj into src/core_mino.h as a C string literal."
+  "Escape src/core.clj into src/generated/core_mino.h as a C string literal."
   []
-  (when (stale? ["src/core.clj"] "src/core_mino.h")
+  (when (stale? ["src/core.clj"] "src/generated/core_mino.h")
+    (when-not (file-exists? "src/generated") (sh! "mkdir" "-p" "src/generated"))
     (let [body (escape-source-as-c-string-literal (slurp "src/core.clj"))]
-      (spit "src/core_mino.h"
+      (spit "src/generated/core_mino.h"
             (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
                  " *\n"
                  " * Produced by `gen-core-header` from src/core.clj.\n"
@@ -239,7 +240,7 @@
                  " */\n"
                  "static const char *core_mino_src =\n    \""
                  body "\\n\"\n    ;\n")))
-    (println "gen-core-header: src/core_mino.h updated")))
+    (println "gen-core-header: src/generated/core_mino.h updated")))
 
 ;; The bundled-stdlib namespace set baked into the binary alongside
 ;; src/core.clj, parsed from src/bundled.list -- the single source of
@@ -275,7 +276,8 @@
   "Regenerates one bundled-stdlib header if its source is newer.
    Returns 1 when the header was rewritten, 0 otherwise."
   [[src-path ns-name c-symbol]]
-  (let [out-path (str "src/" c-symbol ".h")]
+  (let [out-path (str "src/generated/" c-symbol ".h")]
+    (when-not (file-exists? "src/generated") (sh! "mkdir" "-p" "src/generated"))
     (if (stale? [src-path] out-path)
       (do (spit out-path
                 (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
@@ -634,7 +636,7 @@
 ;; ---- Amalgamation ----
 
 (def ^:private amalgam-search-paths
-  ["src" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
+  ["src" "src/generated" "src/public" "src/runtime" "src/gc" "src/eval" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
    "src/vendor/imath" "src/vendor/bearssl" "src/vendor/bearssl/inc"
    "src/vendor/miniz" "src/vendor/miniz/upstream"
@@ -931,10 +933,10 @@
   (when (file-exists? "mino_debug")     (rm-rf "mino_debug"))
   (when (file-exists? "mino_jit_host")      (rm-rf "mino_jit_host"))
   (when (file-exists? "mino_jit_host_lean") (rm-rf "mino_jit_host_lean"))
-  (when (file-exists? "src/core_mino.h")
-    (rm-rf "src/core_mino.h"))
+  (when (file-exists? "src/generated/core_mino.h")
+    (rm-rf "src/generated/core_mino.h"))
   (doseq [[_ _ c-symbol] bundled-stdlib]
-    (let [hpath (str "src/" c-symbol ".h")]
+    (let [hpath (str "src/generated/" c-symbol ".h")]
       (when (file-exists? hpath) (rm-rf hpath))))
   (println "  cleaned"))
 

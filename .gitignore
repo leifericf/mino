@@ -29,9 +29,7 @@ jit-parity-jit-on.out
 jit-parity-jit-off.out
 jit-parity-lean.out
 /data/
-src/core_mino.h
-src/lib_clojure_*.h
-src/lib_mino_*.h
+src/generated/
 
 # Test artifacts
 *.gcda

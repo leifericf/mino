@@ -25,7 +25,7 @@ CC      ?= cc
 # miscompiles them on x86_64 (observed: wrong MD5 output); the flag keeps
 # that third-party code correct at -O2.
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2 -fno-strict-aliasing -DMINO_CPJIT=1
-INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+INCDIRS  = -Isrc -Isrc/generated -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async \
            -Isrc/interop -Isrc/diag -Isrc/vendor/imath \
            -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc \
@@ -67,8 +67,8 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                    src/vendor/miniz/*.c) main.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
-# becomes src/<symbol>.h with a single static const char *<symbol>_src
-# C string literal. src/bundled.list is the single source of truth for
+# becomes src/generated/<symbol>.h with a single static const char
+# *<symbol>_src C string literal. src/bundled.list is the single source of truth for
 # which namespaces are bundled; builtin.clj's `bundled-stdlib` parses
 # the same file for incremental `./mino task build` rebuilds. This
 # bootstrap path reads it here so there is exactly one list to edit.
@@ -81,7 +81,7 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
 BUNDLED_LIBS = $(shell awk '$$1 ~ /\.clj$$/ { sym = $$1; sub(/\.clj$$/, "", sym); gsub(/[^A-Za-z0-9]/, "_", sym); print sym ":" $$1 }' src/bundled.list)
 BUNDLED = core_mino:src/core.clj $(BUNDLED_LIBS)
 
-HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
+HEADERS = $(foreach p,$(BUNDLED),src/generated/$(word 1,$(subst :, ,$(p))).h)
 
 .PHONY: bootstrap clean
 bootstrap: $(BIN)
@@ -103,10 +103,11 @@ $(BIN): $(HEADERS)
 # writes the whole header, banner included, so its bytes match what
 # `gen-core-header` / `gen-stdlib-headers` emit for every entry.
 $(HEADERS): src/bundle.awk src/bundled.list Makefile
+	@mkdir -p src/generated
 	@for pair in $(BUNDLED); do \
 	    sym=$${pair%%:*}; \
 	    src=$${pair##*:}; \
-	    awk -v sym="$$sym" -v src="$$src" -f src/bundle.awk "$$src" > "src/$$sym.h"; \
+	    awk -v sym="$$sym" -v src="$$src" -f src/bundle.awk "$$src" > "src/generated/$$sym.h"; \
 	done
 
 clean:

@@ -6,7 +6,7 @@
 ;; Makefile escapes each bundled source through src/bundle.awk; the
 ;; incremental `./mino task build` escapes it through
 ;; gen-stdlib-headers in mino.tasks.builtin. Both emit
-;; src/<c-symbol>.h, and the runtime links whichever one built the
+;; src/generated/<c-symbol>.h, and the runtime links whichever one built the
 ;; binary, so their output must agree byte for byte. bundle.awk's
 ;; header comment asserts that contract in prose; this lane turns it
 ;; into a check. If either emitter's banner, escaping, or trailing
@@ -20,7 +20,7 @@
 
 (def ^:private rep-src "lib/clojure/string.clj")
 (def ^:private rep-sym "lib_clojure_string")
-(def ^:private rep-hdr (str "src/" rep-sym ".h"))
+(def ^:private rep-hdr (str "src/generated/" rep-sym ".h"))
 
 (defn- awk-header
   "The header bundle.awk emits for the representative source, captured
