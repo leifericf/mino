@@ -84,7 +84,6 @@
    "src/runtime/state.c" "src/runtime/var.c"
    "src/runtime/error.c" "src/runtime/env.c"
    "src/runtime/ns_env.c"
-   "src/runtime/path_buf.c"
    "src/runtime/host_threads.c"
    "src/runtime/capabilities.c"
    "src/runtime/image.c"
