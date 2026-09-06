@@ -169,3 +169,68 @@
     (is (thrown? (reset-vals! a -1)))
     (is (= 5 @a))
     (is (= [5 10] (reset-vals! a 10)))))
+
+;; --- watch and validator parity across reference types ---
+;; Watches receive (key ref old new) and validators gate the publish
+;; identically for atoms, vars, refs, and agents; only the failure
+;; surface differs per type (throw, tx abort, agent fail state).
+
+(def d2a-watched-var 1)
+(deftest var-watch-fires-on-alter-var-root
+  (let [log (atom [])]
+    (add-watch #'d2a-watched-var :w (fn [k r o n] (swap! log conj [k o n])))
+    (alter-var-root #'d2a-watched-var inc)
+    (remove-watch #'d2a-watched-var :w)
+    (alter-var-root #'d2a-watched-var inc)
+    (is (= [[:w 1 2]] @log))
+    (is (= 3 d2a-watched-var))))
+
+(def d2a-validated-var 1)
+(deftest var-validator-rejects-and-keeps-old-root
+  (set-validator! #'d2a-validated-var pos?)
+  (is (thrown? (alter-var-root #'d2a-validated-var (fn [_] -5))))
+  (is (= 1 d2a-validated-var))
+  (set-validator! #'d2a-validated-var nil)
+  (alter-var-root #'d2a-validated-var (fn [_] -5))
+  (is (= -5 d2a-validated-var)))
+
+(deftest ref-watch-receives-key-ref-old-new
+  (let [r    (ref 1)
+        seen (atom [])]
+    (add-watch r :w (fn [k rr o n] (swap! seen conj [k (identical? rr r) o n])))
+    (dosync (alter r inc))
+    (is (= [[:w true 1 2]] @seen))))
+
+(deftest ref-validator-rejection-aborts-whole-tx
+  (let [r  (ref 1)
+        r2 (ref 10)]
+    (set-validator! r pos?)
+    (is (thrown? (dosync (alter r2 inc) (alter r (fn [_] -1)))))
+    (is (= 1 @r))
+    (is (= 10 @r2))))
+
+(deftest agent-watch-fires-on-send
+  (let [a   (agent 0)
+        log (atom [])]
+    (add-watch a :w (fn [k r o n] (swap! log conj [k (identical? r a) o n])))
+    (send a inc)
+    (await a)
+    (is (= [[:w true 0 1]] @log))))
+
+(deftest agent-validator-rejection-enters-fail-state
+  (let [a (agent 1)]
+    (set-validator! a pos?)
+    (send a (fn [_] -1))
+    (loop [i 0]
+      (when (and (nil? (agent-error a)) (< i 400))
+        (thread-sleep 5)
+        (recur (inc i))))
+    (is (some? (agent-error a)))
+    (is (= 1 @a))))
+
+(deftest watch-receives-the-reference-itself
+  (let [a    (atom 0)
+        seen (atom nil)]
+    (add-watch a :w (fn [k r o n] (reset! seen (identical? r a))))
+    (swap! a inc)
+    (is (true? @seen))))

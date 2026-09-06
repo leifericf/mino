@@ -37,6 +37,7 @@
 #include "prim/internal.h"
 #include "mino.h"
 #include "eval/internal.h"
+#include "runtime/ref_publish.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -318,34 +319,6 @@ static int store_check_state(mino_state *S, mino_val *store)
         prim_throw_classified(S, "eval/state", "MST007",
             "store from foreign state");
         return 1;
-    }
-    return 0;
-}
-
-/* Notify all watches after a state change. Callback signature:
- * (fn key store old-state new-state). Returns -1 if any watch threw
- * (the exception propagates per Clojure JVM semantics), 0 otherwise.
- * Mirrors atom_notify_watches in prim/stateful.c. */
-static int store_notify_watches(mino_state *S, mino_val *store,
-                                 mino_val *old_val, mino_val *new_val,
-                                 mino_env *env)
-{
-    mino_val *watches = store->as.store.watches;
-    size_t i, len;
-    if (watches == NULL || mino_type_of(watches) != MINO_MAP
-        || watches->as.map.len == 0)
-        return 0;
-    len = watches->as.map.len;
-    for (i = 0; i < len; i++) {
-        mino_val *key = vec_nth(watches->as.map.key_order, i);
-        mino_val *fn  = map_get_val(watches, key);
-        mino_val *wargs;
-        if (fn == NULL) continue;
-        wargs = mino_cons(S, key,
-                  mino_cons(S, store,
-                    mino_cons(S, old_val,
-                      mino_cons(S, new_val, mino_nil(S)))));
-        if (mino_call(S, fn, wargs, env) == NULL) return -1;
     }
     return 0;
 }
@@ -644,7 +617,10 @@ static mino_val *prim_store_commit(mino_state *S, mino_val *args,
     }
     old_val = conn->as.store.val;
     if (mino_store_publish(S, conn, new_db) == NULL) return NULL;
-    if (store_notify_watches(S, conn, old_val, new_db, env) != 0) return NULL;
+    if (ref_notify(S, conn, conn->as.store.watches, old_val, new_db,
+                   env, REF_FAIL_THROW, NULL) != 0) {
+        return NULL;
+    }
     return new_db;
 }
 

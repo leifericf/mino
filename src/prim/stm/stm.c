@@ -66,6 +66,7 @@
 #include "prim/internal.h"
 #include "mino.h"
 #include "eval/internal.h"
+#include "runtime/ref_publish.h"
 #include <setjmp.h>
 
 #define STM_RETRY_CAP 10000
@@ -843,34 +844,6 @@ mino_val *mino_tx_ensure(mino_state *S, mino_val *ref,
  * against the latest committed value so concurrent commutes against
  * the same ref do not conflict.
  */
-/* Run a ref's validator (if any) against the proposed new value via
- * mino_pcall so a thrown validator does not longjmp out while we
- * still hold the commit lock. Returns:
- *   1  -- validator returned truthy
- *   0  -- validator threw; *out_ex set to the thrown value
- *  -1  -- validator returned falsy (no throw); *out_ex unchanged.
- * vfn==NULL is treated as "no validator" and returns 1. */
-static int run_ref_validator(mino_state *S, mino_val *ref,
-                              mino_val *new_val, mino_env *env,
-                              mino_val **out_ex)
-{
-    mino_val *vfn = ref->as.tx_ref.validator;
-    mino_val *vargs;
-    mino_val *result = NULL;
-    mino_val *thrown = NULL;
-    int         pc;
-    if (vfn == NULL) return 1;
-    vargs = mino_cons(S, new_val, mino_nil(S));
-    pc = mino_pcall(S, vfn, vargs, env, &result, &thrown);
-    if (pc != 0) {
-        if (out_ex != NULL) *out_ex = thrown;
-        return 0;
-    }
-    if (result == NULL) return 0;  /* defensive; shouldn't happen */
-    if (!mino_is_truthy(result)) return -1;
-    return 1;
-}
-
 static int tx_commit(mino_state *S, tx_state_t *tx, mino_env *env,
                      int *out_validator_rejected)
 {
@@ -931,8 +904,12 @@ static int tx_commit(mino_state *S, tx_state_t *tx, mino_env *env,
             }
         }
         if (new_val != NULL) {
+            /* Validate via ref_validate's capture policy: a thrown
+             * validator must not longjmp out while we still hold the
+             * commit lock. */
             mino_val *vex = NULL;
-            int vc = run_ref_validator(S, rs->ref, new_val, env, &vex);
+            int vc = ref_validate(S, rs->ref->as.tx_ref.validator,
+                                  new_val, env, REF_FAIL_CAPTURE, &vex);
             if (vc != 1) {
                 tx->in_commit = 0;
                 stm_unlock(S);
@@ -971,45 +948,24 @@ static int tx_commit(mino_state *S, tx_state_t *tx, mino_env *env,
  * ctx->current_tx already cleared so a watch fn that itself calls
  * dosync allocates fresh transaction state.
  *
- * Each watch is invoked through mino_pcall so a throw doesn't
- * abort dispatch -- earlier behavior was inconsistent with agent
- * watch dispatch (which already pcall'd) and could swallow watches
- * registered against later refs. The first thrown exception is
- * captured and re-thrown after every watch has been given a chance
- * to fire, so the dosync caller still surfaces a watch error but
- * never silently loses unrelated watches.
- */
+ * Dispatch goes through ref_notify's capture policy so a throw does
+ * not abort dispatch. The first thrown exception across every ref is
+ * re-thrown after every watch has been given a chance to fire, so the
+ * dosync caller still surfaces a watch error but never silently loses
+ * unrelated watches. */
 static int dispatch_watches(mino_state *S, tx_state_t *tx,
                              mino_env *env)
 {
     tx_ref_state_t *rs;
     mino_val     *first_thrown = NULL;
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
-        mino_val *watches;
-        size_t      i, n;
+        mino_val *thrown = NULL;
         if (rs->committed_new == NULL) continue;
-        watches = rs->ref->as.tx_ref.watches;
-        if (watches == NULL || mino_type_of(watches) != MINO_MAP
-            || watches->as.map.len == 0) {
-            continue;
-        }
-        n = watches->as.map.len;
-        for (i = 0; i < n; i++) {
-            mino_val *key = vec_nth(watches->as.map.key_order, i);
-            mino_val *fn  = map_get_val(watches, key);
-            mino_val *wargs;
-            mino_val *result = NULL;
-            mino_val *thrown = NULL;
-            int         pc;
-            if (fn == NULL) continue;
-            wargs = mino_cons(S, key,
-                      mino_cons(S, rs->ref,
-                        mino_cons(S, rs->committed_old,
-                          mino_cons(S, rs->committed_new, mino_nil(S)))));
-            pc = mino_pcall(S, fn, wargs, env, &result, &thrown);
-            if (pc != 0 && first_thrown == NULL) {
-                first_thrown = thrown;
-            }
+        if (ref_notify(S, rs->ref, rs->ref->as.tx_ref.watches,
+                       rs->committed_old, rs->committed_new, env,
+                       REF_FAIL_CAPTURE, &thrown) != 0
+            && first_thrown == NULL) {
+            first_thrown = thrown;
         }
     }
     if (first_thrown != NULL) {

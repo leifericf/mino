@@ -83,7 +83,7 @@
    "src/eval/bc/jit/patcher_x86_64.c"
    "src/eval/bc/jit/emit.c" "src/eval/bc/jit/region.c"
    "src/state/state.c" "src/names/var.c"
-   "src/state/error.c" "src/names/env.c"
+   "src/state/error.c" "src/state/ref_publish.c" "src/names/env.c"
    "src/names/ns_env.c"
    "src/state/host_threads.c"
    "src/state/capabilities.c"

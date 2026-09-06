@@ -59,6 +59,7 @@
 #include "mino.h"
 #include "eval/internal.h"
 #include "runtime/host_threads.h"
+#include "runtime/ref_publish.h"
 
 #include <limits.h>
 #include <string.h>
@@ -265,58 +266,35 @@ static void agent_apply_action(mino_state *S, mino_val *agent,
         goto out;
     }
 
-    /* Validator: rejects bypass the publish + watch dispatch. */
-    if (agent->as.agent.validator != NULL) {
-        mino_val *vargs = mino_cons(S, new_state, mino_nil(S));
-        mino_val *vresult = NULL;
-        pc = mino_pcall(S, agent->as.agent.validator, vargs, env,
-                          &vresult, &thrown_ex);
-        if (pc != 0 || vresult == NULL || !mino_is_truthy(vresult)) {
-            mino_val *ex = thrown_ex;
-            if (ex == NULL) {
-                /* Validator returned falsy without throwing: synthesize. */
-                ex = mino_string(S, "Invalid reference state");
-            }
-            agent_report_failure(S, agent, ex, env);
-            goto out;
+    /* Validator: rejects bypass the publish + watch dispatch. The
+     * capture policy pcalls the validator so a throw becomes the
+     * agent's fail state instead of propagating to the worker loop. */
+    pc = ref_validate(S, agent->as.agent.validator, new_state, env,
+                      REF_FAIL_CAPTURE, &thrown_ex);
+    if (pc != 1) {
+        mino_val *ex = thrown_ex;
+        if (ex == NULL) {
+            /* Validator returned falsy without throwing: synthesize. */
+            ex = mino_string(S, "Invalid reference state");
         }
+        agent_report_failure(S, agent, ex, env);
+        goto out;
     }
 
     gc_write_barrier(S, agent, agent->as.agent.val, new_state);
     agent->as.agent.val = new_state;
 
-    /* Watches: each invocation is wrapped in mino_pcall so a thrown
-     * watch sets agent.err but does not abort dispatch of later
-     * watches. JVM's behavior on watch throws is implementation-
-     * defined; this matches the test-add-watch agent arm which
-     * expects the watch's thrown payload to surface via
-     * agent-error. */
-    if (agent->as.agent.watches != NULL
-        && mino_type_of(agent->as.agent.watches) == MINO_MAP
-        && agent->as.agent.watches->as.map.len > 0) {
-        mino_val *watches = agent->as.agent.watches;
-        size_t      n = watches->as.map.len;
-        size_t      i;
-        for (i = 0; i < n; i++) {
-            mino_val *key = vec_nth(watches->as.map.key_order, i);
-            mino_val *wfn = map_get_val(watches, key);
-            mino_val *wargs;
-            mino_val *wresult = NULL;
-            mino_val *wthrown = NULL;
-            if (wfn == NULL) continue;
-            wargs = mino_cons(S, key,
-                      mino_cons(S, agent,
-                        mino_cons(S, old_state,
-                          mino_cons(S, new_state, mino_nil(S)))));
-            pc = mino_pcall(S, wfn, wargs, env, &wresult, &wthrown);
-            if (pc != 0 && wthrown != NULL) {
-                /* Capture the watch's thrown payload into agent.err.
-                 * Continue dispatching remaining watches: a thrown
-                 * watch shouldn't silence later watches on the same
-                 * publish. */
-                gc_write_barrier(S, agent, agent->as.agent.err, wthrown);
-                agent->as.agent.err = wthrown;
-            }
+    /* Watches: dispatched under the capture policy so a thrown watch
+     * sets agent.err but does not abort dispatch of later watches.
+     * JVM's behavior on watch throws is implementation-defined; the
+     * thrown payload surfaces via agent-error. */
+    {
+        mino_val *wthrown = NULL;
+        if (ref_notify(S, agent, agent->as.agent.watches, old_state,
+                       new_state, env, REF_FAIL_CAPTURE, &wthrown) != 0
+            && wthrown != NULL) {
+            gc_write_barrier(S, agent, agent->as.agent.err, wthrown);
+            agent->as.agent.err = wthrown;
         }
     }
 

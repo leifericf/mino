@@ -9,6 +9,7 @@
 #include "prim/internal.h"
 #include "atomic_ptr.h"
 #include "runtime/host_threads.h"
+#include "runtime/ref_publish.h"
 
 /* mino_tx_ref_deref is declared in mino.h; pulled in via prim/internal.h.
  * deref of a ref needs to consult the active transaction to return the
@@ -16,60 +17,20 @@
 
 /* ---- shared helpers ---------------------------------------------------- */
 
-/* Validate new_val against atom's validator.  Returns 0 on success,
- * -1 if the validator rejects (throws a catchable error). */
-static int atom_validate(mino_state *S, mino_val *atom,
-                         mino_val *new_val, mino_env *env)
-{
-    mino_val *vfn = atom->as.atom.validator;
-    mino_val *vargs, *result;
-    if (vfn == NULL) return 0;
-    vargs = mino_cons(S, new_val, mino_nil(S));
-    result = mino_call(S, vfn, vargs, env);
-    if (result == NULL) return -1;  /* validator threw */
-    if (!mino_is_truthy(result)) {
-        prim_throw_classified(S, "eval/contract", "MCT001", "Invalid reference state");
-        return -1;
-    }
-    return 0;
-}
-
-/* Notify all watches after a state change.  Callback signature:
- * (fn key atom old-state new-state).  Returns -1 if any watch threw
- * (the exception propagates per Clojure JVM semantics), 0 otherwise. */
-static int atom_notify_watches(mino_state *S, mino_val *atom,
-                               mino_val *old_val, mino_val *new_val,
-                               mino_env *env)
-{
-    mino_val *watches = atom->as.atom.watches;
-    size_t i, len;
-    if (watches == NULL || mino_type_of(watches) != MINO_MAP || watches->as.map.len == 0)
-        return 0;
-    len = watches->as.map.len;
-    for (i = 0; i < len; i++) {
-        mino_val *key = vec_nth(watches->as.map.key_order, i);
-        mino_val *fn  = map_get_val(watches, key);
-        mino_val *wargs;
-        if (fn == NULL) continue;
-        wargs = mino_cons(S, key,
-                  mino_cons(S, atom,
-                    mino_cons(S, old_val,
-                      mino_cons(S, new_val, mino_nil(S)))));
-        if (mino_call(S, fn, wargs, env) == NULL) return -1;
-    }
-    return 0;
-}
-
 /* Validate, commit, and notify.  Returns 0 on success, -1 if validator
  * rejects.  On success the atom's val is set to new_val and watches fire. */
 static int atom_set(mino_state *S, mino_val *atom,
                     mino_val *old_val, mino_val *new_val,
                     mino_env *env)
 {
-    if (atom_validate(S, atom, new_val, env) != 0) return -1;
+    if (ref_validate(S, atom->as.atom.validator, new_val, env,
+                     REF_FAIL_THROW, NULL) != 1) {
+        return -1;
+    }
     gc_write_barrier(S, atom, atom->as.atom.val, new_val);
     atom->as.atom.val = new_val;
-    return atom_notify_watches(S, atom, old_val, new_val, env);
+    return ref_notify(S, atom, atom->as.atom.watches, old_val, new_val,
+                      env, REF_FAIL_THROW, NULL);
 }
 
 /* Atomic load of an atom's current value.  In single-threaded mode this
@@ -178,17 +139,13 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
         /* Run the validator against the initial value before installing
          * it so a bad initial value is rejected at construction time --
          * mirrors Clojure's contract for atom + :validator. */
-        mino_val *vargs;
-        mino_val *result;
         gc_pin(atom);
-        vargs  = mino_cons(S, initial, mino_nil(S));
-        gc_unpin(1);
-        result = mino_call(S, validator, vargs, env);
-        if (result == NULL) return NULL;
-        if (!mino_is_truthy(result)) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
-                "Invalid reference state");
+        if (ref_validate(S, validator, initial, env,
+                         REF_FAIL_THROW, NULL) != 1) {
+            gc_unpin(1);
+            return NULL;
         }
+        gc_unpin(1);
         gc_write_barrier(S, atom, atom->as.atom.validator, validator);
         atom->as.atom.validator = validator;
     }
@@ -386,7 +343,10 @@ static mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
         call_args = swap_build_args(S, cur, extra);
         result = mino_call(S, fn, call_args, env);
         if (result == NULL) return NULL;
-        if (atom_validate(S, a, result, env) != 0) return NULL;
+        if (ref_validate(S, a->as.atom.validator, result, env,
+                         REF_FAIL_THROW, NULL) != 1) {
+            return NULL;
+        }
         if (atom_cas_ptr(S, a, cur, result)) {
             /* Barrier on the success path only: a losing CAS that
              * still fires the barrier would add a non-edge to the
@@ -396,7 +356,10 @@ static mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
              * and the major-mark Dijkstra push still observes `result`
              * while phase is MAJOR_MARK. */
             gc_write_barrier(S, a, cur, result);
-            if (atom_notify_watches(S, a, cur, result, env) != 0) return NULL;
+            if (ref_notify(S, a, a->as.atom.watches, cur, result, env,
+                           REF_FAIL_THROW, NULL) != 0) {
+                return NULL;
+            }
             return result;
         }
         /* Lost the race; another worker won.  Try again with the new
@@ -436,14 +399,20 @@ static mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_e
         return prim_throw_classified(S, "eval/type", "MTY001",
             "compare-and-set!: first argument must be an atom");
     }
-    if (atom_validate(S, a, new_val, env) != 0) return NULL;
+    if (ref_validate(S, a->as.atom.validator, new_val, env,
+                     REF_FAIL_THROW, NULL) != 1) {
+        return NULL;
+    }
     if (!atom_cas_ptr(S, a, expected, new_val)) {
         return mino_false(S);
     }
     /* Write barrier fires only after the CAS succeeds so it reflects an
      * actual store; a failed CAS must not leave a stale barrier record. */
     gc_write_barrier(S, a, expected, new_val);
-    if (atom_notify_watches(S, a, expected, new_val, env) != 0) return NULL;
+    if (ref_notify(S, a, a->as.atom.watches, expected, new_val, env,
+                   REF_FAIL_THROW, NULL) != 0) {
+        return NULL;
+    }
     return mino_true(S);
 }
 

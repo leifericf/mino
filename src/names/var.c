@@ -1,5 +1,5 @@
 /*
- * runtime_var.c -- var registry: intern, lookup, root binding management.
+ * var.c -- var registry: intern, lookup, root binding management.
  *
  * Two open-addressing hash indices accelerate the cold path:
  *
@@ -19,9 +19,7 @@
  */
 
 #include "runtime/internal.h"
-
-extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
-                                          const char *code, const char *msg);
+#include "runtime/ref_publish.h"
 
 /* FNV-1a over the bytes of s. 32-bit form is enough for the table
  * sizes mino actually sees (< 2^16 entries) while staying portable. */
@@ -330,7 +328,7 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
 
     /* Pin the three GC-owned locals before any allocation or call that
      * could trigger a collection.  validator, watches, and old_val are
-     * live across mino_cons/mino_call sequences below. */
+     * live across the validate / notify calls below. */
     gc_pin(old_val);
     gc_pin(validator);
     gc_pin(watches);
@@ -342,18 +340,10 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     env = current_ns_env(S);
 
     /* Validator: run before publishing the new root. A throw from
-     * the validator (via prim_throw_classified) longjmps out without
-     * mutating the var. */
-    if (validator != NULL) {
-        mino_val *vargs  = mino_cons(S, val, mino_nil(S));
-        mino_val *result = mino_call(S, validator, vargs, env);
-        if (result == NULL) { gc_unpin(3); return; }  /* validator threw */
-        if (!mino_is_truthy(result)) {
-            gc_unpin(3);
-            prim_throw_classified(S, "eval/contract", "MCT001",
-                "Invalid reference state");
-            return;
-        }
+     * the validator longjmps out without mutating the var. */
+    if (ref_validate(S, validator, val, env, REF_FAIL_THROW, NULL) != 1) {
+        gc_unpin(3);
+        return;
     }
     gc_write_barrier(S, var, var->as.var.root, val);
     var->as.var.root  = val;
@@ -366,24 +356,11 @@ void var_set_root(mino_state *S, mino_val *var, mino_val *val)
     /* Watches: dispatch after the publish. JVM Clojure's Var watches
      * fire on (alter-var-root v f) and on def with rebind. The
      * callback signature is (fn key var old new). A watch that throws
-     * propagates via mino_call returning NULL, matching atoms/refs. */
-    if (watches != NULL && mino_type_of(watches) == MINO_MAP
-        && watches->as.map.len > 0) {
-        size_t n = watches->as.map.len;
-        size_t i;
-        for (i = 0; i < n; i++) {
-            mino_val *key = vec_nth(watches->as.map.key_order, i);
-            mino_val *fn  = map_get_val(watches, key);
-            mino_val *wargs;
-            if (fn == NULL) continue;
-            {
-                mino_val *tmp = mino_cons(S, val, mino_nil(S)); gc_pin(tmp);
-                tmp = mino_cons(S, old_val, tmp);               gc_unpin(1); gc_pin(tmp);
-                tmp = mino_cons(S, var, tmp);                   gc_unpin(1); gc_pin(tmp);
-                wargs = mino_cons(S, key, tmp);                 gc_unpin(1);
-            }
-            if (mino_call(S, fn, wargs, env) == NULL) { gc_unpin(3); return; }
-        }
+     * propagates, matching atoms/refs. */
+    if (ref_notify(S, var, watches, old_val, val, env,
+                   REF_FAIL_THROW, NULL) != 0) {
+        gc_unpin(3);
+        return;
     }
     gc_unpin(3);
 }
