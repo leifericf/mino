@@ -267,9 +267,12 @@ jobs:
     # windows slower still (two zig builds plus two full suite passes
     # past the perf-shape test files run ~25 min there), but a hang
     # (the failure mode JIT bugs produce) should trip this cap, not
-    # the 6-hour default. Held above the 60-minute step cap so a slow
-    # leg fails at the step (log preserved), never the job.
-    timeout-minutes: 70
+    # the 6-hour default. Held above the step cap so a slow leg
+    # fails at the step (log preserved), never the job. The windows
+    # leg's honest runtime is ~75 minutes now that the full stack
+    # reserve lets the deep-recursion tests run to completion across
+    # all four parity passes.
+    timeout-minutes: 100
     defaults:
       run:
         shell: bash
@@ -305,5 +308,5 @@ jobs:
         # stack reserve the windows leg runs the deep-recursion tests
         # to completion instead of aborting, and its honest 4-way
         # runtime brushed the old 40 cap on a slow runner.
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: ./mino task test-jit-host
