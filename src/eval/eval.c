@@ -768,10 +768,9 @@ static mino_val *lazy_realize(mino_state *S, mino_val *v)
                 }
                 /* Pre-realized lazy: cached is NULL, body/env hold
                  * the thunk. Realisation overwrites three slots. The
-                 * body and env stores need SATB because the thunk
-                 * they pointed to may otherwise be reachable only
-                 * through this lazy and must survive the in-flight
-                 * major cycle. The realized flip uses release
+                 * body and env stores route through the write barrier
+                 * so the thunk they pointed to is picked up by any
+                 * in-flight major mark. The realized flip uses release
                  * ordering so a reader that observes LAZY_REALIZED
                  * also observes the cached/body/env writes. */
                 gc_write_barrier(S, v, v->as.lazy.cached, result);
@@ -842,9 +841,8 @@ mino_val *lazy_force(mino_state *S, mino_val *v)
      * observe either form get an equivalent traversal, so this is
      * race-free even though the store happens after the LAZY_REALIZED
      * flip. The barrier is required because v may be OLD and result
-     * may be YOUNG; cached == first is already covered by the
-     * realizer's SATB push, so we only need a fresh barrier when the
-     * pointer actually changes. */
+     * may be YOUNG; only fire it when the pointer actually changes to
+     * avoid a redundant mark-stack push. */
     if (result != first && result != NULL) {
         gc_write_barrier(S, v, v->as.lazy.cached, result);
         v->as.lazy.cached = result;

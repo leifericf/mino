@@ -50,7 +50,7 @@ enum {
  * mark-and-sweep; gc_mark_push filters OLD out of the frontier so
  * tracing stays proportional to young reachability. MAJOR_MARK: major
  * tracing, possibly sliced across many gc_major_step calls interleaved
- * with mutator progress; the SATB write barrier is armed. MAJOR_SWEEP:
+ * with mutator progress; the Dijkstra write barrier is armed. MAJOR_SWEEP:
  * one-shot STW sweep of dead OLD objects, always runs directly after
  * the final remark drain. */
 enum {

@@ -377,8 +377,8 @@ void gc_save_mark_fn(gc_hdr_t *h, void *user);
  * store first -- critical because mid-loop minor GC can promote tail
  * to OLD while the cell being appended is a fresh YOUNG allocation,
  * and an unbarriered OLD-to-YOUNG edge loses the cell at the next
- * minor. Also drives SATB when a major mark is in flight. Caller must
- * guarantee tail is non-NULL. */
+ * minor. Also pushes the new edge during an active major mark. Caller
+ * must guarantee tail is non-NULL. */
 void mino_cons_cdr_set(mino_state *S, mino_val *tail, mino_val *cell);
 
 /* VALARR slot store: barriers the write, then updates arr[i]. Use at

@@ -1,6 +1,6 @@
 /*
  * barrier.c -- write barrier, remembered set, and incremental-major
- * snapshot push.
+ * insertion push.
  *
  * The barrier handles two tasks at every mutation of a GC-managed slot:
  *
@@ -10,18 +10,15 @@
  *     gc_hdr_t::dirty; the remset never grows past one entry per live
  *     OLD container per epoch. This runs in every phase.
  *
- *  2. Incremental-major snapshot push (Yuasa SATB plus Dijkstra
- *     insertion). While the major collector is in MAJOR_MARK, two
- *     pointers ride along onto the mark stack:
- *       - old_value (SATB): the previous slot contents. Any object
- *         reachable at snapshot time survives this cycle even if the
- *         mutator unlinks it before the mark frontier reaches it.
+ *  2. Incremental-major insertion push (Dijkstra). While the major
+ *     collector is in MAJOR_MARK, the just-installed pointer is pushed
+ *     onto the mark stack:
  *       - new_value (insertion barrier): the just-installed pointer.
  *         Catches the case where the snapshot path that used to keep
  *         an OLD reachable has been overwritten in this same store,
  *         and the only surviving path runs through the new edge.
- *     gc_mark_push deduplicates against h->mark, so the second push
- *     is free when the value was already in the snapshot.
+ *     gc_mark_push deduplicates against h->mark, so repeated stores
+ *     to the same target are free.
  *
  * Singletons -- nil, true, false, small-int cache, recur/tail-call
  * sentinels -- live inside mino_state and are not GC-managed. The
@@ -36,9 +33,9 @@
  * container must route through gc_write_barrier (directly or via a
  * typed helper below). Fresh allocations initialising fields for the
  * first time are exempt -- the container is young, all fields start as
- * GC nullish, and SATB on uninitialised memory would be a use-after-
- * read. If you add a new mutation site, add it to this table in the
- * same commit.
+ * GC nullish, and a barrier on uninitialised memory would be a use-
+ * after-read. If you add a new mutation site, add it to this table in
+ * the same commit.
  *
  *   Type         Slot(s)                   Helper / direct call
  *   -----------------------------------------------------------------
@@ -163,24 +160,18 @@ void gc_write_barrier(mino_state *S, void *container,
            || ((((gc_hdr_t *)container) - 1)->gen == GC_GEN_YOUNG
                || (((gc_hdr_t *)container) - 1)->gen == GC_GEN_OLD));
     gc_evt_record(S, GC_EVT_WB, container, old_value, new_value, 0, 0);
-    /* During active major marking, the slot store needs only the
-     * Dijkstra (insertion) half of the barrier: enqueue the just-
-     * installed value so any OLD it transitively reaches gets marked
-     * even if the snapshot path that used to reach those OLDs has been
-     * overwritten in the same write.
+    /* During active major marking, push the just-installed value
+     * (Dijkstra insertion barrier): any OLD transitively reachable
+     * through the new edge gets marked even if the mutator has already
+     * overwritten the snapshot path that used to reach those OLDs.
+     * Dropped values are safe: gc_major_remark does a full
+     * gc_mark_roots pass, so anything the mutator detaches from a
+     * slot either remains reachable through another root, or has lost
+     * every root and is correctly collected.
      *
-     * The Yuasa (SATB) half that used to push old_value was removed
-     * once gc_major_remark grew a full gc_mark_roots pass. Anything
-     * the mutator drops from a slot during the cycle either:
-     *
-     *   - is still reachable through some other root; end-of-mark
-     *     re-walks every root and captures it.
-     *   - has lost every root path; correct collection on next sweep.
-     *
-     * Dijkstra still skips singletons (not GC-managed), NULL (empty
-     * slot), and tagged inline values. gc_mark_push deduplicates
-     * against h->mark, so the push is free when the value was already
-     * in the snapshot or rooted. */
+     * Singletons (not GC-managed), NULL (empty slot), and tagged
+     * inline values are skipped. gc_mark_push deduplicates against
+     * h->mark, so repeated pushes of the same target are free. */
     if (S->gc.phase == GC_PHASE_MAJOR_MARK) {
         if (new_value != NULL
             && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
@@ -303,10 +294,10 @@ void gc_remset_purge_dead(mino_state *S)
 }
 
 /* List-building helper: tail-append a cons cell onto tail. Routes the
- * store through the write barrier so SATB sees the previous cdr and
- * the remset sees any old->young edge the append creates. Used by
- * every in-place list extension loop; caller must guarantee tail is
- * non-NULL and a cons cell. */
+ * store through the write barrier so the remset sees any old->young
+ * edge the append creates and the mark stack picks up any new edge
+ * during an active major mark. Used by every in-place list extension
+ * loop; caller must guarantee tail is non-NULL and a cons cell. */
 void mino_cons_cdr_set(mino_state *S, mino_val *tail, mino_val *cell)
 {
     gc_write_barrier(S, tail, tail->as.cons.cdr, cell);

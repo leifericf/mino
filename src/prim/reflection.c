@@ -1339,8 +1339,8 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_gc_stats_out st;
     const char *phase_name;
-    mino_val *ks[44];
-    mino_val *vs[44];
+    mino_val *ks[43];
+    mino_val *vs[43];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1412,25 +1412,23 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
     ks[26] = mino_keyword(S, "root-scan-ns");
     vs[26] = mino_int(S, (long long)st.root_scan_ns);
     /* Write-barrier hit counters and mark-stack overflow drops. */
-    ks[27] = mino_keyword(S, "barrier-satb-pushes");
-    vs[27] = mino_int(S, (long long)st.barrier_satb_pushes);
-    ks[28] = mino_keyword(S, "barrier-dijkstra-pushes");
-    vs[28] = mino_int(S, (long long)st.barrier_dijkstra_pushes);
-    ks[29] = mino_keyword(S, "mark-stack-overflows");
-    vs[29] = mino_int(S, (long long)st.mark_stack_overflows);
+    ks[27] = mino_keyword(S, "barrier-dijkstra-pushes");
+    vs[27] = mino_int(S, (long long)st.barrier_dijkstra_pushes);
+    ks[28] = mino_keyword(S, "mark-stack-overflows");
+    vs[28] = mino_int(S, (long long)st.mark_stack_overflows);
     /* Generational promotion bookkeeping. :young-age-buckets is a
      * length-8 vector of cumulative survivor counts indexed by
      * clamp(log2(age+1), 0..7). */
-    ks[30] = mino_keyword(S, "bytes-promoted-minor");
-    vs[30] = mino_int(S, (long long)st.bytes_promoted_minor);
+    ks[29] = mino_keyword(S, "bytes-promoted-minor");
+    vs[29] = mino_int(S, (long long)st.bytes_promoted_minor);
     {
         mino_val *buckets[8];
         size_t i;
         for (i = 0; i < 8; i++) {
             buckets[i] = mino_int(S, (long long)st.young_age_bucket[i]);
         }
-        ks[31] = mino_keyword(S, "young-age-buckets");
-        vs[31] = mino_vector(S, buckets, 8);
+        ks[30] = mino_keyword(S, "young-age-buckets");
+        vs[30] = mino_vector(S, buckets, 8);
     }
     /* Pause-time distribution. Percentiles are computed from the
      * last 256 samples in the ring; the 24-bucket lifetime histogram
@@ -1443,17 +1441,17 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
         size_t i;
         mino_gc_stats_pauses(S, &p50, &p95, &p99, &pmax);
         mino_gc_pause_hist(S, hist, &hist_count);
-        ks[32] = mino_keyword(S, "pause-p50-ns");
-        vs[32] = mino_int(S, (long long)p50);
-        ks[33] = mino_keyword(S, "pause-p95-ns");
-        vs[33] = mino_int(S, (long long)p95);
-        ks[34] = mino_keyword(S, "pause-p99-ns");
-        vs[34] = mino_int(S, (long long)p99);
+        ks[31] = mino_keyword(S, "pause-p50-ns");
+        vs[31] = mino_int(S, (long long)p50);
+        ks[32] = mino_keyword(S, "pause-p95-ns");
+        vs[32] = mino_int(S, (long long)p95);
+        ks[33] = mino_keyword(S, "pause-p99-ns");
+        vs[33] = mino_int(S, (long long)p99);
         for (i = 0; i < 24; i++) {
             hist_vals[i] = mino_int(S, (long long)hist[i]);
         }
-        ks[35] = mino_keyword(S, "pause-hist");
-        vs[35] = mino_vector(S, hist_vals, 24);
+        ks[34] = mino_keyword(S, "pause-hist");
+        vs[34] = mino_vector(S, hist_vals, 24);
     }
     /* Per-tag allocation histogram, surfaced as a map of
      * tag-keyword -> count. Indices 1..10 cover the current GC tag
@@ -1474,8 +1472,8 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
             tv[n] = mino_int(S, (long long)st.alloc_by_tag[i]);
             n++;
         }
-        ks[36] = mino_keyword(S, "alloc-by-tag");
-        vs[36] = mino_map(S, tk, tv, n);
+        ks[35] = mino_keyword(S, "alloc-by-tag");
+        vs[35] = mino_map(S, tk, tv, n);
     }
     /* BC compile-decline histogram, surfaced as a keyword -> count
      * map. Zero-count buckets elided. */
@@ -1496,8 +1494,8 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
             dv[n] = mino_int(S, (long long)S->bc_declines[i]);
             n++;
         }
-        ks[37] = mino_keyword(S, "bc-declines");
-        vs[37] = mino_map(S, dk, dv, n);
+        ks[36] = mino_keyword(S, "bc-declines");
+        vs[36] = mino_map(S, dk, dv, n);
     }
     /* Collection-size histogram (env-gated). Map kind -> 32-vec of
      * log2-bucket counts. Empty when MINO_COLL_SIZE_STATS is unset. */
@@ -1519,25 +1517,25 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
             cv[n] = mino_vector(S, bv, 32);
             n++;
         }
-        ks[38] = mino_keyword(S, "coll-size-hist");
-        vs[38] = mino_map(S, ck, cv, n);
+        ks[37] = mino_keyword(S, "coll-size-hist");
+        vs[37] = mino_map(S, ck, cv, n);
     }
     /* Range-index maintenance: cumulative entries examined by the
      * per-collection merge and post-minor compaction passes, the entry
      * count currently in the index across all buffers, and the same
      * count split by generation (young pair, folded old array, old
      * pending buffer). */
-    ks[39] = mino_keyword(S, "range-walk-entries");
-    vs[39] = mino_int(S, (long long)st.range_walk_entries);
-    ks[40] = mino_keyword(S, "ranges-len");
-    vs[40] = mino_int(S, (long long)st.ranges_len);
-    ks[41] = mino_keyword(S, "ranges-young-len");
-    vs[41] = mino_int(S, (long long)st.ranges_young_len);
-    ks[42] = mino_keyword(S, "ranges-old-len");
-    vs[42] = mino_int(S, (long long)st.ranges_old_len);
-    ks[43] = mino_keyword(S, "ranges-old-pending-len");
-    vs[43] = mino_int(S, (long long)st.ranges_old_pending_len);
-    return mino_map(S, ks, vs, 44);
+    ks[38] = mino_keyword(S, "range-walk-entries");
+    vs[38] = mino_int(S, (long long)st.range_walk_entries);
+    ks[39] = mino_keyword(S, "ranges-len");
+    vs[39] = mino_int(S, (long long)st.ranges_len);
+    ks[40] = mino_keyword(S, "ranges-young-len");
+    vs[40] = mino_int(S, (long long)st.ranges_young_len);
+    ks[41] = mino_keyword(S, "ranges-old-len");
+    vs[41] = mino_int(S, (long long)st.ranges_old_len);
+    ks[42] = mino_keyword(S, "ranges-old-pending-len");
+    vs[42] = mino_int(S, (long long)st.ranges_old_pending_len);
+    return mino_map(S, ks, vs, 43);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

@@ -280,15 +280,13 @@ struct mino_state {
     unsigned char   gc_remset_walker_active;
     unsigned char   gc_remset_walker_young_seen;
 
-    /* Write-barrier counters. satb_pushes ticks for each old_value
-     * snapshot push during MAJOR_MARK (Yuasa); dijkstra_pushes ticks
-     * for each new_value insertion push. mark_stack_overflows counts
-     * silent-drop events in gc_mark_stack_push_raw when realloc fails
-     * (the collector then leans on conservative stack scan as a
+    /* Write-barrier counters. dijkstra_pushes ticks for each
+     * new_value insertion push during MAJOR_MARK. mark_stack_overflows
+     * counts silent-drop events in gc_mark_stack_push_raw when realloc
+     * fails (the collector then leans on conservative stack scan as a
      * backstop). The plan's remset_overflows counter is intentionally
      * omitted: mino aborts on a remset realloc failure, so the event
      * is unobservable from the surviving runtime. */
-    size_t          gc_barrier_satb_pushes;
     size_t          gc_barrier_dijkstra_pushes;
     size_t          gc_mark_stack_overflows;
 

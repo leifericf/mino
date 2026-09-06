@@ -199,8 +199,8 @@ mino_val *mino_persistent(mino_state *S, mino_val *t)
     }
     out = t->as.transient.current;
     /* Seal against further mutation. The store to current routes
-     * through the barrier so SATB sees the outgoing inner during a
-     * mid-cycle MAJOR_MARK; the caller's stack slot roots the return
+     * through the barrier so the outgoing inner is picked up by an
+     * in-flight major mark; the caller's stack slot roots the return
      * value for everything after. */
     t->as.transient.valid = 0;
     transient_set_current(S, t, NULL);

@@ -870,8 +870,7 @@ static mino_val *prim_chunk_append(mino_state *S, mino_val *args,
     }
     /* The append is a slot store inside an already-allocated chunk
      * cell. Old slot value is NULL (chunk-buffer zeroed it), so the
-     * write barrier sees a transition from NULL to elem; that's the
-     * correct shape for the SATB+Dijkstra pair. */
+     * write barrier fires the Dijkstra insertion push for elem. */
     gc_write_barrier(S, buf, NULL, elem);
     buf->as.chunk.vals[buf->as.chunk.len++] = elem;
     return buf;

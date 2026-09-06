@@ -157,7 +157,6 @@ void mino_gc_stats(mino_state *S, mino_gc_stats_out *out)
     out->major_mark_ns     = S->gc_major_mark_ns;
     out->major_sweep_ns    = S->gc_major_sweep_ns;
     out->root_scan_ns      = S->gc_root_scan_ns;
-    out->barrier_satb_pushes     = S->gc_barrier_satb_pushes;
     out->barrier_dijkstra_pushes = S->gc_barrier_dijkstra_pushes;
     out->mark_stack_overflows    = S->gc_mark_stack_overflows;
     out->bytes_promoted_minor    = S->gc_bytes_promoted_minor;
