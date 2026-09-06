@@ -3166,4 +3166,24 @@
     (is (nil? (store/close conn)) "second close is still a no-op")
     (is (= 1 (count @calls)) "second close does not route again")))
 
+;; ---------------------------------------------------------------------------
+;; Shared watch table
+;; ---------------------------------------------------------------------------
+
+(deftest add-watch-on-store-fires-through-the-standard-path
+  ;; Stores register with the same watch table as atoms, refs, vars,
+  ;; and agents: add-watch on a conn fires (fn key conn old new) on
+  ;; every transact, and remove-watch detaches it.
+  (let [conn (store/open)
+        log  (atom [])]
+    (add-watch conn :w (fn [k r o n]
+                         (swap! log conj [k (identical? r conn) (map? o) (map? n)])))
+    (store/transact conn {1 {:name "a"}})
+    (is (= [[:w true true true]] @log))
+    (remove-watch conn :w)
+    (store/transact conn {2 {:name "b"}})
+    (is (= 1 (count @log)))
+    (store/close conn)))
+
 (run-tests-and-exit)
+

@@ -1017,10 +1017,9 @@
    schema ops `compact` and `migrate` do NOT fire f -- they bypass the
    tx log and publish through the backend :commit op with no listener
    event. If you need to react to a compact/migrate db change, poll
-   `(db conn)` after the call.
-  (The C-level `add-watch` does not cover stores either: stores are
-  not in the watchable-get table, so store->watches is never populated.
-  `listen`/`fire-listeners` is the only observer surface.)"
+   `(db conn)` after the call, or use `add-watch`: stores register with
+   the shared watch table, and a store watch fires (fn key conn old new)
+   on every publish, compact and migrate included."
   [conn key f]
   (swap! listener-registry assoc-in [conn key] f)
   nil)

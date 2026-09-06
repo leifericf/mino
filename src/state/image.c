@@ -881,11 +881,10 @@ static void img_emit_val_full(FILE *f, img_id_table *t, mino_val *v, uint32_t id
         fprintf(f, "%u ST ", id);
         img_emit_val_id(f, t, v->as.store.val);
         fputc(' ', f);
-        /* watches mirrors the atom/var/tx-ref layout. Today store->watches
-         * is vestigial (stores are not in watchable_get, so add-watch never
-         * populates it), but emitting it keeps the visit/emit pair symmetric
-         * and the format ready if store watches are ever wired. id 0 -> NULL
-         * on the patch side. */
+        /* watches mirrors the atom/var/tx-ref layout: stores register
+         * with the shared watch table, so add-watch populates this slot
+         * and it round-trips like the other reference types. id 0 ->
+         * NULL on the patch side. */
         img_emit_val_id(f, t, v->as.store.watches);
         fputc(' ', f);
         img_emit_path(f, sp);
