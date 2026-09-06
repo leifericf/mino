@@ -186,6 +186,7 @@
    "tests/deps_test"
    "tests/introspection_test"
    "tests/census_surface_test"
+   "tests/bundled_manifest_test"
    "tests/qualified_special_form_test"
    "tests/image_test"
    "tests/require_env_test"
@@ -275,7 +276,7 @@
     shard k covers files [cuts[k-1], cuts[k]). Measured peaks on
     glibc (2026-08-21): 4.6GB / 4.0GB / 2.3GB. Rebalance when the
     tail grows past ~5GB. The final entry must equal the file count."
-    [0 104 130 222])
+    [0 104 130 223])
 
 (let [wired (set (map #(last (str/split % #"/")) suite-files))
       unwired (sort (set/difference disk-basenames wired other-lane-files))]
