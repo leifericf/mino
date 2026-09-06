@@ -86,18 +86,18 @@ static int random_count_arg(mino_state *S, const char *who, mino_val *args,
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires one argument", who);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return -1;
     }
     v = args->as.cons.car;
     if (!as_long(v, &n)) {
         snprintf(msg, sizeof(msg), "%s: count must be an int", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (n < 0) {
         snprintf(msg, sizeof(msg), "%s: count must be non-negative", who);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = n;
@@ -116,17 +116,17 @@ static mino_val *prim_secure_rand_bytes(mino_state *S, mino_val *args,
     if (random_count_arg(S, "secure-rand-bytes", args, &n) != 0) return NULL;
     if (n == 0) return mino_bytes(S, NULL, 0);
     if ((uint64_t)n > SIZE_MAX) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "secure-rand-bytes: count too large");
     }
     buf = (unsigned char *)malloc((size_t)n);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "secure-rand-bytes: out of memory");
     }
     if (prim_os_entropy(buf, (size_t)n) != 0) {
         free(buf);
-        return prim_throw_classified(S, "host", "MHO001",
+        return throw_classified(S, "host", "MHO001",
                                      "secure-rand-bytes: OS entropy source "
                                      "failed");
     }
@@ -151,24 +151,24 @@ static mino_val *prim_rand_hex(mino_state *S, mino_val *args, mino_env *env)
     if (random_count_arg(S, "rand-hex", args, &n) != 0) return NULL;
     if (n == 0) return mino_string_n(S, "", 0);
     if ((uint64_t)n > SIZE_MAX / 2) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "rand-hex: count too large");
     }
     buf = (unsigned char *)malloc((size_t)n);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "rand-hex: out of memory");
     }
     if (prim_os_entropy(buf, (size_t)n) != 0) {
         free(buf);
-        return prim_throw_classified(S, "host", "MHO001",
+        return throw_classified(S, "host", "MHO001",
                                      "rand-hex: OS entropy source failed");
     }
     out = (char *)malloc((size_t)n * 2);
     if (out == NULL) {
         memset(buf, 0, (size_t)n);
         free(buf);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "rand-hex: out of memory");
     }
     for (i = 0; i < (size_t)n; i++) {
@@ -209,25 +209,25 @@ static mino_val *prim_rand_token(mino_state *S, mino_val *args, mino_env *env)
     if (random_count_arg(S, "rand-token", args, &n) != 0) return NULL;
     if (n == 0) return mino_string_n(S, "", 0);
     if ((uint64_t)n > SIZE_MAX / 4) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "rand-token: count too large");
     }
     len = (size_t)n;
     buf = (unsigned char *)malloc(len);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "rand-token: out of memory");
     }
     if (prim_os_entropy(buf, len) != 0) {
         free(buf);
-        return prim_throw_classified(S, "host", "MHO001",
+        return throw_classified(S, "host", "MHO001",
                                      "rand-token: OS entropy source failed");
     }
     out = (char *)malloc(b64url_len(len));
     if (out == NULL) {
         memset(buf, 0, len);
         free(buf);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "rand-token: out of memory");
     }
     for (i = 0; i + 3 <= len; i += 3) {

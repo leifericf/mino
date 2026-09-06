@@ -85,7 +85,7 @@ static char *path_arg_string(mino_state *S, mino_val *args, const char *who,
         char msg[128];
         *ok = 0;
         snprintf(msg, sizeof(msg), "%s requires one argument", who);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return NULL;
     }
     v = args->as.cons.car;
@@ -93,7 +93,7 @@ static char *path_arg_string(mino_state *S, mino_val *args, const char *who,
         char msg[128];
         *ok = 0;
         snprintf(msg, sizeof(msg), "%s: argument must be a string", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     *ok = 1;
@@ -231,7 +231,7 @@ static mino_val *prim_path_join(mino_state *S, mino_val *args, mino_env *env)
             continue;
         }
         if (mino_type_of(v) != MINO_STRING) {
-            prim_throw_classified(S, "eval/type", "MTY001",
+            throw_classified(S, "eval/type", "MTY001",
                                   "path-join: parts must be strings or nil");
             return NULL;
         }
@@ -504,13 +504,13 @@ static mino_val *prim_path_expand_home(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "path-expand-home requires one argument");
         return NULL;
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "path-expand-home: argument must be a string");
         return NULL;
     }
@@ -886,24 +886,24 @@ static mino_val *prim_path_glob_match(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "path-glob-match requires two arguments");
         return NULL;
     }
     pat_val = args->as.cons.car;
     s_val = args->as.cons.cdr->as.cons.car;
     if (pat_val == NULL || mino_type_of(pat_val) != MINO_STRING) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "path-glob-match: pattern must be a string");
         return NULL;
     }
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "path-glob-match: path must be a string");
         return NULL;
     }
     if (pat_val->as.s.len > GLOB_MAX_PATTERN) {
-        prim_throw_classified(S, "eval/bounds", "MBD001",
+        throw_classified(S, "eval/bounds", "MBD001",
                               "path-glob-match: pattern longer than 256 "
                               "bytes");
         return NULL;
@@ -915,7 +915,7 @@ static mino_val *prim_path_glob_match(mino_state *S, mino_val *args,
                                          s_val->as.s.data,
                                          s_val->as.s.len, &over);
         if (over) {
-            prim_throw_classified(S, "eval/bounds", "MBD001",
+            throw_classified(S, "eval/bounds", "MBD001",
                                   "path-glob-match: pattern requires too "
                                   "much backtracking against this path");
             return NULL;
@@ -1186,7 +1186,7 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
 
     for (a = args; a != NULL && mino_is_cons(a); a = a->as.cons.cdr) nargs++;
     if (nargs < 1 || nargs > 3) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "glob requires one to three arguments");
         return NULL;
     }
@@ -1196,26 +1196,26 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
 
     if (pat_val == NULL || mino_type_of(pat_val) != MINO_STRING
         || pat_val->as.s.len == 0) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "glob: pattern must be a non-empty string");
         return NULL;
     }
     if (pat_val->as.s.len > GLOB_MAX_PATTERN) {
-        prim_throw_classified(S, "eval/bounds", "MBD001",
+        throw_classified(S, "eval/bounds", "MBD001",
                               "glob: pattern longer than 256 bytes");
         return NULL;
     }
     if (nargs >= 2 && root_val != NULL
         && mino_type_of(root_val) != MINO_STRING
         && mino_type_of(root_val) != MINO_NIL) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "glob: root must be a string");
         return NULL;
     }
     if (nargs >= 3 && opts_val != NULL
         && mino_type_of(opts_val) != MINO_MAP
         && mino_type_of(opts_val) != MINO_NIL) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "glob: opts must be a map");
         return NULL;
     }
@@ -1232,7 +1232,7 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
                 char msg[96];
                 snprintf(msg, sizeof(msg),
                          "glob: :%s must be a boolean", kbools[bi].key);
-                prim_throw_classified(S, "eval/contract", "MCT001", msg);
+                throw_classified(S, "eval/contract", "MCT001", msg);
                 goto fail;
             }
             {
@@ -1249,7 +1249,7 @@ static mino_val *prim_glob(mino_state *S, mino_val *args, mino_env *env)
             if (v != NULL && mino_type_of(v) != MINO_NIL) {
                 if (mino_type_of(v) != MINO_INT || !as_long(v, &md)
                     || md < 1 || md > 4096) {
-                    prim_throw_classified(S, "eval/contract", "MCT001",
+                    throw_classified(S, "eval/contract", "MCT001",
                                           "glob: :max-depth must be an "
                                           "integer in 1..4096 (the walk "
                                           "recurses one C frame per level)");

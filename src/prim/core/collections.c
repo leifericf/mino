@@ -17,7 +17,7 @@ static mino_val *prim_car(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "car requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "car requires one argument");
     }
     return mino_car(args->as.cons.car);
 }
@@ -26,7 +26,7 @@ static mino_val *prim_cdr(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "cdr requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "cdr requires one argument");
     }
     return mino_cdr(args->as.cons.car);
 }
@@ -132,7 +132,7 @@ mino_val *val_to_seq(mino_state *S, mino_val *v)
         char msg[96];
         snprintf(msg, sizeof(msg),
                  "seq: cannot coerce %s to a sequence", type_tag_str(v));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
@@ -157,7 +157,7 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
                  max_args > 1 ? "%s requires one or two arguments"
                               : "%s requires one argument",
                  opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     if (n == 2) {
         mino_val *size_val = args->as.cons.car;
@@ -168,13 +168,13 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
         if (size_val == NULL || !mino_val_int_p(size_val)) {
             char buf[80];
             snprintf(buf, sizeof(buf), "%s: size must be an integer", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+            return throw_classified(S, "eval/type", "MTY001", buf);
         }
         size = mino_val_int_get(size_val);
         if (size < 0) {
             char buf[80];
             snprintf(buf, sizeof(buf), "%s: negative array size", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+            return throw_classified(S, "eval/type", "MTY001", buf);
         }
         if (init == NULL) init = mino_nil(S);
         /* JVM array ctors take either a scalar fill (Number/char/boolean,
@@ -204,7 +204,7 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
             char buf[120];
             snprintf(buf, sizeof(buf),
                      "%s: init is not seqable", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+            return throw_classified(S, "eval/type", "MTY001", buf);
         }
         /* Scalar fill. init is register-live across the constructor's
          * allocations while vals[] is malloc-owned; pin across the
@@ -222,14 +222,14 @@ static mino_val *prim_host_array_helper(mino_state *S, mino_val *args,
     if (n != 1) {
         char buf[80];
         snprintf(buf, sizeof(buf), "%s requires one argument", opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     arg = args->as.cons.car;
     if (arg != NULL && mino_val_int_p(arg)) {
         if (mino_val_int_get(arg) < 0) {
             char buf[80];
             snprintf(buf, sizeof(buf), "%s: negative array size", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+            return throw_classified(S, "eval/type", "MTY001", buf);
         }
         return mino_host_array_new(S, (size_t)mino_val_int_get(arg), kind);
     }
@@ -278,7 +278,7 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &nargs);
     if (nargs < 1 || nargs > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "byte-array requires one or two arguments");
     }
     arg = args->as.cons.car;
@@ -293,22 +293,22 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
         unsigned char *buf2;
         seq_iter_t it2;
         if (size_val == NULL || !mino_val_int_p(size_val)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "byte-array: size must be an integer");
         }
         n2 = mino_val_int_get(size_val);
         if (n2 < 0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "byte-array: negative array size");
         }
         if (init == NULL) init = mino_nil(S);
         if (!seqable_p(init)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "byte-array: init is not seqable");
         }
         buf2 = (unsigned char *)malloc((size_t)n2 > 0 ? (size_t)n2 : 1);
         if (buf2 == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                 "byte-array: out of memory");
         }
         seq_iter_init(S, &it2, init);
@@ -318,7 +318,7 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
                 buf2[i2] = (unsigned char)bv;
             } else {
                 free(buf2);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "byte-array: element is not a byte");
             }
             seq_iter_next(S, &it2);
@@ -333,7 +333,7 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
     if (arg != NULL && mino_val_int_p(arg)) {
         long long n = mino_val_int_get(arg);
         if (n < 0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "byte-array: negative array size");
         }
         return mino_bytes(S, NULL, (size_t)n);
@@ -378,7 +378,7 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
                     unsigned char *nbuf = (unsigned char *)realloc(buf, new_cap);
                     if (nbuf == NULL) {
                         free(buf);
-                        return prim_throw_classified(S, "internal", "MIN001",
+                        return throw_classified(S, "internal", "MIN001",
                             "byte-array: out of memory");
                     }
                     buf = nbuf;
@@ -388,13 +388,13 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
                     elem = ch->as.chunk.vals[i];
                     if (elem == NULL || !mino_val_int_p(elem)) {
                         free(buf);
-                        return prim_throw_classified(S, "eval/type", "MTY001",
+                        return throw_classified(S, "eval/type", "MTY001",
                             "byte-array: element must be an integer in -128..255");
                     }
                     bv = mino_val_int_get(elem);
                     if (bv < -128 || bv > 255) {
                         free(buf);
-                        return prim_throw_classified(S, "eval/bounds", "MBD001",
+                        return throw_classified(S, "eval/bounds", "MBD001",
                             "byte-array: integer out of byte range (-128..255)");
                     }
                     buf[idx++] = (unsigned char)(bv & 0xff);
@@ -406,13 +406,13 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
             elem = p->as.cons.car;
             if (elem == NULL || !mino_val_int_p(elem)) {
                 free(buf);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "byte-array: element must be an integer in -128..255");
             }
             bv = mino_val_int_get(elem);
             if (bv < -128 || bv > 255) {
                 free(buf);
-                return prim_throw_classified(S, "eval/bounds", "MBD001",
+                return throw_classified(S, "eval/bounds", "MBD001",
                     "byte-array: integer out of byte range (-128..255)");
             }
             if (idx >= cap) {
@@ -420,7 +420,7 @@ static mino_val *prim_byte_array(mino_state *S, mino_val *args, mino_env *env)
                 unsigned char *nbuf = (unsigned char *)realloc(buf, new_cap);
                 if (nbuf == NULL) {
                     free(buf);
-                    return prim_throw_classified(S, "internal", "MIN001",
+                    return throw_classified(S, "internal", "MIN001",
                         "byte-array: out of memory");
                 }
                 buf = nbuf;
@@ -485,28 +485,28 @@ static mino_val *prim_aset(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "aset requires three arguments (array, index, value)");
     }
     arr     = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     new_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (arr != NULL && mino_type_of(arr) == MINO_BYTES) {
-        return prim_throw_classified(S, "eval/state", "MST005",
+        return throw_classified(S, "eval/state", "MST005",
             "aset: mino bytes values are immutable; build a new "
             "bytes value via byte-array instead");
     }
     if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "aset: first argument must be a host array");
     }
     if (idx_val == NULL || !mino_val_int_p(idx_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "aset: index must be an integer");
     }
     idx = mino_val_int_get(idx_val);
     if (idx < 0 || (size_t)idx >= arr->as.host_array.len) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "aset: index out of range");
     }
     /* host_array.vals[] is malloc-owned storage on the GC_T_VAL
@@ -534,34 +534,34 @@ static mino_val *prim_aget(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "aget requires two arguments (array, index)");
     }
     arr     = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     if (idx_val == NULL || !mino_val_int_p(idx_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "aget: index must be an integer");
     }
     idx = mino_val_int_get(idx_val);
     if (idx < 0) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "aget: index out of range");
     }
     if (arr != NULL && mino_type_of(arr) == MINO_BYTES) {
         if ((size_t)idx >= arr->as.bytes.byte_len) {
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
+            return throw_classified(S, "eval/bounds", "MBD001",
                 "aget: index out of range");
         }
         return mino_int(S,
             (long long)(unsigned)arr->as.bytes.data[(size_t)idx]);
     }
     if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "aget: first argument must be a host array or bytes value");
     }
     if ((size_t)idx >= arr->as.host_array.len) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "aget: index out of range");
     }
     return arr->as.host_array.vals[(size_t)idx];
@@ -573,7 +573,7 @@ static mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
     mino_val *arr;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "alength requires one argument");
     }
     arr = args->as.cons.car;
@@ -581,7 +581,7 @@ static mino_val *prim_alength(mino_state *S, mino_val *args, mino_env *env)
         return mino_int(S, (long long)arr->as.bytes.byte_len);
     }
     if (arr == NULL || mino_type_of(arr) != MINO_HOST_ARRAY) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "alength: argument must be a host array or bytes value");
     }
     return mino_int(S, (long long)arr->as.host_array.len);
@@ -592,7 +592,7 @@ static mino_val *prim_map_entry(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "map-entry requires two arguments");
     }
     return mino_map_entry(S, args->as.cons.car,
@@ -622,7 +622,7 @@ static mino_val *prim_cons_step(mino_state *S, mino_val *car,
 static mino_val *prim_cons(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "cons requires two arguments");
     }
     return prim_cons_step(S, args->as.cons.car,
@@ -633,7 +633,7 @@ static mino_val *prim_cons_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "cons requires two arguments");
     }
     return prim_cons_step(S, argv[0], argv[1], env);
@@ -703,7 +703,7 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
     }
     if (mino_type_of(coll) == MINO_TRANSIENT) {
         if (!coll->as.transient.valid)
-            return prim_throw_classified(S, "eval/state", "MST001",
+            return throw_classified(S, "eval/state", "MST001",
                 "count: transient is no longer valid");
         coll = coll->as.transient.current;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_int(S, 0);
@@ -772,7 +772,7 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
             char msg[96];
             snprintf(msg, sizeof(msg), "count: expected a collection, got %s",
                      type_tag_str(coll));
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
     }
     }
 }
@@ -780,7 +780,7 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
 mino_val *prim_count(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "count requires one argument");
     }
     return prim_count_step(S, args->as.cons.car, env);
@@ -790,7 +790,7 @@ static mino_val *prim_count_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "count requires one argument");
     }
     return prim_count_step(S, argv[0], env);
@@ -800,7 +800,7 @@ static mino_val *prim_empty_queue(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "-empty-queue takes no arguments");
     }
     return mino_queue_empty(S);
@@ -810,7 +810,7 @@ static mino_val *prim_queue_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "queue? requires one argument");
     }
     return mino_is_queue(args->as.cons.car) ? mino_true(S) : mino_false(S);
@@ -875,7 +875,7 @@ mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
             if (p == NULL) return NULL;
         }
         if (!mino_is_cons(p)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "hash-map: argument walk produced a non-cons");
         }
         ks[i] = p->as.cons.car;
@@ -885,7 +885,7 @@ mino_val *prim_hash_map(mino_state *S, mino_val *args, mino_env *env)
             if (p == NULL) return NULL;
         }
         if (!mino_is_cons(p)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "hash-map: argument walk produced a non-cons");
         }
         vs[i] = p->as.cons.car;
@@ -904,7 +904,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "nth requires 2 or 3 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "nth requires 2 or 3 arguments");
     }
     coll    = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
@@ -912,12 +912,12 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         def_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     }
     if (idx_val == NULL || !mino_val_int_p(idx_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "nth index must be an integer");
+        return throw_classified(S, "eval/type", "MTY001", "nth index must be an integer");
     }
     idx = mino_val_int_get(idx_val);
     if (idx < 0) {
         if (def_val != NULL) return def_val;
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         /* Clojure treats nil as an empty seq for nth: returns the
@@ -927,12 +927,12 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
     }
     if (mino_type_of(coll) == MINO_TRANSIENT) {
         if (!coll->as.transient.valid)
-            return prim_throw_classified(S, "eval/state", "MST001",
+            return throw_classified(S, "eval/state", "MST001",
                 "nth: transient is no longer valid");
         coll = coll->as.transient.current;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
+            return throw_classified(S, "eval/bounds", "MBD001",
                 "nth index out of range");
         }
     }
@@ -941,34 +941,34 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         if (coll == NULL) return NULL;
         if (mino_type_of(coll) == MINO_NIL) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
     }
     if (mino_type_of(coll) == MINO_VECTOR) {
         if ((size_t)idx >= coll->as.vec.len) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return vec_nth(coll, (size_t)idx);
     }
     if (mino_type_of(coll) == MINO_CHUNK) {
         if ((size_t)idx >= coll->as.chunk.len) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return coll->as.chunk.vals[(size_t)idx];
     }
     if (mino_type_of(coll) == MINO_HOST_ARRAY) {
         if ((size_t)idx >= coll->as.host_array.len) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return coll->as.host_array.vals[(size_t)idx];
     }
     if (mino_type_of(coll) == MINO_BYTES) {
         if ((size_t)idx >= coll->as.bytes.byte_len) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return mino_int(S,
             (long long)(unsigned)coll->as.bytes.data[(size_t)idx]);
@@ -977,7 +977,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         if (idx == 0) return coll->as.map_entry.k;
         if (idx == 1) return coll->as.map_entry.v;
         if (def_val != NULL) return def_val;
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (mino_type_of(coll) == MINO_CONS) {
         mino_val *p = coll;
@@ -985,7 +985,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         for (i = 0; i < idx; i++) {
             if (!mino_is_cons(p)) {
                 if (def_val != NULL) return def_val;
-                return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+                return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
             }
             p = p->as.cons.cdr;
             if (p != NULL && mino_type_of(p) == MINO_LAZY) {
@@ -995,7 +995,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         }
         if (!mino_is_cons(p)) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return p->as.cons.car;
     }
@@ -1017,7 +1017,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
         }
         if (p == NULL || mino_type_of(p) == MINO_NIL || mino_type_of(p) == MINO_EMPTY_LIST) {
             if (def_val != NULL) return def_val;
-            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         /* Fall through to the cons-walk for the lazy/cons tail. */
         coll = p;
@@ -1027,7 +1027,7 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
             for (i = 0; i < idx; i++) {
                 if (!mino_is_cons(coll)) {
                     if (def_val != NULL) return def_val;
-                    return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+                    return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
                 }
                 coll = coll->as.cons.cdr;
                 if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
@@ -1037,12 +1037,12 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
             }
             if (!mino_is_cons(coll)) {
                 if (def_val != NULL) return def_val;
-                return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+                return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
             }
             return coll->as.cons.car;
         }
         if (def_val != NULL) return def_val;
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (mino_type_of(coll) == MINO_STRING) {
         /* Match Clojure: indexing a string returns a `\char`, consistent
@@ -1060,13 +1060,13 @@ mino_val *prim_nth(mino_state *S, mino_val *args, mino_env *env)
             pos += step;
         }
         if (def_val != NULL) return def_val;
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "nth: expected a list, vector, or string, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
@@ -1153,14 +1153,14 @@ static mino_val *prim_first_step(mino_state *S, mino_val *coll,
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
 mino_val *prim_first(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "first requires one argument");
     }
     return prim_first_step(S, args->as.cons.car, env);
@@ -1170,7 +1170,7 @@ static mino_val *prim_first_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "first requires one argument");
     }
     return prim_first_step(S, argv[0], env);
@@ -1398,14 +1398,14 @@ static mino_val *prim_rest_step(mino_state *S, mino_val *coll,
         char msg[96];
         snprintf(msg, sizeof(msg), "rest: expected a list or vector, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
 mino_val *prim_rest(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "rest requires one argument");
     }
     return prim_rest_step(S, args->as.cons.car, env);
@@ -1415,7 +1415,7 @@ static mino_val *prim_rest_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "rest requires one argument");
     }
     return prim_rest_step(S, argv[0], env);
@@ -1467,11 +1467,11 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
      * is a value error, and the JVM words that one as a count
      * mismatch, not a dangling key. */
     if (n < 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "assoc requires a collection, a key, and a value");
     }
     if ((n - 1) % 2 != 0) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "assoc expects even number of arguments after map/vector, found odd number");
     }
     coll = args->as.cons.car;
@@ -1488,11 +1488,11 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
             mino_val *v = p->as.cons.cdr->as.cons.car;
             long long   idx;
             if (k == NULL || !mino_val_int_p(k)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "assoc on vector requires integer indices");
+                return throw_classified(S, "eval/type", "MTY001", "assoc on vector requires integer indices");
             }
             idx = mino_val_int_get(k);
             if (idx < 0 || (size_t)idx > acc->as.vec.len) {
-                return prim_throw_classified(S, "eval/bounds", "MBD001", "assoc on vector: index out of range");
+                return throw_classified(S, "eval/bounds", "MBD001", "assoc on vector: index out of range");
             }
             acc = vec_assoc1(S, acc, (size_t)idx, v);
             p = p->as.cons.cdr->as.cons.cdr;
@@ -1529,7 +1529,7 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
             idx = record_field_index(acc, k);
             new_rec = alloc_val(S, MINO_RECORD);
             if (new_rec == NULL) {
-                return prim_throw_classified(S, "internal", "MIN001",
+                return throw_classified(S, "internal", "MIN001",
                     "assoc: failed to allocate record");
             }
             /* Pin new_rec so it survives mino_cons / map_assoc_pairs allocs. */
@@ -1541,7 +1541,7 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
                     n_fields * sizeof(*slots));
                 if (slots == NULL) {
                     gc_unpin(1);
-                    return prim_throw_classified(S, "internal", "MIN001",
+                    return throw_classified(S, "internal", "MIN001",
                         "assoc: out of memory");
                 }
                 /* Suppress GC while slots[] (C-heap, GC-invisible) holds live
@@ -1590,7 +1590,7 @@ mino_val *prim_assoc(mino_state *S, mino_val *args, mino_env *env)
         char msg[96];
         snprintf(msg, sizeof(msg), "assoc: expected a map or vector, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
@@ -1603,7 +1603,7 @@ mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "get requires 2 or 3 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "get requires 2 or 3 arguments");
     }
     coll = args->as.cons.car;
     key  = args->as.cons.cdr->as.cons.car;
@@ -1615,7 +1615,7 @@ mino_val *prim_get(mino_state *S, mino_val *args, mino_env *env)
     }
     if (mino_type_of(coll) == MINO_TRANSIENT) {
         if (!coll->as.transient.valid)
-            return prim_throw_classified(S, "eval/state", "MST001",
+            return throw_classified(S, "eval/state", "MST001",
                 "get: transient is no longer valid");
         coll = coll->as.transient.current;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return def_val;
@@ -1810,7 +1810,7 @@ static mino_val *conj_map(mino_state *S, mino_val *coll,
                     mino_cons(S, item->as.map_entry.v, mino_nil(S)));
             acc = map_assoc_pairs(S, acc, pair_args, 1);
         } else {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "conj on map requires map entries or 2-element vectors");
         }
         items = items->as.cons.cdr;
@@ -1861,7 +1861,7 @@ static mino_val *conj_sorted_map(mino_state *S, mino_val *coll,
                 es = es->as.cons.cdr;
             }
         } else {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "conj on sorted-map requires a map entry, 2-element vector, or map");
         }
         items = items->as.cons.cdr;
@@ -1930,7 +1930,7 @@ mino_val *prim_conj(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg),
                  "conj: expected a list, vector, map, or set, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     }
 }
@@ -1943,7 +1943,7 @@ static mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "keys requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "keys requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
@@ -1995,7 +1995,7 @@ static mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
                 mino_val *entry = seq_iter_val(S, &it);
                 mino_val *k;
                 if (entry == NULL) {
-                    return prim_throw_classified(
+                    return throw_classified(
                         S, "eval/type", "MTY001",
                         "keys: seq element is not a map entry (expected [k v])");
                 }
@@ -2005,7 +2005,7 @@ static mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
                            && entry->as.vec.len == 2) {
                     k = vec_nth(entry, 0);
                 } else {
-                    return prim_throw_classified(
+                    return throw_classified(
                         S, "eval/type", "MTY001",
                         "keys: seq element is not a map entry (expected [k v])");
                 }
@@ -2019,7 +2019,7 @@ static mino_val *prim_keys(mino_state *S, mino_val *args, mino_env *env)
             }
             return head;
         }
-        return prim_throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map or seq of map entries");
+        return throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
         mino_val *cell = mino_cons(S, vec_nth(coll->as.map.key_order, i),
@@ -2042,7 +2042,7 @@ static mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "vals requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "vals requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
@@ -2101,7 +2101,7 @@ static mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
                 mino_val *entry = seq_iter_val(S, &it);
                 mino_val *v;
                 if (entry == NULL) {
-                    return prim_throw_classified(
+                    return throw_classified(
                         S, "eval/type", "MTY001",
                         "vals: seq element is not a map entry (expected [k v])");
                 }
@@ -2111,7 +2111,7 @@ static mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
                            && entry->as.vec.len == 2) {
                     v = vec_nth(entry, 1);
                 } else {
-                    return prim_throw_classified(
+                    return throw_classified(
                         S, "eval/type", "MTY001",
                         "vals: seq element is not a map entry (expected [k v])");
                 }
@@ -2125,7 +2125,7 @@ static mino_val *prim_vals(mino_state *S, mino_val *args, mino_env *env)
             }
             return head;
         }
-        return prim_throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map or seq of map entries");
+        return throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
         mino_val *key  = vec_nth(coll->as.map.key_order, i);
@@ -2267,7 +2267,7 @@ static mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "contains? requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "contains? requires two arguments");
     }
     coll = args->as.cons.car;
     key  = args->as.cons.cdr->as.cons.car;
@@ -2276,7 +2276,7 @@ static mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
     }
     if (mino_type_of(coll) == MINO_TRANSIENT) {
         if (!coll->as.transient.valid)
-            return prim_throw_classified(S, "eval/state", "MST001",
+            return throw_classified(S, "eval/state", "MST001",
                 "contains?: transient is no longer valid");
         coll = coll->as.transient.current;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_false(S);
@@ -2305,14 +2305,14 @@ static mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
     if (mino_type_of(coll) == MINO_STRING) {
         /* For strings, key must be an integer index. */
         if (key == NULL || mino_type_of(key) == MINO_NIL)
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "contains?: string key must be an integer");
         if (mino_val_int_p(key)) {
             long long idx = mino_val_int_get(key);
             return (idx >= 0 && (size_t)idx < coll->as.s.len)
                 ? mino_true(S) : mino_false(S);
         }
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "contains?: string key must be an integer");
     }
     if (mino_type_of(coll) == MINO_RECORD) {
@@ -2328,7 +2328,7 @@ static mino_val *prim_contains_p(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg),
                  "contains?: expected a map, set, vector, or string, got %s",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
@@ -2340,7 +2340,7 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "disj requires a set");
+        return throw_classified(S, "eval/arity", "MAR001", "disj requires a set");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
@@ -2360,7 +2360,7 @@ mino_val *prim_disj(mino_state *S, mino_val *args, mino_env *env)
         return coll;
     }
     if (mino_type_of(coll) != MINO_SET) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "disj: first argument must be a set");
+        return throw_classified(S, "eval/type", "MTY001", "disj: first argument must be a set");
     }
     /* Rebuild set excluding the specified elements. Not the most efficient
      * approach, but keeps the code simple and correct. */
@@ -2420,7 +2420,7 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "dissoc requires at least one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "dissoc requires at least one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
@@ -2518,7 +2518,7 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
                         new_rec = alloc_val(S, MINO_RECORD);
                         if (new_rec == NULL) {
                             gc_unpin(n_pinned);
-                            return prim_throw_classified(S, "internal",
+                            return throw_classified(S, "internal",
                                 "MIN001", "dissoc: failed to allocate record");
                         }
                         /* Pin new_rec across the malloc+copy block. */
@@ -2532,7 +2532,7 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
                                 n_fields_acc * sizeof(*slots));
                             if (slots == NULL) {
                                 gc_unpin(n_pinned);
-                                return prim_throw_classified(S, "internal",
+                                return throw_classified(S, "internal",
                                     "MIN001", "dissoc: out of memory");
                             }
                             /* Suppress GC while slots[] (C-heap, GC-invisible)
@@ -2563,7 +2563,7 @@ mino_val *prim_dissoc(mino_state *S, mino_val *args, mino_env *env)
         return acc;
     }
     if (mino_type_of(coll) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "dissoc: first argument must be a map");
+        return throw_classified(S, "eval/type", "MTY001", "dissoc: first argument must be a map");
     }
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
@@ -2606,26 +2606,26 @@ static mino_val *prim_subvec(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     for (p = args; mino_is_cons(p); p = p->as.cons.cdr) nargs++;
     if (nargs < 2 || nargs > 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "subvec requires 2 or 3 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "subvec requires 2 or 3 arguments");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "subvec: first argument must be a vector");
+        return throw_classified(S, "eval/type", "MTY001", "subvec: first argument must be a vector");
     }
     start = subvec_to_long(args->as.cons.cdr->as.cons.car, &ok);
     if (!ok) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "subvec: start must be a number");
+        return throw_classified(S, "eval/type", "MTY001", "subvec: start must be a number");
     }
     if (nargs == 3) {
         end = subvec_to_long(args->as.cons.cdr->as.cons.cdr->as.cons.car, &ok);
         if (!ok) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "subvec: end must be a number");
+            return throw_classified(S, "eval/type", "MTY001", "subvec: end must be a number");
         }
     } else {
         end = (long long)v->as.vec.len;
     }
     if (start < 0 || end < start || (size_t)end > v->as.vec.len) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "subvec: index out of bounds");
+        return throw_classified(S, "eval/bounds", "MBD001", "subvec: index out of bounds");
     }
     return vec_subvec(S, v, (size_t)start, (size_t)end);
 }

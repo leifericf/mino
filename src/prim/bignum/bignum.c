@@ -93,7 +93,7 @@ mino_val *mino_bigint_from_ll(mino_state *S, long long n)
 {
     mp_int z = bigint_alloc_zeroed();
     if (z == NULL) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory building bigint");
     }
     /* mp_small is `long` in imath. On LP64 this is 64-bit so direct
@@ -102,7 +102,7 @@ mino_val *mino_bigint_from_ll(mino_state *S, long long n)
     if (n >= LONG_MIN && n <= LONG_MAX) {
         if (mp_int_set_value(z, (mp_small)n) != MP_OK) {
             mp_int_clear(z); free(z);
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                                          "out of memory building bigint");
         }
     } else {
@@ -113,7 +113,7 @@ mino_val *mino_bigint_from_ll(mino_state *S, long long n)
         rr = mp_int_read_string(z, 10, buf);
         if (rr != MP_OK) {
             mp_int_clear(z); free(z);
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                                          "out of memory building bigint");
         }
     }
@@ -128,7 +128,7 @@ mino_val *mino_bigint_from_string_n(mino_state *S, const char *s, size_t len)
     if (s == NULL || len == 0) return NULL;
     buf = (char *)malloc(len + 1);
     if (buf == NULL) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory building bigint");
     }
     memcpy(buf, s, len);
@@ -136,7 +136,7 @@ mino_val *mino_bigint_from_string_n(mino_state *S, const char *s, size_t len)
     z = bigint_alloc_zeroed();
     if (z == NULL) {
         free(buf);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory building bigint");
     }
     rr = mp_int_read_string(z, 10, buf);
@@ -167,7 +167,7 @@ mino_val *mino_bigint_from_digits_base(mino_state *S, const char *s,
     if (base < MP_MIN_RADIX || base > MP_MAX_RADIX) return NULL;
     buf = (char *)malloc(len + 2);
     if (buf == NULL) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory building bigint");
     }
     buf[0] = negative ? '-' : '+';
@@ -176,7 +176,7 @@ mino_val *mino_bigint_from_digits_base(mino_state *S, const char *s,
     z = bigint_alloc_zeroed();
     if (z == NULL) {
         free(buf);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory building bigint");
     }
     rr = mp_int_read_string(z, (mp_size)base, buf);
@@ -403,12 +403,12 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
     mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "bigint requires one argument");
     }
     x = args->as.cons.car;
     if (x == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigint argument is nil");
     }
     switch (mino_type_of(x)) {
@@ -418,12 +418,12 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
         /* Copy into a fresh bigint. */
         mp_int z = bigint_alloc_zeroed();
         if (z == NULL) {
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                                          "out of memory building bigint");
         }
         if (mp_int_copy((mp_int)x->as.bigint.mpz, z) != MP_OK) {
             mp_int_clear(z); free(z);
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                                          "out of memory building bigint");
         }
         return bigint_wrap(S, z);
@@ -438,13 +438,13 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
         mino_val *bd, *unscaled;
         int         scale;
         if (f != f || f == INFINITY || f == -INFINITY) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "cannot convert non-finite double to bigint");
         }
         mino_double_shortest(f, buf, sizeof(buf));
         bd = mino_bigdec_from_string(S, buf);
         if (bd == NULL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "bigint: failed to convert double");
         }
         unscaled = bd->as.bigdec.unscaled;
@@ -459,13 +459,13 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
             mpz_t       pw;
             mino_val *out;
             if (mp_int_init(&pw) != MP_OK) {
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             if (mp_int_set_value(&pw, 10) != MP_OK
                 || mp_int_expt(&pw, scale, &pw) != MP_OK) {
                 mp_int_clear(&pw);
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             gc_pin(bd); /* keep bd (and unscaled) alive across alloc */
@@ -475,7 +475,7 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
                            (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
                 gc_unpin(1);
                 mp_int_clear(&pw);
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             gc_unpin(1);
@@ -486,7 +486,7 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
     case MINO_STRING: {
         mino_val *r = mino_bigint_from_string_n(S, x->as.s.data, x->as.s.len);
         if (r == NULL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "bigint: invalid numeric string");
         }
         return r;
@@ -502,14 +502,14 @@ static mino_val *prim_bigint(mino_state *S, mino_val *args, mino_env *env)
                        (mp_int)x->as.ratio.denom->as.bigint.mpz,
                        (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
             gc_unpin(1);
-            return prim_throw_classified(S, "eval/out-of-memory",
+            return throw_classified(S, "eval/out-of-memory",
                                          "MOM001", "out of memory");
         }
         gc_unpin(1);
         return out;
     }
     default:
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigint: argument must be integer, "
                                      "float, ratio, string, or bigint");
     }
@@ -527,7 +527,7 @@ static mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "bigint? requires one argument");
     }
     {
@@ -547,7 +547,7 @@ static mino_val *prim_bigint_p(mino_state *S, mino_val *args, mino_env *env)
 /* to long either, so returning a bigint is the expected shape).             */
 /*                                                                           */
 /* On allocation or imath failure these return NULL after raising an         */
-/* out-of-memory error through prim_throw_classified.                        */
+/* out-of-memory error through throw_classified.                        */
 /* ------------------------------------------------------------------------- */
 
 /* Borrowed view into a value as a bigint. If the value is already a bigint
@@ -600,21 +600,21 @@ static mino_val *bigint_binop(mino_state *S, const mino_val *a,
     if (!bigint_view(a, &as_buf, &av, &owns_a) ||
         !bigint_view(b, &bs_buf, &bv, &owns_b)) {
         if (owns_a) mp_int_clear(&as_buf);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     rz = bigint_alloc_zeroed();
     if (rz == NULL) {
         if (owns_a) mp_int_clear(&as_buf);
         if (owns_b) mp_int_clear(&bs_buf);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     if (op(av, bv, rz) != MP_OK) {
         if (owns_a) mp_int_clear(&as_buf);
         if (owns_b) mp_int_clear(&bs_buf);
         mp_int_clear(rz); free(rz);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     if (owns_a) mp_int_clear(&as_buf);
@@ -659,14 +659,14 @@ static int mino_bigint_quotrem(mino_state *S, const mino_val *a,
     if (!bigint_view(a, &as_buf, &av, &owns_a) ||
         !bigint_view(b, &bs_buf, &bv, &owns_b)) {
         if (owns_a) mp_int_clear(&as_buf);
-        prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        throw_classified(S, "eval/out-of-memory", "MOM001",
                               "out of memory in bigint quotrem");
         return -1;
     }
     if (mp_int_compare_zero(bv) == 0) {
         if (owns_a) mp_int_clear(&as_buf);
         if (owns_b) mp_int_clear(&bs_buf);
-        prim_throw_classified(S, "eval/type", "MTY001", "division by zero");
+        throw_classified(S, "eval/type", "MTY001", "division by zero");
         return -1;
     }
     if (q_out) {
@@ -690,7 +690,7 @@ oom:
     if (owns_b) mp_int_clear(&bs_buf);
     if (qz != NULL) { mp_int_clear(qz); free(qz); }
     if (rz != NULL) { mp_int_clear(rz); free(rz); }
-    prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+    throw_classified(S, "eval/out-of-memory", "MOM001",
                           "out of memory in bigint quotrem");
     return -1;
 }
@@ -740,19 +740,19 @@ mino_val *mino_bigint_neg(mino_state *S, const mino_val *a)
     int    owns_a = 0;
     mp_int rz;
     if (!bigint_view(a, &as_buf, &av, &owns_a)) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     rz = bigint_alloc_zeroed();
     if (rz == NULL) {
         if (owns_a) mp_int_clear(&as_buf);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     if (mp_int_neg(av, rz) != MP_OK) {
         if (owns_a) mp_int_clear(&as_buf);
         mp_int_clear(rz); free(rz);
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigint arithmetic");
     }
     if (owns_a) mp_int_clear(&as_buf);

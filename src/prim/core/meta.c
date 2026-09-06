@@ -153,7 +153,7 @@ static mino_val *prim_meta(mino_state *S, mino_val *args,
     mino_val *obj;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "meta requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "meta requires one argument");
     }
     obj = args->as.cons.car;
     if (obj == NULL) return mino_nil(S);
@@ -180,28 +180,28 @@ static mino_val *prim_with_meta(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "with-meta requires 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "with-meta requires 2 arguments");
     }
     obj = args->as.cons.car;
     m   = args->as.cons.cdr->as.cons.car;
     if (obj == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "with-meta: type does not support metadata");
     }
     if (mino_type_of(obj) == MINO_ATOM
         || mino_type_of(obj) == MINO_AGENT
         || mino_type_of(obj) == MINO_TX_REF
         || mino_type_of(obj) == MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "with-meta: identity-tied types (atom/agent/ref/var) "
             "cannot be copied to attach new meta; use alter-meta! "
             "for in-place mutation or the constructor's :meta option");
     }
     if (!supports_meta(mino_type_of(obj))) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: type does not support metadata");
+        return throw_classified(S, "eval/type", "MTY001", "with-meta: type does not support metadata");
     }
     if (m != NULL && mino_type_of(m) != MINO_NIL && mino_type_of(m) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: metadata must be a map or nil");
+        return throw_classified(S, "eval/type", "MTY001", "with-meta: metadata must be a map or nil");
     }
     /* Shallow-copy the value and attach the new metadata.
      * Pin obj and m across alloc_val so a GC triggered by the
@@ -221,26 +221,26 @@ static mino_val *prim_vary_meta(mino_state *S, mino_val *args,
 {
     mino_val *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "vary-meta requires at least 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "vary-meta requires at least 2 arguments");
     }
     obj = args->as.cons.car;
     f   = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr; /* remaining args (cons list or nil) */
     if (obj == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "vary-meta: type does not support metadata");
     }
     if (mino_type_of(obj) == MINO_ATOM
         || mino_type_of(obj) == MINO_AGENT
         || mino_type_of(obj) == MINO_TX_REF
         || mino_type_of(obj) == MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "vary-meta: identity-tied types (atom/agent/ref/var) "
             "cannot be copied to attach new meta; use alter-meta! "
             "for in-place mutation or the constructor's :meta option");
     }
     if (!supports_meta(mino_type_of(obj))) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: type does not support metadata");
+        return throw_classified(S, "eval/type", "MTY001", "vary-meta: type does not support metadata");
     }
     old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
     /* Build (old-meta extra...) argument list for f. */
@@ -250,7 +250,7 @@ static mino_val *prim_vary_meta(mino_state *S, mino_val *args,
         return NULL;
     }
     if (mino_type_of(new_meta) != MINO_NIL && mino_type_of(new_meta) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: f must return a map or nil");
+        return throw_classified(S, "eval/type", "MTY001", "vary-meta: f must return a map or nil");
     }
     /* Pin obj and new_meta across alloc_val so a GC triggered by the
      * allocation cannot collect either live value. */
@@ -268,7 +268,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
 {
     mino_val *obj, *f, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "alter-meta! requires at least 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "alter-meta! requires at least 2 arguments");
     }
     obj   = args->as.cons.car;
     f     = args->as.cons.cdr->as.cons.car;
@@ -277,7 +277,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
      * (their identity is preserved) so use the broader meta_readable
      * gate rather than supports_meta. */
     if (obj == NULL || !meta_readable(mino_type_of(obj))) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: type does not support metadata");
+        return throw_classified(S, "eval/type", "MTY001", "alter-meta!: type does not support metadata");
     }
     /* Single-threaded fast path: no other writer, so a load + apply +
      * store is trivially atomic. */
@@ -289,7 +289,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
         if (new_meta == NULL) return NULL;
         if (mino_type_of(new_meta) != MINO_NIL
             && mino_type_of(new_meta) != MINO_MAP) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "alter-meta!: f must return a map or nil");
         }
         next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
@@ -313,7 +313,7 @@ static mino_val *prim_alter_meta(mino_state *S, mino_val *args,
         if (new_meta == NULL) return NULL;
         if (mino_type_of(new_meta) != MINO_NIL
             && mino_type_of(new_meta) != MINO_MAP) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "alter-meta!: f must return a map or nil");
         }
         next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;

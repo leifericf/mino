@@ -1286,7 +1286,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
         *hdrs = count > 0
             ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
         if (count > 0 && *hdrs == NULL) {
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "http: out of memory");
             return -1;
         }
@@ -1302,7 +1302,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
                     snprintf(msg, sizeof(msg),
                              "%s: :headers entries must be "
                              "[name value] pairs", who);
-                    prim_throw_classified(S, "eval/contract", "MCT001",
+                    throw_classified(S, "eval/contract", "MCT001",
                                           msg);
                 }
                 return -1;
@@ -1318,7 +1318,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
                     snprintf(msg, sizeof(msg),
                              "%s: header names must be strings or "
                              "keywords and values strings", who);
-                    prim_throw_classified(S, "eval/contract", "MCT001",
+                    throw_classified(S, "eval/contract", "MCT001",
                                           msg);
                 }
                 return -1;
@@ -1331,7 +1331,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
         *hdrs = count > 0
             ? (http_hdr_in_t *)malloc(count * sizeof(**hdrs)) : NULL;
         if (count > 0 && *hdrs == NULL) {
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "http: out of memory");
             return -1;
         }
@@ -1347,7 +1347,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
                     snprintf(msg, sizeof(msg),
                              "%s: header names must be strings or "
                              "keywords and values strings", who);
-                    prim_throw_classified(S, "eval/contract", "MCT001",
+                    throw_classified(S, "eval/contract", "MCT001",
                                           msg);
                 }
                 return -1;
@@ -1359,7 +1359,7 @@ static int http_headers_arg(mino_state *S, const mino_val *v,
         char msg[160];
         snprintf(msg, sizeof(msg),
                  "%s: :headers must be a vector of pairs or a map", who);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *n = count;
@@ -1378,7 +1378,7 @@ static int http_opt_bool(mino_state *S, const mino_val *opts, const char *key,
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "http: opts key :%s must be a boolean", key);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = mino_val_bool_get(v);
@@ -1400,7 +1400,7 @@ static int http_opt_long(mino_state *S, const mino_val *opts, const char *key,
         snprintf(msg, sizeof(msg),
                  "http: opts key :%s must be an integer in %lld..%lld",
                  key, lo, hi);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = n;
@@ -1423,7 +1423,7 @@ static mino_val *http_rows_map(mino_state *S, const mino_http_parser_t *p,
     tmp  = (mino_val **)malloc(n * sizeof(*tmp));
     if (keys == NULL || vals == NULL || tmp == NULL) {
         free(keys); free(vals); free(tmp);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
     /* GC is suppressed while the C arrays hold freshly built values
@@ -1603,7 +1603,7 @@ static int http_read_parse_opts(mino_state *S, const mino_val *opts,
     out->informational    = 0;
     if (opts == NULL || mino_type_of(opts) == MINO_NIL) return 0;
     if (mino_type_of(opts) != MINO_MAP) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "http: opts must be a map");
         return -1;
     }
@@ -1657,19 +1657,19 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
     memset(&req, 0, sizeof(req));
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-encode-request requires one "
                                      "map");
     }
     m = args->as.cons.car;
     if (m == NULL || mino_type_of(m) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-encode-request: argument must "
                                      "be a map");
     }
     v = map_get_val(m, mino_keyword(S, "method"));
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "http-encode-request: :method must "
                                      "be a string");
     }
@@ -1677,7 +1677,7 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
     req.method_len = v->as.s.len;
     v = map_get_val(m, mino_keyword(S, "target"));
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "http-encode-request: :target must "
                                      "be a string");
     }
@@ -1685,7 +1685,7 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
     req.target_len = v->as.s.len;
     v = map_get_val(m, mino_keyword(S, "host"));
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "http-encode-request: :host must "
                                      "be a string");
     }
@@ -1706,7 +1706,7 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
         if (!http_text_arg(v, &req.body, &req.body_len)) {
             free(hdrs);
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "http-encode-request: :body must "
                                          "be bytes or a string");
         }
@@ -1714,7 +1714,7 @@ static mino_val *prim_http_encode_request(mino_state *S, mino_val *args,
 
     if (http_encode_request(&req, &out, &out_len, err, sizeof(err)) != 0) {
         free(hdrs);
-        return prim_throw_classified(S, "eval/contract", "MCT001", err);
+        return throw_classified(S, "eval/contract", "MCT001", err);
     }
     free(hdrs);
     {
@@ -1738,23 +1738,23 @@ static mino_val *prim_http_encode_chunk(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-encode-chunk requires one "
                                      "argument");
     }
     v = args->as.cons.car;
     if (!http_text_arg(v, &data, &len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-encode-chunk: argument must "
                                      "be a string or bytes value");
     }
     if (len > (size_t)HTTP_CL_LIMIT) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "http-encode-chunk: chunk is too "
                                      "large");
     }
     if (http_encode_chunk(data, len, &out, &out_len) != 0) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http-encode-chunk: out of memory");
     }
     result = mino_bytes(S, out, out_len);
@@ -1782,13 +1782,13 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
     memset(&resp, 0, sizeof(resp));
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-encode-response requires one "
                                      "map");
     }
     m = args->as.cons.car;
     if (m == NULL || mino_type_of(m) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-encode-response: argument must "
                                      "be a map");
     }
@@ -1797,13 +1797,13 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
         long long status_ll;
         if (!as_long(v, &status_ll)
             || status_ll < 100 || status_ll > 599) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "http-encode-response: :status "
                                          "must be an integer in 100..599");
         }
         resp.status = (int)status_ll;
     } else {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "http-encode-response: :status must "
                                      "be an integer in 100..599");
     }
@@ -1825,7 +1825,7 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
         if (!http_text_arg(v, &resp.body, &resp.body_len)) {
             free(hdrs);
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "http-encode-response: :body must "
                                          "be bytes or a string");
         }
@@ -1835,7 +1835,7 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
         if (mino_type_of(v) != MINO_STRING) {
             free(hdrs);
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "http-encode-response: :date must "
                                          "be a string");
         }
@@ -1845,7 +1845,7 @@ static mino_val *prim_http_encode_response(mino_state *S, mino_val *args,
 
     if (http_encode_response(&resp, &out, &out_len, err, sizeof(err)) != 0) {
         free(hdrs);
-        return prim_throw_classified(S, "eval/contract", "MCT001", err);
+        return throw_classified(S, "eval/contract", "MCT001", err);
     }
     free(hdrs);
     {
@@ -1870,7 +1870,7 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-parse-response requires "
                                      "data");
     }
@@ -1879,13 +1879,13 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "http-parse-response takes at "
                                          "most 2 arguments");
         }
     }
     if (!http_text_arg(data_val, &data, &len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-parse-response: data must be "
                                      "a string or bytes value");
     }
@@ -1893,7 +1893,7 @@ static mino_val *prim_http_parse_response(mino_state *S, mino_val *args,
     p = http_parser_new(o.max_header_bytes, o.max_headers,
                         o.max_body_bytes, 0);
     if (p == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
     p->bodiless = o.bodiless;
@@ -1916,7 +1916,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-parse-response-chunks requires "
                                      "a vector of buffers");
     }
@@ -1925,13 +1925,13 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "http-parse-response-chunks takes "
                                          "at most 2 arguments");
         }
     }
     if (vec == NULL || mino_type_of(vec) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-parse-response-chunks: "
                                      "argument must be a vector");
     }
@@ -1939,7 +1939,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
     p = http_parser_new(o.max_header_bytes, o.max_headers,
                         o.max_body_bytes, 0);
     if (p == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
     p->bodiless = o.bodiless;
@@ -1950,7 +1950,7 @@ static mino_val *prim_http_parse_response_chunks(mino_state *S,
         mino_val *el = vec_nth(vec, i);
         if (!http_text_arg(el, &data, &len)) {
             http_parser_free(p);
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "http-parse-response-chunks: "
                                          "every chunk must be a string or "
                                          "bytes value");
@@ -1977,7 +1977,7 @@ static mino_val *prim_http_parse_request(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-parse-request requires "
                                      "data");
     }
@@ -1986,13 +1986,13 @@ static mino_val *prim_http_parse_request(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "http-parse-request takes at "
                                          "most 2 arguments");
         }
     }
     if (!http_text_arg(data_val, &data, &len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-parse-request: data must be "
                                      "a string or bytes value");
     }
@@ -2000,7 +2000,7 @@ static mino_val *prim_http_parse_request(mino_state *S, mino_val *args,
     p = http_parser_new(o.max_header_bytes, o.max_headers,
                         o.max_body_bytes, 1);
     if (p == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
     http_parser_feed(p, data, len);
@@ -2021,7 +2021,7 @@ static mino_val *prim_http_parse_request_chunks(mino_state *S,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-parse-request-chunks requires "
                                      "a vector of buffers");
     }
@@ -2030,13 +2030,13 @@ static mino_val *prim_http_parse_request_chunks(mino_state *S,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "http-parse-request-chunks takes "
                                          "at most 2 arguments");
         }
     }
     if (vec == NULL || mino_type_of(vec) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-parse-request-chunks: "
                                      "argument must be a vector");
     }
@@ -2044,7 +2044,7 @@ static mino_val *prim_http_parse_request_chunks(mino_state *S,
     p = http_parser_new(o.max_header_bytes, o.max_headers,
                         o.max_body_bytes, 1);
     if (p == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http: out of memory");
     }
     for (i = 0; i < vec->as.vec.len; i++) {
@@ -2053,7 +2053,7 @@ static mino_val *prim_http_parse_request_chunks(mino_state *S,
         mino_val *el = vec_nth(vec, i);
         if (!http_text_arg(el, &data, &len)) {
             http_parser_free(p);
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "http-parse-request-chunks: "
                                          "every chunk must be a string or "
                                          "bytes value");
@@ -2442,7 +2442,7 @@ static mino_val *http_headers_prune(mino_state *S, mino_val *headers,
         if (n > 0 && (keys == NULL || vals == NULL)) {
             free(keys);
             free(vals);
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "redirect-next: out of memory");
             return NULL;
         }
@@ -2478,7 +2478,7 @@ static mino_val *http_headers_prune(mino_state *S, mino_val *headers,
         size_t n = headers->as.vec.len;
         els = n > 0 ? (mino_val **)malloc(n * sizeof(*els)) : NULL;
         if (n > 0 && els == NULL) {
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "redirect-next: out of memory");
             return NULL;
         }
@@ -2550,7 +2550,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "redirect-next requires a request "
                                      "map and a response map");
     }
@@ -2560,24 +2560,24 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "redirect-next takes at most 3 "
                                          "arguments");
         }
     }
     if (req == NULL || mino_type_of(req) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "redirect-next: request must be a "
                                      "map");
     }
     if (resp == NULL || mino_type_of(resp) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "redirect-next: response must be a "
                                      "map");
     }
     if (opts != NULL && mino_type_of(opts) != MINO_MAP
         && mino_type_of(opts) != MINO_NIL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "redirect-next: opts must be a map");
     }
     if (opts != NULL && mino_type_of(opts) == MINO_MAP) {
@@ -2585,7 +2585,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
                                                      "follow-redirects"));
         if (v != NULL && mino_type_of(v) != MINO_NIL) {
             if (mino_type_of(v) != MINO_BOOL) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "redirect-next: opts key "
                                              ":follow-redirects must be "
                                              "a boolean");
@@ -2614,7 +2614,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
         || (mino_type_of(method_val) != MINO_KEYWORD
             && mino_type_of(method_val) != MINO_SYMBOL
             && mino_type_of(method_val) != MINO_STRING)) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "redirect-next: request :method "
                                      "must be a keyword or string");
     }
@@ -2623,7 +2623,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
         uri_val = map_get_val(req, mino_keyword(S, "url"));
     }
     if (uri_val == NULL || mino_type_of(uri_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "redirect-next: request :uri must "
                                      "be a string");
     }
@@ -2631,7 +2631,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
     base_uri_len = uri_val->as.s.len;
     parsed = http_parse_url_str(S, base_uri, base_uri_len);
     if (parsed == NULL) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "redirect-next: request :uri is "
                                      "not a parseable http(s) URL");
     }
@@ -2641,7 +2641,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
     mino_current_ctx(S)->gc_depth++;
     if (!http_url_parts(S, parsed, &base)) {
         mino_current_ctx(S)->gc_depth--;
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "redirect-next: request :uri is "
                                      "not a parseable http(s) URL");
     }
@@ -2759,7 +2759,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
         free(keys);
         free(vals);
         mino_current_ctx(S)->gc_depth--;
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "redirect-next: out of memory");
     }
     kept = 0;
@@ -2885,7 +2885,7 @@ static int httpreq_bool_default(mino_state *S, const mino_val *m,
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "http-request: :%s must be a boolean", key);
-        prim_throw_classified(S, "http/request", "MHR003", msg);
+        throw_classified(S, "http/request", "MHR003", msg);
         return -1;
     }
     *out = mino_val_bool_get(v);
@@ -2908,14 +2908,14 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     v = map_get_val(m, mino_keyword(S, "method"));
     if (v == NULL || mino_type_of(v) != MINO_STRING
         || v->as.s.len == 0 || v->as.s.len > HTTPREQ_METHOD_MAX) {
-        prim_throw_classified(S, "http/method", "MHR001",
+        throw_classified(S, "http/method", "MHR001",
                               "http-request: :method must be a token "
                               "string");
         return -1;
     }
     for (i = 0; i < v->as.s.len; i++) {
         if (!http_tchar((unsigned char)v->as.s.data[i])) {
-            prim_throw_classified(S, "http/method", "MHR001",
+            throw_classified(S, "http/method", "MHR001",
                                   "http-request: :method must be a token "
                                   "string");
             return -1;
@@ -2935,7 +2935,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
                    && memcmp(s, "https", 5) == 0) {
             p->is_https = 1;
         } else {
-            prim_throw_classified(S, "http/request", "MHR003",
+            throw_classified(S, "http/request", "MHR003",
                                   "http-request: :scheme must be :http "
                                   "or :https");
             return -1;
@@ -2945,7 +2945,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     v = map_get_val(m, mino_keyword(S, "host"));
     if (v == NULL || mino_type_of(v) != MINO_STRING
         || v->as.s.len == 0 || v->as.s.len >= HTTPREQ_HOST_CAP) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: :host must be a non-empty "
                               "string under 256 bytes");
         return -1;
@@ -2955,7 +2955,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
 
     v = map_get_val(m, mino_keyword(S, "port"));
     if (!as_long(v, &p->port) || p->port < 1 || p->port > 65535) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: :port must be an integer in "
                               "1..65535");
         return -1;
@@ -2964,7 +2964,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     v = map_get_val(m, mino_keyword(S, "target"));
     if (v == NULL || mino_type_of(v) != MINO_STRING
         || !http_valid_target(v->as.s.data, v->as.s.len)) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: :target must be a non-empty "
                               "string without spaces or control bytes");
         return -1;
@@ -2980,7 +2980,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     if (p->headers_val != NULL
         && mino_type_of(p->headers_val) != MINO_VECTOR
         && mino_type_of(p->headers_val) != MINO_MAP) {
-        prim_throw_classified(S, "http/headers", "MHR002",
+        throw_classified(S, "http/headers", "MHR002",
                               "http-request: :headers must be a vector "
                               "of [name value] pairs or a map");
         return -1;
@@ -3004,7 +3004,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     if (p->body_val != NULL
         && mino_type_of(p->body_val) != MINO_STRING
         && !mino_is_bytes(p->body_val)) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: :body must be a string, "
                               "bytes, or nil");
         return -1;
@@ -3014,7 +3014,7 @@ static int httpreq_read(mino_state *S, mino_val *m, httpreq_parts_t *p)
     p->keepalive = HTTPREQ_DEFAULT_KEEPALIVE_MS;
     if (v != NULL && mino_type_of(v) != MINO_NIL && !as_long(v,
                                                              &p->keepalive)) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: :keepalive must be an "
                               "integer");
         return -1;
@@ -3076,7 +3076,7 @@ static int httpreq_header_row(mino_val *k, mino_val *val,
 
 /* Headers value into a malloc'd encoder array (caller frees), with
  * room for one injected Connection header. Row rejections free the
- * array BEFORE throwing: prim_throw_classified longjmps to the
+ * array BEFORE throwing: throw_classified longjmps to the
  * nearest try frame, so any throw with the array live leaks it. */
 static int httpreq_headers_array(mino_state *S, mino_val *headers,
                                  size_t extra,
@@ -3107,7 +3107,7 @@ static int httpreq_headers_array(mino_state *S, mino_val *headers,
             if (httpreq_header_row(vec_nth(entry, 0), vec_nth(entry, 1),
                                    &hdrs[i], msg, sizeof(msg)) != 0) {
                 free(hdrs);
-                prim_throw_classified(S, "http/headers", "MHR002", msg);
+                throw_classified(S, "http/headers", "MHR002", msg);
                 return -1;
             }
         }
@@ -3120,7 +3120,7 @@ static int httpreq_headers_array(mino_state *S, mino_val *headers,
             if (httpreq_header_row(k, map_get_val(headers, k),
                                    &hdrs[i], msg, sizeof(msg)) != 0) {
                 free(hdrs);
-                prim_throw_classified(S, "http/headers", "MHR002", msg);
+                throw_classified(S, "http/headers", "MHR002", msg);
                 return -1;
             }
         }
@@ -3130,7 +3130,7 @@ static int httpreq_headers_array(mino_state *S, mino_val *headers,
     return 0;
 
 oom:
-    prim_throw_classified(S, "internal", "MIN001",
+    throw_classified(S, "internal", "MIN001",
                           "http-request: out of memory");
     return -1;
 }
@@ -3238,7 +3238,7 @@ static mino_val *httpreq_with_uri(mino_state *S, mino_val *m,
     if (keys == NULL || vals == NULL) {
         free(keys);
         free(vals);
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
                               "http-request: out of memory");
         return NULL;
     }
@@ -3276,14 +3276,14 @@ static int httpreq_translate(mino_state *S, mino_val *next,
     int r = -1;
 
     if (next == NULL) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: redirect follow decision "
                               "has no :request");
         return -1;
     }
     uri_val = map_get_val(next, mino_keyword(S, "uri"));
     if (uri_val == NULL || mino_type_of(uri_val) != MINO_STRING) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: redirect target has no "
                               ":uri");
         return -1;
@@ -3293,7 +3293,7 @@ static int httpreq_translate(mino_state *S, mino_val *next,
     if (parsed == NULL) return -1;
     gc_pin(parsed);
     if (!http_url_parts(S, parsed, &up)) {
-        prim_throw_classified(S, "http/request", "MHR003",
+        throw_classified(S, "http/request", "MHR003",
                               "http-request: redirect target is not an "
                               "http(s) URL");
         goto unpin;
@@ -3304,7 +3304,7 @@ static int httpreq_translate(mino_state *S, mino_val *next,
     if (keys == NULL || vals == NULL) {
         free(keys);
         free(vals);
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
                               "http-request: out of memory");
         goto unpin;
     }
@@ -3316,7 +3316,7 @@ static int httpreq_translate(mino_state *S, mino_val *next,
             mino_current_ctx(S)->gc_depth--;
             free(keys);
             free(vals);
-            prim_throw_classified(S, "http/request", "MHR003",
+            throw_classified(S, "http/request", "MHR003",
                                   "http-request: redirect target has no "
                                   "usable :method");
             goto unpin;
@@ -3330,7 +3330,7 @@ static int httpreq_translate(mino_state *S, mino_val *next,
             mino_current_ctx(S)->gc_depth--;
             free(keys);
             free(vals);
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "http-request: out of memory");
             goto unpin;
         }
@@ -3439,13 +3439,13 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
     char msg[240];
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "http-request requires one request "
                                      "map");
     }
     req = args->as.cons.car;
     if (req == NULL || mino_type_of(req) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "http-request: argument must be a "
                                      "request map");
     }
@@ -3457,7 +3457,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
     if (req_ref == NULL || cur_ref == NULL) {
         mino_unref(S, req_ref);
         mino_unref(S, cur_ref);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "http-request: out of memory");
     }
     cur = req;
@@ -3512,7 +3512,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
         if (sock_ref == NULL) {
             httpreq_close_handle(sock);
             sock = NULL;
-            res = prim_throw_classified(S, "internal", "MIN001",
+            res = throw_classified(S, "internal", "MIN001",
                                         "http-request: out of memory");
             goto done;
         }
@@ -3550,7 +3550,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 if (tls_ref == NULL) {
                     httpreq_close_handle(tls);
                     sock = tls;
-                    res = prim_throw_classified(S, "internal", "MIN001",
+                    res = throw_classified(S, "internal", "MIN001",
                                                 "http-request: out of "
                                                 "memory");
                     goto close_and_done;
@@ -3565,7 +3565,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
              * so a plain socket under an https endpoint cannot happen;
              * refusing here keeps plaintext off TLS ports even if it
              * ever did. */
-            res = prim_throw_classified(S, "tls", "MTL004",
+            res = throw_classified(S, "tls", "MTL004",
                                         "http-request: pooled socket is "
                                         "not a TLS session");
             goto close_and_done;
@@ -3610,7 +3610,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 if (!http_text_arg(parts.body_val, &rq.body,
                                    &rq.body_len)) {
                     free(hdrs);
-                    res = prim_throw_classified(S, "http/request",
+                    res = throw_classified(S, "http/request",
                                                 "MHR003",
                                                 "http-request: :body must "
                                                 "be a string, bytes, or "
@@ -3622,7 +3622,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                      sizeof(err));
             free(hdrs);
             if (rc != 0) {
-                res = prim_throw_classified(S, "http/headers", "MHR002",
+                res = throw_classified(S, "http/headers", "MHR002",
                                             err);
                 goto close_and_done;
             }
@@ -3659,7 +3659,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                  HTTP_DEFAULT_MAX_HEADERS,
                                  parts.max_bytes, 0);
         if (parser == NULL) {
-            res = prim_throw_classified(S, "internal", "MIN001",
+            res = throw_classified(S, "internal", "MIN001",
                                         "http-request: out of memory");
             goto close_and_done;
         }
@@ -3713,7 +3713,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                  : parser->trailer_start);
         hmap_ref = mino_ref_new(S, hmap);
         if (hmap_ref == NULL) {
-            res = prim_throw_classified(S, "internal", "MIN001",
+            res = throw_classified(S, "internal", "MIN001",
                                         "http-request: out of memory");
             goto close_and_done;
         }
@@ -3725,7 +3725,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             size_t uri_len;
             if (httpreq_uri(&parts, uribuf, sizeof(uribuf), &uri_len)
                 != 0) {
-                res = prim_throw_classified(S, "http/request", "MHR003",
+                res = throw_classified(S, "http/request", "MHR003",
                                             "http-request: request URL "
                                             "is too long");
                 goto close_and_done;
@@ -3769,7 +3769,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                     if (httpreq_trace_push(S, uval, &trace_refs,
                                            &trace_len, &trace_cap) != 0) {
                         gc_unpin(1);
-                        res = prim_throw_classified(
+                        res = throw_classified(
                             S, "internal", "MIN001",
                             "http-request: out of memory");
                         goto close_and_done;
@@ -3780,7 +3780,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 if (!ok) goto close_and_done;
                 next_ref = mino_ref_new(S, new_cur);
                 if (next_ref == NULL) {
-                    res = prim_throw_classified(S, "internal", "MIN001",
+                    res = throw_classified(S, "internal", "MIN001",
                                                 "http-request: out of "
                                                 "memory");
                     goto close_and_done;
@@ -3844,7 +3844,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             if (body_val == NULL) goto close_and_done;
             body_ref = mino_ref_new(S, body_val);
             if (body_ref == NULL) {
-                res = prim_throw_classified(S, "internal", "MIN001",
+                res = throw_classified(S, "internal", "MIN001",
                                             "http-request: out of memory");
                 goto close_and_done;
             }
@@ -3886,7 +3886,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                     if (out == NULL) goto close_and_done;
                     out_ref = mino_ref_new(S, out);
                     if (out_ref == NULL) {
-                        res = prim_throw_classified(S, "internal",
+                        res = throw_classified(S, "internal",
                                                     "MIN001",
                                                     "http-request: out "
                                                     "of memory");
@@ -3905,7 +3905,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 : NULL;
             if (trace_len > 0 && trace_vals == NULL) {
                 mino_current_ctx(S)->gc_depth--;
-                res = prim_throw_classified(S, "internal", "MIN001",
+                res = throw_classified(S, "internal", "MIN001",
                                             "http-request: out of "
                                             "memory");
                 goto done;
@@ -3966,7 +3966,7 @@ fail_io:
         http_parser_free(parser);
         parser = NULL;
     }
-    res = prim_throw_classified(S, kind, code, msg);
+    res = throw_classified(S, kind, code, msg);
     goto done;
 
 done:

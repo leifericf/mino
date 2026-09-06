@@ -465,12 +465,12 @@ int mino_chan_put(mino_state *S, mino_val *ch, mino_val *val,
     /* Park. */
     drop_committed_putters(impl);
     if (impl->putters_len >= ASYNC_CHAN_MAX_PENDING) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
             "channel has too many pending puts (> 1024)");
         return -1;
     }
     if (grow_q(&impl->putters, &impl->putters_cap, impl->putters_len) < 0) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "channel putters queue out of memory");
         return -1;
     }
@@ -538,12 +538,12 @@ int mino_chan_take(mino_state *S, mino_val *ch, mino_val *callback)
     /* Park. */
     drop_committed_takers(impl);
     if (impl->takers_len >= ASYNC_CHAN_MAX_PENDING) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
             "channel has too many pending takes (> 1024)");
         return -1;
     }
     if (grow_q(&impl->takers, &impl->takers_cap, impl->takers_len) < 0) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "channel takers queue out of memory");
         return -1;
     }
@@ -685,12 +685,12 @@ int mino_chan_put_alts(mino_state *S, mino_val *ch, mino_val *val,
     /* Park with the alts flag attached. */
     drop_committed_putters(impl);
     if (impl->putters_len >= ASYNC_CHAN_MAX_PENDING) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
             "channel has too many pending puts (> 1024)");
         return -1;
     }
     if (grow_q(&impl->putters, &impl->putters_cap, impl->putters_len) < 0) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "channel putters queue out of memory");
         return -1;
     }
@@ -834,12 +834,12 @@ int mino_chan_take_alts(mino_state *S, mino_val *ch,
     /* Park with the alts flag. */
     drop_committed_takers(impl);
     if (impl->takers_len >= ASYNC_CHAN_MAX_PENDING) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
             "channel has too many pending takes (> 1024)");
         return -1;
     }
     if (grow_q(&impl->takers, &impl->takers_cap, impl->takers_len) < 0) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "channel takers queue out of memory");
         return -1;
     }

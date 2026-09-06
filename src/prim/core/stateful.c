@@ -100,7 +100,7 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
     mino_val *atom;
     mino_val *rest;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "atom requires one argument");
     }
     initial = args->as.cons.car;
@@ -119,7 +119,7 @@ static mino_val *prim_atom(mino_state *S, mino_val *args, mino_env *env)
                 if (v != NULL && mino_type_of(v) != MINO_NIL
                     && mino_type_of(v) != MINO_MAP
                     && mino_type_of(v) != MINO_SORTED_MAP) {
-                    return prim_throw_classified(S, "eval/type", "MTY001",
+                    return throw_classified(S, "eval/type", "MTY001",
                         "atom: :meta value must be a map or nil");
                 }
                 meta = (v != NULL
@@ -195,13 +195,13 @@ static mino_val *prim_delay_star(mino_state *S, mino_val *args, mino_env *env)
     mino_val *fn, *d;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "delay* requires one argument");
     }
     fn = args->as.cons.car;
     if (fn == NULL || (mino_type_of(fn) != MINO_FN
                        && mino_type_of(fn) != MINO_PRIM)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "delay*: argument must be a fn of no arguments");
     }
     d = alloc_val(S, MINO_DELAY);
@@ -219,18 +219,18 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
     mino_val *timeout_val = NULL;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
     }
     a    = args->as.cons.car;
     argc = 1;
     if (mino_is_cons(args->as.cons.cdr)) {
         ms_v = args->as.cons.cdr->as.cons.car;
         if (!mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
+            return throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
         }
         timeout_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
+            return throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
         }
         argc = 3;
     }
@@ -245,7 +245,7 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         long       ms;
         long long  ms_ll;
         if (!mino_val_int_p(ms_v)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "deref: timeout argument must be an integer (milliseconds)");
         }
         ms_ll = mino_val_int_get(ms_v);
@@ -255,7 +255,7 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         if (a != NULL && mino_type_of(a) == MINO_FUTURE) {
             return mino_future_deref_timed(S, a, ms, timeout_val);
         }
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "deref: 3-arg form only supported on blocking refs (future, promise)");
     }
 
@@ -281,7 +281,7 @@ static mino_val *prim_deref(mino_state *S, mino_val *args, mino_env *env)
         return a->as.agent.val;
     }
     if (a != NULL && mino_type_of(a) == MINO_STORE)  return a->as.store.val;
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, store, or reduced");
+    return throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, store, or reduced");
 }
 
 static mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
@@ -289,12 +289,12 @@ static mino_val *prim_reset_bang(mino_state *S, mino_val *args, mino_env *env)
     mino_val *a, *val, *old;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "reset! requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "reset! requires two arguments");
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "reset!: first argument must be an atom");
+        return throw_classified(S, "eval/type", "MTY001", "reset!: first argument must be an atom");
     }
     old = a->as.atom.val;
     if (atom_set(S, a, old, val, env) != 0) return NULL;
@@ -311,12 +311,12 @@ static mino_val *prim_swap_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *a, *fn, *cur, *call_args, *result, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "swap! requires at least 2 arguments: atom and function");
+        return throw_classified(S, "eval/arity", "MAR001", "swap! requires at least 2 arguments: atom and function");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
+        return throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
     }
     extra = args->as.cons.cdr->as.cons.cdr;
     if (!S->threading.multi_threaded) {
@@ -379,14 +379,14 @@ static mino_val *prim_compare_and_set_bang(mino_state *S, mino_val *args, mino_e
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "compare-and-set! requires three arguments: atom, expected, new-val");
     }
     a        = args->as.cons.car;
     expected = args->as.cons.cdr->as.cons.car;
     new_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "compare-and-set!: first argument must be an atom");
     }
     if (ref_validate(S, a->as.atom.validator, new_val, env,
@@ -410,7 +410,7 @@ static mino_val *prim_atom_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "atom? requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "atom? requires one argument");
     }
     return mino_is_atom(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
@@ -502,7 +502,7 @@ static int watchable_check_state(mino_state *S, mino_val *v)
     else if (mino_type_of(v) == MINO_AGENT) owner = v->as.agent.owning_state;
     else if (mino_type_of(v) == MINO_STORE) owner = v->as.store.owning_state;
     if (owner != NULL && owner != S) {
-        prim_throw_classified(S, "eval/state", "MST007",
+        throw_classified(S, "eval/state", "MST007",
             "reference from foreign state");
         return 1;
     }
@@ -519,13 +519,13 @@ static mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "add-watch requires three arguments: reference key fn");
+        return throw_classified(S, "eval/arity", "MAR001", "add-watch requires three arguments: reference key fn");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
     fn  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom, ref, var, agent, or store");
+        return throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom, ref, var, agent, or store");
     }
     if (watchable_check_state(S, a)) return NULL;
     /* The watch fn is invoked as (fn key ref old-value new-value) on
@@ -535,7 +535,7 @@ static mino_val *prim_add_watch(mino_state *S, mino_val *args, mino_env *env)
     if (fn == NULL || (mino_type_of(fn) != MINO_FN
                         && mino_type_of(fn) != MINO_PRIM
                         && mino_type_of(fn) != MINO_MACRO)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "add-watch: watch fn must be a fn");
     }
     /* CAS retry loop: load the slot, build the next map off it, and
@@ -572,12 +572,12 @@ static mino_val *prim_remove_watch(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "remove-watch requires two arguments: reference key");
+        return throw_classified(S, "eval/arity", "MAR001", "remove-watch requires two arguments: reference key");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom, ref, var, agent, or store");
+        return throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom, ref, var, agent, or store");
     }
     if (watchable_check_state(S, a)) return NULL;
     for (;;) {
@@ -604,13 +604,13 @@ static mino_val *prim_set_validator(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: reference fn");
+        return throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: reference fn");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (!watchable_get(a, &watches_slot, &validator_slot)
         || validator_slot == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom, ref, var, or agent");
+        return throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom, ref, var, or agent");
     }
     if (watchable_check_state(S, a)) return NULL;
     /* nil removes the validator. The CAS retry loop handles the case
@@ -632,7 +632,7 @@ static mino_val *prim_set_validator(mino_state *S, mino_val *args,
     if (mino_type_of(fn) != MINO_FN
         && mino_type_of(fn) != MINO_PRIM
         && mino_type_of(fn) != MINO_MACRO) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-validator!: validator must be a fn or nil");
     }
     /* JVM Clojure does not validate the current value at install time; only
@@ -655,12 +655,12 @@ static mino_val *prim_get_validator(mino_state *S, mino_val *args,
     mino_val **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "get-validator requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "get-validator requires one argument");
     }
     a = args->as.cons.car;
     if (!watchable_get(a, &watches_slot, &validator_slot)
         || validator_slot == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom, ref, var, or agent");
+        return throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom, ref, var, or agent");
     }
     if (watchable_check_state(S, a)) return NULL;
     return *validator_slot != NULL ? *validator_slot : mino_nil(S);
@@ -673,12 +673,12 @@ static mino_val *prim_reset_vals(mino_state *S, mino_val *args, mino_env *env)
     mino_val *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "reset-vals! requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "reset-vals! requires two arguments");
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "reset-vals!: first argument must be an atom");
+        return throw_classified(S, "eval/type", "MTY001", "reset-vals!: first argument must be an atom");
     }
     old = a->as.atom.val;
     if (atom_set(S, a, old, val, env) != 0) return NULL;
@@ -693,12 +693,12 @@ static mino_val *prim_swap_vals(mino_state *S, mino_val *args, mino_env *env)
     mino_val *a, *fn, *cur, *call_args, *result;
     mino_val *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "swap-vals! requires at least 2 arguments: atom and function");
+        return throw_classified(S, "eval/arity", "MAR001", "swap-vals! requires at least 2 arguments: atom and function");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "swap-vals!: first argument must be an atom");
+        return throw_classified(S, "eval/type", "MTY001", "swap-vals!: first argument must be an atom");
     }
     cur = a->as.atom.val;
     call_args = swap_build_args(S, cur, args->as.cons.cdr->as.cons.cdr);
@@ -726,12 +726,12 @@ static mino_val *prim_set_fail_alloc_at(mino_state *S, mino_val *args,
     mino_val *n;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "set-fail-alloc-at! requires 1 argument");
     }
     n = args->as.cons.car;
     if (n == NULL || !mino_val_int_p(n)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-fail-alloc-at!: argument must be an integer");
     }
     mino_set_fail_alloc_at(S, (long)mino_val_int_get(n));
@@ -749,7 +749,7 @@ static mino_val *prim_mino_thread_limit(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "mino-thread-limit takes no arguments");
     }
     return mino_int(S, (long long)mino_get_option(S, MINO_OPT_THREAD_LIMIT));
@@ -789,7 +789,7 @@ static mino_val *prim_mino_thread_id(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "mino-thread-id* takes no arguments");
     }
     return mino_int(S, thread_id_get());
@@ -801,7 +801,7 @@ static mino_val *prim_mino_thread_count(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "mino-thread-count takes no arguments");
     }
     return mino_int(S, mino_thread_count(S));
@@ -818,14 +818,14 @@ static mino_val *prim_future_call(mino_state *S, mino_val *args,
 {
     mino_val *thunk;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future-call expects exactly one argument");
     }
     thunk = args->as.cons.car;
     if (thunk == NULL || (mino_type_of(thunk) != MINO_FN
                           && mino_type_of(thunk) != MINO_PRIM
                           && mino_type_of(thunk) != MINO_MACRO)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "future-call expects a function");
     }
     return mino_future_spawn(S, thunk, env);
@@ -837,7 +837,7 @@ static mino_val *prim_promise(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "promise takes no arguments");
     }
     return mino_promise_new(S);
@@ -852,13 +852,13 @@ static mino_val *prim_deliver(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "deliver expects two arguments: promise value");
     }
     promise = args->as.cons.car;
     value   = args->as.cons.cdr->as.cons.car;
     if (promise == NULL || mino_type_of(promise) != MINO_FUTURE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "deliver expects a promise");
     }
     return mino_promise_deliver(S, promise, value) ? promise : mino_nil(S);
@@ -871,7 +871,7 @@ static mino_val *prim_future_cancel(mino_state *S, mino_val *args,
     mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future-cancel expects one argument");
     }
     fut = args->as.cons.car;
@@ -885,7 +885,7 @@ static mino_val *prim_future_done_q(mino_state *S, mino_val *args,
     mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future-done? expects one argument");
     }
     fut = args->as.cons.car;
@@ -899,7 +899,7 @@ static mino_val *prim_future_cancelled_q(mino_state *S, mino_val *args,
     mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future-cancelled? expects one argument");
     }
     fut = args->as.cons.car;
@@ -913,7 +913,7 @@ static mino_val *prim_future_q(mino_state *S, mino_val *args,
     mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future? expects one argument");
     }
     x = args->as.cons.car;
@@ -929,12 +929,12 @@ static mino_val *prim_future_deref(mino_state *S, mino_val *args,
     mino_val *fut;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "future-deref expects one argument");
     }
     fut = args->as.cons.car;
     if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "future-deref expects a future");
     }
     return mino_future_deref(S, fut);
@@ -947,7 +947,7 @@ static mino_val *prim_volatile_bang(mino_state *S, mino_val *args,
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "volatile! requires one argument");
     }
     return mino_volatile(S, args->as.cons.car);
@@ -958,7 +958,7 @@ static mino_val *prim_volatile_p(mino_state *S, mino_val *args,
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "volatile? requires one argument");
     }
     return mino_is_volatile(args->as.cons.car) ? mino_true(S) : mino_false(S);
@@ -971,13 +971,13 @@ static mino_val *prim_vreset_bang(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "vreset! requires two arguments");
     }
     v   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (v == NULL || mino_type_of(v) != MINO_VOLATILE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "vreset!: first argument must be a volatile");
     }
     gc_write_barrier(S, v, v->as.volatile_.val, val);

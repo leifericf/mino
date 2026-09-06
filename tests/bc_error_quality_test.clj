@@ -57,7 +57,7 @@
   ;; Regression: catch values from user-throw paths previously lacked
   ;; :mino/location. normalize_exception built a 5-key map (kind, code,
   ;; phase, message, data) but never added location; only system throws
-  ;; (via prim_throw_classified) included it. Inconsistent error shape.
+  ;; (via throw_classified) included it. Inconsistent error shape.
   ;;
   ;; Fix: normalize_exception now consults bc_current_pc (preferred)
   ;; or eval_current_form (fallback) and attaches :mino/location when
@@ -84,7 +84,7 @@
   ;; reported the call site's line (eval_current_form, which stays
   ;; at the outer (f) form during BC dispatch) instead of the throw
   ;; site's line (bc_current_pc, which the VM dispatch loop keeps in
-  ;; sync with the current instruction). Fix: prim_throw_classified
+  ;; sync with the current instruction). Fix: throw_classified
   ;; and normalize_exception now prefer the BC PC when available.
   (testing "arity-error inside a BC fn body has a non-nil line"
     (def bc-bad (fn [] (assoc nil)))

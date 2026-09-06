@@ -116,7 +116,7 @@ mino_val *prim_get_thread_bindings(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "get-thread-bindings takes no arguments");
     }
     return mino_snapshot_thread_bindings(S);
@@ -140,13 +140,13 @@ mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "set-dyn-binding! requires two arguments: name value");
     }
     name_sym = args->as.cons.car;
     new_val  = args->as.cons.cdr->as.cons.car;
     if (name_sym == NULL || mino_type_of(name_sym) != MINO_SYMBOL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-dyn-binding!: first argument must be a symbol");
     }
     name = name_sym->as.s.data;
@@ -172,7 +172,7 @@ mino_val *prim_set_dyn_binding(mino_state *S, mino_val *args,
         char msg[256];
         snprintf(msg, sizeof(msg),
             "Can't change/establish root binding of: %s with set!", name);
-        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return throw_classified(S, "eval/contract", "MCT001", msg);
     }
 }
 
@@ -201,7 +201,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "with-bindings* requires two arguments: bindings-map fn");
     }
     map_arg = args->as.cons.car;
@@ -212,7 +212,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
         return mino_call(S, fn, mino_nil(S), env);
     }
     if (mino_type_of(map_arg) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "with-bindings*: bindings argument must be a map or nil");
     }
 
@@ -224,7 +224,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
                 && mino_type_of(key) != MINO_SYMBOL
                 && mino_type_of(key) != MINO_STRING)) {
             dyn_binding_list_free(bhead);
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "with-bindings*: keys must be vars, symbols, or strings");
         }
         /* Clojure-canon: with-bindings/push-thread-bindings map is
@@ -234,7 +234,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
         b = dyn_binding_make(S, key, val, bhead);
         if (b == NULL) {
             dyn_binding_list_free(bhead);
-            return prim_throw_classified(S, "eval/contract", "MIN001",
+            return throw_classified(S, "eval/contract", "MIN001",
                 "with-bindings*: out of memory");
         }
         bhead = b;
@@ -243,7 +243,7 @@ mino_val *prim_with_bindings_star(mino_state *S, mino_val *args,
     frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) {
         dyn_binding_list_free(bhead);
-        return prim_throw_classified(S, "eval/contract", "MIN001",
+        return throw_classified(S, "eval/contract", "MIN001",
             "with-bindings*: out of memory");
     }
     frame->bindings = bhead;
@@ -276,7 +276,7 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "push-thread-bindings* requires one argument: bindings-map");
     }
     map_arg = args->as.cons.car;
@@ -285,7 +285,7 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
      * still has something to remove. */
     if (map_arg != NULL && mino_type_of(map_arg) != MINO_NIL
         && mino_type_of(map_arg) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "push-thread-bindings*: bindings argument must be a map or nil");
     }
     if (map_arg != NULL && mino_type_of(map_arg) == MINO_MAP) {
@@ -297,13 +297,13 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
                     && mino_type_of(key) != MINO_SYMBOL
                     && mino_type_of(key) != MINO_STRING)) {
                 dyn_binding_list_free(bhead);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "push-thread-bindings*: keys must be vars, symbols, or strings");
             }
             b = dyn_binding_make(S, key, val, bhead);
             if (b == NULL) {
                 dyn_binding_list_free(bhead);
-                return prim_throw_classified(S, "eval/contract", "MIN001",
+                return throw_classified(S, "eval/contract", "MIN001",
                     "push-thread-bindings*: out of memory");
             }
             bhead = b;
@@ -312,7 +312,7 @@ mino_val *prim_push_thread_bindings_star(mino_state *S, mino_val *args,
     frame = (dyn_frame_t *)calloc(1, sizeof(*frame));
     if (frame == NULL) {
         dyn_binding_list_free(bhead);
-        return prim_throw_classified(S, "eval/contract", "MIN001",
+        return throw_classified(S, "eval/contract", "MIN001",
             "push-thread-bindings*: out of memory");
     }
     frame->bindings = bhead;
@@ -330,12 +330,12 @@ mino_val *prim_pop_thread_bindings_star(mino_state *S, mino_val *args,
     dyn_frame_t *frame;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "pop-thread-bindings* takes no arguments");
     }
     frame = mino_current_ctx(S)->dyn_stack;
     if (frame == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST005",
+        return throw_classified(S, "eval/state", "MST005",
             "pop-thread-bindings*: no active binding frame");
     }
     mino_current_ctx(S)->dyn_stack = frame->prev;
@@ -356,12 +356,12 @@ mino_val *prim_thread_bound_p(mino_state *S, mino_val *args,
     const char    *name;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "thread-bound? requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "thread-bound?: expected a var");
     }
     name = v->as.var.sym;

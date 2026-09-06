@@ -64,23 +64,23 @@ static mino_val *prim_base64_encode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "base64-encode requires one argument");
     }
     v = args->as.cons.car;
     if (!codec_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "base64-encode: argument must be a "
                                      "string or bytes value");
     }
     if (len > (SIZE_MAX / 4 - 1) * 3) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "base64-encode: input too large");
     }
     out_len = ((len + 2) / 3) * 4;
     out     = (unsigned char *)malloc(out_len + 1);
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "base64-encode: out of memory");
     }
     for (i = 0; i + 3 <= len; i += 3) {
@@ -126,12 +126,12 @@ static mino_val *prim_base64_decode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "base64-decode requires one argument");
     }
     v = args->as.cons.car;
     if (!codec_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "base64-decode: argument must be a "
                                      "string or bytes value");
     }
@@ -140,11 +140,11 @@ static mino_val *prim_base64_decode(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg),
                  "base64-decode: input length %lu is not a multiple of 4",
                  (unsigned long)len);
-        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return throw_classified(S, "eval/contract", "MCT001", msg);
     }
     out = (unsigned char *)malloc(3 * (len / 4));
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "base64-decode: out of memory");
     }
     for (blk = 0; blk < len; blk += 4) {
@@ -164,7 +164,7 @@ static mino_val *prim_base64_decode(mino_state *S, mino_val *args,
                          "byte %lu", (unsigned)src[blk + j],
                          (unsigned long)(blk + j));
                 free(out);
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              msg);
             }
         }
@@ -177,7 +177,7 @@ static mino_val *prim_base64_decode(mino_state *S, mino_val *args,
                          "base64-decode: non-canonical block at byte %lu "
                          "(leftover bits set)", (unsigned long)blk);
                 free(out);
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              msg);
             }
         }
@@ -226,22 +226,22 @@ static mino_val *prim_hex_encode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "hex-encode requires one argument");
     }
     v = args->as.cons.car;
     if (!codec_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hex-encode: argument must be a "
                                      "string or bytes value");
     }
     if (len > SIZE_MAX / 2) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "hex-encode: input too large");
     }
     out = (unsigned char *)malloc(2 * len + 1);
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "hex-encode: out of memory");
     }
     for (i = 0; i < len; i++) {
@@ -266,23 +266,23 @@ static mino_val *prim_hex_decode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "hex-decode requires one argument");
     }
     v = args->as.cons.car;
     if (!codec_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hex-decode: argument must be a "
                                      "string or bytes value");
     }
     if (len % 2 != 0) {
         snprintf(msg, sizeof(msg),
                  "hex-decode: input length %lu is odd", (unsigned long)len);
-        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return throw_classified(S, "eval/contract", "MCT001", msg);
     }
     out = (unsigned char *)malloc(len / 2 > 0 ? len / 2 : 1);
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "hex-decode: out of memory");
     }
     for (i = 0; i < len; i += 2) {
@@ -295,7 +295,7 @@ static mino_val *prim_hex_decode(mino_state *S, mino_val *args,
                      "hex-decode: invalid character 0x%02x at byte %lu",
                      (unsigned)bad, (unsigned long)off);
             free(out);
-            return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            return throw_classified(S, "eval/contract", "MCT001", msg);
         }
         out[i / 2] = (unsigned char)(hi * 16 + lo);
     }
@@ -382,7 +382,7 @@ static mino_val *prim_bytes_to_string(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "bytes->string requires one or two "
                                      "arguments");
     }
@@ -392,19 +392,19 @@ static mino_val *prim_bytes_to_string(mino_state *S, mino_val *args,
         cap_arg  = rest->as.cons.car;
         have_cap = 1;
         if (mino_is_cons(rest->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "bytes->string requires one or two "
                                          "arguments");
         }
     }
     if (!codec_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bytes->string: argument must be a "
                                      "string or bytes value");
     }
     if (have_cap) {
         if (!as_long(cap_arg, &cap) || cap < 0) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "bytes->string: max-bytes must be a "
                                          "non-negative integer");
         }
@@ -412,14 +412,14 @@ static mino_val *prim_bytes_to_string(mino_state *S, mino_val *args,
             snprintf(msg, sizeof(msg),
                      "bytes->string: input length %lu exceeds max-bytes %lld",
                      (unsigned long)len, cap);
-            return prim_throw_classified(S, "eval/bounds", "MBD001", msg);
+            return throw_classified(S, "eval/bounds", "MBD001", msg);
         }
     }
     if (!codec_utf8_validate(src, len, &bad_off)) {
         snprintf(msg, sizeof(msg),
                  "bytes->string: invalid UTF-8 at byte %lu",
                  (unsigned long)bad_off);
-        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return throw_classified(S, "eval/contract", "MCT001", msg);
     }
     /* Validated bytes are already a well-formed UTF-8 string, so a
      * straight copy preserves byte identity with one allocation. */

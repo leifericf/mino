@@ -65,7 +65,7 @@ static mino_val *jp_err(jp_t *j, const char *msg)
     loc = mino_map(j->S, lkeys, lvals, 2);
     dkeys[0] = mino_keyword(j->S, "location"); dvals[0] = loc;
     data = mino_map(j->S, dkeys, dvals, 1);
-    return prim_throw_classified_data(j->S, "json/parse", "MJP001",
+    return throw_classified_data(j->S, "json/parse", "MJP001",
                                       msg, data);
 }
 
@@ -582,7 +582,7 @@ static mino_val *prim_json_parse(mino_state *S, mino_val *args,
     mino_val *key_fn;
     jp_t j;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "json-parse requires one or two arguments");
     }
     s_val = args->as.cons.car;
@@ -595,7 +595,7 @@ static mino_val *prim_json_parse(mino_state *S, mino_val *args,
         key_fn = NULL;
     }
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "json-parse: first argument must be a string");
     }
     j.S      = S;

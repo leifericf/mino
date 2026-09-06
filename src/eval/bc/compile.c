@@ -3854,7 +3854,7 @@ static int try_fold_arg(compiler_t *c, mino_val *v, mino_val **out)
             if (args == NULL) { gc_unpin(argc); return 0; }
         }
         gc_unpin(argc);
-        /* The speculative fold contract requires prim_throw_classified
+        /* The speculative fold contract requires throw_classified
          * to take the "set diag + return NULL" branch on error, not the
          * "longjmp to active try-frame" branch. If the compile is
          * happening underneath a live try (compile-on-call from inside
@@ -3913,7 +3913,7 @@ static int try_fold_call(compiler_t *c, mino_val *form, int dst,
     gc_unpin(argc);
 
     /* Same try_depth suppression as try_fold_arg: the speculative
-     * fold needs prim_throw_classified to take the diag-return-NULL
+     * fold needs throw_classified to take the diag-return-NULL
      * branch, not longjmp. */
     int saved_td = mino_current_ctx(c->S)->try_depth;
     mino_current_ctx(c->S)->try_depth = 0;
@@ -4528,7 +4528,7 @@ static int compile_symbol_ref(compiler_t *c, mino_val *sym, int dst)
 static int compile_expr(compiler_t *c, mino_val *form, int dst, int tail)
 {
     if (c->depth >= BC_MAX_COMPILE_DEPTH) {
-        prim_throw_classified(c->S, "user", "MBC002",
+        throw_classified(c->S, "user", "MBC002",
             "form too deeply nested: compile-time recursion limit exceeded");
         c->ok = 0;
         return -1;

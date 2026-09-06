@@ -77,7 +77,7 @@ mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
     mino_val *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "seq requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "seq requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_nil(S);
@@ -279,7 +279,7 @@ mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env)
         char msg[96];
         snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
                  type_tag_str(coll));
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 }
 
@@ -292,7 +292,7 @@ mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "realized? requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "realized? requires one argument");
     }
     v = args->as.cons.car;
     if (v != NULL && mino_type_of(v) == MINO_LAZY) {
@@ -308,6 +308,6 @@ mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env)
     if (v != NULL && mino_type_of(v) == MINO_FUTURE) {
         return mino_future_realized_p(v) ? mino_true(S) : mino_false(S);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "realized? expects a lazy seq, delay, promise, or future");
 }

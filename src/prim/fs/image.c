@@ -16,12 +16,12 @@ static mino_val *prim_save_image(mino_state *S, mino_val *args,
     const char *path_str;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "save-image requires one argument");
     }
     path_val = args->as.cons.car;
     if (mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "save-image: path must be a string");
     }
     path_str = path_val->as.s.data;
@@ -37,12 +37,12 @@ static mino_val *prim_load_image(mino_state *S, mino_val *args,
     const char *path_str;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "load-image-into requires one argument");
     }
     path_val = args->as.cons.car;
     if (mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "load-image-into: path must be a string");
     }
     path_str = path_val->as.s.data;

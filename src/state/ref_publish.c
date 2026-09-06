@@ -12,12 +12,6 @@
 #include "runtime/internal.h"
 #include "runtime/ref_publish.h"
 
-/* Classified-throw entry point (prim/prim.c). Same interim upward
- * declaration names/var.c uses; the raise mechanism itself moves
- * below the prim layer separately. */
-extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
-                                          const char *code, const char *msg);
-
 int ref_validate(mino_state *S, mino_val *validator,
                  mino_val *candidate, mino_env *env,
                  ref_fail_policy_t policy, mino_val **out_ex)
@@ -39,7 +33,7 @@ int ref_validate(mino_state *S, mino_val *validator,
     result = mino_call(S, validator, vargs, env);
     if (result == NULL) return 0; /* validator threw */
     if (!mino_is_truthy(result)) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "Invalid reference state");
         return 0;
     }

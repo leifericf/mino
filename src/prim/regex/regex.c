@@ -52,7 +52,7 @@ static mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env)
     mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "re-pattern requires one argument");
     }
     x = args->as.cons.car;
@@ -60,7 +60,7 @@ static mino_val *prim_re_pattern(mino_state *S, mino_val *args, mino_env *env)
     if (x != NULL && mino_type_of(x) == MINO_STRING) {
         return mino_regex_from_source(S, x);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "re-pattern: argument must be a string or regex");
 }
 
@@ -112,18 +112,18 @@ static mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
     (void)pat_len;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "re-find requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "re-find requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
     if (!regex_source_view(pat_val, &pat_data, &pat_len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "re-find: first argument must be a pattern (regex or string)");
     }
     /* Real Clojure (re-find re nil) returns nil rather than throwing. */
     if (text_val == NULL || mino_type_of(text_val) == MINO_NIL) return mino_nil(S);
     if (mino_type_of(text_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
+        return throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
     /* The regex engine uses file-static globals (re_flags +
      * re_g_state) for match state, so every caller must serialize
@@ -133,7 +133,7 @@ static mino_val *prim_re_find(mino_state *S, mino_val *args, mino_env *env)
     MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "re-find: invalid regex pattern");
     }
     match_idx = re_matchp_groups(compiled, text_val->as.s.data,
@@ -164,22 +164,22 @@ static mino_val *prim_re_matches(mino_state *S, mino_val *args, mino_env *env)
     (void)pat_len;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "re-matches requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "re-matches requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
     if (!regex_source_view(pat_val, &pat_data, &pat_len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "re-matches: first argument must be a pattern (regex or string)");
     }
     if (text_val == NULL || mino_type_of(text_val) == MINO_NIL) return mino_nil(S);
     if (mino_type_of(text_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
+        return throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
     MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "re-matches: invalid regex pattern");
     }
     match_idx = re_matchp_groups_anchored(compiled, text_val->as.s.data,
@@ -219,23 +219,23 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "re-find-from requires three arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
     pos_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (!regex_source_view(pat_val, &pat_data, &pat_len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "re-find-from: first argument must be a pattern (regex or string)");
     }
     if (text_val == NULL || mino_type_of(text_val) == MINO_NIL) return mino_nil(S);
     if (mino_type_of(text_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "re-find-from: second argument must be a string");
     }
     if (pos_val == NULL || !mino_val_int_p(pos_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "re-find-from: start must be an integer");
     }
     byte_start = mino_val_int_get(pos_val);
@@ -244,7 +244,7 @@ static mino_val *prim_re_find_from(mino_state *S, mino_val *args, mino_env *env)
     MINO_ASSERT_STATE_SAFE(S);
     compiled = re_compile(pat_data);
     if (compiled == NULL) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "re-find-from: invalid regex pattern");
     }
     match_idx = re_matchp_groups(compiled, text_val->as.s.data + byte_start,

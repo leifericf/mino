@@ -150,7 +150,7 @@ static int gz_args(mino_state *S, mino_val *args, const char *who,
     long long mb;
 
     if (!mino_is_cons(args)) {
-        prim_throw_classified(S, "eval/arity", "MAR001", who);
+        throw_classified(S, "eval/arity", "MAR001", who);
         return -1;
     }
     v = args->as.cons.car;
@@ -158,7 +158,7 @@ static int gz_args(mino_state *S, mino_val *args, const char *who,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            prim_throw_classified(S, "eval/arity", "MAR001", who);
+            throw_classified(S, "eval/arity", "MAR001", who);
             return -1;
         }
     } else {
@@ -168,14 +168,14 @@ static int gz_args(mino_state *S, mino_val *args, const char *who,
         char msg[96];
         snprintf(msg, sizeof(msg),
                  "%s: input must be a bytes value", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (opts != NULL && mino_type_of(opts) != MINO_MAP
         && mino_type_of(opts) != MINO_NIL) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s: opts must be a map", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     *max_out = GZ_DEFAULT_MAX;
@@ -188,7 +188,7 @@ static int gz_args(mino_state *S, mino_val *args, const char *who,
                 snprintf(msg, sizeof(msg),
                          "%s: :max-bytes must be a non-negative integer",
                          who);
-                prim_throw_classified(S, "eval/contract", "MCT001", msg);
+                throw_classified(S, "eval/contract", "MCT001", msg);
                 return -1;
             }
             *max_out = (size_t)mb;
@@ -211,27 +211,27 @@ static mino_val *gz_throw(mino_state *S, gz_status st, size_t max_out,
     switch (st) {
     case GZ_TRUNCATED:
         snprintf(msg, sizeof(msg), "%s: input is truncated", who);
-        return prim_throw_classified(S, "codec/truncated", "MGC001", msg);
+        return throw_classified(S, "codec/truncated", "MGC001", msg);
     case GZ_MAGIC:
         snprintf(msg, sizeof(msg),
                  "%s: not a gzip container (bad magic or method)", who);
-        return prim_throw_classified(S, "codec/magic", "MGC002", msg);
+        return throw_classified(S, "codec/magic", "MGC002", msg);
     case GZ_CRC:
         snprintf(msg, sizeof(msg),
                  "%s: trailer CRC32 or ISIZE mismatch", who);
-        return prim_throw_classified(S, "codec/crc", "MGC003", msg);
+        return throw_classified(S, "codec/crc", "MGC003", msg);
     case GZ_CORRUPT:
         snprintf(msg, sizeof(msg),
                  "%s: corrupt or unsupported stream", who);
-        return prim_throw_classified(S, "codec/corrupt", "MGC004", msg);
+        return throw_classified(S, "codec/corrupt", "MGC004", msg);
     case GZ_LIMIT:
         snprintf(msg, sizeof(msg),
                  "%s: output exceeds the %lu byte cap",
                  who, (unsigned long)max_out);
-        return prim_throw_classified(S, "codec/limit", "MGC005", msg);
+        return throw_classified(S, "codec/limit", "MGC005", msg);
     default:
         snprintf(msg, sizeof(msg), "%s: out of memory", who);
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
 }
 

@@ -312,7 +312,7 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     long long port;
 
     if (m == NULL || mino_type_of(m) != MINO_MAP) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "pool: endpoint must be a map with "
                               ":scheme :host :port");
         return -1;
@@ -321,7 +321,7 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     if (!pool_name_text(v, &scheme, &scheme_len)
         || !((scheme_len == 4 && memcmp(scheme, "http", 4) == 0)
              || (scheme_len == 5 && memcmp(scheme, "https", 5) == 0))) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "pool: :scheme must be :http or :https");
         return -1;
     }
@@ -330,7 +330,7 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     if (v == NULL || mino_type_of(v) != MINO_STRING
         || v->as.s.len == 0
         || pool_lower_host(v->as.s.data, v->as.s.len, host_out) != 0) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "pool: :host must be a non-empty string "
                               "under 256 bytes");
         return -1;
@@ -338,7 +338,7 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     *host_len_out = v->as.s.len;
     v = map_get_val(m, mino_keyword(S, "port"));
     if (!as_long(v, &port) || port < 1 || port > 65535) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "pool: :port must be an integer in "
                               "1..65535");
         return -1;
@@ -348,7 +348,7 @@ static int pool_endpoint_arg(mino_state *S, mino_val *m,
     v = map_get_val(m, mino_keyword(S, "insecure?"));
     if (v != NULL && mino_type_of(v) != MINO_NIL) {
         if (mino_type_of(v) != MINO_BOOL) {
-            prim_throw_classified(S, "eval/contract", "MCT001",
+            throw_classified(S, "eval/contract", "MCT001",
                                   "pool: :insecure? must be a boolean");
             return -1;
         }
@@ -364,7 +364,7 @@ static int pool_opts_arg(mino_state *S, mino_val *opts, const char *who)
         && mino_type_of(opts) != MINO_NIL) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s: opts must be a map", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     return 0;
@@ -381,7 +381,7 @@ static int pool_opt_keepalive(mino_state *S, mino_val *opts,
     v = map_get_val(opts, mino_keyword(S, "keepalive"));
     if (v == NULL || mino_type_of(v) == MINO_NIL) return 0;
     if (!as_long(v, out)) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "pool: opts key :keepalive must be an "
                               "integer");
         return -1;
@@ -406,7 +406,7 @@ static mino_val *prim_pool_checkout(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "pool-checkout requires an endpoint "
                                      "map");
     }
@@ -415,7 +415,7 @@ static mino_val *prim_pool_checkout(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "pool-checkout takes at most 2 "
                                          "arguments");
         }
@@ -444,7 +444,7 @@ static mino_val *prim_pool_return(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "pool-return requires an endpoint "
                                      "map and a handle");
     }
@@ -454,7 +454,7 @@ static mino_val *prim_pool_return(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "pool-return takes at most 3 "
                                          "arguments");
         }
@@ -464,14 +464,14 @@ static mino_val *prim_pool_return(mino_state *S, mino_val *args,
                           &insecure) != 0)
         return NULL;
     if (pool_ops_for(handle) == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "pool-return: handle must be a net "
                                      "or TLS socket");
     }
     if (pool_opt_keepalive(S, opts, &keepalive) != 0) return NULL;
     if (mino_net_pool_return(S, host, host_len, port, is_https, insecure,
                              handle, keepalive) != 0) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "pool-return: out of memory");
     }
     return mino_nil(S);
@@ -603,7 +603,7 @@ static mino_val *prim_pool_close_all(mino_state *S, mino_val *args,
     (void)env;
 
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "pool-close-all takes no arguments");
     }
     reg = S->net_pools;

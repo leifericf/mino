@@ -82,6 +82,89 @@ void clear_error(mino_state *S)
     }
 }
 
+/* Throw a classified catchable exception.  If inside a try block, this
+ * longjmps to the catch handler.  Otherwise it sets a fatal error and
+ * the caller returns NULL to propagate to the host.  Lives beside the
+ * rest of the error machinery so every layer (async, collections, bc,
+ * prims) can raise without including upward. */
+mino_val *throw_classified_data(mino_state *S, const char *kind,
+                                const char *code, const char *msg,
+                                mino_val *data)
+{
+    if (mino_current_ctx(S)->try_depth > 0) {
+        /* Build a diagnostic map so catch normalization preserves the
+         * classification instead of wrapping it as :user/MUS001.
+         * Attach :mino/location when a source span can be derived from
+         * either the call form or the bc cursor; the catch handler
+         * surfaces it as part of (ex-data). */
+        mino_val *keys[6], *vals[6];
+        mino_val *ex;
+        const char *loc_file = NULL;
+        int         loc_line = 0;
+        int         loc_col  = 0;
+        /* Prefer the BC PC lookup (inner instruction inside a compiled
+         * fn body) over eval_current_form (the outer call site), so
+         * a throw inside (defn f [] (assoc nil)) reports the assoc
+         * line, not the caller's (f) line. eval_current_form is the
+         * fallback for tree-walker frames that have no BC cursor. */
+        const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+        size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+        if (cur_bc != NULL) {
+            (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                        &loc_file, &loc_line, &loc_col);
+        }
+        if (loc_file == NULL || loc_line <= 0) {
+            const mino_val *form = mino_current_ctx(S)->eval_current_form;
+            if (form != NULL && mino_is_cons(form)
+                && form->as.cons.file != NULL && form->as.cons.line > 0) {
+                loc_file = form->as.cons.file;
+                loc_line = form->as.cons.line;
+                loc_col  = form->as.cons.column;
+            }
+        }
+        size_t n = 0;
+        keys[n] = mino_keyword(S, "mino/kind");
+        vals[n] = mino_keyword(S, kind);
+        n++;
+        keys[n] = mino_keyword(S, "mino/code");
+        vals[n] = mino_string(S, code);
+        n++;
+        keys[n] = mino_keyword(S, "mino/phase");
+        vals[n] = mino_keyword(S, "eval");
+        n++;
+        keys[n] = mino_keyword(S, "mino/message");
+        vals[n] = mino_string(S, msg);
+        n++;
+        keys[n] = mino_keyword(S, "mino/data");
+        vals[n] = (data != NULL) ? data : mino_nil(S);
+        n++;
+        if (loc_file != NULL && loc_line > 0) {
+            mino_val *lkeys[3], *lvals[3];
+            lkeys[0] = mino_keyword(S, "file");
+            lvals[0] = mino_string(S, loc_file);
+            lkeys[1] = mino_keyword(S, "line");
+            lvals[1] = mino_int(S, loc_line);
+            lkeys[2] = mino_keyword(S, "column");
+            lvals[2] = mino_int(S, loc_col);
+            keys[n] = mino_keyword(S, "mino/location");
+            vals[n] = mino_map(S, lkeys, lvals, 3);
+            n++;
+        }
+        ex = mino_map(S, keys, vals, n);
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
+        longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
+    }
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, kind, code, msg);
+    append_trace(S);
+    return NULL;
+}
+
+mino_val *throw_classified(mino_state *S, const char *kind,
+                           const char *code, const char *msg)
+{
+    return throw_classified_data(S, kind, code, msg, NULL);
+}
+
 /* Classified eval-phase diagnostic from a form with source info. */
 void set_eval_diag(mino_state *S, const mino_val *form,
                    const char *kind, const char *code, const char *msg)
@@ -104,7 +187,7 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
      * they are catchable by the surrounding catch clause. Build a
      * diagnostic map with classification, message, optional data, and
      * a :mino/location span when the form or the bc cursor knows the
-     * source position. Mirrors the shape prim_throw_classified emits
+     * source position. Mirrors the shape throw_classified emits
      * so catch handlers see one consistent diagnostic schema. */
     if (mino_current_ctx(S)->try_depth > 0) {
         const char *loc_file = NULL;

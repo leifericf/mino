@@ -21,7 +21,7 @@
  *
  * Error reporting uses set_eval_diag (available via runtime/internal.h),
  * which longjmps to the active try frame when try_depth > 0, matching
- * the semantics previously provided by prim_throw_classified.
+ * the semantics previously provided by throw_classified.
  */
 
 #include "runtime/internal.h"

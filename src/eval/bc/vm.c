@@ -637,7 +637,7 @@ mino_val *mino_bc_ic_global_load(mino_state *S,
  * directly; on a miss looks up the impl via map_get_val with a
  * :default fallback, refills the IC under write barriers, and
  * returns. NULL return means the user-visible error was already
- * surfaced via prim_throw_classified (bad dispatch table shape, no
+ * surfaced via throw_classified (bad dispatch table shape, no
  * impl for type) and the caller should goto bc_done. */
 mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
                                         const mino_bc_fn_t *bc,
@@ -645,7 +645,7 @@ mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
                                         mino_val *first_arg)
 {
     if (slot->atom == NULL || mino_type_of(slot->atom) != MINO_ATOM) {
-        prim_throw_classified(S, "user", "MPR002",
+        throw_classified(S, "user", "MPR002",
                               "protocol dispatch atom is not an atom");
         return NULL;
     }
@@ -669,7 +669,7 @@ mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
         snprintf(emsg, sizeof(emsg),
                  "protocol dispatch table for %s is not a map",
                  mname_s);
-        prim_throw_classified(S, "user", "MPR002", emsg);
+        throw_classified(S, "user", "MPR002", emsg);
         return NULL;
     }
     mino_val *impl = map_get_val(atom_map, type_disc);
@@ -694,7 +694,7 @@ mino_val *mino_bc_ic_resolve_protocol(mino_state *S,
         snprintf(emsg, sizeof(emsg),
                  "No implementation of method: %s for type: %s",
                  mname_s, tname);
-        prim_throw_classified(S, "user", "MPR001", emsg);
+        throw_classified(S, "user", "MPR001", emsg);
         return NULL;
     }
     gc_write_barrier(S, bc->ic_slots,
@@ -987,13 +987,13 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
                                         kind_str, code_str, msg_str,
                                         data, NULL);
             } else {
-                prim_throw_classified(S, kind_str, code_str, msg_str);
+                throw_classified(S, kind_str, code_str, msg_str);
             }
         } else if (exc != NULL && mino_type_of(exc) == MINO_STRING) {
             char msg[512];
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)exc->as.s.len, exc->as.s.data);
-            prim_throw_classified(S, "user", "MUS001", msg);
+            throw_classified(S, "user", "MUS001", msg);
         } else if (exc != NULL) {
             /* Non-string non-map payload (keyword, symbol, vector, ...):
              * route through mino_print_to_buf so the original value
@@ -1005,13 +1005,13 @@ static int bc_cold_op(mino_state *S, const mino_bc_fn_t *bc,
             int  w = mino_print_to_buf(S, exc, buf, sizeof(buf));
             if (w > 0) {
                 snprintf(msg, sizeof(msg), "unhandled exception: %s", buf);
-                prim_throw_classified(S, "user", "MUS001", msg);
+                throw_classified(S, "user", "MUS001", msg);
             } else {
-                prim_throw_classified(S, "user", "MUS001",
+                throw_classified(S, "user", "MUS001",
                     "unhandled exception");
             }
         } else {
-            prim_throw_classified(S, "user", "MUS001",
+            throw_classified(S, "user", "MUS001",
                 "unhandled exception");
         }
         *ok = 0;

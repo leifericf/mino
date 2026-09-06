@@ -109,7 +109,7 @@ static tx_ref_state_t *tx_get_or_create_ref_state(mino_state *S,
     }
     rs = (tx_ref_state_t *)calloc(1, sizeof(*rs));
     if (rs == NULL) {
-        prim_throw_classified(S, "eval/state", "MST005",
+        throw_classified(S, "eval/state", "MST005",
             "out of memory allocating tx state");
         return NULL;
     }
@@ -147,12 +147,12 @@ static mino_val *prim_io_bang_check(mino_state *S, mino_val *args,
     mino_thread_ctx_t *ctx;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "io!-check takes no arguments");
     }
     ctx = mino_current_ctx(S);
     if (ctx->current_tx != NULL) {
-        return prim_throw_classified(S, "eval/state", "MST003",
+        return throw_classified(S, "eval/state", "MST003",
             "I/O in transaction");
     }
     return mino_nil(S);
@@ -163,7 +163,7 @@ static mino_val *prim_in_tx_p(mino_state *S, mino_val *args, mino_env *env)
     mino_thread_ctx_t *ctx;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "in-transaction? takes no arguments");
     }
     ctx = mino_current_ctx(S);
@@ -180,7 +180,7 @@ static mino_val *prim_ref_min_history(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n < 1 || n > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref-min-history accepts a ref and an optional n");
     }
     return mino_int(S, 0);
@@ -193,7 +193,7 @@ static mino_val *prim_ref_max_history(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n < 1 || n > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref-max-history accepts a ref and an optional n");
     }
     return mino_int(S, 10);
@@ -206,7 +206,7 @@ static mino_val *prim_ref_history_count(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref-history-count requires a ref");
     }
     return mino_int(S, 0);
@@ -223,7 +223,7 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ref;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref requires an initial value");
     }
     initial = args->as.cons.car;
@@ -242,7 +242,7 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
         }
         v = opts->as.cons.cdr->as.cons.car;
         if (k == NULL || mino_type_of(k) != MINO_KEYWORD) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "ref: option key must be a keyword");
         }
         if (k->as.s.len == 9 && memcmp(k->as.s.data, "validator", 9) == 0) {
@@ -250,14 +250,14 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
                 && mino_type_of(v) != MINO_FN
                 && mino_type_of(v) != MINO_PRIM
                 && mino_type_of(v) != MINO_MACRO) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "ref: :validator must be a fn or nil");
             }
             validator = (v != NULL && mino_type_of(v) != MINO_NIL) ? v : NULL;
         } else if (k->as.s.len == 4 && memcmp(k->as.s.data, "meta", 4) == 0) {
             if (v != NULL && mino_type_of(v) != MINO_NIL
                 && mino_type_of(v) != MINO_MAP) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "ref: :meta must be a map or nil");
             }
             meta = (v != NULL && mino_type_of(v) != MINO_NIL) ? v : NULL;
@@ -271,7 +271,7 @@ static mino_val *prim_ref(mino_state *S, mino_val *args, mino_env *env)
             snprintf(msg, sizeof(msg),
                 "ref: unknown option :%.*s",
                 (int)k->as.s.len, k->as.s.data);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
         opts = opts->as.cons.cdr->as.cons.cdr;
     }
@@ -287,7 +287,7 @@ static mino_val *prim_ref_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref? requires one argument");
     }
     v = args->as.cons.car;
@@ -457,7 +457,7 @@ int mino_is_tx_ref(const mino_val *v)
 static int tx_check_ref_owned(mino_state *S, mino_val *ref)
 {
     if (ref->as.tx_ref.owning_state != S) {
-        prim_throw_classified(S, "eval/state", "MST007",
+        throw_classified(S, "eval/state", "MST007",
             "ref from foreign state");
         return 1;
     }
@@ -468,7 +468,7 @@ static int tx_check_ref_owned(mino_state *S, mino_val *ref)
 
 /* Shared core for prim_ref_set / mino_tx_ref_set. Caller has already
  * type-checked ref. Returns val on success; NULL on throw (the throw
- * has already been raised via prim_throw_classified). */
+ * has already been raised via throw_classified). */
 static mino_val *tx_ref_set_core(mino_state *S, mino_val *ref,
                                     mino_val *val)
 {
@@ -476,11 +476,11 @@ static mino_val *tx_ref_set_core(mino_state *S, mino_val *ref,
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (ctx->current_tx == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
     if (ctx->current_tx->in_commit) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "ref-set not allowed during commit-phase replay");
     }
     rs = tx_get_or_create_ref_state(S, ref);
@@ -490,7 +490,7 @@ static mino_val *tx_ref_set_core(mino_state *S, mino_val *ref,
      * that should survive replay; an explicit set would silently
      * discard them, which JVM forbids. */
     if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "Can't set after commute");
     }
     if (!rs->read) {
@@ -510,13 +510,13 @@ static mino_val *prim_ref_set(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ref-set requires two arguments: ref and value");
     }
     ref = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "ref-set: first argument must be a ref");
     }
     return tx_ref_set_core(S, ref, val);
@@ -525,7 +525,7 @@ static mino_val *prim_ref_set(mino_state *S, mino_val *args, mino_env *env)
 mino_val *mino_tx_ref_set(mino_state *S, mino_val *ref, mino_val *val)
 {
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ref_set: argument must be a ref");
     }
     return tx_ref_set_core(S, ref, val);
@@ -593,11 +593,11 @@ static mino_val *tx_alter_core(mino_state *S, mino_val *ref,
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
     if (t_ctx->current_tx->in_commit) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "alter not allowed during commit-phase replay");
     }
     rs = tx_get_or_create_ref_state(S, ref);
@@ -605,7 +605,7 @@ static mino_val *tx_alter_core(mino_state *S, mino_val *ref,
     /* JVM canon: alter after commute on the same ref throws
      * "Can't set after commute". See tx_ref_set_core above. */
     if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "Can't set after commute");
     }
     cur = tx_effective_value(S, rs, env);
@@ -627,14 +627,14 @@ static mino_val *prim_alter(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ref;
     struct compute_clj_ctx clj_ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "alter requires at least two arguments: ref and function");
     }
     ref           = args->as.cons.car;
     clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
     clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "alter: first argument must be a ref");
     }
     return tx_alter_core(S, ref, compute_clj, &clj_ctx, env);
@@ -646,11 +646,11 @@ mino_val *mino_tx_alter_c(mino_state *S, mino_val *ref,
 {
     struct compute_c_ctx c_ctx;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: argument must be a ref");
     }
     if (fn == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: transformer fn must not be NULL");
     }
     c_ctx.fn   = fn;
@@ -675,7 +675,7 @@ static mino_val *make_c_log_entry(mino_state *S, void *ctx)
     struct tx_c_closure  *closure = (struct tx_c_closure *)
                                      malloc(sizeof(*closure));
     if (closure == NULL) {
-        prim_throw_classified(S, "eval/state", "MST005",
+        throw_classified(S, "eval/state", "MST005",
             "out of memory allocating commute closure");
         return NULL;
     }
@@ -706,11 +706,11 @@ static mino_val *tx_commute_core(mino_state *S, mino_val *ref,
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
     if (t_ctx->current_tx->in_commit) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "commute not allowed during commit-phase replay");
     }
     rs = tx_get_or_create_ref_state(S, ref);
@@ -747,14 +747,14 @@ static mino_val *prim_commute(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ref;
     struct compute_clj_ctx clj_ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "commute requires at least two arguments: ref and function");
     }
     ref           = args->as.cons.car;
     clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
     clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "commute: first argument must be a ref");
     }
     return tx_commute_core(S, ref, compute_clj, make_clj_log_entry,
@@ -767,11 +767,11 @@ mino_val *mino_tx_commute_c(mino_state *S, mino_val *ref,
 {
     struct compute_c_ctx c_ctx;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: argument must be a ref");
     }
     if (fn == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: transformer fn must not be NULL");
     }
     c_ctx.fn   = fn;
@@ -791,7 +791,7 @@ static mino_val *tx_ensure_core(mino_state *S, mino_val *ref,
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     if (tx_check_ref_owned(S, ref)) return NULL;
     if (ctx->current_tx == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
     rs = tx_get_or_create_ref_state(S, ref);
@@ -814,12 +814,12 @@ static mino_val *prim_ensure(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *ref;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ensure requires one argument");
     }
     ref = args->as.cons.car;
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "ensure: argument must be a ref");
     }
     return tx_ensure_core(S, ref, env);
@@ -829,7 +829,7 @@ mino_val *mino_tx_ensure(mino_state *S, mino_val *ref,
                            mino_env *env)
 {
     if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ensure: argument must be a ref");
     }
     return tx_ensure_core(S, ref, env);
@@ -1025,9 +1025,9 @@ static mino_val *tx_run_loop(mino_state *S,
 
         if (tx->retry_count > STM_RETRY_CAP) {
             tx->retry_count = 0;
-            prim_throw_classified(S, "eval/state", "MST004",
+            throw_classified(S, "eval/state", "MST004",
                 "transaction retry limit exceeded");
-            return NULL; /* unreachable -- prim_throw_classified longjmps */
+            return NULL; /* unreachable -- throw_classified longjmps */
         }
         r = invoke(S, body_user, env);
         if (r == NULL) {
@@ -1048,7 +1048,7 @@ static mino_val *tx_run_loop(mino_state *S,
                  * as a generic IllegalStateException. */
                 mino_throw(S, vex);
             } else {
-                prim_throw_classified(S, "eval/contract", "MCT001",
+                throw_classified(S, "eval/contract", "MCT001",
                     "Invalid reference state");
             }
             return NULL; /* unreachable */
@@ -1096,7 +1096,7 @@ static mino_val *tx_outer_run(mino_state *S,
     tx.pending_sends        = NULL;
 
     if (ctx_v->try_depth >= MAX_TRY_DEPTH) {
-        return prim_throw_classified(S, "eval/state", "MST006",
+        return throw_classified(S, "eval/state", "MST006",
             origin_label);
     }
     frame                 = &ctx_v->try_stack[ctx_v->try_depth];
@@ -1199,14 +1199,14 @@ static mino_val *prim_dosync_star(mino_state *S, mino_val *args,
     struct invoke_clj_thunk  body_ctx;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "dosync* requires one argument (a thunk)");
     }
     thunk = args->as.cons.car;
     if (thunk == NULL || (mino_type_of(thunk) != MINO_FN
                           && mino_type_of(thunk) != MINO_PRIM
                           && mino_type_of(thunk) != MINO_MACRO)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "dosync*: expected a thunk");
     }
     ctx = mino_current_ctx(S);
@@ -1230,7 +1230,7 @@ mino_val *mino_tx_run(mino_state *S, mino_tx_body_fn body, void *user,
     struct invoke_c_body  body_ctx;
 
     if (body == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino_tx_run: body fn must not be NULL");
     }
     ctx = mino_current_ctx(S);

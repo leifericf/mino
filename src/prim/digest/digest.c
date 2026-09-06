@@ -60,14 +60,14 @@ static int digest_one_arg(mino_state *S, mino_val *args, const char *who,
     char      msg[96];
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires one argument", who);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     v = args->as.cons.car;
     if (!digest_text_arg(v, data, len)) {
         snprintf(msg, sizeof(msg),
                  "%s: argument must be a string or bytes value", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     return 1;
@@ -170,16 +170,16 @@ static mino_val *prim_hmac_sha256(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "hmac-sha256 requires two arguments");
     }
     if (!digest_text_arg(args->as.cons.car, &key, &key_len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hmac-sha256: key must be a string or "
                                      "bytes value");
     }
     if (!digest_text_arg(args->as.cons.cdr->as.cons.car, &data, &len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hmac-sha256: data must be a string or "
                                      "bytes value");
     }
@@ -203,16 +203,16 @@ static mino_val *prim_hmac_sha512(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "hmac-sha512 requires two arguments");
     }
     if (!digest_text_arg(args->as.cons.car, &key, &key_len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hmac-sha512: key must be a string or "
                                      "bytes value");
     }
     if (!digest_text_arg(args->as.cons.cdr->as.cons.car, &data, &len)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "hmac-sha512: data must be a string or "
                                      "bytes value");
     }

@@ -515,7 +515,7 @@ static mino_tls_sock_t *tls_sock_arg(mino_state *S, mino_val *v,
         char msg[160];
         snprintf(msg, sizeof(msg), "%s: argument must be a TLS socket",
                  who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     return (mino_tls_sock_t *)v->as.handle.ptr;
@@ -544,7 +544,7 @@ static int tls_opt_insecure(mino_state *S, mino_val *opts, int *out)
     v = map_get_val(opts, mino_keyword(S, "insecure?"));
     if (v == NULL || mino_type_of(v) == MINO_NIL) return 0;
     if (mino_type_of(v) != MINO_BOOL) {
-        prim_throw_classified(S, "eval/contract", "MCT001",
+        throw_classified(S, "eval/contract", "MCT001",
                               "tls-connect: opts key :insecure? must be "
                               "a boolean");
         return -1;
@@ -574,7 +574,7 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tls-connect requires a socket and a "
                                      "host, or a host and a port");
     }
@@ -584,13 +584,13 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "tls-connect takes at most 3 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "tls-connect: opts must be a map");
         }
     }
@@ -599,7 +599,7 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         /* Socket-arity: host is the second argument. */
         have_port_arity = 0;
         if (a2 == NULL || mino_type_of(a2) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "tls-connect: second argument "
                                          "must be the host name string");
         }
@@ -609,12 +609,12 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
          * connection attempt. */
         have_port_arity = 1;
         if (!as_long(a2, &port) || port < 1 || port > 65535) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "tls-connect: port must be an "
                                          "integer in 1..65535");
         }
     } else {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "tls-connect: first argument must "
                                      "be a net socket or a host string");
     }
@@ -622,7 +622,7 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         const mino_val *host_val = have_port_arity ? a1 : a2;
         if (host_val->as.s.len == 0
             || host_val->as.s.len >= sizeof host) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "tls-connect: host name is empty "
                                          "or too long");
         }
@@ -688,7 +688,7 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         if (ts == NULL) {
             mino_net_close_raw(fd);
             gc_unpin(1);
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "tls-connect: out of memory");
         }
         ts->fd = fd;
@@ -705,7 +705,7 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         mino_net_close_raw(ts->fd);
         free(ts);
         gc_unpin(1);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "tls-connect: out of memory");
     }
     ts->iobuf = iobuf;
@@ -728,14 +728,14 @@ mino_val *prim_tls_connect(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "tls-connect: cannot start handshake "
                  "with %.120s: %.50s (code %d)", host,
                  tls_engine_err_desc(err), err);
-        return prim_throw_classified(S, "tls", "MTL001", msg);
+        return throw_classified(S, "tls", "MTL001", msg);
     }
     if (tls_handshake(S, ts, &kind, &code, msg, sizeof msg) != 0) {
         mino_net_close_raw(ts->fd);
         free(iobuf);
         free(ts);
         gc_unpin(1);
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     hv->as.handle.ptr = ts;
     gc_unpin(1);
@@ -760,7 +760,7 @@ static mino_val *prim_tls_read(mino_state *S, mino_val *args, mino_env *env)
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tls-read requires a TLS socket and "
                                      "a byte count");
     }
@@ -769,22 +769,22 @@ static mino_val *prim_tls_read(mino_state *S, mino_val *args, mino_env *env)
     ts = tls_sock_arg(S, sock_val, "tls-read");
     if (ts == NULL) return NULL;
     if (ts->closed) {
-        return prim_throw_classified(S, "tls", "MTL004",
+        return throw_classified(S, "tls", "MTL004",
                                      "tls-read: socket is closed");
     }
     if (!as_long(n_val, &n) || n < 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "tls-read: n must be a non-negative "
                                      "integer");
     }
     if (n == 0) return mino_bytes(S, NULL, 0);
     if ((unsigned long long)n > SIZE_MAX) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "tls-read: n is too large");
     }
     buf = (unsigned char *)malloc((size_t)n);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "tls-read: out of memory");
     }
     /* The engine pump yields inside; pin the handle so a concurrent
@@ -795,7 +795,7 @@ static mino_val *prim_tls_read(mino_state *S, mino_val *args, mino_env *env)
     gc_unpin(1);
     if (rc < 0) {
         free(buf);
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     if (rc == 0) {
         free(buf);
@@ -826,7 +826,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tls-read-all requires a TLS socket");
     }
     sock_val = args->as.cons.car;
@@ -834,7 +834,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         cap_val = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "tls-read-all takes at most 2 "
                                          "arguments");
         }
@@ -845,7 +845,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
                 return NULL;
         } else if (cap_val != NULL && mino_type_of(cap_val) != MINO_NIL) {
             if (!as_long(cap_val, &max_bytes) || max_bytes < 0) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "tls-read-all: cap must be a "
                                              "non-negative integer");
             }
@@ -854,7 +854,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
     ts = tls_sock_arg(S, sock_val, "tls-read-all");
     if (ts == NULL) return NULL;
     if (ts->closed) {
-        return prim_throw_classified(S, "tls", "MTL004",
+        return throw_classified(S, "tls", "MTL004",
                                      "tls-read-all: socket is closed");
     }
 
@@ -869,7 +869,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
         if (rc < 0) {
             free(buf);
             gc_unpin(1);
-            return prim_throw_classified(S, kind, code, msg);
+            return throw_classified(S, kind, code, msg);
         }
         if (rc == 0) break;
         /* A zero-byte chunk needs no copy; also keeps memcpy's first
@@ -883,7 +883,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
             snprintf(m, sizeof(m),
                      "tls-read-all: exceeded cap of %lld bytes",
                      max_bytes);
-            return prim_throw_classified(S, "net/overflow", "MNE005", m);
+            return throw_classified(S, "net/overflow", "MNE005", m);
         }
         if (len + got > cap) {
             size_t new_cap = cap == 0 ? sizeof chunk : cap * 2;
@@ -896,7 +896,7 @@ static mino_val *prim_tls_read_all(mino_state *S, mino_val *args,
             if (nb == NULL) {
                 free(buf);
                 gc_unpin(1);
-                return prim_throw_classified(S, "internal", "MIN001",
+                return throw_classified(S, "internal", "MIN001",
                                              "tls-read-all: out of memory");
             }
             buf = nb;
@@ -978,7 +978,7 @@ static mino_val *prim_tls_write(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tls-write requires a TLS socket and "
                                      "data");
     }
@@ -987,7 +987,7 @@ static mino_val *prim_tls_write(mino_state *S, mino_val *args,
     ts = tls_sock_arg(S, sock_val, "tls-write");
     if (ts == NULL) return NULL;
     if (ts->closed) {
-        return prim_throw_classified(S, "tls", "MTL004",
+        return throw_classified(S, "tls", "MTL004",
                                      "tls-write: socket is closed");
     }
     if (data_val != NULL && mino_type_of(data_val) == MINO_STRING) {
@@ -997,7 +997,7 @@ static mino_val *prim_tls_write(mino_state *S, mino_val *args,
         data = mino_bytes_data(data_val);
         len  = mino_bytes_len(data_val);
     } else {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "tls-write: data must be a string or "
                                      "bytes");
     }
@@ -1011,7 +1011,7 @@ static mino_val *prim_tls_write(mino_state *S, mino_val *args,
     if (tls_send_all(S, ts, data, len, "tls-write", &kind, &code, msg,
                      sizeof msg) != 0) {
         gc_unpin(2);
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     gc_unpin(2);
     return mino_int(S, (long long)len);
@@ -1031,7 +1031,7 @@ static mino_val *prim_tls_close(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tls-close requires one argument");
     }
     sock_val = args->as.cons.car;

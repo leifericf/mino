@@ -142,7 +142,7 @@ static mino_udp_sock_t *udp_sock_arg(mino_state *S, mino_val *v,
         char msg[160];
         snprintf(msg, sizeof(msg), "%s: argument must be a udp socket",
                  who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     return (mino_udp_sock_t *)v->as.handle.ptr;
@@ -156,12 +156,12 @@ static int udp_host_arg(mino_state *S, mino_val *v, const char *who,
     char msg[200];
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
         snprintf(msg, sizeof(msg), "%s: host must be a string", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (v->as.s.len >= cap) {
         snprintf(msg, sizeof(msg), "%s: host is too long", who);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     memcpy(buf, v->as.s.data, v->as.s.len);
@@ -177,7 +177,7 @@ static int udp_port_arg(mino_state *S, mino_val *v, const char *who,
     if (!as_long(v, out) || *out < 0 || *out > 65535) {
         snprintf(msg, sizeof(msg),
                  "%s: port must be an integer in 0..65535", who);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     return 0;
@@ -252,13 +252,13 @@ static mino_val *prim_udp_socket(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "udp-socket takes at most 1 "
                                          "argument");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "udp-socket: opts must be a map");
         }
     }
@@ -282,7 +282,7 @@ static mino_val *prim_udp_socket(mino_state *S, mino_val *args,
 
 #ifdef _WIN32
     if (udp_winsock_init() != 0) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "udp-socket: WSAStartup failed");
     }
 #endif
@@ -310,7 +310,7 @@ static mino_val *prim_udp_socket(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "udp-socket: cannot resolve bind "
                  "address %.190s: %.60s", host, gai_strerror(gai_rc));
 #endif
-        return prim_throw_classified(S, "net/dns", "MNE001", msg);
+        return throw_classified(S, "net/dns", "MNE001", msg);
     }
 
     detail[0] = '\0';
@@ -336,7 +336,7 @@ static mino_val *prim_udp_socket(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "udp-socket: cannot bind %.140s:%lld: "
                  "%.60s", host, port,
                  detail[0] ? detail : "no usable addresses");
-        return prim_throw_classified(S, "net", "MNE004", msg);
+        return throw_classified(S, "net", "MNE004", msg);
     }
 
     udp_apply_read_timeout(fd, read_ms);
@@ -345,7 +345,7 @@ static mino_val *prim_udp_socket(mino_state *S, mino_val *args,
     if (sock == NULL) {
         udp_close_fd(fd);
         gc_unpin(1);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "udp-socket: out of memory");
     }
     sock->fd              = fd;
@@ -367,7 +367,7 @@ static mino_val *prim_udp_socket_port(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "udp-socket-port requires one "
                                      "argument");
     }
@@ -375,7 +375,7 @@ static mino_val *prim_udp_socket_port(mino_state *S, mino_val *args,
     sock = udp_sock_arg(S, sock_val, "udp-socket-port");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "udp-socket-port: socket is closed");
     }
     memset(&ss, 0, sizeof(ss));
@@ -391,7 +391,7 @@ static mino_val *prim_udp_socket_port(mino_state *S, mino_val *args,
             snprintf(msg, sizeof(msg),
                      "udp-socket-port: getsockname failed: %.60s",
                      detail);
-            return prim_throw_classified(S, "net", "MNE004", msg);
+            return throw_classified(S, "net", "MNE004", msg);
         }
     }
     return mino_int(S, (long long)udp_addr_port(&ss));
@@ -419,7 +419,7 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr
                         ->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "udp-send requires a socket, host, "
                                      "port, and data");
     }
@@ -431,7 +431,7 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
     sock = udp_sock_arg(S, sock_val, "udp-send");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "udp-send: socket is closed");
     }
     if (udp_host_arg(S, host_val, "udp-send", host, sizeof(host)) != 0)
@@ -439,7 +439,7 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
     if (udp_port_arg(S, port_val, "udp-send", &port) != 0)
         return NULL;
     if (port < 1) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "udp-send: port must be in 1..65535");
     }
     if (data_val != NULL && mino_type_of(data_val) == MINO_STRING) {
@@ -449,14 +449,14 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
         data = mino_bytes_data(data_val);
         len  = mino_bytes_len(data_val);
     } else {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "udp-send: data must be a string or "
                                      "bytes");
     }
 
 #ifdef _WIN32
     if ((unsigned long long)len > (unsigned long long)INT_MAX) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "udp-send: datagram too large");
     }
 #endif
@@ -480,7 +480,7 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg), "udp-send: cannot resolve host %.190s: "
                  "%.60s", host, gai_strerror(gai_rc));
 #endif
-        return prim_throw_classified(S, "net/dns", "MNE001", msg);
+        return throw_classified(S, "net/dns", "MNE001", msg);
     }
 
     detail[0] = '\0';
@@ -509,7 +509,7 @@ static mino_val *prim_udp_send(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg), "udp-send: cannot send to %.140s:%lld: "
                  "%.60s", host, port,
                  detail[0] ? detail : "no usable addresses");
-        return prim_throw_classified(S, "net", "MNE004", msg);
+        return throw_classified(S, "net", "MNE004", msg);
     }
     return mino_int(S, (long long)len);
 }
@@ -582,7 +582,7 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "udp-recv requires a socket");
     }
     sock_val = args->as.cons.car;
@@ -590,20 +590,20 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "udp-recv takes at most 2 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "udp-recv: opts must be a map");
         }
     }
     sock = udp_sock_arg(S, sock_val, "udp-recv");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "udp-recv: socket is closed");
     }
     read_ms = sock->read_timeout_ms;
@@ -618,7 +618,7 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
 
     buf = (unsigned char *)malloc(cap);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "udp-recv: out of memory");
     }
     /* Pin the socket handle across the poll + recvfrom yield windows,
@@ -632,10 +632,10 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
         if (rc == 1) {
             snprintf(msg, sizeof(msg),
                      "udp-recv: timed out after %lld ms", read_ms);
-            return prim_throw_classified(S, "net/timeout", "MNE003", msg);
+            return throw_classified(S, "net/timeout", "MNE003", msg);
         }
         udp_os_error(msg, sizeof(msg));
-        return prim_throw_classified(S, "net", "MNE004", msg);
+        return throw_classified(S, "net", "MNE004", msg);
     }
     memset(&ss, 0, sizeof(ss));
     {
@@ -660,12 +660,12 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
             } else if (e == WSAETIMEDOUT) {
                 snprintf(msg, sizeof(msg),
                          "udp-recv: timed out after %lld ms", read_ms);
-                return prim_throw_classified(S, "net/timeout", "MNE003",
+                return throw_classified(S, "net/timeout", "MNE003",
                                              msg);
             } else {
                 snprintf(msg, sizeof(msg),
                          "udp-recv: recv failed: winsock error %d", e);
-                return prim_throw_classified(S, "net", "MNE004", msg);
+                return throw_classified(S, "net", "MNE004", msg);
             }
         } else {
             got = (long long)r;
@@ -699,12 +699,12 @@ static mino_val *prim_udp_recv(mino_state *S, mino_val *args, mino_env *env)
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 snprintf(msg, sizeof(msg),
                          "udp-recv: timed out after %lld ms", read_ms);
-                return prim_throw_classified(S, "net/timeout", "MNE003",
+                return throw_classified(S, "net/timeout", "MNE003",
                                              msg);
             }
             snprintf(msg, sizeof(msg), "udp-recv: recv failed: %s",
                      strerror(errno));
-            return prim_throw_classified(S, "net", "MNE004", msg);
+            return throw_classified(S, "net", "MNE004", msg);
         }
         got = (long long)r;
         if (mh.msg_flags & MSG_TRUNC) truncated = 1;
@@ -750,7 +750,7 @@ static mino_val *prim_udp_close(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "udp-close requires one argument");
     }
     v = args->as.cons.car;
@@ -765,7 +765,7 @@ static mino_val *prim_udp_close(mino_state *S, mino_val *args, mino_env *env)
         }
         return mino_nil(S);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
                                  "udp-close: argument must be a udp "
                                  "socket");
 }
@@ -787,7 +787,7 @@ static mino_val *prim_dns_lookup(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "dns-lookup requires a host");
     }
     host_val = args->as.cons.car;
@@ -795,13 +795,13 @@ static mino_val *prim_dns_lookup(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "dns-lookup takes at most 2 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "dns-lookup: opts must be a map");
         }
     }
@@ -818,7 +818,7 @@ static mino_val *prim_dns_lookup(mino_state *S, mino_val *args,
 
 #ifdef _WIN32
     if (udp_winsock_init() != 0) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "dns-lookup: WSAStartup failed");
     }
 #endif
@@ -837,7 +837,7 @@ static mino_val *prim_dns_lookup(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "dns-lookup: cannot resolve %.190s: "
                  "%.60s", host, gai_strerror(gai_rc));
 #endif
-        return prim_throw_classified(S, "net/dns", "MNE001", msg);
+        return throw_classified(S, "net/dns", "MNE001", msg);
     }
 
     for (ai = res; ai != NULL; ai = ai->ai_next) {
@@ -845,13 +845,13 @@ static mino_val *prim_dns_lookup(mino_state *S, mino_val *args,
     }
     if (n == 0) {
         freeaddrinfo(res);
-        return prim_throw_classified(S, "net/dns", "MNE001",
+        return throw_classified(S, "net/dns", "MNE001",
                                      "dns-lookup: no addresses");
     }
     items = (mino_val **)malloc(n * sizeof(*items));
     if (items == NULL) {
         freeaddrinfo(res);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "dns-lookup: out of memory");
     }
     /* Each address map is pinned as it is built so a collection

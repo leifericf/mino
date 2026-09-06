@@ -37,11 +37,6 @@
 #  include <time.h>
 #endif
 
-/* prim_throw_classified is the runtime's catchable-throw entry point;
- * declared in src/prim/internal.h. We declare it here to avoid pulling
- * the prim layer into the runtime header. */
-extern mino_val *prim_throw_classified(mino_state *S, const char *kind,
-                                         const char *code, const char *msg);
 /* Wraps any thrown value (kind-tagged map, ex-info, raw value, NULL)
  * into the standard diagnostic map the future stores + deref rethrows.
  * Defined in eval/control.c; declared in eval/special_internal.h,
@@ -520,7 +515,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
     mino_worker_list_lock_acquire(S);
     if (tc_load(&S->threading.thread_count) >= S->threading.thread_limit) {
         mino_worker_list_lock_release(S);
-        return prim_throw_classified(S,
+        return throw_classified(S,
             "mino/thread-limit-exceeded", "MTH001",
             "thread limit exceeded; raise via "
             "mino_set_option(S, MINO_OPT_THREAD_LIMIT, n)");
@@ -563,7 +558,7 @@ mino_val *mino_future_spawn(mino_state *S, mino_val *thunk,
             mino_worker_list_lock_acquire(S);
             tc_dec_if_positive(&S->threading.thread_count);
             mino_worker_list_lock_release(S);
-            return prim_throw_classified(S,
+            return throw_classified(S,
                 "mino/thread-limit-exceeded", "MTH001",
                 "host thread pool refused submission");
         }
@@ -650,7 +645,7 @@ mino_val *mino_future_deref(mino_state *S, mino_val *fut)
 
     /* FAILED or CANCELLED: deref re-raises. */
     if (impl->state_tag == MINO_FUTURE_CANCELLED) {
-        return prim_throw_classified(S, "mino/cancelled", "MTH002",
+        return throw_classified(S, "mino/cancelled", "MTH002",
                                      "future was cancelled");
     }
     /* FAILED with a captured worker diag: rethrow with full fidelity.
@@ -659,9 +654,9 @@ mino_val *mino_future_deref(mino_state *S, mino_val *fut)
      * unmodified so the consumer sees the same shape the worker
      * saw, including :mino/data (ex-info payload) and any other
      * fields. The previous variant copied only kind/code/message via
-     * prim_throw_classified, which dropped :mino/data and re-emitted
+     * throw_classified, which dropped :mino/data and re-emitted
      * a fresh :mino/location pointing at deref's call site. With
-     * try_depth == 0 we still go through prim_throw_classified so
+     * try_depth == 0 we still go through throw_classified so
      * the host-style diag path runs, but accept the message-only
      * narrowing in that path because there's no catch frame to
      * receive the full map anyway. */
@@ -707,11 +702,11 @@ mino_val *mino_future_deref(mino_state *S, mino_val *fut)
                 mbuf[v_msg->as.s.len] = '\0';
                 msg = mbuf;
             }
-            return prim_throw_classified(S, kind, code, msg);
+            return throw_classified(S, kind, code, msg);
         }
     }
     /* FAILED with no captured exception (worker hit OOM): synthesize. */
-    return prim_throw_classified(S, "mino/future-failed", "MTH003",
+    return throw_classified(S, "mino/future-failed", "MTH003",
                                  "future failed");
 }
 

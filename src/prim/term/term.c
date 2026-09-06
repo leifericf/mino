@@ -72,7 +72,7 @@ static int term_stream_fd(mino_state *S, mino_val *v, const char *who,
         snprintf(msg, sizeof(msg),
                  "%s: stream must be the keyword :stdout, :stderr, or "
                  ":stdin", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     name = v->as.s.data;
@@ -87,7 +87,7 @@ static int term_stream_fd(mino_state *S, mino_val *v, const char *who,
         snprintf(msg, sizeof(msg),
                  "%s: unknown stream :%s; expected :stdout, :stderr, or "
                  ":stdin", who, name);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     return 1;
@@ -187,7 +187,7 @@ static mino_val *prim_tty_p(mino_state *S, mino_val *args, mino_env *env)
     int tty;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tty? requires one argument");
     }
     v = args->as.cons.car;
@@ -206,7 +206,7 @@ static int term_no_args(mino_state *S, mino_val *args, const char *who)
     if (mino_is_cons(args)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s requires no arguments", who);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     return 1;
@@ -326,7 +326,7 @@ static mino_val *term_read_stdin_line(mino_state *S)
     size_t           len;
     term_line_status st = term_read_raw_line(&buf, &len);
     if (st == TERM_LINE_OOM) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "read-password: line too long or out "
                                      "of memory");
     }
@@ -355,7 +355,7 @@ static int term_opt_bool(mino_state *S, const mino_val *opts, const char *key,
         char msg[96];
         snprintf(msg, sizeof(msg),
                  "read-password: opts key :%s must be a boolean", key);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = mino_val_bool_get(v);
@@ -377,7 +377,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "read-password takes at most one "
                                          "argument: an opts map");
         }
@@ -392,7 +392,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
 
     if (!is_tty) {
         if (!allow_pipe) {
-            return prim_throw_classified(S, "term/not-a-tty", "MTT001",
+            return throw_classified(S, "term/not-a-tty", "MTT001",
                                          "read-password: stdin is not a "
                                          "terminal; pass {:allow-pipe true} "
                                          "to read a secret from a pipe");
@@ -420,7 +420,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
             SetConsoleMode(h, mode);
         }
         if (st == TERM_LINE_OOM) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "read-password: line too long or "
                                          "out of memory");
         }
@@ -441,7 +441,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
         term_line_status st;
         static int       atexit_registered = 0;
         if (tcgetattr(0, &g_term_saved) != 0) {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "read-password: cannot read the "
                                          "terminal mode");
         }
@@ -456,7 +456,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
         g_term_echo_armed = 1;
         if (tcsetattr(0, TCSAFLUSH, &raw) != 0) {
             g_term_echo_armed = 0;
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "read-password: cannot disable "
                                          "terminal echo");
         }
@@ -471,7 +471,7 @@ static mino_val *prim_read_password(mino_state *S, mino_val *args,
         g_term_echo_armed = 0;
         fputc('\n', stderr);
         if (st == TERM_LINE_OOM) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "read-password: line too long or "
                                          "out of memory");
         }

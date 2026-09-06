@@ -96,7 +96,7 @@ static int tar_data_arg(mino_state *S, mino_val *v, const char *who,
     if (v == NULL || (!mino_is_bytes(v) && !mino_is_string(v))) {
         snprintf(msg, sizeof(msg), "%s: archive must be bytes or a string",
                  who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (mino_is_bytes(v)) {
@@ -534,7 +534,7 @@ static mino_val *prim_tar_entries(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tar-entries takes one argument");
     }
     if (tar_data_arg(S, args->as.cons.car, "tar-entries", &data, &len) != 0)
@@ -546,7 +546,7 @@ static mino_val *prim_tar_entries(mino_state *S, mino_val *args,
         /* Finish-and-discard: releases the builder's malloc and its
          * GC ref; the half-built vector becomes ordinary garbage. */
         (void)mino_vector_builder_finish(ctx.out);
-        return prim_throw_classified(S, ekind, ecode, emsg);
+        return throw_classified(S, ekind, ecode, emsg);
     }
     return mino_vector_builder_finish(ctx.out);
 }
@@ -591,14 +591,14 @@ static mino_val *prim_tar_read(mino_state *S, mino_val *args, mino_env *env)
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tar-read takes two arguments");
     }
     if (tar_data_arg(S, args->as.cons.car, "tar-read", &data, &len) != 0)
         return NULL;
     name_val = args->as.cons.cdr->as.cons.car;
     if (name_val == NULL || !mino_is_string(name_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "tar-read: name must be a string");
     }
 
@@ -609,11 +609,11 @@ static mino_val *prim_tar_read(mino_state *S, mino_val *args, mino_env *env)
     ctx.have = 0;
     if (tar_walk(S, data, len, tar_read_visit, &ctx,
                  &ekind, &ecode, emsg, sizeof(emsg)) != 0)
-        return prim_throw_classified(S, ekind, ecode, emsg);
+        return throw_classified(S, ekind, ecode, emsg);
     if (!ctx.have) {
         snprintf(msg, sizeof(msg), "tar-read: no entry named \"%.120s\"",
                  ctx.target);
-        return prim_throw_classified(S, "codec/missing", TAR_MGC_MISSING, msg);
+        return throw_classified(S, "codec/missing", TAR_MGC_MISSING, msg);
     }
     return mino_bytes(S, ctx.found, ctx.found_len);
 }
@@ -918,7 +918,7 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tar-extract takes an archive and a "
                                      "destination");
     }
@@ -928,20 +928,20 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
     if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         /* opts arg accepted for forward compatibility; no keys yet. */
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "tar-extract takes an archive, a "
                                          "destination, and optional opts");
         }
     }
     if (dest_val == NULL || !mino_is_string(dest_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "tar-extract: destination must be a "
                                      "string");
     }
 
 #if defined(_WIN32)
     (void)ctx; (void)result; (void)ekind; (void)ecode; (void)emsg;
-    return prim_throw_classified(S, "host/unsupported", "MHO002",
+    return throw_classified(S, "host/unsupported", "MHO002",
                                  "tar-extract: not supported on this "
                                  "platform");
 #else
@@ -951,7 +951,7 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
         char msg[200];
         snprintf(msg, sizeof(msg), "tar-extract: cannot open destination "
                  "\"%.150s\"", dest_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     ctx.names = mino_vector_builder_new(S);
     if (tar_walk(S, data, len, tar_extract_visit, &ctx,
@@ -959,7 +959,7 @@ static mino_val *prim_tar_extract(mino_state *S, mino_val *args,
         close(ctx.root_fd);
         /* Finish-and-discard releases the builder (see tar-entries). */
         (void)mino_vector_builder_finish(ctx.names);
-        return prim_throw_classified(S, ekind, ecode, emsg);
+        return throw_classified(S, ekind, ecode, emsg);
     }
     close(ctx.root_fd);
     result = mino_vector_builder_finish(ctx.names);
@@ -1241,13 +1241,13 @@ static mino_val *prim_tar_create(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "tar-create takes one argument (a "
                                      "vector of entry maps)");
     }
     entries_val = args->as.cons.car;
     if (entries_val == NULL || mino_type_of(entries_val) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "tar-create: entries must be a vector "
                                      "of entry maps");
     }
@@ -1256,7 +1256,7 @@ static mino_val *prim_tar_create(mino_state *S, mino_val *args, mino_env *env)
     if (n != 0) {
         wentries = (tar_wentry *)calloc(n, sizeof(*wentries));
         if (wentries == NULL)
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "tar-create: out of memory");
     }
     for (i = 0; i < n; i++) {
@@ -1265,7 +1265,7 @@ static mino_val *prim_tar_create(mino_state *S, mino_val *args, mino_env *env)
         if (tar_wentry_capture(S, vec_nth(entries_val, i), i, &wentries[i],
                                emsg, &ekind, &ecode) != 0) {
             tar_wentries_free(wentries, i);
-            return prim_throw_classified(S, ekind, ecode, emsg);
+            return throw_classified(S, ekind, ecode, emsg);
         }
     }
 
@@ -1273,7 +1273,7 @@ static mino_val *prim_tar_create(mino_state *S, mino_val *args, mino_env *env)
         size_t span = tar_wentry_span(&wentries[i]);
         if (span > SIZE_MAX - total - 2 * TAR_BLOCK) {
             tar_wentries_free(wentries, n);
-            return prim_throw_classified(S, "codec/limit", "MGC005",
+            return throw_classified(S, "codec/limit", "MGC005",
                                          "tar-create: archive exceeds the "
                                          "addressable range");
         }
@@ -1284,7 +1284,7 @@ static mino_val *prim_tar_create(mino_state *S, mino_val *args, mino_env *env)
     buf = (unsigned char *)calloc(1, total);
     if (buf == NULL) {
         tar_wentries_free(wentries, n);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "tar-create: out of memory");
     }
     for (i = 0; i < n; i++)

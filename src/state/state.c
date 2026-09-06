@@ -23,11 +23,11 @@
 #include "values/internal.h"        /* mino_val_finalize_teardown */
 
 /* Forward declarations for cross-module helpers used here.
- * prim_throw_classified is defined in prim/prim.c; normalize_exception in
+ * throw_classified is defined in prim/prim.c; normalize_exception in
  * eval/control.c.  Pulling those modules' full internal headers would
  * violate the runtime -> {prim,eval/special} dependency direction, so we
  * declare only the two signatures state.c actually needs. */
-mino_val *prim_throw_classified(mino_state *S, const char *kind,
+mino_val *throw_classified(mino_state *S, const char *kind,
                                 const char *code, const char *msg);
 mino_val *normalize_exception(mino_state *S, mino_val *ex_val);
 void      mino_agent_quiesce_workers(mino_state *S);
@@ -1079,7 +1079,7 @@ static mino_val *mino_eval_string_inner(mino_state *S, const char *src_in, mino_
                  * Mirrors mino_eval_inner so file-mode (script) errors
                  * report the same diagnostic the REPL prints; without
                  * normalizing first, ex-info maps (with un-namespaced
-                 * :message / :data keys) and prim_throw_classified maps
+                 * :message / :data keys) and throw_classified maps
                  * would take different paths and degrade to a generic
                  * MCT001 wrapper. */
                 const char *file = S->reader.reader_file;
@@ -1847,7 +1847,7 @@ static void mino_sampler_fire(mino_state *S)
  * 1. Cooperative cancellation: if a sibling thread set our
  *    impl->cancel_flag via future-cancel, throw :mino/cancelled
  *    so the BC loop unwinds and worker_run publishes CANCELLED.
- *    The throw routes through prim_throw_classified, which either
+ *    The throw routes through throw_classified, which either
  *    longjmps into an enclosing try-frame or sets the eval diag
  *    and we return failure.
  *
@@ -1872,7 +1872,7 @@ int mino_bc_safepoint_batch(mino_state *S, unsigned jumps)
     if (S == NULL) return 1;
     mino_sampler_fire(S);
     if (mino_tls_cancel_ptr != NULL && *mino_tls_cancel_ptr) {
-        (void)prim_throw_classified(S, "mino/cancelled", "MTH002",
+        (void)throw_classified(S, "mino/cancelled", "MTH002",
                                     "future was cancelled");
         return 0;
     }

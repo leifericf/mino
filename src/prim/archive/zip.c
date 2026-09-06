@@ -109,7 +109,7 @@ static int zip_data_arg(mino_state *S, mino_val *v, const char *who,
     if (v == NULL || (!mino_is_bytes(v) && !mino_is_string(v))) {
         snprintf(msg, sizeof(msg), "%s: %s must be bytes or a string",
                  who, what);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (mino_is_bytes(v)) {
@@ -142,7 +142,7 @@ static int zip_max_bytes_opt(mino_state *S, mino_val *opts, const char *who,
             || (unsigned long long)mb > SIZE_MAX / 2) {
             snprintf(msg, sizeof(msg),
                      "%s: :max-bytes must be a non-negative integer", who);
-            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            throw_classified(S, "eval/contract", "MCT001", msg);
             return -1;
         }
         *max_out = (size_t)mb;
@@ -194,7 +194,7 @@ static mino_val *zip_init_error(mino_state *S, mz_zip_archive *zip,
     switch (err) {
     case MZ_ZIP_ALLOC_FAILED:
         snprintf(msg, sizeof(msg), "%s: out of memory", who);
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     case MZ_ZIP_TOO_MANY_FILES:
     case MZ_ZIP_FILE_TOO_LARGE:
     case MZ_ZIP_UNSUPPORTED_CDIR_SIZE:
@@ -203,11 +203,11 @@ static mino_val *zip_init_error(mino_state *S, mz_zip_archive *zip,
         snprintf(msg, sizeof(msg),
                  "%s: archive exceeds the entry or directory-size ceiling",
                  who);
-        return prim_throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
+        return throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
     case MZ_ZIP_UNSUPPORTED_MULTIDISK:
     case MZ_ZIP_UNSUPPORTED_FEATURE:
         snprintf(msg, sizeof(msg), "%s: unsupported archive feature", who);
-        return prim_throw_classified(S, "codec/unsupported",
+        return throw_classified(S, "codec/unsupported",
                                      ZIP_MGC_UNSUPPORTED, msg);
     default:
         break;
@@ -219,13 +219,13 @@ static mino_val *zip_init_error(mino_state *S, mz_zip_archive *zip,
              * central directory included, was cut away. */
             snprintf(msg, sizeof(msg), "%s: archive is truncated (no "
                      "end-of-central-directory record)", who);
-            return prim_throw_classified(S, "codec/truncated",
+            return throw_classified(S, "codec/truncated",
                                          ZIP_MGC_TRUNCATED, msg);
         }
         snprintf(msg, sizeof(msg),
                  "%s: not a zip (no end-of-central-directory signature)",
                  who);
-        return prim_throw_classified(S, "codec/magic", ZIP_MGC_MAGIC, msg);
+        return throw_classified(S, "codec/magic", ZIP_MGC_MAGIC, msg);
     }
 
     if (eocd_ofs + ZIP_EOCD_REC_LEN > len) {
@@ -233,7 +233,7 @@ static mino_val *zip_init_error(mino_state *S, mz_zip_archive *zip,
          * is cut. */
         snprintf(msg, sizeof(msg), "%s: end-of-central-directory record "
                  "is truncated", who);
-        return prim_throw_classified(S, "codec/truncated",
+        return throw_classified(S, "codec/truncated",
                                      ZIP_MGC_TRUNCATED, msg);
     }
     if (err == MZ_ZIP_INVALID_HEADER_OR_CORRUPTED) {
@@ -242,12 +242,12 @@ static mino_val *zip_init_error(mino_state *S, mz_zip_archive *zip,
         if (cd_ofs > len || cd_size > len - cd_ofs) {
             snprintf(msg, sizeof(msg),
                      "%s: central directory is truncated", who);
-            return prim_throw_classified(S, "codec/truncated",
+            return throw_classified(S, "codec/truncated",
                                          ZIP_MGC_TRUNCATED, msg);
         }
     }
     snprintf(msg, sizeof(msg), "%s: archive is corrupt", who);
-    return prim_throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT, msg);
+    return throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT, msg);
 }
 
 /* Init the vendor memory reader in archive order; on failure throws
@@ -409,7 +409,7 @@ static mino_val *zip_entry_map(mino_state *S,
         || st->m_comp_size > (mz_uint64)LLONG_MAX) {
         snprintf(msg, sizeof(msg),
                  "zip-entries: declared size exceeds the addressable range");
-        return prim_throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
+        return throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
     }
 
     ks[0] = mino_keyword(S, "name");
@@ -436,7 +436,7 @@ static mino_val *zip_entry_map(mino_state *S,
         clen = comment_len;
         scratch = (unsigned char *)malloc(clen * 3 + 1);
         if (scratch == NULL)
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "zip-entries: out of memory");
         dn = zip_decode_name(scratch, comment, clen, bit_flag);
         vs[7] = mino_string_n(S, (const char *)scratch, dn);
@@ -456,20 +456,20 @@ static mino_val *zip_extract_error(mino_state *S, mz_zip_error err,
     switch (err) {
     case MZ_ZIP_ALLOC_FAILED:
         snprintf(msg, sizeof(msg), "%s: out of memory", who);
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     case MZ_ZIP_UNSUPPORTED_METHOD:
     case MZ_ZIP_UNSUPPORTED_ENCRYPTION:
     case MZ_ZIP_UNSUPPORTED_FEATURE:
         snprintf(msg, sizeof(msg), "%s: entry uses an unsupported feature",
                  who);
-        return prim_throw_classified(S, "codec/unsupported",
+        return throw_classified(S, "codec/unsupported",
                                      ZIP_MGC_UNSUPPORTED, msg);
     case MZ_ZIP_CRC_CHECK_FAILED:
         snprintf(msg, sizeof(msg), "%s: CRC-32 mismatch", who);
-        return prim_throw_classified(S, "codec/crc", ZIP_MGC_CRC, msg);
+        return throw_classified(S, "codec/crc", ZIP_MGC_CRC, msg);
     default:
         snprintf(msg, sizeof(msg), "%s: entry is corrupt", who);
-        return prim_throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
+        return throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
                                      msg);
     }
 }
@@ -577,7 +577,7 @@ static int zip_write_opts(mino_state *S, mino_val *opts, int *level,
         if (!as_long(v, &n) || n < 0 || n > 9) {
             snprintf(msg, sizeof(msg),
                      "zip-write: :level must be an integer 0-9");
-            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            throw_classified(S, "eval/contract", "MCT001", msg);
             return -1;
         }
         *level = (int)n;
@@ -587,7 +587,7 @@ static int zip_write_opts(mino_state *S, mino_val *opts, int *level,
         if (mino_type_of(v) != MINO_BOOL) {
             snprintf(msg, sizeof(msg),
                      "zip-write: :zip64 must be a boolean");
-            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            throw_classified(S, "eval/contract", "MCT001", msg);
             return -1;
         }
         *zip64 = mino_val_bool_get(v);
@@ -780,19 +780,19 @@ static mino_val *zip_writer_error(mino_state *S, mz_zip_error err,
     switch (err) {
     case MZ_ZIP_ALLOC_FAILED:
         snprintf(msg, sizeof(msg), "%s: out of memory", who);
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     case MZ_ZIP_TOO_MANY_FILES:
     case MZ_ZIP_FILE_TOO_LARGE:
     case MZ_ZIP_UNSUPPORTED_CDIR_SIZE:
         snprintf(msg, sizeof(msg),
                  "%s: archive exceeds the entry or directory-size "
                  "ceiling", who);
-        return prim_throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
+        return throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
     default:
         snprintf(msg, sizeof(msg),
                  "%s: writer failed after validation (invariant break)",
                  who);
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
 }
 
@@ -826,7 +826,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "zip-entries takes one argument");
         return NULL;
     }
@@ -850,7 +850,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
             free(stats); free(words); free(name_ofs); free(name_len);
             free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: out of memory");
-            return prim_throw_classified(S, "internal", "MIN001", msg);
+            return throw_classified(S, "internal", "MIN001", msg);
         }
     }
     if (zip_cdh_walk_init(&zip, &walk, data, len) != 0) {
@@ -858,7 +858,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
         free(stats); free(words); free(name_ofs); free(name_len);
         free(com_ofs); free(com_len);
         snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
-        return prim_throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
+        return throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
                                      msg);
     }
 
@@ -868,7 +868,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
             free(stats); free(words); free(name_ofs); free(name_len);
             free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
-            return prim_throw_classified(S, "codec/corrupt",
+            return throw_classified(S, "codec/corrupt",
                                          ZIP_MGC_CORRUPT, msg);
         }
         if (zip_cdh_next(&walk, &dos_time, &dos_date, &bit_flag,
@@ -877,7 +877,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
             free(stats); free(words); free(name_ofs); free(name_len);
             free(com_ofs); free(com_len);
             snprintf(msg, sizeof(msg), "zip-entries: archive is corrupt");
-            return prim_throw_classified(S, "codec/corrupt",
+            return throw_classified(S, "codec/corrupt",
                                          ZIP_MGC_CORRUPT, msg);
         }
         words[i * 4] = dos_time;
@@ -900,7 +900,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
         free(stats); free(words); free(name_ofs); free(name_len);
         free(com_ofs); free(com_len);
         snprintf(msg, sizeof(msg), "zip-entries: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     for (i = 0; i < total; i++) {
         mino_val *entry;
@@ -914,7 +914,7 @@ static mino_val *prim_zip_entries(mino_state *S, mino_val *args,
                 free(stats); free(words); free(name_ofs); free(name_len);
                 free(com_ofs); free(com_len);
                 snprintf(msg, sizeof(msg), "zip-entries: out of memory");
-                return prim_throw_classified(S, "internal", "MIN001", msg);
+                return throw_classified(S, "internal", "MIN001", msg);
             }
             free(scratch);
             scratch = grown;
@@ -966,7 +966,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "zip-read takes two or three arguments");
         return NULL;
     }
@@ -975,13 +975,13 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
         return NULL;
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "zip-read takes two or three arguments");
         return NULL;
     }
     name_val = args->as.cons.car;
     if (name_val == NULL || !mino_is_string(name_val)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "zip-read: name must be a string");
         return NULL;
     }
@@ -991,13 +991,13 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            prim_throw_classified(S, "eval/arity", "MAR001",
+            throw_classified(S, "eval/arity", "MAR001",
                                   "zip-read takes two or three arguments");
             return NULL;
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            prim_throw_classified(S, "eval/type", "MTY001",
+            throw_classified(S, "eval/type", "MTY001",
                                   "zip-read: opts must be a map");
             return NULL;
         }
@@ -1009,7 +1009,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     if (zip_cdh_walk_init(&zip, &walk, data, len) != 0) {
         mz_zip_reader_end(&zip);
         snprintf(msg, sizeof(msg), "zip-read: archive is corrupt");
-        return prim_throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
+        return throw_classified(S, "codec/corrupt", ZIP_MGC_CORRUPT,
                                      msg);
     }
 
@@ -1021,7 +1021,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
     if (scratch == NULL) {
         mz_zip_reader_end(&zip);
         snprintf(msg, sizeof(msg), "zip-read: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     for (i = 0; i < total; i++) {
         if (zip_cdh_next(&walk, &dos_time, &dos_date, &bit_flag,
@@ -1029,7 +1029,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
             mz_zip_reader_end(&zip);
             free(scratch);
             snprintf(msg, sizeof(msg), "zip-read: archive is corrupt");
-            return prim_throw_classified(S, "codec/corrupt",
+            return throw_classified(S, "codec/corrupt",
                                          ZIP_MGC_CORRUPT, msg);
         }
         if (nlen * 3 + 1 > scratch_cap) {
@@ -1038,7 +1038,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
                 mz_zip_reader_end(&zip);
                 free(scratch);
                 snprintf(msg, sizeof(msg), "zip-read: out of memory");
-                return prim_throw_classified(S, "internal", "MIN001", msg);
+                return throw_classified(S, "internal", "MIN001", msg);
             }
             free(scratch);
             scratch = grown;
@@ -1055,7 +1055,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
         free(scratch);
         snprintf(msg, sizeof(msg), "zip-read: no entry named \"%s\"",
                  target);
-        return prim_throw_classified(S, "codec/missing", ZIP_MGC_MISSING,
+        return throw_classified(S, "codec/missing", ZIP_MGC_MISSING,
                                      msg);
     }
 
@@ -1071,7 +1071,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
         mz_zip_reader_end(&zip);
         free(scratch);
         snprintf(msg, sizeof(msg), "zip-read: entry is encrypted");
-        return prim_throw_classified(S, "codec/unsupported",
+        return throw_classified(S, "codec/unsupported",
                                      ZIP_MGC_UNSUPPORTED, msg);
     }
     if (st.m_method != 0 && st.m_method != 8) {
@@ -1080,7 +1080,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
         snprintf(msg, sizeof(msg),
                  "zip-read: compression method %u is not supported",
                  (unsigned)st.m_method);
-        return prim_throw_classified(S, "codec/unsupported",
+        return throw_classified(S, "codec/unsupported",
                                      ZIP_MGC_UNSUPPORTED, msg);
     }
     /* The bomb cap: the central-directory declared size is checked
@@ -1092,7 +1092,7 @@ static mino_val *prim_zip_read(mino_state *S, mino_val *args, mino_env *env)
                  "zip-read: entry declares %llu bytes, over the %lu byte "
                  "cap", (unsigned long long)st.m_uncomp_size,
                  (unsigned long)max_out);
-        return prim_throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
+        return throw_classified(S, "codec/limit", ZIP_MGC_LIMIT, msg);
     }
 
     out = mz_zip_reader_extract_to_heap(&zip, i, &out_len, 0);
@@ -1132,7 +1132,7 @@ static mino_val *prim_zip_write(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "zip-write takes one or two arguments");
         return NULL;
     }
@@ -1141,20 +1141,20 @@ static mino_val *prim_zip_write(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            prim_throw_classified(S, "eval/arity", "MAR001",
+            throw_classified(S, "eval/arity", "MAR001",
                                   "zip-write takes one or two arguments");
             return NULL;
         }
     }
     if (entries_val == NULL || mino_type_of(entries_val) != MINO_VECTOR) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "zip-write: entries must be a vector of "
                               "entry maps");
         return NULL;
     }
     if (opts != NULL && mino_type_of(opts) != MINO_MAP
         && mino_type_of(opts) != MINO_NIL) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "zip-write: opts must be a map");
         return NULL;
     }
@@ -1164,7 +1164,7 @@ static mino_val *prim_zip_write(mino_state *S, mino_val *args,
     if (n != 0) {
         wentries = (zip_wentry *)calloc(n, sizeof(*wentries));
         if (wentries == NULL) {
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                                   "zip-write: out of memory");
             return NULL;
         }
@@ -1174,11 +1174,11 @@ static mino_val *prim_zip_write(mino_state *S, mino_val *args,
         const char *ekind = NULL, *ecode = NULL;
         if (zip_wentry_capture(S, vec_nth(entries_val, i), i, level,
                                &wentries[i], emsg, &ekind, &ecode) != 0) {
-            /* Free the C buffers before the throw: prim_throw_classified
+            /* Free the C buffers before the throw: throw_classified
              * longjmps out of any surrounding try, so cleanup cannot
              * follow it. */
             zip_wentries_free(wentries, i);
-            prim_throw_classified(S, ekind, ecode, emsg);
+            throw_classified(S, ekind, ecode, emsg);
             return NULL;
         }
     }

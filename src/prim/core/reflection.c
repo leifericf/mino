@@ -9,11 +9,11 @@ static mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "name requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "name requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL)
-        return prim_throw_classified(S, "eval/type", "MTY001", "name: argument must not be nil");
+        return throw_classified(S, "eval/type", "MTY001", "name: argument must not be nil");
     if (mino_type_of(v) == MINO_STRING)  return v;
     if (mino_type_of(v) == MINO_KEYWORD || mino_type_of(v) == MINO_SYMBOL) {
         const char *data = v->as.s.data;
@@ -43,7 +43,7 @@ static mino_val *prim_name(mino_state *S, mino_val *args, mino_env *env)
                  "name: expected a keyword, symbol, or string, got: %.*s",
                  printed != NULL ? (int)printed->as.s.len : 0,
                  printed != NULL ? printed->as.s.data : "");
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
 }
 
@@ -52,14 +52,14 @@ static mino_val *prim_rand(mino_state *S, mino_val *args, mino_env *env)
     double r;
     (void)env;
     if (mino_is_cons(args) && mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "rand takes zero or one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "rand takes zero or one argument");
     }
     /* 53-bit mantissa out of our 64-bit xorshift result. */
     r = (double)(state_rand64(S) >> 11) * (1.0 / 9007199254740992.0);
     if (mino_is_cons(args)) {
         double n;
         if (!as_double(args->as.cons.car, &n)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "rand expects a number");
+            return throw_classified(S, "eval/type", "MTY001", "rand expects a number");
         }
         r *= n;
     }
@@ -77,12 +77,12 @@ static mino_val *prim_random_seed_bang(mino_state *S, mino_val *args,
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "random-seed! requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || !mino_val_int_p(v)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "random-seed! seed must be an integer");
     }
     {
@@ -102,7 +102,7 @@ static mino_val *prim_eval(mino_state *S, mino_val *args, mino_env *env)
     const char *saved_ambient;
     mino_val *result;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "eval requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "eval requires one argument");
     }
     saved_ambient = S->ns_vars.fn_ambient_ns;
     S->ns_vars.fn_ambient_ns = NULL;
@@ -120,12 +120,12 @@ static mino_val *prim_load_string(mino_state *S, mino_val *args, mino_env *env)
     mino_val *src;
     mino_val *result;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "load-string requires one string argument");
     }
     src = args->as.cons.car;
     if (src == NULL || mino_type_of(src) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "load-string: argument must be a string");
     }
     saved_ambient = S->ns_vars.fn_ambient_ns;
@@ -145,16 +145,16 @@ static mino_val *prim_load_file(mino_state *S, mino_val *args, mino_env *env)
     mino_val *result;
     char        cpath[1024];
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "load-file requires one string argument");
     }
     path = args->as.cons.car;
     if (path == NULL || mino_type_of(path) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "load-file: argument must be a string");
     }
     if (path->as.s.len >= sizeof(cpath)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "load-file: path too long");
     }
     memcpy(cpath, path->as.s.data, path->as.s.len);
@@ -171,7 +171,7 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
     }
     /* 2-arg: (symbol ns name) */
     if (mino_is_cons(args->as.cons.cdr)) {
@@ -180,10 +180,10 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
         char buf[512];
         size_t pos = 0;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
+            return throw_classified(S, "eval/arity", "MAR001", "symbol requires 1 or 2 arguments");
         }
         if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name must be a string");
+            return throw_classified(S, "eval/type", "MTY001", "symbol: name must be a string");
         }
         if (ns_arg != NULL && mino_type_of(ns_arg) == MINO_STRING) {
             /* Preserve an explicit (even empty) ns by emitting the
@@ -191,16 +191,16 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
              * (namespace returns `""`) from `(symbol nil "x")` (no ns,
              * namespace returns `nil`). */
             if (ns_arg->as.s.len + 1 + name_arg->as.s.len >= sizeof(buf)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name too long");
+                return throw_classified(S, "eval/type", "MTY001", "symbol: name too long");
             }
             memcpy(buf, ns_arg->as.s.data, ns_arg->as.s.len);
             pos = ns_arg->as.s.len;
             buf[pos++] = '/';
         } else if (ns_arg != NULL && mino_type_of(ns_arg) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "symbol: namespace must be a string");
+            return throw_classified(S, "eval/type", "MTY001", "symbol: namespace must be a string");
         }
         if (pos + name_arg->as.s.len >= sizeof(buf)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name too long");
+            return throw_classified(S, "eval/type", "MTY001", "symbol: name too long");
         }
         memcpy(buf + pos, name_arg->as.s.data, name_arg->as.s.len);
         pos += name_arg->as.s.len;
@@ -209,7 +209,7 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
     /* 1-arg */
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must not be nil");
+        return throw_classified(S, "eval/type", "MTY001", "symbol: argument must not be nil");
     }
     if (mino_type_of(v) == MINO_STRING) {
         return mino_symbol_n(S, v->as.s.data, v->as.s.len);
@@ -229,14 +229,14 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
         const char *sym     = v->as.var.sym;
         size_t      sym_len = (sym != NULL) ? strlen(sym) : 0;
         if (sym == NULL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "symbol: var has no name");
         }
         if (ns_name != NULL && ns_name[0] != '\0') {
             char        buf[512];
             size_t      ns_len = strlen(ns_name);
             if (ns_len + 1 + sym_len >= sizeof(buf)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "symbol: var name too long");
             }
             memcpy(buf, ns_name, ns_len);
@@ -246,7 +246,7 @@ static mino_val *prim_symbol(mino_state *S, mino_val *args, mino_env *env)
         }
         return mino_symbol_n(S, sym, sym_len);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, keyword, or var");
+    return throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, keyword, or var");
 }
 
 static mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
@@ -254,22 +254,22 @@ static mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
     }
     /* 2-arity: (keyword ns name) */
     if (mino_is_cons(args->as.cons.cdr)) {
         mino_val *ns_val  = args->as.cons.car;
         mino_val *nm_val  = args->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-            return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
+            return throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
         if (mino_type_of(nm_val) != MINO_STRING)
-            return prim_throw_classified(S, "eval/type", "MTY001", "keyword: name must be a string");
+            return throw_classified(S, "eval/type", "MTY001", "keyword: name must be a string");
         if (ns_val == NULL || mino_type_of(ns_val) == MINO_NIL) {
             return mino_keyword_ns_n(S, NULL, 0,
                                      nm_val->as.s.data, nm_val->as.s.len);
         }
         if (mino_type_of(ns_val) != MINO_STRING)
-            return prim_throw_classified(S, "eval/type", "MTY001", "keyword: namespace must be a string or nil");
+            return throw_classified(S, "eval/type", "MTY001", "keyword: namespace must be a string or nil");
         return mino_keyword_ns_n(S,
                                  ns_val->as.s.data, ns_val->as.s.len,
                                  nm_val->as.s.data, nm_val->as.s.len);
@@ -283,7 +283,7 @@ static mino_val *prim_keyword(mino_state *S, mino_val *args, mino_env *env)
         return v;
     if (mino_type_of(v) == MINO_SYMBOL)
         return mino_keyword_n(S, v->as.s.data, v->as.s.len);
-    return prim_throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
+    return throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
 }
 
 /* find-keyword is lookup-only over the keyword intern table: nil for
@@ -296,14 +296,14 @@ static mino_val *prim_find_keyword(mino_state *S, mino_val *args, mino_env *env)
     mino_val *found;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "find-keyword requires one or two arguments");
     }
     if (mino_is_cons(args->as.cons.cdr)) {
         mino_val *ns_val = args->as.cons.car;
         mino_val *nm_val = args->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "find-keyword requires one or two arguments");
         }
         if (ns_val == NULL || mino_type_of(ns_val) != MINO_STRING
@@ -327,7 +327,7 @@ static mino_val *prim_hash(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "hash requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "hash requires one argument");
     }
     return mino_int(S, (long long)hash_val(args->as.cons.car));
 }
@@ -408,7 +408,7 @@ static mino_val *prim_type(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL)  return mino_keyword(S, "nil");
@@ -439,7 +439,7 @@ static mino_val *prim_class(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "class requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "class requires one argument");
     }
     v = args->as.cons.car;
     /* nil -> nil, not :nil. */
@@ -466,7 +466,7 @@ static mino_val *prim_class(mino_state *S, mino_val *args, mino_env *env)
         mino_val *v; \
         (void)env; \
         if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) { \
-            return prim_throw_classified(S, "eval/arity", "MAR001", \
+            return throw_classified(S, "eval/arity", "MAR001", \
                 label " requires one argument"); \
         } \
         v = args->as.cons.car; \
@@ -481,7 +481,7 @@ static mino_val *prim_class(mino_state *S, mino_val *args, mino_env *env)
         mino_val *v; \
         (void)env; \
         if (argc != 1) { \
-            return prim_throw_classified(S, "eval/arity", "MAR001", \
+            return throw_classified(S, "eval/arity", "MAR001", \
                 label " requires one argument"); \
         } \
         v = argv[0]; \
@@ -521,7 +521,7 @@ static mino_val *prim_not(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "not requires one argument");
     }
     return mino_is_truthy_inline(args->as.cons.car) ? mino_false(S) : mino_true(S);
@@ -532,7 +532,7 @@ static mino_val *prim_some_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "some? requires one argument");
     }
     v = args->as.cons.car;
@@ -544,7 +544,7 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "empty? requires one argument");
     }
     v = args->as.cons.car;
@@ -577,7 +577,7 @@ mino_val *prim_empty_p(mino_state *S, mino_val *args, mino_env *env)
     case MINO_QUEUE:        return mino_queue_count(v) == 0 ? mino_true(S) : mino_false(S);
     case MINO_BYTES:        return mino_bytes_len(v) == 0 ? mino_true(S) : mino_false(S);
     default:
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");
     }
     }
@@ -606,7 +606,7 @@ type_err:
     {
         char buf[96];
         snprintf(buf, sizeof(buf), "%s requires a number", name);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
 }
 
@@ -617,7 +617,7 @@ static mino_val *num_pred(mino_state *S, mino_val *args,
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         char buf[96];
         snprintf(buf, sizeof(buf), "%s requires one argument", name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     return num_pred_step(S, args->as.cons.car, name, cmp_int, cmp_float);
 }
@@ -649,7 +649,7 @@ static mino_val *prim_zero_p_argv(mino_state *S, mino_val **argv, int argc,
                              mino_env *env)
 {
     (void)env;
-    if (argc != 1) return prim_throw_classified(
+    if (argc != 1) return throw_classified(
         S, "eval/arity", "MAR001", "zero? requires one argument");
     return num_pred_step(S, argv[0], "zero?", is_zero_i, is_zero_f);
 }
@@ -657,7 +657,7 @@ static mino_val *prim_pos_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     (void)env;
-    if (argc != 1) return prim_throw_classified(
+    if (argc != 1) return throw_classified(
         S, "eval/arity", "MAR001", "pos? requires one argument");
     return num_pred_step(S, argv[0], "pos?", is_pos_i, is_pos_f);
 }
@@ -665,7 +665,7 @@ static mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     (void)env;
-    if (argc != 1) return prim_throw_classified(
+    if (argc != 1) return throw_classified(
         S, "eval/arity", "MAR001", "neg? requires one argument");
     return num_pred_step(S, argv[0], "neg?", is_neg_i, is_neg_f);
 }
@@ -673,7 +673,7 @@ static mino_val *prim_neg_p_argv(mino_state *S, mino_val **argv, int argc,
 static mino_val *odd_p_step(mino_state *S, mino_val *v)
 {
     if (v == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "odd? requires an integer");
     }
     if (mino_val_int_p(v)) {
@@ -683,7 +683,7 @@ static mino_val *odd_p_step(mino_state *S, mino_val *v)
         return mino_bigint_is_odd(v)
             ? mino_true(S) : mino_false(S);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "odd? requires an integer");
 }
 
@@ -691,7 +691,7 @@ mino_val *prim_odd_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "odd? requires one argument");
     }
     return odd_p_step(S, args->as.cons.car);
@@ -701,7 +701,7 @@ static mino_val *prim_odd_p_argv(mino_state *S, mino_val **argv, int argc,
                             mino_env *env)
 {
     (void)env;
-    if (argc != 1) return prim_throw_classified(
+    if (argc != 1) return throw_classified(
         S, "eval/arity", "MAR001", "odd? requires one argument");
     return odd_p_step(S, argv[0]);
 }
@@ -709,7 +709,7 @@ static mino_val *prim_odd_p_argv(mino_state *S, mino_val **argv, int argc,
 static mino_val *even_p_step(mino_state *S, mino_val *v)
 {
     if (v == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "even? requires an integer");
     }
     if (mino_val_int_p(v)) {
@@ -719,7 +719,7 @@ static mino_val *even_p_step(mino_state *S, mino_val *v)
         return mino_bigint_is_odd(v)
             ? mino_false(S) : mino_true(S);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "even? requires an integer");
 }
 
@@ -727,7 +727,7 @@ mino_val *prim_even_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "even? requires one argument");
     }
     return even_p_step(S, args->as.cons.car);
@@ -737,7 +737,7 @@ static mino_val *prim_even_p_argv(mino_state *S, mino_val **argv, int argc,
                              mino_env *env)
 {
     (void)env;
-    if (argc != 1) return prim_throw_classified(
+    if (argc != 1) return throw_classified(
         S, "eval/arity", "MAR001", "even? requires one argument");
     return even_p_step(S, argv[0]);
 }
@@ -746,7 +746,7 @@ static mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env
 {
     int expanded;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "macroexpand-1 requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "macroexpand-1 requires one argument");
     }
     return macroexpand1(S, args->as.cons.car, env, &expanded);
 }
@@ -754,7 +754,7 @@ static mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env
 static mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "macroexpand requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "macroexpand requires one argument");
     }
     return macroexpand_all(S, args->as.cons.car, env);
 }
@@ -768,17 +768,17 @@ static mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &nargs);
     if (nargs > 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "gensym takes 0 or 1 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "gensym takes 0 or 1 arguments");
     }
     if (nargs == 1) {
         mino_val *p = args->as.cons.car;
         if (p == NULL || mino_type_of(p) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "gensym prefix must be a string");
+            return throw_classified(S, "eval/type", "MTY001", "gensym prefix must be a string");
         }
         prefix_src = p->as.s.data;
         prefix_len = p->as.s.len;
         if (prefix_len >= sizeof(buf) - 32) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "gensym prefix too long");
+            return throw_classified(S, "eval/type", "MTY001", "gensym prefix too long");
         }
     }
     {
@@ -788,7 +788,7 @@ static mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)
         used = snprintf(buf + prefix_len, sizeof(buf) - prefix_len,
                         "%ld", ++S->gensym_counter);
         if (used < 0) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "gensym formatting failed");
+            return throw_classified(S, "eval/type", "MTY001", "gensym formatting failed");
         }
         total_len = prefix_len + (size_t)used;
         /* Gensyms are unique by construction of the counter, so interning
@@ -835,7 +835,7 @@ static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "defrecord* requires three arguments: ns name fields");
     }
     ns_arg     = args->as.cons.car;
@@ -843,15 +843,15 @@ static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
     fields_arg = args->as.cons.cdr->as.cons.cdr->as.cons.car;
 
     if (ns_arg == NULL || mino_type_of(ns_arg) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "defrecord*: ns must be a string");
     }
     if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "defrecord*: name must be a string");
     }
     if (fields_arg == NULL || mino_type_of(fields_arg) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "defrecord*: fields must be a vector");
     }
 
@@ -863,7 +863,7 @@ static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
     if (n_fields > 0) {
         field_names = (const char **)malloc(n_fields * sizeof(*field_names));
         if (field_names == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                 "defrecord*: out of memory");
         }
         for (i = 0; i < n_fields; i++) {
@@ -872,7 +872,7 @@ static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
                               && mino_type_of(f) != MINO_SYMBOL
                               && mino_type_of(f) != MINO_STRING)) {
                 free(field_names);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "defrecord*: field names must be keywords, symbols, or strings");
             }
             field_names[i] = f->as.s.data;
@@ -881,7 +881,7 @@ static mino_val *prim_defrecord_star(mino_state *S, mino_val *args,
     result = mino_defrecord(S, ns_str, name_str, field_names, n_fields);
     free(field_names);
     if (result == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
             "defrecord*: failed to construct record type");
     }
     return result;
@@ -902,17 +902,17 @@ static mino_val *prim_record_star(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "record* requires two arguments: type vals-vector");
     }
     type_arg = args->as.cons.car;
     vals_arg = args->as.cons.cdr->as.cons.car;
     if (type_arg == NULL || mino_type_of(type_arg) != MINO_TYPE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "record*: first argument must be a record type");
     }
     if (vals_arg == NULL || mino_type_of(vals_arg) != MINO_VECTOR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "record*: second argument must be a vector of field values");
     }
     n = vals_arg->as.vec.len;
@@ -921,7 +921,7 @@ static mino_val *prim_record_star(mino_state *S, mino_val *args,
         slots = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                               n * sizeof(*slots));
         if (slots == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                 "record*: out of memory");
         }
         for (i = 0; i < n; i++) slots[i] = vec_nth(vals_arg, i);
@@ -936,7 +936,7 @@ static mino_val *prim_record_star(mino_state *S, mino_val *args,
             type_arg->as.record_type.ns ? type_arg->as.record_type.ns : "",
             type_arg->as.record_type.name ? type_arg->as.record_type.name : "",
             expected, n);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     return result;
 }
@@ -955,17 +955,17 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "record-from-map requires two arguments: type map");
     }
     type_arg = args->as.cons.car;
     map_arg  = args->as.cons.cdr->as.cons.car;
     if (type_arg == NULL || mino_type_of(type_arg) != MINO_TYPE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "record-from-map: first argument must be a record type");
     }
     if (map_arg == NULL || mino_type_of(map_arg) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "record-from-map: second argument must be a map");
     }
     fields   = type_arg->as.record_type.fields;
@@ -976,7 +976,7 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
         slots = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                                               n_fields * sizeof(*slots));
         if (slots == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                 "record-from-map: out of memory");
         }
         for (i = 0; i < n_fields; i++) {
@@ -987,7 +987,7 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
     }
     result = mino_record(S, type_arg, slots, n_fields);
     if (result == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
             "record-from-map: failed to construct record");
     }
 
@@ -1002,7 +1002,7 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
             ext_keys = (mino_val **)gc_alloc_typed(S, GC_T_VALARR,
                 map_arg->as.map.len * sizeof(*ext_keys));
             if (ext_keys == NULL) {
-                return prim_throw_classified(S, "internal", "MIN001",
+                return throw_classified(S, "internal", "MIN001",
                     "record-from-map: out of memory");
             }
             /* Pin ext_keys so the second alloc cannot collect it. */
@@ -1011,7 +1011,7 @@ static mino_val *prim_record_from_map(mino_state *S, mino_val *args,
                 map_arg->as.map.len * sizeof(*ext_vals));
             gc_unpin(1);
             if (ext_vals == NULL) {
-                return prim_throw_classified(S, "internal", "MIN001",
+                return throw_classified(S, "internal", "MIN001",
                     "record-from-map: out of memory");
             }
         }
@@ -1040,12 +1040,12 @@ static mino_val *prim_record_fields(mino_state *S, mino_val *args,
     mino_val *t;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "record-fields requires one argument");
     }
     t = args->as.cons.car;
     if (t == NULL || mino_type_of(t) != MINO_TYPE) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "record-fields: argument must be a record type");
     }
     return t->as.record_type.fields != NULL
@@ -1063,7 +1063,7 @@ static mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ex;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "throw requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "throw requires one argument");
     }
     ex = args->as.cons.car;
     if (mino_current_ctx(S)->try_depth <= 0) {
@@ -1133,7 +1133,7 @@ static mino_val *prim_throw(mino_state *S, mino_val *args, mino_env *env)
             append_trace(S);
             return NULL;
         }
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     mino_throw_capture_site(S);
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
@@ -1146,7 +1146,7 @@ static mino_val *prim_var_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "var? requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "var? requires one argument");
     }
     v = args->as.cons.car;
     return (v != NULL && mino_type_of(v) == MINO_VAR) ? mino_true(S) : mino_false(S);
@@ -1160,11 +1160,11 @@ static mino_val *prim_resolve(mino_state *S, mino_val *args, mino_env *env)
     const char *slash;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "resolve requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "resolve requires one argument");
     }
     sym = args->as.cons.car;
     if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "resolve: argument must be a symbol");
+        return throw_classified(S, "eval/type", "MTY001", "resolve: argument must be a symbol");
     }
     n = sym->as.s.len;
     if (n >= sizeof(buf)) return mino_nil(S);
@@ -1239,11 +1239,11 @@ static mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
     const char *slash;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "namespace requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "namespace requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "namespace: argument must not be nil");
+        return throw_classified(S, "eval/type", "MTY001", "namespace: argument must not be nil");
     }
     if (mino_type_of(v) != MINO_SYMBOL && mino_type_of(v) != MINO_KEYWORD) {
         char        buf[256];
@@ -1252,7 +1252,7 @@ static mino_val *prim_namespace(mino_state *S, mino_val *args, mino_env *env)
                  "namespace: expected a symbol or keyword, got: %.*s",
                  printed != NULL ? (int)printed->as.s.len : 0,
                  printed != NULL ? printed->as.s.data : "");
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
     data = v->as.s.data;
     len  = v->as.s.len;
@@ -1297,7 +1297,7 @@ static mino_val *prim_ex_data(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v, *data_key, *result;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "ex-data requires one argument");
     }
     v = args->as.cons.car;
@@ -1313,7 +1313,7 @@ static mino_val *prim_ex_message(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v, *msg_key, *result;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "ex-message requires one argument");
     }
     v = args->as.cons.car;
@@ -1337,7 +1337,7 @@ mino_val *prim_gc_stats(mino_state *S, mino_val *args, mino_env *env)
     mino_val *vs[43];
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "gc-stats takes no arguments");
     }
     mino_gc_stats(S, &st);
@@ -1540,7 +1540,7 @@ mino_val *prim_gc_bang(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "gc! takes no arguments");
     }
     mino_gc_collect(S, MINO_GC_FULL);
@@ -1553,7 +1553,7 @@ static mino_val *prim_alloc_profile_enabled_p(mino_state *S,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "alloc-profile-enabled? takes no arguments");
     }
     return mino_alloc_profile_enabled() ? mino_true(S) : mino_false(S);
@@ -1565,7 +1565,7 @@ static mino_val *prim_alloc_profile_reset_bang(mino_state *S,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "alloc-profile-reset! takes no arguments");
     }
     mino_alloc_profile_reset(S);
@@ -1582,12 +1582,12 @@ static mino_val *prim_alloc_profile_dump_bang(mino_state *S,
     if (mino_is_cons(args)) {
         mino_val *first = args->as.cons.car;
         if (first == NULL || !mino_val_int_p(first)) {
-            return prim_throw_classified(S, "eval/arg", "MAR002",
+            return throw_classified(S, "eval/arg", "MAR002",
                                          "alloc-profile-dump! takes an integer count");
         }
         n = mino_val_int_get(first);
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "alloc-profile-dump! takes at most one argument");
         }
     }

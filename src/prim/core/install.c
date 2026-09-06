@@ -558,7 +558,7 @@ static mino_val *prim_mino_installed_p(mino_state *S, mino_val *args,
         label = arg->as.s.data;
         break;
     default:
-        return prim_throw_classified(S, "eval/type", "MNS003",
+        return throw_classified(S, "eval/type", "MNS003",
             "mino-installed?: expected keyword, string, or symbol");
     }
     if (label == NULL) return mino_false(S);

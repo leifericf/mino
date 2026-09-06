@@ -2,7 +2,7 @@
  * error_diag.h -- runtime error reporting, structured diagnostics,
  * call-frame stack, source cache, and the metadata table API.
  *
- * Bodies live in runtime/error.c. Internal to the runtime;
+ * Bodies live in state/error.c. Internal to the runtime;
  * embedders should only use mino.h.
  */
 
@@ -31,6 +31,17 @@ void        set_eval_diag_with_data(mino_state *S, const mino_val *form,
                                     const char *kind, const char *code,
                                     const char *msg, mino_val *data,
                                     const char *note);
+/* Throw a classified catchable exception (kind + code + msg, optional
+ * :mino/data payload in the _data form). Inside a try frame this does
+ * NOT return: the diagnostic map is delivered to the matching catch
+ * via longjmp. Outside any try frame it sets the diagnostic, appends
+ * the trace, and returns NULL for the caller to propagate. Any layer
+ * may raise through these; they live beside the error machinery. */
+mino_val *throw_classified(mino_state *S, const char *kind,
+                           const char *code, const char *msg);
+mino_val *throw_classified_data(mino_state *S, const char *kind,
+                                const char *code, const char *msg,
+                                mino_val *data);
 const char *type_tag_str(const mino_val *v);                    /* static string */
 void        push_frame(mino_state *S, const char *name,     /* name: borrowed */
                        const char *file, int line,            /* file: borrowed */

@@ -182,12 +182,12 @@ static mino_val *prim_ws_accept_key(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "ws-accept-key requires one argument");
     }
     v = args->as.cons.car;
     if (mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "ws-accept-key: key must be a string");
     }
     key     = v->as.s.data;
@@ -247,19 +247,19 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "ws-encode-frame requires one argument");
     }
     frame = args->as.cons.car;
     if (mino_type_of(frame) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "ws-encode-frame: argument must be a map");
     }
 
     opv    = map_get_val(frame, mino_keyword(S, "opcode"));
     opcode = ws_opcode_for(opv);
     if (opcode < 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-encode-frame: :opcode must be one of "
                                      ":text :binary :ping :pong :close "
                                      ":continuation");
@@ -271,12 +271,12 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
     } else if (mino_type_of(finv) == MINO_BOOL) {
         fin = mino_val_bool_get(finv) ? 1 : 0;
     } else {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-encode-frame: :fin? must be a boolean");
     }
 
     if (ws_is_control(opcode) && !fin) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-encode-frame: a control frame is "
                                      "never fragmented");
     }
@@ -292,7 +292,7 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
         codev = map_get_val(frame, mino_keyword(S, "code"));
         if (codev != NULL && mino_type_of(codev) != MINO_NIL) {
             if (!as_long(codev, &code) || code < 0 || code > 0xFFFF) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "ws-encode-frame: :code must be "
                                              "an integer in 0..65535");
             }
@@ -300,13 +300,13 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
         reasonv = map_get_val(frame, mino_keyword(S, "reason"));
         if (reasonv != NULL && mino_type_of(reasonv) != MINO_NIL) {
             if (!ws_bytes_view(reasonv, &reason, &reason_len)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                                              "ws-encode-frame: :reason must be "
                                              "a string or bytes value");
             }
         }
         if (code < 0 && reason_len > 0) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "ws-encode-frame: a close :reason "
                                          "requires a :code");
         }
@@ -314,7 +314,7 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
             payload_len = 0;
         } else {
             if (reason_len > sizeof(close_body) - 2) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "ws-encode-frame: close frame "
                                              "body exceeds 125 bytes");
             }
@@ -328,7 +328,7 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
         mino_val *pv = map_get_val(frame, mino_keyword(S, "payload"));
         if (pv != NULL && mino_type_of(pv) != MINO_NIL) {
             if (!ws_bytes_view(pv, &payload, &payload_len)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                                              "ws-encode-frame: :payload must "
                                              "be a string or bytes value");
             }
@@ -336,7 +336,7 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
     }
 
     if (ws_is_control(opcode) && payload_len > 125) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-encode-frame: a control payload "
                                      "never exceeds 125 bytes");
     }
@@ -345,14 +345,14 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
     if (maskv != NULL && mino_type_of(maskv) != MINO_NIL) {
         size_t mask_len;
         if (!mino_is_bytes(maskv)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "ws-encode-frame: :mask must be a "
                                          "bytes value");
         }
         mask     = mino_bytes_data(maskv);
         mask_len = mino_bytes_len(maskv);
         if (mask_len != 4) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "ws-encode-frame: :mask must be "
                                          "exactly four bytes");
         }
@@ -371,14 +371,14 @@ static mino_val *prim_ws_encode_frame(mino_state *S, mino_val *args,
 
     /* Guard the total against SIZE_MAX before the allocation. */
     if (payload_len > SIZE_MAX - header_len) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "ws-encode-frame: frame too large");
     }
     total = header_len + payload_len;
 
     wire = (unsigned char *)malloc(total > 0 ? total : 1);
     if (wire == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "ws-encode-frame: out of memory");
     }
 
@@ -768,7 +768,7 @@ static mino_val *ws_build_result(mino_state *S, ws_decode_state *st,
     if (st->count > 0) {
         items = (mino_val **)malloc(st->count * sizeof(*items));
         if (items == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "ws-decode-frames: out of memory");
         }
     }
@@ -856,7 +856,7 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "ws-decode-frames requires bytes and "
                                      "an opts map");
     }
@@ -864,7 +864,7 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
     opts = args->as.cons.cdr->as.cons.car;
 
     if (!mino_is_bytes(bufv) && mino_type_of(bufv) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "ws-decode-frames: first argument must "
                                      "be bytes");
     }
@@ -877,12 +877,12 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
     }
 
     if (mino_type_of(opts) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "ws-decode-frames: opts must be a map");
     }
     rolev = map_get_val(opts, mino_keyword(S, "role"));
     if (rolev == NULL || mino_type_of(rolev) != MINO_KEYWORD) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-decode-frames: :role must be :client "
                                      "or :server");
     }
@@ -892,7 +892,7 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
     } else if (role != NULL && strcmp(role, "client") == 0) {
         role_is_server = 0;
     } else {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "ws-decode-frames: :role must be :client "
                                      "or :server");
     }
@@ -901,7 +901,7 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
     if (maxv != NULL && mino_type_of(maxv) != MINO_NIL) {
         long long m;
         if (!as_long(maxv, &m) || m < 0) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "ws-decode-frames: :max-payload must "
                                          "be a non-negative integer");
         }
@@ -913,19 +913,19 @@ static mino_val *prim_ws_decode_frames(mino_state *S, mino_val *args,
 
     if (rc == WS_CORRUPT) {
         ws_state_free(&st);
-        return prim_throw_classified(S, "codec/corrupt", "MWS001",
+        return throw_classified(S, "codec/corrupt", "MWS001",
                                      "ws-decode-frames: malformed websocket "
                                      "frame");
     }
     if (rc == WS_LIMIT) {
         ws_state_free(&st);
-        return prim_throw_classified(S, "codec/limit", "MWS002",
+        return throw_classified(S, "codec/limit", "MWS002",
                                      "ws-decode-frames: frame or message "
                                      "exceeds the payload cap");
     }
     if (rc == WS_OOM) {
         ws_state_free(&st);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "ws-decode-frames: out of memory");
     }
 

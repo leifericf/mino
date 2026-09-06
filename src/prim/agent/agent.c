@@ -167,7 +167,7 @@ static mino_val *agent_array_to_list(mino_state *S, mino_val **agents)
 static int agent_check_state(mino_state *S, mino_val *agent)
 {
     if (agent->as.agent.owning_state != S) {
-        prim_throw_classified(S, "eval/state", "MST007",
+        throw_classified(S, "eval/state", "MST007",
             "agent from foreign state");
         return 1;
     }
@@ -571,7 +571,7 @@ static void agent_worker_reap_pending(mino_state *S, agent_pool_kind_t kind)
  *
  * Returns 0 on success, 1 on OOM or thread-budget refusal (caller
  * propagates NULL). On 1, the diag has been published via
- * prim_throw_classified and no observable state change happened
+ * throw_classified and no observable state change happened
  * (no enqueue, no in_flight bump, no pthread spawned). */
 static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
                           mino_val *agent, mino_val *fn,
@@ -645,7 +645,7 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
     if (!budget_ok) {
         agent_mu_unlock(&S->agent.mu);
         free(n);
-        prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+        throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
             "raise via mino_set_option(S, MINO_OPT_THREAD_LIMIT, n) "
             "(>= 1 for one agent worker; >= 2 if both send and "
@@ -715,7 +715,7 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
                 agent_cv_broadcast(&S->agent.cv);
                 agent_mu_unlock(&S->agent.mu);
                 free(n);
-                prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                     "host refused agent worker thread for this send; "
                     "a concurrent producer's queued action is being "
                     "drained by a retried worker");
@@ -728,7 +728,7 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
             if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
             free(n);
-            prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+            throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
@@ -790,7 +790,7 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
                 agent_cv_broadcast(&S->agent.cv);
                 agent_mu_unlock(&S->agent.mu);
                 free(n);
-                prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                     "host refused agent worker thread for this send; "
                     "a concurrent producer's queued action is being "
                     "drained by a retried worker");
@@ -803,7 +803,7 @@ static int agent_enqueue(mino_state *S, agent_pool_kind_t kind,
             if (S->threading.thread_count > 0) { S->threading.thread_count--; }
             mino_worker_list_lock_release(S);
             free(n);
-            prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+            throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
@@ -932,7 +932,7 @@ mino_val *mino_agent_error(mino_state *S, mino_val *agent)
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     if (!mino_is_agent(agent)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
             "mino_agent_error: argument must be an agent");
         mino_unlock(S);
         return NULL;
@@ -978,18 +978,18 @@ static mino_val *agent_send_core(mino_state *S, agent_pool_kind_t kind,
 {
     mino_thread_ctx_t *ctx;
     if (!mino_is_agent(agent)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
             prim_name);
         return NULL;
     }
     if (agent_check_state(S, agent)) return NULL;
     if (S->agent.shutdown) {
-        prim_throw_classified(S, "eval/state", "MST008",
+        throw_classified(S, "eval/state", "MST008",
             "Agents have been shut down; new sends are not accepted");
         return NULL;
     }
     if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
-        prim_throw_classified(S, "eval/state", "MST002",
+        throw_classified(S, "eval/state", "MST002",
             "Agent is failed, needs restart");
         return NULL;
     }
@@ -1087,7 +1087,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
     mino_val *agent;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "agent requires at least one argument");
     }
     initial = args->as.cons.car;
@@ -1107,7 +1107,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
         if (key == NULL || mino_type_of(key) != MINO_KEYWORD) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "agent: option key must be a keyword");
         }
         if (strcmp(key->as.s.data, "validator") == 0) {
@@ -1115,7 +1115,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
                                  && mino_type_of(val) != MINO_PRIM
                                  && mino_type_of(val) != MINO_MACRO
                                  && mino_type_of(val) != MINO_NIL)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "agent: :validator must be a fn or nil");
             }
             if (mino_type_of(val) == MINO_NIL) val = NULL;
@@ -1126,7 +1126,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
                                  && mino_type_of(val) != MINO_PRIM
                                  && mino_type_of(val) != MINO_MACRO
                                  && mino_type_of(val) != MINO_NIL)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "agent: :error-handler must be a fn or nil");
             }
             if (mino_type_of(val) == MINO_NIL) val = NULL;
@@ -1136,7 +1136,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
             if (val == NULL || mino_type_of(val) != MINO_KEYWORD
                 || (strcmp(val->as.s.data, "fail") != 0
                     && strcmp(val->as.s.data, "continue") != 0)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "agent: :error-mode must be :fail or :continue");
             }
             agent->as.agent.err_mode =
@@ -1144,7 +1144,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
         } else if (strcmp(key->as.s.data, "meta") == 0) {
             if (val != NULL && mino_type_of(val) != MINO_NIL
                 && mino_type_of(val) != MINO_MAP) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "agent: :meta must be a map or nil");
             }
             if (val != NULL && mino_type_of(val) == MINO_NIL) val = NULL;
@@ -1155,7 +1155,7 @@ static mino_val *prim_agent(mino_state *S, mino_val *args, mino_env *env)
             gc_write_barrier(S, agent, agent->meta, val);
             agent->meta = val;
         } else {
-            return prim_throw_classified(S, "eval/state", "MST002",
+            return throw_classified(S, "eval/state", "MST002",
                 "agent: unknown option key");
         }
     }
@@ -1166,7 +1166,7 @@ static mino_val *prim_agent_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "agent? requires one argument");
     }
     return mino_is_agent(args->as.cons.car) ? mino_true(S) : mino_false(S);
@@ -1176,7 +1176,7 @@ static mino_val *prim_send(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "send requires at least two arguments: agent and fn");
     }
     agent = args->as.cons.car;
@@ -1190,7 +1190,7 @@ static mino_val *prim_send_off(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "send-off requires at least two arguments: agent and fn");
     }
     agent = args->as.cons.car;
@@ -1221,7 +1221,7 @@ mino_val *prim_await(mino_state *S, mino_val *args, mino_env *env)
     for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
         mino_val *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "await: argument must be an agent");
         }
         if (agent_check_state(S, a)) return NULL;
@@ -1235,7 +1235,7 @@ mino_val *prim_await(mino_state *S, mino_val *args, mino_env *env)
         /* Calling thread is a host worker (the agent worker is the
          * only writer of mino_tls_ctx in this state); await would
          * self-deadlock. */
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "await called from agent action body would deadlock");
     }
     saved_depth = mino_yield_lock(S);
@@ -1280,12 +1280,12 @@ mino_val *prim_await_for(mino_state *S, mino_val *args,
     int timed_out = 0;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "await-for requires a timeout and at least one agent");
     }
     first = args->as.cons.car;
     if (first == NULL || !mino_val_int_p(first)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "await-for: timeout must be an integer (milliseconds)");
     }
     timeout_ms = mino_val_int_get(first);
@@ -1294,14 +1294,14 @@ mino_val *prim_await_for(mino_state *S, mino_val *args,
     for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
         mino_val *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "await-for: argument must be an agent");
         }
         if (agent_check_state(S, a)) return NULL;
     }
     if (!S->agent.mu_inited) return mino_true(S);
     if (mino_tls_ctx != NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "await-for called from agent action body would deadlock");
     }
     saved_depth = mino_yield_lock(S);
@@ -1366,12 +1366,12 @@ static mino_val *prim_agent_error(mino_state *S, mino_val *args,
     mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "agent-error requires one argument");
     }
     agent = args->as.cons.car;
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "agent-error: argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
@@ -1386,7 +1386,7 @@ mino_val *prim_restart_agent(mino_state *S, mino_val *args,
     int         clear_actions = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "restart-agent requires at least two arguments: agent and value");
     }
     agent     = args->as.cons.car;
@@ -1401,23 +1401,23 @@ mino_val *prim_restart_agent(mino_state *S, mino_val *args,
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
         if (key == NULL || mino_type_of(key) != MINO_KEYWORD) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "restart-agent: option key must be a keyword");
         }
         if (strcmp(key->as.s.data, "clear-actions") == 0) {
             clear_actions = mino_is_truthy(val) ? 1 : 0;
         } else {
-            return prim_throw_classified(S, "eval/state", "MST002",
+            return throw_classified(S, "eval/state", "MST002",
                 "restart-agent: unknown option key");
         }
     }
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "restart-agent: first argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
     if (agent->as.agent.err == NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "Agent does not need a restart");
     }
     /* JVM canon: restart-agent runs the validator on the new state
@@ -1435,7 +1435,7 @@ mino_val *prim_restart_agent(mino_state *S, mino_val *args,
             return mino_throw(S, thrown);
         }
         if (vresult == NULL || !mino_is_truthy(vresult)) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                 "Invalid reference state");
         }
     }
@@ -1487,13 +1487,13 @@ static mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "set-error-handler! requires two arguments");
     }
     agent = args->as.cons.car;
     fn    = args->as.cons.cdr->as.cons.car;
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-error-handler!: first argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
@@ -1505,7 +1505,7 @@ static mino_val *prim_set_error_handler_bang(mino_state *S, mino_val *args,
     if (fn != NULL && mino_type_of(fn) != MINO_FN
         && mino_type_of(fn) != MINO_PRIM
         && mino_type_of(fn) != MINO_MACRO) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-error-handler!: handler must be a fn or nil");
     }
     gc_write_barrier(S, agent, agent->as.agent.err_handler, fn);
@@ -1519,12 +1519,12 @@ static mino_val *prim_error_handler(mino_state *S, mino_val *args,
     mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "error-handler requires one argument");
     }
     agent = args->as.cons.car;
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "error-handler: argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
@@ -1539,13 +1539,13 @@ static mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "set-error-mode! requires two arguments");
     }
     agent = args->as.cons.car;
     mode  = args->as.cons.cdr->as.cons.car;
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-error-mode!: first argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
@@ -1557,7 +1557,7 @@ static mino_val *prim_set_error_mode_bang(mino_state *S, mino_val *args,
     if (mode == NULL || mino_type_of(mode) != MINO_KEYWORD
         || (strcmp(mode->as.s.data, "fail") != 0
             && strcmp(mode->as.s.data, "continue") != 0)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-error-mode!: mode must be :fail or :continue");
     }
     agent->as.agent.err_mode =
@@ -1571,12 +1571,12 @@ static mino_val *prim_error_mode(mino_state *S, mino_val *args,
     mino_val *agent;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "error-mode requires one argument");
     }
     agent = args->as.cons.car;
     if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "error-mode: argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
@@ -1589,7 +1589,7 @@ static mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "shutdown-agents takes no arguments");
     }
     /* Self-detect: an action body running on the worker thread
@@ -1597,7 +1597,7 @@ static mino_val *prim_shutdown_agents(mino_state *S, mino_val *args,
      * threads, so a non-NULL tls_ctx during eval implies the agent
      * worker is the caller. */
     if (mino_tls_ctx != NULL) {
-        return prim_throw_classified(S, "eval/state", "MST002",
+        return throw_classified(S, "eval/state", "MST002",
             "shutdown-agents cannot be called from inside an agent action");
     }
     /* Flip the shutdown flag, signal the worker to drain + exit,
@@ -1613,7 +1613,7 @@ static mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "send-via requires an executor, an agent, and a function");
     }
     /* JVM-canon (send-via executor a fn & args) routes the action
@@ -1623,7 +1623,7 @@ static mino_val *prim_send_via(mino_state *S, mino_val *args, mino_env *env)
      * with a clear message rather than aliasing to send and
      * silently dropping the executor argument. Use send / send-off
      * to dispatch through the per-state worker. */
-    return prim_throw_classified(S, "eval/state", "MST008",
+    return throw_classified(S, "eval/state", "MST008",
         "send-via is intentionally deferred -- mino has no public "
         "Executor type. Use send or send-off to dispatch through the "
         "per-state worker.");
@@ -1637,7 +1637,7 @@ static mino_val *prim_release_pending_sends(mino_state *S, mino_val *args,
     mino_val        *p;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "release-pending-sends takes no arguments");
     }
     /* JVM canon: returns the number of sends that were queued by the

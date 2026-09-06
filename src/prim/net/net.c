@@ -236,7 +236,7 @@ static mino_net_sock_t *net_sock_arg(mino_state *S, mino_val *v,
         char msg[160];
         snprintf(msg, sizeof(msg), "%s: argument must be a net socket",
                  who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     return (mino_net_sock_t *)v->as.handle.ptr;
@@ -253,7 +253,7 @@ static mino_net_listener_t *net_listener_arg(mino_state *S, mino_val *v,
         char msg[160];
         snprintf(msg, sizeof(msg),
                  "%s: argument must be a net listener", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     return (mino_net_listener_t *)v->as.handle.ptr;
@@ -275,7 +275,7 @@ int net_opt_ms(mino_state *S, mino_val *opts, const char *key,
         char msg[160];
         snprintf(msg, sizeof(msg),
                  "net: opts key :%s must be a non-negative integer", key);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = ms;
@@ -502,13 +502,13 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-connect requires host and port");
     }
     host_val = args->as.cons.car;
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-connect requires host and port");
     }
     port_val = args->as.cons.car;
@@ -517,28 +517,28 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
         opts = args->as.cons.car;
         if (opts != NULL && mino_type_of(opts) == MINO_MAP
             && mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "net-connect takes at most 3 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "net-connect: opts must be a map");
         }
     }
     if (host_val == NULL || mino_type_of(host_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "net-connect: host must be a string");
     }
     if (host_val->as.s.len >= sizeof(host)) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-connect: host is too long");
     }
     memcpy(host, host_val->as.s.data, host_val->as.s.len);
     host[host_val->as.s.len] = '\0';
     if (!as_long(port_val, &port) || port < 1 || port > 65535) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-connect: port must be an integer "
                                      "in 1..65535");
     }
@@ -554,7 +554,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
 
 #ifdef _WIN32
     if (net_winsock_init() != 0) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-connect: WSAStartup failed");
     }
 #endif
@@ -588,7 +588,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
                  "net-connect: cannot resolve host %.200s: %.60s",
                  host, gai_strerror(gai_rc));
 #endif
-        return prim_throw_classified(S, "net/dns", "MNE001", msg);
+        return throw_classified(S, "net/dns", "MNE001", msg);
     }
 
     detail[0] = '\0';
@@ -629,7 +629,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
                 snprintf(msg, sizeof(msg),
                          "net-connect: connect to %.200s:%lld timed out "
                          "after %lld ms", host, port, connect_ms);
-                return prim_throw_classified(S, "net/connect", "MNE002",
+                return throw_classified(S, "net/connect", "MNE002",
                                              msg);
             }
             if (rc < 0) {
@@ -653,7 +653,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "net-connect: cannot connect to %.180s:"
                  "%lld: %.60s", host, port,
                  detail[0] ? detail : "no usable addresses");
-        return prim_throw_classified(S, "net/connect", "MNE002", msg);
+        return throw_classified(S, "net/connect", "MNE002", msg);
     }
 
     net_suppress_sigpipe(fd);
@@ -663,7 +663,7 @@ mino_val *prim_net_connect(mino_state *S, mino_val *args,
     if (sock == NULL) {
         net_close_fd(fd);
         gc_unpin(1);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "net-connect: out of memory");
     }
     sock->fd              = fd;
@@ -730,13 +730,13 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-listen requires host and port");
     }
     host_val = args->as.cons.car;
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-listen requires host and port");
     }
     port_val = args->as.cons.car;
@@ -745,29 +745,29 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
         opts = args->as.cons.car;
         if (opts != NULL && mino_type_of(opts) == MINO_MAP
             && mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "net-listen takes at most 3 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "net-listen: opts must be a map");
         }
     }
     if (host_val == NULL || mino_type_of(host_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "net-listen: host must be a string");
     }
     if (host_val->as.s.len >= sizeof(host)) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-listen: host is too long");
     }
     memcpy(host, host_val->as.s.data, host_val->as.s.len);
     host[host_val->as.s.len] = '\0';
     wildcard = host[0] == '\0' || strcmp(host, "*") == 0;
     if (!as_long(port_val, &port) || port < 0 || port > 65535) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-listen: port must be an integer "
                                      "in 0..65535");
     }
@@ -776,7 +776,7 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
         mino_val *v = map_get_val(opts, mino_keyword(S, "backlog"));
         if (v != NULL && mino_type_of(v) != MINO_NIL) {
             if (!as_long(v, &backlog) || backlog < 1) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "net-listen: opts key "
                                              ":backlog must be a positive "
                                              "integer");
@@ -787,7 +787,7 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
 
 #ifdef _WIN32
     if (net_winsock_init() != 0) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-listen: WSAStartup failed");
     }
 #endif
@@ -827,7 +827,7 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
             snprintf(msg, sizeof(msg), "net-listen: cannot resolve bind "
                      "address %.190s: %.60s", host, gai_strerror(gai_rc));
 #endif
-            return prim_throw_classified(S, "net/dns", "MNE001", msg);
+            return throw_classified(S, "net/dns", "MNE001", msg);
         }
         detail[0] = '\0';
         for (ai = res; ai != NULL; ai = ai->ai_next) {
@@ -844,7 +844,7 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
         snprintf(msg, sizeof(msg), "net-listen: cannot listen on %.120s:"
                  "%lld: %.60s", host, port,
                  detail[0] ? detail : "no usable addresses");
-        return prim_throw_classified(S, "net", "MNE004", msg);
+        return throw_classified(S, "net", "MNE004", msg);
     }
     /* Non-blocking listener: accept is gated on a poll with a
      * deadline, and a connection stolen between poll and accept must
@@ -856,14 +856,14 @@ static mino_val *prim_net_listen(mino_state *S, mino_val *args,
         gc_unpin(1);
         snprintf(msg, sizeof(msg), "net-listen: cannot set non-blocking "
                  "mode: %.100s", detail);
-        return prim_throw_classified(S, "net", "MNE004", msg);
+        return throw_classified(S, "net", "MNE004", msg);
     }
 
     rec = (mino_net_listener_t *)malloc(sizeof(*rec));
     if (rec == NULL) {
         net_close_fd(fd);
         gc_unpin(1);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "net-listen: out of memory");
     }
     rec->fd        = fd;
@@ -901,7 +901,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-accept requires a listener");
     }
     l_val = args->as.cons.car;
@@ -909,20 +909,20 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "net-accept takes at most 2 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "net-accept: opts must be a map");
         }
     }
     listener = net_listener_arg(S, l_val, "net-accept");
     if (listener == NULL) return NULL;
     if (listener->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-accept: listener is closed");
     }
     if (net_opt_ms(S, opts, "accept-timeout",
@@ -963,7 +963,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
         if (listener->closed) {
             net_accept_end(listener);
             gc_unpin(2);
-            return prim_throw_classified(S, "net", "MNE004",
+            return throw_classified(S, "net", "MNE004",
                                          "net-accept: listener is closed");
         }
         if (rc == 1) {
@@ -973,7 +973,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
             snprintf(msg, sizeof(msg),
                      "net-accept: accept timed out after %lld ms",
                      accept_ms);
-            return prim_throw_classified(S, "net/timeout", "MNE003", msg);
+            return throw_classified(S, "net/timeout", "MNE003", msg);
         }
         if (rc < 0) {
             char msg[200];
@@ -982,7 +982,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
             gc_unpin(2);
             snprintf(msg, sizeof(msg), "net-accept: accept failed: %.100s",
                      detail);
-            return prim_throw_classified(S, "net/connect", "MNE002", msg);
+            return throw_classified(S, "net/connect", "MNE002", msg);
         }
         cfd = accept(listener->fd, NULL, NULL);
         if (cfd == MINO_NET_INVALID_FD) {
@@ -1006,7 +1006,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
                 gc_unpin(2);
                 snprintf(msg, sizeof(msg),
                          "net-accept: accept failed: %.100s", detail);
-                return prim_throw_classified(S, "net/connect", "MNE002",
+                return throw_classified(S, "net/connect", "MNE002",
                                              msg);
             }
         }
@@ -1024,7 +1024,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
         gc_unpin(2);
         snprintf(msg, sizeof(msg), "net-accept: cannot reset blocking "
                  "mode on accepted socket: %.100s", detail);
-        return prim_throw_classified(S, "net/connect", "MNE002", msg);
+        return throw_classified(S, "net/connect", "MNE002", msg);
     }
     net_suppress_sigpipe(cfd);
     net_set_tcp_nodelay(cfd);
@@ -1034,7 +1034,7 @@ static mino_val *prim_net_accept(mino_state *S, mino_val *args,
     if (sock == NULL) {
         net_close_fd(cfd);
         gc_unpin(2);
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "net-accept: out of memory");
     }
     sock->fd              = cfd;
@@ -1058,7 +1058,7 @@ static mino_val *prim_net_listener_port(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-listener-port requires one "
                                      "argument");
     }
@@ -1066,7 +1066,7 @@ static mino_val *prim_net_listener_port(mino_state *S, mino_val *args,
     listener = net_listener_arg(S, l_val, "net-listener-port");
     if (listener == NULL) return NULL;
     if (listener->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-listener-port: listener is "
                                      "closed");
     }
@@ -1087,7 +1087,7 @@ static mino_val *prim_net_listener_port(mino_state *S, mino_val *args,
             snprintf(msg, sizeof(msg),
                      "net-listener-port: getsockname failed: %.60s",
                      detail);
-            return prim_throw_classified(S, "net", "MNE004", msg);
+            return throw_classified(S, "net", "MNE004", msg);
         }
     }
     if (ss.ss_family == AF_INET6) {
@@ -1188,7 +1188,7 @@ static mino_val *prim_net_read(mino_state *S, mino_val *args, mino_env *env)
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-read requires a socket and a byte "
                                      "count");
     }
@@ -1197,22 +1197,22 @@ static mino_val *prim_net_read(mino_state *S, mino_val *args, mino_env *env)
     sock = net_sock_arg(S, sock_val, "net-read");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-read: socket is closed");
     }
     if (!as_long(n_val, &n) || n < 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-read: n must be a non-negative "
                                      "integer");
     }
     if (n == 0) return mino_bytes(S, NULL, 0);
     if ((unsigned long long)n > SIZE_MAX) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "net-read: n is too large");
     }
     buf = (unsigned char *)malloc((size_t)n);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "net-read: out of memory");
     }
     /* The socket record is re-read after the recv yield windows; pin
@@ -1224,7 +1224,7 @@ static mino_val *prim_net_read(mino_state *S, mino_val *args, mino_env *env)
     gc_unpin(1);
     if (rc < 0) {
         free(buf);
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     if (rc == 0) {
         free(buf);
@@ -1253,7 +1253,7 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-read-all requires a socket");
     }
     sock_val = args->as.cons.car;
@@ -1261,20 +1261,20 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
     if (mino_is_cons(args)) {
         opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "net-read-all takes at most 2 "
                                          "arguments");
         }
         if (opts != NULL && mino_type_of(opts) != MINO_MAP
             && mino_type_of(opts) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "net-read-all: opts must be a map");
         }
     }
     sock = net_sock_arg(S, sock_val, "net-read-all");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-read-all: socket is closed");
     }
     if (net_opt_ms(S, opts, "max-bytes", NET_READ_ALL_DEFAULT_MAX_BYTES,
@@ -1297,7 +1297,7 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
         if (rc < 0) {
             free(buf);
             gc_unpin(1);
-            return prim_throw_classified(S, kind, code, msg);
+            return throw_classified(S, kind, code, msg);
         }
         if (rc == 0) break;
         /* A zero-byte chunk needs no copy; also keeps memcpy's first
@@ -1314,7 +1314,7 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
             snprintf(m, sizeof(m),
                      "net-read-all: exceeded :max-bytes cap of %lld bytes",
                      max_bytes);
-            return prim_throw_classified(S, "net/overflow", "MNE005", m);
+            return throw_classified(S, "net/overflow", "MNE005", m);
         }
         if (len + got > cap) {
             size_t new_cap = cap == 0 ? NET_READ_CHUNK : cap * 2;
@@ -1327,7 +1327,7 @@ static mino_val *prim_net_read_all(mino_state *S, mino_val *args,
             if (nb == NULL) {
                 free(buf);
                 gc_unpin(1);
-                return prim_throw_classified(S, "internal", "MIN001",
+                return throw_classified(S, "internal", "MIN001",
                                              "net-read-all: out of memory");
             }
             buf = nb;
@@ -1419,7 +1419,7 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-write requires a socket and data");
     }
     sock_val = args->as.cons.car;
@@ -1427,7 +1427,7 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
     sock = net_sock_arg(S, sock_val, "net-write");
     if (sock == NULL) return NULL;
     if (sock->closed) {
-        return prim_throw_classified(S, "net", "MNE004",
+        return throw_classified(S, "net", "MNE004",
                                      "net-write: socket is closed");
     }
     if (data_val != NULL && mino_type_of(data_val) == MINO_STRING) {
@@ -1437,7 +1437,7 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
         data = mino_bytes_data(data_val);
         len  = mino_bytes_len(data_val);
     } else {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "net-write: data must be a string or "
                                      "bytes");
     }
@@ -1449,7 +1449,7 @@ static mino_val *prim_net_write(mino_state *S, mino_val *args, mino_env *env)
     if (net_send_all_fd(S, sock->fd, data, len, sock->write_timeout_ms,
                         &kind, &code, msg, sizeof(msg)) != 0) {
         gc_unpin(1);
-        return prim_throw_classified(S, kind, code, msg);
+        return throw_classified(S, kind, code, msg);
     }
     gc_unpin(1);
     return mino_int(S, (long long)len);
@@ -1466,7 +1466,7 @@ static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "net-close requires one argument");
     }
     v = args->as.cons.car;
@@ -1500,7 +1500,7 @@ static mino_val *prim_net_close(mino_state *S, mino_val *args, mino_env *env)
             return mino_nil(S);
         }
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
                                  "net-close: argument must be a net "
                                  "socket or listener");
 }
@@ -1518,7 +1518,7 @@ int mino_net_adopt(mino_state *S, mino_val *v, uintptr_t *fd_out,
     mino_net_sock_t *sock = net_sock_arg(S, v, "tls-connect");
     if (sock == NULL) return -1;
     if (sock->closed) {
-        prim_throw_classified(S, "tls", "MTL004",
+        throw_classified(S, "tls", "MTL004",
                               "tls-connect: underlying socket is "
                               "closed");
         return -1;

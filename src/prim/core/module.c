@@ -544,7 +544,7 @@ mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env)
     /* Zero args is in-signature but rejected with a value error,
      * matching the JVM. */
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Nothing specified to load");
     }
     /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
@@ -588,24 +588,24 @@ mino_val *prim_require(mino_state *S, mino_val *args, mino_env *env)
                            && sub->as.vec.len >= 1) {
                     sub_name = vec_nth(sub, 0);
                     if (sub_name == NULL || mino_type_of(sub_name) != MINO_SYMBOL) {
-                        return prim_throw_classified(S,
+                        return throw_classified(S,
                             "eval/type", "MTY001",
                             "require prefix list: subspec head must be a symbol");
                     }
                 } else {
-                    return prim_throw_classified(S,
+                    return throw_classified(S,
                         "eval/type", "MTY001",
                         "require prefix list: subspec must be symbol or vector");
                 }
                 if (memchr(sub_name->as.s.data, '.',
                            sub_name->as.s.len) != NULL) {
-                    return prim_throw_classified(S,
+                    return throw_classified(S,
                         "name", "MNS001",
                         "lib names inside prefix lists must not contain periods");
                 }
                 sn = first->as.s.len + 1 + sub_name->as.s.len;
                 if (sn >= sizeof(joined)) {
-                    return prim_throw_classified(S,
+                    return throw_classified(S,
                         "eval/type", "MTY001",
                         "require: prefix list name too long");
                 }
@@ -844,7 +844,7 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
     mino_val *arg;
     mino_val *last = mino_nil(S);
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Nothing specified to load");
     }
     while (mino_is_cons(args)) {
@@ -919,7 +919,7 @@ static mino_val *prim_use(mino_state *S, mino_val *args, mino_env *env)
                 libspec = arg;
             }
         } else {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "use: arg must be a symbol or vector");
         }
         {
@@ -1238,12 +1238,12 @@ static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
     char       *dup;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "add-load-path! requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "add-load-path!: argument must be a string");
     }
     path = path_val->as.s.data;
@@ -1256,7 +1256,7 @@ static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
         char **np = (char **)realloc(S->module.extra_load_paths,
                                      new_cap * sizeof(*np));
         if (np == NULL) {
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                 "out of memory in add-load-path!");
         }
         S->module.extra_load_paths     = np;
@@ -1266,7 +1266,7 @@ static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
         size_t path_len = strlen(path);
         dup = (char *)malloc(path_len + 1);
         if (dup == NULL) {
-            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            return throw_classified(S, "eval/out-of-memory", "MOM001",
                 "out of memory in add-load-path!");
         }
         memcpy(dup, path, path_len + 1);
@@ -1290,17 +1290,17 @@ static mino_val *prim_mino_capability(mino_state *S, mino_val *args,
     meta_entry_t *e;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "mino-capability requires one argument");
     }
     name_val = args->as.cons.car;
     if (name_val == NULL || mino_type_of(name_val) != MINO_SYMBOL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino-capability: argument must be a symbol");
     }
     n = name_val->as.s.len;
     if (n >= sizeof(buf)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "mino-capability: name too long");
     }
     memcpy(buf, name_val->as.s.data, n);

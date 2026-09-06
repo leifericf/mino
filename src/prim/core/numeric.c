@@ -153,7 +153,7 @@ static int classify_or_throw(mino_state *S, const mino_val *v,
 err: {
     char buf[64];
     snprintf(buf, sizeof(buf), "%s expects numbers", opname);
-    prim_throw_classified(S, "eval/type", "MTY001", buf);
+    throw_classified(S, "eval/type", "MTY001", buf);
     return 0;
 }
 }
@@ -191,7 +191,7 @@ static mino_val *tower_op_at_tier(mino_state *S, tower_op_t op,
         }
         break;
     }
-    return prim_throw_classified(S, "internal", "MIN001", "tower_op_at_tier");
+    return throw_classified(S, "internal", "MIN001", "tower_op_at_tier");
 }
 
 /* Promote the accumulator to a higher tier in-place. */
@@ -356,7 +356,7 @@ static mino_val *coerce_at_tier(mino_state *S, mino_val *v, int tier,
     }
     }
     /* Should be unreachable in well-classified args. */
-    return prim_throw_classified(S, "internal", "MIN001",
+    return throw_classified(S, "internal", "MIN001",
                                  "coerce_at_tier: unsupported tier transition");
 }
 
@@ -394,7 +394,7 @@ static int tower_apply_int(mino_state *S, tower_acc_t *acc,
             if (strict) {
                 char buf[64];
                 snprintf(buf, sizeof(buf), "integer overflow");
-                prim_throw_classified(S, "eval/contract", "MCT001", buf);
+                throw_classified(S, "eval/contract", "MCT001", buf);
                 return -1;
             }
             {
@@ -416,7 +416,7 @@ static int tower_apply_int(mino_state *S, tower_acc_t *acc,
     }
     /* OP_DIV. */
     if (x == 0) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "division by zero");
         return -1;
     }
@@ -693,7 +693,7 @@ static mino_val *prim_inc_step(mino_state *S, mino_val *x,
     if (x != NULL && mino_val_int_p(x)) {
         if (mino_val_int_get(x) == LLONG_MAX) {
             if (strict) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             {
@@ -721,7 +721,7 @@ static mino_val *prim_inc_step(mino_state *S, mino_val *x,
         mino_val *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
         return strict ? prim_add(S, pair, env) : prim_addp(S, pair, env);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "inc expects a number");
 }
 
@@ -729,7 +729,7 @@ static mino_val *prim_inc_impl(mino_state *S, mino_val *args,
                                  mino_env *env, int strict)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "inc requires exactly 1 argument");
     }
     return prim_inc_step(S, args->as.cons.car, env, strict);
@@ -739,7 +739,7 @@ static mino_val *prim_inc_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "inc requires exactly 1 argument");
     }
     return prim_inc_step(S, argv[0], env, 1);
@@ -749,7 +749,7 @@ static mino_val *prim_incp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "inc' requires exactly 1 argument");
     }
     return prim_inc_step(S, argv[0], env, 0);
@@ -771,7 +771,7 @@ static mino_val *prim_dec_step(mino_state *S, mino_val *x,
     if (x != NULL && mino_val_int_p(x)) {
         if (mino_val_int_get(x) == LLONG_MIN) {
             if (strict) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             {
@@ -793,7 +793,7 @@ static mino_val *prim_dec_step(mino_state *S, mino_val *x,
         mino_val *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
         return strict ? prim_sub(S, pair, env) : prim_subp(S, pair, env);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "dec expects a number");
 }
 
@@ -801,7 +801,7 @@ static mino_val *prim_dec_impl(mino_state *S, mino_val *args,
                                  mino_env *env, int strict)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "dec requires exactly 1 argument");
     }
     return prim_dec_step(S, args->as.cons.car, env, strict);
@@ -811,7 +811,7 @@ static mino_val *prim_dec_argv(mino_state *S, mino_val **argv, int argc,
                           mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "dec requires exactly 1 argument");
     }
     return prim_dec_step(S, argv[0], env, 1);
@@ -821,7 +821,7 @@ static mino_val *prim_decp_argv(mino_state *S, mino_val **argv, int argc,
                            mino_env *env)
 {
     if (argc != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "dec' requires exactly 1 argument");
     }
     return prim_dec_step(S, argv[0], env, 0);
@@ -876,7 +876,7 @@ static int tower_seeded_step(mino_state *S, tower_acc_t *a, mino_val *x,
             if (op == OP_SUB) {
                 if (isub_overflow(a->iacc, mino_val_int_get(x), &out)) {
                     if (strict) {
-                        prim_throw_classified(S, "eval/contract", "MCT001",
+                        throw_classified(S, "eval/contract", "MCT001",
                                               "integer overflow");
                         return -1;
                     }
@@ -897,7 +897,7 @@ static int tower_seeded_step(mino_state *S, tower_acc_t *a, mino_val *x,
                 a->iacc = out;
             } else { /* OP_DIV */
                 if (mino_val_int_get(x) == 0) {
-                    prim_throw_classified(S, "eval/type", "MTY001",
+                    throw_classified(S, "eval/type", "MTY001",
                                           "division by zero");
                     return -1;
                 }
@@ -1027,13 +1027,13 @@ static mino_val *prim_sub_negate(mino_state *S, mino_val *first,
     if (first == NULL) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s expects numbers", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
     if (mino_val_int_p(first)) {
         long long neg;
         if (ineg_overflow(mino_val_int_get(first), &neg)) {
             if (strict) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             /* Negating LLONG_MIN doesn't fit in long; promote. */
@@ -1069,7 +1069,7 @@ static mino_val *prim_sub_negate(mino_state *S, mino_val *first,
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s expects numbers", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
 }
 
@@ -1081,7 +1081,7 @@ static mino_val *prim_sub_impl(mino_state *S, mino_val *args,
     if (!mino_is_cons(args)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s requires at least one argument", opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     first = args->as.cons.car;
     if (!mino_is_cons(args->as.cons.cdr))
@@ -1145,7 +1145,7 @@ static mino_val *prim_sub_argv_impl(mino_state *S, mino_val **argv,
     if (argc == 0) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s requires at least one argument", opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     if (argc == 1) return prim_sub_negate(S, argv[0], strict, opname);
     return tower_reduce_seeded_argv(S, argv[0], argv + 1, argc - 1,
@@ -1242,14 +1242,14 @@ static int unchecked_two_int(mino_state *S, mino_val *args,
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires exactly 2 arguments", opname);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     xa = args->as.cons.car;
     xb = args->as.cons.cdr->as.cons.car;
     if (!unchecked_grab_long(xa, a) || !unchecked_grab_long(xb, b)) {
         snprintf(msg, sizeof(msg), "%s expects ints", opname);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     return 1;
@@ -1284,10 +1284,10 @@ static mino_val *prim_unchecked_inc(mino_state *S, mino_val *args, mino_env *env
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-inc requires exactly 1 argument");
     if (!unchecked_grab_long(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-inc expects an int");
     return mino_int_wrap(S, uwrap_add(x, 1));
 }
@@ -1297,10 +1297,10 @@ static mino_val *prim_unchecked_dec(mino_state *S, mino_val *args, mino_env *env
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-dec requires exactly 1 argument");
     if (!unchecked_grab_long(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-dec expects an int");
     return mino_int_wrap(S, uwrap_sub(x, 1));
 }
@@ -1310,10 +1310,10 @@ static mino_val *prim_unchecked_negate(mino_state *S, mino_val *args, mino_env *
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-negate requires exactly 1 argument");
     if (!unchecked_grab_long(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-negate expects an int");
     return mino_int_wrap(S, uwrap_sub(0, x));
 }
@@ -1340,7 +1340,7 @@ static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
     *is_double = 0;
     if (v == NULL) {
         snprintf(msg, sizeof(msg), "%s requires a number", opname);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     if (mino_val_int_p(v)) {
@@ -1382,7 +1382,7 @@ static int unchecked_grab_num(mino_state *S, const char *opname, mino_val *v,
     }
     snprintf(msg, sizeof(msg),
         "%s: numeric type not supported", opname);
-    prim_throw_classified(S, "eval/type", "MTY001", msg);
+    throw_classified(S, "eval/type", "MTY001", msg);
     return 0;
 }
 
@@ -1407,7 +1407,7 @@ static int unchecked_grab_one(mino_state *S, const char *opname,
     char msg[80];
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires exactly 1 argument", opname);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     return unchecked_grab_num(S, opname, args->as.cons.car,
@@ -1528,7 +1528,7 @@ static int unchecked_two_int_lenient(mino_state *S, mino_val *args,
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires exactly 2 arguments", opname);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     xa = args->as.cons.car;
@@ -1536,7 +1536,7 @@ static int unchecked_two_int_lenient(mino_state *S, mino_val *args,
     if (!unchecked_grab_long_lenient(xa, a)
         || !unchecked_grab_long_lenient(xb, b)) {
         snprintf(msg, sizeof(msg), "%s expects numbers", opname);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     return 1;
@@ -1571,10 +1571,10 @@ static mino_val *prim_unchecked_inc_int(mino_state *S, mino_val *args, mino_env 
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-inc-int requires exactly 1 argument");
     if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-inc-int expects a number");
     return mino_int_wrap(S, iwrap32_add(x, 1));
 }
@@ -1584,10 +1584,10 @@ static mino_val *prim_unchecked_dec_int(mino_state *S, mino_val *args, mino_env 
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-dec-int requires exactly 1 argument");
     if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-dec-int expects a number");
     return mino_int_wrap(S, iwrap32_sub(x, 1));
 }
@@ -1597,10 +1597,10 @@ static mino_val *prim_unchecked_negate_int(mino_state *S, mino_val *args, mino_e
     long long x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "unchecked-negate-int requires exactly 1 argument");
     if (!unchecked_grab_long_lenient(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "unchecked-negate-int expects a number");
     return mino_int_wrap(S, iwrap32_sub(0, x));
 }
@@ -1611,7 +1611,7 @@ static mino_val *prim_unchecked_remainder_int(mino_state *S, mino_val *args, min
     (void)env;
     if (!unchecked_two_int_lenient(S, args, "unchecked-remainder-int", &a, &b)) return NULL;
     if ((int32_t)b == 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "unchecked-remainder-int: division by zero");
     }
     /* JVM int `%` operator: ((int32_t)a) % ((int32_t)b). Overflow case
@@ -1625,7 +1625,7 @@ mino_val *prim_div(mino_state *S, mino_val *args, mino_env *env)
     mino_val *first;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "/ requires at least one argument");
     }
     first = args->as.cons.car;
@@ -1643,7 +1643,7 @@ static mino_val *prim_div_argv(mino_state *S, mino_val **argv, int argc,
 {
     (void)env;
     if (argc == 0) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "/ requires at least one argument");
     }
     if (argc == 1) {
@@ -1682,17 +1682,17 @@ static mino_val *mqr_float(mino_state *S, double a, double b, mqr_op_t op,
     if (isnan(a) || isinf(a)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: NaN or Infinite dividend", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
     if (isnan(b)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: NaN divisor", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
     if (b == 0.0) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s: division by zero", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        return throw_classified(S, "eval/type", "MTY001", buf);
     }
     if (op == MQR_QUOT) {
         if (isinf(b)) return mino_float(S, 0.0);
@@ -1747,7 +1747,7 @@ static int as_ratio_pair_bigints(mino_state *S, const mino_val *v,
         *denom_out = mino_bigint_from_ll(S, 1);
         return *denom_out != NULL;
     }
-    prim_throw_classified(S, "internal", "MIN001",
+    throw_classified(S, "internal", "MIN001",
                           "as_ratio_pair_bigints: unexpected type");
     return 0;
 }
@@ -1912,7 +1912,7 @@ static mino_val *prim_mqr(mino_state *S, mino_val *args, mqr_op_t op)
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s requires two arguments", opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+        return throw_classified(S, "eval/arity", "MAR001", buf);
     }
     xv = args->as.cons.car;
     yv = args->as.cons.cdr->as.cons.car;
@@ -1953,7 +1953,7 @@ static mino_val *prim_mqr(mino_state *S, mino_val *args, mqr_op_t op)
         if (b == 0) {
             char buf[64];
             snprintf(buf, sizeof(buf), "%s: division by zero", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+            return throw_classified(S, "eval/type", "MTY001", buf);
         }
         if (a == LLONG_MIN && b == -1) {
             /* Long division wraps at this one corner (canon reference
@@ -2121,7 +2121,7 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "compare requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "compare requires two arguments");
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
@@ -2220,14 +2220,14 @@ mino_val *prim_compare(mino_state *S, mino_val *args, mino_env *env)
             return compare_vec_iter(S, a, b, env);
         }
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "compare: cannot compare values of different types");
+    return throw_classified(S, "eval/type", "MTY001", "compare: cannot compare values of different types");
 }
 
 mino_val *prim_eq(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "= requires at least one argument");
     }
     {
@@ -2307,7 +2307,7 @@ static mino_val *prim_identical(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "identical? requires 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "identical? requires 2 arguments");
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
@@ -2390,7 +2390,7 @@ static mino_val *compare_chain(mino_state *S, mino_val *args, const char *name, 
     if (!mino_is_cons(args)) {
         char msg[64];
         snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     if (!mino_is_cons(args->as.cons.cdr)) {
         /* Single-arg form: Clojure short-circuits and never inspects
@@ -2403,7 +2403,7 @@ static mino_val *compare_chain(mino_state *S, mino_val *args, const char *name, 
         if (!is_compare_number(prev)) {
             char msg[64];
             snprintf(msg, sizeof(msg), "%s expects numbers", name);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
         args = args->as.cons.cdr;
         while (mino_is_cons(args)) {
@@ -2413,7 +2413,7 @@ static mino_val *compare_chain(mino_state *S, mino_val *args, const char *name, 
             if (!is_compare_number(cur)) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "%s expects numbers", name);
-                return prim_throw_classified(S, "eval/type", "MTY001", msg);
+                return throw_classified(S, "eval/type", "MTY001", msg);
             }
             if (has_nan(prev) || has_nan(cur)) return mino_false(S);
             cmp = tower_cmp(prev, cur);
@@ -2464,14 +2464,14 @@ static mino_val *compare_chain_argv(mino_state *S, mino_val **argv,
     if (argc < 1) {
         char msg[64];
         snprintf(msg, sizeof(msg), "%s requires at least one argument", name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     if (argc == 1) return mino_true(S);
     prev = argv[0];
     if (!is_compare_number(prev)) {
         char msg[64];
         snprintf(msg, sizeof(msg), "%s expects numbers", name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     for (i = 1; i < argc; i++) {
         const mino_val *cur = argv[i];
@@ -2480,7 +2480,7 @@ static mino_val *compare_chain_argv(mino_state *S, mino_val **argv,
         if (!is_compare_number(cur)) {
             char msg[64];
             snprintf(msg, sizeof(msg), "%s expects numbers", name);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
         if (has_nan(prev) || has_nan(cur)) return mino_false(S);
         cmp = tower_cmp(prev, cur);
@@ -2529,11 +2529,11 @@ static mino_val *prim_nan_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "NaN? requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "NaN? requires one argument");
     }
     v = args->as.cons.car;
     if (!is_compare_number(v))
-        return prim_throw_classified(S, "eval/type", "MTY001", "NaN? requires a number");
+        return throw_classified(S, "eval/type", "MTY001", "NaN? requires a number");
     return ((mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)
             && isnan(v->as.f))
            ? mino_true(S) : mino_false(S);
@@ -2544,11 +2544,11 @@ static mino_val *prim_infinite_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "infinite? requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "infinite? requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL)
-        return prim_throw_classified(S, "eval/type", "MTY001", "infinite? requires a number");
+        return throw_classified(S, "eval/type", "MTY001", "infinite? requires a number");
     return ((mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)
             && isinf(v->as.f))
            ? mino_true(S) : mino_false(S);

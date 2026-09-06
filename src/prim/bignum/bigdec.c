@@ -37,11 +37,11 @@ mino_val *mino_bigdec_make(mino_state *S, mino_val *unscaled, int scale)
 {
     mino_val *v;
     if (unscaled == NULL || mino_type_of(unscaled) != MINO_BIGINT) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "bigdec: unscaled must be a bigint");
     }
     if (scale > MINO_BIGDEC_MAX_SCALE || scale < -MINO_BIGDEC_MAX_SCALE) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "bigdec: scale magnitude too large");
     }
     v = alloc_val(S, MINO_BIGDEC);
@@ -98,7 +98,7 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
              * contribution is caught by mino_bigdec_make below. */
             if (e > MINO_BIGDEC_MAX_SCALE || e < -MINO_BIGDEC_MAX_SCALE) {
                 free(digits);
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                     "bigdec: exponent magnitude too large");
             }
             exp = (int)e;
@@ -126,19 +126,19 @@ mino_val *mino_bigdec_from_string(mino_state *S, const char *s)
         if (scale < 0) {
             mpz_t pw;
             if (mp_int_init(&pw) != MP_OK) {
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             if (mp_int_set_value(&pw, 10) != MP_OK ||
                 mp_int_expt(&pw, -scale, &pw) != MP_OK) {
                 mp_int_clear(&pw);
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             if (mp_int_mul((mp_int)unscaled->as.bigint.mpz, &pw,
                            (mp_int)unscaled->as.bigint.mpz) != MP_OK) {
                 mp_int_clear(&pw);
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                                              "MOM001", "out of memory");
             }
             mp_int_clear(&pw);
@@ -356,12 +356,12 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
     mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "bigdec requires one argument");
     }
     x = args->as.cons.car;
     if (x == NULL)
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec: nil");
     if (mino_type_of(x) == MINO_BIGDEC) return x;
     if (mino_val_int_p(x)) {
@@ -380,7 +380,7 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
          * expansion 0.10000000000000001M. */
         char buf[64];
         if (isnan(x->as.f) || isinf(x->as.f))
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "bigdec: NaN and Infinity have no decimal form");
         mino_double_shortest(x->as.f, buf, sizeof(buf));
         return mino_bigdec_from_string(S, buf);
@@ -388,7 +388,7 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
     if (mino_type_of(x) == MINO_STRING) {
         mino_val *r = mino_bigdec_from_string(S, x->as.s.data);
         if (r == NULL)
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                                          "bigdec: invalid numeric string");
         return r;
     }
@@ -406,7 +406,7 @@ mino_val *prim_bigdec(mino_state *S, mino_val *args, mino_env *env)
         if (den == NULL) return NULL;
         return mino_bigdec_div(S, num, den);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
                                  "bigdec: unsupported argument type");
 }
 
@@ -415,7 +415,7 @@ mino_val *prim_decimal_p(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "decimal? requires one argument");
     }
     {
@@ -458,7 +458,7 @@ mino_val *mino_bigdec_add(mino_state *S, const mino_val *a,
     int        sa, sb, smax;
     mino_val *au, *bu, *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec add: bigdec operands required");
     }
     sa = a->as.bigdec.scale;
@@ -471,7 +471,7 @@ mino_val *mino_bigdec_add(mino_state *S, const mino_val *a,
     gc_unpin(1);
     if (bu == NULL) return NULL;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigdec add");
     }
     result = mino_bigint_add(S, au, bu);
@@ -485,7 +485,7 @@ mino_val *mino_bigdec_sub(mino_state *S, const mino_val *a,
     int        sa, sb, smax;
     mino_val *au, *bu, *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec sub: bigdec operands required");
     }
     sa = a->as.bigdec.scale;
@@ -498,7 +498,7 @@ mino_val *mino_bigdec_sub(mino_state *S, const mino_val *a,
     gc_unpin(1);
     if (bu == NULL) return NULL;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigdec sub");
     }
     result = mino_bigint_sub(S, au, bu);
@@ -511,7 +511,7 @@ mino_val *mino_bigdec_mul(mino_state *S, const mino_val *a,
 {
     mino_val *result;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec mul: bigdec operands required");
     }
     result = mino_bigint_mul(S, a->as.bigdec.unscaled, b->as.bigdec.unscaled);
@@ -523,7 +523,7 @@ mino_val *mino_bigdec_neg(mino_state *S, const mino_val *a)
 {
     mino_val *u;
     if (a == NULL || mino_type_of(a) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec neg: bigdec operand required");
     }
     u = mino_bigint_neg(S, a->as.bigdec.unscaled);
@@ -551,7 +551,7 @@ static int bigdec_align(mino_state *S, const mino_val *a,
     gc_unpin(1);
     if (bu == NULL) return 0;
     if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
-        prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        throw_classified(S, "eval/out-of-memory", "MOM001",
                               "out of memory aligning bigdec scales");
         return 0;
     }
@@ -567,7 +567,7 @@ mino_val *mino_bigdec_quot(mino_state *S, const mino_val *a,
     mino_val *au, *bu, *q;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec quot: bigdec operands required");
     }
     if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;
@@ -575,7 +575,7 @@ mino_val *mino_bigdec_quot(mino_state *S, const mino_val *a,
     if (q == NULL) return NULL;
     /* Re-encode q at scale smax: unscaled = q * 10^smax. */
     if (!bigint_mul_pow10(q, smax)) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigdec quot");
     }
     return mino_bigdec_make(S, q, smax);
@@ -587,7 +587,7 @@ mino_val *mino_bigdec_rem(mino_state *S, const mino_val *a,
     mino_val *au, *bu, *r;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec rem: bigdec operands required");
     }
     if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;
@@ -872,7 +872,7 @@ mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
     mc_active = resolve_math_context(S, &mc_precision, &mc_rmode);
     if (!mc_active) return bd;
     if (mc_rmode == MC_RMODE_UNKNOWN) {
-        return prim_throw_classified(S, "host", "MHO002",
+        return throw_classified(S, "host", "MHO002",
             "with-precision: unknown :rounding-mode keyword "
             "(supported: :down :up :floor :ceiling :half-up "
             ":half-down :half-even :unnecessary)");
@@ -883,7 +883,7 @@ mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
     excess = sig - mc_precision;
 
     if (mp_int_init(&pw) != MP_OK) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
                                      "out of memory in bigdec rounding");
     }
     qz_heap = bigint_alloc_zeroed();
@@ -893,7 +893,7 @@ mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
     mp_int_clear(&pw);
     if (rc == -2) {
         free(qz_heap);
-        return prim_throw_classified(S, "host", "MHO002",
+        return throw_classified(S, "host", "MHO002",
             "with-precision :unnecessary: rounding required");
     }
     if (rc != 0) { free(qz_heap); goto oom; }
@@ -906,7 +906,7 @@ mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd)
     return mino_bigdec_make(S, q_wrapped, bd->as.bigdec.scale - excess);
 
 oom:
-    return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+    return throw_classified(S, "eval/out-of-memory", "MOM001",
                                  "out of memory in bigdec rounding");
 }
 
@@ -935,17 +935,17 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
     mino_val *result = NULL;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC
         || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec div: bigdec operands required");
     }
     if (mp_int_compare_zero(
             (mp_int)b->as.bigdec.unscaled->as.bigint.mpz) == 0) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "division by zero");
     }
     mc_active = resolve_math_context(S, &mc_precision, &mc_rmode);
     if (mc_active && mc_rmode == MC_RMODE_UNKNOWN) {
-        return prim_throw_classified(S, "host", "MHO002",
+        return throw_classified(S, "host", "MHO002",
             "with-precision: unknown :rounding-mode keyword "
             "(supported: :down :up :floor :ceiling :half-up "
             ":half-down :half-even :unnecessary)");
@@ -953,7 +953,7 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
     /* When *math-context* is set, use its precision as the loop cap;
      * otherwise stay at the historical 1024-digit upper bound. */
     if (mc_active && mc_precision > INT_MAX - 8) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "with-precision: precision too large");
     }
     max_extra = mc_active ? (mc_precision + 8) : 1024;
@@ -985,7 +985,7 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                     free(qz_heap);
                     mp_int_clear(&num); mp_int_clear(&den);
                     mp_int_clear(&q);   mp_int_clear(&r); mp_int_clear(&pw);
-                    return prim_throw_classified(S, "host", "MHO002",
+                    return throw_classified(S, "host", "MHO002",
                         "with-precision :unnecessary: rounding required");
                 }
                 if (rc != 0) { free(qz_heap); goto oom; }
@@ -1022,7 +1022,7 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                     free(qz_heap);
                     mp_int_clear(&num); mp_int_clear(&den);
                     mp_int_clear(&q);   mp_int_clear(&r); mp_int_clear(&pw);
-                    return prim_throw_classified(S, "host", "MHO002",
+                    return throw_classified(S, "host", "MHO002",
                         "with-precision :unnecessary: rounding required");
                 }
                 if (rc != 0) { free(qz_heap); goto oom; }
@@ -1050,7 +1050,7 @@ mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
     mp_int_clear(&r);
     mp_int_clear(&pw);
     if (result == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "non-terminating decimal expansion in bigdec division");
     }
     return result;
@@ -1061,7 +1061,7 @@ oom:
     mp_int_clear(&r);
     mp_int_clear(&pw);
 oom_pre:
-    return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+    return throw_classified(S, "eval/out-of-memory", "MOM001",
                                  "out of memory in bigdec div");
 }
 
@@ -1071,7 +1071,7 @@ mino_val *mino_bigdec_mod(mino_state *S, const mino_val *a,
     mino_val *au, *bu, *m;
     int smax;
     if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "bigdec mod: bigdec operands required");
     }
     if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;

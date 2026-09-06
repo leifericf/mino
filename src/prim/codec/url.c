@@ -68,22 +68,22 @@ static mino_val *prim_percent_encode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "percent-encode requires one argument");
     }
     v = args->as.cons.car;
     if (!url_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "percent-encode: argument must be a "
                                      "string or bytes value");
     }
     if (len > (SIZE_MAX - 1) / 3) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
                                      "percent-encode: input too large");
     }
     out = (unsigned char *)malloc(len * 3 + 1);
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "percent-encode: out of memory");
     }
     for (i = 0; i < len; i++) {
@@ -166,12 +166,12 @@ static mino_val *prim_percent_decode(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "percent-decode requires one argument");
     }
     v = args->as.cons.car;
     if (!url_text_arg(v, &src, &len, &is_string)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "percent-decode: argument must be a "
                                      "string or bytes value");
     }
@@ -183,7 +183,7 @@ static mino_val *prim_percent_decode(mino_state *S, mino_val *args,
                 snprintf(msg, sizeof(msg),
                          "percent-decode: malformed percent-escape at "
                          "byte %lu", (unsigned long)i);
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              msg);
             }
             o++;
@@ -195,7 +195,7 @@ static mino_val *prim_percent_decode(mino_state *S, mino_val *args,
     }
     out = (unsigned char *)malloc(o > 0 ? o : 1);
     if (out == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "percent-decode: out of memory");
     }
     /* Pass 2: fill. Escapes were validated above; no re-check needed. */
@@ -215,7 +215,7 @@ static mino_val *prim_percent_decode(mino_state *S, mino_val *args,
                      "percent-decode: decoded bytes are not valid UTF-8 "
                      "at byte %lu", (unsigned long)bad_off);
             free(out);
-            return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            return throw_classified(S, "eval/contract", "MCT001", msg);
         }
         result = mino_string_n(S, (const char *)out, o);
     } else {
@@ -286,12 +286,12 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "parse-url requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "parse-url: argument must be a string");
     }
     s   = v->as.s.data;
@@ -299,13 +299,13 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
 
     /* Scheme: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":" */
     if (len == 0 || !url_ascii_alpha((unsigned char)s[0])) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "parse-url: URL has no scheme");
     }
     j = 1;
     while (j < len && url_scheme_char((unsigned char)s[j])) j++;
     if (j >= len || s[j] != ':') {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "parse-url: URL has no scheme");
     }
     scheme_len = j;
@@ -315,11 +315,11 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
                  "parse-url: unsupported scheme '%.*s' (only http and "
                  "https are supported)",
                  (int)(scheme_len < 40 ? scheme_len : 40), s);
-        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        return throw_classified(S, "eval/contract", "MCT001", msg);
     }
     if (scheme_len + 2 >= len || s[scheme_len + 1] != '/'
         || s[scheme_len + 2] != '/') {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "parse-url: URL must start with "
                                      "scheme://");
     }
@@ -348,19 +348,19 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
             if (s[k] == ']') { close = k; break; }
         }
         if (close == 0) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "parse-url: unterminated IPv6 "
                                          "host literal");
         }
         host_end = close + 1;
         if (host_end - host_start < 2) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "parse-url: URL has an empty "
                                          "host");
         }
         if (host_end < auth_end) {
             if (s[host_end] != ':') {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "parse-url: unexpected "
                                              "character after IPv6 host "
                                              "literal");
@@ -381,7 +381,7 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
             }
         }
         if (host_end == host_start) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                                          "parse-url: URL has an empty "
                                          "host");
         }
@@ -396,13 +396,13 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
         for (k = 0; k < port_len; k++) {
             unsigned char c = (unsigned char)s[port_start + k];
             if (c < '0' || c > '9') {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "parse-url: invalid character "
                                              "in port");
             }
             port = port * 10 + (c - '0');
             if (port > 65535) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                                              "parse-url: port is out of "
                                              "range (max 65535)");
             }
@@ -436,7 +436,7 @@ mino_val *prim_parse_url(mino_state *S, mino_val *args,
      * every buffer is bounded by len. */
     scratch = (char *)malloc(len + 1);
     if (scratch == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "parse-url: out of memory");
     }
     keys[0] = mino_keyword(S, "scheme");          gc_pin(keys[0]); pinned++;

@@ -728,7 +728,7 @@ mino_val *mino_tx_ref_set(mino_state *S, mino_val *v, mino_val *val);
  * `cur` is the in-tx effective value at call time; `user` is the
  * caller-supplied opaque pointer. Returns the new value. May call
  * mino_call for nested Clojure dispatch and may throw via
- * prim_throw_classified -- both unwind through the enclosing tx
+ * throw_classified -- both unwind through the enclosing tx
  * runner. The function pointer must remain valid for the lifetime of
  * the transaction (in particular: across retries and through commit-
  * time replay for commute). */
@@ -764,7 +764,7 @@ mino_val *mino_tx_ensure(mino_state *S, mino_val *v,
 /* C-callable transaction body, used by mino_tx_run. Returns the
  * body's last value. The body may invoke any in-tx accessor
  * (mino_tx_ref_deref / mino_tx_alter_c / ...), call mino_call to
- * dispatch into Clojure code, and throw via prim_throw_classified.
+ * dispatch into Clojure code, and throw via throw_classified.
  *
  * The body is re-invoked on commit-time conflict, up to 10000 retries
  * before throwing eval/state MST004. Any user state mutated through

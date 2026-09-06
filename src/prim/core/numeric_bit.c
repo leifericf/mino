@@ -27,17 +27,17 @@ static mino_val *bit_fold(mino_state *S, mino_val *args, const char *name,
     char       msg[64];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires at least two arguments", name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     if (!as_long(args->as.cons.car, &acc)) {
         snprintf(msg, sizeof(msg), "%s expects integers", name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     for (p = args->as.cons.cdr; mino_is_cons(p); p = p->as.cons.cdr) {
         long long b;
         if (!as_long(p->as.cons.car, &b)) {
             snprintf(msg, sizeof(msg), "%s expects integers", name);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
         acc = op(acc, b);
     }
@@ -71,10 +71,10 @@ mino_val *prim_bit_not(mino_state *S, mino_val *args, mino_env *env)
     long long a;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-not requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "bit-not requires one argument");
     }
     if (!as_long(args->as.cons.car, &a)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-not expects an integer");
+        return throw_classified(S, "eval/type", "MTY001", "bit-not expects an integer");
     }
     return mino_int_wrap(S, ~a);
 }
@@ -95,14 +95,14 @@ mino_val *prim_bit_shift_left(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-shift-left requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "bit-shift-left requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-shift-left expects integers");
+        return throw_classified(S, "eval/type", "MTY001", "bit-shift-left expects integers");
     }
     if (!shift_amount_ok(b)) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "bit-shift-left shift amount must be in [0, 63]");
     }
     /* Route the shift through unsigned so that (bit-shift-left 1 63)
@@ -118,14 +118,14 @@ mino_val *prim_bit_shift_right(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "bit-shift-right requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "bit-shift-right requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "bit-shift-right expects integers");
+        return throw_classified(S, "eval/type", "MTY001", "bit-shift-right expects integers");
     }
     if (!shift_amount_ok(b)) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "bit-shift-right shift amount must be in [0, 63]");
     }
     /* C99 §6.5.7p5: right-shifting a negative signed value is
@@ -150,14 +150,14 @@ mino_val *prim_unsigned_bit_shift_right(mino_state *S, mino_val *args, mino_env 
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "unsigned-bit-shift-right requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "unsigned-bit-shift-right requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "unsigned-bit-shift-right expects integers");
+        return throw_classified(S, "eval/type", "MTY001", "unsigned-bit-shift-right expects integers");
     }
     if (!shift_amount_ok(b)) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "unsigned-bit-shift-right shift amount must be in [0, 63]");
     }
     return mino_int_wrap(S, (long long)((unsigned long long)a >> b));

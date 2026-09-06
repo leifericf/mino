@@ -26,7 +26,7 @@ mino_val *prim_transient(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "transient requires one argument");
     }
     return mino_transient(S, args->as.cons.car);
@@ -38,7 +38,7 @@ mino_val *prim_persistent_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "persistent! requires one argument");
     }
     return mino_persistent(S, args->as.cons.car);
@@ -57,7 +57,7 @@ mino_val *prim_assoc_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "assoc! requires at least three arguments");
     }
     t = args->as.cons.car;
@@ -92,7 +92,7 @@ mino_val *prim_conj_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "conj! accepts at most a transient and one value");
     }
     if (!mino_is_cons(args)) {
@@ -118,7 +118,7 @@ mino_val *prim_dissoc_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "dissoc! requires at least a transient and a key");
     }
     t = args->as.cons.car;
@@ -141,7 +141,7 @@ mino_val *prim_disj_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n < 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "disj! requires a set");
     }
     t = args->as.cons.car;
@@ -164,7 +164,7 @@ mino_val *prim_pop_bang(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "pop! requires one argument");
     }
     return mino_pop_bang(S, args->as.cons.car);
@@ -176,7 +176,7 @@ mino_val *prim_transient_p(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "transient? requires one argument");
     }
     return mino_is_transient(args->as.cons.car) ? mino_true(S) : mino_false(S);

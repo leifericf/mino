@@ -1338,13 +1338,13 @@ static mino_val *prim_toml_parse(mino_state *S, mino_val *args,
     if (!mino_is_cons(args)
         || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "toml-parse requires two arguments");
     }
     s_val = args->as.cons.car;
     pv_val = args->as.cons.cdr->as.cons.car;
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "toml-parse: first argument must be a string");
     }
     if (pv_val == NULL || mino_type_of(pv_val) == MINO_NIL) {

@@ -316,7 +316,7 @@ const char *mino_store_path(const mino_val *v)
 static int store_check_state(mino_state *S, mino_val *store)
 {
     if (store->as.store.owning_state != S) {
-        prim_throw_classified(S, "eval/state", "MST007",
+        throw_classified(S, "eval/state", "MST007",
             "store from foreign state");
         return 1;
     }
@@ -329,7 +329,7 @@ mino_val *mino_store_publish(mino_state *S, mino_val *conn,
                                mino_val *new_db)
 {
     if (!mino_is_store(conn)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
             "store-publish requires a store connection");
         return NULL;
     }
@@ -460,7 +460,7 @@ int mino_store_checkpoint(mino_state *S, mino_val *conn)
     char              *wal_path;
     char              *tmp_path;
     if (!mino_is_store(conn)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
             "store-checkpoint requires a store connection");
         return -1;
     }
@@ -515,7 +515,7 @@ int mino_store_close(mino_state *S, mino_val *conn)
 {
     mino_store_handle *h;
     if (!mino_is_store(conn)) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
             "store-close requires a store connection");
         return -1;
     }
@@ -559,14 +559,14 @@ static mino_val *prim_store_open(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-open* requires two arguments");
     }
     db       = args->as.cons.car;
     path_val = args->as.cons.cdr->as.cons.car;
     if (path_val != NULL && mino_type_of(path_val) != MINO_NIL) {
         if (mino_type_of(path_val) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "store-open*: path must be a string or nil");
         }
         path_str = path_val->as.s.data;
@@ -590,7 +590,7 @@ static mino_val *prim_store_commit(mino_state *S, mino_val *args,
     mino_val          *old_val;
     mino_store_handle *h;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-commit* requires at least two arguments");
     }
     conn   = args->as.cons.car;
@@ -599,12 +599,12 @@ static mino_val *prim_store_commit(mino_state *S, mino_val *args,
     if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         tx_info = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "store-commit* accepts at most three arguments");
         }
     }
     if (!mino_is_store(conn)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-commit* requires a store connection");
     }
     if (store_check_state(S, conn)) return NULL;
@@ -632,12 +632,12 @@ static mino_val *prim_store_checkpoint(mino_state *S, mino_val *args,
     mino_val *conn;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-checkpoint* requires one argument");
     }
     conn = args->as.cons.car;
     if (!mino_is_store(conn)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-checkpoint* requires a store connection");
     }
     if (store_check_state(S, conn)) return NULL;
@@ -652,12 +652,12 @@ static mino_val *prim_store_close(mino_state *S, mino_val *args,
     mino_val *conn;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-close* requires one argument");
     }
     conn = args->as.cons.car;
     if (!mino_is_store(conn)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-close* requires a store connection");
     }
     if (store_check_state(S, conn)) return NULL;
@@ -672,7 +672,7 @@ static mino_val *prim_store_p(mino_state *S, mino_val *args,
     mino_val *x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store? requires one argument");
     }
     x = args->as.cons.car;
@@ -688,7 +688,7 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
     long long          now;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-clock* requires one argument");
     }
     conn = args->as.cons.car;
@@ -699,7 +699,7 @@ static mino_val *prim_store_clock(mino_state *S, mino_val *args,
         return mino_int(S, store_wall_clock_ms());
     }
     if (!mino_is_store(conn)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-clock* requires a store connection");
     }
     if (store_check_state(S, conn)) return NULL;
@@ -724,12 +724,12 @@ static mino_val *prim_store_read_snapshot(mino_state *S, mino_val *args,
     const char *path_str;
     mino_val   *db;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-read-snapshot* requires one argument");
     }
     path_val = args->as.cons.car;
     if (mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-read-snapshot*: path must be a string");
     }
     path_str = path_val->as.s.data;
@@ -747,12 +747,12 @@ static mino_val *prim_store_read_wal(mino_state *S, mino_val *args,
     mino_val   *path_val;
     const char *path_str;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "store-read-wal* requires one argument");
     }
     path_val = args->as.cons.car;
     if (mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "store-read-wal*: path must be a string");
     }
     path_str = path_val->as.s.data;

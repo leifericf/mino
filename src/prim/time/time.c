@@ -136,7 +136,7 @@ static int64_t secs_from_broken(const civil_tm *tm)
 static mino_val *time_throw(mino_state *S, const char *kind, const char *code,
                             const char *msg)
 {
-    return prim_throw_classified(S, kind, code, msg);
+    return throw_classified(S, kind, code, msg);
 }
 
 /* strict integer extraction: ints only, floats and bignums reject */
@@ -1077,7 +1077,7 @@ static mino_val *prim_format_time(mino_state *S, mino_val *args,
     (void)env;
 
     if (!arg_count(S, args, &n) || n < 1 || n > 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "format-time takes one to three "
                                      "arguments");
     }
@@ -1172,7 +1172,7 @@ static mino_val *prim_zone_offset_mins(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "zone-offset-mins takes two "
                                      "arguments");
     }
@@ -1215,7 +1215,7 @@ static mino_val *prim_parse_time(mino_state *S, mino_val *args,
     if (!mino_is_cons(args)
         || (mino_is_cons(args->as.cons.cdr)
             && mino_is_cons(args->as.cons.cdr->as.cons.cdr))) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "parse-time requires one or two "
                                      "arguments");
     }
@@ -1227,7 +1227,7 @@ static mino_val *prim_parse_time(mino_state *S, mino_val *args,
         if (have_zone < 0) return NULL;
     }
     if (v == NULL || mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "parse-time: argument must be a "
                                      "string");
     }
@@ -1355,7 +1355,7 @@ static mino_val *prim_now(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "now takes no arguments");
     }
     return mino_int(S, time_wall_ms());
@@ -1366,7 +1366,7 @@ static mino_val *prim_now_s(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "now-s takes no arguments");
     }
     return mino_int(S, time_wall_ms() / 1000);
@@ -1377,7 +1377,7 @@ static mino_val *prim_cpu_ms(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "cpu-ms takes no arguments");
     }
     return mino_int(S, time_cpu_ms());
@@ -1405,7 +1405,7 @@ static mino_val *prim_epoch_to_time_map(mino_state *S, mino_val *args,
     (void)env;
 
     if (!arg_count(S, args, &n) || n < 1 || n > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "epoch->time-map takes one or two "
                                      "arguments");
     }
@@ -1514,7 +1514,7 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || args->as.cons.car == NULL
         || mino_type_of(args->as.cons.car) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "time-map->epoch requires one map "
                                      "argument");
     }
@@ -1522,7 +1522,7 @@ static mino_val *prim_time_map_to_epoch(mino_state *S, mino_val *args,
     if (mino_is_cons(args->as.cons.cdr)) {
         mino_val *opts;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "time-map->epoch takes one or "
                                          "two arguments");
         }
@@ -1720,7 +1720,7 @@ static mino_val *prim_days_in_month(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "days-in-month takes two arguments");
     }
     av[0] = args->as.cons.car;
@@ -1745,7 +1745,7 @@ static mino_val *prim_weekday(mino_state *S, mino_val *args,
     long long ms;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "weekday takes one argument");
     }
     v = args->as.cons.car;
@@ -1786,7 +1786,7 @@ static mino_val *prim_add_days(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "add-days takes two arguments");
     }
     av[0] = args->as.cons.car;
@@ -1821,7 +1821,7 @@ static mino_val *prim_add_months(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "add-months takes two arguments");
     }
     v = args->as.cons.car;
@@ -1935,7 +1935,7 @@ static mino_val *prim_days_between(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "days-between takes two arguments");
     }
     av[0] = args->as.cons.car;
@@ -1960,7 +1960,7 @@ static mino_val *prim_months_between(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "months-between takes two arguments");
     }
     av[0] = args->as.cons.car;
@@ -1995,7 +1995,7 @@ static mino_val *prim_human_diff(mino_state *S, mino_val *args,
     (void)env;
 
     if (!arg_count(S, args, &n) || n < 1 || n > 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "human-diff takes one or two "
                                      "arguments");
     }

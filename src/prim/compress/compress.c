@@ -54,7 +54,7 @@ static int cmp_args(mino_state *S, mino_val *args, const char *who,
     char      msg[96];
 
     if (!mino_is_cons(args)) {
-        prim_throw_classified(S, "eval/arity", "MAR001", who);
+        throw_classified(S, "eval/arity", "MAR001", who);
         return -1;
     }
     v = args->as.cons.car;
@@ -62,7 +62,7 @@ static int cmp_args(mino_state *S, mino_val *args, const char *who,
     if (mino_is_cons(args)) {
         *opts = args->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr)) {
-            prim_throw_classified(S, "eval/arity", "MAR001", who);
+            throw_classified(S, "eval/arity", "MAR001", who);
             return -1;
         }
     } else {
@@ -70,13 +70,13 @@ static int cmp_args(mino_state *S, mino_val *args, const char *who,
     }
     if (v == NULL || !mino_is_bytes(v)) {
         snprintf(msg, sizeof(msg), "%s: input must be a bytes value", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     if (*opts != NULL && mino_type_of(*opts) != MINO_MAP
         && mino_type_of(*opts) != MINO_NIL) {
         snprintf(msg, sizeof(msg), "%s: opts must be a map", who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return -1;
     }
     *data = mino_bytes_data(v);
@@ -104,7 +104,7 @@ static int cmp_level_opt(mino_state *S, mino_val *opts, const char *who,
     if (!as_long(lv, &n) || n < 0 || n > 9) {
         snprintf(msg, sizeof(msg),
                  "%s: :level must be an integer 0-9", who);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *level = (int)n;
@@ -128,7 +128,7 @@ static int cmp_max_bytes_opt(mino_state *S, mino_val *opts, const char *who,
             || (unsigned long long)mb > SIZE_MAX / 2) {
             snprintf(msg, sizeof(msg),
                      "%s: :max-bytes must be a non-negative integer", who);
-            prim_throw_classified(S, "eval/contract", "MCT001", msg);
+            throw_classified(S, "eval/contract", "MCT001", msg);
             return -1;
         }
         *max_out = (size_t)mb;
@@ -207,7 +207,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
         if (mv != NULL && mino_type_of(mv) != MINO_NIL
             && (!as_long(mv, &mtime) || mtime < 0
                 || (unsigned long long)mtime > CMP_GZ_MAX_MTIME)) {
-            prim_throw_classified(S, "eval/contract", "MCT001",
+            throw_classified(S, "eval/contract", "MCT001",
                                   "gzip-compress: :mtime must be an "
                                   "integer 0..4294967295");
             return NULL;
@@ -215,7 +215,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
         mv = map_get_val(opts, mino_keyword(S, "os"));
         if (mv != NULL && mino_type_of(mv) != MINO_NIL
             && (!as_long(mv, &os) || os < 0 || os > 255)) {
-            prim_throw_classified(S, "eval/contract", "MCT001",
+            throw_classified(S, "eval/contract", "MCT001",
                                   "gzip-compress: :os must be an "
                                   "integer 0-255");
             return NULL;
@@ -224,7 +224,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
         if (mv != NULL && mino_type_of(mv) != MINO_NIL) {
             const char *slash;
             if (mino_type_of(mv) != MINO_STRING) {
-                prim_throw_classified(S, "eval/contract", "MCT001",
+                throw_classified(S, "eval/contract", "MCT001",
                                       "gzip-compress: :name must be a "
                                       "string");
                 return NULL;
@@ -236,7 +236,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
             if (slash != NULL) name_base = slash + 1;
             name_len = mv->as.s.len - (size_t)(name_base - mv->as.s.data);
             if (name_len == 0) {
-                prim_throw_classified(S, "eval/contract", "MCT001",
+                throw_classified(S, "eval/contract", "MCT001",
                                       "gzip-compress: :name has an empty "
                                       "basename");
                 return NULL;
@@ -249,7 +249,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
     buf = (unsigned char *)malloc(cap);
     if (buf == NULL) {
         snprintf(msg, sizeof(msg), "gzip-compress: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     buf[0] = 0x1f;
     buf[1] = 0x8b;
@@ -275,7 +275,7 @@ static mino_val *prim_gzip_compress(mino_state *S, mino_val *args,
         free(buf);
         snprintf(msg, sizeof(msg),
                  "gzip-compress: compressor failed at the proven bound");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     crc = (uint32_t)mz_crc32(MZ_CRC32_INIT, data, len);
     p = buf + hdr_len + body_len;
@@ -311,7 +311,7 @@ static mino_val *prim_deflate_compress(mino_state *S, mino_val *args,
     buf = cmp_tdefl(data, len, level, 0, &out_len);
     if (buf == NULL) {
         snprintf(msg, sizeof(msg), "deflate-compress: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     result = mino_bytes(S, buf, out_len);
     free(buf);
@@ -337,7 +337,7 @@ static mino_val *prim_zlib_compress(mino_state *S, mino_val *args,
     buf = cmp_tdefl(data, len, level, 1, &out_len);
     if (buf == NULL) {
         snprintf(msg, sizeof(msg), "zlib-compress: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     result = mino_bytes(S, buf, out_len);
     free(buf);
@@ -366,22 +366,22 @@ static mino_val *prim_zlib_decompress(mino_state *S, mino_val *args,
         return NULL;
 
     if (len < 2) {
-        return prim_throw_classified(S, "codec/truncated", "MGC001",
+        return throw_classified(S, "codec/truncated", "MGC001",
                                      "zlib-decompress: input is truncated");
     }
     if ((data[0] & 0x0F) != 8 || (data[0] >> 4) > 7
         || ((data[0] << 8) | data[1]) % 31 != 0) {
-        return prim_throw_classified(S, "codec/magic", "MGC002",
+        return throw_classified(S, "codec/magic", "MGC002",
                                      "zlib-decompress: not a zlib stream "
                                      "(bad CMF/FLG header)");
     }
     if ((data[1] & 0x20) != 0) {
-        return prim_throw_classified(S, "codec/unsupported", "MGC007",
+        return throw_classified(S, "codec/unsupported", "MGC007",
                                      "zlib-decompress: FDICT preset "
                                      "dictionaries are not supported");
     }
     if (len < 6) {
-        return prim_throw_classified(S, "codec/truncated", "MGC001",
+        return throw_classified(S, "codec/truncated", "MGC001",
                                      "zlib-decompress: input is truncated");
     }
 
@@ -391,33 +391,33 @@ static mino_val *prim_zlib_decompress(mino_state *S, mino_val *args,
     st = mino_inflate_raw(data + 2, body_len, max_out, &out, &consumed);
     if (st == GZ_TRUNCATED) {
         snprintf(msg, sizeof(msg), "zlib-decompress: input is truncated");
-        return prim_throw_classified(S, "codec/truncated", "MGC001", msg);
+        return throw_classified(S, "codec/truncated", "MGC001", msg);
     }
     if (st == GZ_CORRUPT) {
         snprintf(msg, sizeof(msg), "zlib-decompress: corrupt stream");
-        return prim_throw_classified(S, "codec/corrupt", "MGC004", msg);
+        return throw_classified(S, "codec/corrupt", "MGC004", msg);
     }
     if (st == GZ_LIMIT) {
         snprintf(msg, sizeof(msg),
                  "zlib-decompress: output exceeds the %lu byte cap",
                  (unsigned long)max_out);
-        return prim_throw_classified(S, "codec/limit", "MGC005", msg);
+        return throw_classified(S, "codec/limit", "MGC005", msg);
     }
     if (st != GZ_OK) {
         snprintf(msg, sizeof(msg), "zlib-decompress: out of memory");
-        return prim_throw_classified(S, "internal", "MIN001", msg);
+        return throw_classified(S, "internal", "MIN001", msg);
     }
     if (consumed != body_len) {
         free(out.data);
         snprintf(msg, sizeof(msg),
                  "zlib-decompress: trailing bytes after the stream");
-        return prim_throw_classified(S, "codec/corrupt", "MGC004", msg);
+        return throw_classified(S, "codec/corrupt", "MGC004", msg);
     }
     if ((uint32_t)mz_adler32(MZ_ADLER32_INIT, out.data, out.len) != adler) {
         free(out.data);
         snprintf(msg, sizeof(msg),
                  "zlib-decompress: Adler-32 trailer mismatch");
-        return prim_throw_classified(S, "codec/crc", "MGC003", msg);
+        return throw_classified(S, "codec/crc", "MGC003", msg);
     }
     result = mino_bytes(S, out.data, out.len);
     free(out.data);

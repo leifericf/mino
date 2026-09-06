@@ -11,7 +11,7 @@
  *   MINO_ERR_RECOVERABLE -- scheduler.c, timer.c, prim/async.c.
  *      Arity / type errors on async primitives (drain!,
  *      async-sched-enqueue*, async-schedule-timer*) reach
- *      prim_throw_classified.  No CORRUPT or HOST paths -- the
+ *      throw_classified.  No CORRUPT or HOST paths -- the
  *      async surface is a thin layer over a cooperative run-queue
  *      that never escapes to the host.
  */

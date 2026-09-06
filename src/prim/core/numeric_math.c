@@ -47,11 +47,11 @@ static inline mino_val *math_unary(mino_state *S, mino_val *args,
     double  x;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires one argument", label);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     if (!tower_as_double(args->as.cons.car, &x)) {
         snprintf(msg, sizeof(msg), "%s expects a number", label);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     return mino_float(S, fn(x));
 }
@@ -76,14 +76,14 @@ mino_val *prim_math_round(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "math-round requires one argument");
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     a = args->as.cons.car;
     /* Integer input: Clojure Math.round(long) returns the same long. */
     if (mino_type_of(a) == MINO_INT) return a;
     if (!tower_as_double(a, &x)) {
         snprintf(msg, sizeof(msg), "math-round expects a number");
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     /* Match java.lang.Math.round(double): round half toward positive
      * infinity (not C round()'s half-away-from-zero), NaN -> 0, and clamp
@@ -144,11 +144,11 @@ mino_val *prim_math_pow(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-pow requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-pow requires two arguments");
     }
     if (!tower_as_double(args->as.cons.car, &base) ||
         !tower_as_double(args->as.cons.cdr->as.cons.car, &exponent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-pow expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-pow expects numbers");
     }
     return mino_float(S, pow(base, exponent));
 }
@@ -159,11 +159,11 @@ mino_val *prim_math_atan2(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-atan2 requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-atan2 requires two arguments");
     }
     if (!tower_as_double(args->as.cons.car, &y) ||
         !tower_as_double(args->as.cons.cdr->as.cons.car, &x)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-atan2 expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-atan2 expects numbers");
     }
     return mino_float(S, atan2(y, x));
 }
@@ -226,9 +226,9 @@ mino_val *prim_math_signum(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-signum requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-signum requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-signum expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-signum expects a number");
     if (x != x) return mino_float(S, x);       /* NaN -> NaN */
     if (x == 0.0) return mino_float(S, x);     /* +0/-0 preserved */
     return mino_float(S, x > 0.0 ? 1.0 : -1.0);
@@ -238,9 +238,9 @@ mino_val *prim_math_to_radians(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-to-radians requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-to-radians requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-to-radians expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-to-radians expects a number");
     return mino_float(S, x * (3.14159265358979323846 / 180.0));
 }
 mino_val *prim_math_to_degrees(mino_state *S, mino_val *args, mino_env *env)
@@ -248,9 +248,9 @@ mino_val *prim_math_to_degrees(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-to-degrees requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-to-degrees requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-to-degrees expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-to-degrees expects a number");
     return mino_float(S, x * (180.0 / 3.14159265358979323846));
 }
 mino_val *prim_math_hypot(mino_state *S, mino_val *args, mino_env *env)
@@ -259,10 +259,10 @@ mino_val *prim_math_hypot(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-hypot requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-hypot requires two arguments");
     if (!tower_as_double(args->as.cons.car, &a)
         || !tower_as_double(args->as.cons.cdr->as.cons.car, &b))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-hypot expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-hypot expects numbers");
     return mino_float(S, hypot(a, b));
 }
 mino_val *prim_math_copy_sign(mino_state *S, mino_val *args, mino_env *env)
@@ -271,10 +271,10 @@ mino_val *prim_math_copy_sign(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-copy-sign requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-copy-sign requires two arguments");
     if (!tower_as_double(args->as.cons.car, &mag)
         || !tower_as_double(args->as.cons.cdr->as.cons.car, &sgn))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-copy-sign expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-copy-sign expects numbers");
     return mino_float(S, copysign(mag, sgn));
 }
 mino_val *prim_math_next_up(mino_state *S, mino_val *args, mino_env *env)
@@ -282,9 +282,9 @@ mino_val *prim_math_next_up(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-up requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-next-up requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-up expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-next-up expects a number");
     return mino_float(S, nextafter(x, INFINITY));
 }
 mino_val *prim_math_next_down(mino_state *S, mino_val *args, mino_env *env)
@@ -292,9 +292,9 @@ mino_val *prim_math_next_down(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-down requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-next-down requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-down expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-next-down expects a number");
     return mino_float(S, nextafter(x, -INFINITY));
 }
 mino_val *prim_math_ieee_remainder(mino_state *S, mino_val *args, mino_env *env)
@@ -303,10 +303,10 @@ mino_val *prim_math_ieee_remainder(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-ieee-remainder requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-ieee-remainder requires two arguments");
     if (!tower_as_double(args->as.cons.car, &a)
         || !tower_as_double(args->as.cons.cdr->as.cons.car, &b))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-ieee-remainder expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-ieee-remainder expects numbers");
     return mino_float(S, remainder(a, b));
 }
 mino_val *prim_math_rint(mino_state *S, mino_val *args, mino_env *env)
@@ -314,9 +314,9 @@ mino_val *prim_math_rint(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-rint requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-rint requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-rint expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-rint expects a number");
     /* Default FE rounding is to-nearest / ties-to-even, matching the
      * half-even contract. */
     return mino_float(S, rint(x));
@@ -326,9 +326,9 @@ mino_val *prim_math_ulp(mino_state *S, mino_val *args, mino_env *env)
     double x, ax;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-ulp requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-ulp requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-ulp expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-ulp expects a number");
     if (isnan(x)) return mino_float(S, x);
     if (isinf(x)) return mino_float(S, INFINITY);
     ax = fabs(x);
@@ -346,10 +346,10 @@ mino_val *prim_math_scalb(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-scalb requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-scalb requires two arguments");
     if (!tower_as_double(args->as.cons.car, &x)
         || !mino_as_ll(args->as.cons.cdr->as.cons.car, &n))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-scalb expects a number and an integer scale factor");
+        return throw_classified(S, "eval/type", "MTY001", "math-scalb expects a number and an integer scale factor");
     /* Clamp the scale factor; past +-2200 every double has already
      * saturated to 0 / Inf, so the clamp cannot change the result. */
     if (n > 2200)  n = 2200;
@@ -361,9 +361,9 @@ mino_val *prim_math_get_exponent(mino_state *S, mino_val *args, mino_env *env)
     double x;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-get-exponent requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "math-get-exponent requires one argument");
     if (!tower_as_double(args->as.cons.car, &x))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-get-exponent expects a number");
+        return throw_classified(S, "eval/type", "MTY001", "math-get-exponent expects a number");
     /* Unbiased exponent with the canonical edge values: NaN / Inf
      * report MAX_EXPONENT + 1, zero and subnormals MIN_EXPONENT - 1
      * (ilogb would report the effective exponent of a subnormal). */
@@ -377,9 +377,9 @@ mino_val *prim_math_next_after(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
-        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-after requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "math-next-after requires two arguments");
     if (!tower_as_double(args->as.cons.car, &start)
         || !tower_as_double(args->as.cons.cdr->as.cons.car, &direction))
-        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-after expects numbers");
+        return throw_classified(S, "eval/type", "MTY001", "math-next-after expects numbers");
     return mino_float(S, nextafter(start, direction));
 }

@@ -42,7 +42,7 @@ int      mino_as_ll(const mino_val *v, long long *out);
 /* Bigint arithmetic helpers for the promoting tower primitives. Each
  * accepts MINO_INT or MINO_BIGINT operands (callers classify first) and
  * returns a GC-owned MINO_BIGINT, or NULL on allocation failure (error
- * raised via prim_throw_classified). */
+ * raised via throw_classified). */
 mino_val *mino_bigint_add(mino_state *S, const mino_val *a,
                             const mino_val *b);
 mino_val *mino_bigint_sub(mino_state *S, const mino_val *a,

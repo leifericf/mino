@@ -7,7 +7,7 @@
  * Error classes emitted (see diag/diag_contract.h):
  *
  *   MINO_ERR_RECOVERABLE -- transient.c, val.c, and the public
- *      collection APIs reach prim_throw_classified for type errors
+ *      collection APIs reach throw_classified for type errors
  *      and contract violations (e.g. (assoc! v k) on a frozen
  *      transient, mismatched arity on rb-tree comparators).
  *      Diagnostic kinds: :eval/type, :eval/contract, :eval/arity.

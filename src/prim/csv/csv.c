@@ -258,23 +258,23 @@ static mino_val *prim_csv_parse(mino_state *S, mino_val *args,
     mino_val *rows_cur;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "csv-parse requires one or three arguments");
     }
     s_val = args->as.cons.car;
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "csv-parse: first argument must be a string");
     }
     if (mino_is_cons(args->as.cons.cdr)) {
         sep_val = args->as.cons.cdr->as.cons.car;
         if (!mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "csv-parse requires one or three arguments");
         }
         q_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (!mino_is_char(sep_val) || !mino_is_char(q_val)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "csv-parse: separator and quote must be characters");
         }
     } else {

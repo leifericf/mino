@@ -79,13 +79,13 @@ static int try_capture_to_atom(mino_state *S, mino_val *sink,
     if (cur == NULL || mino_type_of(cur) != MINO_STRING) return 0;
     cur_len = cur->as.s.len;
     if (len > SIZE_MAX - cur_len) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "*out*: out of memory");
         return -1;
     }
     combined = (char *)malloc(cur_len + len);
     if (combined == NULL) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "*out*: out of memory");
         return -1;
     }
@@ -139,7 +139,7 @@ static mino_val *out_buf_make(mino_state *S)
     if (hv == NULL) return NULL;
     b = (out_buf_t *)calloc(1, sizeof(*b));
     if (b == NULL) {
-        prim_throw_classified(S, "internal", "MIN001",
+        throw_classified(S, "internal", "MIN001",
             "out-buffer: out of memory");
         return NULL;
     }
@@ -170,7 +170,7 @@ static int out_buf_append(mino_state *S, out_buf_t *b,
     b->len = need;
     return 0;
 oom:
-    prim_throw_classified(S, "internal", "MIN001",
+    throw_classified(S, "internal", "MIN001",
         "*out*: out of memory");
     return -1;
 }
@@ -315,7 +315,7 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         binding = (dyn_binding_t *)malloc(sizeof(*binding));
         if (binding == NULL) {
             gc_unpin(1);
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                 "print: out of memory");
             return NULL;
         }
@@ -331,7 +331,7 @@ static mino_val *format_via_hook_or_builtin(mino_state *S,
         if (frame == NULL) {
             free(binding);
             gc_unpin(1);
-            prim_throw_classified(S, "internal", "MIN001",
+            throw_classified(S, "internal", "MIN001",
                 "print: out of memory");
             return NULL;
         }
@@ -502,7 +502,7 @@ static mino_val *prim_pr_builtin(mino_state *S, mino_val *args, mino_env *env)
     mino_val *formatted;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "pr-builtin requires one argument");
     }
     formatted = print_to_string(S, args->as.cons.car);
@@ -528,7 +528,7 @@ static mino_val *prim_out_buffer(mino_state *S, mino_val *args,
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "out-buffer takes no arguments");
     }
     return out_buf_make(S);
@@ -539,7 +539,7 @@ static mino_val *prim_out_buffer_p(mino_state *S, mino_val *args,
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "out-buffer? requires one argument");
     }
     return is_out_buf(args->as.cons.car) ? mino_true(S)
@@ -553,13 +553,13 @@ static out_buf_t *out_buf_arg(mino_state *S, mino_val *args,
     char msg[80];
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires one argument", who);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return NULL;
     }
     if (!is_out_buf(args->as.cons.car)) {
         snprintf(msg, sizeof(msg), "%s: argument must be an out-buffer",
                  who);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return NULL;
     }
     return (out_buf_t *)args->as.cons.car->as.handle.ptr;
@@ -601,7 +601,7 @@ static mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
     mino_val *fn;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "set-print-method! requires one argument");
     }
     fn = args->as.cons.car;
@@ -610,7 +610,7 @@ static mino_val *prim_set_print_method_bang(mino_state *S, mino_val *args,
         return mino_nil(S);
     }
     if (mino_type_of(fn) != MINO_FN && mino_type_of(fn) != MINO_PRIM) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "set-print-method! argument must be a fn");
     }
     S->print_method_fn = fn;
@@ -622,7 +622,7 @@ static mino_val *prim_newline(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "newline takes no arguments");
     }
     if (io_emit(S, "*out*", "\n", 1) < 0) return NULL;
@@ -641,7 +641,7 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
     mino_val *src;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "read-line takes no arguments");
     }
     src = resolve_io_sink(S, "*in*");
@@ -690,7 +690,7 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
                 if (!checked_add_sz(len, cl, &need)
                     || !checked_add_sz(need, 1, &need)) {
                     free(buf);
-                    return prim_throw_classified(S, "internal", "MIN001",
+                    return throw_classified(S, "internal", "MIN001",
                         "read-line: buffer size overflow");
                 }
                 if (need > cap) {
@@ -699,14 +699,14 @@ static mino_val *prim_read_line(mino_state *S, mino_val *args, mino_env *env)
                     while (nc < need) {
                         if (!checked_double_sz(nc, &nc)) {
                             free(buf);
-                            return prim_throw_classified(S, "internal", "MIN001",
+                            return throw_classified(S, "internal", "MIN001",
                                 "read-line: buffer size overflow");
                         }
                     }
                     nb = (char *)realloc(buf, nc);
                     if (nb == NULL) {
                         free(buf);
-                        return prim_throw_classified(S, "internal", "MIN001",
+                        return throw_classified(S, "internal", "MIN001",
                             "read-line: out of memory");
                     }
                     buf = nb;
@@ -738,7 +738,7 @@ static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
     mino_val *src;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "read takes no arguments in this build");
     }
     src = resolve_io_sink(S, "*in*");
@@ -773,7 +773,7 @@ static mino_val *prim_read(mino_state *S, mino_val *args, mino_env *env)
         src->as.atom.val = rem;
         return form;
     }
-    return prim_throw_classified(S, "mino/unsupported", "MIO002",
+    return throw_classified(S, "mino/unsupported", "MIO002",
         "read: stdin-backed *in* is not supported; use with-in-str or read-string");
 }
 
@@ -786,13 +786,13 @@ static mino_val *prim_printf(mino_state *S, mino_val *args, mino_env *env)
     mino_val *formatted;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "printf requires at least a format string");
     }
     formatted = prim_format(S, args, env);
     if (formatted == NULL) return NULL;
     if (mino_type_of(formatted) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "printf: format did not produce a string");
     }
     /* Pin across io_emit: a string-atom sink appends by allocating a
@@ -815,7 +815,7 @@ static mino_val *prim_flush(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "flush takes no arguments");
     }
     fflush(stdout);
@@ -837,18 +837,18 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
     mino_val *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "slurp requires one argument");
+        return throw_classified(S, "eval/arity", "MAR001", "slurp requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "slurp: argument must be a string");
+        return throw_classified(S, "eval/type", "MTY001", "slurp: argument must be a string");
     }
     path = path_val->as.s.data;
     f = fopen(path, "rb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "slurp: cannot open file: %s", path);
-        return prim_throw_classified(S, "host", "MHO001", msg);
+        return throw_classified(S, "host", "MHO001", msg);
     }
     /* Seekable sources (regular files) take one sized read. A stream
      * that cannot probe its size (FIFO, pipe, /dev/stdin, process
@@ -871,7 +871,7 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
         buf = (char *)malloc((size_t)sz + 1);
         if (buf == NULL) {
             fclose(f);
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "slurp: out of memory");
         }
         rd = fread(buf, 1, (size_t)sz, f);
@@ -886,7 +886,7 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
         buf = (char *)malloc(cap);
         if (buf == NULL) {
             fclose(f);
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "slurp: out of memory");
         }
         for (;;) {
@@ -895,7 +895,7 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
                 if (grown == NULL) {
                     free(buf);
                     fclose(f);
-                    return prim_throw_classified(S, "host", "MHO001",
+                    return throw_classified(S, "host", "MHO001",
                                                  "slurp: out of memory");
                 }
                 buf = grown;
@@ -907,7 +907,7 @@ static mino_val *prim_slurp(mino_state *S, mino_val *args, mino_env *env)
                 if (ferror(f)) {
                     free(buf);
                     fclose(f);
-                    return prim_throw_classified(S, "host", "MHO001",
+                    return throw_classified(S, "host", "MHO001",
                                                  "slurp: read error");
                 }
                 break; /* EOF */
@@ -946,7 +946,7 @@ static mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
     int         append = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "spit requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "spit requires two arguments");
     }
     path_val = args->as.cons.car;
     content  = args->as.cons.cdr->as.cons.car;
@@ -972,23 +972,23 @@ static mino_val *prim_spit(mino_state *S, mino_val *args, mino_env *env)
             if (v == NULL || mino_type_of(v) != MINO_STRING
                 || (str_ieq_lit(v->as.s.data, v->as.s.len, "UTF-8") != 0
                     && str_ieq_lit(v->as.s.data, v->as.s.len, "UTF8") != 0)) {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                     "spit: only UTF-8 encoding is supported");
             }
         } else {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                 "spit: unknown option (supported: :append, :encoding)");
         }
     }
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "spit: first argument must be a string path");
+        return throw_classified(S, "eval/type", "MTY001", "spit: first argument must be a string path");
     }
     path = path_val->as.s.data;
     f = fopen(path, append ? "ab" : "wb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);
-        return prim_throw_classified(S, "host", "MHO001", msg);
+        return throw_classified(S, "host", "MHO001", msg);
     }
     if (content != NULL && mino_type_of(content) == MINO_STRING) {
         fwrite(content->as.s.data, 1, content->as.s.len, f);
@@ -1068,7 +1068,7 @@ static mino_val *prim_time_ms(mino_state *S, mino_val *args, mino_env *env)
     (void)args;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
     }
     return mino_float(S, (double)mino_monotonic_ns() / 1.0e6);
 }
@@ -1078,7 +1078,7 @@ mino_val *prim_nano_time(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "nano-time takes no arguments");
     }
     return mino_int(S, mino_monotonic_ns());
@@ -1093,7 +1093,7 @@ static mino_val *prim_uname(mino_state *S, mino_val *args, mino_env *env)
     mino_val *ks[5], *vs[5];
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "uname takes no arguments");
     }
 #ifdef _WIN32
@@ -1119,7 +1119,7 @@ static mino_val *prim_uname(mino_state *S, mino_val *args, mino_env *env)
     {
         struct utsname u;
         if (uname(&u) != 0) {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "uname: failed to query host");
         }
         ks[0] = mino_keyword(S, "sysname");
@@ -1144,14 +1144,14 @@ static mino_val *prim_user_name(mino_state *S, mino_val *args, mino_env *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "user-name takes no arguments");
     }
 #ifdef _WIN32
     {
         const char *u = getenv("USERNAME");
         if (u == NULL || u[0] == '\0') {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "user-name: USERNAME is not set");
         }
         return mino_string(S, u);
@@ -1160,7 +1160,7 @@ static mino_val *prim_user_name(mino_state *S, mino_val *args, mino_env *env)
     {
         struct passwd *pw = getpwuid(geteuid());
         if (pw == NULL || pw->pw_name == NULL || pw->pw_name[0] == '\0') {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "user-name: cannot determine current user");
         }
         return mino_string(S, pw->pw_name);
@@ -1174,7 +1174,7 @@ static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
     char buf[PATH_BUF_CAP];
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "getcwd takes no arguments");
     }
 #ifdef _WIN32
@@ -1182,7 +1182,7 @@ static mino_val *prim_getcwd(mino_state *S, mino_val *args, mino_env *env)
 #else
     if (getcwd(buf, sizeof(buf)) == NULL) {
 #endif
-        return prim_throw_classified(S, "io", "MIO001",
+        return throw_classified(S, "io", "MIO001",
                                      "getcwd: failed to get working directory");
     }
     return mino_string(S, buf);
@@ -1194,12 +1194,12 @@ static mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
     mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "chdir requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "chdir: argument must be a string");
     }
 #ifdef _WIN32
@@ -1207,7 +1207,7 @@ static mino_val *prim_chdir(mino_state *S, mino_val *args, mino_env *env)
 #else
     if (chdir(path_val->as.s.data) != 0) {
 #endif
-        return prim_throw_classified(S, "io", "MIO001",
+        return throw_classified(S, "io", "MIO001",
                                      "chdir: directory not found");
     }
     return mino_nil(S);
@@ -1220,12 +1220,12 @@ mino_val *prim_getenv(mino_state *S, mino_val *args, mino_env *env)
     const char *val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "getenv requires one argument");
     }
     name_val = args->as.cons.car;
     if (name_val == NULL || mino_type_of(name_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "getenv: argument must be a string");
     }
     val = getenv(name_val->as.s.data);
@@ -1302,12 +1302,12 @@ static mino_val *prim_file_seq(mino_state *S, mino_val *args, mino_env *env)
     mino_val *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "file-seq requires one argument");
     }
     dir_val = args->as.cons.car;
     if (dir_val == NULL || mino_type_of(dir_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "file-seq: argument must be a string");
     }
     dir = dir_val->as.s.data;

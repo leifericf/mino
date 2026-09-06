@@ -142,7 +142,7 @@ mino_val *prim_lazy_map_1(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "lazy-map-1 requires 2 arguments");
     }
     fn   = args->as.cons.car;
@@ -274,7 +274,7 @@ mino_val *prim_lazy_filter(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "lazy-filter requires 2 arguments");
     }
     pred = args->as.cons.car;
@@ -585,11 +585,11 @@ mino_val *prim_lazy_take(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &na);
     if (na != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "lazy-take requires 2 arguments");
     }
     if (!mino_to_int(args->as.cons.car, &n)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "lazy-take: n must be an integer");
     }
     coll = args->as.cons.cdr->as.cons.car;
@@ -621,11 +621,11 @@ mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &na);
     if (na != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "drop-seq requires 2 arguments");
     }
     if (!mino_to_int(args->as.cons.car, &n)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "drop-seq: n must be an integer");
     }
     coll = args->as.cons.cdr->as.cons.car;
@@ -753,7 +753,7 @@ mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
             return repeat_forever_lazy(S, mino_int(S, start));
         }
     } else {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "range takes 0, 1, 2, or 3 arguments");
     }
     if (generic) {
@@ -774,7 +774,7 @@ mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env)
         }
         if (!range_val_is_number(g_start) || !range_val_is_number(g_end)
             || !range_val_is_number(g_step)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "range arguments must be numbers");
         }
         ascending = range_g_in_bounds(S, zero, g_step, 1, &ok);
@@ -824,20 +824,20 @@ static mino_val *prim_chunk_buffer(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-buffer requires 1 argument");
     }
     if (!mino_to_int(args->as.cons.car, &cap)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-buffer: capacity must be an integer");
     }
     if (cap <= 0 || cap > 65535) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "chunk-buffer: capacity out of range (1..65535)");
     }
     buf = mino_chunk_buffer(S, (unsigned)cap);
     if (buf == NULL) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
             "chunk-buffer: allocation failed");
     }
     return buf;
@@ -851,21 +851,21 @@ static mino_val *prim_chunk_append(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-append requires 2 arguments");
     }
     buf  = args->as.cons.car;
     elem = args->as.cons.cdr->as.cons.car;
     if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-append: first argument must be a chunk-buffer");
     }
     if (buf->as.chunk.sealed) {
-        return prim_throw_classified(S, "eval/contract", "MCO001",
+        return throw_classified(S, "eval/contract", "MCO001",
             "chunk-append: buffer is sealed");
     }
     if (buf->as.chunk.len >= buf->as.chunk.cap) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "chunk-append: buffer is full");
     }
     /* The append is a slot store inside an already-allocated chunk
@@ -883,12 +883,12 @@ static mino_val *prim_chunk(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk requires 1 argument");
     }
     buf = args->as.cons.car;
     if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk: argument must be a chunk-buffer");
     }
     return mino_chunk_seal(buf);
@@ -902,13 +902,13 @@ static mino_val *prim_chunk_cons(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-cons requires 2 arguments");
     }
     chunk = args->as.cons.car;
     more  = args->as.cons.cdr->as.cons.car;
     if (chunk == NULL || mino_type_of(chunk) != MINO_CHUNK) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-cons: first argument must be a chunk");
     }
     if (chunk->as.chunk.len == 0) {
@@ -926,12 +926,12 @@ static mino_val *prim_chunk_first(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-first requires 1 argument");
     }
     cs = args->as.cons.car;
     if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-first: argument must be a chunked-seq");
     }
     /* Consumers index the result with count/nth from zero, so a head
@@ -967,12 +967,12 @@ static mino_val *prim_chunk_rest(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-rest requires 1 argument");
     }
     cs = args->as.cons.car;
     if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-rest: argument must be a chunked-seq");
     }
     more = cs->as.chunked_cons.more;
@@ -989,12 +989,12 @@ static mino_val *prim_chunk_next(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunk-next requires 1 argument");
     }
     cs = args->as.cons.car;
     if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "chunk-next: argument must be a chunked-seq");
     }
     more = cs->as.chunked_cons.more;
@@ -1016,7 +1016,7 @@ static mino_val *prim_chunked_seq_p(mino_state *S, mino_val *args,
     (void)env;
     arg_count(S, args, &n);
     if (n != 1) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "chunked-seq? requires 1 argument");
     }
     return (args->as.cons.car != NULL

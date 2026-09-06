@@ -164,7 +164,7 @@ static mino_val *prim_on_signal(mino_state *S, mino_val *args, mino_env *env)
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "on-signal requires two arguments: a "
                                      "signal keyword and a handler");
     }
@@ -173,12 +173,12 @@ static mino_val *prim_on_signal(mino_state *S, mino_val *args, mino_env *env)
 
     slot = slot_for_keyword(sig_val);
     if (slot < 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "on-signal: signal must be one of "
                                      ":int :term :hup :usr1 :usr2");
     }
     if (slot_signo((enum sig_slot)slot) < 0) {
-        return prim_throw_classified(S, "host/unsupported", "MHU001",
+        return throw_classified(S, "host/unsupported", "MHU001",
                                      "on-signal: this signal is not "
                                      "available on this platform");
     }
@@ -190,7 +190,7 @@ static mino_val *prim_on_signal(mino_state *S, mino_val *args, mino_env *env)
         S->signal_handlers[slot] = NULL;
         g_signal_pending[slot]   = 0;
         if (slot_set_disposition((enum sig_slot)slot, SIG_DFL) != 0) {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "on-signal: failed to restore the "
                                          "default disposition");
         }
@@ -201,14 +201,14 @@ static mino_val *prim_on_signal(mino_state *S, mino_val *args, mino_env *env)
         S->signal_handlers[slot] = NULL;
         g_signal_pending[slot]   = 0;
         if (slot_set_disposition((enum sig_slot)slot, SIG_IGN) != 0) {
-            return prim_throw_classified(S, "host", "MHO001",
+            return throw_classified(S, "host", "MHO001",
                                          "on-signal: failed to ignore the "
                                          "signal");
         }
         return mino_nil(S);
     }
     if (!mino_is_fn(handler)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "on-signal: handler must be a function "
                                      "or the keyword :default / :ignore");
     }
@@ -216,7 +216,7 @@ static mino_val *prim_on_signal(mino_state *S, mino_val *args, mino_env *env)
     S->signal_handlers[slot] = handler;
     if (slot_install_trap((enum sig_slot)slot) != 0) {
         S->signal_handlers[slot] = NULL;
-        return prim_throw_classified(S, "host", "MHO001",
+        return throw_classified(S, "host", "MHO001",
                                      "on-signal: failed to install the "
                                      "signal handler");
     }
@@ -232,26 +232,26 @@ static mino_val *prim_at_exit(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "at-exit requires one argument: a "
                                      "zero-argument function");
     }
     thunk = args->as.cons.car;
     if (!mino_is_fn(thunk)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "at-exit: the hook must be a function");
     }
 
     if (S->atexit_len == S->atexit_cap) {
         size_t new_cap = (S->atexit_cap == 0) ? 8 : S->atexit_cap * 2;
         if (new_cap > SIZE_MAX / sizeof(mino_val *)) {
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
+            return throw_classified(S, "eval/bounds", "MBD001",
                                          "at-exit: too many hooks");
         }
         grown = (mino_val **)realloc(S->atexit_hooks,
                                      new_cap * sizeof(mino_val *));
         if (grown == NULL) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "at-exit: out of memory");
         }
         S->atexit_hooks = grown;

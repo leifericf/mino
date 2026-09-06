@@ -41,7 +41,7 @@ static mino_val *interop_error(mino_state *S, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
-    return prim_throw_classified(S, "host", "MHO001", msg);
+    return throw_classified(S, "host", "MHO001", msg);
 }
 
 /* (host/new :Type arg1 arg2 ...) */

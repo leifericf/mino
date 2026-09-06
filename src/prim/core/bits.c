@@ -151,7 +151,7 @@ static int bits_kw_match(const mino_val *k, const char *name)
 /* Parse the option keyword/value pairs after the leading value of a
  * segment vector. `start` is the index in the vector after the value;
  * `vec_len` is the vector's length. Returns 0 on success, -1 on a
- * structural error (already throws via prim_throw_classified). */
+ * structural error (already throws via throw_classified). */
 static int parse_seg_opts(mino_state *S, const mino_val *vec,
                           size_t start, size_t vec_len, seg_opts_t *out,
                           const char *opname)
@@ -167,7 +167,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
         snprintf(buf, sizeof(buf),
             "%s: segment options must come in keyword/value pairs",
             opname);
-        prim_throw_classified(S, "eval/type", "MTY001", buf);
+        throw_classified(S, "eval/type", "MTY001", buf);
         return -1;
     }
     for (i = start; i + 1 < vec_len; i += 2) {
@@ -179,7 +179,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
                 char buf[96];
                 snprintf(buf, sizeof(buf),
                     "%s: :size must be a non-negative integer", opname);
-                prim_throw_classified(S, "eval/type", "MTY001", buf);
+                throw_classified(S, "eval/type", "MTY001", buf);
                 return -1;
             }
             out->size     = mino_val_int_get(v);
@@ -194,7 +194,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
                 snprintf(buf, sizeof(buf),
                     "%s: :type must be :int, :uint, :float, or :bytes",
                     opname);
-                prim_throw_classified(S, "eval/type", "MTY001", buf);
+                throw_classified(S, "eval/type", "MTY001", buf);
                 return -1;
             }
         } else if (bits_kw_match(k, "endian")) {
@@ -204,7 +204,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
                 char buf[120];
                 snprintf(buf, sizeof(buf),
                     "%s: :endian must be :big or :little", opname);
-                prim_throw_classified(S, "eval/type", "MTY001", buf);
+                throw_classified(S, "eval/type", "MTY001", buf);
                 return -1;
             }
         } else if (bits_kw_match(k, "signed?")) {
@@ -214,7 +214,7 @@ static int parse_seg_opts(mino_state *S, const mino_val *vec,
             snprintf(buf, sizeof(buf),
                 "%s: unknown segment option %s", opname,
                 (k != NULL && mino_type_of(k) == MINO_KEYWORD) ? k->as.s.data : "<non-keyword>");
-            prim_throw_classified(S, "eval/type", "MTY001", buf);
+            throw_classified(S, "eval/type", "MTY001", buf);
             return -1;
         }
     }
@@ -243,7 +243,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
         seg_opts_t opts;
         if (seg == NULL || mino_type_of(seg) != MINO_VECTOR
             || seg->as.vec.len == 0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "bits: each segment must be a [value & opts] vector");
         }
         vec_len = seg->as.vec.len;
@@ -256,7 +256,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
                 opts.size = 64;
             } else if (opts.type == BITS_TYPE_BYTES) {
                 if (value == NULL || mino_type_of(value) != MINO_BYTES) {
-                    return prim_throw_classified(S, "eval/type", "MTY001",
+                    return throw_classified(S, "eval/type", "MTY001",
                         "bits: :type :bytes requires a bytes-typed value");
                 }
                 opts.size = (long long)mino_bytes_bit_len(value);
@@ -266,31 +266,31 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
         }
         if (opts.size < 0 || opts.size > 64) {
             if (opts.type != BITS_TYPE_BYTES) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "bits: :size must be in 0..64 for :int/:uint/:float");
             }
         }
         if (opts.type == BITS_TYPE_FLOAT
             && opts.size != 32 && opts.size != 64) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "bits: :type :float requires :size of 32 or 64");
         }
         if (opts.endian == BITS_LITTLE && (opts.size % 8) != 0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "bits: :endian :little requires :size to be a multiple of 8");
         }
         if (opts.type == BITS_TYPE_BYTES) {
             if (value == NULL || mino_type_of(value) != MINO_BYTES) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "bits: :type :bytes requires a bytes-typed value");
             }
             if ((size_t)opts.size > mino_bytes_bit_len(value)) {
-                return prim_throw_classified(S, "eval/bounds", "MBD001",
+                return throw_classified(S, "eval/bounds", "MBD001",
                     "bits: :type :bytes :size exceeds source bit length");
             }
         }
         if ((size_t)opts.size > SIZE_MAX - total_bits) {
-            return prim_throw_classified(S, "eval/bounds", "MBD001",
+            return throw_classified(S, "eval/bounds", "MBD001",
                 "bits: total bit count overflow");
         }
         total_bits += (size_t)opts.size;
@@ -298,7 +298,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
     total_bytes = (total_bits + 7u) / 8u;
     buf = (unsigned char *)calloc(1, total_bytes > 0 ? total_bytes : 1);
     if (buf == NULL && total_bytes > 0) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
             "bits: out of memory");
     }
     /* Pass 2: write each segment. */
@@ -321,7 +321,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
             long long vv;
             if (value == NULL || !mino_val_int_p(value)) {
                 free(buf);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "bits: :type :int/:uint requires an integer value");
             }
             vv = mino_val_int_get(value);
@@ -332,7 +332,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
                     long long max_u = (long long)((1ULL << opts.size) - 1u);
                     if (vv < 0 || vv > max_u) {
                         free(buf);
-                        return prim_throw_classified(S, "eval/bounds", "MBD001",
+                        return throw_classified(S, "eval/bounds", "MBD001",
                             "bits: integer value out of unsigned range for :size");
                     }
                 } else {
@@ -341,7 +341,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
                     if (vv < min_s || vv > max_s) {
                         if (vv < 0 || vv > (long long)((1ULL << opts.size) - 1u)) {
                             free(buf);
-                            return prim_throw_classified(S, "eval/bounds", "MBD001",
+                            return throw_classified(S, "eval/bounds", "MBD001",
                                 "bits: integer value out of signed/unsigned range for :size");
                         }
                     }
@@ -368,7 +368,7 @@ static mino_val *prim_bits(mino_state *S, mino_val *args, mino_env *env)
                 d = value->as.f;
             } else {
                 free(buf);
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "bits: :type :float requires a number");
             }
             if (opts.size == 32) {
@@ -423,12 +423,12 @@ static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
     size_t total_bits;
     (void)env;
     if (arglen < 1u || ((arglen - 1u) % 2u) != 0u) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "bits-get: (bits-get bs & opts), opts in keyword/value pairs");
     }
     bs = args->as.cons.car;
     if (bs == NULL || mino_type_of(bs) != MINO_BYTES) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "bits-get: first argument must be a bytes value");
     }
     total_bits = mino_bytes_bit_len(bs);
@@ -441,13 +441,13 @@ static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
             mino_val *v = p->as.cons.car;
             if (bits_kw_match(k, "offset")) {
                 if (v == NULL || !mino_val_int_p(v) || mino_val_int_get(v) < 0) {
-                    return prim_throw_classified(S, "eval/type", "MTY001",
+                    return throw_classified(S, "eval/type", "MTY001",
                         "bits-get: :offset must be a non-negative integer");
                 }
                 offset = mino_val_int_get(v);
             } else if (bits_kw_match(k, "size")) {
                 if (v == NULL || !mino_val_int_p(v) || mino_val_int_get(v) < 0) {
-                    return prim_throw_classified(S, "eval/type", "MTY001",
+                    return throw_classified(S, "eval/type", "MTY001",
                         "bits-get: :size must be a non-negative integer");
                 }
                 size = mino_val_int_get(v);
@@ -457,36 +457,36 @@ static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
                 else if (bits_kw_match(v, "uint"))  type = BITS_TYPE_UINT;
                 else if (bits_kw_match(v, "float")) type = BITS_TYPE_FLOAT;
                 else if (bits_kw_match(v, "bytes")) type = BITS_TYPE_BYTES;
-                else return prim_throw_classified(S, "eval/type", "MTY001",
+                else return throw_classified(S, "eval/type", "MTY001",
                     "bits-get: :type must be :int, :uint, :float, or :bytes");
             } else if (bits_kw_match(k, "endian")) {
                 if      (bits_kw_match(v, "big"))    endian = BITS_BIG;
                 else if (bits_kw_match(v, "little")) endian = BITS_LITTLE;
-                else return prim_throw_classified(S, "eval/type", "MTY001",
+                else return throw_classified(S, "eval/type", "MTY001",
                     "bits-get: :endian must be :big or :little");
             } else if (bits_kw_match(k, "signed?")) {
                 signed_ = mino_is_truthy_inline(v) ? 1 : 0;
             } else {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "bits-get: unknown option");
             }
         }
     }
     if (!size_set) size = 8;
     if (size < 0) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "bits-get: :size must be non-negative");
     }
     if (size > LLONG_MAX - offset || (size_t)(offset + size) > total_bits) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "bits-get: :offset + :size exceeds bit length");
     }
     if (endian == BITS_LITTLE && (size % 8) != 0) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "bits-get: :endian :little requires :size to be a multiple of 8");
     }
     if (type == BITS_TYPE_FLOAT && size != 32 && size != 64) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "bits-get: :type :float requires :size 32 or 64");
     }
     if (type == BITS_TYPE_BYTES) {
@@ -498,7 +498,7 @@ static mino_val *prim_bits_get(mino_state *S, mino_val *args, mino_env *env)
         mino_val *result;
         out = (unsigned char *)calloc(1, n_bytes > 0 ? n_bytes : 1);
         if (out == NULL && n_bytes > 0) {
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                 "bits-get: out of memory");
         }
         for (i = 0; i < n_bits; i++) {
@@ -560,12 +560,12 @@ static mino_val *prim_subbits(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "subbits requires three arguments (bs, start, end)");
     }
     bs = args->as.cons.car;
     if (bs == NULL || mino_type_of(bs) != MINO_BYTES) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "subbits: first argument must be a bytes value");
     }
     {
@@ -573,7 +573,7 @@ static mino_val *prim_subbits(mino_state *S, mino_val *args, mino_env *env)
         mino_val *ev = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (sv == NULL || !mino_val_int_p(sv)
             || ev == NULL || !mino_val_int_p(ev)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "subbits: start and end must be integers");
         }
         start = mino_val_int_get(sv);
@@ -581,14 +581,14 @@ static mino_val *prim_subbits(mino_state *S, mino_val *args, mino_env *env)
     }
     total_bits = mino_bytes_bit_len(bs);
     if (start < 0 || end < start || (size_t)end > total_bits) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001",
+        return throw_classified(S, "eval/bounds", "MBD001",
             "subbits: range out of bit length");
     }
     n_bits = (size_t)(end - start);
     n_bytes = (n_bits + 7u) / 8u;
     out = (unsigned char *)calloc(1, n_bytes > 0 ? n_bytes : 1);
     if (out == NULL && n_bytes > 0) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
             "subbits: out of memory");
     }
     for (i = 0; i < n_bits; i++) {

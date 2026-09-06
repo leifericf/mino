@@ -783,7 +783,7 @@ int mino_catch_class_matches(mino_state *S, int class_idx, mino_val *diag);
 int mino_catch_kind_matches(mino_state *S, mino_val *kind_kw, mino_val *diag);
 
 /* prim/prim.c -- error helper used by vm.c's protocol dispatch. */
-mino_val *prim_throw_classified(mino_state *S, const char *kind,
+mino_val *throw_classified(mino_state *S, const char *kind,
                                 const char *code, const char *msg);
 
 /* prim/numeric.c -- arithmetic and predicate prims used as fallbacks in

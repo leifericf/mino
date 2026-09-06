@@ -50,23 +50,23 @@ static mino_val *jvm_parse_integer(mino_state *S, mino_val *args,
     char      msg[96];
     if (!mino_is_cons(args)) {
         snprintf(msg, sizeof(msg), "%s requires a string argument", fn_name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     s = args->as.cons.car;
     if (mino_type_of(s) != MINO_STRING) {
         snprintf(msg, sizeof(msg), "%s: string argument required", fn_name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     if (mino_is_cons(args->as.cons.cdr)) {
         radix_v = args->as.cons.cdr->as.cons.car;
         if (!mino_val_int_p(radix_v)) {
             snprintf(msg, sizeof(msg), "%s: radix must be an integer", fn_name);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
         radix = mino_val_int_get(radix_v);
         if (radix < 2 || radix > 36) {
             snprintf(msg, sizeof(msg), "%s: radix out of range", fn_name);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
     }
     errno = 0;
@@ -80,11 +80,11 @@ static mino_val *jvm_parse_integer(mino_state *S, mino_val *args,
                     (s->as.s.data[0] == '+' || s->as.s.data[0] == '-') ||
         *endp != '\0' || errno == ERANGE) {
         snprintf(msg, sizeof(msg), "%s: unparseable input", fn_name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     if (int32_p && (n < INT_MIN || n > INT_MAX)) {
         snprintf(msg, sizeof(msg), "%s: value out of range", fn_name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     return mino_int(S, n);
 }
@@ -111,12 +111,12 @@ static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
     double    d;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Double/parseDouble requires a string argument");
     }
     s = args->as.cons.car;
     if (mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Double/parseDouble: string argument required");
     }
     {
@@ -134,7 +134,7 @@ static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
         while (start < stop && isspace((unsigned char)str[start])) start++;
         while (stop > start && isspace((unsigned char)str[stop - 1])) stop--;
         if (start == stop) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "Double/parseDouble: unparseable input");
         }
         c = str[stop - 1];
@@ -150,14 +150,14 @@ static mino_val *prim_double_parse_double(mino_state *S, mino_val *args,
             for (j = i + 2; j < stop; j++)
                 if (str[j] == 'p' || str[j] == 'P') { has_p = 1; break; }
             if (!has_p) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "Double/parseDouble: unparseable input");
             }
         }
         d = strtod(str + start, &endp);
         if (endp == NULL || endp != str + stop
             || endp <= str + start + (str[start] == '+' || str[start] == '-')) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "Double/parseDouble: unparseable input");
         }
     }
@@ -170,7 +170,7 @@ static mino_val *prim_double_is_nan_jvm(mino_state *S, mino_val *args,
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Double/isNaN requires one argument");
     }
     v = args->as.cons.car;
@@ -186,7 +186,7 @@ static mino_val *prim_double_is_infinite_jvm(mino_state *S, mino_val *args,
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Double/isInfinite requires one argument");
     }
     v = args->as.cons.car;
@@ -204,7 +204,7 @@ static mino_val *prim_jvm_math_abs(mino_state *S, mino_val *args,
     mino_val *v;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Math/abs requires one argument");
     }
     v = args->as.cons.car;
@@ -215,7 +215,7 @@ static mino_val *prim_jvm_math_abs(mino_state *S, mino_val *args,
     if (mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32) {
         return mino_float(S, fabs(v->as.f));
     }
-    return prim_throw_classified(S, "eval/type", "MTY001",
+    return throw_classified(S, "eval/type", "MTY001",
         "Math/abs: numeric argument required");
 }
 
@@ -257,7 +257,7 @@ static mino_val *prim_jvm_math_min(mino_state *S, mino_val *args,
     double      a, b;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Math/min requires two arguments");
     }
     va = args->as.cons.car;
@@ -269,7 +269,7 @@ static mino_val *prim_jvm_math_min(mino_state *S, mino_val *args,
         return mino_int(S, aa < bb ? aa : bb);
     }
     if (!coerce_to_double(va, &a) || !coerce_to_double(vb, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Math/min: numeric arguments required");
     }
     return mino_float(S, a < b ? a : b);
@@ -282,7 +282,7 @@ static mino_val *prim_jvm_math_max(mino_state *S, mino_val *args,
     double      a, b;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Math/max requires two arguments");
     }
     va = args->as.cons.car;
@@ -293,7 +293,7 @@ static mino_val *prim_jvm_math_max(mino_state *S, mino_val *args,
         return mino_int(S, aa > bb ? aa : bb);
     }
     if (!coerce_to_double(va, &a) || !coerce_to_double(vb, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Math/max: numeric arguments required");
     }
     return mino_float(S, a > b ? a : b);
@@ -309,12 +309,12 @@ static mino_val *prim_jvm_math_round(mino_state *S, mino_val *args,
     double      x;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Math/round requires one argument");
     }
     v = args->as.cons.car;
     if (!coerce_to_double(v, &x)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Math/round: numeric argument required");
     }
     return mino_int(S, (long long)floor(x + 0.5));
@@ -329,13 +329,13 @@ static mino_val *prim_boolean_parse_boolean(mino_state *S, mino_val *args,
     size_t      n;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "Boolean/parseBoolean requires a string argument");
     }
     v = args->as.cons.car;
     if (mino_type_of(v) == MINO_NIL) return mino_false(S);
     if (mino_type_of(v) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "Boolean/parseBoolean: string argument required");
     }
     s = v->as.s.data;
@@ -399,13 +399,13 @@ static mino_val *prim_int_to_radix_string(mino_state *S, mino_val *args,
         char msg[96];
         snprintf(msg, sizeof(msg), "%s requires one integer argument",
                  fn_name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     v = args->as.cons.car;
     if (!mino_val_int_p(v)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s: integer argument required", fn_name);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
     n = mino_val_int_get(v);
     u = (unsigned long long)n;       /* implementation-defined cast OK
@@ -507,7 +507,7 @@ static mino_val *jvm_remap_get_property(mino_state *S, mino_val *args,
     /* mino doesn't have a JVM properties table; surface
      * :mino/unsupported rather than fake an empty answer. */
     (void)args; (void)env;
-    return prim_throw_classified(S, "host", "MHO001",
+    return throw_classified(S, "host", "MHO001",
         "System/getProperty: mino has no JVM properties table; "
         "use System/getenv or the embedder's capability surface");
 }

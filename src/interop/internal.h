@@ -12,7 +12,7 @@
  *      code can catch it normally.
  *   MINO_ERR_RECOVERABLE -- arity / type errors at the eval-side
  *      surface (e.g. (.method receiver ...) with a non-handle
- *      receiver) go through prim_throw_classified just like any
+ *      receiver) go through throw_classified just like any
  *      other primitive.
  */
 

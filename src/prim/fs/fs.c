@@ -59,7 +59,7 @@ static int fs_opt_bool(mino_state *S, const mino_val *opts, const char *key,
     if (mino_type_of(v) != MINO_BOOL) {
         char msg[128];
         snprintf(msg, sizeof(msg), "fs: opts key :%s must be a boolean", key);
-        prim_throw_classified(S, "eval/contract", "MCT001", msg);
+        throw_classified(S, "eval/contract", "MCT001", msg);
         return -1;
     }
     *out = mino_val_bool_get(v);
@@ -128,19 +128,19 @@ static mino_val *prim_stat(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "stat requires a path argument");
     }
     path_val = args->as.cons.car;
     if (mino_is_cons(args->as.cons.cdr)) {
         opts = args->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "stat takes a path and optional opts");
         }
     }
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "stat: path must be a string");
     }
     if (fs_opt_bool(S, opts, "follow-links?", 0, &follow) != 0)
@@ -177,12 +177,12 @@ static mino_val *prim_file_size(mino_state *S, mino_val *args, mino_env *env)
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "file-size requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "file-size: argument must be a string");
     }
     if (stat(path_val->as.s.data, &st) != 0)
@@ -199,17 +199,17 @@ static mino_val *prim_chmod(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "chmod requires a path and a mode");
     }
     path_val = args->as.cons.car;
     mode_val = args->as.cons.cdr->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "chmod: path must be a string");
     }
     if (!as_long(mode_val, &mode) || mode < 0 || mode > 07777) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
                                      "chmod: mode must be an int in 0..07777");
     }
 #if defined(_MSC_VER)
@@ -221,7 +221,7 @@ static mino_val *prim_chmod(mino_state *S, mino_val *args, mino_env *env)
         char msg[300];
         snprintf(msg, sizeof(msg), "chmod: cannot set mode on: %.200s",
                  path_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     return mino_nil(S);
 }
@@ -236,21 +236,21 @@ static mino_val *prim_symlink(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "symlink requires a target and a link");
     }
     target_val = args->as.cons.car;
     link_val = args->as.cons.cdr->as.cons.car;
     if (target_val == NULL || mino_type_of(target_val) != MINO_STRING ||
         link_val == NULL || mino_type_of(link_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "symlink: target and link must be strings");
     }
     if (symlink(target_val->as.s.data, link_val->as.s.data) != 0) {
         char msg[300];
         snprintf(msg, sizeof(msg), "symlink: cannot create link: %.180s",
                  link_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     return mino_nil(S);
 }
@@ -263,12 +263,12 @@ static mino_val *prim_read_symlink(mino_state *S, mino_val *args, mino_env *env)
     ssize_t n;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "read-symlink requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "read-symlink: argument must be a string");
     }
     /* readlink does not NUL-terminate; a full buffer means the target
@@ -279,10 +279,10 @@ static mino_val *prim_read_symlink(mino_state *S, mino_val *args, mino_env *env)
         char msg[300];
         snprintf(msg, sizeof(msg), "read-symlink: cannot read link: %.180s",
                  path_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     if ((size_t)n >= sizeof(buf)) {
-        return prim_throw_classified(S, "io", "MIO001",
+        return throw_classified(S, "io", "MIO001",
                                      "read-symlink: link target too long");
     }
     return mino_string_n(S, buf, (size_t)n);
@@ -450,7 +450,7 @@ static mino_val *prim_copy(mino_state *S, mino_val *args, mino_env *env)
     int replace = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "copy requires a source and a destination");
     }
     src_val = args->as.cons.car;
@@ -458,20 +458,20 @@ static mino_val *prim_copy(mino_state *S, mino_val *args, mino_env *env)
     if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         opts = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "copy takes src, dst, and optional opts");
         }
     }
     if (src_val == NULL || mino_type_of(src_val) != MINO_STRING ||
         dst_val == NULL || mino_type_of(dst_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "copy: src and dst must be strings");
     }
     if (fs_opt_bool(S, opts, "replace", 0, &replace) != 0)
         return NULL;
 #if defined(_WIN32)
     (void)replace;
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "copy: not supported on this platform");
 #else
     {
@@ -480,18 +480,18 @@ static mino_val *prim_copy(mino_state *S, mino_val *args, mino_env *env)
                       &was_symlink, &dst_existed) != 0) {
             char msg[300];
             if (was_symlink) {
-                return prim_throw_classified(S, "io", "MIO001",
+                return throw_classified(S, "io", "MIO001",
                     "copy: refusing to copy a symlink source; use copy-tree");
             }
             if (dst_existed) {
                 snprintf(msg, sizeof(msg),
                          "copy: destination exists (pass {:replace true}): %.160s",
                          dst_val->as.s.data);
-                return prim_throw_classified(S, "io", "MIO001", msg);
+                return throw_classified(S, "io", "MIO001", msg);
             }
             snprintf(msg, sizeof(msg), "copy: cannot copy %.120s to %.120s",
                      src_val->as.s.data, dst_val->as.s.data);
-            return prim_throw_classified(S, "io", "MIO001", msg);
+            return throw_classified(S, "io", "MIO001", msg);
         }
         return mino_nil(S);
     }
@@ -506,18 +506,18 @@ static mino_val *prim_copy_tree(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "copy-tree requires a source and a destination");
     }
     src_val = args->as.cons.car;
     dst_val = args->as.cons.cdr->as.cons.car;
     if (src_val == NULL || mino_type_of(src_val) != MINO_STRING ||
         dst_val == NULL || mino_type_of(dst_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "copy-tree: src and dst must be strings");
     }
 #if defined(_WIN32)
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "copy-tree: not supported on this platform");
 #else
     {
@@ -525,23 +525,23 @@ static mino_val *prim_copy_tree(mino_state *S, mino_val *args, mino_env *env)
         int src_fd;
         if (lstat(src_val->as.s.data, &src_st) != 0 ||
             !S_ISDIR(src_st.st_mode)) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "copy-tree: source is not a directory");
         }
         if (mkdir(dst_val->as.s.data, src_st.st_mode & 07777) != 0 &&
             errno != EEXIST) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "copy-tree: cannot create destination");
         }
         src_fd = open(src_val->as.s.data,
                       O_RDONLY | O_NOFOLLOW | O_DIRECTORY);
         if (src_fd < 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "copy-tree: cannot open source");
         }
         if (copytree_dir(src_fd, dst_val->as.s.data) != 0) {
             close(src_fd);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "copy-tree: copy failed");
         }
         close(src_fd);
@@ -579,14 +579,14 @@ static int temp_prefix_arg(mino_state *S, mino_val *args, const char **prefix)
     *prefix = NULL;
     if (!mino_is_cons(args)) return 0;
     if (mino_is_cons(args->as.cons.cdr)) {
-        prim_throw_classified(S, "eval/arity", "MAR001",
+        throw_classified(S, "eval/arity", "MAR001",
                               "temp: takes at most one prefix argument");
         return -1;
     }
     {
         mino_val *p = args->as.cons.car;
         if (p == NULL || mino_type_of(p) != MINO_STRING) {
-            prim_throw_classified(S, "eval/type", "MTY001",
+            throw_classified(S, "eval/type", "MTY001",
                                   "temp: prefix must be a string");
             return -1;
         }
@@ -603,7 +603,7 @@ static mino_val *prim_mkdtemp(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 #if defined(_WIN32)
     (void)args;
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "mkdtemp: not supported on this platform");
 #else
     {
@@ -611,17 +611,17 @@ static mino_val *prim_mkdtemp(mino_state *S, mino_val *args, mino_env *env)
         const char *prefix;
         if (temp_prefix_arg(S, args, &prefix) != 0) return NULL;
         if (temp_template(tmpl, sizeof(tmpl), prefix) != 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkdtemp: temp path too long");
         }
         if (mkdtemp(tmpl) == NULL) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkdtemp: cannot create temp directory");
         }
         /* mkdtemp already creates the directory 0700; make it explicit so
          * the mode is independent of any implementation drift. */
         if (chmod(tmpl, 0700) != 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkdtemp: cannot set private mode");
         }
         return mino_string(S, tmpl);
@@ -636,7 +636,7 @@ static mino_val *prim_mkstemp(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 #if defined(_WIN32)
     (void)args;
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "mkstemp: not supported on this platform");
 #else
     {
@@ -645,18 +645,18 @@ static mino_val *prim_mkstemp(mino_state *S, mino_val *args, mino_env *env)
         int         fd;
         if (temp_prefix_arg(S, args, &prefix) != 0) return NULL;
         if (temp_template(tmpl, sizeof(tmpl), prefix) != 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkstemp: temp path too long");
         }
         fd = mkstemp(tmpl);
         if (fd < 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkstemp: cannot create temp file");
         }
         /* POSIX mkstemp creates 0600 already; pin it explicitly. */
         if (fchmod(fd, 0600) != 0) {
             close(fd);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "mkstemp: cannot set private mode");
         }
         close(fd);
@@ -673,12 +673,12 @@ static mino_val *prim_file_exists_p(mino_state *S, mino_val *args,
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "file-exists? requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "file-exists?: argument must be a string");
     }
     return stat(path_val->as.s.data, &st) == 0
@@ -694,12 +694,12 @@ static mino_val *prim_directory_p(mino_state *S, mino_val *args,
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "directory? requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "directory?: argument must be a string");
     }
     if (stat(path_val->as.s.data, &st) != 0)
@@ -744,19 +744,19 @@ static mino_val *prim_mkdir_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "mkdir-p requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "mkdir-p: argument must be a string");
     }
     if (mkdirp(path_val->as.s.data) != 0) {
         char msg[300];
         snprintf(msg, sizeof(msg), "mkdir-p: cannot create directory: %s",
                  path_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     return mino_nil(S);
 }
@@ -885,19 +885,19 @@ static mino_val *prim_rm_rf(mino_state *S, mino_val *args, mino_env *env)
     mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "rm-rf requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "rm-rf: argument must be a string");
     }
     if (rmrf(path_val->as.s.data) != 0) {
         char msg[300];
         snprintf(msg, sizeof(msg), "rm-rf: cannot remove: %s",
                  path_val->as.s.data);
-        return prim_throw_classified(S, "io", "MIO001", msg);
+        return throw_classified(S, "io", "MIO001", msg);
     }
     return mino_nil(S);
 }
@@ -910,12 +910,12 @@ static mino_val *prim_file_mtime(mino_state *S, mino_val *args,
     struct stat st;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "file-mtime requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "file-mtime: argument must be a string");
     }
     if (stat(path_val->as.s.data, &st) != 0)
@@ -944,12 +944,12 @@ static mino_val *prim_realpath(mino_state *S, mino_val *args, mino_env *env)
     mino_val *path_val;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "realpath requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "realpath: argument must be a string");
     }
 #if defined(_WIN32) || defined(_MSC_VER)
@@ -980,12 +980,12 @@ static mino_val *prim_which(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "which requires one argument");
     }
     cmd_val = args->as.cons.car;
     if (cmd_val == NULL || mino_type_of(cmd_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "which: argument must be a string");
     }
 
@@ -1071,26 +1071,26 @@ static mino_val *prim_flock(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "flock requires a lockfile path");
     }
     path_val = args->as.cons.car;
     if (mino_is_cons(args->as.cons.cdr)) {
         opts = args->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                                          "flock takes a path and optional opts");
         }
     }
     if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "flock: path must be a string");
     }
     if (fs_opt_bool(S, opts, "shared", 0, &shared) != 0) return NULL;
     if (fs_opt_bool(S, opts, "block", 1, &block) != 0) return NULL;
 #if defined(_WIN32)
     (void)shared; (void)block;
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "flock: not supported on this platform");
 #else
     {
@@ -1102,7 +1102,7 @@ static mino_val *prim_flock(mino_state *S, mino_val *args, mino_env *env)
 
         fd = open(path_val->as.s.data, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
         if (fd < 0) {
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "flock: cannot open lockfile");
         }
         /* Pre-flight the handle: its allocation can throw for OOM, which
@@ -1127,14 +1127,14 @@ static mino_val *prim_flock(mino_state *S, mino_val *args, mino_env *env)
             close(fd);
             if (!block && (errno == EWOULDBLOCK || errno == EAGAIN))
                 return mino_nil(S);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "flock: cannot acquire lock");
         }
         lk = (fs_lock_t *)malloc(sizeof(*lk));
         if (lk == NULL) {
             gc_unpin(1);
             close(fd);
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "flock: out of memory");
         }
         lk->fd = fd;
@@ -1153,14 +1153,14 @@ static mino_val *prim_funlock(mino_state *S, mino_val *args, mino_env *env)
     mino_val *h;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "funlock requires one argument");
     }
     h = args->as.cons.car;
     if (h == NULL || mino_type_of(h) != MINO_HANDLE ||
         h->as.handle.tag == NULL ||
         strcmp(h->as.handle.tag, FLOCK_TAG) != 0) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
                                      "funlock: argument must be a lock handle");
     }
 #if !defined(_WIN32)

@@ -358,12 +358,12 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
     char        emsgbuf[64];
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "format requires at least a format string");
     }
     fmt_val = args->as.cons.car;
     if (fmt_val == NULL || mino_type_of(fmt_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "format: first argument must be a string");
     }
     fmt      = fmt_val->as.s.data;
@@ -376,7 +376,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
             size_t k = 0;
             argv = (mino_val **)malloc(argc * sizeof(*argv));
             if (argv == NULL) {
-                return prim_throw_classified(S, "eval/out-of-memory",
+                return throw_classified(S, "eval/out-of-memory",
                     "MOM001", "out of memory");
             }
             for (walk = arg_list; mino_is_cons(walk);
@@ -924,7 +924,7 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
 fail:
     free(buf);
     free(argv);
-    return prim_throw_classified(S, ekind, ecode, emsg);
+    return throw_classified(S, ekind, ecode, emsg);
 }
 
 static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
@@ -935,13 +935,13 @@ static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
     int         saved_mode = S->reader.reader_cond_mode;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "read-string requires one string argument");
+        return throw_classified(S, "eval/arity", "MAR001", "read-string requires one string argument");
     }
     /* Two-arg form: (read-string opts s). The opts map currently
      * recognises :read-cond → :allow / :preserve / :disallow. */
     if (mino_is_cons(args->as.cons.cdr)) {
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "read-string takes one or two arguments");
         }
         opts = args->as.cons.car;
@@ -950,25 +950,25 @@ static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
         s = args->as.cons.car;
     }
     if (s == NULL || mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "read-string: argument must be a string");
+        return throw_classified(S, "eval/type", "MTY001", "read-string: argument must be a string");
     }
     if (opts != NULL && mino_type_of(opts) != MINO_NIL) {
         mino_val *rc;
         if (mino_type_of(opts) != MINO_MAP) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "read-string: opts must be a map");
         }
         rc = map_get_val(opts, mino_keyword(S, "read-cond"));
         if (rc != NULL) {
             if (mino_type_of(rc) != MINO_KEYWORD) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "read-string: :read-cond must be a keyword");
             }
             if (strcmp(rc->as.s.data, "allow") == 0)         S->reader.reader_cond_mode = 0;
             else if (strcmp(rc->as.s.data, "preserve") == 0) S->reader.reader_cond_mode = 1;
             else if (strcmp(rc->as.s.data, "disallow") == 0) S->reader.reader_cond_mode = 2;
             else {
-                return prim_throw_classified(S, "eval/contract", "MCT001",
+                return throw_classified(S, "eval/contract", "MCT001",
                     "read-string: :read-cond must be :allow, :preserve, or :disallow");
             }
         }
@@ -989,7 +989,7 @@ static mino_val *prim_read_string(mino_state *S, mino_val *args, mino_env *env)
             char msg[512];
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
-            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+            return throw_classified(S, "eval/type", "MTY001", msg);
         }
     }
     return result != NULL ? result : mino_nil(S);
@@ -1014,17 +1014,17 @@ static mino_val *prim_char_at(mino_state *S, mino_val *args, mino_env *env)
     long long idx;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "char-at requires two arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "char-at requires two arguments");
     }
     s       = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING
         || idx_val == NULL || !mino_val_int_p(idx_val)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "char-at: requires a string and integer index");
+        return throw_classified(S, "eval/type", "MTY001", "char-at: requires a string and integer index");
     }
     idx = mino_val_int_get(idx_val);
     if (idx < 0 || (size_t)idx >= s->as.s.len) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "char-at: index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "char-at: index out of range");
     }
     return mino_string_n(S, s->as.s.data + idx, 1);
 }
@@ -1100,15 +1100,15 @@ static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "subs requires 2 or 3 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "subs requires 2 or 3 arguments");
     }
     s_val = args->as.cons.car;
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "subs: first argument must be a string");
+        return throw_classified(S, "eval/type", "MTY001", "subs: first argument must be a string");
     }
     if (args->as.cons.cdr->as.cons.car == NULL
         || !mino_val_int_p(args->as.cons.cdr->as.cons.car)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "subs: start index must be an integer");
+        return throw_classified(S, "eval/type", "MTY001", "subs: start index must be an integer");
     }
     start = mino_val_int_get(args->as.cons.cdr->as.cons.car);
     /* Indices are codepoint-counted, matching Clojure where strings
@@ -1121,14 +1121,14 @@ static mino_val *prim_subs(mino_state *S, mino_val *args, mino_env *env)
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
             || !mino_val_int_p(args->as.cons.cdr->as.cons.cdr->as.cons.car)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "subs: end index must be an integer");
+            return throw_classified(S, "eval/type", "MTY001", "subs: end index must be an integer");
         }
         end_idx = mino_val_int_get(args->as.cons.cdr->as.cons.cdr->as.cons.car);
     } else {
         end_idx = total_cps;
     }
     if (start < 0 || end_idx < start || end_idx > total_cps) {
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "subs: index out of range");
+        return throw_classified(S, "eval/bounds", "MBD001", "subs: index out of range");
     }
     if ((size_t)total_cps == s_val->as.s.len) {
         /* ASCII content: codepoint indices are byte offsets. */
@@ -1159,29 +1159,29 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
     const char  *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "split requires a string and a separator");
+        return throw_classified(S, "eval/arity", "MAR001", "split requires a string and a separator");
     }
     s_val   = args->as.cons.car;
     sep_val = args->as.cons.cdr->as.cons.car;
     if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         limit_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "split takes at most 3 arguments");
         }
         if (limit_val == NULL || !mino_val_int_p(limit_val)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "split: limit must be an integer");
         }
         limit = mino_val_int_get(limit_val);
     }
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "split: first argument must be a string");
     }
     if (sep_val == NULL
         || (mino_type_of(sep_val) != MINO_STRING && mino_type_of(sep_val) != MINO_REGEX)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "split: separator must be a string or regex");
     }
     s    = s_val->as.s.data;
@@ -1217,7 +1217,7 @@ static mino_val *prim_split(mino_state *S, mino_val *args, mino_env *env)
         MINO_ASSERT_STATE_SAFE(S);
         compiled = re_compile(pat_src);
         if (compiled == NULL) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                 "split: invalid regex pattern");
         }
         for (;;) {
@@ -1448,10 +1448,10 @@ static mino_val *prim_join(mino_state *S, mino_val *args, mino_env *env)
             sep     = sep_val->as.s.data;
             sep_len = sep_val->as.s.len;
         } else if (sep_val != NULL && mino_type_of(sep_val) != MINO_NIL) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "join: separator must be a string or nil");
+            return throw_classified(S, "eval/type", "MTY001", "join: separator must be a string or nil");
         }
     } else {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "join requires 1 or 2 arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "join requires 1 or 2 arguments");
     }
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_string(S, "");
@@ -1603,7 +1603,7 @@ static int str_replace_expand_template(mino_state *S,
                 /* unmatched group: contributes nothing, mirroring JVM */
             } else {
                 free(*pbuf); *pbuf = NULL;
-                prim_throw_classified(S, "eval/contract", "MCT001",
+                throw_classified(S, "eval/contract", "MCT001",
                     "str-replace: replacement references missing capture group");
                 return -1;
             }
@@ -1671,20 +1671,20 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "str-replace requires three arguments");
     }
     s_val     = args->as.cons.car;
     match_val = args->as.cons.cdr->as.cons.car;
     repl_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "str-replace: first argument must be a string");
     }
     if (match_val == NULL
         || (mino_type_of(match_val) != MINO_STRING
             && mino_type_of(match_val) != MINO_REGEX)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "str-replace: match must be a string or regex");
     }
     s    = s_val->as.s.data;
@@ -1695,7 +1695,7 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
         const char *match, *repl, *p;
         size_t mlen, rlen;
         if (repl_val == NULL || mino_type_of(repl_val) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "str-replace: replacement must be a string when match is a string");
         }
         match = match_val->as.s.data; mlen = match_val->as.s.len;
@@ -1753,14 +1753,14 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
         size_t      tlen = repl_is_string ? repl_val->as.s.len   : 0;
         if (match_val->as.regex.source == NULL
             || mino_type_of(match_val->as.regex.source) != MINO_STRING) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                 "str-replace: regex has no source pattern");
         }
         pat_src  = match_val->as.regex.source->as.s.data;
         MINO_ASSERT_STATE_SAFE(S);
         compiled = re_compile(pat_src);
         if (compiled == NULL) {
-            return prim_throw_classified(S, "eval/contract", "MCT001",
+            return throw_classified(S, "eval/contract", "MCT001",
                 "str-replace: invalid regex pattern");
         }
         buf_cap = slen + 256;
@@ -1849,7 +1849,7 @@ static mino_val *str_replace_impl(mino_state *S, mino_val *args,
                     }
                 } else {
                     free(buf); re_free(compiled);
-                    return prim_throw_classified(S, "eval/type", "MTY001",
+                    return throw_classified(S, "eval/type", "MTY001",
                         "str-replace: fn replacement must return a string or char");
                 }
             }
@@ -1893,13 +1893,13 @@ static mino_val *prim_starts_with_p(mino_state *S, mino_val *args, mino_env *env
     mino_val *s, *prefix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "starts-with? requires two string arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "starts-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     prefix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING
         || prefix == NULL || mino_type_of(prefix) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "starts-with? requires two string arguments");
+        return throw_classified(S, "eval/type", "MTY001", "starts-with? requires two string arguments");
     }
     if (prefix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data, prefix->as.s.data, prefix->as.s.len) == 0
@@ -1911,13 +1911,13 @@ static mino_val *prim_ends_with_p(mino_state *S, mino_val *args, mino_env *env)
     mino_val *s, *suffix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "ends-with? requires two string arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "ends-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     suffix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING
         || suffix == NULL || mino_type_of(suffix) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "ends-with? requires two string arguments");
+        return throw_classified(S, "eval/type", "MTY001", "ends-with? requires two string arguments");
     }
     if (suffix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data + s->as.s.len - suffix->as.s.len,
@@ -1931,13 +1931,13 @@ static mino_val *prim_includes_p(mino_state *S, mino_val *args, mino_env *env)
     const char *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "includes? requires two string arguments");
+        return throw_classified(S, "eval/arity", "MAR001", "includes? requires two string arguments");
     }
     s   = args->as.cons.car;
     sub = args->as.cons.cdr->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING
         || sub == NULL || mino_type_of(sub) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "includes? requires two string arguments");
+        return throw_classified(S, "eval/type", "MTY001", "includes? requires two string arguments");
     }
     if (sub->as.s.len == 0) return mino_true(S);
     if (sub->as.s.len > s->as.s.len) return mino_false(S);
@@ -2008,12 +2008,12 @@ static mino_val *string_case_map(mino_state *S, mino_val *args,
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         snprintf(msg, sizeof(msg), "%s requires one string argument", opname);
-        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return throw_classified(S, "eval/arity", "MAR001", msg);
     }
     s = args->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING) {
         snprintf(msg, sizeof(msg), "%s requires one string argument", opname);
-        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return throw_classified(S, "eval/type", "MTY001", msg);
     }
 
     /* ASCII fast path: no high byte, byte-wise casing is exact. */
@@ -2088,11 +2088,11 @@ static mino_val *prim_trim(mino_state *S, mino_val *args, mino_env *env)
     const char *start, *end_ptr;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "trim requires one string argument");
+        return throw_classified(S, "eval/arity", "MAR001", "trim requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "trim requires one string argument");
+        return throw_classified(S, "eval/type", "MTY001", "trim requires one string argument");
     }
     start   = s->as.s.data;
     end_ptr = s->as.s.data + s->as.s.len;
@@ -2397,7 +2397,7 @@ mino_val *prim_random_uuid(mino_state *S, mino_val *args,
     int i;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "random-uuid takes no arguments");
     }
     for (i = 0; i < 16; i += 8) {
@@ -2426,12 +2426,12 @@ mino_val *prim_parse_uuid(mino_state *S, mino_val *args, mino_env *env)
     unsigned char bytes[16];
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "parse-uuid requires one argument");
     }
     s = args->as.cons.car;
     if (s == NULL || mino_type_of(s) != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "parse-uuid: argument must be a string");
     }
     if (!mino_uuid_parse(s->as.s.data, s->as.s.len, bytes)) {

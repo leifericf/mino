@@ -18,7 +18,7 @@ static int ns_one_arg(mino_state *S, mino_val *args, const char *name,
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s: expected one argument", name);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return 0;
     }
     *out = args->as.cons.car;
@@ -36,12 +36,12 @@ static int ns_to_name(mino_state *S, mino_val *v, char *buf, size_t cap,
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "%s: expected a namespace symbol or string", fn);
-        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        throw_classified(S, "eval/type", "MTY001", msg);
         return 0;
     }
     n = v->as.s.len;
     if (n >= cap) {
-        prim_throw_classified(S, "eval/type", "MTY001",
+        throw_classified(S, "eval/type", "MTY001",
                               "namespace name too long");
         return 0;
     }
@@ -88,7 +88,7 @@ static mino_val *prim_the_ns(mino_state *S, mino_val *args, mino_env *env)
     if (ns_env_lookup(S, buf) == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "no namespace: %s", buf);
-        return prim_throw_classified(S, "name", "MNS001", msg);
+        return throw_classified(S, "name", "MNS001", msg);
     }
     return ns_symbol_with_meta(S, buf);
 }
@@ -275,7 +275,7 @@ static mino_val *prim_ns_imports(mino_state *S, mino_val *args, mino_env *env)
     if (ns_env_lookup(S, buf) == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "ns-imports: no such namespace: %s", buf);
-        return prim_throw_classified(S, "name", "MNS001", msg);
+        return throw_classified(S, "name", "MNS001", msg);
     }
     /* No host-class imports exist in this runtime, so every
      * namespace's import map is empty. */
@@ -480,7 +480,7 @@ static int validate_only_names(mino_state *S, mino_val *sel,
                 char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s does not exist in %s", nm, src_ns);
-                prim_throw_classified(S, "name", "MNS001", msg);
+                throw_classified(S, "name", "MNS001", msg);
                 return -1;
             }
             var = var_find(S, src_ns, nm);
@@ -489,7 +489,7 @@ static int validate_only_names(mino_state *S, mino_val *sel,
                 char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s is not public in %s", nm, src_ns);
-                prim_throw_classified(S, "name", "MNS001", msg);
+                throw_classified(S, "name", "MNS001", msg);
                 return -1;
             }
         }
@@ -508,7 +508,7 @@ static int validate_only_names(mino_state *S, mino_val *sel,
                 char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s does not exist in %s", nm, src_ns);
-                prim_throw_classified(S, "name", "MNS001", msg);
+                throw_classified(S, "name", "MNS001", msg);
                 return -1;
             }
             var = var_find(S, src_ns, nm);
@@ -517,7 +517,7 @@ static int validate_only_names(mino_state *S, mino_val *sel,
                 char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s is not public in %s", nm, src_ns);
-                prim_throw_classified(S, "name", "MNS001", msg);
+                throw_classified(S, "name", "MNS001", msg);
                 return -1;
             }
         }
@@ -564,7 +564,7 @@ static mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
     size_t      i;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "refer requires a namespace symbol");
     }
     ns_arg = args->as.cons.car;
@@ -574,7 +574,7 @@ static mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
     while (mino_is_cons(cur)) {
         mino_val *kw = cur->as.cons.car;
         if (!mino_is_cons(cur->as.cons.cdr)) {
-            return prim_throw_classified(S, "eval/arity", "MAR001",
+            return throw_classified(S, "eval/arity", "MAR001",
                 "refer: option key without value");
         }
         if (ns_kw_eq(kw, "only")) {
@@ -590,7 +590,7 @@ static mino_val *prim_refer(mino_state *S, mino_val *args, mino_env *env)
     if (src == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "refer: no namespace: %s", ns_buf);
-        return prim_throw_classified(S, "name", "MNS001", msg);
+        return throw_classified(S, "name", "MNS001", msg);
     }
     dst = current_ns_env(S);
     if (dst == NULL) return mino_nil(S);
@@ -651,7 +651,7 @@ static mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "alias: expected (alias alias-sym ns-sym)");
     }
     a = args->as.cons.car;
@@ -662,10 +662,10 @@ static mino_val *prim_alias(mino_state *S, mino_val *args, mino_env *env)
         char msg[300];
         snprintf(msg, sizeof(msg),
                  "alias: no such namespace: %s", tbuf);
-        return prim_throw_classified(S, "name", "MNS001", msg);
+        return throw_classified(S, "name", "MNS001", msg);
     }
     if (runtime_module_add_alias(S, abuf, tbuf) != 0) {
-        return prim_throw_classified(S, "internal", "MIN001",
+        return throw_classified(S, "internal", "MIN001",
                                      "alias: out of memory");
     }
     return mino_nil(S);
@@ -682,7 +682,7 @@ static mino_val *prim_ns_unalias(mino_state *S, mino_val *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ns-unalias: expected (ns-unalias ns-sym alias-sym)");
     }
     ns_arg    = args->as.cons.car;
@@ -721,7 +721,7 @@ static mino_val *prim_ns_unmap(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ns-unmap: expected (ns-unmap ns-sym sym)");
     }
     ns_arg  = args->as.cons.car;
@@ -747,7 +747,7 @@ static mino_val *prim_all_ns(mino_state *S, mino_val *args, mino_env *env)
     size_t       i;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "all-ns takes no arguments");
     }
     if (S->ns_vars.ns_env_len == 0) return mino_vector(S, NULL, 0);
@@ -769,7 +769,7 @@ static mino_val *prim_loaded_libs(mino_state *S, mino_val *args,
     size_t       i;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "loaded-libs takes no arguments");
     }
     if (S->module.module_cache_len == 0) return mino_vector(S, NULL, 0);
@@ -825,21 +825,21 @@ static mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!ns_one_arg(S, args, "find-var", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_SYMBOL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "find-var: expected a qualified symbol");
     }
     data  = arg->as.s.data;
     n     = arg->as.s.len;
     slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "find-var: symbol must be qualified (ns/name)");
     }
     {
         size_t ns_len  = (size_t)(slash - data);
         size_t sym_len = n - ns_len - 1;
         if (ns_len >= sizeof(ns_buf) || sym_len >= sizeof(sym_buf)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "find-var: symbol too long");
         }
         memcpy(ns_buf, data, ns_len);
@@ -853,7 +853,7 @@ static mino_val *prim_find_var(mino_state *S, mino_val *args, mino_env *env)
         char msg[300];
         snprintf(msg, sizeof(msg),
                  "find-var: no such namespace: %s", ns_buf);
-        return prim_throw_classified(S, "name", "MNS001", msg);
+        return throw_classified(S, "name", "MNS001", msg);
     }
     var = resolve_in_ns(S, ns_buf, sym_buf);
     return var != NULL ? var : mino_nil(S);
@@ -873,7 +873,7 @@ static mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
     (void)env;
     for (cur = args; mino_is_cons(cur); cur = cur->as.cons.cdr) argc++;
     if (argc < 2 || argc > 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "ns-resolve: expected (ns-resolve ns ?env-map? sym)");
     }
     ns_arg  = args->as.cons.car;
@@ -887,7 +887,7 @@ static mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
         return NULL;
     if (sym_arg == NULL || mino_type_of(sym_arg) != MINO_SYMBOL
         || sym_arg->as.s.len >= sizeof(sym_buf)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "ns-resolve: second arg must be a symbol");
     }
     /* Qualified arg sym/foo wins over the ns context. */
@@ -898,7 +898,7 @@ static mino_val *prim_ns_resolve(mino_state *S, mino_val *args,
             size_t qlen = (size_t)(slash - sym_arg->as.s.data);
             size_t plen = sym_arg->as.s.len - qlen - 1;
             if (qlen >= sizeof(ns_buf) || plen >= sizeof(sym_buf)) {
-                return prim_throw_classified(S, "eval/type", "MTY001",
+                return throw_classified(S, "eval/type", "MTY001",
                     "ns-resolve: symbol too long");
             }
             memcpy(ns_buf, sym_arg->as.s.data, qlen);
@@ -934,21 +934,21 @@ static mino_val *prim_requiring_resolve(mino_state *S, mino_val *args,
     char        sym_buf[256];
     if (!ns_one_arg(S, args, "requiring-resolve", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_SYMBOL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "requiring-resolve: expected a qualified symbol");
     }
     data  = arg->as.s.data;
     n     = arg->as.s.len;
     slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash == NULL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "requiring-resolve: symbol must be qualified");
     }
     {
         size_t ns_len  = (size_t)(slash - data);
         size_t sym_len = n - ns_len - 1;
         if (ns_len >= sizeof(ns_buf) || sym_len >= sizeof(sym_buf)) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
+            return throw_classified(S, "eval/type", "MTY001",
                 "requiring-resolve: symbol too long");
         }
         memcpy(ns_buf, data, ns_len);
@@ -986,7 +986,7 @@ static mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     arg_count(S, args, &argc);
     if (argc != 2 && argc != 3) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "intern: expected (intern ns sym) or (intern ns sym val)");
     }
     ns_arg  = args->as.cons.car;
@@ -995,7 +995,7 @@ static mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
     if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "intern")) return NULL;
     if (sym_arg == NULL || mino_type_of(sym_arg) != MINO_SYMBOL
         || sym_arg->as.s.len >= sizeof(s_buf)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "intern: second arg must be a symbol");
     }
     memcpy(s_buf, sym_arg->as.s.data, sym_arg->as.s.len);
@@ -1007,7 +1007,7 @@ static mino_val *prim_intern(mino_state *S, mino_val *args, mino_env *env)
         char msg[320];
         snprintf(msg, sizeof(msg),
                  "intern: no namespace: %s found", ns_buf);
-        return prim_throw_classified(S, "eval/state", "MST001", msg);
+        return throw_classified(S, "eval/state", "MST001", msg);
     }
     var = var_intern(S, ns_buf, s_buf);
     if (var == NULL) return NULL;
@@ -1027,7 +1027,7 @@ static mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!ns_one_arg(S, args, "var-get", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "var-get: expected a var");
     }
     /* Thread binding wins over the root, per canon -- and it
@@ -1037,7 +1037,7 @@ static mino_val *prim_var_get(mino_state *S, mino_val *args, mino_env *env)
         if (bv != NULL) return bv;
     }
     if (!arg->as.var.bound) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "var-get: var is unbound");
     }
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
@@ -1049,7 +1049,7 @@ static mino_val *prim_var_root_bound_p(mino_state *S, mino_val *args, mino_env *
     (void)env;
     if (!ns_one_arg(S, args, "-var-root-bound?", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "-var-root-bound?: expected a var");
     }
     return arg->as.var.bound ? mino_true(S) : mino_false(S);
@@ -1066,7 +1066,7 @@ static mino_val *prim_var_root(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!ns_one_arg(S, args, "-var-root", &arg)) return NULL;
     if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "-var-root: expected a var");
     }
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
@@ -1095,13 +1095,13 @@ static mino_val *prim_var_set(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "var-set: expected (var-set var val)");
     }
     var_arg = args->as.cons.car;
     val_arg = args->as.cons.cdr->as.cons.car;
     if (var_arg == NULL || mino_type_of(var_arg) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "var-set: expected a var");
     }
     var_set_root(S, var_arg, val_arg);
@@ -1118,14 +1118,14 @@ static mino_val *prim_alter_var_root(mino_state *S, mino_val *args,
     mino_val *call_args;
     mino_val *new_val;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "alter-var-root: expected (alter-var-root var f & args)");
     }
     var_arg   = args->as.cons.car;
     fn_arg    = args->as.cons.cdr->as.cons.car;
     rest_args = args->as.cons.cdr->as.cons.cdr;
     if (var_arg == NULL || mino_type_of(var_arg) != MINO_VAR) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "alter-var-root: first arg must be a var");
     }
     /* (apply f current-root rest-args) */

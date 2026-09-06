@@ -51,7 +51,7 @@ mino_val *mino_throw(mino_state *S, mino_val *ex)
                 snprintf(msg, sizeof(msg), "uncaught exception: %s", buf);
             }
         }
-        return prim_throw_classified(S, "user", "MUS001", msg);
+        return throw_classified(S, "user", "MUS001", msg);
     }
 
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
@@ -141,7 +141,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                      name ? name : "<prim>", expected,
                      expected == 1 ? "" : "s", idx);
             va_end(ap);
-            prim_throw_classified(S, "eval/arity", "MAR001", msg);
+            throw_classified(S, "eval/arity", "MAR001", msg);
             return -1;
         }
 
@@ -153,7 +153,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                      args_type_label(*f),
                      v == NULL ? "nil" : type_tag_str(v));
             va_end(ap);
-            prim_throw_classified(S, "eval/type", "MTY001", msg);
+            throw_classified(S, "eval/type", "MTY001", msg);
             return -1;
         }
 
@@ -207,7 +207,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                      "%s: mino_args_parse: unknown format '%c'",
                      name ? name : "<prim>", *f);
             va_end(ap);
-            prim_throw_classified(S, "internal", "MIN001", msg);
+            throw_classified(S, "internal", "MIN001", msg);
             return -1;
         }
 
@@ -225,7 +225,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
                  "%s: expected %zu argument%s, got %zu",
                  name ? name : "<prim>", expected,
                  expected == 1 ? "" : "s", expected + extra);
-        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        throw_classified(S, "eval/arity", "MAR001", msg);
         return -1;
     }
 

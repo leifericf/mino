@@ -106,7 +106,7 @@ static char *build_command(mino_state *S, mino_val *args)
         size_t new_pos;
         if (arg == NULL || mino_type_of(arg) != MINO_STRING) {
             free(buf);
-            prim_throw_classified(S, "eval/type", "MTY001",
+            throw_classified(S, "eval/type", "MTY001",
                                   "sh: all arguments must be strings");
             return NULL;
         }
@@ -190,7 +190,7 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "sh requires at least one argument");
     }
 
@@ -228,7 +228,7 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
         free(cmd);
         if (fp == NULL) {
             mino_resume_lock(S, depth);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "sh: failed to execute command");
         }
 
@@ -247,7 +247,7 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
      * instead. */
     if (status == -1) {
         free(out);
-        return prim_throw_classified(S, "io", "MIO001",
+        return throw_classified(S, "io", "MIO001",
                                      "sh: pclose failed");
     }
 #ifndef _WIN32
@@ -256,7 +256,7 @@ static mino_val *prim_sh(mino_state *S, mino_val *args, mino_env *env)
 #endif
 
     if (out == NULL) {
-        return prim_throw_classified(S, "io", "MIO001",
+        return throw_classified(S, "io", "MIO001",
                                      "sh: out of memory reading output");
     }
 
@@ -297,7 +297,7 @@ static mino_val *prim_sh_bang(mino_state *S, mino_val *args, mino_env *env)
                      mino_val_int_get(exit_val),
                      (out_val && mino_type_of(out_val) == MINO_STRING)
                          ? out_val->as.s.data : "");
-            return prim_throw_classified(S, "io", "MIO001", msg);
+            return throw_classified(S, "io", "MIO001", msg);
         }
     }
 
@@ -354,7 +354,7 @@ static char **build_argv(mino_state *S, mino_val *args, size_t *out_argc)
             size_t j;
             for (j = 0; j < ai; j++) free(argv[j]);
             free(argv);
-            prim_throw_classified(S, "eval/type", "MTY001",
+            throw_classified(S, "eval/type", "MTY001",
                                   "run: all arguments must be strings");
             return NULL;
         }
@@ -398,7 +398,7 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "run requires at least one argument");
     }
 
@@ -419,7 +419,7 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
     }
 
     if (!mino_is_cons(args)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "run requires a command");
     }
 
@@ -429,13 +429,13 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
         /* Cannot happen (build_argv rejects an empty list), but keeps
          * the exec'd command provably non-NULL. */
         free_argv(argv);
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
                                      "run requires a command");
     }
 
 #ifdef _WIN32
     free_argv(argv);
-    return prim_throw_classified(S, "io", "MIO001",
+    return throw_classified(S, "io", "MIO001",
                                  "run: not yet implemented on Windows");
 #else
     {
@@ -455,7 +455,7 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
 
         if (pipe(out_pipe) == -1 || pipe(err_pipe) == -1) {
             free_argv(argv);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "run: pipe failed");
         }
 
@@ -464,7 +464,7 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
             close(out_pipe[0]); close(out_pipe[1]);
             close(err_pipe[0]); close(err_pipe[1]);
             free_argv(argv);
-            return prim_throw_classified(S, "io", "MIO001",
+            return throw_classified(S, "io", "MIO001",
                                          "run: fork failed");
         }
 
@@ -596,7 +596,7 @@ static mino_val *prim_run(mino_state *S, mino_val *args, mino_env *env)
              * silently lost everything past the realloc failure. */
             free(out_buf);
             free(err_buf);
-            return prim_throw_classified(S, "internal", "MIN001",
+            return throw_classified(S, "internal", "MIN001",
                                          "run: out of memory capturing output");
         }
 
@@ -631,16 +631,16 @@ mino_val *prim_thread_sleep(mino_state *S, mino_val *args, mino_env *env)
     (void)env;
 
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
+        return throw_classified(S, "eval/arity", "MAR001",
             "thread-sleep requires exactly 1 argument");
     }
     ms_val = args->as.cons.car;
     if (!mino_to_int(ms_val, &ms)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
+        return throw_classified(S, "eval/type", "MTY001",
             "thread-sleep: argument must be an integer");
     }
     if (ms < 0) {
-        return prim_throw_classified(S, "eval/contract", "MCT001",
+        return throw_classified(S, "eval/contract", "MCT001",
             "thread-sleep: argument must be non-negative");
     }
     /* Yield state_lock for the duration of the sleep so worker
