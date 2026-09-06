@@ -97,8 +97,10 @@ class env {
 public:
     /* Construct a fresh env in `s`. The state must outlive the env;
      * destructing the env frees its frame and releases any closures
-     * reachable only through it. */
-    explicit env(state& s) : state_(&s), ptr_(mino_env_new(s)) {
+     * reachable only through it. Captures the raw mino_state, not the
+     * wrapper: moving the state wrapper transfers the raw pointer, but
+     * the env still frees against the same live runtime. */
+    explicit env(state& s) : state_(s.raw()), ptr_(mino_env_new(s)) {
         if (ptr_ == nullptr) {
             throw error("mino_env_new failed");
         }
@@ -109,7 +111,7 @@ public:
      * the caller wants to drive eval through a C++-facing API. */
     static env borrow(state& s, mino_env* e) noexcept {
         env out;
-        out.state_  = &s;
+        out.state_  = s.raw();
         out.ptr_    = e;
         out.owning_ = false;
         return out;
@@ -117,7 +119,7 @@ public:
 
     ~env() noexcept {
         if (owning_ && ptr_ != nullptr && state_ != nullptr) {
-            mino_env_free(*state_, ptr_);
+            mino_env_free(state_, ptr_);
         }
     }
 
@@ -135,7 +137,7 @@ public:
     env& operator=(env&& other) noexcept {
         if (this != &other) {
             if (owning_ && ptr_ != nullptr && state_ != nullptr) {
-                mino_env_free(*state_, ptr_);
+                mino_env_free(state_, ptr_);
             }
             state_        = other.state_;
             ptr_          = other.ptr_;
@@ -151,7 +153,7 @@ public:
 
     /* Convenience for the common (set, get) cases. */
     void set(const char* name, mino_val* val) noexcept {
-        if (state_ != nullptr) mino_env_set(*state_, ptr_, name, val);
+        if (state_ != nullptr) mino_env_set(state_, ptr_, name, val);
     }
     mino_val* get(const char* name) const noexcept {
         return mino_env_get(ptr_, name);
@@ -160,9 +162,9 @@ public:
 private:
     env() : state_(nullptr), ptr_(nullptr), owning_(false) {}
 
-    state*   state_;
-    mino_env* ptr_;
-    bool      owning_ = true;
+    mino_state* state_;
+    mino_env*   ptr_;
+    bool        owning_ = true;
 };
 
 /* ----------------------------------------------------------------- */
@@ -180,8 +182,13 @@ class pin {
 public:
     pin() : state_(nullptr), ref_(nullptr) {}
 
+    /* Captures the raw mino_state, not the wrapper: the pin roots
+     * against the live runtime for its whole lifetime, even after the
+     * state wrapper is moved (which transfers the raw pointer out of
+     * the moved-from wrapper). Holding the wrapper would null-deref in
+     * mino_unref once the wrapper moved. */
     pin(state& s, mino_val* v)
-        : state_(&s), ref_(mino_ref_new(s, v))
+        : state_(s.raw()), ref_(mino_ref_new(s, v))
     {
         if (ref_ == nullptr) {
             throw error("mino_ref_new failed");
@@ -190,7 +197,7 @@ public:
 
     ~pin() noexcept {
         if (ref_ != nullptr && state_ != nullptr) {
-            mino_unref(*state_, ref_);
+            mino_unref(state_, ref_);
         }
     }
 
@@ -206,7 +213,7 @@ public:
     pin& operator=(pin&& other) noexcept {
         if (this != &other) {
             if (ref_ != nullptr && state_ != nullptr) {
-                mino_unref(*state_, ref_);
+                mino_unref(state_, ref_);
             }
             state_       = other.state_;
             ref_         = other.ref_;
@@ -231,13 +238,28 @@ public:
     bool empty() const noexcept { return ref_ == nullptr; }
 
 private:
-    state*    state_;
-    mino_ref* ref_;
+    mino_state* state_;
+    mino_ref*   ref_;
 };
 
 /* ----------------------------------------------------------------- */
 /* eval helpers                                                       */
 /* ----------------------------------------------------------------- */
+
+/* Hazard: the C runtime reports an uncaught error by longjmp back to
+ * its own protected-call frame, not by return. These helpers call the
+ * public mino_* entry points, which install that frame and convert an
+ * error into a NULL return before control reaches C++ again -- so the
+ * longjmp never crosses a C++ stack frame here, and these helpers turn
+ * the NULL into a mino::error throw safely. The rule the caller must
+ * keep: never let a mino_val* that carries a live error (a control
+ * token) propagate back into the runtime through a raw mino_* call
+ * placed between C++ objects with non-trivial destructors. A longjmp
+ * out of such a call would skip those destructors (pins, envs would
+ * leak their roots and frames). Drive every eval through these
+ * throwing helpers, or through a mino_pcall/mino_eval_ex entry that
+ * returns rather than longjmps, so stack unwinding stays in C++'s
+ * hands and RAII cleanup runs. */
 
 /* mino_eval_string with C++-shape error handling. Returns the result
  * on success; throws mino::error with the diagnostic text on failure.

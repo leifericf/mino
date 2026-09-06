@@ -2578,6 +2578,36 @@
     (apply sh! args)
     (println (sh! (str "./" bin)))))
 
+;; The C++ wrappers in mino.hpp compile against the same object set but
+;; need a C++ compiler and the C++ include flags (no -std=c99). Derive
+;; the compiler from CC so a `zig cc` toolchain uses `zig c++`; CXX
+;; overrides. The runtime objects themselves are C, linked as-is.
+(def ^:private cxx
+  (str/split (or (getenv "CXX")
+                 (if (= (str/join " " (str/split cc " ")) "zig cc")
+                   "zig c++"
+                   "c++"))
+             " "))
+
+(def ^:private cxxflags
+  (str/split (or (getenv "CXXFLAGS")
+                 (str "-std=c++14 -Wall -Wextra -O2 " include-flags))
+             " "))
+
+(defn- compile-and-run-embed-cpp-test
+  "Compile a tests/*.cpp harness against the lib srcs with the C++
+  compiler and run it. Pins that mino.hpp keeps compiling and its RAII
+  wrappers behave under move."
+  [src bin]
+  (let [objs    (mapv src->obj lib-srcs)
+        pthread (if windows? [] ["-pthread"])
+        args    (into cxx (concat cxxflags pthread ldflags
+                                  ["-o" bin src]
+                                  objs libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
+
 (defn test-embed
   "Compile and run the embed smoke tests. embed_api_test covers the
   basic embedder API; embed_jit_guard_test pins the JIT slow-helper
@@ -2590,8 +2620,11 @@
   point; jit_win_dual_view_test pins the structural dual-view invariant
   (separate executable and writable mappings; make_rw/make_rx never
   disturb the executable view) that holds on every threaded JIT host,
-  Windows included. Multi-state, STM, and capability embed tests live in
-  the mino-tests satellite repo (test-embed-suite there)."
+  Windows included. embed_hpp_test compiles the C++ RAII wrappers in
+  mino.hpp and pins that a pin or env still releases against its state
+  after the state wrapper is moved. Multi-state, STM, and capability
+  embed tests live in the mino-tests satellite repo (test-embed-suite
+  there)."
   []
   (compile-and-run-embed-test "tests/embed_api_test.c"
                               "embed_api_test")
@@ -2602,7 +2635,9 @@
   (compile-and-run-embed-test "tests/jit_retire_reclaim_test.c"
                               "jit_retire_reclaim_test")
   (compile-and-run-embed-test "tests/jit_win_dual_view_test.c"
-                              "jit_win_dual_view_test"))
+                              "jit_win_dual_view_test")
+  (compile-and-run-embed-cpp-test "tests/embed_hpp_test.cpp"
+                                  "embed_hpp_test"))
 
 (defn test-crash-handler
   "Compile and run the crash-handler backtrace smoke. Exercises the

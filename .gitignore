@@ -110,6 +110,7 @@ examples/embed_proc_amalgam
 tests/embed_api_test
 tools/stencil-extract
 embed_api_test
+embed_hpp_test
 crash_handler_test
 dist/
 dist-cross/
