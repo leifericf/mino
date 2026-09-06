@@ -661,12 +661,6 @@ mino_val *unop_int_fast(struct mino_state *S, mino_val *v,
                           unsigned subop);
 mino_val *tag_or_box_int(struct mino_state *S, long long r);
 
-/* GC hook: walk a single mino_bc_fn_t's consts and child fns. Called from
- * gc_mark_runtime_globals (indirectly via the MINO_FN walker) and from
- * the closure-build path so a partially-constructed bc fn stays rooted
- * across allocations. */
-void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
-
 /* Symbolic name for an opcode id (e.g. OP_LOOP_INT_DEC_INC). Returns
  * a static string; OP_UNKNOWN for out-of-range ids. Used by the
  * MINO_CPJIT_STATS dumper to self-describe blocker histograms and by

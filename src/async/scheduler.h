@@ -27,10 +27,4 @@ void async_sched_enqueue(mino_state *S, mino_val *callback,
  * Returns 1 if any entries were executed, 0 if queue was empty. */
 int async_sched_drain(mino_state *S, mino_env *env);
 
-/* Free all entries in the run queue without executing them. */
-void async_sched_free(mino_state *S);
-
-/* Mark all values in the run queue for GC. */
-void async_sched_mark(mino_state *S);
-
 #endif /* ASYNC_SCHEDULER_H */

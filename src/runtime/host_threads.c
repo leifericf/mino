@@ -102,24 +102,6 @@ static int cv_timedwait_ms(pthread_cond_t *c, pthread_mutex_t *m, long ms)
 #endif
 
 /* ------------------------------------------------------------------------- */
-/* state init/destroy                                                        */
-/* ------------------------------------------------------------------------- */
-
-void mino_host_threads_state_init(mino_state *S)
-{
-    S->threading.future_list_head = NULL;
-}
-
-void mino_host_threads_state_destroy(mino_state *S)
-{
-    /* Quiesce drains worker threads first so the impl free below is
-     * safe. Note: state_free already calls quiesce explicitly via
-     * mino_quiesce_threads if the embedder requested it; this is the
-     * fallback for embedders that didn't. */
-    mino_host_threads_quiesce(S);
-}
-
-/* ------------------------------------------------------------------------- */
 /* Future allocation                                                          */
 /* ------------------------------------------------------------------------- */
 

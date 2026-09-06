@@ -67,7 +67,7 @@ void source_cache_store(mino_state *S, const char *file,
     }
 }
 
-const char *source_cache_get_line(mino_state *S, const char *file,
+static const char *source_cache_get_line(mino_state *S, const char *file,
                                   int line, size_t *out_len)
 {
     int i;
@@ -192,31 +192,6 @@ void diag_set_data(mino_diag *d, mino_val *data)
     d->data = data;
 }
 
-void diag_capture_frames(mino_state *S, mino_diag *d)
-{
-    int i;
-    if (mino_current_ctx(S)->call_depth <= 0) return;
-    free(d->frames);
-    d->frames = (mino_diag_frame_t *)calloc(
-        (size_t)mino_current_ctx(S)->call_depth, sizeof(*d->frames));
-    if (d->frames == NULL) {
-        d->frames_len = 0;
-        d->frames_cap = 0;
-        return;
-    }
-    d->frames_len = (size_t)mino_current_ctx(S)->call_depth;
-    d->frames_cap = (size_t)mino_current_ctx(S)->call_depth;
-    for (i = mino_current_ctx(S)->call_depth - 1; i >= 0; i--) {
-        size_t idx = (size_t)(mino_current_ctx(S)->call_depth - 1 - i);
-        d->frames[idx].fn_name  = mino_current_ctx(S)->call_stack[i].name;
-        d->frames[idx].file     = mino_current_ctx(S)->call_stack[i].file;
-        d->frames[idx].line     = mino_current_ctx(S)->call_stack[i].line;
-        d->frames[idx].column   = mino_current_ctx(S)->call_stack[i].column;
-        d->frames[idx].is_macro = 0;
-        d->frames[idx].is_host  = 0;
-    }
-}
-
 /* ------------------------------------------------------------------------- */
 /* Rendering                                                                 */
 /* ------------------------------------------------------------------------- */
@@ -249,7 +224,7 @@ int diag_render_compact(const mino_diag *d, char *buf, size_t n)
 #define DIAG_POS_ADVANCE(pos, n, w) \
     do { if ((w) > 0) { (pos) += (size_t)(w); if ((pos) >= (n)) (pos) = (n) - 1; } } while (0)
 
-int diag_render_pretty(mino_state *S, const mino_diag *d,
+static int diag_render_pretty(mino_state *S, const mino_diag *d,
                        char *buf, size_t n)
 {
     size_t pos = 0;

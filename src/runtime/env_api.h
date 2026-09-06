@@ -36,7 +36,6 @@ void           env_bind_sym(mino_state *S, mino_env *env,
 int            env_unbind(mino_state *S, mino_env *env,
                         const char *name);                     /* 1 if removed */
 mino_env    *env_child(mino_state *S, mino_env *parent); /* GC-owned */
-mino_env    *env_root(mino_state *S, mino_env *env);     /* borrowed (walks up) */
 mino_val    *dyn_lookup(mino_state *S, const char *name);  /* borrowed; var-less entries only */
 mino_val    *dyn_lookup_var(mino_state *S, const mino_val *var); /* borrowed */
 mino_val    *dyn_lookup_var_or_name(mino_state *S, const mino_val *var,

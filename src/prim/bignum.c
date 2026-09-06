@@ -646,9 +646,9 @@ mino_val *mino_bigint_mul(mino_state *S, const mino_val *a,
  * usual product-of-signs. Either q_out or r_out may be NULL when only
  * one half is wanted. Returns -1 on b == 0 (with diag set) or
  * allocation failure; 0 on success. */
-int mino_bigint_quotrem(mino_state *S, const mino_val *a,
-                        const mino_val *b, mino_val **q_out,
-                        mino_val **r_out)
+static int mino_bigint_quotrem(mino_state *S, const mino_val *a,
+                               const mino_val *b, mino_val **q_out,
+                               mino_val **r_out)
 {
     mpz_t  as_buf, bs_buf;
     mp_int av = NULL, bv = NULL;

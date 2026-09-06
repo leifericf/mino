@@ -265,13 +265,6 @@ const stencil_desc_t *mino_jit_find_stencil(unsigned opcode);
 int                   mino_jit_op_extra_words(unsigned op);
 int                   mino_jit_is_direct_emit_op(unsigned op);
 
-/* Eligibility classifier (defined in entry.c). Both out-params are
- * optional (pass NULL to skip). *first_unknown_op records the op that
- * tripped the classifier; *first_unknown_pc records its PC so a future
- * compile-with-deopt path can plant a side-exit at exactly that offset. */
-cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
-                                              unsigned *first_unknown_op,
-                                              size_t   *first_unknown_pc);
 const char    *mino_jit_reason_name(cpjit_reason_t r);
 
 /* Symbol-name decoding (defined in entry.c). */

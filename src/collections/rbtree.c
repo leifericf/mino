@@ -424,8 +424,8 @@ static mino_rb_node_t *rb_delete(mino_state *S, const mino_rb_node_t *h,
     return fixup(S, hc);
 }
 
-mino_rb_node_t *rb_dissoc(mino_state *S, const mino_rb_node_t *n,
-                           const mino_val *key, mino_val *comparator)
+static mino_rb_node_t *rb_dissoc(mino_state *S, const mino_rb_node_t *n,
+                                  const mino_val *key, mino_val *comparator)
 {
     mino_rb_node_t *root;
     if (n == NULL) return NULL;

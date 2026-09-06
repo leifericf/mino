@@ -96,10 +96,6 @@ int mino_future_cancelled_p(mino_val *fut);
  * set newly, 0 if the future was already realized. */
 int mino_future_cancel(mino_state *S, mino_val *fut);
 
-/* Init/destroy hooks called from state_init / state_free. */
-void mino_host_threads_state_init(mino_state *S);
-void mino_host_threads_state_destroy(mino_state *S);
-
 /* Join all outstanding worker threads. Called from mino_state_free
  * before the heap is torn down so workers don't run after free. Also
  * exposed publicly as mino_quiesce_threads. */

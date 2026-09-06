@@ -429,26 +429,6 @@ mino_val *prim_decimal_p(mino_state *S, mino_val *args, mino_env *env)
 /* Tier promotion helpers + bigdec arithmetic                                 */
 /* ------------------------------------------------------------------------- */
 
-/* Promote int / bigint / ratio to bigdec at scale 0. Lossless. */
-mino_val *mino_to_bigdec(mino_state *S, const mino_val *v)
-{
-    if (v == NULL) return NULL;
-    if (mino_type_of(v) == MINO_BIGDEC) return (mino_val *)v;
-    if (mino_val_int_p(v)) {
-        mino_val *u = mino_bigint_from_ll(S, mino_val_int_get(v));
-        if (u == NULL) return NULL;
-        return mino_bigdec_make(S, u, 0);
-    }
-    if (mino_type_of(v) == MINO_BIGINT) {
-        mino_val *u = to_bigint(S, v);
-        if (u == NULL) return NULL;
-        return mino_bigdec_make(S, u, 0);
-    }
-    /* Ratio promotion to bigdec is non-exact in general (e.g. 1/3) so the
-     * tower-dispatch caller drops to float when ratio meets bigdec. */
-    return NULL;
-}
-
 /* Scale an unscaled bigint up by 10^delta in place; delta must be >= 0. */
 static int bigint_mul_pow10(mino_val *bi, int delta)
 {

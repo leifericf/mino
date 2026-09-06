@@ -85,25 +85,3 @@ int async_sched_drain(mino_state *S, mino_env *env)
     return ran;
 }
 
-void async_sched_free(mino_state *S)
-{
-    sched_entry_t *e = S->async.run_head;
-    while (e != NULL) {
-        sched_entry_t *next = e->next;
-        if (e->cb_ref)  mino_unref(S, e->cb_ref);
-        if (e->val_ref) mino_unref(S, e->val_ref);
-        free(e);
-        e = next;
-    }
-    S->async.run_head = NULL;
-    S->async.run_tail = NULL;
-}
-
-void async_sched_mark(mino_state *S)
-{
-    sched_entry_t *e;
-    for (e = S->async.run_head; e != NULL; e = e->next) {
-        if (e->callback) gc_mark_interior(S, e->callback);
-        if (e->value)    gc_mark_interior(S, e->value);
-    }
-}

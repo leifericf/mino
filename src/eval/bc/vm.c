@@ -2933,7 +2933,3 @@ fallback:
     return mino_bc_run(S, fn_val, argv, argc, env);
 }
 
-void mino_bc_fn_mark(mino_state *S, const mino_bc_fn_t *bc)
-{
-    (void)S; (void)bc;
-}

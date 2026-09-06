@@ -104,9 +104,6 @@ void diag_add_note(mino_diag *d, const char *message);
 /* Set the user data payload (GC-owned, caller must ensure it is pinned). */
 void diag_set_data(mino_diag *d, mino_val *data);
 
-/* Copy call stack frames from the runtime state into the diagnostic. */
-void diag_capture_frames(mino_state *S, mino_diag *d);
-
 /* ------------------------------------------------------------------------- */
 /* Rendering                                                                 */
 /* ------------------------------------------------------------------------- */
@@ -114,10 +111,6 @@ void diag_capture_frames(mino_state *S, mino_diag *d);
 /* Render a compact one-line form into buf. Returns bytes written (excl NUL).
  * Output is truncated if it exceeds n-1 bytes. */
 int diag_render_compact(const mino_diag *d, char *buf, size_t n);
-
-/* Render a pretty multi-line diagnostic with source snippet and caret. */
-int diag_render_pretty(mino_state *S, const mino_diag *d,
-                       char *buf, size_t n);
 
 /* ------------------------------------------------------------------------- */
 /* Map conversion                                                            */

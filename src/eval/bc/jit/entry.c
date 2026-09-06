@@ -678,9 +678,9 @@ const char *mino_jit_reason_name(cpjit_reason_t r)
  * the interpreter takes that fn directly. A PC>0 miss returns
  * OK_WITH_DEOPT so a future compile path knows to plant a deopt
  * stencil at first_unknown_pc and run the supported prefix natively. */
-cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
-                                              unsigned *first_unknown_op,
-                                              size_t   *first_unknown_pc)
+static cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
+                                                     unsigned *first_unknown_op,
+                                                     size_t   *first_unknown_pc)
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
     /* captures blocks native JIT. Simple env-capturing fns JIT correctly

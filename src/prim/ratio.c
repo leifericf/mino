@@ -151,8 +151,8 @@ mino_val *mino_ratio_make(mino_state *S, mino_val *num,
     return ratio_make_impl(S, num, denom, 1);
 }
 
-mino_val *mino_ratio_make_keepbig(mino_state *S, mino_val *num,
-                                    mino_val *denom)
+static mino_val *mino_ratio_make_keepbig(mino_state *S, mino_val *num,
+                                          mino_val *denom)
 {
     return ratio_make_impl(S, num, denom, 0);
 }

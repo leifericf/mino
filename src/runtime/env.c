@@ -304,15 +304,6 @@ void env_bind_sym(mino_state *S, mino_env *env, mino_val *sym,
                   sym->as.s.data, val);
 }
 
-mino_env *env_root(mino_state *S, mino_env *env)
-{
-    (void)S;
-    while (env->parent != NULL) {
-        env = env->parent;
-    }
-    return env;
-}
-
 mino_env *mino_env_clone(mino_state *S, mino_env *env)
 {
     if (env == NULL) return NULL;

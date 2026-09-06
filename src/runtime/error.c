@@ -82,29 +82,6 @@ void clear_error(mino_state *S)
     }
 }
 
-/* Location-aware error: prepend file:line when the form has source info. */
-void set_error_at(mino_state *S, const mino_val *form, const char *msg)
-{
-    if (form != NULL && mino_type_of(form) == MINO_CONS
-        && form->as.cons.file != NULL && form->as.cons.line > 0) {
-        char buf[2048];
-        mino_span_t span;
-        snprintf(buf, sizeof(buf), "%s:%d: %s",
-                 form->as.cons.file, form->as.cons.line, msg);
-        set_error(S, buf);
-        /* Enrich the diagnostic with source span. */
-        if (mino_current_ctx(S)->last_diag != NULL) {
-            memset(&span, 0, sizeof(span));
-            span.file   = form->as.cons.file;
-            span.line   = form->as.cons.line;
-            span.column = form->as.cons.column;
-            diag_set_span(mino_current_ctx(S)->last_diag, span);
-        }
-    } else {
-        set_error(S, msg);
-    }
-}
-
 /* Classified eval-phase diagnostic from a form with source info. */
 void set_eval_diag(mino_state *S, const mino_val *form,
                    const char *kind, const char *code, const char *msg)

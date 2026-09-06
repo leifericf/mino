@@ -245,7 +245,7 @@ int record_field_index(const mino_val *r, const mino_val *key);
 /* rbtree.c: persistent red-black tree operations for sorted map/set         */
 /* ------------------------------------------------------------------------- */
 
-/* rb_get returns a borrowed pointer; rb_assoc/rb_dissoc return new trees. */
+/* rb_get returns a borrowed pointer; rb_assoc returns a new tree. */
 int val_compare(const mino_val *a, const mino_val *b);          /* pure */
 int rb_compare(mino_state *S, const mino_val *a, const mino_val *b,
                mino_val *comparator);
@@ -256,9 +256,6 @@ int rb_contains(mino_state *S, const mino_rb_node_t *n,
 mino_rb_node_t *rb_assoc(mino_state *S, const mino_rb_node_t *n,
                           mino_val *key, mino_val *val,
                           mino_val *comparator, int *replaced);    /* GC-owned */
-mino_rb_node_t *rb_dissoc(mino_state *S, const mino_rb_node_t *n,
-                           const mino_val *key,
-                           mino_val *comparator);                  /* GC-owned */
 void rb_to_list(mino_state *S, const mino_rb_node_t *n,
                 mino_val **head, mino_val **tail);
 int rb_trees_content_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
@@ -330,9 +327,6 @@ mino_val *mino_bigint_rem(mino_state *S, const mino_val *a,
                             const mino_val *b);
 mino_val *mino_bigint_mod(mino_state *S, const mino_val *a,
                             const mino_val *b);
-int mino_bigint_quotrem(mino_state *S, const mino_val *a,
-                        const mino_val *b, mino_val **q_out,
-                        mino_val **r_out);
 double   mino_bigint_to_double(const mino_val *v);
 /* Returns non-zero if v (MINO_BIGINT) is odd. */
 int      mino_bigint_is_odd(const mino_val *v);
@@ -344,8 +338,6 @@ void     mino_bigint_to_bits64(const mino_val *v, uint64_t *out);
 
 /* MINO_RATIO support. */
 mino_val *mino_ratio_make(mino_state *S, mino_val *num, mino_val *denom);
-mino_val *mino_ratio_make_keepbig(mino_state *S, mino_val *num,
-                                    mino_val *denom);
 mino_val *mino_ratio_make_unchecked(mino_state *S, mino_val *num,
                                       mino_val *denom);
 void     mino_ratio_print(mino_state *S, const mino_val *v, FILE *out);
@@ -384,7 +376,6 @@ mino_val *mino_bigdec_mul(mino_state *S, const mino_val *a,
 mino_val *mino_bigdec_div(mino_state *S, const mino_val *a,
                             const mino_val *b);
 mino_val *mino_bigdec_neg(mino_state *S, const mino_val *a);
-mino_val *mino_to_bigdec(mino_state *S, const mino_val *v);
 mino_val *mino_bigdec_apply_math_context(mino_state *S, mino_val *bd);
 
 #endif /* COLLECTIONS_INTERNAL_H */

@@ -15,16 +15,12 @@
 
 #include <stddef.h>
 
-/* set_error / set_error_at copy msg into the current ctx's error_buf; msg is borrowed. */
+/* set_error copies msg into the current ctx's error_buf; msg is borrowed. */
 void        set_error(mino_state *S, const char *msg);          /* msg: borrowed */
-void        set_error_at(mino_state *S, const mino_val *form, /* form: borrowed */
-                         const char *msg);                         /* msg: borrowed */
 void        clear_error(mino_state *S);
 void        set_diag(mino_state *S, mino_diag *d);           /* d: consumed */
 void        source_cache_store(mino_state *S, const char *file,
                                const char *text, size_t len);
-const char *source_cache_get_line(mino_state *S, const char *file,
-                                  int line, size_t *out_len);
 void        set_eval_diag(mino_state *S, const mino_val *form,
                           const char *kind, const char *code,
                           const char *msg);
