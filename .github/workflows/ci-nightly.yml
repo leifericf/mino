@@ -88,7 +88,9 @@ jobs:
         # cap is a realistic off-peak budget, not the push path's tight
         # one.
         run: ./mino task release-gate
-        timeout-minutes: 40
+        # 40 sat exactly at the honest runtime on a slow runner (the
+        # historical 41m failures were this cap, not the gate).
+        timeout-minutes: 60
 
       - name: Embed stress
         run: ./mino task test-embed
@@ -265,8 +267,9 @@ jobs:
     # windows slower still (two zig builds plus two full suite passes
     # past the perf-shape test files run ~25 min there), but a hang
     # (the failure mode JIT bugs produce) should trip this cap, not
-    # the 6-hour default.
-    timeout-minutes: 45
+    # the 6-hour default. Held above the 60-minute step cap so a slow
+    # leg fails at the step (log preserved), never the job.
+    timeout-minutes: 70
     defaults:
       run:
         shell: bash
@@ -298,7 +301,9 @@ jobs:
         # step and preserves the log -- which is the only way to see
         # where a hung suite actually sat. Baseline was ~8 min on the
         # slowest host (windows) before the perf-shape test files
-        # landed; they push the windows leg past 15, so the cap is
-        # now 3x the original baseline.
-        timeout-minutes: 40
+        # landed; they push the windows leg past 15. With the full
+        # stack reserve the windows leg runs the deep-recursion tests
+        # to completion instead of aborting, and its honest 4-way
+        # runtime brushed the old 40 cap on a slow runner.
+        timeout-minutes: 60
         run: ./mino task test-jit-host
