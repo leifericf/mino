@@ -996,6 +996,18 @@ void gc_mark_child_push_exported(mino_state *S, const void *p)
 static void gc_mark_child_push(mino_state *S, const void *p)
 {
     gc_hdr_t *h;
+    /* Verify-pass interception: when the remset-completeness pass is
+     * active it drives the real tracer table (gc_trace_children) so its
+     * walk can never diverge from the collector's. Each child the tracer
+     * would mark is instead handed to the verify callback with the
+     * container it belongs to; nothing is marked. Routed before the
+     * mark-path filters so the callback sees exactly the raw child
+     * pointer a hand-rolled verify walk used to, and does its own NULL
+     * and header resolution. */
+    if (S->gc_verify_active) {
+        S->gc_verify_cb(S, S->gc_verify_container, (void *)p);
+        return;
+    }
     if (p == NULL) return;
     /* Inline-tagged values (low 3 bits non-zero) hold their payload
      * directly in the pointer-sized slot; there's no heap cell to

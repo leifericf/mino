@@ -651,6 +651,22 @@ struct mino_state {
      * every-def ns_vars.ic_gen, so plain defs never force macro-baked
      * fns to recompile. Past the stencil-ABI anchor blocks. */
     unsigned                 macro_def_gen;
+
+    /* GC verify-pass interception (opt-in via MINO_GC_VERIFY=1). When
+     * gc_verify_active is set, the remset-completeness verify pass in
+     * gc/minor.c drives the live tracer table through
+     * gc_trace_children instead of a second hand-rolled union walk;
+     * gc_mark_child_push then routes every child pointer to
+     * gc_verify_cb(S, gc_verify_container, child) rather than marking
+     * it. Driving the real tracer means the verify walk can never
+     * miss a field the collector traces. gc_verify_container is the
+     * header currently being walked, so the callback has the offending
+     * container for its diagnostics. Off outside the verify pass, so
+     * the mark hot path pays one predicted-false branch. Past the
+     * stencil-ABI anchor blocks. */
+    void          (*gc_verify_cb)(mino_state *, gc_hdr_t *, void *);
+    gc_hdr_t       *gc_verify_container;
+    unsigned char   gc_verify_active;
 };
 
 /* Resolve the active per-thread ctx for state S.
