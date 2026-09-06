@@ -125,6 +125,14 @@ void mino_chan_finalize(mino_state *S, mino_val *v);
  * host did not call mino_store_close explicitly. */
 void mino_store_gc_finalize(mino_val *v);
 
+/* Force a MINO_LAZY to its cached non-lazy value, running the thunk
+ * body through the evaluator (safepoints, cancellation, namespace
+ * restore included). Implemented in eval/eval.c; declared here because
+ * laziness is a value-model property and the forcing consumers are
+ * value-layer walks -- equality, print, iteration (ADR 57). Returns
+ * NULL when the thunk throws; mutates the lazy's cache. */
+mino_val *lazy_force(mino_state *S, mino_val *v);
+
 #ifdef __cplusplus
 }
 #endif

@@ -19,7 +19,7 @@
 #include "mino.h"
 #include "mino_internal.h"
 #include "collections/internal.h"
-#include "eval/internal.h"          /* lazy_force */
+#include "values/internal.h"        /* lazy_force (ADR 57) */
 #include "runtime/value_assert.h"   /* mino_type_of */
 
 /* Sorted maps and sets walk an in-order red-black tree via a small
