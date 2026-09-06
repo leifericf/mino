@@ -1109,6 +1109,12 @@ void gc_register_finalizer(mino_state *S, unsigned char tag,
     if (tag < GC_T__COUNT) S->gc_finalizers[tag] = fn;
 }
 
+void gc_register_root_walker(mino_state *S, gc_root_walker_fn fn)
+{
+    if (fn == NULL || S->gc_root_walker_len >= GC_ROOT_WALKERS_MAX) return;
+    S->gc_root_walkers[S->gc_root_walker_len++] = fn;
+}
+
 /* Wire up every built-in tag. Component-owned tracers (collections,
  * eval/bc, values) live in their own gc_handlers.c files and register
  * via mino_<component>_register_gc_handlers called from state_init. */

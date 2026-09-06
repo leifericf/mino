@@ -266,6 +266,16 @@ void gc_register_finalizer(mino_state *S, unsigned char tag,
  * before the first allocation; component-owned tracers register
  * themselves alongside. */
 void gc_register_default_tracers(mino_state *S);
+
+/* Registered root walkers: a component whose C-side queues hold GC
+ * values (the async scheduler's run queue and timer registry, for
+ * example) registers a walker at state init; gc_mark_roots calls
+ * every walker each cycle, so gc/ enumerates component roots without
+ * including component internals. A walker marks its values via
+ * gc_mark_interior. */
+typedef void (*gc_root_walker_fn)(mino_state *S);
+#define GC_ROOT_WALKERS_MAX 8
+void gc_register_root_walker(mino_state *S, gc_root_walker_fn fn);
 /* Enqueue a header onto the mark stack with mark=1, bypassing the
  * minor-phase OLD filter. Used by minor's promotion hook to hand
  * newly-promoted OLD objects to major's mark frontier when a minor

@@ -310,3 +310,17 @@
                        "(a/timeout 600000) (print \"ok\")"))]
         (is (= 0 (:exit r)))
         (is (= "ok" (:out r)))))))
+
+(deftest queued-async-values-survive-gc
+  (testing "values held only by the scheduler queue and timer registry
+            are GC roots: a full collection mid-scheduling must not
+            reclaim queued callbacks or their payloads"
+    (let [ch      (a/chan 1)
+          payload (vec (range 50))]
+      (a/go (a/>! ch {:payload payload}))
+      (gc!)
+      (is (= {:payload payload} (a/<!! ch))))
+    (let [t (a/timeout 30)]
+      (gc!)
+      ;; The timer must still fire and close its channel after the GC.
+      (is (nil? (a/<!! t))))))

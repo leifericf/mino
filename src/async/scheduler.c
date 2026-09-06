@@ -6,6 +6,24 @@
 #include "async/timer.h"
 #include "runtime/internal.h"
 
+/* Root walker: pin scheduler run-queue callbacks/values and timer
+ * channel payloads. Registered with the GC at state init so gc/
+ * enumerates async roots without including async internals. */
+static void async_roots_mark(mino_state *S)
+{
+    sched_entry_t *e;
+    for (e = S->async.run_head; e != NULL; e = e->next) {
+        gc_mark_interior(S, e->callback);
+        gc_mark_interior(S, e->value);
+    }
+    async_timers_mark(S);
+}
+
+void mino_async_register_gc_handlers(mino_state *S)
+{
+    gc_register_root_walker(S, async_roots_mark);
+}
+
 void async_sched_enqueue(mino_state *S, mino_val *callback,
                          mino_val *value)
 {

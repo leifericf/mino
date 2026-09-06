@@ -269,6 +269,7 @@ static void state_init(mino_state *S)
     mino_values_register_gc_handlers(S);
     mino_collections_register_gc_handlers(S);
     mino_bc_register_gc_handlers(S);
+    mino_async_register_gc_handlers(S);
 }
 
 mino_state *mino_state_new(void)

@@ -6,8 +6,6 @@
  */
 
 #include "runtime/internal.h"
-#include "async/scheduler.h"
-#include "async/timer.h"
 
 /* AddressSanitizer's stack-use-after-return detection moves a function's
  * locals to a heap "fake stack", so &local no longer reflects the real
@@ -492,16 +490,15 @@ static void gc_mark_runtime_globals(mino_state *S)
     }
 }
 
-/* Pin async-subsystem live values: scheduler run-queue callbacks/values
- * and timer channel payloads. */
-static void gc_mark_async_roots(mino_state *S)
+/* Run every registered component root walker (the async scheduler's
+ * queue and timer registry register one at state init). Components
+ * own the knowledge of their queues; gc/ only runs the walkers. */
+static void gc_mark_registered_roots(mino_state *S)
 {
-    struct sched_entry *e;
-    for (e = S->async.run_head; e != NULL; e = e->next) {
-        gc_mark_interior(S, e->callback);
-        gc_mark_interior(S, e->value);
+    size_t i;
+    for (i = 0; i < S->gc_root_walker_len; i++) {
+        S->gc_root_walkers[i](S);
     }
-    async_timers_mark(S);
 }
 
 /* Pin record-type registry entries. Record types are interned per
@@ -542,8 +539,8 @@ static void gc_mark_agent_runq(mino_state *S)
  * root envs, symbol/keyword intern tables, try-catch exceptions, module
  * cache, metadata table, var registry, host-retained refs, dynamic
  * binding values, diagnostic cache, sort comparator, GC save stack,
- * cached core forms, async scheduler queue, trampoline sentinels, and
- * async timer channels.
+ * cached core forms, trampoline sentinels, and the registered
+ * component walkers (async scheduler queue + timer channels).
  */
 void gc_mark_roots(mino_state *S)
 {
@@ -551,7 +548,7 @@ void gc_mark_roots(mino_state *S)
     gc_mark_module_and_meta(S);
     gc_mark_thread_state(S);
     gc_mark_runtime_globals(S);
-    gc_mark_async_roots(S);
+    gc_mark_registered_roots(S);
     gc_mark_record_types(S);
     gc_mark_agent_runq(S);
 }

@@ -19,6 +19,11 @@ typedef struct sched_entry {
     struct sched_entry *next;
 } sched_entry_t;
 
+/* Register the async root walker (scheduler queue + timer registry)
+ * with the GC. Called from state init beside the other component
+ * register hooks. */
+void mino_async_register_gc_handlers(mino_state *S);
+
 /* Enqueue a callback to be called with value during the next drain. */
 void async_sched_enqueue(mino_state *S, mino_val *callback,
                          mino_val *value);

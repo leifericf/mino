@@ -577,6 +577,12 @@ struct mino_state {
     gc_tracer_fn             gc_tracers[GC_T__COUNT];
     gc_finalizer_fn          gc_finalizers[GC_T__COUNT];
 
+    /* Registered root walkers (gc_register_root_walker): called by
+     * gc_mark_roots every cycle so components can pin their C-side
+     * queues without gc/ including component internals. */
+    gc_root_walker_fn        gc_root_walkers[GC_ROOT_WALKERS_MAX];
+    size_t                   gc_root_walker_len;
+
     /* Cached *print-length* / *print-level* resolved values.
      * -1 = unset (no limit). Resolved once per top-level pr / print /
      * pr-str call; helpers consult these inline so dynvar lookup
