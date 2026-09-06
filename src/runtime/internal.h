@@ -404,7 +404,7 @@ struct mino_state {
     mino_val     *sort_comp_fn;
     mino_env     *sort_comp_env;
 
-    /* Signal traps and process-exit hooks (src/prim/signal.c). The five
+    /* Signal traps and process-exit hooks (src/prim/signal/signal.c). The five
      * trappable-signal handler fns sit in fixed slots indexed by
      * enum sig_slot; the at-exit thunks grow in a malloc'd array. Both
      * are GC roots (gc_mark_runtime_globals) so a registered fn survives
@@ -686,7 +686,7 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state *S)
  * must bail with NULL. */
 int mino_eval_stack_guard(mino_state *S);
 
-/* Signal delivery at the interpreter safepoint (src/prim/signal.c). The
+/* Signal delivery at the interpreter safepoint (src/prim/signal/signal.c). The
  * eval safepoint reads mino_signal_any (a single volatile flag, set by
  * the async-signal-safe trap) on its hot path and calls
  * mino_signal_deliver_pending only when it is set. The delivery runs any
@@ -815,13 +815,13 @@ static inline void mino_unlock(mino_state *S)
 
 long long mino_monotonic_ns(void);
 
-/* UUID helpers (defined in src/prim/string.c) -- declared here so the
+/* UUID helpers (defined in src/prim/core/string.c) -- declared here so the
  * reader can build a MINO_UUID directly for the `#uuid "..."` literal
  * without pulling in the full prim/internal.h. */
 mino_val *mino_uuid_from_bytes(mino_state *S, const unsigned char *b);
 int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
 
-/* Regex constructor (defined in src/prim/regex.c) -- declared here so
+/* Regex constructor (defined in src/prim/regex/regex.c) -- declared here so
  * the reader can build a MINO_REGEX for the `#"..."` literal. */
 mino_val *mino_regex_from_source(mino_state *S, mino_val *source);
 

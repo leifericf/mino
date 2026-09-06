@@ -50,7 +50,7 @@ void           dyn_frame_restore_ns(mino_state *S, dyn_frame_t *f); /* restore *
 /* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
  * Returns mino_nil(S) when the stack is empty. Used by future spawn to
  * convey caller bindings to the worker, and by get-thread-bindings.
- * NOTE: the implementation lives in src/prim/stateful.c, not env.c,
+ * NOTE: the implementation lives in src/prim/core/stateful.c, not env.c,
  * because it needs gc_alloc_typed and mino_symbol which are only
  * available after the prim layer initialises. Callers reach it via
  * this header (pulled in through runtime/internal.h). */

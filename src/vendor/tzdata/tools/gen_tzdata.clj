@@ -1,5 +1,5 @@
 (ns vendor.tzdata.tools.gen-tzdata
-  "Regenerate src/prim/tzdata_blob.c and tzdata_blob.h from the
+  "Regenerate src/prim/time/tzdata_blob.c and tzdata_blob.h from the
   vendored zoneinfo snapshot (ADR 27).
 
   Runs under ./mino as the gen-tzdata task. Parses each bundle
@@ -21,7 +21,7 @@
 (require '[clojure.string :as str])
 
 (def ^:private bundle-path "src/vendor/tzdata/zoneinfo.bundle")
-(def ^:private out-path "src/prim/tzdata_blob.c")
+(def ^:private out-path "src/prim/time/tzdata_blob.c")
 (def ^:private hdr-path "src/prim/tzdata_blob.h")
 
 ;; ---- byte building (eager vectors; no deep lazy chains) --------------
@@ -296,7 +296,7 @@
                   "const size_t mino_tzdata_blob_size = " (count blob)
                   ";\n")
         hdr (str "/* Declarations for the generated tzdata blob (ADR 27).\n"
-                 " * Generated alongside src/prim/tzdata_blob.c; do not\n"
+                 " * Generated alongside src/prim/time/tzdata_blob.c; do not\n"
                  " * edit by hand.\n"
                  " */\n"
                  "#ifndef MINO_TZDATA_BLOB_H\n"

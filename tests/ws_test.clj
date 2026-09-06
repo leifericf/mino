@@ -1,7 +1,7 @@
 (require "tests/test")
 
 ;; RFC 6455 websocket frame codec and handshake accept-key goldens for
-;; the native prims ADR 41 sends to src/prim/ws.c. The decoder eats
+;; the native prims ADR 41 sends to src/prim/ws/ws.c. The decoder eats
 ;; untrusted network bytes, so the rejection and malformed-corpus arms
 ;; below are the core of this file (the corpus doubles as the fuzz
 ;; seed).

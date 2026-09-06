@@ -5,7 +5,7 @@
 ;; engine had two quadratic defects (re-find-from walked codepoints
 ;; from 0 per call; top-level alternation ran each branch as its own
 ;; unanchored scan). The fixes are structural in src/regex/re_match.c
-;; and src/prim/regex.c; these assertions pin the observable contract
+;; and src/prim/regex/regex.c; these assertions pin the observable contract
 ;; (fixed token counts, contiguity, document order) on mixed-ASCII
 ;; content. Timing ratios proved unmeasurable on loaded CI runners:
 ;; collection pauses that scale with the suite's live heap dominate

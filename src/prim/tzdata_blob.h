@@ -1,5 +1,5 @@
 /* Declarations for the generated tzdata blob (ADR 27).
- * Generated alongside src/prim/tzdata_blob.c; do not
+ * Generated alongside src/prim/time/tzdata_blob.c; do not
  * edit by hand.
  */
 #ifndef MINO_TZDATA_BLOB_H

@@ -253,7 +253,7 @@
 (defn- cfile-list
   "The client-relevant unit list, in paste order. Directory walks are
   sorted; name exclusions follow the trim list (server side, key
-  generation). sysrng.c is excluded: src/prim/tls.c provides
+  generation). sysrng.c is excluded: src/prim/net/tls.c provides
   br_prng_seeder_system (getentropy / BCryptGenRandom) so no Windows
   advapi32 link is needed."
   []

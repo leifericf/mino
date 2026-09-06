@@ -314,12 +314,12 @@
 
 ;; --- Utility functions ---
 ;; some, every?, not-any?, not-every? are registered as C primitives
-;; (see src/prim/sequences.c). zipmap is also a C prim.
+;; (see src/prim/core/sequences.c). zipmap is also a C prim.
 
 ;; --- Higher-order functions ---
 
 ;; comp, partial, complement are registered as C primitives
-;; (see src/prim/sequences.c).
+;; (see src/prim/core/sequences.c).
 
 ;; --- Trivial compositions ---
 
@@ -419,15 +419,15 @@
         acc))
       (with-meta {} (meta map)) keyseq)))
 
-;; zipmap is registered as a C primitive (see src/prim/sequences.c).
+;; zipmap is registered as a C primitive (see src/prim/core/sequences.c).
 
-;; frequencies is registered as a C primitive (see src/prim/sequences.c).
+;; frequencies is registered as a C primitive (see src/prim/core/sequences.c).
 
-;; group-by is registered as a C primitive (see src/prim/sequences.c).
+;; group-by is registered as a C primitive (see src/prim/core/sequences.c).
 
 ;; --- More higher-order ---
 
-;; juxt is registered as a C primitive (see src/prim/sequences.c).
+;; juxt is registered as a C primitive (see src/prim/core/sequences.c).
 
 (defn mapcat
   "Returns the result of applying concat to the result of mapping f
@@ -752,13 +752,13 @@
   "Returns true if x is a collection."
   [x] (or (seq? x) (vector? x) (map? x) (set? x) (= :queue (type x))))
 ;; some? is a C primitive.
-;; list? is registered as a C primitive (see src/prim/reflection.c)
+;; list? is registered as a C primitive (see src/prim/core/reflection.c)
 ;; that distinguishes MINO_CONS / MINO_EMPTY_LIST from
 ;; MINO_CHUNKED_CONS, matching Clojure's narrower contract: sequences
 ;; produced by `seq` on other collections are seqs but not lists.
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
-;; not-any? / not-every? are C primitives (see src/prim/sequences.c).
-;; distinct? is registered as a C primitive (see src/prim/sequences.c).
+;; not-any? / not-every? are C primitives (see src/prim/core/sequences.c).
+;; distinct? is registered as a C primitive (see src/prim/core/sequences.c).
 ;; Alias of the hash-map prim: :arglists ride def metadata because the
 ;; value is a var, not a fn form defn could derive them from.
 (def ^{:arglists '([] [& keyvals])} array-map
@@ -904,7 +904,7 @@
        (finally
          (monitor-exit mon# owner#)))))
 ;; Delay realisation is folded into the C prim_deref hot path
-;; (see src/prim/stateful.c): when (deref m) is called on a map
+;; (see src/prim/core/stateful.c): when (deref m) is called on a map
 ;; carrying :delay/fn, the prim invokes the thunk directly. The
 ;; Clojure-side `deref` shadow that used to wrap every call with
 ;; a (delay? x) check is no longer needed; the 3-arg form
@@ -1245,7 +1245,7 @@
       (assoc m k (apply update-in (get m k) (rest ks) f args))
       (assoc m k (apply f (get m k) args)))))
 
-;; merge-with is registered as a C primitive (see src/prim/sequences.c).
+;; merge-with is registered as a C primitive (see src/prim/core/sequences.c).
 
 (defn reduce-kv
   "Reduces a map with f taking accumulator, key, and value."
@@ -2120,7 +2120,7 @@
 ;; agent / send / send-off / await / agent-error / restart-agent /
 ;; set-error-handler! / error-handler / set-error-mode! / error-mode /
 ;; agent? / await-for / shutdown-agents / release-pending-sends are
-;; provided by mino_install_agent (src/prim/agent.c). mino's MVP runs
+;; provided by mino_install_agent (src/prim/agent/agent.c). mino's MVP runs
 ;; sends synchronously on the calling thread, so await is a no-op.
 ;; See /documentation/stm/ for the full deviation list.
 
@@ -3421,7 +3421,7 @@
     `(eval (list 'ns *ns* '~clause))))
 
 ;; bytes? / bitstring? predicates are installed as C primitives -- the
-;; real checks against MINO_BYTES live in src/prim/reflection.c so they
+;; real checks against MINO_BYTES live in src/prim/core/reflection.c so they
 ;; integrate with the type-dispatch fast path. `inst?` does the real
 ;; check against the `:mino/instant` meta marker that clojure.instant
 ;; attaches to its parsed maps. mino has no URI type, so uri? stays

@@ -62,7 +62,7 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                   src/read/*.c src/print/*.c \
                   src/diag/*.c \
                   src/names/*.c src/state/*.c src/gc/*.c src/public/*.c \
-                  src/values/*.c src/collections/*.c src/prim/*.c \
+                  src/values/*.c src/collections/*.c src/prim/*/*.c \
                   src/interop/*.c src/regex/*.c src/async/*.c \
                    src/vendor/imath/*.c \
                    src/vendor/bearssl/*.c \

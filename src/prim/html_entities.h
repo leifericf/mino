@@ -1,5 +1,5 @@
 /* Declarations for the generated HTML entity table (ADR 28).
- * Generated alongside src/prim/html_entities.c by
+ * Generated alongside src/prim/html/html_entities.c by
  * tools/gen_html_entities.py; do not edit by hand.
  */
 #ifndef MINO_HTML_ENTITIES_H
