@@ -9,7 +9,7 @@
 (def ^:private cc      (or (getenv "CC") "cc"))
 (def ^:private include-flags
   (str "-Isrc -Isrc/generated -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
-       " -Isrc/read -Isrc/print"
+       " -Isrc/read -Isrc/print -Isrc/names -Isrc/state"
        " -Isrc/values -Isrc/collections -Isrc/prim -Isrc/async"
        " -Isrc/interop -Isrc/diag -Isrc/vendor/imath"
        " -Isrc/vendor/bearssl -Isrc/vendor/bearssl/inc"
@@ -82,16 +82,16 @@
    "src/eval/bc/jit/patcher.c"
    "src/eval/bc/jit/patcher_x86_64.c"
    "src/eval/bc/jit/emit.c" "src/eval/bc/jit/region.c"
-   "src/runtime/state.c" "src/runtime/var.c"
-   "src/runtime/error.c" "src/runtime/env.c"
-   "src/runtime/ns_env.c"
-   "src/runtime/host_threads.c"
-   "src/runtime/capabilities.c"
-   "src/runtime/image.c"
-   "src/runtime/image_load.c"
+   "src/state/state.c" "src/names/var.c"
+   "src/state/error.c" "src/names/env.c"
+   "src/names/ns_env.c"
+   "src/state/host_threads.c"
+   "src/state/capabilities.c"
+   "src/state/image.c"
+   "src/state/image_load.c"
     "src/gc/driver.c" "src/gc/roots.c" "src/gc/ranges.c" "src/gc/major.c"
    "src/gc/barrier.c" "src/gc/minor.c"
-   "src/gc/trace.c" "src/gc/profile.c" "src/runtime/module.c"
+   "src/gc/trace.c" "src/gc/profile.c" "src/names/module.c"
    "src/public/gc.c" "src/public/embed.c"
    "src/values/val.c" "src/values/gc_handlers.c"
    "src/collections/vec.c" "src/collections/map.c"
@@ -638,7 +638,7 @@
 
 (def ^:private amalgam-search-paths
   ["src" "src/generated" "src/public" "src/runtime" "src/gc" "src/eval"
-   "src/read" "src/print" "src/values"
+   "src/read" "src/print" "src/names" "src/state" "src/values"
    "src/collections" "src/prim" "src/async" "src/interop" "src/diag"
    "src/vendor/imath" "src/vendor/bearssl" "src/vendor/bearssl/inc"
    "src/vendor/miniz" "src/vendor/miniz/upstream"
@@ -2699,7 +2699,7 @@
 
 ;; Files allowed to exceed the TU size limit, with rationale.
 (def ^:private tu-allowlist
-  {"src/eval/read.c"            "lexer/parser -- inherently sequential, not decomposable"
+  {"src/read/read.c"            "lexer/parser -- inherently sequential, not decomposable"
    "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"
    "src/prim/agent.c"           "agent subsystem -- worker thread, queue, prims kept together"
    "src/prim/bigdec.c"           "bigdec tower -- mul/sub/cmp share imath helpers, barely over limit"
@@ -2714,10 +2714,10 @@
    "src/prim/stm.c"             "STM commit + retry + ref/alter/commute/dosync kept together"
    "src/prim/string.c"          "string primitives -- per-byte / per-char ops share parsing helpers"
    "src/values/val.c"           "value layer -- alloc / copy / hash / equality kept with type defs"
-   "src/runtime/state.c"        "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
-   "src/runtime/image_load.c"   "SLAD image deserializer -- per-type allocate + patch + ROOTS splice over all MINO_* types"
-   "src/runtime/image.c"        "SLAD image serializer -- per-type emit dispatch over every MINO_* tag"
-   "src/eval/print.c"           "printer dispatch over every MINO_* tag (narrowly over once MINO_STORE printing landed)"
+   "src/state/state.c"          "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
+   "src/state/image_load.c"     "SLAD image deserializer -- per-type allocate + patch + ROOTS splice over all MINO_* types"
+   "src/state/image.c"          "SLAD image serializer -- per-type emit dispatch over every MINO_* tag"
+   "src/print/print.c"          "printer dispatch over every MINO_* tag (narrowly over once MINO_STORE printing landed)"
    "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"
    "src/vendor/bearssl/bearssl_client.c"
    "generated BearSSL client amalgam -- see src/vendor/bearssl/README.md"
@@ -2739,11 +2739,11 @@
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
   #{"src/eval/special.c:eval_impl"     ;; main evaluator dispatch -- inherently large
-    "src/eval/read.c:read_form"
+    "src/read/read.c:read_form"
     "src/values/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
-    "src/eval/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
-    "src/runtime/image.c:img_emit_val_full" ;; SLAD serializer -- per-type emit dispatch over every MINO_* tag
-    "src/runtime/image_load.c:img_patch_one" ;; SLAD deserializer -- per-type reference-patch dispatch over every MINO_* tag
+    "src/print/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
+    "src/state/image.c:img_emit_val_full" ;; SLAD serializer -- per-type emit dispatch over every MINO_* tag
+    "src/state/image_load.c:img_patch_one" ;; SLAD deserializer -- per-type reference-patch dispatch over every MINO_* tag
     "src/prim/module.c:mino_env *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
     "src/prim/module.c:mino_val *prim_require" ;; require -- spec parsing + loading + aliasing in one path
     ;; Vendored BearSSL: unrolled constant-time multiplication and
