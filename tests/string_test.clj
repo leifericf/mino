@@ -439,6 +439,36 @@
     (is (str/starts-with? s "(1"))
     (is (str/ends-with? s ".000000)"))))
 
+(deftest format-f-shortest-digits-half-up
+  ;; %f renders from the shortest decimal digits (the pr-str digits)
+  ;; and rounds to the requested precision with HALF_UP, matching the
+  ;; canonical Formatter, not the host C round-half-to-even of the
+  ;; exact binary expansion.
+  ;; Exact halves round up, not to even.
+  (is (= "1235" (format "%.0f" 1234.5)))
+  (is (= "1" (format "%.0f" 0.5)))
+  (is (= "0.3" (format "%.1f" 0.25)))
+  (is (= "2.50" (format "%.2f" 2.5)))
+  ;; A HALF_UP carry can grow the integer part.
+  (is (= "10" (format "%.0f" 9.5)))
+  (is (= "1.0" (format "%.1f" 0.95)))
+  ;; Very small value rounds up at the precision boundary.
+  (is (= "0.000001" (format "%f" 0.0000005)))
+  ;; Ordinary values and negatives stay unchanged.
+  (is (= "3.14" (format "%.2f" 3.14159)))
+  (is (= "-1234.50" (format "%.2f" -1234.5)))
+  (is (= "0.000000" (format "%f" 0.0)))
+  (is (= "-0.000000" (format "%f" -0.0)))
+  ;; A huge magnitude zero-extends the shortest digits; the integer
+  ;; tail is all zeros, not the exact binary expansion.
+  (let [s (format "%f" 1e300)]
+    (is (= 308 (count s)))
+    (is (str/starts-with? s "1"))
+    (is (str/ends-with? s "000000000.000000")))
+  ;; Precision 0 drops the decimal point entirely.
+  (is (= "3" (format "%.0f" 3.14159)))
+  (is (= "4" (format "%.0f" 3.6))))
+
 (deftest format-paren-flag-rejected-on-hex-float
   ;; Canon: the ( flag is an illegal pair with the hex float
   ;; directive; ignoring it silently was a divergence. The check

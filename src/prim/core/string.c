@@ -191,6 +191,179 @@ static void fmt_group_thousands(const char *in, char *out)
     strcpy(out + di, in + s0 + digits);
 }
 
+/* Render a finite double as fixed-point `%f` with `prec` fractional
+ * digits from the *shortest* decimal digits (the same digits pr-str
+ * prints, i.e. Double.toString), rounded HALF_UP -- matching
+ * java.util.Formatter, not the host C round-half-to-even of the exact
+ * binary expansion. `f_plus`/`f_space` add a leading '+'/' ' on a
+ * non-negative value; `f_hash` forces a '.' at precision 0. The
+ * numeric result (optional sign, integer digits, optional '.' and
+ * exactly `prec` fractional digits) lands in *out (malloc'd, caller
+ * frees) with its length in *outlen. Returns 1, or 0 on allocation
+ * failure. Non-finite values must be handled by the caller before
+ * calling here. */
+static int fmt_f_shortest(double d, long prec, int f_plus, int f_space,
+                          int f_hash, char **out, size_t *outlen)
+{
+    char   shortest[64];
+    int    sn;
+    int    neg;
+    const char *p;
+    char  *idig = NULL, *fdig = NULL;   /* integer, fractional digits */
+    size_t ilen = 0, flen = 0;
+    long   places = prec < 0 ? 6 : prec;
+    char  *res = NULL;
+    size_t reslen = 0;
+
+    sn = print_float_to_buf(shortest, sizeof(shortest), d);
+    if (sn < 0) return 0;
+    p = shortest;
+    neg = (*p == '-');
+    if (neg || *p == '+') p++;
+
+    /* Split the shortest form into a raw integer-digit run and a raw
+     * fractional-digit run, then apply any 'E' exponent by shifting
+     * the decimal point across the concatenated significand. */
+    {
+        const char *ip = p, *fp = NULL, *ep;
+        size_t rawi, rawf = 0;
+        long   e10 = 0;
+        char  *sig;   /* concatenated significand digits */
+        size_t siglen;
+        long   point; /* count of significand digits left of the point */
+        size_t k;
+
+        for (ep = p; *ep && *ep != '.' && *ep != 'E' && *ep != 'e'; ep++) ;
+        rawi = (size_t)(ep - ip);
+        if (*ep == '.') {
+            fp = ep + 1;
+            for (ep = fp; *ep && *ep != 'E' && *ep != 'e'; ep++) ;
+            rawf = (size_t)(ep - fp);
+        }
+        if (*ep == 'E' || *ep == 'e') e10 = strtol(ep + 1, NULL, 10);
+
+        siglen = rawi + rawf;
+        sig = (char *)malloc(siglen + 1);
+        if (sig == NULL) return 0;
+        for (k = 0; k < rawi; k++) sig[k] = ip[k];
+        for (k = 0; k < rawf; k++) sig[rawi + k] = fp[k];
+        sig[siglen] = '\0';
+        point = (long)rawi + e10;   /* digits left of the point */
+
+        /* Materialize integer and fractional digit runs, zero-padding
+         * for a point that falls outside the significand. */
+        if (point <= 0) {
+            ilen = 1;
+            idig = (char *)malloc(2);
+            if (idig == NULL) { free(sig); return 0; }
+            idig[0] = '0'; idig[1] = '\0';
+            flen = (size_t)(-point) + siglen;
+            fdig = (char *)malloc(flen + 1);
+            if (fdig == NULL) { free(sig); free(idig); return 0; }
+            for (k = 0; k < (size_t)(-point); k++) fdig[k] = '0';
+            memcpy(fdig + (size_t)(-point), sig, siglen);
+            fdig[flen] = '\0';
+        } else if ((size_t)point >= siglen) {
+            ilen = (size_t)point;
+            idig = (char *)malloc(ilen + 1);
+            if (idig == NULL) { free(sig); return 0; }
+            memcpy(idig, sig, siglen);
+            for (k = siglen; k < ilen; k++) idig[k] = '0';
+            idig[ilen] = '\0';
+            flen = 0;
+            fdig = (char *)malloc(1);
+            if (fdig == NULL) { free(sig); free(idig); return 0; }
+            fdig[0] = '\0';
+        } else {
+            ilen = (size_t)point;
+            idig = (char *)malloc(ilen + 1);
+            if (idig == NULL) { free(sig); return 0; }
+            memcpy(idig, sig, ilen);
+            idig[ilen] = '\0';
+            flen = siglen - ilen;
+            fdig = (char *)malloc(flen + 1);
+            if (fdig == NULL) { free(sig); free(idig); return 0; }
+            memcpy(fdig, sig + ilen, flen);
+            fdig[flen] = '\0';
+        }
+        free(sig);
+    }
+
+    /* Round the fractional run to `places` digits, HALF_UP: if the
+     * first dropped digit is >= '5', increment the kept digits and
+     * carry into the integer part when the fraction overflows. */
+    {
+        char  *frac = (char *)malloc((size_t)places + 1);
+        int    carry = 0;
+        long   k;
+        if (frac == NULL) { free(idig); free(fdig); return 0; }
+        for (k = 0; k < places; k++)
+            frac[k] = ((size_t)k < flen) ? fdig[k] : '0';
+        frac[places] = '\0';
+        if ((size_t)places < flen && fdig[places] >= '5') {
+            long j = places - 1;
+            carry = 1;
+            while (j >= 0 && carry) {
+                if (frac[j] == '9') { frac[j] = '0'; }
+                else { frac[j]++; carry = 0; }
+                j--;
+            }
+        }
+        if (carry) {
+            /* The fraction rounded up to 1.0; add one to the integer
+             * digits, growing them by a leading '1' on all-nines. */
+            long j = (long)ilen - 1;
+            while (j >= 0 && carry) {
+                if (idig[j] == '9') { idig[j] = '0'; }
+                else { idig[j]++; carry = 0; }
+                j--;
+            }
+            if (carry) {
+                char *ni = (char *)malloc(ilen + 2);
+                if (ni == NULL) { free(idig); free(fdig); free(frac); return 0; }
+                ni[0] = '1';
+                memcpy(ni + 1, idig, ilen + 1);
+                free(idig);
+                idig = ni;
+                ilen++;
+            }
+        }
+        free(fdig);
+        fdig = frac;
+        flen = (size_t)places;
+    }
+
+    /* A rounded-to-zero magnitude is never signed '-'; canon keeps a
+     * literal "-0.0" negative but a value that rounds to all-zero
+     * prints unsigned. -0.0 itself keeps its sign (Formatter prints
+     * "-0.000000"), so honor the source sign here without a zero
+     * check: snprintf-parity and the existing paren test both expect
+     * the sign to survive. */
+
+    /* Assemble: sign, integer digits, optional point + fraction. */
+    reslen = ilen + (size_t)places;
+    reslen += 1;                      /* possible sign */
+    reslen += 1;                      /* possible '.' */
+    reslen += 1;                      /* slack for a trailing paren */
+    res = (char *)malloc(reslen + 1);
+    if (res == NULL) { free(idig); free(fdig); return 0; }
+    {
+        size_t w = 0;
+        if (neg)           res[w++] = '-';
+        else if (f_plus)   res[w++] = '+';
+        else if (f_space)  res[w++] = ' ';
+        memcpy(res + w, idig, ilen); w += ilen;
+        if (places > 0 || f_hash) res[w++] = '.';
+        memcpy(res + w, fdig, (size_t)places); w += (size_t)places;
+        res[w] = '\0';
+        *outlen = w;
+    }
+    free(idig);
+    free(fdig);
+    *out = res;
+    return 1;
+}
+
 /* The Formatter's %g: `prec` total significant digits (default 6,
  * 0 promotes to 1), trailing zeros kept; scientific notation outside
  * [1e-4, 10^prec). C's %g strips zeros and picks the shorter form,
@@ -689,6 +862,44 @@ mino_val *prim_format(mino_state *S, mino_val *args, mino_env *env)
                                           f_space, f_paren, nf);
                 buf = fmt_append_padded(S, buf, &len, &cap, nf, nn,
                                         width, f_minus);
+                if (buf == NULL) { free(argv); return NULL; }
+                break;
+            }
+            if (spec == 'f') {
+                /* Fixed-point renders from the shortest decimal digits
+                 * with HALF_UP rounding, matching the canonical
+                 * Formatter rather than the host C round-half-to-even
+                 * of the exact binary expansion. Grouping, parens,
+                 * width and zero fill layer on exactly as before. */
+                char  *src = NULL;
+                size_t sl;
+                if (!fmt_f_shortest(d, prec, f_plus, f_space, f_hash,
+                                    &src, &sl)) {
+                    ekind = "eval/out-of-memory"; ecode = "MOM001";
+                    emsg  = "out of memory";
+                    goto fail;
+                }
+                if (f_comma) {
+                    char *g2 = (char *)malloc(sl + sl / 3 + 4);
+                    if (g2 == NULL) {
+                        free(src);
+                        ekind = "eval/out-of-memory"; ecode = "MOM001";
+                        emsg  = "out of memory";
+                        goto fail;
+                    }
+                    fmt_group_thousands(src, g2);
+                    free(src);
+                    src = g2;
+                    sl  = strlen(g2);
+                }
+                if (f_paren && src[0] == '-') {
+                    src[0] = '(';
+                    src[sl++] = ')';
+                    src[sl] = '\0';
+                }
+                buf = fmt_append_num_padded(S, buf, &len, &cap, src, sl,
+                                            width, f_minus, f_zero);
+                free(src);
                 if (buf == NULL) { free(argv); return NULL; }
                 break;
             }
