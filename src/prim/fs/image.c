@@ -50,13 +50,13 @@ static mino_val *prim_load_image(mino_state *S, mino_val *args,
     return mino_nil(S);
 }
 
-static const mino_prim_def k_prims_image[] = {
+const mino_prim_def k_prims_image[] = {
     {"save-image",      prim_save_image,
      "Save the full runtime state to an image file."},
     {"load-image-into", prim_load_image,
      "Load an image file into the current state."},
 };
-static const size_t k_prims_image_count =
+const size_t k_prims_image_count =
     sizeof(k_prims_image) / sizeof(k_prims_image[0]);
 
 void mino_install_image_prims(mino_state *S, mino_env *env)
@@ -65,5 +65,6 @@ void mino_install_image_prims(mino_state *S, mino_env *env)
     (void)env;
     prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_image, k_prims_image_count,
-                                       "fs");
+                                       "image");
+    S->caps_installed |= MINO_CAP_IMAGE;
 }

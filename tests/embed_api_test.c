@@ -357,6 +357,66 @@ static void test_json_csv_capability_gate(void)
     }
 }
 
+/* Heap images (save-image / load-image-into) used to ride in on the fs
+ * install as a rider, so installing fs implicitly installed image. They
+ * now gate on their own MINO_CAP_IMAGE bit: an fs-only state carries the
+ * fs prims but not the image prims, an explicit image install brings
+ * them online, and image is excluded from the DEFAULT / sandbox surface
+ * (it was fs-gated, never a sandbox capability). */
+static void test_image_capability_gate(void)
+{
+    /* (a) fs installed, image not: the image prims are absent and their
+     * reference surfaces the MNS002 :image diagnostic. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        const char *err;
+        mino_install(S, env, MINO_CAP_FS);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_FS),
+                "image/gate: fs installs");
+        REQUIRE(!mino_capability_installed(S, MINO_CAP_IMAGE),
+                "image/gate: installing fs must not install image");
+        r = mino_eval_string(S, "(mino-installed? :image)", env);
+        REQUIRE(r == mino_false(S),
+                "image/gate: mino-installed? :image false under fs-only");
+        r = mino_eval_string(S, "(save-image \"/tmp/mino-noimg.img\")", env);
+        REQUIRE(r == NULL, "image/gate: save-image absent under fs-only");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "capability 'image'") != NULL,
+                "image/gate: MNS002 names the image capability");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    /* (b) Explicit image install: the bit sets and the prims are bound. */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_val   *r;
+        mino_install(S, env, MINO_CAP_IMAGE);
+        REQUIRE(mino_capability_installed(S, MINO_CAP_IMAGE),
+                "image/gate: MINO_CAP_IMAGE installs on demand");
+        r = mino_eval_string(S, "(fn? save-image)", env);
+        REQUIRE(r == mino_true(S),
+                "image/gate: save-image bound once image installed");
+        r = mino_eval_string(S, "(fn? load-image-into)", env);
+        REQUIRE(r == mino_true(S),
+                "image/gate: load-image-into bound once image installed");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+    /* (c) DEFAULT / sandbox does not carry image (it was fs-gated). */
+    {
+        mino_state *S   = mino_state_new();
+        mino_env   *env = mino_env_new(S);
+        mino_install_sandbox(S, env);
+        REQUIRE(!mino_capability_installed(S, MINO_CAP_IMAGE),
+                "image/gate: sandbox preset must not carry image");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+}
+
 /* A net-gated prim referenced without the net capability must surface
  * the MNS002 capability diagnostic ("capability 'net' disabled by
  * host"), not a bare unbound-symbol error. Pins the net entry in the
@@ -1288,6 +1348,7 @@ int main(void)
     test_to_int_bignum_round_trip();
     test_net_capability_gate();
     test_json_csv_capability_gate();
+    test_image_capability_gate();
     test_net_mns002_diagnostic();
     test_pure_data_lib_gating();
     test_atom_reset_tenured();

@@ -570,6 +570,11 @@ extern const size_t        k_prims_async_count;
 extern const mino_prim_def k_prims_fs[];
 extern const size_t        k_prims_fs_count;
 
+/* image.c -- save-image / load-image-into install under MINO_CAP_IMAGE
+ * (its own capability, no longer a rider on fs). */
+extern const mino_prim_def k_prims_image[];
+extern const size_t        k_prims_image_count;
+
 /* http_client.c -- mino_install_http_client installs the http-request
  * orchestration prim under MINO_CAP_NET (net/tls/pool capability
  * dispatch in runtime/capabilities.c). It drives the http_codec.c

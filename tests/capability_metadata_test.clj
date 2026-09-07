@@ -20,6 +20,9 @@
   (is (= :io   (mino-capability 'exit)))
   (is (= :fs   (mino-capability 'mkdir-p)))
   (is (= :fs   (mino-capability 'file-exists?)))
+  ;; Heap images gate on their own capability, no longer a rider on fs.
+  (is (= :image (mino-capability 'save-image)))
+  (is (= :image (mino-capability 'load-image-into)))
   (is (= :proc (mino-capability 'sh)))
   (is (= :proc (mino-capability 'sh!)))
   ;; json / csv are gated data libraries, not floor prims: their reader

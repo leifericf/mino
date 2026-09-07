@@ -1748,6 +1748,7 @@ const char *mino_reader_file(mino_state *S);
 #define MINO_CAP_TAR           (1ull << 54) /* mino.tar + tar container prims */
 #define MINO_CAP_UDP           (1ull << 55) /* udp-socket / udp-send / udp-recv / dns-lookup */
 #define MINO_CAP_UTIL          (1ull << 56) /* mino.shell / mino.retry / mino.wait / mino.mime */
+#define MINO_CAP_IMAGE         (1ull << 57) /* save-image / load-image-into (heap image SLAD) */
 
 /* The capability field is uint64_t, accommodating capabilities at bits
  * 32 and above. Existing MINO_CAP_* constants (bits 0-31) remain

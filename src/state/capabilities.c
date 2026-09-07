@@ -47,6 +47,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
     { MINO_CAP_TRANSDUCERS, mino_install_transducers },
     { MINO_CAP_IO,          mino_install_io          },
     { MINO_CAP_FS,          mino_install_fs          },
+    { MINO_CAP_IMAGE,       mino_install_image_prims },
     { MINO_CAP_PROC,        mino_install_proc        },
     { MINO_CAP_STM,         mino_install_stm         },
     { MINO_CAP_AGENT,       mino_install_agent       },

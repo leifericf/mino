@@ -362,6 +362,8 @@ static const mino_capability_info k_capability_info[] = {
       "udp-socket / udp-send / udp-recv / udp-close / dns-lookup." },
     { "util",         MINO_CAP_UTIL,
       "mino.shell / mino.retry / mino.wait / mino.mime / mino.jsonl." },
+    { "image",        MINO_CAP_IMAGE,
+      "save-image / load-image-into (whole-heap image save and load)." },
     { NULL,           0u,                                                NULL },
 };
 
@@ -455,6 +457,9 @@ static const cap_prim_table_t k_cap_prim_tables[] = {
     { MINO_CAP_IO,     k_prims_io,     &k_prims_io_count     },
     { MINO_CAP_FS,     k_prims_fs,     &k_prims_fs_count     },
     { MINO_CAP_FS,     k_prims_path_fs, &k_prims_path_fs_count },
+    /* save-image / load-image-into gate on their own capability now;
+     * an unbound save-image under a no-image install reports :image. */
+    { MINO_CAP_IMAGE,  k_prims_image,  &k_prims_image_count  },
     { MINO_CAP_PROC,   k_prims_proc,   &k_prims_proc_count   },
     { MINO_CAP_STM,    k_prims_stm,    &k_prims_stm_count    },
     { MINO_CAP_HOST,   k_prims_host,   &k_prims_host_count   },
