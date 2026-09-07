@@ -102,3 +102,29 @@ int runtime_module_add_alias(mino_state *S,
     S->ns_vars.ns_alias_len++;
     return 0;
 }
+
+int runtime_module_add_load_path(mino_state *S, const char *path)
+{
+    size_t i;
+    size_t path_len;
+    char  *dup;
+    if (path == NULL) return -1;
+    for (i = 0; i < S->module.extra_load_paths_len; i++) {
+        if (strcmp(S->module.extra_load_paths[i], path) == 0) return 0;
+    }
+    if (S->module.extra_load_paths_len == S->module.extra_load_paths_cap) {
+        size_t new_cap = S->module.extra_load_paths_cap == 0 ? 4
+                       : S->module.extra_load_paths_cap * 2;
+        char **np = (char **)realloc(S->module.extra_load_paths,
+                                     new_cap * sizeof(*np));
+        if (np == NULL) return -1;
+        S->module.extra_load_paths     = np;
+        S->module.extra_load_paths_cap = new_cap;
+    }
+    path_len = strlen(path);
+    dup = (char *)malloc(path_len + 1);
+    if (dup == NULL) return -1;
+    memcpy(dup, path, path_len + 1);
+    S->module.extra_load_paths[S->module.extra_load_paths_len++] = dup;
+    return 0;
+}

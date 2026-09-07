@@ -691,6 +691,90 @@ static void test_last_error_uniform_across_eval_family(mino_state *S,
             "uniform-err: mino_eval_ex last_error matches");
 }
 
+/* The REPL / front-end embedding surface: a host builds the pieces a
+ * REPL needs without reaching into runtime internals -- load-path
+ * extension, var root read/write for history vars, and source-cache
+ * feeding for error context. */
+static void test_repl_embedding_surface(mino_state *S, mino_env *env)
+{
+    (void)env;
+    /* Load paths: add, enumerate, dedup. */
+    {
+        size_t before = mino_load_path_count(S);
+        int    seen_a = 0, seen_b = 0;
+        size_t i;
+        mino_add_load_path(S, "/tmp/mino-lp-a");
+        mino_add_load_path(S, "/tmp/mino-lp-b");
+        mino_add_load_path(S, "/tmp/mino-lp-a"); /* dup: ignored */
+        REQUIRE(mino_load_path_count(S) == before + 2,
+                "loadpath: two distinct paths added, dup ignored");
+        for (i = 0; i < mino_load_path_count(S); i++) {
+            const char *p = mino_load_path_get(S, i);
+            if (p != NULL && strcmp(p, "/tmp/mino-lp-a") == 0) seen_a = 1;
+            if (p != NULL && strcmp(p, "/tmp/mino-lp-b") == 0) seen_b = 1;
+        }
+        REQUIRE(seen_a && seen_b, "loadpath: both paths enumerable");
+        REQUIRE(mino_load_path_get(S, mino_load_path_count(S)) == NULL,
+                "loadpath: out-of-range index returns NULL");
+    }
+
+    /* Var root read/write: intern a dynamic var, set and read its root,
+     * and confirm mino code sees the same value through the var. */
+    {
+        mino_val *v = mino_intern_var(S, "clojure.core", "*embed-star1*");
+        REQUIRE(v != NULL, "var: intern returns a var");
+        REQUIRE(v != NULL && mino_typeof(v) == MINO_VAR,
+                "var: interned value is a var");
+        mino_var_set_dynamic(S, v, 1);
+        mino_var_set_root(S, v, mino_int(S, 77));
+        {
+            mino_val  *root = mino_var_get_root(v);
+            long long   n = 0;
+            REQUIRE(root != NULL && mino_to_int(root, &n) && n == 77,
+                    "var: get_root reads back the set root");
+        }
+        /* Interning again returns the same cell (find, not re-create),
+         * so a rotate that re-interns sees the current root. */
+        {
+            mino_val *again = mino_intern_var(S, "clojure.core",
+                                              "*embed-star1*");
+            REQUIRE(again == v, "var: re-intern returns the same cell");
+        }
+        /* Rewriting the root is observed through get_root -- the read
+         * side a REPL history rotate uses to shuffle *1 -> *2 -> *3. */
+        mino_var_set_root(S, v, mino_int(S, 99));
+        {
+            mino_val  *root = mino_var_get_root(v);
+            long long   n = 0;
+            REQUIRE(root != NULL && mino_to_int(root, &n) && n == 99,
+                    "var: root rewrite is observed through get_root");
+        }
+        /* set_dynamic accepts both directions without disturbing the
+         * root. */
+        mino_var_set_dynamic(S, v, 0);
+        {
+            mino_val  *root = mino_var_get_root(v);
+            long long   n = 0;
+            REQUIRE(root != NULL && mino_to_int(root, &n) && n == 99,
+                    "var: set_dynamic(0) leaves the root intact");
+        }
+    }
+
+    /* Source-cache feed: feeding source under a file name lets a later
+     * error at that location quote the offending text. We assert the
+     * feed and the reader-file accessor rather than the exact snippet
+     * (rendering is diag-internal), since a wrong file name would make
+     * the cache miss. */
+    {
+        const char *src = "(this-symbol-is-unbound)";
+        mino_source_cache_feed(S, "<embed-feed>", src, strlen(src));
+        /* The accessor returns the reader's current attribution; after a
+         * prior eval it is non-NULL. */
+        REQUIRE(mino_reader_file(S) != NULL,
+                "srccache: reader_file is available for feeding");
+    }
+}
+
 /* mino_iter walks every k/v of a sorted-map (in sort order) and every
  * element of a sorted-set, just like it does for hashed variants. */
 static void test_iter_sorted(mino_state *S, mino_env *env)
@@ -1154,6 +1238,7 @@ int main(void)
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
     test_last_error_uniform_across_eval_family(S, env);
+    test_repl_embedding_surface(S, env);
     test_to_int_bignum_round_trip();
     test_net_capability_gate();
     test_json_csv_capability_gate();

@@ -73,5 +73,11 @@ int  runtime_module_dotted_to_path(const char *name, size_t nlen,
                                    char *buf, size_t bufsize);
 int  runtime_module_add_alias(mino_state *S,
                               const char *alias, const char *full);
+/* Append `path` to the runtime require search path, growing the backing
+ * array as needed. Idempotent: a path already present is not re-added.
+ * Returns 0 on success (or when the path was already present) and -1 on
+ * allocation failure. Shared by the add-load-path! primitive and the
+ * public mino_add_load_path. */
+int  runtime_module_add_load_path(mino_state *S, const char *path);
 
 #endif /* RUNTIME_VAR_MODULE_H */

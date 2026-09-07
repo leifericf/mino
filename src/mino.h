@@ -1575,6 +1575,67 @@ void mino_register_bundled_lib(mino_state *S, const char *name,
                                 const char *source);
 
 /* ------------------------------------------------------------------------- */
+/* REPL / front-end embedding surface                                        */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * The functions in this block are what a REPL- or CLI-building embedder
+ * needs and would otherwise reach into runtime internals for: extending
+ * the require search path, reading and writing var roots (for the
+ * `*1 *2 *3 *e` history vars a REPL rotates), feeding read source into
+ * the diagnostic cache so errors show the offending line, and reading
+ * the last structured diagnostic (see mino_last_diag / mino_last_error
+ * above). They are stable embedder surface, not internal helpers.
+ */
+
+/*
+ * Append `path` to the runtime require search path (the list
+ * (add-load-path! ...) grows from mino code). Duplicates are ignored.
+ * A registered resolver can enumerate the list via mino_load_path_count
+ * / mino_load_path_get to honor these paths. The string is copied.
+ */
+void         mino_add_load_path(mino_state *S, const char *path);
+/* Number of runtime load paths registered so far. */
+size_t       mino_load_path_count(mino_state *S);
+/* The load path at index i (0 <= i < mino_load_path_count), or NULL if
+ * out of range. The pointer is owned by the state; do not free it. */
+const char *mino_load_path_get(mino_state *S, size_t i);
+
+/*
+ * Intern (or find) the var named `name` in namespace `ns`, returning its
+ * var cell. Use with mino_var_set_root / mino_var_get_root to manage a
+ * front-end's own vars (the REPL history vars, a host-provided global).
+ * Returns NULL on allocation failure.
+ */
+mino_val *mino_intern_var(mino_state *S, const char *ns, const char *name);
+/* Mark `var` dynamic (thread-bindable) when `dynamic` is non-zero, or
+ * static when zero. REPL history vars are dynamic so a nested binding
+ * is honored. */
+void         mino_var_set_dynamic(mino_state *S, mino_val *var, int dynamic);
+/* Set the root binding of `var` to `val` (NULL is stored as nil). */
+void         mino_var_set_root(mino_state *S, mino_val *var, mino_val *val);
+/* Read the current root binding of `var`, or NULL if `var` is not a var
+ * or is unbound. */
+mino_val *mino_var_get_root(const mino_val *var);
+
+/*
+ * Feed `len` bytes of source text under the name `file` into the
+ * diagnostic source cache, so a subsequent error whose location falls in
+ * that file can quote the offending line. A REPL feeds its accumulated
+ * input here before each read; a host evaluating in-memory source feeds
+ * the buffer it is about to read. The text is copied.
+ */
+void mino_source_cache_feed(mino_state *S, const char *file,
+                            const char *text, size_t len);
+/*
+ * The file name the reader is currently attributing source positions to
+ * (the value set by the last read entry point, e.g. "<string>" or a
+ * script path), or NULL if none. Borrowed; do not free. Useful as the
+ * `file` argument to mino_source_cache_feed.
+ */
+const char *mino_reader_file(mino_state *S);
+
+/* ------------------------------------------------------------------------- */
 /* Capability-gated install API                                              */
 /* ------------------------------------------------------------------------- */
 

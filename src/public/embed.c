@@ -231,3 +231,64 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
 
     return 0;
 }
+
+/* ------------------------------------------------------------------------- */
+/* REPL / front-end embedding surface                                        */
+/* ------------------------------------------------------------------------- */
+
+void mino_add_load_path(mino_state *S, const char *path)
+{
+    if (S == NULL || path == NULL) return;
+    (void)runtime_module_add_load_path(S, path);
+}
+
+size_t mino_load_path_count(mino_state *S)
+{
+    if (S == NULL) return 0;
+    return S->module.extra_load_paths_len;
+}
+
+const char *mino_load_path_get(mino_state *S, size_t i)
+{
+    if (S == NULL || i >= S->module.extra_load_paths_len) return NULL;
+    return S->module.extra_load_paths[i];
+}
+
+mino_val *mino_intern_var(mino_state *S, const char *ns, const char *name)
+{
+    if (S == NULL || ns == NULL || name == NULL) return NULL;
+    return var_intern(S, ns, name);
+}
+
+void mino_var_set_dynamic(mino_state *S, mino_val *var, int dynamic)
+{
+    (void)S;
+    if (var == NULL || mino_type_of(var) != MINO_VAR) return;
+    var->as.var.dynamic = dynamic ? 1 : 0;
+}
+
+void mino_var_set_root(mino_state *S, mino_val *var, mino_val *val)
+{
+    if (S == NULL || var == NULL || mino_type_of(var) != MINO_VAR) return;
+    if (val == NULL) val = mino_nil(S);
+    var_set_root(S, var, val);
+}
+
+mino_val *mino_var_get_root(const mino_val *var)
+{
+    if (var == NULL || mino_type_of(var) != MINO_VAR) return NULL;
+    return var->as.var.root;
+}
+
+void mino_source_cache_feed(mino_state *S, const char *file,
+                            const char *text, size_t len)
+{
+    if (S == NULL || file == NULL || text == NULL) return;
+    source_cache_store(S, file, text, len);
+}
+
+const char *mino_reader_file(mino_state *S)
+{
+    if (S == NULL) return NULL;
+    return S->reader.reader_file;
+}

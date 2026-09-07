@@ -1234,8 +1234,6 @@ static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
 {
     mino_val *path_val;
     const char *path;
-    size_t      i;
-    char       *dup;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return throw_classified(S, "eval/arity", "MAR001",
@@ -1247,31 +1245,10 @@ static mino_val *prim_add_load_path(mino_state *S, mino_val *args,
             "add-load-path!: argument must be a string");
     }
     path = path_val->as.s.data;
-    for (i = 0; i < S->module.extra_load_paths_len; i++) {
-        if (strcmp(S->module.extra_load_paths[i], path) == 0) return mino_nil(S);
+    if (runtime_module_add_load_path(S, path) != 0) {
+        return throw_classified(S, "eval/out-of-memory", "MOM001",
+            "out of memory in add-load-path!");
     }
-    if (S->module.extra_load_paths_len == S->module.extra_load_paths_cap) {
-        size_t new_cap = S->module.extra_load_paths_cap == 0 ? 4
-                       : S->module.extra_load_paths_cap * 2;
-        char **np = (char **)realloc(S->module.extra_load_paths,
-                                     new_cap * sizeof(*np));
-        if (np == NULL) {
-            return throw_classified(S, "eval/out-of-memory", "MOM001",
-                "out of memory in add-load-path!");
-        }
-        S->module.extra_load_paths     = np;
-        S->module.extra_load_paths_cap = new_cap;
-    }
-    {
-        size_t path_len = strlen(path);
-        dup = (char *)malloc(path_len + 1);
-        if (dup == NULL) {
-            return throw_classified(S, "eval/out-of-memory", "MOM001",
-                "out of memory in add-load-path!");
-        }
-        memcpy(dup, path, path_len + 1);
-    }
-    S->module.extra_load_paths[S->module.extra_load_paths_len++] = dup;
     return mino_nil(S);
 }
 
