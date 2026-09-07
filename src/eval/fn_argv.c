@@ -70,6 +70,9 @@ static inline mino_val *invoke_bc_fn_argv(mino_state *S, mino_val *fn,
         if (tmpl != NULL && tmpl->as.fn.bc == fn->as.fn.bc) {
             tmpl->as.fn.bc = NULL;
             (void)mino_bc_compile_fn(S, tmpl);
+            /* fn may be an OLD sibling inheriting the template's fresh
+             * YOUNG bc: barrier the store so the remset sees the edge. */
+            gc_write_barrier(S, fn, NULL, tmpl->as.fn.bc);
             fn->as.fn.bc = tmpl->as.fn.bc;
         } else {
             fn->as.fn.bc = NULL;
