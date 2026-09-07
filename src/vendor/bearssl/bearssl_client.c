@@ -1,3 +1,4 @@
+#ifndef MINO_NO_TLS
 /* BearSSL v0.6 (commit 8ef7680) TLS-client amalgam, generated
  * by tools/make_amalgam.clj (mino task bearssl-amalgam) from
  * the vendored tree in this directory. Not an upstream file.
@@ -62868,3 +62869,6 @@ br_get_config(void)
 {
 	return config_u245;
 }
+#else
+typedef int mino_bearssl_client_compiled_out;
+#endif /* MINO_NO_TLS */

@@ -22,6 +22,26 @@
 
 (def ^:private vendor-root "src/vendor/bearssl")
 (def ^:private out-path "src/vendor/bearssl/bearssl_client.c")
+(def ^:private hash-out-path "src/vendor/bearssl/bearssl_hash.c")
+
+;; Compile-out guard. The full TLS-client amalgam (bearssl_client.c) and
+;; the vendored CA roots (roots.c) drop under MINO_NO_TLS; the hash-only
+;; amalgam (bearssl_hash.c) then supplies the SHA / MD5 / HMAC surface
+;; that the digest and websocket layers still need. The two amalgams are
+;; mutually exclusive -- exactly one defines the public br_* hash symbols
+;; in any build -- so nothing collides. The guards are emitted here (not
+;; added by hand) so a regeneration stays byte-identical with the
+;; committed files, keeping the amalgam drift gate green.
+(def ^:private tls-guard-open "#ifndef MINO_NO_TLS\n")
+(def ^:private tls-guard-else-tail
+  ;; A non-empty translation unit under the flag: a lone typedef keeps
+  ;; -Wpedantic from flagging an empty TU when the amalgam is compiled out.
+  (str "#else\ntypedef int mino_bearssl_client_compiled_out;\n"
+       "#endif /* MINO_NO_TLS */\n"))
+(def ^:private hash-guard-open "#ifdef MINO_NO_TLS\n")
+(def ^:private hash-guard-else-tail
+  (str "#else\ntypedef int mino_bearssl_hash_compiled_out;\n"
+       "#endif /* MINO_NO_TLS */\n"))
 
 ;; Type and storage keywords never part of a declared name.
 (def ^:private kw
@@ -282,6 +302,22 @@
            (mapv #(str "src/x509/" % ".c") x509)
            ["src/settings.c"]))))
 
+(defn- hash-cfile-list
+  "The digest / websocket hash surface, in paste order: the byte codec
+  helpers and every hash and HMAC unit. This is the always-compiled
+  subset that survives MINO_NO_TLS (the SHA / MD5 / HMAC prims the
+  digest and websocket layers call). Excludes the GHASH units (GCM,
+  used only by the TLS record layer) so the standalone hash TU carries
+  no dead GCM code. Directory walks are sorted for determinism."
+  []
+  (let [hash-files (->> (dir-c-files "src/hash")
+                        (filterv #(not (str/starts-with? % "ghash")))
+                        (mapv #(subs % 0 (- (count %) 2))))]
+    (vec (concat
+           (mapv #(str "src/codec/" % ".c") codec)
+           (mapv #(str "src/hash/" % ".c") hash-files)
+           ["src/mac/hmac.c" "src/mac/hmac_ct.c"]))))
+
 (defn- emit
   "Paste one vendored file into the chunk accumulator: drop #pragma
   comment lines, rename file-local identifiers when a unit suffix is
@@ -370,6 +406,7 @@
   writes nothing)."
   []
   (let [chunks (atom [])]
+    (swap! chunks conj tls-guard-open)
     (swap! chunks conj banner)
     (doseq [h headers]
       (emit chunks h nil))
@@ -380,6 +417,59 @@
       (pedantic-relief chunks c true)
       (emit chunks c (str "u" idx))
       (pedantic-relief chunks c false))
+    (swap! chunks conj tls-guard-else-tail)
+    (min-max-rename (str/join "" @chunks))))
+
+(def ^:private hash-banner
+  (str
+    "/* BearSSL v0.6 (commit 8ef7680) hash / HMAC amalgam, generated\n"
+    " * by tools/make_amalgam.clj (mino task bearssl-amalgam) from\n"
+    " * the vendored tree in this directory. Not an upstream file.\n"
+    " * MIT (c) 2016 Thomas Pornin <pornin@bolet.org>; see LICENSE.\n"
+    " *\n"
+    " * The SHA / MD5 / HMAC surface only: the digest and websocket\n"
+    " * layers call these hash primitives, and they must survive a\n"
+    " * MINO_NO_TLS build that compiles out the full TLS client\n"
+    " * (bearssl_client.c) and the CA roots. This TU is compiled ONLY\n"
+    " * under MINO_NO_TLS; the full amalgam supplies the same public\n"
+    " * br_* hash symbols otherwise, so exactly one of the two defines\n"
+    " * them in any build.\n"
+    " *\n"
+    " * Per-unit local identifiers carry an _u<idx> suffix so the\n"
+    " * independent TUs coexist in one translation unit.\n"
+    " *\n"
+    " * MIN/MAX renamed to br_MIN/br_MAX: hosts commonly define MIN/MAX\n"
+    " * macros (sys/param.h) which collide with inner.h's inlines.\n"
+    " */\n"
+    "#define BR_ENABLE_INTRINSICS 1\n"
+    "#define WIN32_LEAN_AND_MEAN\n"
+    "#if defined(__GNUC__) || defined(__clang__)\n"
+    "#pragma GCC diagnostic push\n"
+    "#pragma GCC diagnostic ignored \"-Wunused-function\"\n"
+    "#endif\n"))
+
+(defn generate-hash-text
+  "Assemble the standalone hash / HMAC amalgam from the vendored tree.
+  Same paste discipline as generate-text over the hash subset, wrapped
+  in the MINO_NO_TLS guard so it contributes symbols only when the full
+  TLS amalgam is compiled out. Deterministic and pure."
+  []
+  (let [chunks (atom [])]
+    (swap! chunks conj hash-guard-open)
+    (swap! chunks conj hash-banner)
+    ;; The full public-header set: inner.h references TLS-only types
+    ;; (br_ssl_engine_context, br_rsa_public_key, ...) even though this
+    ;; TU compiles none of the TLS units, so every declaring header must
+    ;; be present. Headers are declarations and file-local inlines only,
+    ;; inert for the units the hash amalgam actually pastes.
+    (doseq [h headers]
+      (emit chunks h nil))
+    (emit chunks "src/config.h" nil)
+    (emit chunks "src/inner.h" nil)
+    (swap! chunks conj (header-pop))
+    (doseq [[idx c] (map-indexed vector (hash-cfile-list))]
+      (emit chunks c (str "u" idx)))
+    (swap! chunks conj hash-guard-else-tail)
     (min-max-rename (str/join "" @chunks))))
 
 (defn run
@@ -388,10 +478,14 @@
   from the repo root."
   []
   (let [cfiles (cfile-list)
-        text (generate-text)]
+        text (generate-text)
+        hash-text (generate-hash-text)]
     (spit out-path text)
+    (spit hash-out-path hash-text)
     (println (str "file list (" (count cfiles) " C files):"))
     (doseq [c cfiles]
       (println (format "  %-42s %7d"
                        c (count (slurp (str vendor-root "/" c))))))
-    (println (format "amalgam: %s (%d chars)" out-path (count text)))))
+    (println (format "amalgam: %s (%d chars)" out-path (count text)))
+    (println (format "hash amalgam: %s (%d chars)"
+                     hash-out-path (count hash-text)))))

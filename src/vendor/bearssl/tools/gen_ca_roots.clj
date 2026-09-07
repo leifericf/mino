@@ -96,13 +96,18 @@
        " * https://curl.se/ca/cacert.pem.\n"
        " *\n"
        " * " date-line "\n"
-       " * PEM sha256: " (sha256 pem) "\n"
+       " * PEM sha256: " (hex-encode (sha256 pem)) "\n"
        " * " (count anchors) " anchors, " (count blob) " bytes of DER.\n"
        " *\n"
        " * Update ritual: fetch https://curl.se/ca/cacert.pem over the\n"
        " * checked-in PEM, rerun the generator, commit both, and update\n"
        " * the README (sha256 and Mozilla date line).\n"
+       " *\n"
+       " * The blob drops under MINO_NO_TLS: only the TLS certificate\n"
+       " * validator (src/prim/net/tls.c) reads it, and that layer is\n"
+       " * compiled out with the vendored client under the flag.\n"
        " */\n"
+       "#ifndef MINO_NO_TLS\n"
        "#include \"roots.h\"\n\n"
        "/* Concatenated DER certificates; anchor i spans\n"
        " * mino_ca_der_data[offset_i, offset_i + len_i).\n"
@@ -116,7 +121,10 @@
        "const mino_ca_anchor mino_ca_anchors[] = {\n"
        (str/join "\n" table-lines) "\n"
        "};\n\n"
-       "const size_t mino_ca_anchor_count = " (count anchors) ";\n"))
+       "const size_t mino_ca_anchor_count = " (count anchors) ";\n"
+       "#else\n"
+       "typedef int mino_ca_roots_compiled_out;\n"
+       "#endif /* MINO_NO_TLS */\n"))
 
 (def mozilla-date
   (str/replace date-line "## Certificate data from Mozilla as of: "

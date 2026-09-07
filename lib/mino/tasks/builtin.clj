@@ -145,6 +145,7 @@
     "src/prim/bignum/bignum.c" "src/prim/bignum/ratio.c" "src/prim/bignum/bigdec.c"
      "src/vendor/imath/imath.c"
      "src/vendor/bearssl/bearssl_client.c"
+     "src/vendor/bearssl/bearssl_hash.c"
      "src/vendor/bearssl/roots.c"
       "src/vendor/miniz/miniz_core.c"])
 

@@ -15,7 +15,12 @@
  * Update ritual: fetch https://curl.se/ca/cacert.pem over the
  * checked-in PEM, rerun the generator, commit both, and update
  * the README (sha256 and Mozilla date line).
+ *
+ * The blob drops under MINO_NO_TLS: only the TLS certificate
+ * validator (src/prim/net/tls.c) reads it, and that layer is
+ * compiled out with the vendored client under the flag.
  */
+#ifndef MINO_NO_TLS
 #include "roots.h"
 
 /* Concatenated DER certificates; anchor i spans
@@ -8224,3 +8229,6 @@ const mino_ca_anchor mino_ca_anchors[] = {
 };
 
 const size_t mino_ca_anchor_count = 121;
+#else
+typedef int mino_ca_roots_compiled_out;
+#endif /* MINO_NO_TLS */

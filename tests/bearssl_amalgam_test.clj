@@ -13,6 +13,7 @@
 (def ^:private sample-path "tests/fixtures/bearssl/sample_unit.c")
 (def ^:private sample (slurp sample-path))
 (def ^:private amalgam-path "src/vendor/bearssl/bearssl_client.c")
+(def ^:private hash-amalgam-path "src/vendor/bearssl/bearssl_hash.c")
 
 (deftest bearssl-amalgam-sample-file-exists
   (is (file-exists? sample-path) "the committed sample TU is checked in"))
@@ -78,5 +79,13 @@
         "amalgam size unchanged by regeneration")
     (is (= committed generated)
         "committed bearssl_client.c is byte-identical with a fresh regeneration")))
+
+(deftest bearssl-hash-amalgam-regenerates-byte-identical
+  (let [committed (slurp hash-amalgam-path)
+        generated (ma/generate-hash-text)]
+    (is (= (count committed) (count generated))
+        "hash amalgam size unchanged by regeneration")
+    (is (= committed generated)
+        "committed bearssl_hash.c is byte-identical with a fresh regeneration")))
 
 (run-tests-and-exit)
