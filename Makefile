@@ -66,7 +66,7 @@ SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
                   src/interop/*.c src/regex/*.c src/async/*.c \
                    src/vendor/imath/*.c \
                    src/vendor/bearssl/*.c \
-                   src/vendor/miniz/*.c) main.c
+                   src/vendor/miniz/*.c) src/cli/*.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/generated/<symbol>.h with a single static const char

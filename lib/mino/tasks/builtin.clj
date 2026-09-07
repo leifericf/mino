@@ -148,7 +148,7 @@
      "src/vendor/bearssl/roots.c"
       "src/vendor/miniz/miniz_core.c"])
 
-(def ^:private all-srcs (conj lib-srcs "main.c"))
+(def ^:private all-srcs (conj lib-srcs "src/cli/main.c"))
 
 ;; C sources intentionally outside the lane compile lists. The guard
 ;; below fails any task run when a new src/**/*.c lands in neither
@@ -163,7 +163,12 @@
     "src/regex/re.c"
     ;; Vendored upstream trees; compiled through the amalgam wrappers
     ;; already in lib-srcs (bearssl_client, roots, imath, miniz_core).
-    "src/vendor"})
+    "src/vendor"
+    ;; The standalone CLI entry point. Not part of the embeddable
+    ;; runtime the sanitizer / lean lanes exercise; it is compiled into
+    ;; ./mino via all-srcs (lib-srcs plus src/cli/main.c). An embedder
+    ;; supplies its own entrypoint and never links this.
+    "src/cli"})
 
 (def ^:private lane-excluded?
   (let [excluded lane-excluded-srcs]
@@ -186,8 +191,9 @@
 
 ;; Object and dependency files mirror the source tree under build/ so no
 ;; artifact lands beside a source. src/foo/bar.c compiles to
-;; build/src/foo/bar.o with its build/src/foo/bar.d depfile; main.c maps
-;; to build/main.o. The build/ tree is gitignored.
+;; build/src/foo/bar.o with its build/src/foo/bar.d depfile; the CLI
+;; entry src/cli/main.c maps to build/src/cli/main.o. The build/ tree is
+;; gitignored.
 (defn- src->build [src ext]
   (str "build/" (subs src 0 (- (count src) 2)) ext))
 
