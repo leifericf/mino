@@ -169,6 +169,13 @@ static void gc_verify_check(mino_state *S, gc_hdr_t *h, void *p)
             "  h: dirty=%u mark=%u age=%u  child: mark=%u age=%u\n",
             (unsigned)h->dirty, (unsigned)h->mark, (unsigned)h->age,
             (unsigned)child->mark, (unsigned)child->age);
+    /* gc_classify_offender and gc_evt_dump_around drive gc_mark_roots /
+     * gc_scan_stack, whose child pushes route back through
+     * gc_mark_child_push. With gc_verify_active still set those pushes
+     * would re-enter this very callback, recursing until the C stack
+     * overflows (a SIGSEGV that masks the real offender report). Clear
+     * the flag so the classifier's own mark walk marks normally. */
+    S->gc_verify_active = 0;
     gc_classify_offender(S, h);
     gc_evt_dump_around(S, (void *)h, (void *)child, p);
     abort(); /* Class I: remset/write-barrier invariant violated */

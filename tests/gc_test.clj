@@ -400,3 +400,24 @@
         (dotimes [i 2048]
           (is (= (str "pv" i) (nth v i)) (str "vector slot broke at " i)))))))
 
+;; Sibling closures share one template bytecode program and bake a
+;; constant fold. A later def advances the compile generation, so the
+;; next call lazily recompiles and installs a fresh program into each
+;; closure -- after the closures have aged into the old generation.
+;; That old-fn to young-bytecode edge must survive collection; if it is
+;; lost, a later invocation runs a freed program and returns garbage.
+(defn- gc-mk-adder [k]
+  (fn [x] (+ x k (+ 1 2))))
+
+(deftest recompiled-closures-keep-their-program-across-gc
+  (let [siblings (mapv gc-mk-adder (range 200))]
+    (doseq [c siblings] (c 1))          ; compile the shared template
+    (dotimes [_ 6] (gc!))               ; age the closures to OLD
+    (def gc-recompile-marker 1)         ; advance the compile generation
+    (def gc-recompile-marker 2)
+    (doseq [c siblings] (c 1))          ; lazy recompile installs fresh bc
+    (dotimes [_ 6] (gc!))               ; collect with old->young bc edges live
+    (is (= (+ 100 0 3) ((nth siblings 0) 100)))
+    (is (= (+ 100 7 3) ((nth siblings 7) 100)))
+    (is (= (+ 5 199 3) ((nth siblings 199) 5)))))
+
