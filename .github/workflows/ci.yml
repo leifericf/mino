@@ -368,6 +368,29 @@ jobs:
         run: ./mino task test-jit-parity
         timeout-minutes: 15
 
+  # Compile-out axis: build mino with every MINO_NO_<CAP> flag set and
+  # run the floor smoke against it. Keeps the flags from silently
+  # rotting -- a guard that stops compiling, a subtracted prim that
+  # crashes instead of throwing its classified error, or a capability
+  # that was meant to survive a flag (digest, websocket hashing, the
+  # http codec, UTC / fixed offsets, xml-parse) losing its home would
+  # fail this leg. Host-agnostic; one runner, like jit-parity.
+  compile-out:
+    name: gate - compile-out floor
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Build mino-min and run the floor smoke
+        run: ./mino task test-compile-out
+        timeout-minutes: 15
+
   # Stencil determinism, re-armed.
   #
   # A previous `cross-compile` job regenerated each target's stencil

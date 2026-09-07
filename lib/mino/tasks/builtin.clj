@@ -46,6 +46,7 @@
                                           "-lm -lws2_32 -lbcrypt"
                                           "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
+(def ^:private mino-min-bin (if windows? "mino-min.exe" "./mino-min"))
 
 ;; Stencil-regeneration toolchain. Stencils are committed as byte
 ;; headers, so this compiler is invoked only by maintainers running
@@ -1718,6 +1719,24 @@
     (println (str "  " (str/join " " args)))
     (apply sh! args)
     (println "  compile-out build -> mino-min")))
+
+(defn test-compile-out
+  "Build mino-min (every MINO_NO_<CAP> flag) and run the floor smoke
+   against it. Proves the compile-out flags cannot silently rot: the
+   floor still runs, the capabilities that survive every flag (digest,
+   websocket hashing, the http codec, UTC / fixed-offset zones,
+   xml-parse) still work, and each subtracted capability throws its
+   classified error instead of crashing or vanishing into an
+   unbound-symbol miss. The CI compile-out leg runs this task."
+  []
+  (build-min)
+  (let [smoke  "tests/compile_out_smoke.clj"
+        result (sh mino-min-bin smoke)]
+    (print (get result :out))
+    (when-not (= 0 (get result :exit))
+      (throw (ex-info "test-compile-out: floor smoke failed on mino-min"
+                      {:exit (get result :exit)})))
+    (println "  test-compile-out: OK")))
 
 (def ^:private jit-disabled-warning-prefix
   "mino: note: this build has the JIT compiled out")

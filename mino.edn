@@ -46,6 +46,8 @@
                    :task mino.tasks.builtin/build-lean}
   build-min       {:doc  "Build mino-min with every MINO_NO_<CAP> compile-out flag"
                    :task mino.tasks.builtin/build-min}
+  test-compile-out {:doc  "Build mino-min and run the floor smoke against it"
+                   :task mino.tasks.builtin/test-compile-out}
   build-all       {:doc  "Build mino for every target (native + cross) from one host; smoke the native"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/build-all}
