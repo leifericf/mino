@@ -10,6 +10,26 @@
 # Anything beyond bootstrap belongs in lib/mino/tasks/builtin.clj. Do
 # not grow this Makefile -- if you find yourself adding a target here,
 # add it to the task runner instead.
+#
+# Compile-out flags. The default build includes every capability (no
+# flag needed). Each MINO_NO_<CAP> subtracts one large optional
+# capability so "what mino is" (the always-on floor: reader, printer,
+# eval, collections, core prims) is separable from "what a given build
+# contains". The floor can never be compiled out. Pass them via CFLAGS,
+# e.g. `make CFLAGS="... -DMINO_NO_TLS"`, or use `./mino task build-min`,
+# which sets all of them at once:
+#
+#   MINO_NO_TLS       drop the vendored BearSSL TLS client and the
+#                     bundled CA roots (~71k LOC). https / tls-connect
+#                     throw :tls/unavailable; plain http, digest, and
+#                     websocket keep working (hashes survive in
+#                     src/vendor/bearssl/bearssl_hash.c).
+#   MINO_NO_TZDATA    drop the IANA timezone database blob (~10.7k LOC).
+#                     UTC and fixed offsets still work; named-zone lookup
+#                     throws a classified error.
+#   MINO_NO_DOCUMENTS drop the document parsers (html + html-entities +
+#                     yaml + toml, ~8.6k LOC). Their parse / emit prims
+#                     throw a classified error.
 
 CC      ?= cc
 # -Wno-clobbered silences a gcc-specific false positive in the bytecode VM

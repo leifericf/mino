@@ -28,6 +28,8 @@
  * classification through the fd bridge in net.c.
  */
 
+#ifndef MINO_NO_TLS
+
 #define _POSIX_C_SOURCE 200809L
 #if defined(__APPLE__)
 #  define _DARWIN_C_SOURCE 1
@@ -1258,3 +1260,124 @@ void mino_install_tls(mino_state *S, mino_env *env)
                                        "net");
     S->caps_installed |= MINO_CAP_NET;
 }
+
+#else /* MINO_NO_TLS: the vendored TLS client and CA roots are compiled
+       * out. The tls-* prims stay bound but throw a clear classified
+       * error, plain http still works over net, and the digest and
+       * websocket layers keep their hash primitives from
+       * bearssl_hash.c. */
+
+#include "prim/internal.h"
+#include "mino.h"
+
+#include <stdint.h>
+#include <string.h>
+
+#define TLS_SOCK_TAG "mino/tls-socket"
+
+/* Every tls-* prim resolves here: TLS was excluded from this build, so
+ * an https / tls-connect attempt is a build-capability error, not a
+ * runtime failure. The message names the flag so an embedder knows the
+ * fix is a full build, not a code change. */
+static mino_val *prim_tls_unavailable(mino_state *S, mino_val *args,
+                                      mino_env *env)
+{
+    (void)args;
+    (void)env;
+    return throw_classified(S, "tls/unavailable", "MTL010",
+                            "TLS was compiled out of this build "
+                            "(MINO_NO_TLS): https and tls-connect are "
+                            "unavailable. Plain http over net still "
+                            "works; rebuild without MINO_NO_TLS for TLS.");
+}
+
+const mino_prim_def k_prims_tls[] = {
+    {"tls-connect",  prim_tls_unavailable,
+     "Unavailable: TLS is compiled out of this build (MINO_NO_TLS)."},
+    {"tls-read",     prim_tls_unavailable,
+     "Unavailable: TLS is compiled out of this build (MINO_NO_TLS)."},
+    {"tls-read-all", prim_tls_unavailable,
+     "Unavailable: TLS is compiled out of this build (MINO_NO_TLS)."},
+    {"tls-write",    prim_tls_unavailable,
+     "Unavailable: TLS is compiled out of this build (MINO_NO_TLS)."},
+    {"tls-close",    prim_tls_unavailable,
+     "Unavailable: TLS is compiled out of this build (MINO_NO_TLS)."},
+};
+
+const size_t k_prims_tls_count =
+    sizeof(k_prims_tls) / sizeof(k_prims_tls[0]);
+
+/* prim_tls_connect is the http-request https path's entry point; keep
+ * the symbol so http_client.c links, and make it throw the same
+ * build-capability error the bound prim raises. */
+mino_val *prim_tls_connect(mino_state *S, mino_val *args, mino_env *env)
+{
+    return prim_tls_unavailable(S, args, env);
+}
+
+void mino_install_tls(mino_state *S, mino_env *env)
+{
+    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_tls, k_prims_tls_count,
+                                       "net");
+    S->caps_installed |= MINO_CAP_NET;
+}
+
+/* Pool-bridge stubs. The tag is still reported so pool.c's dispatch
+ * compiles, but no TLS socket is ever created under this flag, so the
+ * fd / close / send / recv paths are unreachable; they fail closed. */
+const char *mino_tls_sock_tag(void)
+{
+    return TLS_SOCK_TAG;
+}
+
+int mino_tls_handle_fd(mino_val *v, uintptr_t *fd_out)
+{
+    (void)v;
+    (void)fd_out;
+    return 0;
+}
+
+void mino_tls_handle_close(mino_val *v)
+{
+    (void)v;
+}
+
+int mino_tls_handle_send(mino_state *S, mino_val *v,
+                         const unsigned char *buf, size_t n,
+                         long long write_ms, const char **kind,
+                         const char **code, char *msg, size_t msg_cap)
+{
+    (void)S;
+    (void)v;
+    (void)buf;
+    (void)n;
+    (void)write_ms;
+    *kind = "tls/unavailable";
+    *code = "MTL010";
+    snprintf(msg, msg_cap, "TLS was compiled out of this build "
+             "(MINO_NO_TLS)");
+    return -1;
+}
+
+int mino_tls_handle_recv(mino_state *S, mino_val *v, unsigned char *buf,
+                         size_t n, size_t *got, long long read_ms,
+                         const char **kind, const char **code, char *msg,
+                         size_t msg_cap)
+{
+    (void)S;
+    (void)v;
+    (void)buf;
+    (void)n;
+    (void)got;
+    (void)read_ms;
+    *kind = "tls/unavailable";
+    *code = "MTL010";
+    snprintf(msg, msg_cap, "TLS was compiled out of this build "
+             "(MINO_NO_TLS)");
+    return -1;
+}
+
+#endif /* MINO_NO_TLS */

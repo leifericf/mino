@@ -44,6 +44,8 @@
                         :task mino.tasks.builtin/gen-analyze-baseline}
   build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
                    :task mino.tasks.builtin/build-lean}
+  build-min       {:doc  "Build mino-min with every MINO_NO_<CAP> compile-out flag"
+                   :task mino.tasks.builtin/build-min}
   build-all       {:doc  "Build mino for every target (native + cross) from one host; smoke the native"
                    :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/build-all}

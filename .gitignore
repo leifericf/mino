@@ -24,6 +24,7 @@ bin/
 /mino_prof
 /mino_opcounts
 /mino-lean
+/mino-min
 jit-parity-jit-auto.out
 jit-parity-jit-on.out
 jit-parity-jit-off.out

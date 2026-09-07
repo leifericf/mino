@@ -1672,6 +1672,53 @@
     (apply sh! args)
     (println "  lean build -> mino-lean")))
 
+;; ---- Compile-out build (mino-min) ----
+;;
+;; The MINO_NO_<CAP> flags subtract large optional capabilities from the
+;; build so "what mino is" (the always-on floor: reader, printer, eval,
+;; collections, core prims) is separable from "what a given build
+;; contains". Each flag drops one capability's vendored blob or parser:
+;;
+;;   MINO_NO_TLS      drops the vendored BearSSL TLS client and the
+;;                    bundled Mozilla CA roots (~71k LOC). https and
+;;                    tls-connect throw a classified :tls/unavailable
+;;                    error; plain http over net, digest, and websocket
+;;                    keep working (their hash primitives survive in
+;;                    bearssl_hash.c).
+;;   MINO_NO_TZDATA   drops the IANA timezone database blob (~10.7k LOC).
+;;                    UTC and fixed-offset zones still work; a named-zone
+;;                    lookup throws a classified error.
+;;   MINO_NO_DOCUMENTS drops the document parsers (html + html-entities +
+;;                    yaml + toml, ~8.6k LOC). Their parse / emit prims
+;;                    throw a classified error.
+;;
+;; The floor can never be compiled out. mino-min sets every flag at once
+;; -- the smallest build the compile-out axis produces -- and the CI
+;; compile-out leg builds it and runs the floor smoke tests so the flags
+;; cannot silently rot.
+(def ^:private min-flags
+  ["-DMINO_NO_TLS" "-DMINO_NO_TZDATA" "-DMINO_NO_DOCUMENTS"])
+
+(defn build-min
+  "Build mino-min with every MINO_NO_<CAP> compile-out flag set: no TLS
+   (and no CA roots), no timezone database, no document parsers. The
+   smallest build the compile-out axis produces. Links and runs the
+   floor; the subtracted capabilities throw a clear classified error
+   rather than crash. Single-invocation compile+link, like build-lean."
+  []
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (let [args (into [cc]
+                   (concat cflags
+                           min-flags
+                           ldflags
+                           ["-o" "mino-min"]
+                           all-srcs
+                           libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println "  compile-out build -> mino-min")))
+
 (def ^:private jit-disabled-warning-prefix
   "mino: note: this build has the JIT compiled out")
 
