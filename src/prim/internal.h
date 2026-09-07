@@ -570,11 +570,11 @@ extern const size_t        k_prims_async_count;
 extern const mino_prim_def k_prims_fs[];
 extern const size_t        k_prims_fs_count;
 
-/* http.c -- codec prims are file-local static (the k_prims_http table
- * above). mino_install_http_client installs the http-request
+/* http_client.c -- mino_install_http_client installs the http-request
  * orchestration prim under MINO_CAP_NET (net/tls/pool capability
- * dispatch in runtime/capabilities.c). prim_parse_url stays cross-TU
- * for redirect-target resolution. */
+ * dispatch in runtime/capabilities.c). It drives the http_codec.c
+ * parser, encoder, and URL helpers declared in http_internal.h.
+ * prim_parse_url stays cross-TU for redirect-target resolution. */
 void mino_install_http_client(mino_state *S, mino_env *env);
 
 /* url.c -- prims are file-local static except prim_parse_url, called
@@ -615,7 +615,8 @@ extern const size_t        k_prims_xml_count;
 extern const mino_prim_def k_prims_digest[];
 extern const size_t        k_prims_digest_count;
 
-/* http.c -- all prims are file-local static; no extern declarations needed. */
+/* http_codec.c -- the always-on floor codec table (encode/parse/
+ * redirect prims); installed via prim/core/install.c. */
 extern const mino_prim_def k_prims_http[];
 extern const size_t        k_prims_http_count;
 
