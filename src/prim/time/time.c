@@ -207,6 +207,24 @@ typedef struct {
     uint8_t init_type;
 } tz_zone;
 
+#ifdef MINO_NO_TZDATA
+
+/* The IANA timezone database blob is compiled out of this build. UTC
+ * and fixed-offset zones still resolve (they never touch the blob); a
+ * named-zone lookup fails here so the caller throws a classified error
+ * naming the compile-out. tz_find is the only blob reader on the named
+ * path, so guarding it alone drops every reference to the absent
+ * mino_tzdata_blob symbol. */
+static int tz_find(const char *q, size_t qlen, tz_zone *z)
+{
+    (void)q;
+    (void)qlen;
+    (void)z;
+    return -1;
+}
+
+#else
+
 static uint32_t tz_zone_count(void)
 {
     return tz_u32le(mino_tzdata_blob + 4);
@@ -261,6 +279,8 @@ static int tz_find(const char *q, size_t qlen, tz_zone *z)
     }
     return -1;
 }
+
+#endif /* MINO_NO_TZDATA */
 
 static int32_t tz_type_off(const tz_zone *z, unsigned i)
 {
@@ -625,9 +645,17 @@ static int time_zone_arg(mino_state *S, mino_val *v, const char *who,
             return -1;
         }
         if (tz_find(nm, len, z) != 0) {
-            char msg[96];
+            char msg[160];
+#ifdef MINO_NO_TZDATA
+            snprintf(msg, sizeof(msg),
+                     "%s: named time zone \"%.32s\" is unavailable: the "
+                     "timezone database was compiled out of this build "
+                     "(MINO_NO_TZDATA). UTC and fixed offsets still work.",
+                     who, nm);
+#else
             snprintf(msg, sizeof(msg),
                      "%s: unknown time zone \"%.32s\"", who, nm);
+#endif
             time_throw(S, "time/zone", "MTZ001", msg);
             return -1;
         }

@@ -7,7 +7,13 @@
  *
  * Bundle sha256: e03189e1595d7a30d510b334d058915d5797a0dd9f3e920025ba164b0382f6ef
  * 598 zones, 341 streams, 170978 bytes.
+ *
+ * The blob drops under MINO_NO_TZDATA: time.c reads it only on the
+ * named-zone path (tz_find), compiled out with it under the flag, so
+ * UTC and fixed offsets keep working while a named-zone lookup throws
+ * a classified error.
  */
+#ifndef MINO_NO_TZDATA
 #include "tzdata_blob.h"
 
 const unsigned char mino_tzdata_blob[] = {
@@ -10701,3 +10707,6 @@ const unsigned char mino_tzdata_blob[] = {
 };
 
 const size_t mino_tzdata_blob_size = 170978;
+#else
+typedef int mino_tzdata_blob_compiled_out;
+#endif /* MINO_NO_TZDATA */

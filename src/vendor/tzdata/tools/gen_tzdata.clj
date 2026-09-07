@@ -288,13 +288,23 @@
                   "\n"
                   " * " (count zones) " zones, " (count streams)
                   " streams, " (count blob) " bytes.\n"
+                  " *\n"
+                  " * The blob drops under MINO_NO_TZDATA: time.c reads it\n"
+                  " * only on the named-zone path (tz_find), compiled out\n"
+                  " * with it under the flag, so UTC and fixed offsets keep\n"
+                  " * working while a named-zone lookup throws a classified\n"
+                  " * error.\n"
                   " */\n"
+                  "#ifndef MINO_NO_TZDATA\n"
                   "#include \"tzdata_blob.h\"\n\n"
                   "const unsigned char mino_tzdata_blob[] = {\n"
                   (str/join "\n" (hex-lines blob)) "\n"
                   "};\n\n"
                   "const size_t mino_tzdata_blob_size = " (count blob)
-                  ";\n")
+                  ";\n"
+                  "#else\n"
+                  "typedef int mino_tzdata_blob_compiled_out;\n"
+                  "#endif /* MINO_NO_TZDATA */\n")
         hdr (str "/* Declarations for the generated tzdata blob (ADR 27).\n"
                  " * Generated alongside src/prim/time/tzdata_blob.c; do not\n"
                  " * edit by hand.\n"
