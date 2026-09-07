@@ -71,9 +71,21 @@ static void trace_bc(mino_state *S, gc_hdr_t *h)
 void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr)
 {
     const struct mino_bc_fn *bc = (const struct mino_bc_fn *)bc_ptr;
+    gc_hdr_t *saved_container = NULL;
     int i;
     if (bc == NULL || bc == &mino_bc_declined) return;
     PUSH(bc);
+    /* The buffers below (code / consts / clauses / source_map /
+     * ic_slots / ic_stats) are held DIRECTLY by the bc record, not by
+     * the fn that delegated here. Under the remset verify pass the
+     * attributed container must follow that ownership: re-root it to
+     * the bc header so a young buffer is blamed on the bc (whose own
+     * barrier keeps it in the remset), not on the fn. Verify-only; the
+     * collector's mark path ignores gc_verify_container entirely. */
+    if (S->gc_verify_active) {
+        saved_container = S->gc_verify_container;
+        S->gc_verify_container = ((gc_hdr_t *)bc) - 1;
+    }
     PUSH(bc->code);
     PUSH(bc->consts);
     PUSH(bc->clauses);
@@ -92,6 +104,9 @@ void mino_bc_trace_fn_bc(mino_state *S, const void *bc_ptr)
     mino_bc_trace_ic_slots(S, bc);
     /* Optional ic_stats POD buffer (MINO_JIT_IC_STATS=1). */
     PUSH(bc->ic_stats);
+    if (S->gc_verify_active) {
+        S->gc_verify_container = saved_container;
+    }
 }
 
 /* A dead bc record may still be referenced by the MINO_CPJIT_STATS

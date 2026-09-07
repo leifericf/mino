@@ -155,6 +155,15 @@ static void gc_verify_check(mino_state *S, gc_hdr_t *h, void *p)
     gc_hdr_t *child;
     int       vt, cvt;
     if (p == NULL) return;
+    /* The invariant is per DIRECT owner: an OLD header with a slot
+     * holding a YOUNG child must be in the remset. The driver loop
+     * pre-skips dirty top-level headers, but an inline cross-header
+     * delegation (fn -> its bc buffers) re-roots the container to a
+     * nested owner whose dirty bit is its own. Honour that owner's
+     * dirty bit here so a young edge held by a correctly-barriered
+     * nested container is not mis-blamed; an un-barriered owner
+     * (dirty=0) still aborts. */
+    if (h->dirty) return;
     child = gc_find_header_for_ptr(S, p);
     if (child == NULL || child->gen != GC_GEN_YOUNG) return;
     vt  = (h->type_tag == GC_T_VAL)

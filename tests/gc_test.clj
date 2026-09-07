@@ -421,3 +421,25 @@
     (is (= (+ 100 7 3) ((nth siblings 7) 100)))
     (is (= (+ 5 199 3) ((nth siblings 199) 5)))))
 
+;; Old fn -> young bc buffers must be attributed to the bc record (its
+;; own barrier keeps it in the remset), not to the delegating fn. The
+;; remset verify walk (MINO_GC_VERIFY=1) once mis-blamed the fn and
+;; aborted; the in-process check here exercises the same recompile /
+;; buffer-realloc shape under nursery churn and asserts the fresh
+;; programs still run. Authoritative verify check runs this file's
+;; repro shape under MINO_GC_VERIFY=1 out of process.
+(deftest recompiled-closures-survive-interleaved-churn
+  (let [siblings (mapv gc-mk-adder (range 400))]
+    (doseq [c siblings] (c 1))          ; compile the shared template
+    (dotimes [_ 400] (reduce + (range 60)))
+    (def gc-churn-marker 1)             ; advance the compile generation
+    (def gc-churn-marker 2)
+    (def gc-churn-marker 3)
+    (dotimes [_ 8]
+      (doseq [c siblings] (c 1))        ; lazy recompile installs fresh bc
+      (reduce + (map inc (range 120))))
+    (dotimes [_ 6] (gc!))
+    (is (= (+ 100 0 3) ((nth siblings 0) 100)))
+    (is (= (+ 100 42 3) ((nth siblings 42) 100)))
+    (is (= (+ 5 399 3) ((nth siblings 399) 5)))))
+
