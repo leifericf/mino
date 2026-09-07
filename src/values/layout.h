@@ -119,6 +119,23 @@ struct mino_bc_fn;            /* compiled-fn record */
 #define LAZY_REALIZING  2
 
 /* ------------------------------------------------------------------------- */
+/* Internal control-flow type tags                                           */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Trampoline sentinels for recur and proper tail calls. These live in
+ * the same `type` field as every public mino_type, but they are never
+ * observable to an embedder: the evaluator's entry points unwrap them
+ * before returning, so mino_typeof / mino_eval / mino_apply can never
+ * hand one back. Kept out of the public mino_type enum so the C API's
+ * type vocabulary is exactly the value types a caller can hold. Values
+ * are placed past the last public tag; the `type` field is an int-
+ * backed enum, so storing them there is well defined.
+ */
+#define MINO_RECUR     ((mino_type)(MINO_DELAY + 1))
+#define MINO_TAIL_CALL ((mino_type)(MINO_DELAY + 2))
+
+/* ------------------------------------------------------------------------- */
 /* Delay realization states                                                  */
 /* ------------------------------------------------------------------------- */
 

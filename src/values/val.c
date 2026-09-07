@@ -1930,6 +1930,11 @@ static int eq_step(mino_state *S, const mino_val *a, const mino_val *b,
     if (mino_type_of(a) != mino_type_of(b)) {
         return eq_cross_type(S, a, b, st);
     }
+    /* Trampoline sentinels compare by identity like the other runtime-
+     * internal cells; they never reach user-level equality. */
+    if (mino_type_of(a) == MINO_RECUR || mino_type_of(a) == MINO_TAIL_CALL) {
+        return a == b;
+    }
     switch (mino_type_of(a)) {
     case MINO_NIL:
     case MINO_EMPTY_LIST:
@@ -2014,16 +2019,14 @@ static int eq_step(mino_state *S, const mino_val *a, const mino_val *b,
      * types (regex, host-array, future) match Object.equals
      * defaults; transients are short-lived mutable handles;
      * record-types intern by (ns, name) so they compare pointer-
-     * equal already; recur/tail-call/reduced are runtime sentinels
-     * that shouldn't escape user code. */
+     * equal already; reduced is a runtime sentinel that shouldn't
+     * escape user code. */
     case MINO_PRIM:
     case MINO_FN:
     case MINO_MACRO:
     case MINO_ATOM:
     case MINO_VOLATILE:
     case MINO_DELAY:
-    case MINO_RECUR:
-    case MINO_TAIL_CALL:
     case MINO_REDUCED:
     case MINO_VAR:
     case MINO_TRANSIENT:

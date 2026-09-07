@@ -816,6 +816,16 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         fputc(' ', out);
         S->print_meta_flag = saved_meta;
     }
+    /* Trampoline sentinels never reach user-visible output; print a
+     * defensive marker if one somehow does. */
+    if (mino_type_of(v) == MINO_RECUR) {
+        fputs("#<recur>", out);
+        return;
+    }
+    if (mino_type_of(v) == MINO_TAIL_CALL) {
+        fputs("#<tail-call>", out);
+        return;
+    }
     switch (mino_type_of(v)) {
     case MINO_NIL:
         fputs("nil", out);
@@ -964,13 +974,6 @@ void mino_print_to(mino_state *S, FILE *out, const mino_val *v)
         return;
     case MINO_CHUNKED_CONS:
         print_chunked_cons(S, out, v);
-        return;
-    case MINO_RECUR:
-        /* Internal sentinel; should not escape to user-visible output. */
-        fputs("#<recur>", out);
-        return;
-    case MINO_TAIL_CALL:
-        fputs("#<tail-call>", out);
         return;
     case MINO_REDUCED:
         fputs("#<reduced ", out);

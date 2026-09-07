@@ -578,8 +578,6 @@ static void img_visit_val_children(img_id_table *t, mino_val *v)
     case MINO_CHAN:
     case MINO_AGENT:
     case MINO_HOST_ARRAY:
-    case MINO_RECUR:
-    case MINO_TAIL_CALL:
     case MINO_REDUCED:
         break;
     default:

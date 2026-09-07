@@ -300,6 +300,8 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
 const char *type_tag_str(const mino_val *v)
 {
     if (v == NULL) return "nil";
+    if (mino_type_of(v) == MINO_RECUR)     return "recur";
+    if (mino_type_of(v) == MINO_TAIL_CALL) return "tail-call";
     switch (mino_type_of(v)) {
     case MINO_NIL:     return "nil";
     case MINO_BOOL:    return "bool";
@@ -327,8 +329,6 @@ const char *type_tag_str(const mino_val *v)
     case MINO_LAZY:    return "lazy-seq";
     case MINO_CHUNK:   return "chunk";
     case MINO_CHUNKED_CONS: return "list";
-    case MINO_RECUR:     return "recur";
-    case MINO_TAIL_CALL: return "tail-call";
     case MINO_REDUCED:   return "reduced";
     case MINO_VAR:       return "var";
     case MINO_TRANSIENT: return "transient";

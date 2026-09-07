@@ -47,6 +47,18 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
 {
     mino_val *v = (mino_val *)(h + 1);
     PUSH(v->meta);
+    /* Trampoline sentinels are runtime-internal type tags, not public
+     * mino_type members, so they cannot be switch cases; trace their
+     * children before the enum switch. */
+    if (mino_type_of(v) == MINO_RECUR) {
+        PUSH(v->as.recur.args);
+        return;
+    }
+    if (mino_type_of(v) == MINO_TAIL_CALL) {
+        PUSH(v->as.tail_call.fn);
+        PUSH(v->as.tail_call.args);
+        return;
+    }
     switch (mino_type_of(v)) {
     case MINO_STRING:
     case MINO_SYMBOL:
@@ -134,13 +146,6 @@ static void trace_val(mino_state *S, gc_hdr_t *h)
             PUSH(v->as.lazy.body);
             PUSH(v->as.lazy.env);
         }
-        break;
-    case MINO_RECUR:
-        PUSH(v->as.recur.args);
-        break;
-    case MINO_TAIL_CALL:
-        PUSH(v->as.tail_call.fn);
-        PUSH(v->as.tail_call.args);
         break;
     case MINO_REDUCED:
         PUSH(v->as.reduced.val);

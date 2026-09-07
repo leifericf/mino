@@ -33,6 +33,11 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
 {
     if (v == NULL) return mino_nil(dst);
 
+    /* Trampoline sentinels are runtime-internal and never transferable
+     * across states. */
+    if (mino_type_of(v) == MINO_RECUR || mino_type_of(v) == MINO_TAIL_CALL) {
+        return NULL;
+    }
     switch (mino_type_of(v)) {
     case MINO_NIL:        return mino_nil(dst);
     case MINO_EMPTY_LIST: return mino_empty_list(dst);
@@ -211,8 +216,6 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
     case MINO_LAZY:
     case MINO_CHUNK:
     case MINO_CHUNKED_CONS:
-    case MINO_RECUR:
-    case MINO_TAIL_CALL:
     case MINO_REDUCED:
     case MINO_VAR:
     case MINO_TYPE:

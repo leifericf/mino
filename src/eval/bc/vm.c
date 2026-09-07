@@ -181,6 +181,8 @@ static mino_val *bc_protocol_type_disc(mino_state *S, mino_val *v)
         mino_val *tv = map_get_val(v->meta, tk);
         if (tv != NULL) return tv;
     }
+    if (mino_type_of(v) == MINO_RECUR)     return mino_keyword(S, "recur");
+    if (mino_type_of(v) == MINO_TAIL_CALL) return mino_keyword(S, "tail-call");
     switch (mino_type_of(v)) {
     case MINO_NIL:        return mino_keyword(S, "nil");
     case MINO_BOOL:       return mino_keyword(S, "bool");
@@ -208,8 +210,6 @@ static mino_val *bc_protocol_type_disc(mino_state *S, mino_val *v)
     case MINO_LAZY:       return mino_keyword(S, "lazy-seq");
     case MINO_CHUNK:      return mino_keyword(S, "chunk");
     case MINO_CHUNKED_CONS: return mino_keyword(S, "list");
-    case MINO_RECUR:      return mino_keyword(S, "recur");
-    case MINO_TAIL_CALL:  return mino_keyword(S, "tail-call");
     case MINO_REDUCED:    return mino_keyword(S, "reduced");
     case MINO_VAR:        return mino_keyword(S, "var");
     case MINO_TRANSIENT:  return mino_keyword(S, "transient");

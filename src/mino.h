@@ -119,8 +119,6 @@ typedef enum {
                         * combinators can pull a whole chunk at a
                         * time and emit chunked output. Constructed
                         * via `chunk-cons`. */
-    MINO_RECUR,   /* internal tail-call trampoline sentinel */
-    MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
     MINO_REDUCED, /* early termination wrapper for reduce */
     MINO_VAR,     /* first-class var: ns + name + root binding */
     MINO_TRANSIENT, /* mutable staging wrapper for batch mutation of a

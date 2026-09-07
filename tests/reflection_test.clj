@@ -67,6 +67,28 @@
     (is (some? err))
     (is (some? (re-find #"\[1 2\]" err)))))
 
+;; Trampoline sentinels (recur / proper tail call) are runtime-internal
+;; control-flow tags that never surface to user code. Heavy recur and
+;; self-tail-call bodies must always yield an ordinary value whose type
+;; is a real value type, never :recur or :tail-call.
+
+(deftest recur-result-type-is-never-sentinel
+  (let [v (loop [a 0] (if (< a 1000) (recur (inc a)) a))]
+    (is (= 1000 v))
+    (is (= :int (type v)))
+    (is (not= :recur (type v)))
+    (is (not= :tail-call (type v)))))
+
+(deftest tail-call-result-type-is-never-sentinel
+  ;; A self-tail-calling fn drives the proper-tail-call trampoline; its
+  ;; observable result must be a plain value, not the sentinel.
+  (letfn [(down [n acc] (if (zero? n) acc (down (dec n) (conj acc n))))]
+    (let [v (down 500 [])]
+      (is (= 500 (count v)))
+      (is (= :vector (type v)))
+      (is (not= :tail-call (type v)))
+      (is (not= :recur (type v))))))
+
 ;; class: returns a keyword type tag, ignoring :type metadata. (class nil) returns nil.
 
 (deftest class-nil-returns-nil

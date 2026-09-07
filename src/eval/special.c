@@ -869,6 +869,12 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
     if (form == NULL) {
         return mino_nil(S);
     }
+    /* Trampoline sentinels are never real forms; if one is handed back
+     * for evaluation it self-evaluates like any other opaque value. */
+    if (mino_type_of(form) == MINO_RECUR
+        || mino_type_of(form) == MINO_TAIL_CALL) {
+        return form;
+    }
     switch (mino_type_of(form)) {
     case MINO_NIL:
     case MINO_EMPTY_LIST:
@@ -887,8 +893,6 @@ mino_val *eval_impl(mino_state *S, mino_val *form, mino_env *env, int tail)
     case MINO_VOLATILE:
     case MINO_DELAY:
     case MINO_CHUNK:
-    case MINO_RECUR:
-    case MINO_TAIL_CALL:
     case MINO_REDUCED:
     case MINO_VAR:
     case MINO_TRANSIENT:
