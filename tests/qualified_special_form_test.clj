@@ -142,15 +142,26 @@
   (is (thrown? :error (eval '(clojure.core/recur)))))
 
 ;; ---------------------------------------------------------------------------
-;; (6) macroexpand-1 of a qualified family form returns it unchanged -- the
-;;     special-form handler wins over any macro lookup on the qualified head.
+;; (6) macroexpand-1 resolves a qualified head through the alias table and
+;;     var registry, exactly like the bare head: a qualified macro expands
+;;     to the same shape as its bare spelling, while a qualified true
+;;     special form (let, which carries no macro var) stays unchanged.
 ;; ---------------------------------------------------------------------------
 
-(deftest qsf-macroexpand-qualified-unchanged
+(deftest qsf-macroexpand-qualified-special-form-unchanged
+  ;; let has no macro var in mino, so both spellings pass through.
   (is (= '(clojure.core/let [x 1] x)
-         (macroexpand-1 '(clojure.core/let [x 1] x))))
-  (is (= '(clojure.core/when true 1)
-         (macroexpand-1 '(clojure.core/when true 1)))))
+         (macroexpand-1 '(clojure.core/let [x 1] x)))))
+
+(deftest qsf-macroexpand-qualified-macro-matches-bare
+  ;; cond, when and -> are macros: the qualified head expands to the same
+  ;; shape the bare head does.
+  (is (= (macroexpand-1 '(cond :else :c))
+         (macroexpand-1 '(clojure.core/cond :else :c))))
+  (is (= (macroexpand-1 '(when true 1))
+         (macroexpand-1 '(clojure.core/when true 1))))
+  (is (= (macroexpand-1 '(-> 1 inc inc))
+         (macroexpand-1 '(clojure.core/-> 1 inc inc)))))
 
 ;; ---------------------------------------------------------------------------
 ;; (7) Unresolvable bare symbols qualify with the current ns, matching the

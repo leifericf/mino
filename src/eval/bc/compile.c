@@ -760,7 +760,11 @@ static mino_val *bc_macroexpand_step(compiler_t *c, mino_val *form,
     mino_state *S = c->S;
     int saved_td = mino_current_ctx(S)->try_depth;
     mino_current_ctx(S)->try_depth = 0;
-    mino_val *e = macroexpand1(S, form, c->env, expanded);
+    /* resolve_qualified = 0: keep the compile-time step keyed on the full
+     * symbol text. The gated clojure.core/ fallback below is the only
+     * compile-time path for qualified heads, so a context-dependent macro
+     * from another ns is never baked here (it stays on the tree-walker). */
+    mino_val *e = macroexpand1(S, form, c->env, expanded, 0);
     mino_current_ctx(S)->try_depth = saved_td;
     if (e != NULL && !*expanded) {
         mino_val *qhead = form->as.cons.car;

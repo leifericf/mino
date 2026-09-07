@@ -748,7 +748,7 @@ static mino_val *prim_macroexpand_1(mino_state *S, mino_val *args, mino_env *env
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return throw_classified(S, "eval/arity", "MAR001", "macroexpand-1 requires one argument");
     }
-    return macroexpand1(S, args->as.cons.car, env, &expanded);
+    return macroexpand1(S, args->as.cons.car, env, &expanded, 1);
 }
 
 static mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
@@ -756,7 +756,7 @@ static mino_val *prim_macroexpand(mino_state *S, mino_val *args, mino_env *env)
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return throw_classified(S, "eval/arity", "MAR001", "macroexpand requires one argument");
     }
-    return macroexpand_all(S, args->as.cons.car, env);
+    return macroexpand_all(S, args->as.cons.car, env, 1);
 }
 
 static mino_val *prim_gensym(mino_state *S, mino_val *args, mino_env *env)

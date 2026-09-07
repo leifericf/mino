@@ -24,12 +24,82 @@ int sym_eq(const mino_val *v, const char *s)
 
 
 /*
+ * Resolve a namespace-qualified head symbol (ns/name) to its bound value,
+ * mirroring the eval_qualified_symbol cascade but without throwing or
+ * setting a diagnostic: alias the ns part against the current namespace,
+ * look the name up in the var registry, then fall back to the resolved
+ * namespace's env bindings. Returns the unwrapped root value, or NULL when
+ * nothing binds. Used by macroexpand1 so a qualified macro head resolves
+ * to the same var a bare head would.
+ */
+static mino_val *resolve_qualified_head(mino_state *S, const char *data,
+                                          size_t nlen, const char *slash)
+{
+    char        ns_buf[256];
+    size_t      ns_len   = (size_t)(slash - data);
+    const char *sym_name = slash + 1;
+    const char *resolved_ns;
+    const char *cur;
+    mino_val *var;
+    mino_env *target_env;
+    size_t      i;
+    (void)nlen;
+
+    if (ns_len >= sizeof(ns_buf)) {
+        return NULL;
+    }
+    memcpy(ns_buf, data, ns_len);
+    ns_buf[ns_len] = '\0';
+
+    /* Alias the ns part against the current namespace (aliases are
+     * per-ns), falling back to the literal ns name. */
+    resolved_ns = ns_buf;
+    cur = S->ns_vars.current_ns != NULL ? S->ns_vars.current_ns : "user";
+    for (i = 0; i < S->ns_vars.ns_alias_len; i++) {
+        if (S->ns_vars.ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_vars.ns_aliases[i].owning_ns, cur) == 0
+            && strcmp(S->ns_vars.ns_aliases[i].alias, ns_buf) == 0) {
+            resolved_ns = S->ns_vars.ns_aliases[i].full_name;
+            break;
+        }
+    }
+
+    var = var_find(S, resolved_ns, sym_name);
+    if (var != NULL && mino_type_of(var) == MINO_VAR && var->as.var.bound) {
+        return var->as.var.root;
+    }
+
+    /* Primitives and referred mappings live in the ns env rather than the
+     * var registry; unwrap a var cell so a macro still matches. */
+    target_env = ns_env_lookup(S, resolved_ns);
+    if (target_env != NULL) {
+        env_binding_t *b = env_find_here(target_env, sym_name);
+        if (b != NULL && b->val != NULL) {
+            mino_val *bv = b->val;
+            if (mino_type_of(bv) == MINO_VAR && bv->as.var.bound) {
+                bv = bv->as.var.root;
+            }
+            return bv;
+        }
+    }
+    return NULL;
+}
+
+/*
  * macroexpand1: if `form` is a call whose head resolves to a macro in env,
  * expand it once and return the new form. If not a macro call, return the
  * input unchanged and set *expanded = 0.
+ *
+ * When resolve_qualified is nonzero and the head's full symbol text does
+ * not bind, a namespace-qualified head is resolved through the alias table
+ * and var registry (resolve_qualified_head) so clojure.core/cond expands
+ * like bare cond. The bytecode compiler passes 0 here and keeps its own
+ * gated core-macro fallback as the only compile-time path for qualified
+ * heads (see bc_macroexpand_step), so context-dependent macros from other
+ * namespaces are never baked at compile time.
  */
 mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
-                         int *expanded)
+                         int *expanded, int resolve_qualified)
 {
     char        buf[256];
     size_t      n;
@@ -66,6 +136,18 @@ mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
     if (mac != NULL && mino_type_of(mac) == MINO_VAR && mac->as.var.bound) {
         mac = mac->as.var.root;
     }
+    /* Full-text keying misses a namespace-qualified head (the env binds
+     * bare names). Resolve ns/name the way call dispatch does so a
+     * qualified macro head expands like its bare spelling. */
+    if ((mac == NULL || mino_type_of(mac) != MINO_MACRO) && resolve_qualified) {
+        const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
+        if (slash != NULL && slash[1] != '\0') {
+            mino_val *qmac = resolve_qualified_head(S, buf, n, slash);
+            if (qmac != NULL && mino_type_of(qmac) == MINO_MACRO) {
+                mac = qmac;
+            }
+        }
+    }
     if (mac == NULL || mino_type_of(mac) != MINO_MACRO) {
         return form;
     }
@@ -74,11 +156,13 @@ mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
 }
 
 /* Expand repeatedly until `form` is no longer a macro call at the top. */
-mino_val *macroexpand_all(mino_state *S, mino_val *form, mino_env *env)
+mino_val *macroexpand_all(mino_state *S, mino_val *form, mino_env *env,
+                            int resolve_qualified)
 {
     for (;;) {
         int         expanded = 0;
-        mino_val *next     = macroexpand1(S, form, env, &expanded);
+        mino_val *next     = macroexpand1(S, form, env, &expanded,
+                                            resolve_qualified);
         if (next == NULL) {
             return NULL;
         }

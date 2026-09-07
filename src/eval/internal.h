@@ -42,10 +42,16 @@ mino_val *eval_implicit_do_impl(mino_state *S, mino_val *body,
 /* lazy_force is declared in values/internal.h: the value layer owns
  * the forcing interface, eval owns the implementation (ADR 57). */
 mino_val *eval_args(mino_state *S, mino_val *args, mino_env *env);
+/* resolve_qualified: when nonzero, a namespace-qualified head whose full
+ * symbol text does not bind is resolved through the alias table and var
+ * registry (mirroring eval_qualified_symbol), so clojure.core/cond expands
+ * like bare cond. The interpreter-facing macroexpand-1/macroexpand prims
+ * pass 1; the bytecode compiler passes 0 to keep its own gated core-macro
+ * fallback the only compile-time path for qualified heads. */
 mino_val *macroexpand1(mino_state *S, mino_val *form, mino_env *env,
-                         int *expanded);
+                         int *expanded, int resolve_qualified);
 mino_val *macroexpand_all(mino_state *S, mino_val *form,
-                            mino_env *env);
+                            mino_env *env, int resolve_qualified);
 mino_val *quasiquote_expand(mino_state *S, mino_val *form,
                               mino_env *env);
 
