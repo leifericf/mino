@@ -66,3 +66,5 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [55](55-runtime-splits-into-names-and-state.md) | The runtime directory splits into names and state, shared headers stay |
 | [56](56-maintainer-generators-stay-off-the-c-and-mino-rule.md) | The maintainer-only generators stay exempt from the C-and-mino rule for now |
 | [57](57-lazy-forcing-stays-owned-by-eval.md) | Lazy forcing stays owned by eval, declared at the value layer |
+| [58](58-protected-eval-entry-points-publish-the-last-error.md) | Protected eval entry points publish the last error; pcall stays the swallow |
+| [59](59-store-stays-in-tree-behind-its-capability.md) | The EAVT store stays in-tree behind its capability |
