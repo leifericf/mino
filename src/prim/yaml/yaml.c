@@ -24,6 +24,8 @@
 #include "prim/internal.h"
 #include "mino.h"
 
+#ifndef MINO_NO_DOCUMENTS
+
 #include <limits.h>
 #include <math.h>
 #include <stdlib.h>
@@ -2287,3 +2289,33 @@ const mino_prim_def k_prims_yaml[] = {
 
 const size_t k_prims_yaml_count =
     sizeof(k_prims_yaml) / sizeof(k_prims_yaml[0]);
+
+#else /* MINO_NO_DOCUMENTS: the YAML reader is compiled out with the
+       * other document parsers. yaml-parse stays bound but throws a
+       * clear build-capability error; the table stays defined so
+       * install_stdlib.c links. */
+
+/* yaml-parse resolves here under the flag: the reader was excluded from
+ * this build, so a parse attempt is a build-capability error naming the
+ * flag, not a runtime parse failure. */
+static mino_val *prim_yaml_unavailable(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    (void)args;
+    (void)env;
+    return throw_classified(S, "yaml/unavailable", "MYA001",
+        "yaml-parse is unavailable: the document parsers were compiled "
+        "out of this build (MINO_NO_DOCUMENTS). Rebuild without "
+        "MINO_NO_DOCUMENTS to parse YAML.");
+}
+
+const mino_prim_def k_prims_yaml[] = {
+    {"yaml-parse", prim_yaml_unavailable,
+     "Unavailable: the document parsers are compiled out of this build "
+     "(MINO_NO_DOCUMENTS)."},
+};
+
+const size_t k_prims_yaml_count =
+    sizeof(k_prims_yaml) / sizeof(k_prims_yaml[0]);
+
+#endif /* MINO_NO_DOCUMENTS */

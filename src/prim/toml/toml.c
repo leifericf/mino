@@ -23,6 +23,8 @@
 #include "prim/internal.h"
 #include "mino.h"
 
+#ifndef MINO_NO_DOCUMENTS
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1460,3 +1462,33 @@ const mino_prim_def k_prims_toml[] = {
 
 const size_t k_prims_toml_count =
     sizeof(k_prims_toml) / sizeof(k_prims_toml[0]);
+
+#else /* MINO_NO_DOCUMENTS: the TOML reader is compiled out with the
+       * other document parsers. toml-parse stays bound but throws a
+       * clear build-capability error; the table stays defined so
+       * install_stdlib.c links. */
+
+/* toml-parse resolves here under the flag: the reader was excluded from
+ * this build, so a parse attempt is a build-capability error naming the
+ * flag, not a runtime parse failure. */
+static mino_val *prim_toml_unavailable(mino_state *S, mino_val *args,
+                                       mino_env *env)
+{
+    (void)args;
+    (void)env;
+    return throw_classified(S, "toml/unavailable", "MTM001",
+        "toml-parse is unavailable: the document parsers were compiled "
+        "out of this build (MINO_NO_DOCUMENTS). Rebuild without "
+        "MINO_NO_DOCUMENTS to parse TOML.");
+}
+
+const mino_prim_def k_prims_toml[] = {
+    {"toml-parse", prim_toml_unavailable,
+     "Unavailable: the document parsers are compiled out of this build "
+     "(MINO_NO_DOCUMENTS)."},
+};
+
+const size_t k_prims_toml_count =
+    sizeof(k_prims_toml) / sizeof(k_prims_toml[0]);
+
+#endif /* MINO_NO_DOCUMENTS */

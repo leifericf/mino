@@ -6,8 +6,16 @@
  * semicolon forms and legacy bare forms alike), canonically sorted
  * by name bytes; the tokenizer looks them up by longest match.
  * Values are UTF-8, octal-escaped where not printable ASCII.
+ *
+ * The table drops under MINO_NO_DOCUMENTS with the rest of the document
+ * parsers: its only consumer is html.c's named-entity lookup, itself
+ * gated by the flag, so under it this data body is dead weight. The
+ * guard is added by hand because the generator (tools/gen_html_entities.py)
+ * is out-of-doctrine Python and is not edited.
  */
 #include "html_entities.h"
+
+#ifndef MINO_NO_DOCUMENTS
 
 const mino_html_entity_t k_html_entities[2231] = {
     {"AElig", "\303\206"},
@@ -2244,3 +2252,7 @@ const mino_html_entity_t k_html_entities[2231] = {
 };
 
 const unsigned k_html_entities_count = 2231;
+
+#else
+typedef int mino_html_entities_compiled_out;
+#endif /* MINO_NO_DOCUMENTS */

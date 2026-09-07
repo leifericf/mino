@@ -604,19 +604,29 @@ static long long hp_emit_cp(unsigned long cp, unsigned char *buf, long long w)
     return w + (long long)hp_utf8(cp, buf + w);
 }
 
+#ifndef MINO_NO_DOCUMENTS
 static int hp_ent_cmp(const void *a, const void *b)
 {
     return strcmp((const char *)a,
                   ((const mino_html_entity_t *)b)->name);
 }
+#endif
 
 /* Exact-table lookup of a candidate name (already NUL-terminated in
- * cand). Returns the entry or NULL. */
+ * cand). Returns the entry or NULL. Under MINO_NO_DOCUMENTS the
+ * generated table (html_entities.c) is compiled out and html-parse
+ * throws before any tokenizing, so this never runs; it returns no
+ * match to keep the symbol off the dropped table. */
 static const mino_html_entity_t *hp_ent_lookup(const char *cand)
 {
+#ifdef MINO_NO_DOCUMENTS
+    (void)cand;
+    return NULL;
+#else
     return (const mino_html_entity_t *)bsearch(
         cand, k_html_entities, k_html_entities_count,
         sizeof(k_html_entities[0]), hp_ent_cmp);
+#endif
 }
 
 /* Decode the reference at *pp (pointing at '&') against [to).
@@ -2426,6 +2436,17 @@ static mino_val *prim_html_parse(mino_state *S, mino_val *args,
     hp_t h;
     int fragment = 0;
     (void)env;
+#ifdef MINO_NO_DOCUMENTS
+    /* The document parsers are compiled out: html-parse, yaml-parse, and
+     * toml-parse throw a build-capability error rather than run. xml-parse
+     * keeps working; it is a separate capability. */
+    (void)args;
+    (void)h;
+    return throw_classified(S, "html/unavailable", "MHT001",
+        "html-parse is unavailable: the document parsers were compiled "
+        "out of this build (MINO_NO_DOCUMENTS). Rebuild without "
+        "MINO_NO_DOCUMENTS to parse HTML.");
+#endif
     if (!mino_is_cons(args)
         || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
