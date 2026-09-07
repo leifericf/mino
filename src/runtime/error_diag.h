@@ -31,6 +31,21 @@ void        set_eval_diag_with_data(mino_state *S, const mino_val *form,
                                     const char *kind, const char *code,
                                     const char *msg, mino_val *data,
                                     const char *note);
+/* Like set_eval_diag but always publishes to the last-error slot; never
+ * converts the diagnostic into a throw, even inside an active try frame.
+ * For recording an already-caught error for observation. */
+void        set_eval_diag_noraise(mino_state *S, const mino_val *form,
+                                  const char *kind, const char *code,
+                                  const char *msg);
+/* Publish a caught thrown value to the last-error slot as a structured
+ * diagnostic, unless a diagnostic is already set (an inner catch's
+ * report is preserved). Normalizes the payload first so ex-info maps,
+ * classified maps, strings, and arbitrary values all surface with the
+ * payload visible in the message. Used by the protected eval entry
+ * points so error observation via mino_last_error is uniform whether or
+ * not the caller took the _ex form. `ex` may be NULL (OOM / parse
+ * failure with no payload). */
+void        error_publish_caught(mino_state *S, mino_val *ex);
 /* Throw a classified catchable exception (kind + code + msg, optional
  * :mino/data payload in the _data form). Inside a try frame this does
  * NOT return: the diagnostic map is delivered to the matching catch

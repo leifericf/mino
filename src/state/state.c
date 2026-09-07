@@ -1404,6 +1404,11 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
         }
         if (out != NULL) *out = NULL;
         if (out_ex != NULL) *out_ex = ex;
+        /* Publish uniformly with the unsuffixed eval entry points so an
+         * embedder observes the error through mino_last_error whichever
+         * variant it called. Guarded inside the helper against an
+         * already-set inner diagnostic. */
+        error_publish_caught(S, ex);
         return -1;
     }
     mino_current_ctx(S)->try_depth++;
@@ -1417,6 +1422,9 @@ static int eval_pcall(mino_state *S, eval_body_fn body, void *payload,
     if (result == NULL && out_ex != NULL
         && mino_current_ctx(S)->pending_user_ex != NULL) {
         *out_ex = mino_current_ctx(S)->pending_user_ex;
+    }
+    if (result == NULL) {
+        error_publish_caught(S, mino_current_ctx(S)->pending_user_ex);
     }
     mino_current_ctx(S)->pending_user_ex = NULL;
 

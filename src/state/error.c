@@ -5,6 +5,11 @@
 #include "runtime/internal.h"
 #include "eval/bc/internal.h"
 
+static void publish_eval_diag(mino_state *S, const mino_val *form,
+                              const char *kind, const char *code,
+                              const char *msg, mino_val *data,
+                              const char *note);
+
 /* ------------------------------------------------------------------------- */
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
@@ -172,6 +177,59 @@ void set_eval_diag(mino_state *S, const mino_val *form,
     set_eval_diag_with_data(S, form, kind, code, msg, NULL, NULL);
 }
 
+/* Publish a caught thrown value to the last-error slot. Mirrors the
+ * top-level landing pad in mino_eval_inner so a protected eval entry
+ * point reports the same diagnostic the unsuffixed variant would. The
+ * already-set guard preserves an inner catch's more specific report. */
+void error_publish_caught(mino_state *S, mino_val *ex)
+{
+    mino_val *nex;
+    if (mino_last_error(S) != NULL) {
+        return;
+    }
+    /* Normalize first so an ex-info map ({:message :data}) is reshaped
+     * to the diagnostic form ({:mino/kind :mino/code :mino/message
+     * :mino/data}) before lookup; without it a raw ex-info reaches here
+     * with the un-namespaced :message key and degrades to a generic
+     * "uncaught exception". */
+    nex = (ex != NULL) ? normalize_exception(S, ex) : NULL;
+    if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
+        mino_val *msg  = map_get_val(nex, mino_keyword(S, "mino/message"));
+        mino_val *kind = map_get_val(nex, mino_keyword(S, "mino/kind"));
+        mino_val *code = map_get_val(nex, mino_keyword(S, "mino/code"));
+        set_eval_diag_noraise(S, mino_current_ctx(S)->eval_current_form,
+            (kind && mino_type_of(kind) == MINO_KEYWORD)
+                ? kind->as.s.data : "internal",
+            (code && mino_type_of(code) == MINO_STRING)
+                ? code->as.s.data : "MIN001",
+            (msg && mino_type_of(msg) == MINO_STRING)
+                ? msg->as.s.data : "uncaught exception");
+    } else if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
+        char msg[512];
+        snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                 (int)ex->as.s.len, ex->as.s.data);
+        set_eval_diag_noraise(S, mino_current_ctx(S)->eval_current_form,
+                              "user", "MUS001", msg);
+    } else if (ex != NULL) {
+        /* Non-string non-map payload: route through mino_print_to_buf so
+         * the original value appears in the diagnostic. */
+        char buf[384];
+        char msg[512];
+        int  w = mino_print_to_buf(S, ex, buf, sizeof(buf));
+        if (w > 0) {
+            snprintf(msg, sizeof(msg), "uncaught exception: %s", buf);
+            set_eval_diag_noraise(S, mino_current_ctx(S)->eval_current_form,
+                                  "user", "MUS001", msg);
+        } else {
+            set_eval_diag_noraise(S, mino_current_ctx(S)->eval_current_form,
+                                  "user", "MUS001", "uncaught exception");
+        }
+    } else {
+        set_eval_diag_noraise(S, mino_current_ctx(S)->eval_current_form,
+                              "user", "MUS001", "uncaught exception");
+    }
+}
+
 /* Extended variant: attach a data payload and an optional note. Used
  * by the capability-aware MNS002 diagnostic so the unbound-symbol
  * error carries `{:capability ... :symbol ... :reason :not-installed
@@ -253,47 +311,70 @@ void set_eval_diag_with_data(mino_state *S, const mino_val *form,
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
-    {
-        mino_diag *d = diag_new(kind, code, "eval", msg);
-        if (d != NULL && form != NULL && mino_type_of(form) == MINO_CONS
-            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+    publish_eval_diag(S, form, kind, code, msg, data, note);
+}
+
+/* Build the structured diagnostic and store it in the last-error slot
+ * without ever throwing. This is the non-try-frame publish path shared
+ * by set_eval_diag_with_data (its outside-a-try branch) and by
+ * set_eval_diag_noraise (which always publishes, never converts to a
+ * throw). */
+static void publish_eval_diag(mino_state *S, const mino_val *form,
+                              const char *kind, const char *code,
+                              const char *msg, mino_val *data,
+                              const char *note)
+{
+    mino_diag *d = diag_new(kind, code, "eval", msg);
+    if (d != NULL && form != NULL && mino_type_of(form) == MINO_CONS
+        && form->as.cons.file != NULL && form->as.cons.line > 0) {
+        mino_span_t span;
+        memset(&span, 0, sizeof(span));
+        span.file   = form->as.cons.file;
+        span.line   = form->as.cons.line;
+        span.column = form->as.cons.column;
+        diag_set_span(d, span);
+    } else if (d != NULL && !d->has_primary_span) {
+        /* Form lacked source info -- fall back to the bc cursor.
+         * Resolves the precise pc that was executing when the
+         * diagnostic was raised, regardless of whether the bc
+         * frame's enclosing eval_current_form had been refreshed
+         * yet. Native tiers populate the same cursor so JIT'd
+         * errors inherit this attribution path. */
+        const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+        size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+        const char         *file   = NULL;
+        int                 line   = 0;
+        int                 column = 0;
+        if (cur_bc != NULL
+            && mino_bc_source_lookup(cur_bc, cur_pc,
+                                     &file, &line, &column)) {
             mino_span_t span;
             memset(&span, 0, sizeof(span));
-            span.file   = form->as.cons.file;
-            span.line   = form->as.cons.line;
-            span.column = form->as.cons.column;
+            span.file   = file;
+            span.line   = line;
+            span.column = column;
             diag_set_span(d, span);
-        } else if (d != NULL && !d->has_primary_span) {
-            /* Form lacked source info -- fall back to the bc cursor.
-             * Resolves the precise pc that was executing when the
-             * diagnostic was raised, regardless of whether the bc
-             * frame's enclosing eval_current_form had been refreshed
-             * yet. Native tiers populate the same cursor so JIT'd
-             * errors inherit this attribution path. */
-            const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
-            size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
-            const char         *file   = NULL;
-            int                 line   = 0;
-            int                 column = 0;
-            if (cur_bc != NULL
-                && mino_bc_source_lookup(cur_bc, cur_pc,
-                                         &file, &line, &column)) {
-                mino_span_t span;
-                memset(&span, 0, sizeof(span));
-                span.file   = file;
-                span.line   = line;
-                span.column = column;
-                diag_set_span(d, span);
-            }
         }
-        if (d != NULL && data != NULL) {
-            diag_set_data(d, data);
-        }
-        if (d != NULL && note != NULL && note[0] != '\0') {
-            diag_add_note(d, note);
-        }
-        set_diag(S, d);
     }
+    if (d != NULL && data != NULL) {
+        diag_set_data(d, data);
+    }
+    if (d != NULL && note != NULL && note[0] != '\0') {
+        diag_add_note(d, note);
+    }
+    set_diag(S, d);
+}
+
+/* Publish a classified diagnostic to the last-error slot without the
+ * inside-a-try-frame throw conversion set_eval_diag applies. Used where
+ * a diagnostic must be recorded for observation but must not longjmp
+ * out of a surrounding catch -- the protected eval entry points
+ * publishing a caught throw for mino_last_error. */
+void set_eval_diag_noraise(mino_state *S, const mino_val *form,
+                           const char *kind, const char *code,
+                           const char *msg)
+{
+    publish_eval_diag(S, form, kind, code, msg, NULL, NULL);
 }
 
 /* Return a short human-readable label for a value's type. */

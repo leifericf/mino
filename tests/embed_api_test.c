@@ -634,6 +634,63 @@ static void test_eval_ex_out_ex_payload(mino_state *S, mino_env *env)
     }
 }
 
+/* Error observation is uniform across the eval family: a failing eval
+ * publishes to mino_last_error whether the caller used the unsuffixed
+ * variant or the protected _ex variant. The _ex variant additionally
+ * hands back the raw payload via out_ex; it does not trade away the
+ * last-error slot to do so. */
+static void test_last_error_uniform_across_eval_family(mino_state *S,
+                                                       mino_env *env)
+{
+    const char *unsuffixed_err;
+    const char *ex_err;
+    char        saved[256];
+    mino_val *out, *out_ex;
+
+    /* Unsuffixed: last_error is set and mentions the payload. */
+    mino_clear_error(S);
+    (void)mino_eval_string(S, "(throw :beacon)", env);
+    unsuffixed_err = mino_last_error(S);
+    REQUIRE(unsuffixed_err != NULL,
+            "uniform-err: unsuffixed publishes last_error");
+    REQUIRE(unsuffixed_err != NULL
+            && strstr(unsuffixed_err, "beacon") != NULL,
+            "uniform-err: unsuffixed last_error names the payload");
+    if (unsuffixed_err != NULL) {
+        size_t n = strlen(unsuffixed_err);
+        if (n >= sizeof(saved)) n = sizeof(saved) - 1;
+        memcpy(saved, unsuffixed_err, n);
+        saved[n] = '\0';
+    } else {
+        saved[0] = '\0';
+    }
+
+    /* _ex string form: same last_error is published. */
+    mino_clear_error(S);
+    out = NULL; out_ex = NULL;
+    (void)mino_eval_string_ex(S, "(throw :beacon)", env, &out, &out_ex);
+    ex_err = mino_last_error(S);
+    REQUIRE(ex_err != NULL,
+            "uniform-err: _ex publishes last_error too");
+    REQUIRE(ex_err != NULL && strcmp(ex_err, saved) == 0,
+            "uniform-err: _ex last_error matches the unsuffixed one");
+    REQUIRE(out_ex != NULL,
+            "uniform-err: _ex still hands back the raw payload");
+
+    /* _ex form-eval variant: last_error published on a pre-read form. */
+    mino_clear_error(S);
+    {
+        mino_val *form = mino_read(S, "(throw :beacon)", NULL);
+        out = NULL; out_ex = NULL;
+        (void)mino_eval_ex(S, form, env, &out, &out_ex);
+    }
+    REQUIRE(mino_last_error(S) != NULL,
+            "uniform-err: mino_eval_ex publishes last_error");
+    REQUIRE(mino_last_error(S) != NULL
+            && strcmp(mino_last_error(S), saved) == 0,
+            "uniform-err: mino_eval_ex last_error matches");
+}
+
 /* mino_iter walks every k/v of a sorted-map (in sort order) and every
  * element of a sorted-set, just like it does for hashed variants. */
 static void test_iter_sorted(mino_state *S, mino_env *env)
@@ -1096,6 +1153,7 @@ int main(void)
     test_read_null_src(S);
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
+    test_last_error_uniform_across_eval_family(S, env);
     test_to_int_bignum_round_trip();
     test_net_capability_gate();
     test_json_csv_capability_gate();

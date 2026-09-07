@@ -236,7 +236,12 @@ static mino_val *store_wal_read(mino_state *S, const char *snap_path,
                     if (rc == 0 && entry != NULL) {
                         mino_vector_builder_push(vb, entry);
                     } else {
-                        /* Torn write: stop here, keep what we have */
+                        /* Torn write: stop here, keep what we have. The
+                         * parse error is expected during recovery and is
+                         * deliberately swallowed, so clear the last-error
+                         * slot the _ex call published rather than leaving
+                         * a spurious diagnostic for the caller. */
+                        mino_clear_error(S);
                         *p = saved;
                         break;
                     }
@@ -372,8 +377,13 @@ static mino_val *store_read_snapshot(mino_state *S, const char *path,
     /* Version header check: skip one byte if it's the version sentinel */
     if (sz > 0 && (unsigned char)buf[0] == STORE_SNAPSHOT_VERSION)
         offset = 1;
-    if (mino_eval_string_ex(S, buf + offset, env, &db, NULL) != 0)
+    if (mino_eval_string_ex(S, buf + offset, env, &db, NULL) != 0) {
+        /* A corrupt snapshot is recovered from, not surfaced: clear the
+         * diagnostic the _ex call published so it doesn't leak to the
+         * caller as a spurious error. */
+        mino_clear_error(S);
         db = NULL;
+    }
     free(buf);
     return db;
 }

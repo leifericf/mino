@@ -1358,9 +1358,11 @@ mino_val *mino_load_file(mino_state *S, const char *path,
  * (matching mino_pcall's contract). *out_ex is NULL on success or when
  * out_ex is NULL.
  *
- * The _ex variants do NOT publish to mino_last_error on a caught throw;
- * embedders that want a diagnostic must inspect *out_ex or call
- * mino_last_error explicitly.
+ * Error observation is uniform with the unsuffixed variants: a caught
+ * throw is published to mino_last_error as well, so the same diagnostic
+ * is available through mino_last_error() regardless of which eval form
+ * the caller used. The _ex form adds the raw payload via *out_ex on top
+ * of that; it does not trade the last-error slot away.
  */
 int mino_eval_ex       (mino_state *S, mino_val *form, mino_env *env,
                         mino_val **out, mino_val **out_ex);
@@ -1413,8 +1415,16 @@ mino_val *mino_call(mino_state *S, mino_val *fn, mino_val *args,
 
 /*
  * Protected call: same as mino_call but returns 0 on success (writing
- * the result to *out) or -1 on error. The error message is available
- * via mino_last_error(). *out is set to NULL on error.
+ * the result to *out) or -1 on error. *out is set to NULL on error.
+ *
+ * Unlike the eval entry points, mino_pcall does NOT publish to
+ * mino_last_error on a caught throw: it is the low-level swallow the
+ * runtime's own reference-type machinery (validators, watches, agent
+ * actions, STM retries, delay forcing, signal hooks) is built on, and
+ * publishing would leave a spurious diagnostic across those flows.
+ * Observe the error through the -1 return and *out_ex; a host that
+ * wants a published diagnostic should use the eval entry points or set
+ * one itself.
  *
  * If out_ex is non-NULL, on error *out_ex is set to the raw thrown
  * exception value (the cell passed to (throw ...) by the inner code).
