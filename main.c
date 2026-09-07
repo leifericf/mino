@@ -14,10 +14,8 @@
 #  define _DARWIN_C_SOURCE
 #endif
 
-#include "runtime/internal.h"
-#include "path_buf.h"
-#include "crash_backtrace.h"  /* portable _Unwind_Backtrace, replaces <execinfo.h> */
-#include "eval/bc/jit.h"  /* MINO_CPJIT_HOST_DETECTED for --help/--version */
+#include "mino.h"
+#include "crash_backtrace.h"  /* CLI-local: portable _Unwind_Backtrace crash trace */
 
 #include <errno.h>
 #include <signal.h>
@@ -40,6 +38,9 @@
 #  include <sys/types.h>
 #endif
 
+/* CLI-local fixed path/line buffer capacity. The CLI builds paths and
+ * reads REPL lines into stack buffers of this size. */
+#define PATH_BUF_CAP  4096
 #define MINO_LINE_MAX PATH_BUF_CAP
 
 /* ---- CWD-relative module resolver ---- */
@@ -157,8 +158,8 @@ static int try_resolve_in(const char *dir, const char *name, size_t nlen,
 
 /* Resolver that checks project paths first, then runtime-registered
  * extra paths (from `(add-load-path! ...)`), then falls through to
- * cwd. The state pointer is passed in via ctx so we can read
- * S->module.extra_load_paths without a global. */
+ * cwd. The state pointer is passed in via ctx so we can enumerate the
+ * runtime load paths via the public API without a global. */
 static const char *project_resolve(const char *name, void *ctx)
 {
     static char pbuf[PATH_BUF_CAP];
@@ -174,9 +175,11 @@ static const char *project_resolve(const char *name, void *ctx)
             return pbuf;
     }
     if (S != NULL) {
-        for (i = 0; i < S->module.extra_load_paths_len; i++) {
-            if (try_resolve_in(S->module.extra_load_paths[i], name, nlen,
-                               pbuf, sizeof(pbuf)))
+        size_t np = mino_load_path_count(S);
+        for (i = 0; i < np; i++) {
+            const char *lp = mino_load_path_get(S, i);
+            if (lp != NULL && try_resolve_in(lp, name, nlen,
+                                             pbuf, sizeof(pbuf)))
                 return pbuf;
         }
     }
@@ -196,9 +199,11 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
     nlen = strlen(name);
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
     if (S != NULL) {
-        for (i = 0; i < S->module.extra_load_paths_len; i++) {
-            if (try_resolve_in(S->module.extra_load_paths[i], name, nlen,
-                               pbuf, sizeof(pbuf)))
+        size_t np = mino_load_path_count(S);
+        for (i = 0; i < np; i++) {
+            const char *lp = mino_load_path_get(S, i);
+            if (lp != NULL && try_resolve_in(lp, name, nlen,
+                                             pbuf, sizeof(pbuf)))
                 return pbuf;
         }
     }
@@ -211,7 +216,7 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
 static void setup_project(mino_state *S, mino_env *env)
 {
     mino_val *result;
-    mino_root *ref;
+    mino_iter *it;
 
     if (!file_exists("mino.edn")) return;
 
@@ -221,24 +226,30 @@ static void setup_project(mino_state *S, mino_env *env)
         "(deps/resolve-paths (deps/load-manifest \"mino.edn\"))",
         env);
 
-    if (result == NULL || result->type != MINO_VECTOR) return;
+    if (result == NULL || !mino_is_vector(result)) return;
 
-    /* Root the result so GC cannot collect it while we extract paths. */
-    ref = mino_root_new(S, result);
+    /* Walk the vector of path strings via the public iterator, which
+     * roots the collection for its lifetime so a GC during strdup is
+     * safe. For a vector, each step yields the element in `elem`. */
+    it = (mino_iter *)malloc(mino_iter_sizeof());
+    if (it == NULL) return;
+    mino_iter_init(S, it, result);
     {
-        size_t i;
-        size_t count = result->as.vec.len;
-        if (count > MAX_PROJECT_PATHS) count = MAX_PROJECT_PATHS;
-        for (i = 0; i < count; i++) {
-            mino_val *p = vec_nth(result, i);
-            if (p != NULL && p->type == MINO_STRING) {
-                project_paths[project_path_count] = strdup(p->as.s.data);
+        mino_val *elem, *unused;
+        while (mino_iter_next(it, &elem, &unused)
+               && project_path_count < MAX_PROJECT_PATHS) {
+            const char *s;
+            size_t      slen;
+            if (elem != NULL && mino_is_string(elem)
+                && mino_to_string(elem, &s, &slen)) {
+                project_paths[project_path_count] = strdup(s);
                 if (project_paths[project_path_count] != NULL)
                     project_path_count++;
             }
         }
     }
-    mino_unroot(S, ref);
+    mino_iter_done(it);
+    free(it);
 
     if (project_path_count > 0)
         mino_set_resolver(S, project_resolve, S);
@@ -344,14 +355,14 @@ static int run_deps(mino_state *S, mino_env *env)
 
 static void print_version(FILE *out)
 {
-#if MINO_CPJIT_HOST_DETECTED
-    fprintf(out, "mino %s\n", mino_version_string());
-#else
-    /* mino-lean (or any host where the JIT module was compiled out)
-     * advertises a distinct build tag so install audits and bug
-     * reports can tell which binary the user is running. */
-    fprintf(out, "mino-lean %s (no-jit)\n", mino_version_string());
-#endif
+    if (mino_jit_available()) {
+        fprintf(out, "mino %s\n", mino_version_string());
+    } else {
+        /* mino-lean (or any host where the JIT module was compiled out)
+         * advertises a distinct build tag so install audits and bug
+         * reports can tell which binary the user is running. */
+        fprintf(out, "mino-lean %s (no-jit)\n", mino_version_string());
+    }
 }
 
 static void print_usage(FILE *out)
@@ -368,14 +379,20 @@ static void print_usage(FILE *out)
         "OPTIONS:\n"
         "    -e, --eval EXPR     Evaluate EXPR and print the result\n"
         "    -h, --help          Show this help and exit\n"
-        "    -V, --version       Show version and exit\n"
-#if MINO_CPJIT_HOST_DETECTED
+        "    -V, --version       Show version and exit\n",
+        out);
+    if (mino_jit_available()) {
+        fputs(
         "    --jit=auto|off|on   JIT mode (default auto; overrides MINO_JIT env)\n"
-        "    --jit-threshold=N   Hot-call count before AUTO compiles (default 100)\n"
-#else
+        "    --jit-threshold=N   Hot-call count before AUTO compiles (default 100)\n",
+        out);
+    } else {
+        fputs(
         "    --jit=auto|off|on   Accepted for parity; this build has the JIT compiled out\n"
-        "    --jit-threshold=N   Accepted for parity; this build has the JIT compiled out\n"
-#endif
+        "    --jit-threshold=N   Accepted for parity; this build has the JIT compiled out\n",
+        out);
+    }
+    fputs(
         "    --                  End of options; after FILE, task NAME, or\n"
         "                        -e EXPR the rest is *command-line-args*\n"
         "\n"
@@ -566,7 +583,7 @@ static void repl_set_special(mino_state *S, mino_env *core_env,
 {
     if (val == NULL) val = mino_nil(S);
     if (var != NULL) {
-        var_set_root(S, var, val);
+        mino_var_set_root(S, var, val);
     }
     if (core_env != NULL) {
         /* Bind the var cell (uniform ns-env representation); reads
@@ -579,9 +596,9 @@ static void repl_set_special(mino_state *S, mino_env *core_env,
 static mino_val *repl_intern_special(mino_state *S, mino_env *core_env,
                                        const char *name)
 {
-    mino_val *var = var_intern(S, "clojure.core", name);
+    mino_val *var = mino_intern_var(S, "clojure.core", name);
     if (var != NULL) {
-        var->as.var.dynamic = 1;
+        mino_var_set_dynamic(S, var, 1);
     }
     repl_set_special(S, core_env, var, name, mino_nil(S));
     return var;
@@ -627,7 +644,7 @@ static int cli_args_start(int argc, char **argv, int first,
 static void repl_specials_init(mino_state *S, repl_specials_t *r,
                                int argc, char **argv, int args_start)
 {
-    mino_env *core_env = ns_env_ensure(S, "clojure.core");
+    mino_env *core_env = mino_ns_env(S, "clojure.core");
     r->core_env = core_env;
     r->star1   = repl_intern_special(S, core_env, "*1");
     r->star2   = repl_intern_special(S, core_env, "*2");
@@ -654,10 +671,12 @@ static void repl_specials_init(mino_state *S, repl_specials_t *r,
 static void repl_specials_rotate(mino_state *S, repl_specials_t *r,
                                  mino_val *result)
 {
-    mino_val *prev1 = (r->star1 != NULL) ? r->star1->as.var.root
+    mino_val *prev1 = (r->star1 != NULL) ? mino_var_get_root(r->star1)
                                            : mino_nil(S);
-    mino_val *prev2 = (r->star2 != NULL) ? r->star2->as.var.root
+    mino_val *prev2 = (r->star2 != NULL) ? mino_var_get_root(r->star2)
                                            : mino_nil(S);
+    if (prev1 == NULL) prev1 = mino_nil(S);
+    if (prev2 == NULL) prev2 = mino_nil(S);
     repl_set_special(S, r->core_env, r->star3, "*3", prev2);
     repl_set_special(S, r->core_env, r->star2, "*2", prev1);
     repl_set_special(S, r->core_env, r->star1, "*1", result);
@@ -1013,11 +1032,16 @@ static int run_repl(mino_state *S, mino_env *env,
              * the full session history, not just the parse buffer: the
              * parse buffer is truncated whenever a form is consumed,
              * but reader_line keeps accumulating across forms. */
-            source_cache_store(S, S->reader.reader_file, hist_buf, hist_len);
+            mino_source_cache_feed(S, mino_reader_file(S),
+                                   hist_buf, hist_len);
 
             form = mino_read(S, cursor, &end);
-            if (form != NULL && form->type == MINO_KEYWORD) {
-                const char *name = form->as.s.data;
+            if (form != NULL && mino_is_keyword(form)) {
+                const char *name;
+                size_t      name_len;
+                if (!mino_to_keyword(form, &name, &name_len)) {
+                    name = "";
+                }
                 if (strcmp(name, "quit") == 0) {
                     fputc('\n', stderr);
                     exit_code = 0;

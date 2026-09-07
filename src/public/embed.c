@@ -254,6 +254,12 @@ const char *mino_load_path_get(mino_state *S, size_t i)
     return S->module.extra_load_paths[i];
 }
 
+mino_env *mino_ns_env(mino_state *S, const char *ns)
+{
+    if (S == NULL || ns == NULL) return NULL;
+    return ns_env_ensure(S, ns);
+}
+
 mino_val *mino_intern_var(mino_state *S, const char *ns, const char *name)
 {
     if (S == NULL || ns == NULL || name == NULL) return NULL;

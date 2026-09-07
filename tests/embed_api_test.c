@@ -718,15 +718,25 @@ static void test_repl_embedding_surface(mino_state *S, mino_env *env)
                 "loadpath: out-of-range index returns NULL");
     }
 
-    /* Var root read/write: intern a dynamic var, set and read its root,
-     * and confirm mino code sees the same value through the var. */
+    /* Var root read/write: intern a dynamic var in clojure.core's env,
+     * set and read its root, bind it in that env, and confirm mino code
+     * resolving the unqualified name sees the host-set root. */
     {
+        mino_env *core_env = mino_ns_env(S, "clojure.core");
         mino_val *v = mino_intern_var(S, "clojure.core", "*embed-star1*");
+        REQUIRE(core_env != NULL, "var: mino_ns_env returns the core env");
         REQUIRE(v != NULL, "var: intern returns a var");
         REQUIRE(v != NULL && mino_typeof(v) == MINO_VAR,
                 "var: interned value is a var");
         mino_var_set_dynamic(S, v, 1);
         mino_var_set_root(S, v, mino_int(S, 77));
+        mino_env_set(S, core_env, "*embed-star1*", v);
+        {
+            mino_val  *r = mino_eval_string(S, "*embed-star1*", env);
+            long long   n = 0;
+            REQUIRE(r != NULL && mino_to_int(r, &n) && n == 77,
+                    "var: mino code reads the host-set root via ns env");
+        }
         {
             mino_val  *root = mino_var_get_root(v);
             long long   n = 0;

@@ -630,6 +630,11 @@ mino_jit_capability mino_state_jit_capability(const mino_state *S)
     return cap;
 }
 
+int mino_jit_available(void)
+{
+    return MINO_CPJIT_HOST_DETECTED ? 1 : 0;
+}
+
 /* Tear down a state in the deterministic order each helper expects.
  * Order matters: registries that name heap-resident values release
  * the names before state_free_heap walks the heap; diag releases

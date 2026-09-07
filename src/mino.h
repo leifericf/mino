@@ -1273,6 +1273,15 @@ typedef struct {
 
 mino_jit_capability mino_state_jit_capability(const mino_state *S);
 
+/*
+ * Stateless build-identity query: non-zero when this binary was compiled
+ * with JIT support AND the host arch / OS is a supported target (the same
+ * condition as mino_jit_capability.available, without needing a state).
+ * Always 0 on mino-lean. A CLI or install audit uses this to tag its
+ * --version output without constructing a runtime.
+ */
+int mino_jit_available(void);
+
 /* ------------------------------------------------------------------------- */
 /* Environment and evaluator                                                 */
 /* ------------------------------------------------------------------------- */
@@ -1607,6 +1616,13 @@ const char *mino_load_path_get(mino_state *S, size_t i);
  * front-end's own vars (the REPL history vars, a host-provided global).
  * Returns NULL on allocation failure.
  */
+/*
+ * Return the environment backing namespace `ns`, creating it if it does
+ * not yet exist. A front-end uses this to bind its own vars in a target
+ * namespace (e.g. interning the REPL history vars in clojure.core so
+ * they resolve unqualified). The returned env is owned by the state.
+ */
+mino_env *mino_ns_env(mino_state *S, const char *ns);
 mino_val *mino_intern_var(mino_state *S, const char *ns, const char *name);
 /* Mark `var` dynamic (thread-bindable) when `dynamic` is non-zero, or
  * static when zero. REPL history vars are dynamic so a nested binding
