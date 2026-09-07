@@ -211,7 +211,7 @@ static const char *runtime_paths_resolve(const char *name, void *ctx)
 static void setup_project(mino_state *S, mino_env *env)
 {
     mino_val *result;
-    mino_ref *ref;
+    mino_root *ref;
 
     if (!file_exists("mino.edn")) return;
 
@@ -224,7 +224,7 @@ static void setup_project(mino_state *S, mino_env *env)
     if (result == NULL || result->type != MINO_VECTOR) return;
 
     /* Root the result so GC cannot collect it while we extract paths. */
-    ref = mino_ref_new(S, result);
+    ref = mino_root_new(S, result);
     {
         size_t i;
         size_t count = result->as.vec.len;
@@ -238,7 +238,7 @@ static void setup_project(mino_state *S, mino_env *env)
             }
         }
     }
-    mino_unref(S, ref);
+    mino_unroot(S, ref);
 
     if (project_path_count > 0)
         mino_set_resolver(S, project_resolve, S);

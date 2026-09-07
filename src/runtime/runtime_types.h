@@ -57,11 +57,11 @@ typedef struct root_env {
     struct root_env *next;
 } root_env_t;
 
-/* Host-retained value ref (malloc-owned). */
-struct mino_ref {
-    mino_val      *val;
-    struct mino_ref *next;
-    struct mino_ref *prev;
+/* Host-retained GC root handle (malloc-owned). */
+struct mino_root {
+    mino_val       *val;
+    struct mino_root *next;
+    struct mino_root *prev;
 };
 
 /* Dynamic binding frame. `var` is the canonical var the binding

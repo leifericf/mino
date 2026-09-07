@@ -4,7 +4,7 @@
  *
  * One pool per endpoint (scheme, host, port), held per mino state in
  * S->net_pools. Entries are idle net or TLS socket handles rooted
- * through mino_ref (the host-retained root list), stamped with a
+ * through mino_root (the host-retained root list), stamped with a
  * monotonic last-used time and the TLS verification mode they were
  * opened under: an :insecure? session never serves a verifying
  * request to the same endpoint (credentials would cross an unverified
@@ -70,7 +70,7 @@ static void pool_mu_destroy(pool_mu_t *mu){ pthread_mutex_destroy(mu); }
 #endif
 
 typedef struct pool_entry {
-    mino_ref          *ref;   /* rooted handle value */
+    mino_root         *ref;   /* rooted handle value */
     long long         last_used_ms;
     int               insecure;  /* TLS verification mode at open time */
     struct pool_entry *next;
@@ -229,12 +229,12 @@ static void pool_drain_endpoint(mino_state *S, pool_endpoint_t *ep)
     pool_mu_unlock(&ep->mu);
     while (e != NULL) {
         pool_entry_t *next = e->next;
-        mino_val *v = mino_deref(e->ref);
+        mino_val *v = mino_root_get(e->ref);
         if (v != NULL) {
             const pool_handle_ops_t *ops = pool_ops_for(v);
             if (ops != NULL) ops->close(v);
         }
-        mino_unref(S, e->ref);
+        mino_unroot(S, e->ref);
         free(e);
         e = next;
     }
@@ -510,7 +510,7 @@ mino_val *mino_net_pool_checkout(mino_state *S, const char *host,
         if (e != NULL) ep->idle = e->next;
         pool_mu_unlock(&ep->mu);
         if (e == NULL) return NULL;
-        v = mino_deref(e->ref);
+        v = mino_root_get(e->ref);
         ops = v != NULL ? pool_ops_for(v) : NULL;
         if (v == NULL || ops == NULL
             || e->insecure != insecure
@@ -520,11 +520,11 @@ mino_val *mino_net_pool_checkout(mino_state *S, const char *host,
             /* Expired, closed, peer-gone, or wrong verification mode:
              * close, drop, try next. */
             if (v != NULL && ops != NULL) ops->close(v);
-            mino_unref(S, e->ref);
+            mino_unroot(S, e->ref);
             free(e);
             continue;
         }
-        mino_unref(S, e->ref);
+        mino_unroot(S, e->ref);
         free(e);
         return v;
     }
@@ -567,7 +567,7 @@ int mino_net_pool_return(mino_state *S, const char *host, size_t host_len,
     }
     pool_mu_lock(&ep->mu);
     for (scan = ep->idle; scan != NULL; scan = scan->next) {
-        if (mino_deref(scan->ref) == handle) {
+        if (mino_root_get(scan->ref) == handle) {
             pool_mu_unlock(&ep->mu);
             return 0;
         }
@@ -578,7 +578,7 @@ int mino_net_pool_return(mino_state *S, const char *host, size_t host_len,
         ops->close(handle);
         return -1;
     }
-    e->ref = mino_ref_new(S, handle);
+    e->ref = mino_root_new(S, handle);
     if (e->ref == NULL) {
         free(e);
         ops->close(handle);

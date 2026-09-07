@@ -320,15 +320,15 @@ static void state_free_root_envs(mino_state *S)
     }
 }
 
-/* Free the host-retained value ref doubly-linked list. */
-static void state_free_refs(mino_state *S)
+/* Free the host-retained GC root handle doubly-linked list. */
+static void state_free_roots(mino_state *S)
 {
-    mino_ref *ref = S->ref_roots;
-    mino_ref *rnxt;
-    while (ref != NULL) {
-        rnxt = ref->next;
-        free(ref);
-        ref = rnxt;
+    mino_root *root = S->roots;
+    mino_root *rnxt;
+    while (root != NULL) {
+        rnxt = root->next;
+        free(root);
+        root = rnxt;
     }
 }
 
@@ -663,14 +663,14 @@ void mino_state_free(mino_state *S)
      * the stats ring is off. */
     mino_jit_stats_seal_all();
     state_free_root_envs(S);
-    /* Release the async run queue and any pending timers before the ref
-     * registry: an unfired timer still holds a mino_ref on its callback
-     * and drops it via mino_unref, which unlinks from S->ref_roots.
-     * Freeing the registry first would leave that unref touching (and
-     * double-freeing) already-freed nodes. Same ref-root dependency as
+    /* Release the async run queue and any pending timers before the root
+     * registry: an unfired timer still holds a mino_root on its callback
+     * and drops it via mino_unroot, which unlinks from S->roots.
+     * Freeing the registry first would leave that unroot touching (and
+     * double-freeing) already-freed nodes. Same root dependency as
      * mino_net_pool_state_free above. */
     state_free_async(S);
-    state_free_refs(S);
+    state_free_roots(S);
     state_free_ns_aliases(S);
     state_free_ns_env_table(S);
     /* Unmap every JIT'd code region the runtime mmap'd. Safe to call
@@ -772,44 +772,44 @@ uint64_t state_rand64(mino_state *S)
 /* Value retention (refs)                                                    */
 /* ------------------------------------------------------------------------- */
 
-mino_ref *mino_ref_new(mino_state *S, mino_val *val)
+mino_root *mino_root_new(mino_state *S, mino_val *val)
 {
-    mino_ref *r = (mino_ref *)calloc(1, sizeof(*r));
+    mino_root *r = (mino_root *)calloc(1, sizeof(*r));
     if (r == NULL) {
         return NULL;
     }
     r->val  = val;
     r->prev = NULL;
-    r->next = S->ref_roots;
-    if (S->ref_roots != NULL) {
-        S->ref_roots->prev = r;
+    r->next = S->roots;
+    if (S->roots != NULL) {
+        S->roots->prev = r;
     }
-    S->ref_roots = r;
+    S->roots = r;
     return r;
 }
 
-mino_val *mino_deref(const mino_ref *ref)
+mino_val *mino_root_get(const mino_root *root)
 {
-    if (ref == NULL) {
+    if (root == NULL) {
         return NULL;
     }
-    return ref->val;
+    return root->val;
 }
 
-void mino_unref(mino_state *S, mino_ref *ref)
+void mino_unroot(mino_state *S, mino_root *root)
 {
-    if (ref == NULL) {
+    if (root == NULL) {
         return;
     }
-    if (ref->prev != NULL) {
-        ref->prev->next = ref->next;
+    if (root->prev != NULL) {
+        root->prev->next = root->next;
     } else {
-        S->ref_roots = ref->next;
+        S->roots = root->next;
     }
-    if (ref->next != NULL) {
-        ref->next->prev = ref->prev;
+    if (root->next != NULL) {
+        root->next->prev = root->prev;
     }
-    free(ref);
+    free(root);
 }
 
 /* ------------------------------------------------------------------------- */

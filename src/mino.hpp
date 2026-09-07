@@ -171,33 +171,33 @@ private:
 /* pin -- GC-rooted value handle                                      */
 /* ----------------------------------------------------------------- */
 
-/* Wraps a mino_ref so the underlying value survives garbage
+/* Wraps a mino_root so the underlying value survives garbage
  * collection. Use when you need to keep a mino_val * alive across
  * eval calls or other points where GC may run. Destructing the pin
  * releases the root; the value may then be collected.
  *
- * Move-only. `release` extracts the raw mino_ref* if the caller
+ * Move-only. `release` extracts the raw mino_root* if the caller
  * wants to hand it back to the C API; the wrapper becomes empty. */
 class pin {
 public:
-    pin() : state_(nullptr), ref_(nullptr) {}
+    pin() : state_(nullptr), root_(nullptr) {}
 
     /* Captures the raw mino_state, not the wrapper: the pin roots
      * against the live runtime for its whole lifetime, even after the
      * state wrapper is moved (which transfers the raw pointer out of
      * the moved-from wrapper). Holding the wrapper would null-deref in
-     * mino_unref once the wrapper moved. */
+     * mino_unroot once the wrapper moved. */
     pin(state& s, mino_val* v)
-        : state_(s.raw()), ref_(mino_ref_new(s, v))
+        : state_(s.raw()), root_(mino_root_new(s, v))
     {
-        if (ref_ == nullptr) {
-            throw error("mino_ref_new failed");
+        if (root_ == nullptr) {
+            throw error("mino_root_new failed");
         }
     }
 
     ~pin() noexcept {
-        if (ref_ != nullptr && state_ != nullptr) {
-            mino_unref(state_, ref_);
+        if (root_ != nullptr && state_ != nullptr) {
+            mino_unroot(state_, root_);
         }
     }
 
@@ -205,41 +205,41 @@ public:
     pin& operator=(const pin&) = delete;
 
     pin(pin&& other) noexcept
-        : state_(other.state_), ref_(other.ref_)
+        : state_(other.state_), root_(other.root_)
     {
         other.state_ = nullptr;
-        other.ref_   = nullptr;
+        other.root_  = nullptr;
     }
     pin& operator=(pin&& other) noexcept {
         if (this != &other) {
-            if (ref_ != nullptr && state_ != nullptr) {
-                mino_unref(state_, ref_);
+            if (root_ != nullptr && state_ != nullptr) {
+                mino_unroot(state_, root_);
             }
             state_       = other.state_;
-            ref_         = other.ref_;
+            root_        = other.root_;
             other.state_ = nullptr;
-            other.ref_   = nullptr;
+            other.root_  = nullptr;
         }
         return *this;
     }
 
-    mino_val* deref() const noexcept {
-        return ref_ != nullptr ? mino_deref(ref_) : nullptr;
+    mino_val* get() const noexcept {
+        return root_ != nullptr ? mino_root_get(root_) : nullptr;
     }
-    operator mino_val*() const noexcept { return deref(); }
+    operator mino_val*() const noexcept { return get(); }
 
-    mino_ref* release() noexcept {
-        mino_ref* r = ref_;
-        ref_   = nullptr;
+    mino_root* release() noexcept {
+        mino_root* r = root_;
+        root_  = nullptr;
         state_ = nullptr;
         return r;
     }
 
-    bool empty() const noexcept { return ref_ == nullptr; }
+    bool empty() const noexcept { return root_ == nullptr; }
 
 private:
     mino_state* state_;
-    mino_ref*   ref_;
+    mino_root*  root_;
 };
 
 /* ----------------------------------------------------------------- */

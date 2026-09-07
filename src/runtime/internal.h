@@ -440,8 +440,8 @@ struct mino_state {
      * land after the layout-tracked region. */
     mino_val     *sf_letfn_star;
 
-    /* Host-retained value refs */
-    mino_ref     *ref_roots;
+    /* Host-retained GC root handles */
+    mino_root    *roots;
 
     /* Dynamic bindings, interrupt flag, and GC save stack moved to
      * mino_thread_ctx_t (dyn_stack, interrupted, gc_save, gc_save_len). */

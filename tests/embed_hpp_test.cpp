@@ -36,7 +36,7 @@ static int failures = 0;
  * mino_state to `s2`, but the pin must still release its root against
  * the same live runtime. If the pin held a pointer to the state
  * wrapper, `*state_` would read the moved-from wrapper (raw pointer
- * nulled) and mino_unref would dereference NULL. */
+ * nulled) and mino_unroot would dereference NULL. */
 static void test_pin_survives_state_move(void)
 {
     /* s2 is declared before the pin so the pin destructs first, while
@@ -50,7 +50,7 @@ static void test_pin_survives_state_move(void)
         mino::state s1;
         p = mino::pin(s1, mino_int(s1, 42));
         long long n = 0;
-        REQUIRE(mino_to_int(p.deref(), &n) && n == 42,
+        REQUIRE(mino_to_int(p.get(), &n) && n == 42,
                 "pin/move: pin derefs its value before the move");
         s2 = std::move(s1);
         /* s1 is now moved-from; its raw pointer is null. The pin still
@@ -94,7 +94,7 @@ static void test_pin_move_transfers_root(void)
     REQUIRE(!b.empty(), "pin/move: moved-to pin holds the root");
     {
         long long n = 0;
-        REQUIRE(mino_to_int(b.deref(), &n) && n == 99,
+        REQUIRE(mino_to_int(b.get(), &n) && n == 99,
                 "pin/move: moved-to pin still derefs its value");
     }
 }

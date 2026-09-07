@@ -34,8 +34,8 @@ void async_sched_enqueue(mino_state *S, mino_val *callback,
     }
     e->callback = callback;
     e->value    = value;
-    e->cb_ref   = callback ? mino_ref_new(S, callback) : NULL;
-    e->val_ref  = value ? mino_ref_new(S, value) : NULL;
+    e->cb_ref   = callback ? mino_root_new(S, callback) : NULL;
+    e->val_ref  = value ? mino_root_new(S, value) : NULL;
     e->next     = NULL;
 
     if (S->async.run_tail) {
@@ -87,8 +87,8 @@ int async_sched_drain(mino_state *S, mino_env *env)
             if (pinned) gc_unpin(2);
         }
 
-        if (e->cb_ref)  mino_unref(S, e->cb_ref);
-        if (e->val_ref) mino_unref(S, e->val_ref);
+        if (e->cb_ref)  mino_unroot(S, e->cb_ref);
+        if (e->val_ref) mino_unroot(S, e->val_ref);
         free(e);
         ran = 1;
 

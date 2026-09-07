@@ -56,7 +56,7 @@ int async_timer_schedule(mino_state *S, double ms, mino_val *callback)
     }
     entry->deadline_ms = now_ms() + ms;
     entry->callback    = callback;
-    entry->cb_ref      = mino_ref_new(S, callback);
+    entry->cb_ref      = mino_root_new(S, callback);
     entry->next        = NULL;
 
     /* Insert sorted by deadline (earliest first). */
@@ -103,7 +103,7 @@ void async_timers_check(mino_state *S)
          * pass and receives nil as its argument. */
         async_sched_enqueue(S, entry->callback, mino_nil(S));
 
-        if (entry->cb_ref) mino_unref(S, entry->cb_ref);
+        if (entry->cb_ref) mino_unroot(S, entry->cb_ref);
         free(entry);
     }
 }
@@ -113,7 +113,7 @@ void async_timers_free(mino_state *S)
     timer_entry_t *entry = S->async.timers;
     while (entry != NULL) {
         timer_entry_t *next = entry->next;
-        if (entry->cb_ref) mino_unref(S, entry->cb_ref);
+        if (entry->cb_ref) mino_unroot(S, entry->cb_ref);
         free(entry);
         entry = next;
     }

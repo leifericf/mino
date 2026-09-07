@@ -62,18 +62,18 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
     case MINO_CONS: {
         mino_val *car = clone_val(dst, v->as.cons.car);
         mino_val *cdr;
-        mino_ref *rcar;
+        mino_root *rcar;
         if (car == NULL && v->as.cons.car != NULL
             && mino_type_of(v->as.cons.car) != MINO_NIL) return NULL;
-        rcar = mino_ref_new(dst, car);
+        rcar = mino_root_new(dst, car);
         cdr = clone_val(dst, v->as.cons.cdr);
         if (cdr == NULL && v->as.cons.cdr != NULL
             && mino_type_of(v->as.cons.cdr) != MINO_NIL) {
-            mino_unref(dst, rcar);
+            mino_unroot(dst, rcar);
             return NULL;
         }
-        car = mino_deref(rcar);
-        mino_unref(dst, rcar);
+        car = mino_root_get(rcar);
+        mino_unroot(dst, rcar);
         {
             mino_val *r = mino_cons(dst, car, cdr);
             if (clone_meta(dst, v, r) != 0) return NULL;
@@ -85,11 +85,11 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
         size_t i;
         mino_val **items;
         mino_val *result;
-        mino_ref **refs;
+        mino_root **refs;
         if (len == 0) return mino_vector(dst, NULL, 0);
         if (mino_fi_should_fail_raw(dst)) return NULL;
         items = (mino_val **)malloc(len * sizeof(*items));
-        refs  = (mino_ref **)malloc(len * sizeof(*refs));
+        refs  = (mino_root **)malloc(len * sizeof(*refs));
         if (items == NULL || refs == NULL) {
             free(items); free(refs);
             return NULL;
@@ -98,17 +98,17 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
             items[i] = clone_val(dst, vec_nth(v, i));
             if (items[i] == NULL) {
                 size_t j;
-                for (j = 0; j < i; j++) mino_unref(dst, refs[j]);
+                for (j = 0; j < i; j++) mino_unroot(dst, refs[j]);
                 free(items); free(refs);
                 return NULL;
             }
-            refs[i]  = mino_ref_new(dst, items[i]);
+            refs[i]  = mino_root_new(dst, items[i]);
         }
         for (i = 0; i < len; i++) {
-            items[i] = mino_deref(refs[i]);
+            items[i] = mino_root_get(refs[i]);
         }
         result = mino_vector(dst, items, len);
-        for (i = 0; i < len; i++) mino_unref(dst, refs[i]);
+        for (i = 0; i < len; i++) mino_unroot(dst, refs[i]);
         free(items);
         free(refs);
         if (clone_meta(dst, v, result) != 0) return NULL;
@@ -118,14 +118,14 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
         size_t len = v->as.map.len;
         size_t i;
         mino_val **keys, **vals;
-        mino_ref **krefs, **vrefs;
+        mino_root **krefs, **vrefs;
         mino_val *result;
         if (len == 0) return mino_map(dst, NULL, NULL, 0);
         if (mino_fi_should_fail_raw(dst)) return NULL;
         keys  = (mino_val **)malloc(len * sizeof(*keys));
         vals  = (mino_val **)malloc(len * sizeof(*vals));
-        krefs = (mino_ref **)malloc(len * sizeof(*krefs));
-        vrefs = (mino_ref **)malloc(len * sizeof(*vrefs));
+        krefs = (mino_root **)malloc(len * sizeof(*krefs));
+        vrefs = (mino_root **)malloc(len * sizeof(*vrefs));
         if (!keys || !vals || !krefs || !vrefs) {
             free(keys); free(vals); free(krefs); free(vrefs);
             return NULL;
@@ -136,29 +136,29 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
             keys[i]  = clone_val(dst, src_key);
             if (keys[i] == NULL) {
                 size_t j;
-                for (j = 0; j < i; j++) { mino_unref(dst, krefs[j]); mino_unref(dst, vrefs[j]); }
+                for (j = 0; j < i; j++) { mino_unroot(dst, krefs[j]); mino_unroot(dst, vrefs[j]); }
                 free(keys); free(vals); free(krefs); free(vrefs);
                 return NULL;
             }
-            krefs[i] = mino_ref_new(dst, keys[i]);
+            krefs[i] = mino_root_new(dst, keys[i]);
             vals[i]  = clone_val(dst, src_val);
             if (vals[i] == NULL) {
                 size_t j;
-                mino_unref(dst, krefs[i]);
-                for (j = 0; j < i; j++) { mino_unref(dst, krefs[j]); mino_unref(dst, vrefs[j]); }
+                mino_unroot(dst, krefs[i]);
+                for (j = 0; j < i; j++) { mino_unroot(dst, krefs[j]); mino_unroot(dst, vrefs[j]); }
                 free(keys); free(vals); free(krefs); free(vrefs);
                 return NULL;
             }
-            vrefs[i] = mino_ref_new(dst, vals[i]);
+            vrefs[i] = mino_root_new(dst, vals[i]);
         }
         for (i = 0; i < len; i++) {
-            keys[i] = mino_deref(krefs[i]);
-            vals[i] = mino_deref(vrefs[i]);
+            keys[i] = mino_root_get(krefs[i]);
+            vals[i] = mino_root_get(vrefs[i]);
         }
         result = mino_map(dst, keys, vals, len);
         for (i = 0; i < len; i++) {
-            mino_unref(dst, krefs[i]);
-            mino_unref(dst, vrefs[i]);
+            mino_unroot(dst, krefs[i]);
+            mino_unroot(dst, vrefs[i]);
         }
         free(keys); free(vals); free(krefs); free(vrefs);
         if (clone_meta(dst, v, result) != 0) return NULL;
@@ -168,28 +168,28 @@ static mino_val *clone_val(mino_state *dst, const mino_val *v)
         size_t len = v->as.set.len;
         size_t i;
         mino_val **items;
-        mino_ref **refs;
+        mino_root **refs;
         mino_val *result;
         if (len == 0) return mino_set(dst, NULL, 0);
         if (mino_fi_should_fail_raw(dst)) return NULL;
         items = (mino_val **)malloc(len * sizeof(*items));
-        refs  = (mino_ref **)malloc(len * sizeof(*refs));
+        refs  = (mino_root **)malloc(len * sizeof(*refs));
         if (!items || !refs) { free(items); free(refs); return NULL; }
         for (i = 0; i < len; i++) {
             items[i] = clone_val(dst, vec_nth(v->as.set.key_order, i));
             if (items[i] == NULL) {
                 size_t j;
-                for (j = 0; j < i; j++) mino_unref(dst, refs[j]);
+                for (j = 0; j < i; j++) mino_unroot(dst, refs[j]);
                 free(items); free(refs);
                 return NULL;
             }
-            refs[i]  = mino_ref_new(dst, items[i]);
+            refs[i]  = mino_root_new(dst, items[i]);
         }
         for (i = 0; i < len; i++) {
-            items[i] = mino_deref(refs[i]);
+            items[i] = mino_root_get(refs[i]);
         }
         result = mino_set(dst, items, len);
-        for (i = 0; i < len; i++) mino_unref(dst, refs[i]);
+        for (i = 0; i < len; i++) mino_unroot(dst, refs[i]);
         free(items);
         free(refs);
         if (clone_meta(dst, v, result) != 0) return NULL;

@@ -16,7 +16,7 @@
 typedef struct timer_entry {
     double               deadline_ms;
     mino_val          *callback;
-    mino_ref          *cb_ref;
+    mino_root         *cb_ref;
     struct timer_entry  *next;
 } timer_entry_t;
 

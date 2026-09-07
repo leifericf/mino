@@ -2828,7 +2828,7 @@ static mino_val *prim_redirect_next(mino_state *S, mino_val *args,
  * Rooting: send and recv yield the state lock, so a sibling worker's
  * allocation can collect while this loop holds only C locals. Every
  * value referenced across such a park window or an allocation point
- * rides in a mino_ref root (the pool.c entry pattern): the request,
+ * rides in a mino_root root (the pool.c entry pattern): the request,
  * the current hop's request, the socket handle, the headers map, the
  * final body, each trace URI. gc_pin is reserved for short balanced
  * scopes around nested prim calls, so the LIFO save stack never
@@ -3400,20 +3400,20 @@ unpin:
  * outlive every hop and feed the final :trace-redirects vector. 0 ok,
  * -1 on allocation failure. */
 static int httpreq_trace_push(mino_state *S, mino_val *uri,
-                              mino_ref ***refs, size_t *len,
+                              mino_root ***refs, size_t *len,
                               size_t *cap)
 {
-    mino_ref *r;
+    mino_root *r;
     if (*len == *cap) {
         size_t nc = *cap > 0 ? *cap * 2 : 8;
-        mino_ref **nr;
+        mino_root **nr;
         if (nc > SIZE_MAX / sizeof(*nr)) return -1;
-        nr = (mino_ref **)realloc(*refs, nc * sizeof(*nr));
+        nr = (mino_root **)realloc(*refs, nc * sizeof(*nr));
         if (nr == NULL) return -1;
         *refs = nr;
         *cap  = nc;
     }
-    r = mino_ref_new(S, uri);
+    r = mino_root_new(S, uri);
     if (r == NULL) return -1;
     (*refs)[(*len)++] = r;
     return 0;
@@ -3426,9 +3426,9 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
     mino_val *req, *cur, *res = NULL;
     httpreq_parts_t parts;
     mino_val *sock = NULL;
-    mino_ref *req_ref = NULL, *cur_ref = NULL, *sock_ref = NULL;
-    mino_ref *hmap_ref = NULL, *body_ref = NULL;
-    mino_ref **trace_refs = NULL;
+    mino_root *req_ref = NULL, *cur_ref = NULL, *sock_ref = NULL;
+    mino_root *hmap_ref = NULL, *body_ref = NULL;
+    mino_root **trace_refs = NULL;
     size_t trace_len = 0, trace_cap = 0;
     unsigned char *wire = NULL;
     size_t wire_len = 0;
@@ -3452,11 +3452,11 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
     if (httpreq_read(S, req, &parts) != 0) return NULL;
 
     t0 = mino_monotonic_ns();
-    req_ref = mino_ref_new(S, req);
-    cur_ref = mino_ref_new(S, req);
+    req_ref = mino_root_new(S, req);
+    cur_ref = mino_root_new(S, req);
     if (req_ref == NULL || cur_ref == NULL) {
-        mino_unref(S, req_ref);
-        mino_unref(S, cur_ref);
+        mino_unroot(S, req_ref);
+        mino_unroot(S, cur_ref);
         return throw_classified(S, "internal", "MIN001",
                                      "http-request: out of memory");
     }
@@ -3508,7 +3508,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             }
             sock = csock;
         }
-        sock_ref = mino_ref_new(S, sock);
+        sock_ref = mino_root_new(S, sock);
         if (sock_ref == NULL) {
             httpreq_close_handle(sock);
             sock = NULL;
@@ -3546,7 +3546,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             /* The fresh session takes over the root; the spent TCP
              * handle's root drops. No allocation sits between. */
             {
-                mino_ref *tls_ref = mino_ref_new(S, tls);
+                mino_root *tls_ref = mino_root_new(S, tls);
                 if (tls_ref == NULL) {
                     httpreq_close_handle(tls);
                     sock = tls;
@@ -3555,7 +3555,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                                 "memory");
                     goto close_and_done;
                 }
-                mino_unref(S, sock_ref);
+                mino_unroot(S, sock_ref);
                 sock_ref = tls_ref;
             }
             sock = tls;
@@ -3711,7 +3711,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                              parser->trailer_start == (size_t)-1
                                  ? parser->nrows
                                  : parser->trailer_start);
-        hmap_ref = mino_ref_new(S, hmap);
+        hmap_ref = mino_root_new(S, hmap);
         if (hmap_ref == NULL) {
             res = throw_classified(S, "internal", "MIN001",
                                         "http-request: out of memory");
@@ -3759,7 +3759,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             if (map_get_val(dec, mino_keyword(S, "action"))
                 == mino_keyword(S, "follow")) {
                 mino_val *next, *new_cur, *uval;
-                mino_ref *next_ref;
+                mino_root *next_ref;
                 int ok;
                 next = map_get_val(dec, mino_keyword(S, "request"));
                 uval = next != NULL
@@ -3778,23 +3778,23 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 ok = httpreq_translate(S, next, &new_cur) == 0;
                 gc_unpin(1);
                 if (!ok) goto close_and_done;
-                next_ref = mino_ref_new(S, new_cur);
+                next_ref = mino_root_new(S, new_cur);
                 if (next_ref == NULL) {
                     res = throw_classified(S, "internal", "MIN001",
                                                 "http-request: out of "
                                                 "memory");
                     goto close_and_done;
                 }
-                mino_unref(S, cur_ref);
+                mino_unroot(S, cur_ref);
                 cur_ref = next_ref;
                 cur     = new_cur;
                 httpreq_dispose(S, sock, &parts, parser);
                 sock = NULL;
-                mino_unref(S, sock_ref);
+                mino_unroot(S, sock_ref);
                 sock_ref = NULL;
                 http_parser_free(parser);
                 parser = NULL;
-                mino_unref(S, hmap_ref);
+                mino_unroot(S, hmap_ref);
                 hmap_ref = NULL;
                 hmap = NULL;
                 continue;
@@ -3842,7 +3842,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
             }
             body_val = mino_bytes(S, body, body_len);
             if (body_val == NULL) goto close_and_done;
-            body_ref = mino_ref_new(S, body_val);
+            body_ref = mino_root_new(S, body_val);
             if (body_ref == NULL) {
                 res = throw_classified(S, "internal", "MIN001",
                                             "http-request: out of memory");
@@ -3851,7 +3851,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
 
             httpreq_dispose(S, sock, &parts, parser);
             sock = NULL;
-            mino_unref(S, sock_ref);
+            mino_unroot(S, sock_ref);
             sock_ref = NULL;
             http_parser_free(parser);
             parser = NULL;
@@ -3870,7 +3870,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                         "deflate", 7);
                 if (is_gzip || is_deflate) {
                     mino_val *gkeys[1], *gvals[1], *gopts, *gargs, *out;
-                    mino_ref *out_ref;
+                    mino_root *out_ref;
                     mino_current_ctx(S)->gc_depth++;
                     gkeys[0] = mino_keyword(S, "max-bytes");
                     gvals[0] = mino_int(S, parts.max_bytes);
@@ -3884,7 +3884,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                         : prim_deflate_decompress(S, gargs, NULL);
                     gc_unpin(1);
                     if (out == NULL) goto close_and_done;
-                    out_ref = mino_ref_new(S, out);
+                    out_ref = mino_root_new(S, out);
                     if (out_ref == NULL) {
                         res = throw_classified(S, "internal",
                                                     "MIN001",
@@ -3892,7 +3892,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                                                     "of memory");
                         goto done;
                     }
-                    mino_unref(S, body_ref);
+                    mino_unroot(S, body_ref);
                     body_ref = out_ref;
                     body_val = out;
                     decoded = 1;
@@ -3911,7 +3911,7 @@ static mino_val *prim_http_request(mino_state *S, mino_val *args,
                 goto done;
             }
             for (i = 0; i < trace_len; i++) {
-                trace_vals[i] = mino_deref(trace_refs[i]);
+                trace_vals[i] = mino_root_get(trace_refs[i]);
             }
             trace_vec = mino_vector(S, trace_vals, trace_len);
             free(trace_vals);
@@ -3973,12 +3973,12 @@ done:
     free(wire);
     if (parser != NULL) http_parser_free(parser);
     if (sock != NULL) httpreq_close_handle(sock);
-    mino_unref(S, req_ref);
-    mino_unref(S, cur_ref);
-    mino_unref(S, sock_ref);
-    mino_unref(S, hmap_ref);
-    mino_unref(S, body_ref);
-    while (trace_len > 0) mino_unref(S, trace_refs[--trace_len]);
+    mino_unroot(S, req_ref);
+    mino_unroot(S, cur_ref);
+    mino_unroot(S, sock_ref);
+    mino_unroot(S, hmap_ref);
+    mino_unroot(S, body_ref);
+    while (trace_len > 0) mino_unroot(S, trace_refs[--trace_len]);
     free(trace_refs);
     return res;
 }

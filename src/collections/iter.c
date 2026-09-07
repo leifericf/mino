@@ -30,7 +30,7 @@
 
 struct mino_iter {
     mino_state *S;
-    mino_ref   *ref;        /* roots the collection across GC */
+    mino_root  *ref;        /* roots the collection across GC */
     mino_val   *cursor;     /* the cell currently being walked */
     size_t        idx;        /* index into vector / chunk */
     int           rb_top;     /* depth of rb_stack (0 = empty/uninit) */
@@ -47,7 +47,7 @@ void mino_iter_init(mino_state *S, mino_iter *it, mino_val *coll)
 {
     if (it == NULL) return;
     it->S          = S;
-    it->ref        = (S != NULL) ? mino_ref_new(S, coll) : NULL;
+    it->ref        = (S != NULL) ? mino_root_new(S, coll) : NULL;
     it->cursor     = coll;
     it->idx        = 0;
     it->rb_top     = 0;
@@ -58,7 +58,7 @@ void mino_iter_done(mino_iter *it)
 {
     if (it == NULL) return;
     if (it->ref != NULL) {
-        mino_unref(it->S, it->ref);
+        mino_unroot(it->S, it->ref);
         it->ref = NULL;
     }
     it->cursor = NULL;

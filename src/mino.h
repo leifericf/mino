@@ -199,10 +199,9 @@ typedef enum {
                      * single-version optimistic protocol (read-set
                      * validation at commit; conflicts trigger retry).
                      * Equality is identity, matching atoms.
-                     * Constructed via `(ref v)`. The MINO_REF symbol
-                     * was already taken by the embedder rooting handle
-                     * (mino_ref), so the enum tag is MINO_TX_REF; the
-                     * Clojure-level type keyword is `:ref`. */
+                     * Constructed via `(ref v)`. The enum tag is
+                     * MINO_TX_REF to read as the transactional cell it
+                     * is; the Clojure-level type keyword is `:ref`. */
     MINO_AGENT,     /* Asynchronous mutable cell with a per-state
                      * action run-queue. send / send-off enqueue
                      * (fn args) onto the queue and return the agent
@@ -285,7 +284,7 @@ typedef struct mino_val    mino_val;   /* opaque */
 typedef struct mino_env    mino_env;   /* opaque */
 typedef struct mino_future mino_future;/* opaque */
 typedef struct mino_state  mino_state; /* opaque */
-typedef struct mino_ref    mino_ref;   /* opaque */
+typedef struct mino_root   mino_root;  /* opaque */
 
 /* Return the effective type of a value. Works for both heap-allocated
  * cells and tagged scalars (int, bool, nil, char). NULL is treated as
@@ -2230,26 +2229,27 @@ int mino_repl_feed(mino_repl *repl, const char *line, mino_val **out);
 void mino_repl_free(mino_repl *repl);
 
 /* ------------------------------------------------------------------------- */
-/* Value retention (refs)                                                     */
+/* Value retention (roots)                                                    */
 /* ------------------------------------------------------------------------- */
 
 /*
  * Values returned by constructors and eval are borrowed: they survive until
- * the next GC cycle but are not pinned. A ref roots a value so it survives
- * collection indefinitely. The host must call mino_unref when the value is
- * no longer needed.
+ * the next GC cycle but are not pinned. A root pins a value so it survives
+ * collection indefinitely. The host must call mino_unroot when the value is
+ * no longer needed. ("root" names the GC handle; "ref" and "deref" are
+ * reserved for the Clojure ref type and its forcing verb.)
  *
- *   mino_ref *r = mino_ref_new(S, val);   // root val
- *   mino_val *v = mino_deref(r);      // get the value
- *   mino_unref(S, r);                   // release the root
+ *   mino_root *r = mino_root_new(S, val); // root val
+ *   mino_val  *v = mino_root_get(r);      // read the rooted value
+ *   mino_unroot(S, r);                    // release the root
  *
- * Refs are owned by the state that created them and freed when the state
- * is freed, but the host should unref explicitly to avoid holding objects
+ * Roots are owned by the state that created them and freed when the state
+ * is freed, but the host should unroot explicitly to avoid holding objects
  * longer than necessary.
  */
-mino_ref *mino_ref_new(mino_state *S, mino_val *val);
-mino_val *mino_deref(const mino_ref *ref);
-void        mino_unref(mino_state *S, mino_ref *ref);
+mino_root *mino_root_new(mino_state *S, mino_val *val);
+mino_val  *mino_root_get(const mino_root *root);
+void         mino_unroot(mino_state *S, mino_root *root);
 
 /* ------------------------------------------------------------------------- */
 /* Value cloning (cross-state transfer)                                      */

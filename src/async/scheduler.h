@@ -14,8 +14,8 @@
 typedef struct sched_entry {
     mino_val         *callback;
     mino_val         *value;
-    mino_ref         *cb_ref;
-    mino_ref         *val_ref;
+    mino_root        *cb_ref;
+    mino_root        *val_ref;
     struct sched_entry *next;
 } sched_entry_t;
 

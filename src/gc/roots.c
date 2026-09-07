@@ -270,7 +270,7 @@ static void gc_mark_module_and_meta(mino_state *S)
 {
     int         i;
     size_t      idx;
-    mino_ref *ref;
+    mino_root *ref;
     for (i = 0; i < mino_current_ctx(S)->try_depth; i++) {
         gc_mark_interior(S, mino_current_ctx(S)->try_stack[i].exception);
     }
@@ -291,7 +291,7 @@ static void gc_mark_module_and_meta(mino_state *S)
     for (idx = 0; idx < S->ns_vars.var_registry_len; idx++) {
         gc_mark_interior(S, S->ns_vars.var_registry[idx].var);
     }
-    for (ref = S->ref_roots; ref != NULL; ref = ref->next) {
+    for (ref = S->roots; ref != NULL; ref = ref->next) {
         gc_mark_interior(S, ref->val);
     }
 }
