@@ -69,3 +69,4 @@ it by saying so. Recording ritual: the `record-decision` skill
 | [58](58-protected-eval-entry-points-publish-the-last-error.md) | Protected eval entry points publish the last error; pcall stays the swallow |
 | [59](59-store-stays-in-tree-behind-its-capability.md) | The EAVT store stays in-tree behind its capability |
 | [60](60-lexical-and-namespace-resolution-share-one-chain-walk.md) | Lexical and namespace resolution share one chain walk |
+| [61](61-metadata-rides-an-inline-slot-on-every-box.md) | Metadata rides an inline slot on every box, not a side table |
