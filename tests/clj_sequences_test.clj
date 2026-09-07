@@ -14,6 +14,22 @@
   (is (= (cons 1 [2 3]) '(1 2 3)))
   (is (= (cons 1 #{}) '(1))))
 
+(deftest clj-cons-onto-chunked-tail
+  ;; A cons whose cdr is a seq-typed value that is not a plain cons
+  ;; (a chunked-cons spine from rest-over-vector-seq, or a realized
+  ;; lazy map result) is a proper list on every surface: print, count,
+  ;; vec, and equality all agree.
+  (let [chunked (cons 0 (rest (seq (vec (range 5)))))
+        mapped  (cons 0 (map inc [0 1 2]))]
+    (is (= "(0 1 2 3 4)" (pr-str chunked)))
+    (is (= 5 (count chunked)))
+    (is (= [0 1 2 3 4] (vec chunked)))
+    (is (= '(0 1 2 3 4) chunked))
+    (is (= "(0 1 2 3)" (pr-str mapped)))
+    (is (= 4 (count mapped)))
+    (is (= [0 1 2 3] (vec mapped)))
+    (is (= '(0 1 2 3) mapped))))
+
 ;; --- first ---
 
 (deftest clj-first

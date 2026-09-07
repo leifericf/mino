@@ -662,6 +662,25 @@ size_t list_length(mino_state *S, mino_val *list)
             list = lazy_force(S, list);
         }
     }
+    /* A cons tail can resolve to a chunked spine (e.g.
+     * (cons x (rest (seq some-vector))) or a realized lazy map). That
+     * is a proper continuation of the sequence, so count its elements
+     * rather than stopping at the cons/chunked boundary. */
+    while (list != NULL && mino_type_of(list) == MINO_CHUNKED_CONS) {
+        const mino_val *ch = list->as.chunked_cons.chunk;
+        n += (size_t)(ch->as.chunk.len - list->as.chunked_cons.off);
+        list = list->as.chunked_cons.more;
+        while (list != NULL && mino_type_of(list) == MINO_LAZY) {
+            list = lazy_force(S, list);
+        }
+        while (mino_is_cons(list)) {
+            n++;
+            list = list->as.cons.cdr;
+            while (list != NULL && mino_type_of(list) == MINO_LAZY) {
+                list = lazy_force(S, list);
+            }
+        }
+    }
     return n;
 }
 

@@ -187,7 +187,18 @@ void seq_iter_next(mino_state *S, seq_iter_t *it)
             if (next != NULL && mino_type_of(next) == MINO_LAZY) {
                 next = lazy_force(S, (mino_val *)next);
             }
-            it->cons_p = next;
+            /* A cons tail that resolves to a chunked spine (e.g.
+             * (cons x (rest (seq some-vector))) or a realized lazy
+             * map) is a proper continuation of the sequence. Switch
+             * dispatch to chunked-mode so the walk drains the chunks
+             * instead of stopping at the cons/chunked boundary. */
+            if (next != NULL && mino_type_of(next) == MINO_CHUNKED_CONS) {
+                it->coll   = next;
+                it->cons_p = next;
+                it->idx    = (size_t)next->as.chunked_cons.off;
+            } else {
+                it->cons_p = next;
+            }
         }
     } else if (it->coll != NULL && mino_type_of(it->coll) == MINO_CHUNKED_CONS) {
         if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CHUNKED_CONS) {

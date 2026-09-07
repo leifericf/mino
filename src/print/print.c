@@ -347,6 +347,53 @@ static int print_level_collapse(const mino_state *S)
         && S->print_depth >= S->print_level_limit;
 }
 
+/* Print the elements of a chunked-cons spine (chunk after chunk, then
+ * whatever `more` resolves to) into an already-open list, continuing a
+ * count that started at `printed`. Returns the updated count. Handles
+ * the chunked->cons and chunked->chunked transitions; a resolved lazy
+ * `more` is forced first. Shared by print_cons (when a cons tail
+ * resolves to a chunked spine) and print_chunked_cons. */
+static int print_chunked_body(mino_state *S, FILE *out,
+                              const mino_val *cur, int printed)
+{
+    for (;;) {
+        while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
+            const mino_val *ch = cur->as.chunked_cons.chunk;
+            unsigned k;
+            for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
+                if (printed > 0) fputc(' ', out);
+                if (S->print_length_limit >= 0
+                    && printed >= S->print_length_limit) {
+                    fputs("...", out);
+                    return printed;
+                }
+                mino_print_to(S, out, ch->as.chunk.vals[k]);
+                printed++;
+            }
+            cur = cur->as.chunked_cons.more;
+            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
+                cur = lazy_force(S, (mino_val *)cur);
+            }
+        }
+        while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
+            if (printed > 0) fputc(' ', out);
+            if (S->print_length_limit >= 0
+                && printed >= S->print_length_limit) {
+                fputs("...", out);
+                return printed;
+            }
+            mino_print_to(S, out, cur->as.cons.car);
+            printed++;
+            cur = cur->as.cons.cdr;
+            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
+                cur = lazy_force(S, (mino_val *)cur);
+            }
+        }
+        if (cur == NULL || mino_type_of(cur) != MINO_CHUNKED_CONS) break;
+    }
+    return printed;
+}
+
 static void print_cons(mino_state *S, FILE *out, const mino_val *v)
 {
     const mino_val *p = v;
@@ -366,6 +413,14 @@ static void print_cons(mino_state *S, FILE *out, const mino_val *v)
         /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
         if (p != NULL && mino_type_of(p) == MINO_LAZY) {
             p = lazy_force(S, (mino_val *)p);
+        }
+        /* A cons tail that resolves to a chunked spine (e.g.
+         * (cons x (rest (seq some-vector))) or a realized lazy map)
+         * is a proper continuation of the list, not a dotted tail. */
+        if (p != NULL && mino_type_of(p) == MINO_CHUNKED_CONS) {
+            print_chunked_body(S, out, p, printed);
+            p = NULL;
+            break;
         }
         if (p != NULL && mino_type_of(p) != MINO_CONS
                       && mino_type_of(p) != MINO_NIL
@@ -620,52 +675,12 @@ static void print_chunk(mino_state *S, FILE *out, const mino_val *v)
 
 static void print_chunked_cons(mino_state *S, FILE *out, const mino_val *v)
 {
-    /* Print as a list. Walk the chunk from off..len-1, then recurse
-     * into the more pointer (which may be cons / lazy / another
-     * chunked-cons). */
-    const mino_val *cur = v;
-    int printed = 0;
-    int truncated = 0;
+    /* Print as a list: walk chunk after chunk, then whatever the tail
+     * resolves to (cons / lazy / another chunked-cons). */
     if (print_level_collapse(S)) { fputc('#', out); return; }
     fputc('(', out);
     S->print_depth++;
-    while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
-        const mino_val *ch = cur->as.chunked_cons.chunk;
-        unsigned k;
-        for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
-            if (printed > 0) fputc(' ', out);
-            if (S->print_length_limit >= 0
-                && printed >= S->print_length_limit) {
-                fputs("...", out);
-                truncated = 1;
-                break;
-            }
-            mino_print_to(S, out, ch->as.chunk.vals[k]);
-            printed++;
-        }
-        if (truncated) break;
-        cur = cur->as.chunked_cons.more;
-        if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-            cur = lazy_force(S, (mino_val *)cur);
-        }
-    }
-    if (!truncated && cur != NULL && mino_type_of(cur) == MINO_CONS) {
-        /* Reuse the cons walker by printing the tail inline. */
-        while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
-            if (printed > 0) fputc(' ', out);
-            if (S->print_length_limit >= 0
-                && printed >= S->print_length_limit) {
-                fputs("...", out);
-                break;
-            }
-            mino_print_to(S, out, cur->as.cons.car);
-            printed++;
-            cur = cur->as.cons.cdr;
-            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
-                cur = lazy_force(S, (mino_val *)cur);
-            }
-        }
-    }
+    print_chunked_body(S, out, v, 0);
     S->print_depth--;
     fputc(')', out);
 }
