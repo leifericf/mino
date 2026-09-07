@@ -4,12 +4,18 @@
  *
  * The public API in src/mino.h is intentionally minimal: every symbol
  * here is a runtime internal that some public function genuinely
- * needs to implement (longjmp through try-frames, dispatch on type,
- * raise a classified diagnostic, drive the GC). Centralising the
- * dependency in a single header makes the surface visible at a
- * glance: any new internal a public function reaches for shows up
- * here, signalling that an internal refactor needs to consider the
- * public-side impact.
+ * needs to implement (longjmp through try-frames, raise a classified
+ * diagnostic, drive the GC). Centralising the dependency in a single
+ * header makes the surface visible at a glance: any new internal a
+ * public function reaches for shows up here, signalling that an
+ * internal refactor needs to consider the public-side impact.
+ *
+ * The public layer reads owned-layer data through named accessors, not
+ * raw struct fields: var roots via var_root_get / var_set_dynamic_flag,
+ * the load-path list via runtime_module_load_path_*, the reader file via
+ * reader_current_file, and GC counters via gc_stats_fill. The only
+ * remaining raw reach is the try-stack longjmp in mino_throw, which is
+ * the control-flow seam this bridge exists for.
  *
  * Public-layer source files include mino.h for the ABI plus
  * public/internal_bridge.h for the implementation borrows -- never

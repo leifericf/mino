@@ -8,6 +8,11 @@
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
 
+const char *reader_current_file(mino_state *S)
+{
+    return S->reader.reader_file;
+}
+
 const char *intern_filename(mino_state *S, const char *name)
 {
     size_t i;

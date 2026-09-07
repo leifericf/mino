@@ -298,6 +298,18 @@ mino_val *var_intern(mino_state *S, const char *ns, const char *name)
     return v;
 }
 
+mino_val *var_root_get(const mino_val *var)
+{
+    if (var == NULL || mino_type_of(var) != MINO_VAR) return NULL;
+    return var->as.var.root;
+}
+
+void var_set_dynamic_flag(mino_val *var, int dynamic)
+{
+    if (var == NULL || mino_type_of(var) != MINO_VAR) return;
+    var->as.var.dynamic = dynamic ? 1 : 0;
+}
+
 mino_val *var_read(mino_state *S, mino_val *var)
 {
     /* Thread binding wins over the root, per canon -- and it satisfies

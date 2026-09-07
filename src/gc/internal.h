@@ -163,6 +163,11 @@ char  *dup_n_inner(mino_state *S, const char *s, size_t len);
  * flagged for possibly-uninitialized uses past the throw. */
 MINO_NORETURN void gc_oom_throw(mino_state *S, const char *msg);
 
+/* Fill the public mino_gc_stats_out from the collector's counters.
+ * Defined in gc/driver.c; the public bridge (public/gc.c) calls this so
+ * it never reads the gc struct fields directly. */
+void gc_stats_fill(mino_state *S, mino_gc_stats_out *out);
+
 #ifdef MINO_ALLOC_PROFILE
 void mino_alloc_profile_record(const char *file, int line,
                                unsigned char tag, size_t size);

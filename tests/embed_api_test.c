@@ -785,6 +785,41 @@ static void test_repl_embedding_surface(mino_state *S, mino_env *env)
     }
 }
 
+/* mino_gc_stats copies the collector's counters through the internal
+ * gc_stats_fill accessor. After allocating garbage and forcing a
+ * collection, the snapshot must report a live heap and a run count that
+ * does not decrease across two reads. */
+static void test_gc_stats_snapshot(mino_state *S, mino_env *env)
+{
+    mino_gc_stats_out a, b;
+
+    (void)mino_eval_string(S,
+        "(dotimes [_ 2000] (vec (range 64)))", env);
+    mino_gc_collect(S, MINO_GC_FULL);
+
+    memset(&a, 0, sizeof(a));
+    mino_gc_stats(S, &a);
+    REQUIRE(a.bytes_live > 0, "gc-stats: live heap is non-zero");
+    REQUIRE(a.phase == MINO_GC_PHASE_IDLE
+            || a.phase == MINO_GC_PHASE_MINOR
+            || a.phase == MINO_GC_PHASE_MAJOR_MARK
+            || a.phase == MINO_GC_PHASE_MAJOR_SWEEP,
+            "gc-stats: phase is a known public tag");
+
+    (void)mino_eval_string(S,
+        "(dotimes [_ 2000] (vec (range 64)))", env);
+    mino_gc_collect(S, MINO_GC_FULL);
+
+    memset(&b, 0, sizeof(b));
+    mino_gc_stats(S, &b);
+    REQUIRE(b.collections_minor >= a.collections_minor,
+            "gc-stats: minor count is monotonic across snapshots");
+    REQUIRE(b.collections_major >= a.collections_major,
+            "gc-stats: major count is monotonic across snapshots");
+    REQUIRE(b.bytes_freed >= a.bytes_freed,
+            "gc-stats: cumulative freed bytes never decrease");
+}
+
 /* mino_iter walks every k/v of a sorted-map (in sort order) and every
  * element of a sorted-set, just like it does for hashed variants. */
 static void test_iter_sorted(mino_state *S, mino_env *env)
@@ -1249,6 +1284,7 @@ int main(void)
     test_eval_ex_out_ex_payload(S, env);
     test_last_error_uniform_across_eval_family(S, env);
     test_repl_embedding_surface(S, env);
+    test_gc_stats_snapshot(S, env);
     test_to_int_bignum_round_trip();
     test_net_capability_gate();
     test_json_csv_capability_gate();

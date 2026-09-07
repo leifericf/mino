@@ -31,11 +31,13 @@ mino_val *mino_throw(mino_state *S, mino_val *ex)
          * payload itself is also preserved via the same route as the
          * caught path so error_map's :mino/data carries it. */
         char msg[512];
+        const char *sdata;
+        size_t      slen;
         if (ex == NULL) {
             snprintf(msg, sizeof(msg), "uncaught exception");
-        } else if (mino_type_of(ex) == MINO_STRING) {
+        } else if (mino_to_string(ex, &sdata, &slen)) {
             snprintf(msg, sizeof(msg), "uncaught exception: %.*s",
-                     (int)ex->as.s.len, ex->as.s.data);
+                     (int)slen, sdata);
         } else {
             char buf[384];
             int  written;
@@ -145,7 +147,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
             return -1;
         }
 
-        v = cursor->as.cons.car;
+        v = mino_car(cursor);
         if (!args_type_match(*f, v)) {
             snprintf(msg, sizeof(msg),
                      "%s: argument %zu: expected %s, got %s",
@@ -165,24 +167,35 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
         }
         case 'f': {
             double *out = va_arg(ap, double *);
-            *out = (mino_val_int_p(v)) ? (double)mino_val_int_get(v) : v->as.f;
+            if (mino_val_int_p(v)) {
+                *out = (double)mino_val_int_get(v);
+            } else {
+                mino_to_float(v, out);
+            }
             break;
         }
         case 's': {
             const char **out = va_arg(ap, const char **);
-            *out = v->as.s.data;
+            size_t       slen;
+            mino_to_string(v, out, &slen);
             break;
         }
         case 'S': {
             const char **out_data = va_arg(ap, const char **);
             size_t      *out_len  = va_arg(ap, size_t *);
-            *out_data = v->as.s.data;
-            *out_len  = v->as.s.len;
+            mino_to_string(v, out_data, out_len);
             break;
         }
-        case 'k': case 'y': {
+        case 'k': {
             const char **out = va_arg(ap, const char **);
-            *out = v->as.s.data;
+            size_t       klen;
+            mino_to_keyword(v, out, &klen);
+            break;
+        }
+        case 'y': {
+            const char **out = va_arg(ap, const char **);
+            size_t       ylen;
+            mino_to_symbol(v, out, &ylen);
             break;
         }
         case 'b': {
@@ -211,7 +224,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
             return -1;
         }
 
-        cursor = cursor->as.cons.cdr;
+        cursor = mino_cdr(cursor);
     }
     va_end(ap);
 
@@ -219,7 +232,7 @@ int mino_args_parse(mino_state *S, const char *name, mino_val *args,
         size_t extra = 0;
         while (mino_is_cons(cursor)) {
             extra++;
-            cursor = cursor->as.cons.cdr;
+            cursor = mino_cdr(cursor);
         }
         snprintf(msg, sizeof(msg),
                  "%s: expected %zu argument%s, got %zu",
@@ -245,13 +258,13 @@ void mino_add_load_path(mino_state *S, const char *path)
 size_t mino_load_path_count(mino_state *S)
 {
     if (S == NULL) return 0;
-    return S->module.extra_load_paths_len;
+    return runtime_module_load_path_count(S);
 }
 
 const char *mino_load_path_get(mino_state *S, size_t i)
 {
-    if (S == NULL || i >= S->module.extra_load_paths_len) return NULL;
-    return S->module.extra_load_paths[i];
+    if (S == NULL) return NULL;
+    return runtime_module_load_path_get(S, i);
 }
 
 mino_env *mino_ns_env(mino_state *S, const char *ns)
@@ -270,7 +283,7 @@ void mino_var_set_dynamic(mino_state *S, mino_val *var, int dynamic)
 {
     (void)S;
     if (var == NULL || mino_type_of(var) != MINO_VAR) return;
-    var->as.var.dynamic = dynamic ? 1 : 0;
+    var_set_dynamic_flag(var, dynamic);
 }
 
 void mino_var_set_root(mino_state *S, mino_val *var, mino_val *val)
@@ -283,7 +296,7 @@ void mino_var_set_root(mino_state *S, mino_val *var, mino_val *val)
 mino_val *mino_var_get_root(const mino_val *var)
 {
     if (var == NULL || mino_type_of(var) != MINO_VAR) return NULL;
-    return var->as.var.root;
+    return var_root_get(var);
 }
 
 void mino_source_cache_feed(mino_state *S, const char *file,
@@ -296,5 +309,5 @@ void mino_source_cache_feed(mino_state *S, const char *file,
 const char *mino_reader_file(mino_state *S)
 {
     if (S == NULL) return NULL;
-    return S->reader.reader_file;
+    return reader_current_file(S);
 }

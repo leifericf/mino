@@ -128,3 +128,14 @@ int runtime_module_add_load_path(mino_state *S, const char *path)
     S->module.extra_load_paths[S->module.extra_load_paths_len++] = dup;
     return 0;
 }
+
+size_t runtime_module_load_path_count(mino_state *S)
+{
+    return S->module.extra_load_paths_len;
+}
+
+const char *runtime_module_load_path_get(mino_state *S, size_t i)
+{
+    if (i >= S->module.extra_load_paths_len) return NULL;
+    return S->module.extra_load_paths[i];
+}

@@ -124,67 +124,14 @@ int mino_gc_set_param(mino_state *S, mino_gc_param p, size_t value)
     return ok ? 0 : -1;
 }
 
-/* Map the internal GC phase enum onto the public phase tag. Kept
- * deliberately separate from the internal enum so the public values
- * can stay stable even if the collector adds more internal states. */
-static int phase_to_public(int gc_phase)
-{
-    switch (gc_phase) {
-    case GC_PHASE_IDLE:        return MINO_GC_PHASE_IDLE;
-    case GC_PHASE_MINOR:       return MINO_GC_PHASE_MINOR;
-    case GC_PHASE_MAJOR_MARK:  return MINO_GC_PHASE_MAJOR_MARK;
-    case GC_PHASE_MAJOR_SWEEP: return MINO_GC_PHASE_MAJOR_SWEEP;
-    default:                   return MINO_GC_PHASE_IDLE;
-    }
-}
-
 void mino_gc_stats(mino_state *S, mino_gc_stats_out *out)
 {
     if (S == NULL || out == NULL) {
         return;
     }
-    out->collections_minor = S->gc.collections_minor;
-    out->collections_major = S->gc.collections_major;
-    out->bytes_live        = S->gc.bytes_live;
-    out->bytes_young       = S->gc.bytes_young;
-    out->bytes_old         = S->gc.bytes_old;
-    out->bytes_alloc       = S->gc.bytes_alloc;
-    out->bytes_freed       = S->gc.total_freed;
-    out->total_gc_ns       = S->gc.total_ns;
-    out->max_gc_ns         = S->gc.max_ns;
-    out->minor_mark_ns     = S->gc_minor_mark_ns;
-    out->minor_sweep_ns    = S->gc_minor_sweep_ns;
-    out->major_mark_ns     = S->gc_major_mark_ns;
-    out->major_sweep_ns    = S->gc_major_sweep_ns;
-    out->root_scan_ns      = S->gc_root_scan_ns;
-    out->barrier_dijkstra_pushes = S->gc_barrier_dijkstra_pushes;
-    out->mark_stack_overflows    = S->gc_mark_stack_overflows;
-    out->bytes_promoted_minor    = S->gc_bytes_promoted_minor;
-    {
-        size_t i;
-        for (i = 0; i < 8; i++) {
-            out->young_age_bucket[i] = S->gc_young_age_bucket[i];
-        }
-        for (i = 0; i < 16; i++) {
-            out->alloc_by_tag[i] = (i < (size_t)GC_T__COUNT)
-                                   ? S->gc_alloc_by_tag[i] : 0;
-        }
-    }
-    out->remset_entries    = S->gc.remset_len;
-    out->remset_cap        = S->gc.remset_cap;
-    out->remset_high_water = S->gc.remset_high_water;
-    out->range_walk_entries = S->gc_range_walk_entries;
-    out->ranges_len         = S->gc.ranges_y_len
-                              + S->gc.ranges_y_pending_len
-                              + S->gc.ranges_o_len
-                              + S->gc.ranges_o_pending_len;
-    out->ranges_young_len       = S->gc.ranges_y_len
-                                  + S->gc.ranges_y_pending_len;
-    out->ranges_old_len        = S->gc.ranges_o_len;
-    out->ranges_old_pending_len = S->gc.ranges_o_pending_len;
-    out->mark_stack_cap        = S->gc.mark_stack_cap;
-    out->mark_stack_high_water = S->gc.mark_stack_high_water;
-    out->phase             = phase_to_public(S->gc.phase);
+    /* The gc layer owns its counters; copy the snapshot through the
+     * named accessor rather than reading gc struct fields here. */
+    gc_stats_fill(S, out);
 }
 
 /* qsort comparator on uint32_t in ascending order. */

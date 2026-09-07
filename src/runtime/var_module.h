@@ -55,6 +55,11 @@ const char *intern_var_str(mino_state *S, const char *s);
 int            var_registry_add(mino_state *S, const char *ns,
                                 const char *name, mino_val *var);
 void           var_set_root(mino_state *S, mino_val *var, mino_val *val);
+/* Raw root read (no dyn-stack, no unbound throw) and dynamic-flag set.
+ * Named accessors so the public layer never reads the var union
+ * directly. NULL / non-var inputs are safe no-ops. */
+mino_val    *var_root_get(const mino_val *var);
+void           var_set_dynamic_flag(mino_val *var, int dynamic);
 /* The one var read path shared by symbol access, qualified-symbol
  * access, and deref: thread-binding stack first (a thread binding
  * satisfies the read even when the root is unbound, per canon), then
@@ -79,5 +84,9 @@ int  runtime_module_add_alias(mino_state *S,
  * allocation failure. Shared by the add-load-path! primitive and the
  * public mino_add_load_path. */
 int  runtime_module_add_load_path(mino_state *S, const char *path);
+/* Enumerate the runtime require search path. Named accessors so the
+ * public load-path API never reads the module struct directly. */
+size_t      runtime_module_load_path_count(mino_state *S);
+const char *runtime_module_load_path_get(mino_state *S, size_t i);
 
 #endif /* RUNTIME_VAR_MODULE_H */

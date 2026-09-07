@@ -92,4 +92,9 @@ typedef struct reader_printer_state {
     } source_cache[MINO_SOURCE_CACHE_SIZE];
 } reader_printer_state_t;
 
+/* Named accessor for the reader's current attribution filename, so the
+ * public layer never reads the reader sub-struct directly. Returns the
+ * interned filename or NULL. */
+const char *reader_current_file(mino_state *S);
+
 #endif /* RUNTIME_READER_PRINTER_STATE_H */
