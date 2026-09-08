@@ -680,7 +680,13 @@ static void buf_push(mino_state *S, mino_val ***buf,
         *buf = nb;
         *cap = new_cap;
     }
-    (*buf)[(*len)++] = elem;
+    /* Barrier the slot store: a large collection literal ages this
+     * buffer to OLD across a mid-read minor while later elements are
+     * still YOUNG, so the store can install an OLD->YOUNG edge the
+     * remset must see (mirrors gc_valarr_set / the namespaced-map
+     * reader). The barrier is a no-op while the buffer is still
+     * young. */
+    gc_valarr_set(S, *buf, (*len)++, elem);
 }
 
 /* map_buf_push -- twin-buffer version of buf_push for {key val ...}
@@ -703,8 +709,13 @@ static void map_buf_push(mino_state *S, mino_val ***kbuf,
         *vbuf = nv;
         *cap  = new_cap;
     }
-    (*kbuf)[*len] = key;
-    (*vbuf)[*len] = val;
+    /* Barrier both slot stores: a large map literal ages these buffers
+     * to OLD across a mid-read minor while later keys/values are still
+     * YOUNG, so each store can install an OLD->YOUNG edge the remset
+     * must see (mirrors gc_valarr_set / the namespaced-map reader). The
+     * barrier is a no-op while the buffers are still young. */
+    gc_valarr_set(S, *kbuf, *len, key);
+    gc_valarr_set(S, *vbuf, *len, val);
     (*len)++;
 }
 
