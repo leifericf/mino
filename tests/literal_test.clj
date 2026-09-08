@@ -181,6 +181,14 @@
   ;; slash. The reader must still reject it.
   (is (thrown? (read-string ":foo/"))))
 
+(deftest colon-only-keyword-tokens-rejected
+  ;; A token that is only colons has no name. `::` is the auto-resolve
+  ;; prefix with nothing after it; `:::` resolves to a name that is
+  ;; itself a colon. Both are invalid tokens, not keywords named ":".
+  (is (thrown? (read-string "::")))
+  (is (thrown? (read-string ":::")))
+  (is (thrown? (read-string "::::"))))
+
 (deftest digit-leading-tokens-must-be-numbers
   ;; A token that starts with a digit (or a sign followed by a digit)
   ;; is numeric syntax. When it fails to parse as a number it is a

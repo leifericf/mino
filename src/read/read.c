@@ -1006,7 +1006,7 @@ static mino_val *read_atom(mino_state *S, const char **p)
 
     if (len >= 2 && start[0] == ':') {
         /* ::foo / ::alias/foo: auto-resolve at read time. */
-        if (len >= 3 && start[1] == ':') {
+        if (start[1] == ':') {
             const char *body = start + 2;
             size_t      body_len = len - 2;
             const char *slash = memchr(body, '/', body_len);
@@ -1015,7 +1015,10 @@ static mino_val *read_atom(mino_state *S, const char **p)
             const char *kw_name;
             size_t      kw_name_len;
             char        full[512];
-            if (body_len == 0) {
+            /* `::` alone has no name; `:::` (and longer colon runs)
+             * would resolve to a name that is itself a colon. Neither
+             * is a valid keyword. */
+            if (body_len == 0 || body[0] == ':') {
                 set_reader_diag(S, MRE008,
                                 "auto-resolved keyword missing name",
                                 S->reader.reader_line, S->reader.reader_col);
