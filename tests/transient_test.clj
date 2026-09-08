@@ -321,4 +321,30 @@
               [j acc]))]
     (is (= [97 [0 1 2]] r))))
 
+;; --- transient HAMT write barrier under a spanning minor collection ---
+;; An in-place assoc!/conj! stores a freshly allocated YOUNG child into
+;; an interior HAMT node that a mid-batch minor has promoted to OLD. The
+;; remembered set must capture that OLD->YOUNG edge; if it does not, the
+;; next minor sweeps the young child and the node's slot dangles. The
+;; miss is invisible without the heap verifier, so run a batch in a
+;; subprocess under MINO_GC_VERIFY with a tight nursery and require a
+;; clean exit and the correct counts.
+(deftest transient-hamt-batch-remembers-young-children
+  (let [bin (or (System/getenv "MINO_TEST_BIN")
+                (when (file-exists? "./mino") "./mino"))]
+    (when bin
+      (let [prog (str "(dotimes [_ 20] (vec (range 300))) "
+                      "(def tm (transient {})) "
+                      "(dotimes [i 3000] (assoc! tm i (str \"v\" i))) "
+                      "(def m (persistent! tm)) "
+                      "(def ts (transient #{})) "
+                      "(dotimes [i 4000] (conj! ts (str \"s\" i))) "
+                      "(def s (persistent! ts)) "
+                      "(println (count m) (count s))")
+            r (sh "sh" "-c"
+                  (str "MINO_GC_VERIFY=1 MINO_GC_NURSERY_BYTES=65536 "
+                       bin " -e '" prog "' 2>&1"))]
+        (is (= 0 (:exit r)))
+        (is (= "3000 4000\n" (:out r)))))))
+
 ;; (run-tests) -- called by tests/run.clj

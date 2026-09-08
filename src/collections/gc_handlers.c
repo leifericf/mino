@@ -34,15 +34,16 @@ static void trace_vec_node(mino_state *S, gc_hdr_t *h)
 static void trace_hamt_node(mino_state *S, gc_hdr_t *h)
 {
     mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
-    unsigned count, i;
+    /* The child pointers live in the out-of-line slots[] array, not
+     * inline in the node: pushing the array is enough, its own tracer
+     * (trace_pointer_array over the exact-sized allocation) walks every
+     * child. Do not also push n->slots[i] directly -- that would name
+     * the node as owner of pointers whose physical home is the array,
+     * so a per-slot store (barriered against the array in map_owned.c)
+     * would leave the node's dirty bit clear and the remembered-set
+     * edge unrecorded. One owner per pointer keeps barrier and tracer
+     * agreeing. */
     PUSH(n->slots);
-    count = (n->collision_count > 0) ? n->collision_count
-                                     : popcount32(n->bitmap);
-    if (n->slots != NULL) {
-        for (i = 0; i < count; i++) {
-            PUSH(n->slots[i]);
-        }
-    }
 }
 
 static void trace_hamt_entry(mino_state *S, gc_hdr_t *h)
