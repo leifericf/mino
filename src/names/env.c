@@ -30,6 +30,9 @@ mino_env *mino_env_new(mino_state *S)
     volatile char probe = 0;
     mino_env   *env;
     root_env_t   *r;
+    if (S == NULL) {
+        return NULL;
+    }
     /* Record the host's stack frame: this is typically the earliest point
      * the host calls into mino, so it fixes a generous stack bottom before
      * any allocator runs. */

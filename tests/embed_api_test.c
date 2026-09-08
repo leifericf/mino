@@ -953,6 +953,14 @@ static void test_read_null_src(mino_state *S)
             "null-src + null-end: mino_read still returns NULL");
 }
 
+/* mino_env_new on a NULL state must return NULL, not crash -- matching
+ * the NULL-state guards on mino_eval_string / mino_set_option. */
+static void test_env_new_null_state(void)
+{
+    mino_env *e = mino_env_new(NULL);
+    REQUIRE(e == NULL, "null-state: mino_env_new returns NULL");
+}
+
 /* NULL `src` to mino_eval_string and mino_eval_string_ex must surface
  * a classified error, matching mino_load_file's NULL-arg behaviour. */
 static void test_eval_string_null_src(mino_state *S, mino_env *env)
@@ -1340,6 +1348,7 @@ int main(void)
     test_throw_uncaught(S, env);
     test_eval_string_null_src(S, env);
     test_read_null_src(S);
+    test_env_new_null_state();
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
     test_last_error_uniform_across_eval_family(S, env);
