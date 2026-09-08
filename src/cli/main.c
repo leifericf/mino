@@ -8,6 +8,14 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+/* musl gates realpath(3) on _XOPEN_SOURCE (or a BSD/GNU source macro);
+ * plain _POSIX_C_SOURCE does not expose it. glibc likewise needs
+ * _XOPEN_SOURCE >= 500 for several extensions. Request it before any
+ * system header pulls in features.h. macOS declares realpath
+ * unconditionally, so this is Linux-only. */
+#if defined(__linux__) && !defined(_XOPEN_SOURCE)
+#  define _XOPEN_SOURCE 600
+#endif
 /* Darwin's <sys/sysctl.h> needs the BSD names (u_int, etc.) which
  * strict _POSIX_C_SOURCE hides; _DARWIN_C_SOURCE re-exposes them. */
 #if defined(__APPLE__)
