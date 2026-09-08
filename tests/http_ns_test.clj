@@ -389,11 +389,12 @@
     (is (str/includes? (ex-message e) "Unexpected character"))))
 
 (deftest transport-errors-translate-to-error-kinds
-  ;; Connection-level failures collapse to :net; a size cap to
+  ;; Connection-level failures collapse to :net; a TLS handshake or
+  ;; certificate-verification failure surfaces as :tls; a size cap to
   ;; :overflow; a bad content-encoding / decode to :codec; a real
   ;; request-shaping error stays :http.
   (doseq [[kind want] [[:net/dns :net] [:net/connect :net]
-                       [:net/timeout :net] [:tls :net]
+                       [:net/timeout :net] [:tls :tls]
                        [:net/overflow :overflow] [:codec/limit :overflow]
                        [:codec/truncated :codec] [:codec/magic :codec]
                        [:codec/corrupt :codec] [:codec/crc :codec]
