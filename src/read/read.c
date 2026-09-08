@@ -1474,6 +1474,11 @@ static mino_val *read_metadata_form(mino_state *S, const char **p)
             mino_val *fresh = alloc_val(S, MINO_SYMBOL);
             fresh->as.s.data = target->as.s.data;
             fresh->as.s.len  = target->as.s.len;
+            /* Carry any metadata the inner ^ forms already attached so
+             * the merge below sees it; without this a chained
+             * ^:private ^:dynamic on a symbol drops all but the outer
+             * map. */
+            fresh->meta      = target->meta;
             target = fresh;
         }
         /* Merge with any existing metadata from chained ^ syntax. */

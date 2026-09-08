@@ -115,3 +115,17 @@
     (let [m (with-meta {:a 1} {:doc "y"})
           m2 (assoc m :b 2)]
       (is (= {:doc "y"} (meta m2))))))
+
+(deftest chained-reader-metadata-merges
+  (testing "chained ^ shorthand on a symbol merges, matching vectors"
+    (is (= {:dynamic true, :private true}
+           (meta '^:private ^:dynamic foo))))
+  (testing "chained ^{} maps on a symbol merge keys"
+    (is (= {:a 1, :b 2}
+           (meta '^{:a 1} ^{:b 2} sym))))
+  (testing "three chained keyword shorthands on a symbol all survive"
+    (is (= {:a true, :b true, :c true}
+           (meta '^:a ^:b ^:c qux))))
+  (testing "symbol and vector chains agree"
+    (is (= (meta '^:private ^:dynamic [1])
+           (meta '^:private ^:dynamic bar)))))
