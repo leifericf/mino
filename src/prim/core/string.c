@@ -330,7 +330,6 @@ static int fmt_f_shortest(double d, long prec, int f_plus, int f_space,
         }
         free(fdig);
         fdig = frac;
-        flen = (size_t)places;
     }
 
     /* A rounded-to-zero magnitude is never signed '-'; canon keeps a
