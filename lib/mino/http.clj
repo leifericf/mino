@@ -11,9 +11,10 @@
   and pmap compose directly. 4xx/5xx statuses throw ex-info whose
   ex-data is the full response map; :throw false returns them as data.
   Transport failures throw ex-info with ex-data {:error {:kind ...}}
-  where :kind is :net (dns, connect, tls, or timeout), :overflow (the
-  response body exceeded a size cap), :codec (a compressed body could
-  not be decoded), or :http (a request-shaping fault).
+  where :kind is :net (dns, connect, or timeout), :tls (a handshake or
+  certificate-verification failure), :overflow (the response body
+  exceeded a size cap), :codec (a compressed body could not be
+  decoded), or :http (a request-shaping fault).
 
   Capabilities: this client needs MINO_CAP_NET (it is not in the
   default capability set, so an embedder must install it). The server
@@ -418,12 +419,14 @@
 
 (defn- translate-kind
   "Collapses the prim's fine-grained transport kind into the client's
-  four public error kinds: :net (connection-level: dns, connect, tls,
-  timeout), :overflow (a size cap tripped), :codec (a compressed body
-  would not decode), and :http (a request-shaping fault)."
+  public error kinds: :net (connection-level: dns, connect, timeout),
+  :tls (a TLS handshake or certificate-verification failure),
+  :overflow (a size cap tripped), :codec (a compressed body would not
+  decode), and :http (a request-shaping fault)."
   [kind]
   (case kind
-    (:net/dns :net/connect :net/timeout :tls) :net
+    (:net/dns :net/connect :net/timeout) :net
+    :tls :tls
     (:net/overflow :codec/limit) :overflow
     (:codec/truncated :codec/magic :codec/corrupt :codec/crc
      :codec/unsupported) :codec
