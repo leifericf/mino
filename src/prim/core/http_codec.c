@@ -34,7 +34,7 @@
 
 #include "prim/internal.h"
 #include "mino.h"
-#include "http_internal.h"
+#include "prim/core/http_internal.h"
 
 #include <stdarg.h>
 #include <stdint.h>

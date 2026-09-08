@@ -22,7 +22,7 @@
 
 #include "prim/internal.h"
 #include "mino.h"
-#include "http_internal.h"
+#include "prim/core/http_internal.h"
 
 #include <stdint.h>
 #include <stdio.h>
