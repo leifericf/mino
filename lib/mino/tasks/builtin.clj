@@ -861,6 +861,8 @@
    Writes:
      dist/mino.h      -- the public header, prefixed with the license
                          banner
+     dist/mino.hpp    -- the C++ RAII wrapper over mino.h, for C++
+                         embedders, prefixed with the license banner
      dist/mino.c      -- unified TU of every lib src + transitively
                          referenced internal header, with project-
                          local includes pre-expanded inline and system
@@ -913,8 +915,14 @@
           body    (str/join "" @chunks)]
       (spit "dist/mino.c" (str header body))
       (spit "dist/mino.h" (str dist-license-banner "\n" (slurp "src/mino.h")))
+      ;; The C++ RAII wrapper is self-contained given mino.h beside it:
+      ;; it includes "mino.h" plus <stdexcept>/<string>, so a C++ embedder
+      ;; consuming dist/ resolves it under -Idist. Emit it verbatim under
+      ;; the same banner so the C++ boundary rides the amalgam too.
+      (spit "dist/mino.hpp" (str dist-license-banner "\n" (slurp "src/mino.hpp")))
       (println (str "amalgamate: dist/mino.c (" (count body) " bytes body, "
-                    (count @seen) " files inlined)"))))
+                    (count @seen) " files inlined)"))
+      (println "amalgamate: dist/mino.h + dist/mino.hpp")))
   (spit "dist/README.md"
         (str "# mino amalgamation\n\n"
              "Single-file distribution of mino's embedding runtime.\n\n"
@@ -923,8 +931,18 @@
              "cc -std=c99 -O2 -c mino.c\n"
              "cc app.c mino.o -lm -lpthread -o app\n"
              "```\n\n"
+             "C++ embedders include `mino.hpp` (which pulls in `mino.h`) for\n"
+             "the RAII wrappers, compile the application with a C++ compiler,\n"
+             "and link the same `mino.o`:\n\n"
+             "```\n"
+             "cc -std=c99 -O2 -c mino.c\n"
+             "c++ -std=c++14 app.cpp mino.o -lm -lpthread -o app\n"
+             "```\n\n"
              "## Files\n\n"
-             "- `mino.h` -- public embedding API (the only header you include).\n"
+             "- `mino.h` -- public embedding API (the only header a C\n"
+             "  embedder includes).\n"
+             "- `mino.hpp` -- C++ RAII wrappers over `mino.h`; include it\n"
+             "  from C++ instead and compile with a C++ compiler.\n"
              "- `mino.c` -- unified translation unit; one `.c` file builds the\n"
              "  entire runtime.\n"
              "- `THIRD_PARTY_LICENSES.md` -- every license notice for this\n"
@@ -2775,10 +2793,28 @@
     (apply sh! args)
     (println (sh! (str "./" bin)))))
 
+(defn- compile-and-run-cpp-amalgam
+  "Compile one C++ TU against the amalgamation's C++ wrapper: include
+   dist/mino.hpp under -Idist and link the prebuilt dist/mino.o (the C
+   runtime object `examples-amalgam` already produced). Pins that
+   dist/mino.hpp keeps compiling through the amalgam boundary, the same
+   way the C examples pin dist/mino.c."
+  [src bin]
+  (let [pthread (if windows? [] ["-pthread"])
+        args    (into cxx (concat ["-std=c++17" "-O2" "-Idist"]
+                                  pthread ldflags
+                                  ["-o" bin src "dist/mino.o"]
+                                  libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
+
 (defn examples-amalgam
   "Build and run every examples/embed_*.c against the single-file
    amalgamation (`dist/mino.c`). Enforces that the amalgamation
-   distribution surface is sufficient for the public examples."
+   distribution surface is sufficient for the public examples, and
+   compiles the C++ RAII smoke against dist/mino.hpp + dist/mino.o so
+   the C++ embedding boundary rides the amalgam too."
   []
   (amalgamate)
   ;; Compile the amalgamation once; reuse the .o across examples.
@@ -2788,7 +2824,10 @@
     (apply sh! args))
   (doseq [src embed-examples]
     (println (str "--- " src " (amalgam) ---"))
-    (compile-and-run-example-amalgam src)))
+    (compile-and-run-example-amalgam src))
+  (println "--- tests/embed_hpp_test.cpp (amalgam) ---")
+  (compile-and-run-cpp-amalgam "tests/embed_hpp_test.cpp"
+                               "embed_hpp_amalgam_test"))
 
 ;; ---- Architecture quality gates ----
 
