@@ -115,6 +115,48 @@
   (is (thrown? (read-string "#bytes \"abc\"")))   ;; odd digits
   (is (thrown? (read-string "#bytes \"xyz\""))))  ;; not hex
 
+(deftest bytes-reader-literal-bit-tail-suffix
+  ;; The #bytes literal accepts an optional /N trailing-bit-count suffix
+  ;; naming how many bits of the final byte are significant (1..7). A
+  ;; value with a non-zero tail is a bitstring, not a byte-aligned bytes
+  ;; value, and it prints back with its /N suffix.
+  (let [b (read-string "#bytes \"ff/7\"")]
+    (is (true?  (bitstring? b)))
+    (is (false? (bytes? b)))
+    (is (= "#bytes \"ff/7\"" (pr-str b))))
+  ;; /7 is the largest tail; /8 and above name a whole byte and are
+  ;; rejected.
+  (is (true? (bitstring? (read-string "#bytes \"ff/1\""))))
+  (is (thrown? (read-string "#bytes \"ff/8\"")))
+  (is (thrown? (read-string "#bytes \"ff/9\"")))
+  ;; A tail with no payload byte is meaningless and rejected.
+  (is (thrown? (read-string "#bytes \"/3\""))))
+
+(deftest bytes-reader-literal-suffix-payload-intact
+  ;; The /N suffix names only trailing bits; the hex payload before the
+  ;; slash decodes to exactly the same bytes it would without a suffix.
+  (let [b (read-string "#bytes \"ff/3\"")]
+    (is (= 1 (count b)))
+    (is (= 0xff (aget b 0))))
+  (let [b (read-string "#bytes \"4142/5\"")]
+    (is (= 2 (count b)))
+    (is (= 0x41 (aget b 0)))
+    (is (= 0x42 (aget b 1)))))
+
+(deftest bytes-reader-literal-zero-tail-is-byte-aligned
+  ;; A byte-aligned value (no suffix, or an explicit /0) is plain bytes,
+  ;; not a bit-tailed bitstring, and prints without any /N.
+  (let [b (read-string "#bytes \"ff\"")]
+    (is (true? (bytes? b)))
+    (is (= "#bytes \"ff\"" (pr-str b))))
+  (let [b (read-string "#bytes \"ff/0\"")]
+    (is (true? (bytes? b)))
+    (is (= "#bytes \"ff\"" (pr-str b))))
+  ;; An empty payload is a valid empty byte-aligned value.
+  (let [b (read-string "#bytes \"\"")]
+    (is (true? (bytes? b)))
+    (is (zero? (count b)))))
+
 (deftest bytes-roundtrip-through-read-print
   (let [b1 (byte-array [0 1 2 0xff 0x80 0x7f])
         s  (pr-str b1)
