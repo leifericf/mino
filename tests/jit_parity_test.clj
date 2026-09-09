@@ -472,4 +472,61 @@
 (deftest loop-dec-acc-1m
   (is (= (reduce + (range 1 1000001)) (p-loop-dec-acc 1000000))))
 
+;; ---- Section 7: accumulator-binding-first loop parity -------------
+;;
+;; The fused LT_ACC / DEC_ACC / LT_INC opcodes carry a second register
+;; (the accumulator or carry) alongside the loop's counter. The binding
+;; order is free: the counter may be the first or the second binding.
+;; When the counter is the SECOND binding and the accumulator is the
+;; first, the fused op must still read and write the accumulator
+;; register, not the counter's. These fns place the accumulator first
+;; and the counter second, the mirror of the Section 6 fns.
+
+(defn p-loop-acc-lt  [n] (loop [s 0 i 0] (if (< i n) (recur (+ s i) (inc i)) s)))
+(defn p-loop-acc-dec [n] (loop [s 0 i n] (if (zero? i) s (recur (+ s i) (dec i)))))
+(defn p-loop-inc-lt  [n] (loop [k 0 i 0] (if (< i n) (recur (inc k) (inc i)) k)))
+
+(defn- warm-acc-first-loops []
+  (dotimes [_ +warm+]
+    (p-loop-acc-lt 100)
+    (p-loop-acc-dec 100)
+    (p-loop-inc-lt 100)))
+
+(deftest -aac-warm-acc-first-loops
+  (warm-acc-first-loops)
+  (is true))
+
+(deftest loop-acc-lt-zero
+  (is (= 0 (p-loop-acc-lt 0))))
+
+(deftest loop-acc-lt-one
+  (is (= 0 (p-loop-acc-lt 1))))
+
+(deftest loop-acc-lt-10
+  (is (= 45 (p-loop-acc-lt 10))))
+
+(deftest loop-acc-lt-1m
+  (is (= (reduce + (range 1000000)) (p-loop-acc-lt 1000000))))
+
+(deftest loop-acc-dec-zero
+  (is (= 0 (p-loop-acc-dec 0))))
+
+(deftest loop-acc-dec-one
+  (is (= 1 (p-loop-acc-dec 1))))
+
+(deftest loop-acc-dec-10
+  (is (= 55 (p-loop-acc-dec 10))))
+
+(deftest loop-acc-dec-1m
+  (is (= (reduce + (range 1 1000001)) (p-loop-acc-dec 1000000))))
+
+(deftest loop-inc-lt-zero
+  (is (= 0 (p-loop-inc-lt 0))))
+
+(deftest loop-inc-lt-100
+  (is (= 100 (p-loop-inc-lt 100))))
+
+(deftest loop-inc-lt-1m
+  (is (= 1000000 (p-loop-inc-lt 1000000))))
+
 (run-tests-and-exit)
