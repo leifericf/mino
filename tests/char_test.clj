@@ -58,6 +58,19 @@
   (is (= 48  (int \0)))
   (is (= 0x2603 (int \u2603))))
 
+(deftest char-octal-literals
+  ;; \oNNN reads an octal codepoint. The accepted range is the full
+  ;; latin-1 byte 0..255, so \o377 (0377 octal = 255) is the largest
+  ;; value that reads; \o400 (256) is past the range and rejected.
+  (is (= 0   (int (read-string "\\o0"))))
+  (is (= 10  (int (read-string "\\o12"))))
+  (is (= 65  (int (read-string "\\o101"))))
+  (is (= 255 (int (read-string "\\o377"))))
+  (is (= \A  (read-string "\\o101")))
+  (is (thrown? (read-string "\\o400")))
+  (is (thrown? (read-string "\\o777")))
+  (is (thrown? (read-string "\\o8"))))
+
 (deftest char-roundtrip-via-read-string
   (is (= \A (read-string "\\A")))
   (is (= \space (read-string "\\space")))
