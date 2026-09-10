@@ -334,3 +334,199 @@
               (map-indexed (fn [i x] (+ i x)))
               (filter even?)
               (take 10)))))
+
+;; --- transducer fusion ----------------------------------------------
+;; A comp of standard stage transducers routed through transduce /
+;; into-with-xform / sequence-with-xform must fuse through the same
+;; walker yet stay observably identical to the slow closure path. The
+;; reference in every case is the equivalent lazy-seq pipeline reduced
+;; the ordinary way, so these pass whether or not the fast path fires:
+;; they pin the semantics fusion must never change. An xform the walker
+;; cannot model (stateful take, take-while, halt-when, or any user
+;; closure) MUST take the slow path and still be correct.
+
+(deftest transduce-map-filter-equals-lazy
+  ;; The headline case: (comp (map inc) (filter odd?)) over 1000 elems.
+  ;; transduce applies xform stages left-to-right per element, so inc
+  ;; runs before odd?. The lazy reference nests the other way:
+  ;; (filter odd? (map inc coll)) also runs inc then tests odd?.
+  (is (= (reduce + 0 (filter odd? (map inc (range 1000))))
+         (transduce (comp (map inc) (filter odd?)) + 0 (range 1000))))
+  ;; three stages
+  (is (= (reduce + 0 (filter even? (map #(* 2 %) (map inc (range 1000)))))
+         (transduce (comp (map inc) (map #(* 2 %)) (filter even?))
+                    + 0 (range 1000)))))
+
+(deftest transduce-order-is-left-to-right
+  ;; comp order matters when stages are not commutative: (map inc) then
+  ;; (filter odd?) keeps the odd results of x+1; swapping filters first.
+  (is (= [2 4 6]
+         (transduce (comp (map inc) (filter even?)) conj [] (range 6))))
+  ;; (filter even?) then (map inc): keep 0 2 4, then inc -> 1 3 5
+  (is (= [1 3 5]
+         (transduce (comp (filter even?) (map inc)) conj [] (range 6)))))
+
+(deftest transduce-single-stage
+  ;; A lone standard transducer (no comp) must fuse or slow-path equal.
+  (is (= (reduce + 0 (map inc (range 1000)))
+         (transduce (map inc) + 0 (range 1000))))
+  (is (= (reduce + 0 (filter odd? (range 1000)))
+         (transduce (filter odd?) + 0 (range 1000)))))
+
+(deftest transduce-remove-keep-map-indexed
+  ;; remove / keep / map-indexed transducers fuse as their stages.
+  (is (= (reduce + 0 (remove even? (range 1000)))
+         (transduce (remove even?) + 0 (range 1000))))
+  ;; keep drops nil, keeps false; (keep #(when (odd? %) %)) keeps odds.
+  (is (= (reduce + 0 (keep #(when (odd? %) %) (range 1000)))
+         (transduce (keep #(when (odd? %) %)) + 0 (range 1000))))
+  ;; map-indexed index must be seeded at 0 and cross chunk boundaries.
+  (is (= (reduce + 0 (map-indexed + (range 1000)))
+         (transduce (map-indexed +) + 0 (range 1000))))
+  ;; a comp mixing the new stages
+  (is (= (reduce + 0 (keep #(when (pos? %) %)
+                           (remove #(zero? (mod % 3))
+                                   (map-indexed + (range 1000)))))
+         (transduce (comp (map-indexed +)
+                          (remove #(zero? (mod % 3)))
+                          (keep #(when (pos? %) %)))
+                    + 0 (range 1000)))))
+
+(deftest transduce-edges
+  ;; empty source
+  (is (= 0 (transduce (comp (map inc) (filter odd?)) + 0 (range 0))))
+  (is (= 0 (transduce (comp (map inc) (filter odd?)) + 0 nil)))
+  ;; single element
+  (is (= 2 (transduce (map inc) + 0 [1])))
+  ;; filter empties a chunk: no element in [0,32) survives, but later
+  ;; chunks do; the walk must not stop when a whole chunk is rejected.
+  (is (= (reduce + 0 (filter #(>= % 100) (range 1000)))
+         (transduce (filter #(>= % 100)) + 0 (range 1000))))
+  ;; a stage over a concrete vector source (not a range)
+  (is (= (reduce + 0 (filter odd? (map inc (vec (range 1000)))))
+         (transduce (comp (map inc) (filter odd?)) + 0 (vec (range 1000))))))
+
+(deftest transduce-completion-arity-runs
+  ;; transduce's contract is (xrf (unreduced result)): the completion
+  ;; arity of the composed xform must fire exactly once, after the
+  ;; reduce, on both the fused and the slow path. mino wraps the
+  ;; reducing fn in (completing f), so the observable completion is the
+  ;; sum threaded through each stage's ([result] (rf result)) pass. A
+  ;; scalar fused result must equal the lazy reference and the same
+  ;; result must survive the completion pass unchanged (identity cf).
+  (is (= (reduce + 0 (filter odd? (map inc (range 100))))
+         (transduce (comp (map inc) (filter odd?)) + 0 (range 100))))
+  ;; the fused path and the (forced) slow path agree element-for-element
+  ;; into a vector, which threads conj's completion identically.
+  (is (= (vec (filter odd? (map inc (range 100))))
+         (transduce (comp (map inc) (filter odd?)) conj [] (range 100)))))
+
+(deftest transduce-two-arg-uses-rf-init
+  ;; (transduce xform f coll) with no init seeds from (f); for + that
+  ;; is 0. Must equal the 4-arg form with the identity init.
+  (is (= (transduce (comp (map inc) (filter odd?)) + 0 (range 100))
+         (transduce (comp (map inc) (filter odd?)) + (range 100)))))
+
+(deftest transduce-reduced-short-circuit-take
+  ;; take is stateful and produces `reduced`; it MUST stay slow-path and
+  ;; still short-circuit exactly. Result equals taking from the lazy seq.
+  (is (= (reduce + 0 (take 7 (filter odd? (map inc (range 1000)))))
+         (transduce (comp (map inc) (filter odd?) (take 7))
+                    + 0 (range 1000))))
+  ;; take crossing a chunk boundary (n>32)
+  (is (= (reduce + 0 (take 40 (map inc (range 1000))))
+         (transduce (comp (map inc) (take 40)) + 0 (range 1000))))
+  ;; take-while short-circuit
+  (is (= (reduce + 0 (take-while #(< % 50) (map inc (range 1000))))
+         (transduce (comp (map inc) (take-while #(< % 50)))
+                    + 0 (range 1000)))))
+
+(deftest transduce-take-halts-before-later-elements
+  ;; With take fronted, elements past the count must never be seen.
+  (let [seen (atom [])]
+    (transduce (comp (map (fn [x] (swap! seen conj x) x)) (take 3))
+               + 0 (range 1000))
+    (is (= [0 1 2] @seen))))
+
+(deftest transduce-opaque-user-xform-slow-path
+  ;; A user-written transducer the walker cannot recognise must run
+  ;; correctly on the slow closure path. This doubles every element.
+  (let [dup (fn [rf]
+              (fn ([] (rf))
+                  ([r] (rf r))
+                  ([r x] (rf (rf r x) x))))]
+    (is (= (* 2 (reduce + 0 (range 100)))
+           (transduce dup + 0 (range 100))))
+    ;; opaque xform composed with a standard stage: the whole comp must
+    ;; fall back to the slow path and stay correct.
+    (is (= (reduce + 0 (mapcat (fn [x] [x x]) (map inc (range 100))))
+           (transduce (comp (map inc) dup) + 0 (range 100))))))
+
+(deftest into-with-xform-fuses-equal
+  ;; into with an xform routes through transduce; must equal the lazy
+  ;; build and preserve conj order into a vector.
+  (is (= (vec (filter odd? (map inc (range 1000))))
+         (into [] (comp (map inc) (filter odd?)) (range 1000))))
+  ;; into a non-empty target keeps existing elements first
+  (is (= (into [:a] (comp (map inc) (filter odd?)) (range 6))
+         (vec (concat [:a] (filter odd? (map inc (range 6)))))))
+  ;; into with take (slow path) still bounded
+  (is (= (into [] (comp (map inc) (take 5)) (range 1000))
+         (vec (take 5 (map inc (range 1000)))))))
+
+(deftest sequence-with-xform-fuses-equal
+  ;; sequence with an xform yields a lazy seq of the transformed items.
+  (is (= (filter odd? (map inc (range 1000)))
+         (sequence (comp (map inc) (filter odd?)) (range 1000))))
+  ;; realised equality across chunk boundaries
+  (is (= (doall (sequence (comp (map inc) (filter odd?)) (range 1000)))
+         (filter odd? (map inc (range 1000)))))
+  ;; sequence stays lazy: taking a prefix does not force the whole source
+  (is (= [2 4 6]
+         (take 3 (sequence (comp (map inc) (filter odd?)
+                                 (map inc))
+                           (range 1000))))))
+
+(deftest transduce-long-comp-exceeds-stage-limit
+  ;; A comp of more standard stages than the walker's fixed stage array
+  ;; (8) must fall back to the slow closure path and stay correct, not
+  ;; leak the fusion no-fuse sentinel as a result.
+  (let [xf (apply comp (repeat 9 (map inc)))
+        expected (reduce (fn [c _] (map inc c)) (range 5) (range 9))]
+    (is (= (reduce + 0 expected)
+           (transduce xf + 0 (range 5))))
+    ;; ten stages, mixed kinds, still correct
+    (is (= (reduce + 0 (filter odd? (map inc (map inc (map inc (map inc
+             (map inc (map inc (map inc (map inc (map inc (range 100))))))))))))
+           (transduce (apply comp (concat (repeat 9 (map inc)) [(filter odd?)]))
+                      + 0 (range 100))))))
+
+;; Property: for random comps of standard stateless stages over random
+;; sources, transduce-into-a-scalar must equal reducing the equivalent
+;; lazy-seq composition. Covers empty, single, chunk boundaries at 32,
+;; and filters that empty a chunk.
+(deftest transduce-random-comps-equal-lazy
+  (let [stages [{:x (map inc)        :seq #(map inc %)}
+                {:x (filter odd?)    :seq #(filter odd? %)}
+                {:x (map #(* 2 %))   :seq #(map (fn [e] (* 2 e)) %)}
+                {:x (remove #(zero? (mod % 3)))
+                 :seq #(remove (fn [e] (zero? (mod e 3))) %)}
+                {:x (keep #(when (pos? %) %))
+                 :seq #(keep (fn [e] (when (pos? e) e)) %)}
+                {:x (map-indexed +) :seq #(map-indexed + %)}]
+        sources [(range 0) (range 1) (range 5) (range 32) (range 33)
+                 (range 64) (range 200) (vec (range 33)) (vec (range 200))]
+        rng (atom 12345)
+        nextr (fn [] (swap! rng (fn [s] (mod (+ (* s 1103515245) 12345)
+                                             2147483648))))]
+    (dotimes [_ 60]
+      (let [k    (inc (mod (nextr) 3))
+            picks (repeatedly k #(nth stages (mod (nextr) (count stages))))
+            xform (apply comp (map :x picks))
+            src   (nth sources (mod (nextr) (count sources)))
+            lazy-fn (reduce (fn [acc st] (fn [s] ((:seq st) (acc s))))
+                            identity picks)
+            expected (reduce + 0 (lazy-fn src))
+            actual   (transduce xform + 0 src)]
+        (is (= expected actual)
+            (str "mismatch k=" k " src-count=" (count src)))))))
