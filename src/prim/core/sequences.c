@@ -1192,6 +1192,28 @@ static int pipeline_walk(mino_state *S,
         if (src == NULL) return -1;
     }
 
+    /* Concrete-vector fast path: index the backing store directly with
+     * vec_nth, skipping the seq_iter dispatch per element. This is what
+     * routes a plain-vector source (mapv / filterv / into over a
+     * concrete vector) into the same tight per-element loop the range
+     * and chunked drains use, instead of a seq_iter step each element. */
+    if (mino_type_of(src) == MINO_VECTOR) {
+        size_t vlen = src->as.vec.len;
+        size_t vi;
+        for (vi = 0; vi < vlen; vi++) {
+            mino_val *elem = vec_nth(src, vi);
+            int rc = pipeline_apply_stages(S, stages, fast_kinds,
+                                           n_stages, &elem, env);
+            if (rc < 0) return -1;
+            if (rc == 1) continue;            /* filter rejected */
+            int srcc = step(S, ctx, elem, env);
+            if (srcc < 0) return -1;
+            if (srcc > 0) return 1;
+            if (rc == 2) return 1;            /* take exhausted */
+        }
+        return 0;
+    }
+
     /* Chunked-cons fast path: read chunk values directly, skip the
      * seq_iter call per element. Falls into the seq_iter walk once
      * the chunked chain transitions to a plain cons / vector / etc.
