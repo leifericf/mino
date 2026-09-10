@@ -115,3 +115,85 @@
   (is (= {0 [0 3 6 9] 1 [1 4 7] 2 [2 5 8]}
          (group-by #(mod % 3) (->> (range 10)))))
   (is (= {} (group-by odd? (pipe 0)))))
+
+;; --- concrete-source drains for mapv / filterv / into ----------------
+;; mapv / filterv / into over a CONCRETE vector or range (not a lazy
+;; pipeline head) route through the shared walker's inline
+;; vector-drain / int-range fast path instead of seq-iter +
+;; per-element apply_callable. The fused result must be
+;; indistinguishable from the slow path: same values, same order,
+;; same identity for pass-through elements, same empty / single-element
+;; behaviour, and the callable must run once per element in order.
+
+(deftest mapv-concrete-vector-equals-slow
+  ;; a plain vector source; crosses several 32-element chunk boundaries.
+  (let [v (vec (range 1000))]
+    (is (= (mapv inc v) (vec (map inc v))))
+    (is (= 1000 (count (mapv inc v))))
+    (is (= 1 (first (mapv inc v))))
+    (is (= 1000 (last (mapv inc v)))))
+  ;; empty and single element
+  (is (= [] (mapv inc [])))
+  (is (= [42] (mapv inc [41])))
+  ;; identity function returns the same element objects
+  (let [v [{:a 1} {:b 2}]]
+    (is (= v (mapv identity v)))
+    (is (identical? (first v) (first (mapv identity v))))))
+
+(deftest mapv-concrete-range-equals-slow
+  (is (= (mapv inc (range 1000)) (vec (map inc (range 1000)))))
+  (is (= [] (mapv inc (range 0))))
+  (is (= [1] (mapv inc (range 1))))
+  ;; stepped and descending ranges
+  (is (= (vec (map inc (range 0 100 3)))
+         (mapv inc (range 0 100 3))))
+  (is (= (vec (map inc (range 10 0 -1)))
+         (mapv inc (range 10 0 -1)))))
+
+(deftest mapv-concrete-visits-once-in-order
+  ;; the fast path must apply the fn exactly once per element, in order.
+  (let [seen (atom [])
+        out  (mapv (fn [x] (swap! seen conj x) (* x 10)) (vec (range 5)))]
+    (is (= [0 10 20 30 40] out))
+    (is (= [0 1 2 3 4] @seen))))
+
+(deftest filterv-concrete-vector-equals-slow
+  (let [v (vec (range 1000))]
+    (is (= (filterv even? v) (vec (filter even? v))))
+    (is (= 500 (count (filterv even? v)))))
+  (is (= [] (filterv even? [])))
+  (is (= [] (filterv even? [1 3 5])))
+  (is (= [2] (filterv even? [1 2 3])))
+  ;; survivors are the identical source objects, not copies
+  (let [a {:k 1} b {:k 2}
+        v [a b]]
+    (is (identical? a (first (filterv (fn [_] true) v))))))
+
+(deftest filterv-concrete-range-equals-slow
+  (is (= (filterv even? (range 1000)) (vec (filter even? (range 1000)))))
+  (is (= [] (filterv even? (range 0))))
+  (is (= [] (filterv (fn [_] false) (range 100))))
+  (is (= (vec (range 100)) (filterv (fn [_] true) (range 100)))))
+
+(deftest filterv-concrete-visits-once-in-order
+  (let [seen (atom [])
+        out  (filterv (fn [x] (swap! seen conj x) (odd? x)) (vec (range 5)))]
+    (is (= [1 3] out))
+    (is (= [0 1 2 3 4] @seen))))
+
+(deftest into-concrete-vector-equals-slow
+  (let [v (vec (range 1000))]
+    (is (= (into [] v) v))
+    (is (= (into [:x] v) (vec (concat [:x] v))))
+    (is (= 1000 (count (into [] v)))))
+  (is (= [] (into [] [])))
+  (is (= [:a] (into [] [:a])))
+  ;; source objects pass through by identity
+  (let [a {:k 1}]
+    (is (identical? a (first (into [] [a]))))))
+
+(deftest into-concrete-range-equals-slow
+  (is (= (into [] (range 1000)) (vec (range 1000))))
+  (is (= [] (into [] (range 0))))
+  (is (= [:x 0 1 2] (into [:x] (range 3))))
+  (is (= (vec (range 10 0 -1)) (into [] (range 10 0 -1)))))
