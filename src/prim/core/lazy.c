@@ -296,6 +296,361 @@ mino_val *prim_lazy_filter(mino_state *S, mino_val *args, mino_env *env)
     return lz;
 }
 
+/* Lazy c_thunk for (remove pred coll): the complement of filter. ctx =
+ * cons(pred, coll_state). Emits the elements where pred is FALSY. Kept
+ * as its own thunk (rather than (filter (complement pred) coll)) so the
+ * pipeline unwinder recognises it by exact thunk pointer and inlines the
+ * negated test without the per-element `complement` closure call.
+ * The chunk/cons scaffolding mirrors lazy_filter_thunk exactly; the
+ * distinct function pointer is the only observable difference the
+ * recognizer needs. */
+static mino_val *lazy_remove_thunk(mino_state *S, mino_val *ctx)
+{
+    mino_val *pred = ctx->as.cons.car;
+    mino_val *coll = ctx->as.cons.cdr->as.cons.car;
+    for (;;) {
+        mino_val *head;
+        mino_val *rest;
+        mino_val *call_args;
+        mino_val *ok;
+        coll = normalize_seq(S, coll);
+        if (coll == NULL) return NULL;
+        if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+            /* Chunked path: keep the elements where pred is falsy. */
+            const mino_val *src = coll->as.chunked_cons.chunk;
+            unsigned          off = coll->as.chunked_cons.off;
+            unsigned          n   = src->as.chunk.len - off;
+            mino_val       *buf;
+            mino_val       *more;
+            mino_val       *next_ctx;
+            mino_val       *next_lz;
+            unsigned          k;
+            buf = mino_chunk_buffer(S, n);
+            if (buf == NULL) return NULL;
+            gc_pin(buf);
+            for (k = 0; k < n; k++) {
+                mino_val *elem = src->as.chunk.vals[off + k];
+                mino_val *r;
+                call_args = mino_cons(S, elem, mino_nil(S));
+                gc_pin(call_args);
+                r = apply_callable(S, pred, call_args, NULL);
+                gc_unpin(1);
+                if (r == NULL) { gc_unpin(1); return NULL; }
+                if (!mino_is_truthy_inline(r)) {
+                    gc_write_barrier(S, buf, NULL, elem);
+                    buf->as.chunk.vals[buf->as.chunk.len++] = elem;
+                }
+            }
+            mino_chunk_seal(buf);
+            more = coll->as.chunked_cons.more;
+            if (more != NULL && mino_type_of(more) != MINO_NIL
+                && mino_type_of(more) != MINO_EMPTY_LIST) {
+                next_ctx = mino_cons(S, pred,
+                            mino_cons(S, more, mino_nil(S)));
+                next_lz = alloc_val(S, MINO_LAZY);
+                next_lz->as.lazy.body    = next_ctx;
+                next_lz->as.lazy.c_thunk = lazy_remove_thunk;
+            } else {
+                next_lz = mino_nil(S);
+            }
+            gc_unpin(1);
+            if (buf->as.chunk.len == 0) {
+                if (next_lz != NULL && mino_type_of(next_lz) == MINO_LAZY) {
+                    return lazy_force(S, next_lz);
+                }
+                return mino_nil(S);
+            }
+            return mino_chunked_cons(S, buf, next_lz);
+        }
+        if (!seq_head_rest(S, coll, &head, &rest)) return mino_nil(S);
+        call_args = mino_cons(S, head, mino_nil(S));
+        gc_pin(call_args);
+        ok = apply_callable(S, pred, call_args, NULL);
+        gc_unpin(1);
+        if (ok == NULL) return NULL;
+        if (!mino_is_truthy_inline(ok)) {
+            mino_val *next_ctx;
+            mino_val *next_lz;
+            gc_pin(head);
+            next_ctx = mino_cons(S, pred,
+                        mino_cons(S, rest, mino_nil(S)));
+            next_lz = alloc_val(S, MINO_LAZY);
+            next_lz->as.lazy.body    = next_ctx;
+            next_lz->as.lazy.c_thunk = lazy_remove_thunk;
+            gc_unpin(1);
+            return mino_cons(S, head, next_lz);
+        }
+        coll = rest;
+    }
+}
+
+/* (lazy-remove pred coll) -- lazy remove; pairs with lazy-filter. */
+mino_val *prim_lazy_remove(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *pred;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return throw_classified(S, "eval/arity", "MAR001",
+            "lazy-remove requires 2 arguments");
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
+    }
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
+        coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+        if (coll == NULL) return NULL;
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
+    }
+    ctx = mino_cons(S, pred, mino_cons(S, coll, mino_nil(S)));
+    lz = alloc_val(S, MINO_LAZY);
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = lazy_remove_thunk;
+    return lz;
+}
+
+/* Lazy c_thunk for (keep f coll): ctx = cons(f, coll_state). Emits the
+ * non-nil results of (f elem); a false result is KEPT (only nil drops).
+ * Distinct thunk so the pipeline unwinder recognises a keep stage by
+ * exact thunk pointer. The chunk/cons scaffolding mirrors
+ * lazy_filter_thunk; the emitted value is the mapped result (not the
+ * original element) and the drop test is nil-only (not falsy). */
+static mino_val *lazy_keep_thunk(mino_state *S, mino_val *ctx)
+{
+    mino_val *fn   = ctx->as.cons.car;
+    mino_val *coll = ctx->as.cons.cdr->as.cons.car;
+    for (;;) {
+        mino_val *head;
+        mino_val *rest;
+        mino_val *call_args;
+        mino_val *v;
+        coll = normalize_seq(S, coll);
+        if (coll == NULL) return NULL;
+        if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+            const mino_val *src = coll->as.chunked_cons.chunk;
+            unsigned          off = coll->as.chunked_cons.off;
+            unsigned          n   = src->as.chunk.len - off;
+            mino_val       *buf;
+            mino_val       *more;
+            mino_val       *next_ctx;
+            mino_val       *next_lz;
+            unsigned          k;
+            buf = mino_chunk_buffer(S, n);
+            if (buf == NULL) return NULL;
+            gc_pin(buf);
+            for (k = 0; k < n; k++) {
+                mino_val *elem = src->as.chunk.vals[off + k];
+                mino_val *r;
+                call_args = mino_cons(S, elem, mino_nil(S));
+                gc_pin(call_args);
+                r = apply_callable(S, fn, call_args, NULL);
+                gc_unpin(1);
+                if (r == NULL) { gc_unpin(1); return NULL; }
+                if (mino_type_of(r) != MINO_NIL) {
+                    gc_write_barrier(S, buf, NULL, r);
+                    buf->as.chunk.vals[buf->as.chunk.len++] = r;
+                }
+            }
+            mino_chunk_seal(buf);
+            more = coll->as.chunked_cons.more;
+            if (more != NULL && mino_type_of(more) != MINO_NIL
+                && mino_type_of(more) != MINO_EMPTY_LIST) {
+                next_ctx = mino_cons(S, fn,
+                            mino_cons(S, more, mino_nil(S)));
+                next_lz = alloc_val(S, MINO_LAZY);
+                next_lz->as.lazy.body    = next_ctx;
+                next_lz->as.lazy.c_thunk = lazy_keep_thunk;
+            } else {
+                next_lz = mino_nil(S);
+            }
+            gc_unpin(1);
+            if (buf->as.chunk.len == 0) {
+                if (next_lz != NULL && mino_type_of(next_lz) == MINO_LAZY) {
+                    return lazy_force(S, next_lz);
+                }
+                return mino_nil(S);
+            }
+            return mino_chunked_cons(S, buf, next_lz);
+        }
+        if (!seq_head_rest(S, coll, &head, &rest)) return mino_nil(S);
+        call_args = mino_cons(S, head, mino_nil(S));
+        gc_pin(call_args);
+        v = apply_callable(S, fn, call_args, NULL);
+        gc_unpin(1);
+        if (v == NULL) return NULL;
+        if (mino_type_of(v) != MINO_NIL) {
+            mino_val *next_ctx;
+            mino_val *next_lz;
+            gc_pin(v);
+            next_ctx = mino_cons(S, fn,
+                        mino_cons(S, rest, mino_nil(S)));
+            next_lz = alloc_val(S, MINO_LAZY);
+            next_lz->as.lazy.body    = next_ctx;
+            next_lz->as.lazy.c_thunk = lazy_keep_thunk;
+            gc_unpin(1);
+            return mino_cons(S, v, next_lz);
+        }
+        coll = rest;
+    }
+}
+
+/* (lazy-keep f coll) -- lazy keep; pairs with lazy-map-1. */
+mino_val *prim_lazy_keep(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *fn;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return throw_classified(S, "eval/arity", "MAR001",
+            "lazy-keep requires 2 arguments");
+    }
+    fn   = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
+    }
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
+        coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+        if (coll == NULL) return NULL;
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
+    }
+    ctx = mino_cons(S, fn, mino_cons(S, coll, mino_nil(S)));
+    lz = alloc_val(S, MINO_LAZY);
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = lazy_keep_thunk;
+    return lz;
+}
+
+/* Lazy c_thunk for (map-indexed f coll): ctx = cons(f, cons(index,
+ * cons(coll_state, nil))). Emits (f index elem) for each element, with
+ * the running index carried in the ctx. Its own thunk so the unwinder
+ * recognises a map-indexed stage and seeds the fused walk's per-element
+ * index counter from the stored index. */
+static mino_val *lazy_map_indexed_thunk(mino_state *S, mino_val *ctx)
+{
+    mino_val *fn    = ctx->as.cons.car;
+    long long   idx   = mino_val_int_get(ctx->as.cons.cdr->as.cons.car);
+    mino_val *coll  = ctx->as.cons.cdr->as.cons.cdr->as.cons.car;
+    mino_val *head;
+    mino_val *rest;
+    mino_val *call_args;
+    mino_val *mapped;
+    mino_val *next_ctx;
+    mino_val *next_lz;
+    /* idx is bounded in practice (seeds from mino_int 0; one step per
+     * element) but technically a hand-crafted ctx with idx near LLONG_MAX
+     * would overflow idx+k/n/1 below. Unreachable through normal use. */
+    coll = normalize_seq(S, coll);
+    if (coll == NULL) return NULL;
+    if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+        const mino_val *src = coll->as.chunked_cons.chunk;
+        unsigned          off = coll->as.chunked_cons.off;
+        unsigned          n   = src->as.chunk.len - off;
+        mino_val       *buf;
+        mino_val       *more;
+        unsigned          k;
+        buf = mino_chunk_buffer(S, n);
+        if (buf == NULL) return NULL;
+        gc_pin(buf);
+        for (k = 0; k < n; k++) {
+            mino_val *elem = src->as.chunk.vals[off + k];
+            mino_val *m;
+            mino_val *a2;
+            a2 = mino_cons(S, mino_int(S, idx + (long long)k),
+                           mino_cons(S, elem, mino_nil(S)));
+            gc_pin(a2);
+            m = apply_callable(S, fn, a2, NULL);
+            gc_unpin(1);
+            if (m == NULL) { gc_unpin(1); return NULL; }
+            gc_write_barrier(S, buf, NULL, m);
+            buf->as.chunk.vals[buf->as.chunk.len++] = m;
+        }
+        mino_chunk_seal(buf);
+        more = coll->as.chunked_cons.more;
+        if (more != NULL && mino_type_of(more) != MINO_NIL
+            && mino_type_of(more) != MINO_EMPTY_LIST) {
+            next_ctx = mino_cons(S, fn,
+                        mino_cons(S, mino_int(S, idx + (long long)n),
+                            mino_cons(S, more, mino_nil(S))));
+            next_lz = alloc_val(S, MINO_LAZY);
+            next_lz->as.lazy.body    = next_ctx;
+            next_lz->as.lazy.c_thunk = lazy_map_indexed_thunk;
+        } else {
+            next_lz = mino_nil(S);
+        }
+        gc_unpin(1);
+        return mino_chunked_cons(S, buf, next_lz);
+    }
+    if (!seq_head_rest(S, coll, &head, &rest)) return mino_nil(S);
+    call_args = mino_cons(S, mino_int(S, idx),
+                          mino_cons(S, head, mino_nil(S)));
+    gc_pin(call_args);
+    mapped = apply_callable(S, fn, call_args, NULL);
+    gc_unpin(1);
+    if (mapped == NULL) return NULL;
+    gc_pin(mapped);
+    next_ctx = mino_cons(S, fn,
+                mino_cons(S, mino_int(S, idx + 1),
+                    mino_cons(S, rest, mino_nil(S))));
+    next_lz = alloc_val(S, MINO_LAZY);
+    next_lz->as.lazy.body    = next_ctx;
+    next_lz->as.lazy.c_thunk = lazy_map_indexed_thunk;
+    gc_unpin(1);
+    return mino_cons(S, mapped, next_lz);
+}
+
+/* (lazy-map-indexed f coll) -- lazy map-indexed; pairs with lazy-map-1. */
+mino_val *prim_lazy_map_indexed(mino_state *S, mino_val *args, mino_env *env)
+{
+    mino_val *fn;
+    mino_val *coll;
+    mino_val *ctx;
+    mino_val *lz;
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return throw_classified(S, "eval/arity", "MAR001",
+            "lazy-map-indexed requires 2 arguments");
+    }
+    fn   = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
+    }
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
+        coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+        if (coll == NULL) return NULL;
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
+    }
+    ctx = mino_cons(S, fn,
+            mino_cons(S, mino_int(S, 0),
+                mino_cons(S, coll, mino_nil(S))));
+    lz = alloc_val(S, MINO_LAZY);
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = lazy_map_indexed_thunk;
+    return lz;
+}
+
 /* Lazy range via C thunks, so each step skips the fn-call + lazy-seq body
  * overhead that a mino-level implementation pays per element.
  *
@@ -358,6 +713,30 @@ int lazy_thunk_is_take(const mino_val *coll)
         && mino_type_of(coll) == MINO_LAZY
         && coll->as.lazy.realized == LAZY_UNREALIZED
         && coll->as.lazy.c_thunk == lazy_take_thunk;
+}
+
+int lazy_thunk_is_remove(const mino_val *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && coll->as.lazy.realized == LAZY_UNREALIZED
+        && coll->as.lazy.c_thunk == lazy_remove_thunk;
+}
+
+int lazy_thunk_is_keep(const mino_val *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && coll->as.lazy.realized == LAZY_UNREALIZED
+        && coll->as.lazy.c_thunk == lazy_keep_thunk;
+}
+
+int lazy_thunk_is_map_indexed(const mino_val *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && coll->as.lazy.realized == LAZY_UNREALIZED
+        && coll->as.lazy.c_thunk == lazy_map_indexed_thunk;
 }
 
 static mino_val *range_make_lazy(mino_state *S, long long start,
@@ -1031,6 +1410,12 @@ const mino_prim_def k_prims_lazy[] = {
      "Internal fast path for single-collection lazy map."},
     {"lazy-filter", prim_lazy_filter,
      "Internal fast path for lazy filter."},
+    {"lazy-remove", prim_lazy_remove,
+     "Internal fast path for lazy remove."},
+    {"lazy-keep",   prim_lazy_keep,
+     "Internal fast path for lazy keep."},
+    {"lazy-map-indexed", prim_lazy_map_indexed,
+     "Internal fast path for lazy map-indexed."},
     {"lazy-take",   prim_lazy_take,
      "Internal fast path for lazy take."},
     {"drop-seq",    prim_drop_seq,

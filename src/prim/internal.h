@@ -280,11 +280,15 @@ mino_val *prim_pop(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_seq(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_realized_p(mino_state *S, mino_val *args, mino_env *env);
 
-/* lazy.c -- all 5 prims below are cross-TU: registered in sequences.c's
- * k_prims_sequences table. prim_range also appears in sequences.c table. */
+/* lazy.c -- lazy-seq C primitives, all cross-TU: registered in
+ * k_prims_lazy (installed by install.c alongside the sequence
+ * primitives). Recognizer helpers used by sequences.c's pipeline fusion. */
 mino_val *prim_range(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_lazy_map_1(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_lazy_filter(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_remove(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_keep(mino_state *S, mino_val *args, mino_env *env);
+mino_val *prim_lazy_map_indexed(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_lazy_take(mino_state *S, mino_val *args, mino_env *env);
 mino_val *prim_drop_seq(mino_state *S, mino_val *args, mino_env *env);
 
@@ -295,6 +299,9 @@ int         lazy_is_int_range(const mino_val *coll, long long *start_out,
                               int *infinite_out);
 int         lazy_thunk_is_map1  (const mino_val *coll);
 int         lazy_thunk_is_filter(const mino_val *coll);
+int         lazy_thunk_is_remove(const mino_val *coll);
+int         lazy_thunk_is_keep  (const mino_val *coll);
+int         lazy_thunk_is_map_indexed(const mino_val *coll);
 int         lazy_thunk_is_take  (const mino_val *coll);
 
 /* sequences.c -- terminal-consumer pipeline fusion. count (collections.c)

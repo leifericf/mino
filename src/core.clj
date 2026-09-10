@@ -936,7 +936,7 @@
   "Returns a lazy sequence of items in coll for which pred returns
    falsy. When called with no collection, returns a transducer."
   ([pred] (filter (complement pred)))
-  ([pred coll] (filter (complement pred) coll)))
+  ([pred coll] (lazy-remove pred coll)))
 (defn vec
   "Converts coll into a vector. Coll must be nil, a sequential
    collection, a string, a map, a set, or a host array. Booleans,
@@ -1273,23 +1273,7 @@
               result
               (rf result v)))))))
   ([f coll]
-   (lazy-seq
-     (let [s (seq coll)]
-       (when s
-         (if (chunked-seq? s)
-           (let [c (chunk-first s)
-                 size (count c)
-                 b (chunk-buffer size)]
-             (loop [i 0]
-               (when (< i size)
-                 (let [v (f (nth c i))]
-                   (when-not (nil? v) (chunk-append b v)))
-                 (recur (inc i))))
-             (chunk-cons (chunk b) (keep f (chunk-rest s))))
-           (let [v (f (first s))]
-             (if (nil? v)
-               (keep f (rest s))
-               (cons v (keep f (rest s)))))))))))
+   (lazy-keep f coll)))
 
 (defn keep-indexed
   "Returns a lazy sequence of non-nil results of (f index item).
@@ -1337,22 +1321,7 @@
            ([result input]
             (rf result (f (vswap! i inc) input)))))))
   ([f coll]
-   (let [step (fn step [i s]
-                (lazy-seq
-                  (when-let [s (seq s)]
-                    (if (chunked-seq? s)
-                      (let [c (chunk-first s)
-                            size (count c)
-                            b (chunk-buffer size)]
-                        (loop [j 0]
-                          (when (< j size)
-                            (chunk-append b (f (+ i j) (nth c j)))
-                            (recur (inc j))))
-                        (chunk-cons (chunk b)
-                                    (step (+ i size) (chunk-rest s))))
-                      (cons (f i (first s))
-                            (step (inc i) (rest s)))))))]
-     (step 0 coll))))
+   (lazy-map-indexed f coll)))
 
 (defn partition-all
   "Like partition, but includes a final partial group if items remain.

@@ -844,13 +844,18 @@ static mino_val *reduce_set_direct(mino_state *S, mino_val *fn,
 typedef enum {
     PIPELINE_STAGE_MAP,
     PIPELINE_STAGE_FILTER,
+    PIPELINE_STAGE_REMOVE,
+    PIPELINE_STAGE_KEEP,
+    PIPELINE_STAGE_MAP_INDEXED,
     PIPELINE_STAGE_TAKE
 } pipeline_stage_kind_t;
 
 typedef struct {
     pipeline_stage_kind_t kind;
-    mino_val           *callable;   /* MAP/FILTER: stage fn. TAKE: NULL. */
-    long long             counter;    /* TAKE: remaining countdown. */
+    mino_val           *callable;   /* MAP/FILTER/REMOVE/KEEP/MAP_INDEXED:
+                                       * stage fn. TAKE: NULL. */
+    long long             counter;    /* TAKE: remaining countdown.
+                                       * MAP_INDEXED: next index. */
 } pipeline_stage_t;
 
 /* Try to unwind a chain of map/filter/take LAZY cells from `coll`,
@@ -882,6 +887,34 @@ static int try_unwind_pipeline(mino_val *coll,
             stages[n].callable = body->as.cons.car;
             stages[n].counter  = 0;
             coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else if (lazy_thunk_is_remove(coll)) {
+            stages[n].kind     = PIPELINE_STAGE_REMOVE;
+            stages[n].callable = body->as.cons.car;
+            stages[n].counter  = 0;
+            coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else if (lazy_thunk_is_keep(coll)) {
+            stages[n].kind     = PIPELINE_STAGE_KEEP;
+            stages[n].callable = body->as.cons.car;
+            stages[n].counter  = 0;
+            coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else if (lazy_thunk_is_map_indexed(coll)) {
+            /* body = cons(f, cons(index, cons(coll, nil))). The index is
+             * the position of the NEXT element the thunk would emit; the
+             * fused walk drives the source from the bottom, so we seed
+             * the stage counter with this index and increment per elem. */
+            long long idx;
+            mino_val *rest2;
+            if (!mino_is_cons(body->as.cons.cdr->as.cons.cdr)) break;
+            if (!mino_to_int(body->as.cons.cdr->as.cons.car, &idx)
+                || idx < 0) break;
+            rest2 = body->as.cons.cdr->as.cons.cdr->as.cons.car;
+            stages[n].kind     = PIPELINE_STAGE_MAP_INDEXED;
+            stages[n].callable = body->as.cons.car;
+            stages[n].counter  = idx;
+            coll = rest2;
             n++;
         } else if (lazy_thunk_is_take(coll)) {
             long long m;
@@ -1111,6 +1144,48 @@ static int pipeline_apply_stages(mino_state *S,
             }
             if (err) return -1;
             if (!pass) return 1;
+        } else if (st->kind == PIPELINE_STAGE_REMOVE) {
+            /* Inverted filter: keep elements where the pred is FALSY. */
+            pipeline_fast_kind_t k = fast_kinds[i];
+            int err = 0;
+            int pass;
+            if (k != PIPELINE_FAST_NONE) {
+                pass = pipeline_test_fast_filter(S, k, st->callable,
+                                                 elem, env, &err);
+            } else {
+                mino_val *argv1[1];
+                argv1[0] = elem;
+                mino_val *r = apply_callable_argv(S, st->callable,
+                                                    argv1, 1, env);
+                if (r == NULL) return -1;
+                pass = mino_is_truthy_inline(r) ? 1 : 0;
+            }
+            if (err) return -1;
+            if (pass) return 1;          /* pred truthy -> removed */
+        } else if (st->kind == PIPELINE_STAGE_KEEP) {
+            /* map + nil-drop: apply f; drop only nil (false is kept). */
+            pipeline_fast_kind_t k = fast_kinds[i];
+            if (k != PIPELINE_FAST_NONE) {
+                elem = pipeline_apply_fast_map(S, k, st->callable,
+                                               elem, env);
+            } else {
+                mino_val *argv1[1];
+                argv1[0] = elem;
+                elem = apply_callable_argv(S, st->callable, argv1,
+                                           1, env);
+            }
+            if (elem == NULL) return -1;
+            if (mino_type_of(elem) == MINO_NIL) return 1;
+        } else if (st->kind == PIPELINE_STAGE_MAP_INDEXED) {
+            /* (f index elem); the per-walk index lives in st->counter so
+             * it survives chunk boundaries (one stages[] array threads
+             * the whole walk, exactly like TAKE's countdown). */
+            mino_val *argv2[2];
+            argv2[0] = mino_int(S, st->counter);
+            argv2[1] = elem;
+            elem = apply_callable_argv(S, st->callable, argv2, 2, env);
+            if (elem == NULL) return -1;
+            st->counter++;
         } else {
             /* TAKE */
             if (st->counter <= 0) return 2;
@@ -1150,7 +1225,9 @@ static int pipeline_walk(mino_state *S,
     int i;
     for (i = 0; i < n_stages; i++) {
         if (stages[i].kind == PIPELINE_STAGE_MAP
-            || stages[i].kind == PIPELINE_STAGE_FILTER) {
+            || stages[i].kind == PIPELINE_STAGE_FILTER
+            || stages[i].kind == PIPELINE_STAGE_REMOVE
+            || stages[i].kind == PIPELINE_STAGE_KEEP) {
             fast_kinds[i] = pipeline_fast_callable(stages[i].callable);
         } else {
             fast_kinds[i] = PIPELINE_FAST_NONE;
@@ -1289,12 +1366,17 @@ static mino_val *reduce_pipeline_walk(mino_state *S,
     return reduce_ctx_finalize(S, &ctx, env);
 }
 
+/* Must enumerate exactly the same set of recognizers as try_unwind_pipeline.
+ * If a new stage is added to one, update the other. */
 /* True iff coll's outer LAZY is one of the recognised pipeline stages.
  * Cheap pre-check to gate the unwinder allocation-free. */
 static int coll_is_pipeline_head(const mino_val *coll)
 {
     return lazy_thunk_is_map1(coll)
         || lazy_thunk_is_filter(coll)
+        || lazy_thunk_is_remove(coll)
+        || lazy_thunk_is_keep(coll)
+        || lazy_thunk_is_map_indexed(coll)
         || lazy_thunk_is_take(coll);
 }
 
