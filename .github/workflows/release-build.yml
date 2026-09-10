@@ -326,7 +326,7 @@ jobs:
       - name: Install Clojure CLI (for mino-site cheap lane)
         run: |
           curl -sSL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh \
-            | bash -s -- --prefix /usr/local
+            | sudo bash -s -- --prefix /usr/local
           clojure --version
 
       - name: Clone satellites with submodules
@@ -367,6 +367,10 @@ jobs:
     steps:
       - name: Dispatch parity-nightly-mino at the released tag
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "CENSUS_DISPATCH_TOKEN not set; skipping parity refresh (census self-refreshes nightly)"
+            exit 0
+          fi
           gh workflow run parity-nightly-mino.yml \
             --repo leifericf/clojure-census \
             -f mino_ref="$TAG"
