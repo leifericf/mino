@@ -1942,6 +1942,27 @@ static mino_val *prim_mapv(mino_state *S, mino_val *args, mino_env *env)
             return mino_persistent(S, ctx.t);
         }
     }
+    /* Concrete-source fast lane: a plain vector or bounded int-range
+     * source has no lazy stage cells to unwind, but routing it through
+     * pipeline_walk as a single map stage still buys the walker's
+     * inline vector-drain / int-range loop and canonical-op inlining
+     * over the seq_iter + per-element apply_callable fallback below. */
+    {
+        long long rs, re, rst; int rinf;
+        if (mino_type_of(coll) == MINO_VECTOR
+            || (lazy_is_int_range(coll, &rs, &re, &rst, &rinf) && !rinf)) {
+            pipeline_stage_t stage;
+            stage.kind     = PIPELINE_STAGE_MAP;
+            stage.callable = fn;
+            stage.counter  = 0;
+            tvec_ctx_t ctx = { mino_transient(S, mino_vector(S, NULL, 0)) };
+            if (ctx.t == NULL) return NULL;
+            int rc = pipeline_walk(S, coll, &stage, 1,
+                                   tvec_conj_step, &ctx, env);
+            if (rc < 0) return NULL;
+            return mino_persistent(S, ctx.t);
+        }
+    }
     items = (mino_val **)gc_alloc_typed(S, GC_T_PTRARR,
                                           cap * sizeof(mino_val *));
     if (items == NULL) return NULL;
@@ -2001,6 +2022,24 @@ static mino_val *prim_filterv(mino_state *S, mino_val *args, mino_env *env)
             tvec_ctx_t ctx = { mino_transient(S, mino_vector(S, NULL, 0)) };
             if (ctx.t == NULL) return NULL;
             int rc = pipeline_walk(S, src, stages, ns + 1,
+                                   tvec_conj_step, &ctx, env);
+            if (rc < 0) return NULL;
+            return mino_persistent(S, ctx.t);
+        }
+    }
+    /* Concrete-source fast lane (see prim_mapv): route a plain vector /
+     * bounded int-range through the walker as a single filter stage. */
+    {
+        long long rs, re, rst; int rinf;
+        if (mino_type_of(coll) == MINO_VECTOR
+            || (lazy_is_int_range(coll, &rs, &re, &rst, &rinf) && !rinf)) {
+            pipeline_stage_t stage;
+            stage.kind     = PIPELINE_STAGE_FILTER;
+            stage.callable = pred;
+            stage.counter  = 0;
+            tvec_ctx_t ctx = { mino_transient(S, mino_vector(S, NULL, 0)) };
+            if (ctx.t == NULL) return NULL;
+            int rc = pipeline_walk(S, coll, &stage, 1,
                                    tvec_conj_step, &ctx, env);
             if (rc < 0) return NULL;
             return mino_persistent(S, ctx.t);
@@ -2074,6 +2113,23 @@ static mino_val *prim_into(mino_state *S, mino_val *args, mino_env *env)
                 tvec_ctx_t ctx = { mino_transient(S, to) };
                 if (ctx.t == NULL) return NULL;
                 int rc = pipeline_walk(S, src, stages, ns,
+                                       tvec_conj_step, &ctx, env);
+                if (rc < 0) return NULL;
+                return mino_persistent(S, ctx.t);
+            }
+        }
+        /* Concrete-source fast lane: a plain vector or bounded int-range
+         * `from` drains through the walker's inline vector / range loop
+         * (zero stages) straight into the transient, skipping the
+         * seq_iter dispatch the generic transient path below pays. */
+        {
+            long long rs, re, rst; int rinf;
+            if (mino_type_of(from) == MINO_VECTOR
+                || (lazy_is_int_range(from, &rs, &re, &rst, &rinf)
+                    && !rinf)) {
+                tvec_ctx_t ctx = { mino_transient(S, to) };
+                if (ctx.t == NULL) return NULL;
+                int rc = pipeline_walk(S, from, NULL, 0,
                                        tvec_conj_step, &ctx, env);
                 if (rc < 0) return NULL;
                 return mino_persistent(S, ctx.t);
