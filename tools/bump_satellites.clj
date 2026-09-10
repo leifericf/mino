@@ -47,9 +47,9 @@
 
 (def satellites
   [{:name      "mino-tests"
-    :repo      "leiferacf/mino-tests"
+    :repo      "leifericf/mino-tests"
     :bootstrap ["sh" "-c" "cd mino && make"]
-    :cheap     ["sh" "-c" "./mino/mino task adv-test"]}
+    :cheap     ["sh" "-c" "./mino/mino task adv-test && ./mino/mino task adv-test-embed"]}
    {:name      "mino-bench"
     :repo      "leifericf/mino-bench"
     :bootstrap ["sh" "-c" "cd mino && make"]
@@ -57,15 +57,15 @@
    {:name      "mino-examples"
     :repo      "leifericf/mino-examples"
     :bootstrap ["sh" "-c" "cd mino && make"]
-    :cheap     ["make"]}
+    :cheap     ["sh" "-c" "./mino/mino task test-use-cases"]}
    {:name      "mino-lsp"
     :repo      "leifericf/mino-lsp"
     :bootstrap ["sh" "-c" "cd mino && make"]
-    :cheap     ["make"]}
+    :cheap     ["sh" "-c" "./mino/mino task test"]}
    {:name      "mino-nrepl"
     :repo      "leifericf/mino-nrepl"
     :bootstrap ["sh" "-c" "cd mino && make"]
-    :cheap     ["make"]}
+    :cheap     ["sh" "-c" "./mino/mino task test"]}
    {:name      "mino-site"
     :repo      "leifericf/mino-site"
     :bootstrap nil
