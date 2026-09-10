@@ -1276,6 +1276,147 @@ static int coll_is_pipeline_head(const mino_val *coll)
         || lazy_thunk_is_take(coll);
 }
 
+/* Terminal-consumer fusion shim. When `coll` is a recognised pipeline
+ * head, unwind its stages and drive the elements once through
+ * pipeline_walk with the caller's step/ctx, eliminating the
+ * intermediate lazy-seq cells the slow consumer path would allocate.
+ *
+ * Returns 1 when the walk ran (fused): *ran_out is set to 1 and the
+ * result lives in ctx. Returns 0 when `coll` is not a pipeline head
+ * (or unwinds to no stages): *ran_out is 0 and the caller runs its
+ * ordinary slow path. Returns -1 on a walk error (diag set).
+ *
+ * Soundness is inherited from the unwinder: only lazy cells with the
+ * exact map/filter/take thunk pointers fuse; anything else leaves
+ * ran_out 0 and the observable slow path takes over. */
+static int try_consume_pipeline(mino_state *S, mino_val *coll,
+                                pipeline_step_fn step, void *ctx,
+                                mino_env *env, int *ran_out)
+{
+    *ran_out = 0;
+    if (coll == NULL || !coll_is_pipeline_head(coll)) return 0;
+    {
+        pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+        mino_val        *src = NULL;
+        int ns = try_unwind_pipeline(coll, stages, PIPELINE_MAX_STAGES, &src);
+        if (ns <= 0) return 0;
+        *ran_out = 1;
+        return pipeline_walk(S, src, stages, ns, step, ctx, env) < 0 ? -1 : 1;
+    }
+}
+
+/* --- count fusion -------------------------------------------------- */
+
+typedef struct { long long n; } count_ctx_t;
+
+static int count_pipeline_step(mino_state *S, void *ctx_,
+                               mino_val *elem, mino_env *env)
+{
+    (void)S; (void)elem; (void)env;
+    ((count_ctx_t *)ctx_)->n++;
+    return 0;
+}
+
+/* Cross-TU: count (collections.c) routes a lazy pipeline head here to
+ * avoid forcing the whole seq into cons cells before counting. Sets
+ * *out to the element count and returns 1 when it fused; returns 0
+ * when `coll` is not a recognised pipeline head (caller forces as
+ * before); -1 on error. */
+int seq_pipeline_count(mino_state *S, mino_val *coll, mino_env *env,
+                       long long *out)
+{
+    count_ctx_t ctx;
+    int ran = 0, rc;
+    ctx.n = 0;
+    rc = try_consume_pipeline(S, coll, count_pipeline_step, &ctx, env, &ran);
+    if (rc < 0) return -1;
+    if (!ran) return 0;
+    *out = ctx.n;
+    return 1;
+}
+
+/* --- some / every? fusion ------------------------------------------ */
+
+/* Shared short-circuit context. `pred` is applied to each surviving
+ * element; `result` holds the answer to return. some stops on the
+ * first truthy (pred x) and keeps that value; every? stops on the
+ * first falsy and records mino_false. A stored error leaves *err set
+ * so the walker's -1 return propagates the diag. */
+typedef struct {
+    mino_val *pred;
+    mino_val *result;
+    int         err;
+} pred_ctx_t;
+
+/* some: stop (return 1) on the first truthy (pred elem), stashing it. */
+static int some_pipeline_step(mino_state *S, void *ctx_,
+                              mino_val *elem, mino_env *env)
+{
+    pred_ctx_t *ctx = (pred_ctx_t *)ctx_;
+    mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+    mino_val *test = apply_callable(S, ctx->pred, call_args, env);
+    if (test == NULL) { ctx->err = 1; return -1; }
+    if (mino_is_truthy_inline(test)) { ctx->result = test; return 1; }
+    return 0;
+}
+
+/* every?: stop (return 1) on the first falsy (pred elem), recording
+ * false; otherwise the result stays true. */
+static int every_pipeline_step(mino_state *S, void *ctx_,
+                               mino_val *elem, mino_env *env)
+{
+    pred_ctx_t *ctx = (pred_ctx_t *)ctx_;
+    mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+    mino_val *test = apply_callable(S, ctx->pred, call_args, env);
+    if (test == NULL) { ctx->err = 1; return -1; }
+    if (!mino_is_truthy_inline(test)) {
+        ctx->result = mino_false(S);
+        return 1;
+    }
+    return 0;
+}
+
+/* --- frequencies / group-by fusion --------------------------------- */
+
+/* frequencies: accumulate distinct-element counts into a map. */
+typedef struct { mino_val *result; } freq_ctx_t;
+
+static int frequencies_pipeline_step(mino_state *S, void *ctx_,
+                                     mino_val *elem, mino_env *env)
+{
+    freq_ctx_t *ctx = (freq_ctx_t *)ctx_;
+    mino_val *cur  = mino_map_lookup(ctx->result, elem);
+    long long   prev = 0;
+    (void)env;
+    if (cur != NULL && !mino_is_nil(cur)) (void)mino_to_int(cur, &prev);
+    ctx->result = mino_map_assoc1(S, ctx->result, elem,
+                                  mino_int(S, prev + 1));
+    return ctx->result == NULL ? -1 : 0;
+}
+
+/* group-by: apply f to each element, conj it into (f x)'s bucket
+ * vector, preserving encounter order. */
+typedef struct { mino_val *fn; mino_val *result; } groupby_ctx_t;
+
+static int group_by_pipeline_step(mino_state *S, void *ctx_,
+                                  mino_val *elem, mino_env *env)
+{
+    groupby_ctx_t *ctx = (groupby_ctx_t *)ctx_;
+    mino_val *call_args = mino_cons(S, elem, mino_nil(S));
+    mino_val *k = apply_callable(S, ctx->fn, call_args, env);
+    mino_val *bucket;
+    if (k == NULL) return -1;
+    bucket = mino_map_lookup(ctx->result, k);
+    if (bucket == NULL || mino_is_nil(bucket)) {
+        bucket = mino_vector(S, &elem, 1);
+    } else {
+        bucket = vec_conj1(S, bucket, elem);
+    }
+    if (bucket == NULL) return -1;
+    ctx->result = mino_map_assoc1(S, ctx->result, k, bucket);
+    return ctx->result == NULL ? -1 : 0;
+}
+
 static mino_val *prim_reduce(mino_state *S, mino_val *args, mino_env *env)
 {
     mino_val *fn;
@@ -2912,6 +3053,17 @@ static mino_val *prim_every_p(mino_state *S, mino_val *args, mino_env *env)
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) return mino_true(S);
+    /* Fusion fast path: a recognised pipeline head is always seqable,
+     * so it skips the seqability probe and walks the source once,
+     * short-circuiting on the first falsy (pred x). */
+    {
+        pred_ctx_t ctx; int ran = 0, rc;
+        ctx.pred = pred; ctx.result = mino_true(S); ctx.err = 0;
+        rc = try_consume_pipeline(S, coll, every_pipeline_step, &ctx,
+                                  env, &ran);
+        if (rc < 0) return NULL;
+        if (ran) return ctx.result;
+    }
     /* Validate seqability eagerly so non-seqable inputs throw rather
      * than vacuously returning true. */
     {
@@ -2948,6 +3100,17 @@ static mino_val *prim_some(mino_state *S, mino_val *args, mino_env *env)
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) return mino_nil(S);
+    /* Fusion fast path: a recognised pipeline head is always seqable,
+     * so it skips the seqability probe and walks the source once,
+     * short-circuiting on the first truthy (pred x). */
+    {
+        pred_ctx_t ctx; int ran = 0, rc;
+        ctx.pred = pred; ctx.result = mino_nil(S); ctx.err = 0;
+        rc = try_consume_pipeline(S, coll, some_pipeline_step, &ctx,
+                                  env, &ran);
+        if (rc < 0) return NULL;
+        if (ran) return ctx.result;
+    }
     /* Validate seqability eagerly so non-seqable inputs throw rather
      * than silently returning nil. */
     {
@@ -3293,6 +3456,16 @@ static mino_val *prim_group_by(mino_state *S, mino_val *args, mino_env *env)
     coll = args->as.cons.cdr->as.cons.car;
     result = mino_map(S, NULL, NULL, 0);
     if (coll == NULL || mino_is_nil(coll)) return result;
+    /* Fusion fast path: walk a recognised pipeline head once, grouping
+     * survivors without materialising the intermediate lazy cells. */
+    {
+        groupby_ctx_t ctx; int ran = 0, rc;
+        ctx.fn = fn; ctx.result = result;
+        rc = try_consume_pipeline(S, coll, group_by_pipeline_step, &ctx,
+                                  env, &ran);
+        if (rc < 0) return NULL;
+        if (ran) return ctx.result;
+    }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val *elem = seq_iter_val(S, &it);
@@ -3330,6 +3503,16 @@ static mino_val *prim_frequencies(mino_state *S, mino_val *args, mino_env *env)
     coll = args->as.cons.car;
     result = mino_map(S, NULL, NULL, 0);
     if (coll == NULL || mino_is_nil(coll)) return result;
+    /* Fusion fast path: walk a recognised pipeline head once, counting
+     * survivors without materialising the intermediate lazy cells. */
+    {
+        freq_ctx_t ctx; int ran = 0, rc;
+        ctx.result = result;
+        rc = try_consume_pipeline(S, coll, frequencies_pipeline_step, &ctx,
+                                  env, &ran);
+        if (rc < 0) return NULL;
+        if (ran) return ctx.result;
+    }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val *elem = seq_iter_val(S, &it);

@@ -747,6 +747,16 @@ static mino_val *prim_count_step(mino_state *S, mino_val *coll,
         return mino_int(S, (long long)n);
     }
     case MINO_LAZY: {
+        /* Fusion fast path: when coll is a recognised map/filter/take
+         * pipeline head, walk the source once and count survivors
+         * without allocating the intermediate lazy-seq cells that
+         * forcing the whole seq would produce. Anything unrecognised
+         * (a user shadow, a stateful stage) leaves fused == 0 and
+         * falls through to the force-and-count path below. */
+        long long fused_n = 0;
+        int fused = seq_pipeline_count(S, (mino_val *)coll, env, &fused_n);
+        if (fused < 0) return NULL;
+        if (fused) return mino_int(S, fused_n);
         /* Force the entire lazy seq and count it. The forced value may
          * be a flat cons spine, a chunked-cons spine (lazy range), or
          * another lazy. Dispatch instead of assuming the cons-only

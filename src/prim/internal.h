@@ -297,6 +297,13 @@ int         lazy_thunk_is_map1  (const mino_val *coll);
 int         lazy_thunk_is_filter(const mino_val *coll);
 int         lazy_thunk_is_take  (const mino_val *coll);
 
+/* sequences.c -- terminal-consumer pipeline fusion. count (collections.c)
+ * routes a lazy map/filter/take pipeline head through the shared walker
+ * instead of forcing the whole seq. Returns 1 when fused (*out set), 0
+ * when coll is not a recognised head (caller forces), -1 on error. */
+int         seq_pipeline_count(mino_state *S, mino_val *coll, mino_env *env,
+                               long long *out);
+
 /* string.c -- most prims are file-local static.
  * Cross-TU callers: jvm_statics.c calls prim_str/prim_random_uuid/prim_parse_uuid;
  * io.c calls prim_format. mino_uuid_* and utf8_* are shared helpers. */
