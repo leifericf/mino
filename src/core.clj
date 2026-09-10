@@ -217,11 +217,13 @@
    called with multiple collections, maps f across them in parallel.
    When called with no collection, returns a transducer."
   ([f]
-   (fn [rf]
-     (fn ([] (rf))
-         ([result] (rf result))
-         ([result input] (rf result (f input)))
-         ([result input & inputs] (rf result (apply f input inputs))))))
+   (with-meta
+     (fn [rf]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input] (rf result (f input)))
+           ([result input & inputs] (rf result (apply f input inputs)))))
+     {:mino.fusion/stage {:kind :map :f f}}))
   ([f & colls]
    (if (= (count colls) 1)
      (map1 f (first colls))
@@ -231,13 +233,15 @@
   "Returns a lazy sequence of items in coll for which pred returns
    truthy. When called with no collection, returns a transducer."
   ([pred]
-   (fn [rf]
-     (fn ([] (rf))
-         ([result] (rf result))
-         ([result input]
-          (if (pred input)
-            (rf result input)
-            result)))))
+   (with-meta
+     (fn [rf]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if (pred input)
+              (rf result input)
+              result))))
+     {:mino.fusion/stage {:kind :filter :f pred}}))
   ([pred coll] (lazy-filter pred coll)))
 
 (defn take
@@ -935,7 +939,9 @@
 (defn remove
   "Returns a lazy sequence of items in coll for which pred returns
    falsy. When called with no collection, returns a transducer."
-  ([pred] (filter (complement pred)))
+  ([pred]
+   (with-meta (filter (complement pred))
+     {:mino.fusion/stage {:kind :remove :f pred}}))
   ([pred coll] (lazy-remove pred coll)))
 (defn vec
   "Converts coll into a vector. Coll must be nil, a sequential
@@ -1264,14 +1270,16 @@
   "Returns a lazy sequence of non-nil results of (f item). When called
    with no collection, returns a transducer."
   ([f]
-   (fn [rf]
-     (fn ([] (rf))
-         ([result] (rf result))
-         ([result input]
-          (let [v (f input)]
-            (if (nil? v)
-              result
-              (rf result v)))))))
+   (with-meta
+     (fn [rf]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (let [v (f input)]
+              (if (nil? v)
+                result
+                (rf result v))))))
+     {:mino.fusion/stage {:kind :keep :f f}}))
   ([f coll]
    (lazy-keep f coll)))
 
@@ -1314,12 +1322,14 @@
   "Returns a lazy sequence of (f index item) for each item in coll.
    When called with no collection, returns a transducer."
   ([f]
-   (fn [rf]
-     (let [i (volatile! -1)]
-       (fn ([] (rf))
-           ([result] (rf result))
-           ([result input]
-            (rf result (f (vswap! i inc) input)))))))
+   (with-meta
+     (fn [rf]
+       (let [i (volatile! -1)]
+         (fn ([] (rf))
+             ([result] (rf result))
+             ([result input]
+              (rf result (f (vswap! i inc) input))))))
+     {:mino.fusion/stage {:kind :map-indexed :f f}}))
   ([f coll]
    (lazy-map-indexed f coll)))
 
@@ -3005,15 +3015,45 @@
   [x]
   (if (reduced? x) x (reduced x)))
 
+;; The pipeline walker fuses at most this many stages (PIPELINE_MAX_STAGES
+;; in src/prim/core/sequences.c). A longer comp falls back to the slow
+;; closure path rather than overrun the walker's fixed stage array.
+(def ^:private fusion-max-stages 8)
+
+(defn- fusion-stages
+  "Returns the ordered fusible stage descriptors for xform, or nil.
+   A comp of standard stage transducers carries a :mino.fusion/stages
+   vector (attached by comp); a lone standard stage transducer carries
+   a single :mino.fusion/stage map. Anything else (a reduced-producing,
+   completion-stateful, or user xform, or a comp with any untagged
+   operand) has neither and is nil, so transduce falls back to the slow
+   closure path. A chain longer than the walker's fixed stage limit also
+   returns nil and falls back. (ADR 65)"
+  [xform]
+  (let [m (meta xform)
+        stages (when m
+                 (or (:mino.fusion/stages m)
+                     (when-let [s (:mino.fusion/stage m)] [s])))]
+    (when (and stages (<= (count stages) fusion-max-stages))
+      stages)))
+
 (defn transduce
   "Reduces coll using the transducer xf applied to the reducing
    function f."
   ([xform f coll]
    (transduce xform f (f) coll))
   ([xform f init coll]
-   (let [xrf (xform (completing f))
-         result (reduce xrf init coll)]
-     (xrf (unreduced result)))))
+   (let [stages (fusion-stages xform)
+         result (when stages (__transduce-fuse stages f init coll))]
+     (if (and stages (not (identical? result :mino.fusion/no-fuse)))
+       ;; Fast path (ADR 65): the whole xform is a comp of standard
+       ;; stage transducers within the walker's stage limit. Apply the
+       ;; completion arity exactly as the slow path does. The C prim
+       ;; still guards against an unrecognised descriptor by returning
+       ;; :mino.fusion/no-fuse; the identical? check falls back safely.
+       ((xform (completing f)) (unreduced result))
+       (let [xrf (xform (completing f))]
+         (xrf (unreduced (reduce xrf init coll))))))))
 
 (def ^:private prim-into into)
 (defn into

@@ -1366,6 +1366,102 @@ static mino_val *reduce_pipeline_walk(mino_state *S,
     return reduce_ctx_finalize(S, &ctx, env);
 }
 
+/* --- transducer fusion (ADR 65) ------------------------------------
+ *
+ * `transduce` in src/core.clj recognises a comp of standard stage
+ * transducers (map / filter / remove / keep / map-indexed) by their
+ * `:mino.fusion/stage` metadata and, when the whole xform is fusible,
+ * hands the ordered stage descriptors plus the reducing fn, init, and
+ * source here. Each descriptor is a map {:kind <kw> :f <callable>}.
+ *
+ * The descriptors arrive in application order (the order the composed
+ * transducer threads an element through: (comp a b) applies a then b).
+ * pipeline_apply_stages runs stages innermost-first (index n-1 .. 0),
+ * so we lay descriptor k down at stages[n-1-k]: stage a at the highest
+ * index runs first. That mirrors the lazy pipeline the seq walker
+ * already fuses, so the fused transduce is byte-for-byte the fused
+ * reduce over the equivalent lazy composition -- and equal to the slow
+ * closure path, which core.clj falls back to whenever any operand is
+ * not a tagged standard stage (take, take-while, halt-when, partition,
+ * dedupe, cat, keep-indexed, and every user xform stay slow-path).
+ *
+ * Only element-at-a-time stages whose full behaviour is captured in
+ * the stage descriptor carry a tag; map-indexed tracks a per-walk
+ * index counter, but no stage needs a completion-time state flush.
+ * The scalar accumulator's own `reduced` short-circuit is still
+ * handled by reduce_ctx_step. The result is the raw accumulator
+ * (reduce_ctx unwraps reduced); core.clj then runs the completion
+ * arity (xrf result) exactly as the slow path does. */
+static int transduce_stage_from_desc(mino_state *S, mino_val *desc,
+                                     pipeline_stage_t *out)
+{
+    mino_val *kind, *f;
+    if (desc == NULL || mino_type_of(desc) != MINO_MAP) return 0;
+    kind = map_get_val(desc, mino_keyword(S, "kind"));
+    f    = map_get_val(desc, mino_keyword(S, "f"));
+    if (kind == NULL || mino_type_of(kind) != MINO_KEYWORD) return 0;
+    out->callable = f;
+    out->counter  = 0;
+    if (kind == mino_keyword(S, "map")) {
+        out->kind = PIPELINE_STAGE_MAP;
+    } else if (kind == mino_keyword(S, "filter")) {
+        out->kind = PIPELINE_STAGE_FILTER;
+    } else if (kind == mino_keyword(S, "remove")) {
+        out->kind = PIPELINE_STAGE_REMOVE;
+    } else if (kind == mino_keyword(S, "keep")) {
+        out->kind = PIPELINE_STAGE_KEEP;
+    } else if (kind == mino_keyword(S, "map-indexed")) {
+        out->kind    = PIPELINE_STAGE_MAP_INDEXED;
+        out->counter = 0;               /* fresh walk: index starts at 0 */
+    } else {
+        return 0;                       /* unrecognised kind -> not fusible */
+    }
+    if (f == NULL) return 0;
+    return 1;
+}
+
+/* (__transduce-fuse stages f init coll) -- run the stage vector over
+ * coll through the pipeline walker, reducing with f from init. Returns
+ * the raw accumulator on success; returns the `:mino.fusion/no-fuse`
+ * keyword when the descriptors are not a recognisable stage vector (so
+ * core.clj falls back to the slow closure path). */
+static mino_val *prim_transduce_fuse(mino_state *S, mino_val *args,
+                                     mino_env *env)
+{
+    mino_val *stages_vec, *f, *init, *coll;
+    size_t    ns, k;
+    pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+    size_t    n;
+    arg_count(S, args, &n);
+    if (n != 4) {
+        return throw_classified(S, "eval/arity", "MAR001",
+            "__transduce-fuse requires exactly 4 arguments");
+    }
+    stages_vec = args->as.cons.car;
+    f          = args->as.cons.cdr->as.cons.car;
+    init       = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    coll       = args->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (stages_vec == NULL || mino_type_of(stages_vec) != MINO_VECTOR) {
+        return mino_keyword(S, "mino.fusion/no-fuse");
+    }
+    ns = stages_vec->as.vec.len;
+    if (ns == 0 || ns > PIPELINE_MAX_STAGES) {
+        return mino_keyword(S, "mino.fusion/no-fuse");
+    }
+    /* Descriptors arrive in application order; lay stage k at index
+     * ns-1-k so pipeline_apply_stages (index n-1 .. 0) applies it in
+     * that order. */
+    for (k = 0; k < ns; k++) {
+        mino_val *desc = vec_nth(stages_vec, k);
+        if (!transduce_stage_from_desc(S, desc, &stages[ns - 1 - k])) {
+            return mino_keyword(S, "mino.fusion/no-fuse");
+        }
+    }
+    coll = coll == NULL ? mino_nil(S) : coll;
+    return reduce_pipeline_walk(S, f, init, 1, coll,
+                                stages, (int)ns, env);
+}
+
 /* Must enumerate exactly the same set of recognizers as try_unwind_pipeline.
  * If a new stage is added to one, update the other. */
 /* True iff coll's outer LAZY is one of the recognised pipeline stages.
@@ -3429,7 +3525,57 @@ static mino_val *prim_comp(mino_state *S, mino_val *args, mino_env *env)
                     mino_cons(S, rseq_call, mino_nil(S)))));
         body = mino_cons(S, reduce_form, mino_nil(S));
     }
-    return make_fn(S, params_amp_args(S), body, fn_env);
+    {
+        mino_val *composed = make_fn(S, params_amp_args(S), body, fn_env);
+        /* Transducer fast-path tag (ADR 65): if every operand carries a
+         * :mino.fusion/stage tag (the standard stage transducers do), the
+         * composed closure additionally carries an ordered
+         * :mino.fusion/stages vector so `transduce` can route the chain
+         * through the pipeline walker. The composed value stays a plain
+         * (rf -> rf) closure; the stages vector is advisory metadata only.
+         * When any operand is untagged, no stages vector is attached and
+         * comp's behaviour is exactly as before. */
+        mino_val *stage_kw  = mino_keyword(S, "mino.fusion/stage");
+        mino_val *stages_kw = mino_keyword(S, "mino.fusion/stages");
+        mino_val *cur = args;
+        int       all_tagged = 1;
+        size_t    i;
+        for (i = 0; i < n; i++) {
+            mino_val *op = cur->as.cons.car;
+            mino_val *m  = (op != NULL) ? op->meta : NULL;
+            if (m == NULL || mino_type_of(m) != MINO_MAP
+                || map_get_val(m, stage_kw) == NULL) {
+                all_tagged = 0;
+                break;
+            }
+            cur = cur->as.cons.cdr;
+        }
+        if (all_tagged) {
+            /* Collect each operand's stage descriptor in application
+             * order: (comp a b) applies a then b, and args holds a,b,... */
+            mino_val **descs =
+                (mino_val **)malloc(n * sizeof(mino_val *));
+            if (descs != NULL) {
+                mino_val *stages_vec, *newmeta;
+                mino_current_ctx(S)->gc_depth++;
+                cur = args;
+                for (i = 0; i < n; i++) {
+                    descs[i] = map_get_val(cur->as.cons.car->meta, stage_kw);
+                    cur = cur->as.cons.cdr;
+                }
+                stages_vec = mino_vector(S, descs, n);
+                {
+                    mino_val *keys[1] = { stages_kw };
+                    mino_val *vals[1] = { stages_vec };
+                    newmeta = mino_map(S, keys, vals, 1);
+                }
+                composed = mino_with_meta(S, composed, newmeta);
+                mino_current_ctx(S)->gc_depth--;
+                free(descs);
+            }
+        }
+        return composed;
+    }
 }
 
 /* (partial f) -> f; (partial f & args) -> fn that calls f with args prepended. */
@@ -3815,6 +3961,8 @@ const mino_prim_def k_prims_sequences[] = {
      "Returns a function that applies f with the given arguments prepended."},
     {"juxt",      prim_juxt,
      "Returns a function that returns a vector of applying each f to its args."},
+    {"__transduce-fuse", prim_transduce_fuse,
+     "Internal: run a fusible transducer stage vector over coll through the pipeline walker. Returns :mino.fusion/no-fuse when not fusible."},
 };
 
 const size_t k_prims_sequences_count =

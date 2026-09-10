@@ -65,9 +65,10 @@ entirely in the Clojure layer plus one new C reduce entry point, so the
 Take, take-while, halt-when, and every other reduced-producing or stateful
 stage stay on the slow path, so `reduced` short-circuit, the completion
 arity `(xrf result)`, and stage statefulness are preserved by
-construction: the fast path only ever runs stateless element-at-a-time
-stages that the seq walker already fuses and already tests fused-equals-
-unfused.
+construction: the fast path only runs element-at-a-time stages;
+map-indexed tracks a per-walk index counter reset fresh per transduce
+call, but no stage requires a completion-time flush. The seq walker
+already fuses and already tests fused-equals-unfused for all these stages.
 
 ## Consequences
 
