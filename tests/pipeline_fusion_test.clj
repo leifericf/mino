@@ -197,3 +197,140 @@
   (is (= [] (into [] (range 0))))
   (is (= [:x 0 1 2] (into [:x] (range 3))))
   (is (= (vec (range 10 0 -1)) (into [] (range 10 0 -1)))))
+
+;; --- widened fusible stages: remove / keep / map-indexed -------------
+;; The 2-arg lazy forms of remove / keep / map-indexed produce their own
+;; C lazy thunks, recognised by the pipeline unwinder as inverted-filter
+;; (remove), map+nil-drop (keep), and map-with-index (map-indexed)
+;; stages. The fused walk must be indistinguishable from the slow
+;; per-element path: same values, same order, same short-circuit under a
+;; downstream take, correct behaviour across the 32-element chunk
+;; boundary, when a stage empties a whole chunk, and for the stateful
+;; map-indexed counter crossing chunk boundaries. `doall` forces the
+;; reference (slow, fully-realised) sequence; the bare pipeline exercises
+;; the fused head. A fresh pipeline is built each time so heads are
+;; unrealised.
+
+;; --- remove ----------------------------------------------------------
+
+(deftest remove-pipeline-equals-realised
+  ;; remove over a lazy source, crossing chunk boundaries at n=1000.
+  (is (= (doall (remove even? (range 1000)))
+         (remove even? (range 1000))))
+  (is (= (reduce + 0 (doall (remove even? (range 1000))))
+         (reduce + 0 (remove even? (range 1000)))))
+  ;; remove is the complement of filter
+  (is (= (filter odd? (range 1000))
+         (remove even? (range 1000)))))
+
+(deftest remove-pipeline-edges
+  (is (= '() (remove even? (range 0))))
+  ;; remove nothing: every element survives
+  (is (= (range 100) (remove (fn [_] false) (range 100))))
+  ;; remove everything: whole seq empties (and each chunk empties)
+  (is (= '() (remove (fn [_] true) (range 1000))))
+  ;; single survivor
+  (is (= '(0) (remove pos? (range 5)))))
+
+(deftest remove-pipeline-mixed-and-take
+  ;; remove composes with map / filter / take in one fused chain.
+  (is (= (doall (->> (range 1000) (map inc) (remove even?)))
+         (->> (range 1000) (map inc) (remove even?))))
+  ;; take terminates the walk after remove; crosses a chunk boundary
+  (is (= 40 (count (->> (range 1000) (remove even?) (take 40)))))
+  (is (= (->> (range 1000) (remove even?) (take 40))
+         (doall (->> (range 1000) (remove even?) (take 40))))))
+
+(deftest remove-pipeline-short-circuits
+  ;; under a downstream take, the fused remove must invoke its predicate
+  ;; on exactly the elements the slow chunked path does. A chunked range
+  ;; realises a whole 32-element chunk at a time, so both paths run the
+  ;; pred on the full first chunk (0..31) even though take wants only 3.
+  ;; The invariant pinned here is fused-equals-unfused side effects.
+  (let [seen-fused (atom []) seen-slow (atom [])]
+    (is (= [1 3 5]
+           (->> (range 1000)
+                (remove (fn [x] (swap! seen-fused conj x) (even? x)))
+                (take 3))))
+    (doall (->> (range 1000)
+                (remove (fn [x] (swap! seen-slow conj x) (even? x)))
+                (take 3)))
+    (is (= @seen-slow @seen-fused))))
+
+;; --- keep ------------------------------------------------------------
+
+(deftest keep-pipeline-equals-realised
+  (let [f (fn [x] (when (odd? x) (* x 10)))]
+    (is (= (doall (keep f (range 1000)))
+           (keep f (range 1000))))
+    (is (= (reduce + 0 (doall (keep f (range 1000))))
+           (reduce + 0 (keep f (range 1000)))))))
+
+(deftest keep-pipeline-edges
+  (is (= '() (keep identity (range 0))))
+  ;; keep everything (never nil)
+  (is (= (range 100) (keep identity (range 100))))
+  ;; keep nothing (always nil): whole seq and every chunk empties
+  (is (= '() (keep (fn [_] nil) (range 1000))))
+  ;; keep must NOT drop false, only nil (false is a kept value)
+  (is (= '(false false false)
+         (keep (fn [x] (when (< x 3) false)) (range 3))))
+  (is (= 3 (count (keep (fn [x] (when (< x 3) false)) (range 100))))))
+
+(deftest keep-pipeline-mixed-and-take
+  (let [f (fn [x] (when (odd? x) x))]
+    (is (= (doall (->> (range 1000) (map inc) (keep f)))
+           (->> (range 1000) (map inc) (keep f))))
+    (is (= 20 (count (->> (range 1000) (keep f) (take 20)))))
+    (is (= (->> (range 1000) (keep f) (take 20))
+           (doall (->> (range 1000) (keep f) (take 20)))))))
+
+(deftest keep-pipeline-short-circuits
+  ;; keep's fn must run on exactly the elements the slow chunked path
+  ;; touches; a chunked range realises the whole first chunk.
+  (let [seen-fused (atom []) seen-slow (atom [])]
+    (is (= [1 3 5]
+           (->> (range 1000)
+                (keep (fn [x] (swap! seen-fused conj x) (when (odd? x) x)))
+                (take 3))))
+    (doall (->> (range 1000)
+                (keep (fn [x] (swap! seen-slow conj x) (when (odd? x) x)))
+                (take 3)))
+    (is (= @seen-slow @seen-fused))))
+
+;; --- map-indexed -----------------------------------------------------
+
+(deftest map-indexed-pipeline-equals-realised
+  ;; the stateful index must be correct across chunk boundaries (n>32).
+  (let [f (fn [i x] [i x])]
+    (is (= (doall (map-indexed f (range 1000)))
+           (map-indexed f (range 1000))))
+    ;; index tracks position: element k maps to [k (+ 100 k)]
+    (is (= [[0 100] [1 101] [2 102]]
+           (take 3 (map-indexed f (map #(+ 100 %) (range 1000))))))
+    ;; sum of (+ i x) is a cheap scalar witness the counter is right
+    (is (= (reduce + 0 (doall (map-indexed + (range 1000))))
+           (reduce + 0 (map-indexed + (range 1000)))))))
+
+(deftest map-indexed-counter-crosses-chunk-boundary
+  ;; the 33rd element (index 32) sits just past the first 32-elem chunk;
+  ;; its index must be 32, not reset to 0.
+  (is (= [32 1032]
+         (nth (map-indexed (fn [i x] [i x]) (map #(+ 1000 %) (range 1000)))
+              32)))
+  ;; last element of a 1000-seq has index 999
+  (is (= [999 999]
+         (last (map-indexed (fn [i x] [i x]) (range 1000))))))
+
+(deftest map-indexed-pipeline-edges
+  (is (= '() (map-indexed (fn [i x] [i x]) (range 0))))
+  (is (= [[0 :a]] (map-indexed (fn [i x] [i x]) [:a])))
+  ;; map-indexed composed under filter and take (fused chain)
+  (is (= (doall (->> (range 1000)
+                     (map-indexed (fn [i x] (+ i x)))
+                     (filter even?)
+                     (take 10)))
+         (->> (range 1000)
+              (map-indexed (fn [i x] (+ i x)))
+              (filter even?)
+              (take 10)))))
